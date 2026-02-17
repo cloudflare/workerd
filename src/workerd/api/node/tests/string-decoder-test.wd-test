@@ -7,8 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "string-decoder-test.js")
         ],
-        compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "nodejs_compat_v2"],
       )
     ),
   ],

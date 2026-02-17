@@ -1,0 +1,40 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+    (name = "tail", worker= .tailWorker)
+  ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
+    ]
+  ) ]
+);
+
+const mainWorker :Workerd.Worker = (
+
+  compatibilityFlags = ["enable_ctx_exports", "nodejs_compat", "rpc"],
+
+  streamingTails = ["tail"],
+
+  modules = [
+    (name = "worker", esModule = embed "sync-kv-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    ( className = "MyActor",
+      uniqueKey = "c4ca24b6066547c9a3c847b6f6bf169a",
+      enableSql = true ),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "sync-kv-instrumentation-test.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);

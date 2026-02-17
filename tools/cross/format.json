@@ -1,17 +1,17 @@
 [
   {
-    "directory": "src/workerd",
+    "directory": "src",
     "globs": ["*.c++", "*.h"],
     "formatter": "clang-format"
   },
   {
     "directory": "src",
-    "globs": ["*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"],
+    "globs": ["*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs", "*.json"],
     "formatter": "prettier"
   },
   {
-    "directory": "src",
-    "globs": ["*.json"],
+    "directory": "fuzzilli",
+    "globs": ["*.js"],
     "formatter": "prettier"
   },
   {
@@ -21,7 +21,7 @@
   },
   {
     "directory": ".",
-    "globs": ["*.bzl", "WORKSPACE", "BUILD", "BUILD.*"],
+    "globs": ["*.bzl", "BUILD", "BUILD.*", "*.bazel"],
     "formatter": "buildifier"
   }
 ]

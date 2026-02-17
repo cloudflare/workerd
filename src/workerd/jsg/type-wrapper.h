@@ -19,7 +19,6 @@
 #include <workerd/jsg/value.h>
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
-#include <workerd/util/autogate.h>
 
 #include <v8-wasm.h>
 
@@ -41,12 +40,12 @@ concept ValueLessParameter =
 // This is just a trivial pass-through.
 class V8HandleWrapper {
  public:
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   static constexpr const std::type_info& getName(v8::Local<T>*) {
     return typeid(T);
   }
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   v8::Local<T> wrap(jsg::Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -111,12 +110,12 @@ class V8HandleWrapper {
 #undef JSG_DEFINE_TRY_UNWRAP
 #undef JSG_FOR_EACH_V8_VALUE_SUBCLASS
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   static constexpr const std::type_info& getName(v8::Global<T>*) {
     return typeid(T);
   }
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   v8::Local<T> wrap(jsg::Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -132,12 +131,12 @@ class V8HandleWrapper {
     return v8::Global<v8::Value>(js.v8Isolate, handle);
   }
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   static constexpr const std::type_info& getName(V8Ref<T>*) {
     return typeid(T);
   }
 
-  template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
+  template <V8Value T>
   v8::Local<T> wrap(jsg::Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -278,11 +277,11 @@ class TypeWrapperBase<Self, TypeWrapperExtension<Extension>, JsgKind::EXTENSION>
 
  public:
   template <typename MetaConfiguration,
-      typename = kj::EnableIf<!sfinae<MetaConfiguration>((Extension<Self>*)nullptr)>>
+      typename = kj::EnableIf<!sfinae<MetaConfiguration>(static_cast<Extension<Self>*>(nullptr))>>
   TypeWrapperBase(MetaConfiguration& config) {}
 
   template <typename MetaConfiguration,
-      typename = kj::EnableIf<sfinae<MetaConfiguration>((Extension<Self>*)nullptr)>>
+      typename = kj::EnableIf<sfinae<MetaConfiguration>(static_cast<Extension<Self>*>(nullptr))>>
   TypeWrapperBase(MetaConfiguration& config, bool = false): Extension<Self>(config) {}
 
   void unwrap() = delete;  // extensions only implement tryUnwrap(), not unwrap()
@@ -386,7 +385,7 @@ template <typename Self, typename... T>
 class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public TypeWrapperBase<Self, T>...,
                    public PrimitiveWrapper,
-                   public NameWrapper<Self>,
+                   public NameWrapper,
                    public StringWrapper,
                    public OptionalWrapper<Self>,
                    public LenientOptionalWrapper<Self>,
@@ -396,32 +395,31 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public SetWrapper<Self>,
                    public SequenceWrapper<Self>,
                    public GeneratorWrapper<Self>,
-                   public ArrayBufferWrapper<Self>,
+                   public ArrayBufferWrapper,
                    public DictWrapper<Self>,
-                   public DateWrapper<Self>,
-                   public BufferSourceWrapper<Self>,
+                   public DateWrapper,
+                   public BufferSourceWrapper,
                    public FunctionWrapper<Self>,
                    public PromiseWrapper<Self>,
                    public NonCoercibleWrapper<Self>,
                    public MemoizedIdentityWrapper<Self>,
                    public IdentifiedWrapper<Self>,
-                   public SelfRefWrapper<Self>,
+                   public SelfRefWrapper,
                    public ExceptionWrapper<Self>,
                    public ObjectWrapper<Self>,
                    public V8HandleWrapper,
                    public UnimplementedWrapper,
-                   public JsValueWrapper<Self> {
+                   public JsValueWrapper {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
-  bool fastApiEnabled = false;
-
  public:
   template <typename MetaConfiguration>
   TypeWrapper(v8::Isolate* isolate, MetaConfiguration&& configuration)
       : TypeWrapperBase<Self, T>(configuration)...,
         MaybeWrapper<Self>(configuration),
-        PromiseWrapper<Self>(configuration) {
+        GeneratorWrapper<Self>(configuration),
+        PromiseWrapper<Self>(configuration),
+        config(getConfig(configuration)) {
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
-    fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API);
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
 
@@ -434,7 +432,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   }
 
   bool isFastApiEnabled() const {
-    return fastApiEnabled;
+    return config.fastApiEnabled;
   }
 
   using TypeWrapperBase<Self, T>::getName...;
@@ -450,7 +448,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   using Name::tryUnwrap
 
   USING_WRAPPER(PrimitiveWrapper);
-  USING_WRAPPER(NameWrapper<Self>);
+  USING_WRAPPER(NameWrapper);
   USING_WRAPPER(StringWrapper);
   USING_WRAPPER(OptionalWrapper<Self>);
   USING_WRAPPER(LenientOptionalWrapper<Self>);
@@ -460,21 +458,21 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(SetWrapper<Self>);
   USING_WRAPPER(SequenceWrapper<Self>);
   USING_WRAPPER(GeneratorWrapper<Self>);
-  USING_WRAPPER(ArrayBufferWrapper<Self>);
+  USING_WRAPPER(ArrayBufferWrapper);
   USING_WRAPPER(DictWrapper<Self>);
-  USING_WRAPPER(DateWrapper<Self>);
-  USING_WRAPPER(BufferSourceWrapper<Self>);
+  USING_WRAPPER(DateWrapper);
+  USING_WRAPPER(BufferSourceWrapper);
   USING_WRAPPER(FunctionWrapper<Self>);
   USING_WRAPPER(PromiseWrapper<Self>);
   USING_WRAPPER(NonCoercibleWrapper<Self>);
   USING_WRAPPER(MemoizedIdentityWrapper<Self>);
   USING_WRAPPER(IdentifiedWrapper<Self>);
-  USING_WRAPPER(SelfRefWrapper<Self>);
+  USING_WRAPPER(SelfRefWrapper);
   USING_WRAPPER(ExceptionWrapper<Self>);
   USING_WRAPPER(ObjectWrapper<Self>);
   USING_WRAPPER(V8HandleWrapper);
   USING_WRAPPER(UnimplementedWrapper);
-  USING_WRAPPER(JsValueWrapper<Self>);
+  USING_WRAPPER(JsValueWrapper);
 #undef USING_WRAPPER
 
   template <typename U>
@@ -511,11 +509,13 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       v8::Local<v8::Value> handle,
       TypeErrorContext errorContext,
       kj::Maybe<v8::Local<v8::Object>> parentObject = kj::none) -> RemoveRvalueRef<U> {
-    auto maybe = this->tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr, parentObject);
+    auto maybe =
+        this->tryUnwrap(js, context, handle, static_cast<kj::Decay<U>*>(nullptr), parentObject);
     KJ_IF_SOME(result, maybe) {
       return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
     } else {
-      throwTypeError(js.v8Isolate, errorContext, TypeWrapper::getName((kj::Decay<U>*)nullptr));
+      throwTypeError(
+          js.v8Isolate, errorContext, TypeWrapper::getName(static_cast<kj::Decay<U>*>(nullptr)));
     }
   }
 
@@ -553,9 +553,9 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       return builder.finish();
     } else if constexpr (ValueLessParameter<Self, V>) {
       // C++ parameters which don't unwrap JS values, like TypeHandlers or v8::FunctionCallbackInfo.
-      return unwrap(js, context, (V*)nullptr);
+      return unwrap(js, context, static_cast<V*>(nullptr));
     } else {
-      if constexpr (!webidl::isOptional<V> && !kj::isSameType<V, Unimplemented>()) {
+      if constexpr (!webidl::OptionalType<V> && !kj::isSameType<V, Unimplemented>()) {
         // TODO(perf): Better to perform this parameter index check once, at the unwrap<U>() call
         //   site. We'll need function length properties implemented correctly for that, most
         //   likely -- see EW-386.
@@ -563,7 +563,8 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
           // We're unwrapping a nonexistent argument into a required parameter. Since Web IDL
           // nullable types (Maybe<T>) can be initialized from `undefined`, we need to explicitly
           // throw here, or else `f(Maybe<T>)` could be called like `f()`.
-          throwTypeError(js.v8Isolate, errorContext, TypeWrapper::getName((V*)nullptr));
+          throwTypeError(
+              js.v8Isolate, errorContext, TypeWrapper::getName(static_cast<V*>(nullptr)));
         }
       }
 
@@ -596,6 +597,9 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   void initReflection(Holder* holder, PropertyReflection<U>&... reflections) {
     (initReflection(holder, reflections), ...);
   }
+
+ private:
+  const JsgConfig config;
 };
 
 template <typename Self, typename... Types>
@@ -611,7 +615,8 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
   kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> handle) const override {
     auto isolate = js.v8Isolate;
     auto context = js.v8Context();
-    return TypeWrapper::from(isolate).tryUnwrap(js, context, handle, (T*)nullptr, kj::none);
+    return TypeWrapper::from(isolate).tryUnwrap(
+        js, context, handle, static_cast<T*>(nullptr), kj::none);
   }
 };
 

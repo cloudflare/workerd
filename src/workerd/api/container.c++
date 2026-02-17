@@ -5,6 +5,7 @@
 #include "container.h"
 
 #include <workerd/api/http.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
@@ -17,6 +18,7 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
       running(running) {}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
+  auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
@@ -46,6 +48,15 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
       list.set(i, str(field->name, "=", field->value));
     }
   }
+
+  if (flags.getWorkerdExperimental()) {
+    KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
+      JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
+      req.setHardTimeoutMs(hardTimeoutMs);
+    }
+  }
+
+  req.setCompatibilityFlags(flags);
 
   IoContext::current().addTask(req.sendIgnoringResult());
 
@@ -162,18 +173,27 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     // ... and then adapt that to an HttpService ...
     auto service = kj::newHttpService(*client);
 
-    // ... and now we can just forward our call to that.
+    // ... fork connection promises so we can keep the original exception around ...
+    auto connectionPromiseForked = connectionPromise.fork();
+    auto connectionPromiseBranch = connectionPromiseForked.addBranch();
+    auto connectionPromiseToKeepException = connectionPromiseForked.addBranch();
+
+    // ... and now we can just forward our call to that ...
     try {
-      co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
+      co_await service->request(method, noHostUrl, newHeaders, requestBody, response)
+          .exclusiveJoin(
+              // never done as we do not want a Connection RPC exiting successfully
+              // affecting the request
+              connectionPromiseBranch.then([]() -> kj::Promise<void> { return kj::NEVER_DONE; }));
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       connectionException = kj::some(kj::mv(exception));
     }
 
-    // we prefer an exception from the container service that might've caused
-    // the error in the first place, that's why we await for the connectionPromise
+    // ... and last but not least, if the connect() call succeeded but the connection
+    // was broken, we throw that exception.
     KJ_IF_SOME(exception, connectionException) {
-      co_await connectionPromise;
+      co_await connectionPromiseToKeepException;
       kj::throwFatalException(kj::mv(exception));
     }
   }

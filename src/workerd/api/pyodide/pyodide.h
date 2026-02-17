@@ -57,6 +57,7 @@ class PyodidePackageManager {
 struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
+  kj::Maybe<kj::Own<const kj::Directory>> snapshotDirectory;
   const PyodideBundleManager pyodideBundleManager;
   const PyodidePackageManager pyodidePackageManager;
   bool createSnapshot;
@@ -238,6 +239,12 @@ class PyodideMetadataReader: public jsg::Object {
 
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
+  // We call this during Python setup with the wasm memory and the addresses of the signal clock and
+  // the flag to indicate whether signal handling is on or off. It sets up the isolate
+  // CpuLimitNearlyExceeded callback to trigger a signal in Python.
+  void setCpuLimitNearlyExceededCallback(
+      jsg::Lock& js, kj::Array<kj::byte> wasm_memory, int sig_clock, int sig_flag);
+
   // Similar to Cloudflare::::getCompatibilityFlags in global-scope.c++, but the key difference is
   // that it returns experimental flags even if `experimental` is not enabled. This avoids a gotcha
   // where an experimental compat flag is enabled in our C++ code, but not in our JS code.
@@ -266,6 +273,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getTransitiveRequirements);
     JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
+    JSG_METHOD(setCpuLimitNearlyExceededCallback);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -419,17 +427,23 @@ class DiskCache: public jsg::Object {
   static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT;  // always set to kj::none
 
   const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot;
+  const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot;
 
  public:
-  DiskCache(): cacheRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
-  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot): cacheRoot(cacheRoot) {};
+  DiskCache(): cacheRoot(NULL_CACHE_ROOT), snapshotRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
+  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot,
+      const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot)
+      : cacheRoot(cacheRoot),
+        snapshotRoot(snapshotRoot) {};
 
   jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
   void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
+  void putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
 
   JSG_RESOURCE_TYPE(DiskCache) {
     JSG_METHOD(get);
     JSG_METHOD(put);
+    JSG_METHOD(putSnapshot);
   }
 };
 
@@ -508,12 +522,6 @@ kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
 
 // Constructs the path to a Python package in the package repository
 kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);
-
-template <class Registry>
-void registerPyodideModules(Registry& registry, auto featureFlags) {
-  // We add `pyodide:` packages here including python-entrypoint-helper.js.
-  registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
-}
 
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \

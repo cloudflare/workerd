@@ -6,10 +6,16 @@
 
 #include "basics.h"
 #include "filesystem.h"
-#include "hibernation-event-params.h"
 #include "http.h"
 #include "messagechannel.h"
 #include "performance.h"
+
+#include <workerd/api/hibernation-event-params.h>
+#ifdef WORKERD_FUZZILLI
+#include "unsafe.h"
+
+#include <workerd/api/fuzzilli.h>
+#endif
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
@@ -91,9 +97,9 @@ class Navigator: public jsg::Object {
     return "en"_kj;
   }
 
-  kj::Array<kj::String> getLanguages() {
-    auto builder = kj::heapArrayBuilder<kj::String>(1);
-    builder.add(kj::str("en"));
+  kj::Array<kj::StringPtr> getLanguages() {
+    auto builder = kj::heapArrayBuilder<kj::StringPtr>(1);
+    builder.add("en"_kjc);
     return builder.finish();
   }
 
@@ -112,6 +118,10 @@ class Navigator: public jsg::Object {
     if (reader.getWebFileSystem()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(storage, getStorage);
     }
+
+    JSG_TS_OVERRIDE({
+      sendBeacon(url: string, body?: BodyInit): boolean;
+    });
   }
 };
 
@@ -129,38 +139,6 @@ class Cloudflare: public jsg::Object {
     JSG_TS_OVERRIDE({ readonly compatibilityFlags: Record<string, boolean>;
     });
   }
-};
-
-class PromiseRejectionEvent: public Event {
- public:
-  PromiseRejectionEvent(
-      v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason);
-
-  static jsg::Ref<PromiseRejectionEvent> constructor(kj::String type) = delete;
-
-  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) {
-    return promise.addRef(js);
-  }
-  jsg::Value getReason(jsg::Lock& js) {
-    return reason.addRef(js);
-  }
-
-  JSG_RESOURCE_TYPE(PromiseRejectionEvent) {
-    JSG_INHERIT(Event);
-    JSG_READONLY_INSTANCE_PROPERTY(promise, getPromise);
-    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("promise", promise);
-    tracker.trackField("reason", reason);
-  }
-
- private:
-  jsg::V8Ref<v8::Promise> promise;
-  jsg::Value reason;
-
-  void visitForGc(jsg::GcVisitor& visitor);
 };
 
 class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
@@ -446,12 +424,10 @@ class Immediate final: public jsg::Object {
   }
 
  private:
-  // On the off chance user code holds onto to the Ref<Immediate> longer than
-  // the IoContext remains alive, let's maintain just a weak reference to the
-  // IoContext here to avoid problems. This reference is used only for handling
-  // the dispose operation, so it should be perfectly fine for it to be weak
-  // and a non-op after the IoContext is gone.
-  kj::Own<IoContext::WeakRef> contextRef;
+  // Note: We cannot use IoContext::WeakRef here because it's not thread-safe (it's only intended
+  // to be held from KJ I/O objects, but this is a JSG object which can be accessed by V8's GC
+  // on different threads). Instead, we use IoPtr<IoContext> which is safe to hold from JSG objects.
+  IoPtr<IoContext> ioContext;
   TimeoutId timeoutId;
 };
 
@@ -543,6 +519,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
   void queueMicrotask(jsg::Lock& js, jsg::Function<void()> task);
+
+#ifdef WORKERD_FUZZILLI
+  void fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args);
+#endif
 
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
@@ -670,6 +650,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_LAZY_INSTANCE_PROPERTY(performance, getPerformance);
     JSG_LAZY_INSTANCE_PROPERTY(Cloudflare, getCloudflare);
     JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
+
+#ifdef WORKERD_FUZZILLI
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(fuzzilli);
+    }
+#endif
 
     JSG_NESTED_TYPE(Event);
     JSG_NESTED_TYPE(ExtendableEvent);
@@ -930,6 +916,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::UnhandledRejectionHandler unhandledRejections;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> processValue;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
+  kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
 
   // Global properties such as scheduler, crypto, caches, self, and origin should
   // be monkeypatchable / mutable at the global scope.
@@ -938,7 +925,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
-      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::PromiseRejectionEvent,           \
-      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

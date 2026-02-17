@@ -84,7 +84,8 @@ struct CompatDate {
     struct tm t;
     KJ_ASSERT(gmtime_r(&now, &t) == &t);
 #endif
-    return {(uint)(t.tm_year + 1900), (uint)(t.tm_mon + 1), (uint)t.tm_mday};
+    return {static_cast<uint>(t.tm_year + 1900), static_cast<uint>(t.tm_mon + 1),
+      static_cast<uint>(t.tm_mday)};
   }
 
   kj::String toString() {
@@ -206,7 +207,11 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
       errorReporter.addError(kj::str("Compatibility flags are mutually contradictory: ",
           enableFlagName, " vs ", disableFlagName));
     }
-    if (enableByFlag && enableByDate) {
+    if (enableByFlag && enableByDate &&
+        dateValidation != CompatibilityDateValidation::FUTURE_FOR_TEST) {
+      // Skip this error for FUTURE_FOR_TEST since tests may need to explicitly specify flags
+      // for the default variant (which uses an old compat date) while the all-compat-flags
+      // variant enables all flags by date.
       KJ_IF_SOME(d, enableDate) {
         errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
             " became the default as of ", d, " so does not need to be specified anymore."));

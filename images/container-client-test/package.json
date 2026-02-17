@@ -1,0 +1,10 @@
+{
+  "name": "container-client-test",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {},
+  "devDependencies": {
+    "ws": "^8.19.0"
+  }
+}

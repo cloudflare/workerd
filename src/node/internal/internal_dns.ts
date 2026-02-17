@@ -117,7 +117,7 @@ export function lookup(
     }
     if (options?.order != null) {
       validateOneOf(options.order, 'options.order', validDnsOrders);
-      dnsOrder = options.order as DnsOrder;
+      dnsOrder = options.order;
     }
   }
 

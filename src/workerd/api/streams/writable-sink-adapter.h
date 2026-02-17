@@ -1,5 +1,7 @@
 #include "common.h"
+#include "writable-sink.h"
 
+#include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api::streams {
@@ -121,7 +123,7 @@ class WritableStreamSinkJsAdapter final {
 
   WritableStreamSinkJsAdapter(jsg::Lock& js,
       IoContext& ioContext,
-      kj::Own<WritableStreamSink> sink,
+      kj::Own<WritableSink> sink,
       kj::Maybe<Options> options = kj::none);
   WritableStreamSinkJsAdapter(jsg::Lock& js,
       IoContext& ioContext,
@@ -246,8 +248,27 @@ class WritableStreamSinkJsAdapter final {
   // holds both the underlying WritableStreamSink and the write queue.
   // It must be held within an IoOwn.
   struct Active;
-  struct Closed final {};
-  kj::OneOf<IoOwn<Active>, Closed, kj::Exception> state;
+
+  struct Closed final {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+
+  struct Open {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+    IoOwn<Active> active;
+  };
+
+  // State machine for tracking writable sink adapter lifecycle:
+  //   Open -> Closed (normal close via end())
+  //   Open -> kj::Exception (error via abort() or write failure)
+  // Closed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using State = StateMachine<TerminalStates<Closed>,
+      ErrorState<kj::Exception>,
+      ActiveState<Open>,
+      Open,
+      Closed,
+      kj::Exception>;
+  State state;
 
   // Used for backpressure signaling. When backpressure is indicated, the
   // readyResolver, ready, and readyWatcher will be replaced with a new set.
@@ -329,13 +350,12 @@ class WritableStreamSinkJsAdapter final {
 // as input instead of a kj::ArrayPtr but that's a larger refactor.
 //
 //     ┌───────────────────────────────────────────┐
-//     │         KJ Native Code                    │
+//     │         WritableStreamSink                │
 //     │                                           │
 //     │  • write(buffer)                          │
 //     │  • write(pieces[])                        │
 //     │  • end()                                  │
 //     │  • abort(reason)                          │
-//     │  • tryPumpFrom(source, end)               │
 //     └───────────────────────────────────────────┘
 //                            │
 //                            ▼
@@ -349,7 +369,6 @@ class WritableStreamSinkJsAdapter final {
 //     │  │  • write(ArrayPtr<ArrayPtr<byte>>)  │  │
 //     │  │  • end() → Promise<void>            │  │
 //     │  │  • abort(exception)                 │  │
-//     │  │  • tryPumpFrom(source, end)         │  │
 //     │  └─────────────────────────────────────┘  │
 //     │                   │                       │
 //     │                   ▼                       │
@@ -384,7 +403,7 @@ class WritableStreamSinkJsAdapter final {
 //     │  • locked, state properties               │
 //     └───────────────────────────────────────────┘
 //
-class WritableStreamSinkKjAdapter final: public WritableStreamSink {
+class WritableStreamSinkKjAdapter final: public WritableSink {
  public:
   WritableStreamSinkKjAdapter(jsg::Lock& js, IoContext& ioContext, jsg::Ref<WritableStream> stream);
   ~WritableStreamSinkKjAdapter() noexcept(false);
@@ -420,11 +439,6 @@ class WritableStreamSinkKjAdapter final: public WritableStreamSink {
   // with the failure reason.
   kj::Promise<void> end() override;
 
-  // Attempts to establish a data pipe where input's data is delivered
-  // to this WritableStreamSinkKjAdapter as efficiently as possible.
-  kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
-      ReadableStreamSource& input, bool end) override;
-
   // Immediately interrupts existing pending writes and errors the stream.
   // All pending or in-flight writes will be rejected with the given
   // exception. If we are already in the errored state, this is a no-op
@@ -432,14 +446,40 @@ class WritableStreamSinkKjAdapter final: public WritableStreamSink {
   // the errored state, no further writes or closes are allowed.
   void abort(kj::Exception reason) override;
 
+  // A WritableStreamSinkKjAdapter always (currently) uses identity encoding.
+  rpc::StreamEncoding disownEncodingResponsibility() override {
+    return rpc::StreamEncoding::IDENTITY;
+  }
+
+  rpc::StreamEncoding getEncoding() override {
+    return rpc::StreamEncoding::IDENTITY;
+  }
+
  private:
   struct Active;
   KJ_DECLARE_NON_POLYMORPHIC(Active);
-  struct Closed {};
-  kj::OneOf<kj::Own<Active>, Closed, kj::Exception> state;
-  kj::Rc<WeakRef<WritableStreamSinkKjAdapter>> selfRef;
 
-  kj::Promise<void> pumpFromImpl(ReadableStreamSource& input, bool end);
+  struct KjClosed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+
+  struct KjOpen {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+    kj::Own<Active> active;
+  };
+
+  // State machine for tracking writable sink adapter lifecycle:
+  //   KjOpen -> KjClosed (normal close via end())
+  //   KjOpen -> kj::Exception (error via abort() or write failure)
+  // KjClosed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using KjState = StateMachine<TerminalStates<KjClosed>,
+      ErrorState<kj::Exception>,
+      ActiveState<KjOpen>,
+      KjOpen,
+      KjClosed,
+      kj::Exception>;
+  KjState state;
+  kj::Rc<WeakRef<WritableStreamSinkKjAdapter>> selfRef;
 };
 
 }  // namespace workerd::api::streams

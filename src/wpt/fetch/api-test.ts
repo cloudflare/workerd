@@ -155,10 +155,6 @@ export default {
       'Fetch with GET and mode "cors" does not need an Origin header',
     ],
   },
-  'basic/request-private-network-headers.tentative.any.js': {
-    comment: 'We do not have forbidden headers',
-    omittedTests: true,
-  },
   'basic/request-referrer.any.js': {
     comment: 'Referrer is not implemented',
     omittedTests: true,
@@ -201,15 +197,7 @@ export default {
   },
   'basic/stream-response.any.js': {},
   'basic/stream-safe-creation.any.js': {},
-  'basic/text-utf8.any.js': {
-    comment: 'Some kind of unicode nitpickiness. Needs investigation',
-    expectedFailures: [
-      'UTF-8 with BOM with Request.text()',
-      'UTF-8 with BOM with Response.text()',
-      'UTF-8 with BOM with fetched data (UTF-8 charset)',
-      'UTF-8 with BOM with fetched data (UTF-16 charset)',
-    ],
-  },
+  'basic/text-utf8.any.js': {},
 
   'body/cloned-any.js': {
     comment:
@@ -416,9 +404,27 @@ export default {
   },
   'headers/headers-structure.any.js': {},
 
-  'idlharness.any.js': {
-    comment: 'Implement IDL support in harness',
-    disabledTests: true,
+  'idlharness.https.any.js': {
+    comment:
+      'Workers expose globals differently than browsers - these interface tests fail',
+    expectedFailures: [
+      // Headers interface tests
+      /^Headers interface/,
+      /^Headers must be primary interface/,
+      /^Stringification of new Headers/,
+      // Request interface tests
+      /^Request interface/,
+      /^Request must be primary interface/,
+      /^Stringification of new Request/,
+      // Response interface tests
+      /^Response interface/,
+      /^Response must be primary interface/,
+      /^Stringification of new Response/,
+      // FetchLaterResult interface tests (not implemented)
+      /^FetchLaterResult interface/,
+      // Window interface tests (not applicable to workers)
+      /^Window interface/,
+    ],
   },
 
   'policies/csp-blocked.js': {
@@ -467,7 +473,6 @@ export default {
     comment: 'Keepalive is not implemented',
     disabledTests: true,
   },
-  'redirect/redirect-location-escape.tentative.any.js': {},
   'redirect/redirect-location.any.js': {
     comment:
       'Status is expected to be 0 in a browser to avoid leaking info. We do not implement CORS',
@@ -741,11 +746,9 @@ export default {
   },
 
   'response/json.any.js': {
-    comment: 'Investigate issues with our JSON parser',
-    expectedFailures: [
-      'Ensure UTF-16 results in an error',
-      'Ensure the correct JSON parser is used',
-    ],
+    comment:
+      'UTF-16 test requires /xhr/resources/utf16-bom.json which is in a different test module',
+    expectedFailures: ['Ensure UTF-16 results in an error'],
   },
   'response/response-arraybuffer-realm.window.js': {
     comment: 'Skipped because it involves iframes',

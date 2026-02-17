@@ -22,19 +22,10 @@ namespace workerd::jsg {
 template <typename Signature>
 class WrappableFunction;
 
-template <typename Ret, typename... Args>
-class WrappableFunction<Ret(Args...)>: public Wrappable {
+class WrappableFunctionBase: public Wrappable {
  public:
-  WrappableFunction(bool needsGcTracing): needsGcTracing(needsGcTracing) {}
-  virtual Ret operator()(Lock& js, Args&&... args) = 0;
-
-  const bool needsGcTracing;
-
   kj::StringPtr jsgGetMemoryName() const override {
     return "WrappableFunction"_kjc;
-  }
-  size_t jsgGetMemorySelfSize() const override {
-    return sizeof(WrappableFunction<Ret(Args...)>);
   }
   void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
     Wrappable::jsgGetMemoryInfo(tracker);
@@ -45,36 +36,37 @@ class WrappableFunction<Ret(Args...)>: public Wrappable {
   }
 };
 
-template <typename Signature, typename Impl, bool = hasPublicVisitForGc<Impl>()>
+template <typename Ret, typename... Args>
+class WrappableFunction<Ret(Args...)>: public WrappableFunctionBase {
+ public:
+  WrappableFunction(bool needsGcTracing): needsGcTracing(needsGcTracing) {}
+  virtual Ret operator()(Lock& js, Args&&... args) = 0;
+
+  const bool needsGcTracing;
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(WrappableFunction<Ret(Args...)>);
+  }
+};
+
+template <typename Signature, typename Impl>
 class WrappableFunctionImpl;
 
 template <typename Ret, typename... Args, typename Impl>
-class WrappableFunctionImpl<Ret(Args...), Impl, false>: public WrappableFunction<Ret(Args...)> {
+class WrappableFunctionImpl<Ret(Args...), Impl>: public WrappableFunction<Ret(Args...)> {
  public:
   WrappableFunctionImpl(Impl&& func)
-      : WrappableFunction<Ret(Args...)>(false),
+      : WrappableFunction<Ret(Args...)>(hasPublicVisitForGc<Impl>()),
         func(kj::fwd<Impl>(func)) {}
 
   Ret operator()(Lock& js, Args&&... args) override {
     return func(js, kj::fwd<Args>(args)...);
   }
 
- private:
-  Impl func;
-};
-
-template <typename Ret, typename... Args, typename Impl>
-class WrappableFunctionImpl<Ret(Args...), Impl, true>: public WrappableFunction<Ret(Args...)> {
- public:
-  WrappableFunctionImpl(Impl&& func)
-      : WrappableFunction<Ret(Args...)>(true),
-        func(kj::fwd<Impl>(func)) {}
-
-  Ret operator()(Lock& js, Args&&... args) override {
-    return func(js, kj::fwd<Args>(args)...);
-  }
   void jsgVisitForGc(GcVisitor& visitor) override {
-    visitor.visit(func);
+    if constexpr (hasPublicVisitForGc<Impl>()) {
+      visitor.visit(func);
+    }
   }
 
  private:

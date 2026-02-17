@@ -13,6 +13,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/compat/url.h>
@@ -209,39 +210,42 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
       urlRecord.fragment == kj::none, DOMSyntaxError, wsErr, "The url fragment must be empty.");
 
   kj::HttpHeaders headers(context.getHeaderTable());
-  auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
 
   // Set protocols header if necessary.
   KJ_IF_SOME(variant, protocols) {
     // String consisting of the protocol(s) we send to the server.
-    kj::String protoString;
+    kj::Maybe<kj::String> maybeProtoString;
 
     KJ_SWITCH_ONEOF(variant) {
       KJ_CASE_ONEOF(proto, kj::String) {
         JSG_REQUIRE(
             validProtoToken(proto), DOMSyntaxError, wsErr, "The protocol header token is invalid.");
-        protoString = kj::mv(proto);
+        maybeProtoString = kj::mv(proto);
       }
       KJ_CASE_ONEOF(protoArr, kj::Array<kj::String>) {
-        JSG_REQUIRE(
-            kj::size(protoArr) > 0, DOMSyntaxError, wsErr, "The protocols array cannot be empty.");
-        // Search for duplicates by checking for their presence in the set.
-        kj::HashSet<kj::String> present;
+        // Per the WebSocket spec, an empty protocols array is valid and equivalent to not
+        // specifying any protocols - we simply don't set the Sec-WebSocket-Protocol header.
+        if (protoArr.size() > 0) {
+          // Search for duplicates by checking for their presence in the set.
+          kj::HashSet<kj::String> present;
 
-        for (const auto& proto: protoArr) {
-          JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
-              "One of the protocol header tokens is invalid.");
-          JSG_REQUIRE(!present.contains(proto), DOMSyntaxError, wsErr,
-              "The protocols header cannot have repeating values.");
+          for (const auto& proto: protoArr) {
+            JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
+                "One of the protocol header tokens is invalid.");
+            JSG_REQUIRE(!present.contains(proto), DOMSyntaxError, wsErr,
+                "The protocols header cannot have repeating values.");
 
-          present.insert(kj::str(proto));
+            present.insert(kj::str(proto));
+          }
+          constexpr auto delim = ", "_kj;
+          maybeProtoString = kj::str(kj::delimited(protoArr, delim));
         }
-        const auto delim = ", "_kj;
-        protoString = kj::str(kj::delimited(protoArr, delim));
       }
     }
-    auto protoHeaderId = context.getHeaderIds().secWebSocketProtocol;
-    headers.set(protoHeaderId, kj::mv(protoString));
+    KJ_IF_SOME(protoString, maybeProtoString) {
+      auto protoHeaderId = context.getHeaderIds().secWebSocketProtocol;
+      headers.set(protoHeaderId, kj::mv(protoString));
+    }
   }
 
   // Any userinfo, username and/or password, should be removed.
@@ -259,6 +263,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
   }
 
+  auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
   auto prom =
       ([](auto& context, auto connUrl, auto headers, auto client) -> kj::Promise<PackedWebSocket> {
     auto response = co_await client->openWebSocket(connUrl, headers);
@@ -475,8 +480,16 @@ WebSocket::Accepted::~Accepted() noexcept(false) {
   }
 }
 
+// Default max WebSocket message size limit. Note that kj-http's own default is 1MiB
+// (`kj::WebSocket::SUGGESTED_MAX_MESSAGE_SIZE`). We've found this to be too small for many commmon
+// use cases, such as proxying Chrome Devtools Protocol messages.
+//
+// JS-RPC messages are size-limited to 32MiB, and it seems to be working well, so we're setting the
+// WebSocket default max message size to match that.
+static constexpr size_t WEBSOCKET_MAX_MESSAGE_SIZE = 32u << 20;
+
 void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
-  size_t maxMessageSize = kj::WebSocket::SUGGESTED_MAX_MESSAGE_SIZE;
+  size_t maxMessageSize = WEBSOCKET_MAX_MESSAGE_SIZE;
   if (FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
     maxMessageSize = 128u << 20;
   }
@@ -932,7 +945,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
     // If there are any auto-responses left to process, we should do it now.
     // We should also check if the last sent message was a close. Shouldn't happen.
-    while (autoResponse.pendingAutoResponseDeque.size() > 0 && !autoResponse.isClosed) {
+    while (!autoResponse.pendingAutoResponseDeque.empty() && !autoResponse.isClosed) {
       auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
       co_await ws.send(message);
     }
@@ -1054,7 +1067,7 @@ void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
     error = err.addRef(js);
 
     dispatchEventImpl(js,
-        js.alloc<ErrorEvent>(kj::str("error"),
+        js.alloc<ErrorEvent>(
             ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we

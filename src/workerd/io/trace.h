@@ -43,7 +43,7 @@ namespace tracing {
 class TraceId final {
  public:
   // A null trace ID. This is only acceptable for use in tests.
-  constexpr TraceId(decltype(nullptr)): low(0), high(0) {}
+  constexpr TraceId(decltype(nullptr)) {}
 
   // A trace ID with the given low and high values.
   constexpr TraceId(uint64_t low, uint64_t high): low(low), high(high) {}
@@ -302,7 +302,7 @@ kj::String KJ_STRINGIFY(const TraceId& id);
 kj::String KJ_STRINGIFY(const InvocationSpanContext& context);
 kj::String KJ_STRINGIFY(const SpanContext& context);
 
-// The various structs defined below are used in both legacy tail workers
+// The various structs defined below are used in both buffered tail workers
 // and streaming tail workers to report tail events.
 
 // Describes a fetch request
@@ -422,7 +422,7 @@ struct EmailEventInfo final {
   EmailEventInfo clone() const;
 };
 
-// Describes a legacy tail worker request
+// Describes a buffered tail worker request
 struct TraceEventInfo final {
   struct TraceItem;
 
@@ -512,6 +512,21 @@ struct DiagnosticChannelEvent final {
   DiagnosticChannelEvent clone() const;
 };
 
+// Describes a stream diagnostics event. Currently only droppedEvents is supported.
+struct StreamDiagnosticsEvent final {
+  explicit StreamDiagnosticsEvent(uint32_t droppedEventsCount);
+  StreamDiagnosticsEvent(rpc::Trace::StreamDiagnosticsEvent::Reader reader);
+  StreamDiagnosticsEvent(StreamDiagnosticsEvent&&) = default;
+  KJ_DISALLOW_COPY(StreamDiagnosticsEvent);
+
+  // The count of dropped events for the "droppedEvents" diagnostic. When we support other event
+  // types, this should be replaced with a kj::OneOf<> of all the different types.
+  uint32_t droppedEventsCount;
+
+  void copyTo(rpc::Trace::StreamDiagnosticsEvent::Builder builder) const;
+  StreamDiagnosticsEvent clone() const;
+};
+
 // Describes a log event
 struct Log final {
   explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
@@ -567,7 +582,7 @@ using EventInfo = kj::OneOf<FetchEventInfo,
 EventInfo cloneEventInfo(const EventInfo& info);
 
 template <typename T>
-concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool, T>() ||
+concept AttributeValue = kj::isSameType<kj::ConstString, T>() || kj::isSameType<bool, T>() ||
     kj::isSameType<double, T>() || kj::isSameType<int64_t, T>();
 
 // An Attribute mark is used to add detail to a span over its lifetime.
@@ -575,14 +590,11 @@ concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool,
 // properties for some other structs.
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
-  using Value = kj::OneOf<kj::String, bool, double, int64_t>;
+  using Value = kj::OneOf<kj::ConstString, bool, double, int64_t>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::ConstString name, Value&& value);
   explicit Attribute(kj::ConstString name, Values&& values);
-
-  template <AttributeValue V>
-  explicit Attribute(kj::ConstString name, V v): Attribute(kj::mv(name), Value(kj::mv(v))) {}
 
   template <AttributeValue V>
   explicit Attribute(kj::ConstString name, kj::Array<V> vals)
@@ -606,7 +618,6 @@ struct Attribute final {
 };
 using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
-}  // namespace tracing
 
 struct CompleteSpan {
   // Represents a completed span within user tracing.
@@ -638,7 +649,6 @@ struct CompleteSpan {
   kj::String toString() const;
 };
 
-namespace tracing {
 // A Return mark is used to mark the point at which a span operation returned
 // a value. For instance, when a fetch subrequest response is received, or when
 // the fetch handler returns a Response. Importantly, it does not signal that the
@@ -666,13 +676,13 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(SpanId spanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(SpanId spanId, kj::ConstString operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
   KJ_DISALLOW_COPY(SpanOpen);
 
-  kj::String operationName;
+  kj::ConstString operationName;
   kj::Maybe<Info> info = kj::none;
   SpanId spanId;
 
@@ -770,6 +780,7 @@ struct TailEvent final {
       DiagnosticChannelEvent,
       Exception,
       Log,
+      StreamDiagnosticsEvent,
       Return,
       CustomInfo>;
 
@@ -904,14 +915,9 @@ inline kj::String truncateScriptId(kj::StringPtr id) {
 // =======================================================================================
 // Span tracing
 //
-// TODO(cleanup): As of now, this aspect of tracing is actually not related to the rest of this
-//   file. Most of this file defines the interface to feed Trace Workers. Span tracing, however,
-//   is currently designed to feed tracing of the Workers Runtime itself for the benefit of the
-//   developers of the runtime.
-//
-//   We might potentially want to give trace workers some access to span tracing as well, but with
-//   that the trace worker and span interfaces should still be largely independent of each other;
-//   separate span tracing into a separate header.
+// TODO(cleanup): (Streaming) tail workers now have access to span tracing as well, but with that
+// the trace worker and span interfaces are still mostly independent of each other; separate span
+// tracing into a separate header.
 
 class SpanBuilder;
 class SpanObserver;
@@ -956,9 +962,7 @@ struct Span {
 void serializeTagValue(rpc::TagValue::Builder builder, const Span::TagValue& value);
 Span::TagValue deserializeTagValue(rpc::TagValue::Reader value);
 
-// Stringify and clone for span tags, getting this to work with KJ_STRINGIFY() appears exceedingly
-// difficult.
-kj::String spanTagStr(const Span::TagValue& tag);
+// Clone function for span tags, avoids memory allocation for string literals and non-string values.
 Span::TagValue spanTagClone(const Span::TagValue& tag);
 
 // An opaque token which can be used to create child spans of some parent. This is typically
@@ -1065,7 +1069,18 @@ class SpanBuilder {
   using TagValue = Span::TagValue;
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
-  void setTag(kj::ConstString key, TagValue value);
+  // Allow setting tags with an extended set of types to elide string allocations when we have a
+  // string literal or are not being observed. We include String/LiteralStringConst here to avoid
+  // having to manually cast them to ConstString each time.
+  using TagInitValue = kj::OneOf<kj::StringPtr,
+      kj::String,
+      kj::LiteralStringConst,
+      kj::ConstString,
+      bool,
+      double,
+      int64_t>;
+
+  void setTag(kj::ConstString key, TagInitValue value);
 
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
@@ -1129,14 +1144,9 @@ inline SpanBuilder SpanBuilder::newChild(
 }
 
 // TraceContext to keep track of user tracing/existing tracing better
-// TODO(o11y): When creating user child spans, verify that operationName is within a set of
-// supported operations. This is important to avoid adding spans to the wrong tracing system.
-
-// Interface to track trace context including both Jaeger and User spans.
-// TODO(o11y): Consider fleshing this out to make it a proper class, support adding tags/child spans
-// to both,... We expect that tracking user spans will not be needed in all places where we have the
-// existing spans, so synergies will be limited.
-struct TraceContext {
+class TraceContext {
+ public:
+  TraceContext(): span(nullptr), userSpan(nullptr) {}
   TraceContext(SpanBuilder span, SpanBuilder userSpan)
       : span(kj::mv(span)),
         userSpan(kj::mv(userSpan)) {}
@@ -1144,27 +1154,18 @@ struct TraceContext {
   TraceContext& operator=(TraceContext&& other) = default;
   KJ_DISALLOW_COPY(TraceContext);
 
+  // Set a tag on both the internal span and user span.
+  void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
+  bool isObserved() {
+    return span.isObserved() || userSpan.isObserved();
+  }
+  SpanParent getInternalSpanParent() {
+    return SpanParent(span);
+  }
+
+ private:
   SpanBuilder span;
   SpanBuilder userSpan;
-};
-
-// TraceContext variant tracking span parents instead. This is useful for code interacting with
-// IoChannelFactory::SubrequestMetadata, which often needs to pass through both spans together
-// without modifying them. In particular, add functions like newUserChild() here to make it easier
-// to add a span for the right parent.
-struct TraceParentContext {
-  TraceParentContext(TraceContext& tracing)
-      : parentSpan(tracing.span),
-        userParentSpan(tracing.userSpan) {}
-  TraceParentContext(SpanParent span, SpanParent userSpan)
-      : parentSpan(kj::mv(span)),
-        userParentSpan(kj::mv(userSpan)) {}
-  TraceParentContext(TraceParentContext&& other) = default;
-  TraceParentContext& operator=(TraceParentContext&& other) = default;
-  KJ_DISALLOW_COPY(TraceParentContext);
-
-  SpanParent parentSpan;
-  SpanParent userParentSpan;
 };
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a

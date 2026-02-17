@@ -37,13 +37,27 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 25;
 class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandler {
  public:
   using GetStreamSinkFunc = kj::Function<rpc::JsValue::StreamSink::Client()>;
+  using GetExternalPusherFunc = kj::Function<rpc::JsValue::ExternalPusher::Client()>;
+  using GetStreamHandlerFunc = kj::OneOf<GetStreamSinkFunc, GetExternalPusherFunc>;
+
+  enum StubOwnership { TRANSFER, DUPLICATE };
 
   // `getStreamSinkFunc` will be called at most once, the first time a stream is encountered in
   // serialization, to get the StreamSink that should be used.
-  RpcSerializerExternalHandler(GetStreamSinkFunc getStreamSinkFunc)
-      : getStreamSinkFunc(kj::mv(getStreamSinkFunc)) {}
+  RpcSerializerExternalHandler(
+      StubOwnership stubOwnership, GetStreamHandlerFunc getStreamHandlerFunc)
+      : stubOwnership(stubOwnership),
+        getStreamHandlerFunc(kj::mv(getStreamHandlerFunc)) {}
+
+  inline StubOwnership getStubOwnership() {
+    return stubOwnership;
+  }
 
   using BuilderCallback = kj::Function<void(rpc::JsValue::External::Builder)>;
+
+  // Returns the ExternalPusher for the remote side. Returns kj::none if this serialization is
+  // using the older StreamSink approach, in which case you need to call `writeStream()` instead.
+  kj::Maybe<rpc::JsValue::ExternalPusher::Client> getExternalPusher();
 
   // Add an external. The value is a callback which will be invoked later to fill in the
   // JsValue::External in the Cap'n Proto structure. The external array cannot be allocated until
@@ -55,6 +69,9 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
   // Like write(), but use this when there is also a stream associated with the external, i.e.
   // using StreamSink. This returns a capability which will eventually resolve to the stream.
+  //
+  // StreamSink is being replaced by ExternalPusher. You should only call writeStream() if
+  // getExternalPusher() returns kj::none. If ExternalPusher is available, this method will throw.
   capnp::Capability::Client writeStream(BuilderCallback callback);
 
   // Build the final list.
@@ -90,12 +107,14 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
       jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) override;
 
  private:
-  GetStreamSinkFunc getStreamSinkFunc;
+  StubOwnership stubOwnership;
+  GetStreamHandlerFunc getStreamHandlerFunc;
 
   kj::Vector<BuilderCallback> externals;
   kj::Vector<kj::Own<void>> stubDisposers;
 
   kj::Maybe<rpc::JsValue::StreamSink::Client> streamSink;
+  kj::Maybe<rpc::JsValue::ExternalPusher::Client> externalPusher;
 };
 
 class RpcStubDisposalGroup;
@@ -429,9 +448,9 @@ class RpcStubDisposalGroup {
 
 // `jsRpcSession` returns a capability that provides the client a way to call remote methods
 // over RPC. We drain the IncomingRequest after the capability is used to run the relevant JS.
-class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
+class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
  public:
-  JsRpcSessionCustomEventImpl(uint16_t typeId,
+  JsRpcSessionCustomEvent(uint16_t typeId,
       kj::Maybe<kj::String> wrapperModule = kj::none,
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
@@ -439,6 +458,13 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
         clientCap(kj::mv(paf.promise)),
         typeId(typeId),
         wrapperModule(kj::mv(wrapperModule)) {}
+
+  ~JsRpcSessionCustomEvent() noexcept(false) {
+    if (capFulfiller->isWaiting()) {
+      capFulfiller->reject(
+          KJ_EXCEPTION(DISCONNECTED, "JsRpcSessionCustomEvent was destroyed before completion"));
+    }
+  }
 
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -453,8 +479,8 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
-  kj::Maybe<tracing::EventInfo> getEventInfo() const override {
-    return tracing::EventInfo(tracing::JsRpcEventInfo(kj::str("")));
+  tracing::EventInfo getEventInfo() const override {
+    return tracing::JsRpcEventInfo(nullptr);
   }
 
   rpc::JsRpcTarget::Client getCap() {
@@ -474,7 +500,7 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
   // Event ID for jsRpcSession.
   //
   // Similar to WebSocket hibernation, we define this event ID in the internal codebase, but since
-  // we don't create JsRpcSessionCustomEventImpl from our internal code, we can't pass the event
+  // we don't create JsRpcSessionCustomEvent from our internal code, we can't pass the event
   // type in -- so we hardcode it here.
   static constexpr uint16_t WORKER_RPC_EVENT_TYPE = 9;
 

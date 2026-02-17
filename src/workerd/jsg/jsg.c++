@@ -12,6 +12,10 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
+#ifdef V8_ENABLE_SANDBOX
+#include <sys/mman.h>
+#endif
+
 namespace workerd::jsg {
 
 kj::String stringifyHandle(v8::Local<v8::Value> value) {
@@ -191,19 +195,17 @@ void Lock::setUsingEnhancedErrorSerialization() {
   IsolateBase::from(v8Isolate).setUsingEnhancedErrorSerialization();
 }
 
+void Lock::setUsingFastJsgStruct() {
+  IsolateBase::from(v8Isolate).setUsingFastJsgStruct();
+}
+
+bool Lock::isUsingFastJsgStruct() const {
+  return IsolateBase::from(v8Isolate).getUsingFastJsgStruct();
+}
+
 bool Lock::isUsingEnhancedErrorSerialization() const {
   return IsolateBase::from(v8Isolate).getUsingEnhancedErrorSerialization();
 }
-
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-// JSPI was stabilized in V8 version 14.2, and this API removed.
-// TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-void Lock::installJspi() {
-  IsolateBase::from(v8Isolate).setJspiEnabled({}, true);
-  v8Isolate->InstallConditionalFeatures(v8Context());
-  IsolateBase::from(v8Isolate).setJspiEnabled({}, false);
-}
-#endif
 
 void Lock::setCaptureThrowsAsRejections(bool capture) {
   IsolateBase::from(v8Isolate).setCaptureThrowsAsRejections({}, capture);
@@ -215,6 +217,10 @@ void Lock::setNodeJsCompatEnabled() {
 
 void Lock::setNodeJsProcessV2Enabled() {
   IsolateBase::from(v8Isolate).setNodeJsProcessV2Enabled({}, true);
+}
+
+void Lock::setRequireReturnsDefaultExportEnabled() {
+  IsolateBase::from(v8Isolate).setRequireReturnsDefaultExportEnabled({}, true);
 }
 
 void Lock::setThrowOnUnrecognizedImportAssertion() {
@@ -231,6 +237,10 @@ void Lock::disableTopLevelAwait() {
 
 void Lock::setToStringTag() {
   IsolateBase::from(v8Isolate).enableSetToStringTag();
+}
+
+void Lock::setImmutablePrototype() {
+  IsolateBase::from(v8Isolate).enableSetImmutablePrototype();
 }
 
 void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
@@ -360,14 +370,12 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
     // making such a change, and that's us, and we're not.
     KJ_ASSERT(v8::Locker::IsLocked(target));
 
-    // TODO(cleanup): This is deprecated, but the replacement, v8::ExternalMemoryAccounter,
-    //   explicitly requires that the adjustment returns to zero before it is destroyed. That
-    //   isn't what we want, because we explicitly want external memory to be allowed to live
-    //   beyond the isolate in some cases. Perhaps we need to patch V8 to un-deprecate
-    //   AdjustAmountOfExternalAllocatedMemory(), or directly expose the underlying
-    //   AdjustAmountOfExternalAllocatedMemoryImpl(), which is what ExternalMemoryAccounter
-    //   uses anyway.
-    target->AdjustAmountOfExternalAllocatedMemory(amount);
+    // We use AdjustAmountOfExternalAllocatedMemoryImpl() instead of ExternalMemoryAccounter
+    // because we explicitly want external memory to be allowed to live beyond the isolate
+    // in some cases. The Impl variant bypasses the destructor check that
+    // ExternalMemoryAccounter enforces (requiring adjustment to return to zero).
+    // See patches/v8/0031-Expose-AdjustAmountOfExternalAllocatedMemoryImpl.patch
+    target->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
   } else {
     // We don't hold the isolate lock. Instead, record the adjustment to be applied the next time
     // the isolate lock is acquired.
@@ -383,7 +391,7 @@ void ExternalMemoryTarget::adjustNow(Lock& js, ssize_t amount) const {
   }
 #endif
   if (amount == 0) return;
-  js.v8Isolate->AdjustAmountOfExternalAllocatedMemory(amount);
+  js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
 }
 
 void ExternalMemoryTarget::detach() const {
@@ -397,7 +405,7 @@ ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) cons
 void ExternalMemoryTarget::applyDeferredMemoryUpdate() const {
   int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
   if (amount != 0) {
-    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemory(amount);
+    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
   }
 }
 
@@ -556,5 +564,51 @@ const capnp::SchemaLoader& ContextGlobal::getSchemaLoader() {
 void ContextGlobal::setSchemaLoader(const capnp::SchemaLoader& schemaLoader) {
   this->schemaLoader = schemaLoader;
 }
+
+#ifdef V8_ENABLE_SANDBOX
+// These are disabled by default in workerd. We do not build workerd with
+// the V8_ENABLED_SANDBOX flag. If we do decide to enable it, we will need
+// additional setup to ensure that these are handled correctly on all platforms.
+// For now, keeping it simple. This bit will only be used in the internal
+// project.
+static constexpr int kPkeyNoRestrictions = 0;
+MemoryProtectionKeyScope::MemoryProtectionKeyScope(Lock& js)
+    : pkey(js.v8Isolate->GetMemoryProtectionKey()) {}
+
+MemoryProtectionKeyScope::PkeyScope::PkeyScope(int pkey): key(pkey), saved(pkey_get(key)) {
+  pkey_set(pkey, kPkeyNoRestrictions);
+}
+MemoryProtectionKeyScope::PkeyScope::~PkeyScope() {
+  pkey_set(key, saved);
+}
+#endif
+
+namespace _ {
+
+JsgCatchScope::JsgCatchScope(Lock& js): js(js) {
+  tryCatchHolder.emplace(js.v8Isolate);
+}
+
+void JsgCatchScope::catchException(ExceptionToJsOptions options) {
+  // Be sure to release our TryCatch on the way out.
+  KJ_DEFER(tryCatchHolder = kj::none);
+
+  auto& tryCatch = KJ_ASSERT_NONNULL(tryCatchHolder).tryCatch;
+
+  // Same logic as that found in `jsg::Lock::tryCatch()`.
+  try {
+    throw;
+  } catch (JsExceptionThrown&) {
+    if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+      tryCatch.ReThrow();
+      throw;
+    }
+    caughtException.emplace(js.v8Isolate, tryCatch.Exception());
+  } catch (kj::Exception& e) {
+    caughtException.emplace(js.exceptionToJs(kj::mv(e), options));
+  }
+}
+
+}  // namespace _
 
 }  // namespace workerd::jsg

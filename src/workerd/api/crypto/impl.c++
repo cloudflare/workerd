@@ -4,6 +4,8 @@
 
 #include "impl.h"
 
+#include "simdutf.h"
+
 #include <workerd/api/util.h>
 #include <workerd/jsg/memory.h>
 
@@ -122,7 +124,7 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
   }
   kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line,
       kj::str("OpenSSL call failed: ", code, "; ",
-          lines.size() == 0 ? "but ERR_get_error() returned 0"_kj : kj::strArray(lines, "; "))));
+          lines.empty() ? "but ERR_get_error() returned 0"_kj : kj::strArray(lines, "; "))));
 }
 
 kj::Vector<kj::OneOf<kj::StringPtr, OpensslUntranslatedError>> consumeAllOpensslErrors() {

@@ -13,6 +13,7 @@ import shutil
 import sys
 import zipfile
 from pathlib import Path
+from typing import Literal
 
 from tool_utils import hexdigest, run
 
@@ -20,35 +21,47 @@ PYPROJECT_TEMPLATE = """[project]
 name = "vendor-test"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = [
-    "{package_name}"
-]
+dependencies = {dependencies}
 
 [dependency-groups]
-dev = ["workers-py"]
+dev = ["workers-py>=1.6"]
 """
 
+WRANGLER_TOML = """
+name = "hello-python-bindings"
+main = "src/entry.py"
+compatibility_flags = {compat_flags}
+compatibility_date = "2025-08-14"
+"""
 
-def create_pyproject_toml(package_name: str, target_dir: Path) -> Path:
+type PyVer = Literal["3.12", "3.13"]
+
+
+def create_pyproject_toml(package_names: list[str], target_dir: Path) -> Path:
     """Create a pyproject.toml file with the specified package as a dependency."""
-    pyproject_content = PYPROJECT_TEMPLATE.format(package_name=package_name)
+    pyproject_content = PYPROJECT_TEMPLATE.format(dependencies=repr(package_names))
     pyproject_path = target_dir / "pyproject.toml"
     pyproject_path.write_text(pyproject_content)
-    # Also create a wrangler file as otherwise pywrangler won't run
-    wrangler_path = target_dir / "wrangler.toml"
-    wrangler_path.write_text("\n")
     return pyproject_path
 
 
-def run_pywrangler_sync(work_dir: Path, python: str | None) -> Path:
+def create_wrangler_toml(target_dir: Path, python: PyVer):
+    compat_flags = ["python_workers"]
+    match python:
+        case "3.13":
+            compat_flags.append("python_workers_20250116")
+
+    (target_dir / "wrangler.toml").write_text(
+        WRANGLER_TOML.format(compat_flags=repr(compat_flags))
+    )
+
+
+def run_pywrangler_sync(work_dir: Path) -> Path:
     """Run `uv run pywrangler sync` in the specified directory."""
     env = os.environ.copy()
     env["_PYODIDE_EXTRA_MOUNTS"] = str(work_dir)
-    if python:
-        env["_PYWRANGLER_PYTHON_VERSION"] = python
     # TODO: Make pywrangler understand how to use Python 3.13 correctly and
     # remove these extra commands
-    run(["uv", "venv"], cwd=work_dir, env=env)
     run(["uv", "run", "pywrangler", "sync"], cwd=work_dir, env=env)
     python_modules_dir = work_dir / "python_modules"
     if not python_modules_dir.exists():
@@ -57,7 +70,7 @@ def run_pywrangler_sync(work_dir: Path, python: str | None) -> Path:
     return python_modules_dir
 
 
-def create_zip_archive(source_dir: Path, package_name: str, output_dir: Path) -> bool:
+def create_zip_archive(source_dir: Path, output_dir: Path) -> bool:
     """Create a zip archive of the python_modules directory.
 
     Return value indicates whether the archive includes any binary modules (.so
@@ -78,10 +91,11 @@ def create_zip_archive(source_dir: Path, package_name: str, output_dir: Path) ->
     return native
 
 
-def vendor_package(package_name: str, python: str) -> tuple[Path, bool]:
+def vendor_package(package_names: list[str], python: PyVer) -> tuple[Path, bool]:
     """Main function to vendor a Python package."""
     tmp_dir = Path("/tmp")
-    work_dir = tmp_dir / f"vendor-{package_name}"
+    vendor_name = "-".join(package_names)
+    work_dir = tmp_dir / f"vendor-{vendor_name}"
 
     # Clean up any existing work directory
     if work_dir.exists():
@@ -91,21 +105,22 @@ def vendor_package(package_name: str, python: str) -> tuple[Path, bool]:
     try:
         # Create pyproject.toml
         print(f"Creating pyproject.toml in {work_dir}")
-        create_pyproject_toml(package_name, work_dir)
+        create_pyproject_toml(package_names, work_dir)
+        create_wrangler_toml(work_dir, python)
 
         # Run pywrangler sync
         print("Running uv run pywrangler sync...")
-        python_modules_dir = run_pywrangler_sync(work_dir, python)
+        python_modules_dir = run_pywrangler_sync(work_dir)
 
         # Create zip archive
         print("Creating zip archive...")
-        native = create_zip_archive(python_modules_dir, package_name, tmp_dir)
+        native = create_zip_archive(python_modules_dir, tmp_dir)
         py = f"-{python}" if native else ""
-        name = f"{package_name}{py}-vendored-for-ew-testing.zip"
-        zip_path = tmp_dir / name
+        zip_name = f"{vendor_name}{py}-vendored-for-ew-testing.zip"
+        zip_path = tmp_dir / zip_name
         shutil.move(tmp_dir / "tmp.zip", zip_path)
     except Exception as e:
-        print(f"Error vendoring package {package_name}: {e}")
+        print(f"Error vendoring packages {package_names!r}: {e}")
         sys.exit(1)
     else:
         print(f"Successfully created: {zip_path}")
@@ -125,7 +140,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Create a zip file of a vendored Python package's source files for vendored_py_wd_test."
     )
-    parser.add_argument("package_name", help="Name of the Python package to vendor")
+    parser.add_argument(
+        "package_name", help="Name of the Python package to vendor", nargs="*"
+    )
     parser.add_argument("-p", "--python", help="Name of the Python version to use")
 
     args = parser.parse_args()
@@ -143,8 +160,8 @@ def main() -> int:
         i1 = " " * 12
         i2 = " " * 16
         print(i1 + "{")
-        print(i2 + f'"name": "{args.package_name}",')
-        print(i2 + f'"abi": "{abi}",')
+        print(i2 + f'"name": "{"-".join(args.package_name)}",')
+        print(i2 + f'"abi": {abi!r},')
         print(i2 + f'"sha256": "{hexdigest(zip_path)}",')
         print(i1 + "},")
         print()

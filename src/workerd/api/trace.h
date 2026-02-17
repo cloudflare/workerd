@@ -24,7 +24,8 @@ class TraceDiagnosticChannelEvent;
 
 class TailEvent final: public ExtendableEvent {
  public:
-  explicit TailEvent(jsg::Lock& js, kj::StringPtr type, kj::ArrayPtr<kj::Own<Trace>> events);
+  explicit TailEvent(
+      jsg::Lock& js, kj::LiteralStringConst type, kj::ArrayPtr<kj::Own<Trace>> events);
 
   static jsg::Ref<TailEvent> constructor(kj::String type) = delete;
   // TODO(soon): constructor?
@@ -220,7 +221,7 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
   explicit Request(Detail& detail, bool redacted = true);
 
   jsg::Optional<jsg::V8Ref<v8::Object>> getCf(jsg::Lock& js);
-  jsg::Dict<jsg::ByteString, jsg::ByteString> getHeaders(jsg::Lock& js);
+  jsg::Dict<kj::String, kj::String> getHeaders(jsg::Lock& js);
   kj::StringPtr getMethod();
   kj::String getUrl();
 
@@ -408,13 +409,11 @@ class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
 
   explicit HibernatableWebSocketEventInfo(jsg::Lock& js,
       const Trace& trace,
-      const tracing::HibernatableWebSocketEventInfo::Message eventInfo);
-  explicit HibernatableWebSocketEventInfo(jsg::Lock& js,
-      const Trace& trace,
-      const tracing::HibernatableWebSocketEventInfo::Close eventInfo);
-  explicit HibernatableWebSocketEventInfo(jsg::Lock& js,
-      const Trace& trace,
-      const tracing::HibernatableWebSocketEventInfo::Error eventInfo);
+      tracing::HibernatableWebSocketEventInfo::Message eventInfo);
+  explicit HibernatableWebSocketEventInfo(
+      jsg::Lock& js, const Trace& trace, tracing::HibernatableWebSocketEventInfo::Close eventInfo);
+  explicit HibernatableWebSocketEventInfo(
+      jsg::Lock& js, const Trace& trace, tracing::HibernatableWebSocketEventInfo::Error eventInfo);
 
   using Type = kj::OneOf<jsg::Ref<Message>, jsg::Ref<Close>, jsg::Ref<Error>>;
 
@@ -432,8 +431,7 @@ class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
 
 class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Object {
  public:
-  explicit Message(
-      const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Message eventInfo)
+  explicit Message(const Trace& trace, tracing::HibernatableWebSocketEventInfo::Message eventInfo)
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "message"_kj;
@@ -451,7 +449,7 @@ class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Obje
 
 class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object {
  public:
-  explicit Close(const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Close eventInfo)
+  explicit Close(const Trace& trace, tracing::HibernatableWebSocketEventInfo::Close eventInfo)
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "close"_kj;
@@ -474,7 +472,7 @@ class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object
 
 class TraceItem::HibernatableWebSocketEventInfo::Error final: public jsg::Object {
  public:
-  explicit Error(const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Error eventInfo)
+  explicit Error(const Trace& trace, tracing::HibernatableWebSocketEventInfo::Error eventInfo)
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "error"_kj;
@@ -541,13 +539,12 @@ class TraceLog final: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("level", level);
     tracker.trackField("message", message);
   }
 
  private:
   double timestamp;
-  kj::String level;
+  kj::LiteralStringConst level;
   jsg::V8Ref<v8::Object> message;
 };
 
@@ -613,9 +610,9 @@ class UnsafeTraceMetrics final: public jsg::Object {
   }
 };
 
-class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
+class TraceCustomEvent final: public WorkerInterface::CustomEvent {
  public:
-  TraceCustomEventImpl(uint16_t typeId, kj::Array<kj::Own<Trace>> traces)
+  TraceCustomEvent(uint16_t typeId, kj::Array<kj::Own<Trace>> traces)
       : typeId(typeId),
         traces(kj::mv(traces)) {}
 
@@ -632,7 +629,7 @@ class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
-  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
+  tracing::EventInfo getEventInfo() const override;
 
   kj::Promise<Result> notSupported() override {
     KJ_UNIMPLEMENTED("trace event not supported");

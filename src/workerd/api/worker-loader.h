@@ -76,8 +76,9 @@ class WorkerLoader: public jsg::Object {
     jsg::Optional<jsg::Value> json;             // arbitrary JS value, will be serialized to JSON
                                                 // and then parsed again when imported
     jsg::Optional<kj::String> py;               // Python module
+    jsg::Optional<kj::Array<const byte>> wasm;  // compiled WASM module
 
-    JSG_STRUCT(js, cjs, text, data, json, py);
+    JSG_STRUCT(js, cjs, text, data, json, py, wasm);
 
     // HACK: When we serialize the JSON in extractSource() we need to place the owned kj::String
     //   somewhere since Worker::Script::Source only gets a kj::StringPtr.
@@ -124,7 +125,7 @@ class WorkerLoader: public jsg::Object {
   };
 
   jsg::Ref<WorkerStub> get(
-      jsg::Lock& js, kj::String name, jsg::Function<jsg::Promise<WorkerCode>()> getCode);
+      jsg::Lock& js, kj::Maybe<kj::String> name, jsg::Function<jsg::Promise<WorkerCode>()> getCode);
 
   JSG_RESOURCE_TYPE(WorkerLoader) {
     JSG_METHOD(get);

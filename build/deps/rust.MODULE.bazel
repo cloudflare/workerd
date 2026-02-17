@@ -1,0 +1,84 @@
+RUST_STABLE_VERSION = "1.91.0"  # LLVM 21
+
+RUST_NIGHTLY_VERSION = "nightly/2025-10-30"
+
+# List of additional triples to be configured on top of the local platform triple
+RUST_TARGET_TRIPLES = [
+    # Add support for macOS cross-compilation
+    "x86_64-apple-darwin",
+    # Add support for macOS rosetta
+    "aarch64-unknown-linux-gnu",
+]
+
+# rules_rust
+bazel_dep(name = "rules_rust", version = "0.68.1")
+
+# Under Bazel 9, Rust coverage is broken when using experimental_split_coverage_postprocessing.
+# TODO(cleanup): https://github.com/bazelbuild/rules_rust/pull/3812 should fix this, we're using
+# that commit for now. Switch back to regular release once resolved.
+archive_override(
+    module_name = "rules_rust",
+    integrity = "sha256-dtn87CNPspDl5xEfAGEl0eQ4HBf07vpxIdMNPRHqMqM=",
+    strip_prefix = "bazelbuild-rules_rust-cb9d412",
+    type = "tgz",
+    url = "https://github.com/bazelbuild/rules_rust/tarball/cb9d412afdb95578bd533b60483eecb373119c36",
+)
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    allocator_library = "@rules_rust//ffi/rs:empty",
+    edition = "2024",
+    extra_rustc_flags_triples = {
+        # Enable ISA extensions matching the ones used for C++. The clmul feature is not included as
+        # it is still "unstable" as of 1.86.0.
+        "x86_64-unknown-linux-gnu": ["-Ctarget-feature=+sse4.2"],
+        "x86_64-apple-darwin": ["-Ctarget-feature=+sse4.2"],
+        "x86_64-pc-windows-msvc": ["-Ctarget-feature=+sse4.2"],
+        "aarch64-unknown-linux-gnu": ["-Ctarget-feature=+crc"],
+        # No options needed for aarch64-apple-darwin: CRC feature is enabled by default.
+    },
+    extra_target_triples = RUST_TARGET_TRIPLES,
+    rustfmt_version = RUST_NIGHTLY_VERSION,
+    versions = [
+        RUST_STABLE_VERSION,
+        RUST_NIGHTLY_VERSION,
+    ],
+)
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
+crate_repositories = use_extension("//deps/rust:extension.bzl", "crate_repositories")
+use_repo(
+    crate_repositories,
+    "crates_vendor",
+    # Needed to retrieve lol-html header
+    "crates_vendor__lol_html_c_api-1.3.1",
+)
+
+# rust-based lolhtml dependency, including the API header.
+# Presented as a separate repository to allow overrides.
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+
+new_local_repository(
+    name = "com_cloudflare_lol_html",
+    build_file = "@workerd//deps/rust:BUILD.lolhtml",
+    path = "empty",
+)
+
+# workerd-cxx
+http = use_extension("@//:build/exts/http.bzl", "http")
+
+inject_repo(
+    http,
+    **{"crates.io": "crates_vendor"}
+)
+
+http.archive(
+    name = "workerd-cxx",
+    sha256 = "7ddce8e81d0b81adf6f07f18376a6fea9dca42e6b03b2fcf703c62196c270ad0",
+    strip_prefix = "cloudflare-workerd-cxx-916f0e7",
+    type = "tgz",
+    url = "https://github.com/cloudflare/workerd-cxx/tarball/916f0e7be8f1d43fe5ece1b72edd3c5844243d7b",
+)
+use_repo(http, "workerd-cxx")

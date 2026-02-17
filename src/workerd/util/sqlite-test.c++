@@ -334,6 +334,9 @@ void doLockTest(bool walMode) {
   KJ_EXPECT(db.run(GET_COUNT).getInt(0) == 1);
 
   // Concurrent write allowed, as long as we're not writing at the same time.
+  // Deliberately not assigning this to a variable: We want to create a thread and join it
+  // immediately.
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   kj::Thread([&vfs = vfs]() noexcept {
     SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
     KJ_EXPECT(db2.run(GET_COUNT).getInt(0) == 1);
@@ -493,8 +496,7 @@ RowCounts countRowsTouched(SqliteDatabase& db,
 
 template <typename... Params>
 RowCounts countRowsTouched(SqliteDatabase& db, kj::StringPtr sqlCode, Params... bindParams) {
-  return countRowsTouched(
-      db, SqliteDatabase::TRUSTED, sqlCode, std::forward<Params>(bindParams)...);
+  return countRowsTouched(db, SqliteDatabase::TRUSTED, sqlCode, kj::fwd<Params>(bindParams)...);
 }
 
 KJ_TEST("SQLite read row counters (basic)") {
@@ -1009,10 +1011,10 @@ KJ_TEST("SQLite failed statement reset") {
 
   // Same as above but with ValuePtrs, since these use a different path.
   using ValuePtr = SqliteDatabase::Query::ValuePtr;
-  ValuePtr value = int64_t(1);
+  ValuePtr value = static_cast<int64_t>(1);
   KJ_EXPECT_THROW_MESSAGE(
       "UNIQUE constraint failed: things.id", stmt.run(kj::arrayPtr<const ValuePtr>(value)));
-  value = int64_t(4);
+  value = static_cast<int64_t>(4);
   stmt.run(kj::arrayPtr<const ValuePtr>(value));
 
   // Sanity check that those queries were doing something.

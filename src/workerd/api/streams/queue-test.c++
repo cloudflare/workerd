@@ -6,23 +6,14 @@
 
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/tests/test-fixture.h>
 
 namespace workerd::api {
 namespace {
 
-jsg::V8System v8System;
-
-struct QueueContext: public jsg::Object, public jsg::ContextGlobal {
-  JSG_RESOURCE_TYPE(QueueContext) {}
-};
-JSG_DECLARE_ISOLATE_TYPE(QueueIsolate, QueueContext);
-
 void preamble(auto callback) {
-  QueueIsolate isolate(v8System, kj::heap<jsg::IsolateObserver>());
-  isolate.runInLockScope([&](QueueIsolate::Lock& lock) {
-    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.newContext<QueueContext>().getHandle(lock),
-        [&](jsg::Lock& js) { callback(js); });
-  });
+  TestFixture fixture;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) { callback(env.js); });
 }
 
 using ReadContinuation = jsg::Promise<ReadResult>(ReadResult&&);
@@ -100,7 +91,7 @@ auto byobRead(jsg::Lock& js, auto& consumer, int size) {
 };
 
 auto getEntry(jsg::Lock& js, auto size) {
-  return kj::heap<ValueQueue::Entry>(js.v8Ref(v8::True(js.v8Isolate).As<v8::Value>()), size);
+  return kj::rc<ValueQueue::Entry>(js.v8Ref(v8::True(js.v8Isolate).As<v8::Value>()), size);
 }
 
 #pragma region ValueQueue Tests
@@ -369,7 +360,7 @@ KJ_TEST("ByteQueue basics work") {
     KJ_ASSERT(queue.desiredSize() == 2);
     KJ_ASSERT(queue.size() == 0);
 
-    auto entry = kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)));
+    auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)));
 
     queue.push(js, kj::mv(entry));
 
@@ -381,8 +372,7 @@ KJ_TEST("ByteQueue basics work") {
     queue.close(js);
 
     try {
-      auto entry =
-          kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)));
+      auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)));
       queue.push(js, kj::mv(entry));
       KJ_FAIL_ASSERT("The queue push after close should have failed.");
     } catch (kj::Exception& ex) {
@@ -403,8 +393,7 @@ KJ_TEST("ByteQueue erroring works") {
     KJ_ASSERT(queue.desiredSize() == 0);
 
     try {
-      auto entry =
-          kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)));
+      auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)));
       queue.push(js, kj::mv(entry));
       KJ_FAIL_ASSERT("The queue push after close should have failed.");
     } catch (kj::Exception& ex) {
@@ -424,7 +413,7 @@ KJ_TEST("ByteQueue with single consumer") {
     auto store = jsg::BackingStore::alloc(js, 4);
     store.asArrayPtr().fill('a');
 
-    auto entry = kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store)));
+    auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store)));
     queue.push(js, kj::mv(entry));
 
     // The item was pushed into the consumer.
@@ -896,7 +885,7 @@ KJ_TEST("ByteQueue with default consumer with atLeast") {
 
     const auto push = [&](auto store) {
       try {
-        queue.push(js, kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+        queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
       } catch (kj::Exception& ex) {
         KJ_DBG(ex.getDescription());
       }
@@ -984,7 +973,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
 
     const auto push = [&](auto store) {
       try {
-        queue.push(js, kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+        queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
       } catch (kj::Exception& ex) {
         KJ_DBG(ex.getDescription());
       }
@@ -1090,7 +1079,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
 
     const auto push = [&](auto store) {
       try {
-        queue.push(js, kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+        queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
       } catch (kj::Exception& ex) {
         KJ_DBG(ex.getDescription());
       }
@@ -1200,6 +1189,871 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
 }
 
 #pragma endregion ByteQueue Tests
+
+#pragma region Re-entrancy Safety Tests
+
+// Test that pushing to a closed consumer doesn't crash.
+// This can happen during QueueImpl::push() iteration when resolving a read
+// on one consumer triggers JavaScript that closes another consumer.
+KJ_TEST("ValueQueue push to closed consumer is safe") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(2);
+    ValueQueue::Consumer consumer1(queue);
+    ValueQueue::Consumer consumer2(queue);
+
+    // Close consumer2
+    consumer2.close(js);
+
+    // Now push to the queue - this pushes to all consumers
+    // Before the fix, this would crash when trying to push to closed consumer2
+    queue.push(js, getEntry(js, 4));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1.size() == 4);
+
+    js.runMicrotasks();
+  });
+}
+
+// Test that pushing to a cancelled consumer doesn't crash.
+KJ_TEST("ValueQueue push to cancelled consumer is safe") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(2);
+    ValueQueue::Consumer consumer1(queue);
+    ValueQueue::Consumer consumer2(queue);
+
+    // Cancel consumer2
+    consumer2.cancel(js, kj::none);
+
+    // Now push to the queue
+    queue.push(js, getEntry(js, 4));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1.size() == 4);
+
+    js.runMicrotasks();
+  });
+}
+
+// Test that pushing to an errored consumer doesn't crash.
+KJ_TEST("ValueQueue push to errored consumer is safe") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(2);
+    ValueQueue::Consumer consumer1(queue);
+    ValueQueue::Consumer consumer2(queue);
+
+    // Error consumer2
+    consumer2.error(js, js.v8Ref(js.v8Error("error reason"_kj)));
+
+    // Now push to the queue
+    queue.push(js, getEntry(js, 4));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1.size() == 4);
+
+    js.runMicrotasks();
+  });
+}
+
+// Test ByteQueue version of the safety checks
+KJ_TEST("ByteQueue push to closed consumer is safe") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer1(queue);
+    ByteQueue::Consumer consumer2(queue);
+
+    // Close consumer2
+    consumer2.close(js);
+
+    // Now push to the queue
+    auto store = jsg::BackingStore::alloc(js, 4);
+    memset(store.asArrayPtr().begin(), 'A', 4);
+    auto entry = kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store)));
+    queue.push(js, kj::mv(entry));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1.size() == 4);
+
+    js.runMicrotasks();
+  });
+}
+
+#pragma endregion Re - entrancy Safety Tests
+
+#pragma region Draining Read Tests
+
+using DrainingReadContinuation = jsg::Promise<DrainingReadResult>(DrainingReadResult&&);
+using DrainingReadErrorContinuation = jsg::Promise<DrainingReadResult>(jsg::Value&&);
+
+KJ_TEST("ValueQueue draining read with buffered data") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Push an ArrayBuffer
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr()[0] = 'a';
+    store.asArrayPtr()[1] = 'b';
+    store.asArrayPtr()[2] = 'c';
+    store.asArrayPtr()[3] = 'd';
+    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 4));
+
+    // Push a string
+    auto str = jsg::v8Str(js.v8Isolate, "hello");
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(str.As<v8::Value>()), 5));
+
+    KJ_ASSERT(consumer.size() == 9);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 2);
+
+      // First chunk is the ArrayBuffer data
+      KJ_ASSERT(result.chunks[0].size() == 4);
+      KJ_ASSERT(result.chunks[0][0] == 'a');
+      KJ_ASSERT(result.chunks[0][1] == 'b');
+      KJ_ASSERT(result.chunks[0][2] == 'c');
+      KJ_ASSERT(result.chunks[0][3] == 'd');
+
+      // Second chunk is the string converted to UTF-8
+      KJ_ASSERT(result.chunks[1].size() == 5);
+      KJ_ASSERT(result.chunks[1][0] == 'h');
+      KJ_ASSERT(result.chunks[1][1] == 'e');
+      KJ_ASSERT(result.chunks[1][2] == 'l');
+      KJ_ASSERT(result.chunks[1][3] == 'l');
+      KJ_ASSERT(result.chunks[1][4] == 'o');
+
+      KJ_ASSERT(consumer.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read rejects with pending reads") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Queue a regular read
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+    consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+
+    KJ_ASSERT(consumer.hasReadRequests());
+
+    // Draining read should reject because there are pending reads
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue read rejects with pending draining read") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // No data in buffer, draining read will queue a pending draining read
+    consumer.drainingRead(js);
+
+    KJ_ASSERT(consumer.hasPendingDrainingRead());
+
+    // Regular read should reject because there's a pending draining read
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+
+    MustNotCall<ReadContinuation> readContinuation;
+    MustCall<ReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<ReadResult>(kj::mv(value));
+    });
+
+    consumer.read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+    prp.promise.then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read on closed stream") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    queue.close(js);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      KJ_ASSERT(result.done);
+      KJ_ASSERT(result.chunks.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read on errored stream") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
+
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read with buffered data") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    // Push first chunk
+    auto store1 = jsg::BackingStore::alloc(js, 4);
+    store1.asArrayPtr()[0] = 'a';
+    store1.asArrayPtr()[1] = 'b';
+    store1.asArrayPtr()[2] = 'c';
+    store1.asArrayPtr()[3] = 'd';
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store1))));
+
+    // Push second chunk
+    auto store2 = jsg::BackingStore::alloc(js, 3);
+    store2.asArrayPtr()[0] = 'e';
+    store2.asArrayPtr()[1] = 'f';
+    store2.asArrayPtr()[2] = 'g';
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store2))));
+
+    KJ_ASSERT(consumer.size() == 7);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 2);
+
+      // First chunk
+      KJ_ASSERT(result.chunks[0].size() == 4);
+      KJ_ASSERT(result.chunks[0][0] == 'a');
+      KJ_ASSERT(result.chunks[0][1] == 'b');
+      KJ_ASSERT(result.chunks[0][2] == 'c');
+      KJ_ASSERT(result.chunks[0][3] == 'd');
+
+      // Second chunk
+      KJ_ASSERT(result.chunks[1].size() == 3);
+      KJ_ASSERT(result.chunks[1][0] == 'e');
+      KJ_ASSERT(result.chunks[1][1] == 'f');
+      KJ_ASSERT(result.chunks[1][2] == 'g');
+
+      KJ_ASSERT(consumer.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read rejects with pending reads") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    // Queue a regular read
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+    consumer.read(js,
+        ByteQueue::ReadRequest(kj::mv(prp.resolver),
+            {
+              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+            }));
+
+    KJ_ASSERT(consumer.hasReadRequests());
+
+    // Draining read should reject because there are pending reads
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue read rejects with pending draining read") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    // No data in buffer, draining read will queue a pending draining read
+    consumer.drainingRead(js);
+
+    KJ_ASSERT(consumer.hasPendingDrainingRead());
+
+    // Regular read should reject because there's a pending draining read
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+
+    MustNotCall<ReadContinuation> readContinuation;
+    MustCall<ReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<ReadResult>(kj::mv(value));
+    });
+
+    consumer.read(js,
+        ByteQueue::ReadRequest(kj::mv(prp.resolver),
+            {
+              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+            }));
+    prp.promise.then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read on closed stream") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    queue.close(js);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      KJ_ASSERT(result.done);
+      KJ_ASSERT(result.chunks.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read on errored stream") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
+
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read with close signal") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Push some data
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr()[0] = 'a';
+    store.asArrayPtr()[1] = 'b';
+    store.asArrayPtr()[2] = 'c';
+    store.asArrayPtr()[3] = 'd';
+    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 4));
+
+    // Close the queue
+    queue.close(js);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      // Should have the data and done should be true since stream is closed
+      KJ_ASSERT(result.done);
+      KJ_ASSERT(result.chunks.size() == 1);
+      KJ_ASSERT(result.chunks[0].size() == 4);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read with close signal") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    // Push some data
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr()[0] = 'a';
+    store.asArrayPtr()[1] = 'b';
+    store.asArrayPtr()[2] = 'c';
+    store.asArrayPtr()[3] = 'd';
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+
+    // Close the queue
+    queue.close(js);
+
+    MustCall<DrainingReadContinuation> readContinuation([&](jsg::Lock& js, auto&& result) {
+      // Should have the data and done should be true since stream is closed
+      KJ_ASSERT(result.done);
+      KJ_ASSERT(result.chunks.size() == 1);
+      KJ_ASSERT(result.chunks[0].size() == 4);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read errors on non-byte value") {
+  // Test that drainingRead correctly errors when encountering a value that
+  // cannot be converted to bytes (not ArrayBuffer, ArrayBufferView, or string).
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Push a plain object - this cannot be converted to bytes
+    auto obj = v8::Object::New(js.v8Isolate);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(obj.As<v8::Value>()), 1));
+
+    KJ_ASSERT(consumer.size() == 1);
+
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      // Should get a TypeError about non-convertible value
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      auto message = jsg::JsValue(value.getHandle(js))
+                         .tryCast<jsg::JsObject>()
+                         .map([&](jsg::JsObject obj) {
+        return obj.get(js, "message")
+            .tryCast<jsg::JsString>()
+            .map([&](jsg::JsString str) {
+          return str.toString(js);
+        }).orDefault(kj::str());
+      }).orDefault(kj::str());
+      KJ_ASSERT(message.contains("cannot be converted to bytes"));
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+    // MustCall verifies the error continuation was called
+  });
+}
+
+KJ_TEST("ValueQueue draining read errors on number value") {
+  // Another non-byte value test with a number
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Push a number - this cannot be converted to bytes
+    auto num = v8::Number::New(js.v8Isolate, 42);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(num.As<v8::Value>()), 1));
+
+    MustNotCall<DrainingReadContinuation> readContinuation;
+    MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
+      KJ_ASSERT(value.getHandle(js)->IsNativeError());
+      return js.rejectedPromise<DrainingReadResult>(kj::mv(value));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation, errorContinuation);
+    js.runMicrotasks();
+    // MustCall verifies the error continuation was called
+  });
+}
+
+#pragma endregion Draining Read Tests
+
+#pragma region Draining Read maxRead Tests
+
+// Tests for the maxRead soft limit parameter. The maxRead limit only applies to subsequent
+// synchronous pump attempts after draining the initial buffer. The initial buffer is always
+// drained completely even if it exceeds maxRead.
+//
+// Note: Testing the pump loop behavior requires the full controller infrastructure (stateListener).
+// These tests focus on the buffer drain behavior which can be tested without a listener.
+// The pump loop behavior with maxRead is tested in the benchmark (bench-stream-piping.c++).
+
+KJ_TEST("ValueQueue draining read drains entire buffer even with small maxRead") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Buffer 200 bytes of data
+    auto store1 = jsg::BackingStore::alloc(js, 100);
+    store1.asArrayPtr().fill(0xAA);
+    auto ab1 = jsg::BufferSource(js, kj::mv(store1)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab1.As<v8::Value>()), 100));
+
+    auto store2 = jsg::BackingStore::alloc(js, 100);
+    store2.asArrayPtr().fill(0xBB);
+    auto ab2 = jsg::BufferSource(js, kj::mv(store2)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab2.As<v8::Value>()), 100));
+
+    KJ_ASSERT(consumer.size() == 200);
+
+    // Do a draining read with maxRead=50.
+    // Initial buffer (200 bytes) should be drained completely even though it exceeds maxRead.
+    // maxRead only gates subsequent pump attempts, not the initial buffer drain.
+    MustCall<DrainingReadContinuation> readContinuation(
+        [&](jsg::Lock& js, DrainingReadResult&& result) {
+      KJ_ASSERT(!result.done);
+      // Should have both chunks from the initial buffer
+      KJ_ASSERT(result.chunks.size() == 2);
+      KJ_ASSERT(result.chunks[0].size() == 100);
+      KJ_ASSERT(result.chunks[1].size() == 100);
+      // Buffer should be empty
+      KJ_ASSERT(consumer.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js, 50).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ByteQueue draining read drains entire buffer even with small maxRead") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+    ByteQueue::Consumer consumer(queue);
+
+    // Buffer 200 bytes of data
+    auto store1 = jsg::BackingStore::alloc(js, 100);
+    store1.asArrayPtr().fill(0xAA);
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store1))));
+
+    auto store2 = jsg::BackingStore::alloc(js, 100);
+    store2.asArrayPtr().fill(0xBB);
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store2))));
+
+    KJ_ASSERT(consumer.size() == 200);
+
+    // maxRead=50: initial buffer (200 bytes) still drained completely
+    MustCall<DrainingReadContinuation> readContinuation(
+        [&](jsg::Lock& js, DrainingReadResult&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 2);
+      KJ_ASSERT(result.chunks[0].size() == 100);
+      KJ_ASSERT(result.chunks[1].size() == 100);
+      KJ_ASSERT(consumer.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js, 50).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read with maxRead=0 still drains buffer") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Buffer some data
+    auto store = jsg::BackingStore::alloc(js, 100);
+    store.asArrayPtr().fill(0xAA);
+    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 100));
+
+    // With maxRead=0, we should still drain the buffer (maxRead only gates pumping)
+    MustCall<DrainingReadContinuation> readContinuation(
+        [&](jsg::Lock& js, DrainingReadResult&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 1);
+      KJ_ASSERT(result.chunks[0].size() == 100);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js, 0).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read with default maxRead (unlimited)") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Buffer some data
+    auto store = jsg::BackingStore::alloc(js, 100);
+    store.asArrayPtr().fill(0xAA);
+    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 100));
+
+    // Default maxRead (kj::maxValue) should drain buffer normally
+    MustCall<DrainingReadContinuation> readContinuation(
+        [&](jsg::Lock& js, DrainingReadResult&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 1);
+      KJ_ASSERT(result.chunks[0].size() == 100);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js).then(js, readContinuation);  // No maxRead argument = default
+    js.runMicrotasks();
+  });
+}
+
+#pragma endregion Draining Read maxRead Tests
+
+#pragma region Queue/Consumer Destruction Order Tests
+
+// These tests verify that destroying the queue before its consumers doesn't crash.
+// This can happen during isolate teardown when the destruction order isn't guaranteed
+// to follow the ownership hierarchy.
+// These will typically only catch in builds with AddressSanitizer enabled.
+
+KJ_TEST("ValueQueue destroyed before consumer doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    // Heap-allocate the queue so we can control its destruction order
+    auto queue = kj::heap<ValueQueue>(2);
+
+    // Create a consumer attached to the queue
+    auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
+
+    // Push some data to make sure the consumer has state
+    queue->push(js, getEntry(js, 4));
+    KJ_ASSERT(consumer->size() == 4);
+
+    // Now destroy the queue FIRST - this simulates the production scenario
+    // where wrapper cleanup destroys the controller (and its queue) before
+    // the consumer that holds a reference to it.
+    queue = nullptr;
+
+    // When the consumer is destroyed (here, or when going out of scope),
+    // its destructor calls queue.removeConsumer(this).
+    // Without the fix, this is a use-after-free.
+    // With the fix, the consumer knows the queue is gone and skips the call.
+    consumer = nullptr;
+
+    // If we get here without crashing, the test passes
+  });
+}
+
+KJ_TEST("ValueQueue destroyed before multiple consumers doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ValueQueue>(2);
+
+    auto consumer1 = kj::heap<ValueQueue::Consumer>(*queue);
+    auto consumer2 = kj::heap<ValueQueue::Consumer>(*queue);
+
+    queue->push(js, getEntry(js, 4));
+    KJ_ASSERT(consumer1->size() == 4);
+    KJ_ASSERT(consumer2->size() == 4);
+
+    // Destroy queue before consumers
+    queue = nullptr;
+
+    // Both consumers should handle destruction gracefully
+    consumer1 = nullptr;
+    consumer2 = nullptr;
+  });
+}
+
+KJ_TEST("ByteQueue destroyed before consumer doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ByteQueue>(2);
+    auto consumer = kj::heap<ByteQueue::Consumer>(*queue);
+
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr().fill('a');
+    queue->push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+    KJ_ASSERT(consumer->size() == 4);
+
+    // Destroy queue before consumer
+    queue = nullptr;
+    consumer = nullptr;
+  });
+}
+
+KJ_TEST("ValueQueue destroyed with pending read requests doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ValueQueue>(2);
+    auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
+
+    // Queue a read request (no data pushed, so it will be pending)
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+    consumer->read(js, ValueQueue::ReadRequest{.resolver = kj::mv(prp.resolver)});
+
+    KJ_ASSERT(consumer->hasReadRequests());
+
+    // Destroy queue while there are pending reads
+    queue = nullptr;
+
+    // Consumer destruction should handle this gracefully
+    consumer = nullptr;
+
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue close then destroy before consumer doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ValueQueue>(2);
+    auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
+
+    // Close the queue first
+    queue->close(js);
+
+    // Then destroy it
+    queue = nullptr;
+
+    // Consumer should still handle destruction gracefully
+    consumer = nullptr;
+  });
+}
+
+KJ_TEST("ValueQueue error then destroy before consumer doesn't crash") {
+  preamble([](jsg::Lock& js) {
+    auto queue = kj::heap<ValueQueue>(2);
+    auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
+
+    // Error the queue first
+    queue->error(js, js.v8Ref(js.v8Error("boom"_kj)));
+
+    // Then destroy it
+    queue = nullptr;
+
+    // Consumer should still handle destruction gracefully
+    consumer = nullptr;
+  });
+}
+
+#pragma endregion Queue / Consumer Destruction Order Tests
+
+#pragma region Consumer Destroyed During Push Tests
+// These tests verify that the queue handles consumer destruction gracefully.
+// QueueImpl::push() takes a snapshot of consumers and iterates over it. If a consumer
+// is destroyed (removed from allConsumers) between the snapshot and the iteration,
+// the code must check allConsumers.contains() before dereferencing the pointer.
+// That said, the tests do not actually fail without the relevant fix because the
+// issue is extremely timing-dependent and difficult to trigger deterministically, even
+// with asan enabled. These tests at least document the intended behavior and may catch
+// future regressions.
+
+KJ_TEST("ByteQueue push skips consumer removed from queue during iteration") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+
+    // Create two consumers
+    auto consumer1 = kj::heap<ByteQueue::Consumer>(queue);
+    auto consumer2 = kj::heap<ByteQueue::Consumer>(queue);
+
+    // Destroy consumer2 BEFORE pushing. This directly tests that push()
+    // checks if consumers still exist before calling push on them.
+    // The snapshot taken at the start of push() would have included consumer2,
+    // but consumer2 is no longer in allConsumers when we iterate.
+    consumer2 = nullptr;
+
+    // Push data - should not crash even though consumer2 was in the queue
+    // when it was created but is now destroyed.
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr().fill('x');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+
+    // consumer1 should have received the data
+    KJ_ASSERT(consumer1->size() == 4);
+  });
+}
+
+KJ_TEST("ValueQueue push skips consumer removed from queue during iteration") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+
+    auto consumer1 = kj::heap<ValueQueue::Consumer>(queue);
+    auto consumer2 = kj::heap<ValueQueue::Consumer>(queue);
+
+    // Destroy consumer2 before pushing
+    consumer2 = nullptr;
+
+    queue.push(js, getEntry(js, 4));
+
+    KJ_ASSERT(consumer1->size() == 4);
+  });
+}
+
+KJ_TEST("ByteQueue push handles consumer destroyed by microtask between pushes") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+
+    auto consumer1 = kj::heap<ByteQueue::Consumer>(queue);
+    auto consumer2 = kj::heap<ByteQueue::Consumer>(queue);
+
+    // Set up a pending read on consumer1
+    auto prp = js.newPromiseAndResolver<ReadResult>();
+    consumer1->read(js,
+        ByteQueue::ReadRequest(kj::mv(prp.resolver),
+            {
+              .store = jsg::BufferSource(js, jsg::BackingStore::alloc(js, 4)),
+            }));
+
+    // The continuation destroys consumer2
+    MustCall<ReadContinuation> readContinuation([&consumer2](jsg::Lock& js, ReadResult&& result) {
+      consumer2 = nullptr;
+      return js.resolvedPromise(kj::mv(result));
+    });
+    prp.promise.then(js, readContinuation);
+
+    // First push - resolves consumer1's read, schedules microtask that will destroy consumer2
+    auto store1 = jsg::BackingStore::alloc(js, 4);
+    store1.asArrayPtr().fill('x');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store1))));
+
+    // Run microtasks - this destroys consumer2
+    js.runMicrotasks();
+
+    // Second push - consumer2 is now destroyed, should not crash
+    auto store2 = jsg::BackingStore::alloc(js, 4);
+    store2.asArrayPtr().fill('y');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store2))));
+
+    // consumer1 should have the second push's data buffered
+    KJ_ASSERT(consumer1->size() == 4);
+  });
+}
+
+KJ_TEST("ByteQueue maybeUpdateBackpressure skips destroyed consumers") {
+  preamble([](jsg::Lock& js) {
+    ByteQueue queue(10);
+
+    auto consumer1 = kj::heap<ByteQueue::Consumer>(queue);
+    auto consumer2 = kj::heap<ByteQueue::Consumer>(queue);
+
+    // Push some data so consumers have size
+    auto store = jsg::BackingStore::alloc(js, 4);
+    store.asArrayPtr().fill('x');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store))));
+
+    KJ_ASSERT(consumer1->size() == 4);
+    KJ_ASSERT(consumer2->size() == 4);
+    KJ_ASSERT(queue.size() == 4);
+
+    // Destroy consumer2
+    consumer2 = nullptr;
+
+    // Trigger backpressure recalculation by pushing more data
+    auto store2 = jsg::BackingStore::alloc(js, 4);
+    store2.asArrayPtr().fill('y');
+    queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store2))));
+
+    // Should not crash, and size should reflect only consumer1
+    KJ_ASSERT(consumer1->size() == 8);
+    KJ_ASSERT(queue.size() == 8);
+  });
+}
+#pragma endregion Consumer Destroyed During Push Tests
 
 }  // namespace
 }  // namespace workerd::api

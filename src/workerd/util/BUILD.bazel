@@ -1,6 +1,25 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+
+bool_flag(
+    name = "use_perfetto",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "set_use_perfetto",
+    flag_values = {"use_perfetto": "True"},
+)
+
+selects.config_setting_group(
+    name = "really_use_perfetto",
+    match_all = [
+        ":set_use_perfetto",
+        "//:is_unix",
+    ],
+)
 
 wd_cc_library(
     name = "perfetto",
@@ -21,15 +40,15 @@ wd_cc_library(
     # optimization.
     copts = ["-O3"],
     defines = select({
-        "@platforms//os:windows": [],
-        "//conditions:default": ["WORKERD_USE_PERFETTO"],
+        ":really_use_perfetto": ["WORKERD_USE_PERFETTO"],
+        "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
     ] + select({
-        "@platforms//os:windows": [],
-        "//conditions:default": ["@perfetto//:libperfetto_client_experimental"],
+        ":really_use_perfetto": ["@perfetto//:libperfetto_client_experimental"],
+        "//conditions:default": [],
     }),
 )
 # TODO(later): Currently perfetto support is not enabled on Windows simply because the
@@ -76,6 +95,22 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "ring-buffer",
+    hdrs = ["ring-buffer.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "small-set",
+    hdrs = ["small-set.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "mimetype",
     srcs = ["mimetype.c++"],
     hdrs = ["mimetype.h"],
@@ -84,6 +119,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":strings",
         "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
@@ -121,6 +157,7 @@ wd_cc_library(
     srcs = ["uuid.c++"],
     hdrs = ["uuid.h"],
     implementation_deps = [
+        ":entropy",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
     ],
@@ -231,6 +268,18 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "entropy",
+    srcs = ["entropy.c++"],
+    hdrs = ["entropy.h"],
+    implementation_deps = [
+        "@ncrypto",
+        "@ssl",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
     name = "completion-membrane",
     hdrs = ["completion-membrane.h"],
     visibility = ["//visibility:public"],
@@ -242,6 +291,21 @@ wd_cc_library(
     hdrs = ["exception.h"],
     visibility = ["//visibility:public"],
     deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "immediate-crash",
+    hdrs = ["immediate-crash.h"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "header-validation",
+    hdrs = ["header-validation.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(
@@ -293,6 +357,7 @@ kj_test(
 )
 
 kj_test(
+    size = "large",
     src = "sqlite-test.c++",
     deps = [
         ":sqlite",
@@ -332,4 +397,29 @@ kj_test(
 kj_test(
     src = "checked-queue-test.c++",
     deps = [":checked-queue"],
+)
+
+kj_test(
+    src = "ring-buffer-test.c++",
+    deps = [":ring-buffer"],
+)
+
+kj_test(
+    src = "small-set-test.c++",
+    deps = [
+        ":small-set",
+        ":util",
+    ],
+)
+
+wd_cc_library(
+    name = "state-machine",
+    hdrs = ["state-machine.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+kj_test(
+    src = "state-machine-test.c++",
+    deps = [":state-machine"],
 )

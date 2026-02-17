@@ -10,35 +10,12 @@ the same interface on top of different JavaScript engines. However, as of today,
 quite the case. At present application code will still need to use V8 APIs directly in some
 cases. We would like to improve this in the future.
 
-## V8 Fast API
+---
 
-V8 Fast API allows V8 to compile JavaScript code that calls native functions in a way that directly jumps to the C++ implementation without going through the usual JavaScript-to-C++ binding layers. This is accomplished by having V8 generate specialized machine code that knows how to call the C++ function directly, skipping the overhead of value conversion and JavaScript calling conventions.
+# Part 1: Getting Started
 
-### Requirements for Fast API compatibility
-
-For a method to be compatible with Fast API, it must adhere to several constraints due to v8 itself, and may change as the fast api mechanism continues to evolve:
-
-1. **Return Type**: Must be one of these primitive types: `void`, `bool`, `int32_t`, `uint32_t`, `float`, or `double`.
-
-2. **Parameter Types**: Can be the primitive types listed above, or V8 handle types like `v8::Local<v8::Value>` or `v8::Local<v8::Object>`, or types that can be unwrapped from a V8 value using the TypeWrapper.
-
-3. **Method Structure**: Can be a regular instance method, a const instance method, or a method that takes `jsg::Lock&` as its first parameter.
-
-### Using Fast API in workerd
-
-By default, any `JSG_METHOD(name)` will execute fast path if the method signature is compatible with Fast API requirements. To explicitly force the function to use v8 Fast API in workerd, you can use `JSG_ASSERT_FASTAPI`.
-
-### How it works
-
-When a method is registered with the v8 fast api, workerd automatically:
-
-1. Checks if the method signature is compatible with Fast API requirements
-2. Registers both a regular (slow path) method handler and a Fast API handler
-3. Let's V8 optimize calls to this method when possible
-
-V8 determines at runtime whether to use the fast or slow path:
-- The fast path is used when the method is called from optimized code
-- The slow path is used when called from unoptimized code or when handling complex cases
+This section covers the prerequisites and foundational concepts you need to understand
+before working with JSG.
 
 ## The Basics
 
@@ -60,7 +37,8 @@ built around them.
 
 In order to execute JavaScript on the current thread, a lock must be acquired on the `v8::Isolate`.
 The `jsg::Lock&` represents the current lock. It is passed as an argument to many methods that
-require access to the JavaScript isolate and context.
+require access to the JavaScript isolate and context. By convention, this argument is always named
+`js`.
 
 The `jsg::Lock` interface itself provides access to basic JavaScript functionality, such as the
 ability to construct basic JavaScript values and call JavaScript functions.
@@ -69,7 +47,7 @@ For Resource Types, all methods declared with `JSG_METHOD` and similar macros (d
 optionally take a `jsg::Lock&` as the first parameter, for instance:
 
 ```cpp
-const Foo: public jsg::Object {
+class Foo: public jsg::Object {
 public:
   void foo(jsg::Lock& js, int x, int y) {
     // ...
@@ -82,6 +60,315 @@ public:
 ```
 
 Refer to the `jsg.h` header file for more detail on the specific methods available on the `jsg::Lock`.
+
+## V8 System Setup
+
+Before using any JSG functionality, you must initialize V8 by creating a `V8System` instance.
+This performs process-wide initialization and should be created once, typically in `main()`.
+
+### `V8System`
+
+```cpp
+#include <workerd/jsg/setup.h>
+
+int main() {
+  // Basic initialization with default platform
+  jsg::V8System v8System;
+
+  // Or with V8 flags
+  kj::ArrayPtr<const kj::StringPtr> flags = {"--expose-gc"_kj, "--single-threaded-gc"_kj};
+  jsg::V8System v8System(flags);
+
+  // Or with a custom platform
+  auto platform = jsg::defaultPlatform(4);  // 4 background threads
+  jsg::V8System v8System(*platform, flags, platform.get());
+
+  // ... use JSG APIs ...
+}
+```
+
+**Important:** Only one `V8System` can exist per process. It must be created before any other
+JSG operations and destroyed last.
+
+#### Custom Platform
+
+The default V8 platform uses a background thread pool for tasks like garbage collection and
+compilation. You can customize the thread pool size:
+
+```cpp
+// Create platform with specific thread count
+// Pass 0 for auto-detect (uses available CPU cores)
+kj::Own<v8::Platform> platform = jsg::defaultPlatform(0);
+```
+
+In production (like workerd), you may want to wrap the platform to customize behavior.
+For example, workerd wraps the platform to control `Date.now()` timing:
+
+```cpp
+// In workerd/server/v8-platform-impl.h
+class WorkerdPlatform final: public v8::Platform {
+public:
+  explicit WorkerdPlatform(v8::Platform& inner): inner(inner) {}
+
+  // Override to return KJ time instead of system time
+  double CurrentClockTimeMillis() noexcept override;
+
+  // All other methods delegate to inner platform
+  // ...
+private:
+  v8::Platform& inner;
+};
+
+// Usage in main():
+auto platform = jsg::defaultPlatform(0);
+WorkerdPlatform v8Platform(*platform);
+jsg::V8System v8System(v8Platform, flags, platform.get());
+```
+
+#### Fatal Error Handling
+
+You can set a custom callback for fatal V8 errors:
+
+```cpp
+void myFatalErrorHandler(kj::StringPtr location, kj::StringPtr message) {
+  // Log and handle the error
+  KJ_LOG(FATAL, "V8 fatal error", location, message);
+}
+
+jsg::V8System::setFatalErrorCallback(&myFatalErrorHandler);
+```
+
+### `Isolate<TypeWrapper>`
+
+An Isolate represents an independent V8 execution environment. Multiple isolates can run
+concurrently on different threads. Each isolate has its own heap and cannot directly share
+JavaScript objects with other isolates.
+
+To create an isolate, first declare your isolate type using `JSG_DECLARE_ISOLATE_TYPE`:
+
+```cpp
+// Declare an isolate type that can use MyGlobalObject and MyApiClass
+JSG_DECLARE_ISOLATE_TYPE(MyIsolate, MyGlobalObject, MyApiClass, AnotherClass);
+```
+
+Then instantiate it:
+
+```cpp
+// Create an isolate observer (for metrics/debugging)
+auto observer = kj::heap<jsg::IsolateObserver>();
+
+// Create the isolate
+MyIsolate isolate(v8System, kj::mv(observer));
+```
+
+#### Isolate with Configuration
+
+If your API types require configuration (e.g., compatibility flags):
+
+```cpp
+struct MyConfiguration {
+  bool enableFeatureX;
+  kj::StringPtr version;
+};
+
+MyIsolate isolate(v8System, MyConfiguration{.enableFeatureX = true, .version = "1.0"_kj},
+                  kj::mv(observer));
+```
+
+#### Isolate Groups (V8 Sandboxing)
+
+When V8 sandboxing is enabled, isolates can be grouped to share a sandbox or isolated for
+stronger security boundaries:
+
+```cpp
+// Use the default group (shared sandbox - more memory efficient)
+// This is what workerd uses in production
+auto group = v8::IsolateGroup::GetDefault();
+MyIsolate isolate(v8System, group, config, kj::mv(observer));
+
+// Or create a new isolate group for stronger isolation
+// (separate sandbox, uses more memory)
+auto isolatedGroup = v8::IsolateGroup::Create();
+MyIsolate isolate(v8System, isolatedGroup, config, kj::mv(observer));
+```
+
+In workerd, the default group is used for all worker isolates. This allows multiple
+isolates to share the V8 sandbox memory region, reducing overall memory usage while
+still maintaining isolate-level JavaScript isolation.
+
+### Taking a Lock
+
+Before executing JavaScript, you must acquire a lock on the isolate. Only one thread can
+hold the lock at a time:
+
+```cpp
+// Method 1: Using runInLockScope (recommended)
+isolate.runInLockScope([&](MyIsolate::Lock& lock) {
+  // JavaScript execution happens here
+  auto context = lock.newContext<MyGlobalObject>();
+  // ...
+});
+
+// Method 2: Manual lock (when you need more control)
+jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+  MyIsolate::Lock lock(isolate, stackScope);
+  lock.withinHandleScope([&] {
+    // ...
+  });
+});
+```
+
+### Creating a Context
+
+A context provides the global object and scope for JavaScript execution:
+
+```cpp
+isolate.runInLockScope([&](MyIsolate::Lock& lock) {
+  // Create a context with MyGlobalObject as the global
+  jsg::JsContext<MyGlobalObject> jsContext = lock.newContext<MyGlobalObject>();
+
+  // Access the context handle for V8 operations
+  v8::Local<v8::Context> v8Context = jsContext.getHandle(lock);
+
+  // Enter the context to execute JavaScript
+  v8::Context::Scope contextScope(v8Context);
+
+  // Now you can execute JavaScript...
+});
+```
+
+#### Context Options
+
+```cpp
+jsg::NewContextOptions options {
+  // Add options as needed
+};
+auto context = lock.newContext<MyGlobalObject>(options, constructorArg1, constructorArg2);
+```
+
+### Using the Lock
+
+The `Lock` class provides access to type wrapping and unwrapping:
+
+```cpp
+isolate.runInLockScope([&](MyIsolate::Lock& lock) {
+  auto jsContext = lock.newContext<MyGlobalObject>();
+  v8::Local<v8::Context> context = jsContext.getHandle(lock);
+  v8::Context::Scope contextScope(context);
+
+  // Wrap a C++ value to JavaScript
+  v8::Local<v8::Value> jsValue = lock.wrap(context, kj::str("hello"));
+
+  // Unwrap a JavaScript value to C++
+  kj::String cppValue = lock.unwrap<kj::String>(context, jsValue);
+
+  // Get a type handler for specific operations
+  const auto& handler = lock.getTypeHandler<MyApiClass>();
+
+  // Get a constructor function
+  jsg::JsObject constructor = lock.getConstructor<MyApiClass>(context);
+});
+```
+
+### `IsolateBase`
+
+`IsolateBase` is the non-templated base class of `Isolate<T>`, providing common functionality:
+
+```cpp
+// Get the IsolateBase from a v8::Isolate pointer
+jsg::IsolateBase& base = jsg::IsolateBase::from(v8Isolate);
+
+// Terminate JavaScript execution (can be called from another thread)
+base.terminateExecution();
+
+// Configure isolate behavior
+base.setAllowEval(lock, true);           // Enable/disable eval()
+base.setCaptureThrowsAsRejections(lock, true);  // Convert throws to rejections
+base.setNodeJsCompatEnabled(lock, true);  // Enable Node.js compatibility
+
+// Check configuration
+bool nodeCompat = base.isNodeJsCompatEnabled();
+bool topLevelAwait = base.isTopLevelAwaitEnabled();
+```
+
+### Complete Example
+
+```cpp
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
+
+// Define your API types
+class MyGlobalObject: public jsg::Object, public jsg::ContextGlobal {
+public:
+  kj::String greet(kj::String name) {
+    return kj::str("Hello, ", name, "!");
+  }
+
+  JSG_RESOURCE_TYPE(MyGlobalObject) {
+    JSG_METHOD(greet);
+  }
+};
+
+// Declare the isolate type
+JSG_DECLARE_ISOLATE_TYPE(MyIsolate, MyGlobalObject);
+
+int main() {
+  // Initialize V8
+  jsg::V8System v8System;
+
+  // Create isolate
+  auto observer = kj::heap<jsg::IsolateObserver>();
+  MyIsolate isolate(v8System, kj::mv(observer));
+
+  // Execute JavaScript
+  isolate.runInLockScope([&](MyIsolate::Lock& lock) {
+    auto jsContext = lock.newContext<MyGlobalObject>();
+    v8::Local<v8::Context> context = jsContext.getHandle(lock);
+    v8::Context::Scope contextScope(context);
+
+    // Compile and run JavaScript
+    auto source = lock.str("greet('World')");
+    auto script = jsg::check(v8::Script::Compile(context, source));
+    auto result = jsg::check(script->Run(context));
+
+    // Convert result to C++ string
+    kj::String greeting = lock.unwrap<kj::String>(context, result);
+    KJ_LOG(INFO, greeting);  // "Hello, World!"
+  });
+
+  return 0;
+}
+```
+
+### Real-World Reference: workerd Initialization
+
+For a production example, see how workerd initializes V8 in `src/workerd/server/workerd.c++`:
+
+```cpp
+// From workerd.c++ serveImpl()
+auto platform = jsg::defaultPlatform(0);
+WorkerdPlatform v8Platform(*platform);
+jsg::V8System v8System(v8Platform,
+    KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; },
+    platform.get());
+```
+
+And how isolates are created in `src/workerd/server/server.c++`:
+
+```cpp
+// From server.c++ when creating a worker
+auto isolateGroup = v8::IsolateGroup::GetDefault();
+auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
+    limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver),
+    *memoryCacheProvider, pythonConfig);
+```
+
+---
+
+# Part 2: Core Concepts
+
+This section covers the fundamental type system that JSG provides for mapping between
+C++ and JavaScript.
 
 ## JSG Value Types
 
@@ -105,16 +392,15 @@ At the time of writing this, the primitive value types currently supported by th
 | uint32_t             |  v8::Uint32    |     number      |                         |
 | uint64_t             |  v8::BigInt    |     bigint      |                         |
 | kj::String(Ptr)      |  v8::String    |     string      |                         |
-| jsg::ByteString      |  v8::String    |     string      | See [ByteString][] spec |
 | kj::Date             |  v8::Date      |     Date        |                         |
 | nullptr              |  v8::Null      |     null        | See kj::Maybe&lt;T>     |
 | nullptr              |  v8::Undefined |     undefined   | See jsg::Optional&lt;T> |
 
 Specifically, for example, when mapping from JavaScript into C++, when JSG encounters a
-string value, it can convert that into either a `kj::String`, or `jsg::ByteString`,
+string value, it can convert that into either a `kj::String`, or `jsg::USVString`,
 depending on what is needed by the C++ layer. Likewise, when translating from C++ to
 JavaScript, JSG will generate a JavaScript `string` whenever it encounters a `kj::String`,
-`kj::StringPtr`, or `jsg::ByteString`.
+`kj::StringPtr`, or `jsg::USVString`.
 
 JSG will *not* translate JavaScript `string` to `kj::StringPtr`.
 
@@ -176,11 +462,18 @@ represented in JSG using `kj::OneOf<T...>`.
 For example, `kj::OneOf<kj::String, uint16_t, kj::Maybe<bool>>` can be either:
 a) a string, b) a 16-bit integer, c) `null`, or (d) `true` or `false`.
 
-TODO(soon): Open Question: What happens if you try `kj::OneOf<kj::Maybe<kj::String>,
-kj::Maybe<bool>>` and pass a `null`?
+**Important:** JSG validates union types at compile-time according to Web IDL rules. This means:
 
-TODO(soon): Open Question: What happens if you have a catch-all coercible like kj::String
-in the list?
+- A union can have at most one nullable type (`kj::Maybe<T>`) or dictionary type
+- A union can have at most one numeric type, one string type, one boolean type, etc.
+- Multiple interface types (JSG_RESOURCE types) are allowed as long as they are distinct
+
+For example, `kj::OneOf<int, double>` will produce a compile error because both are numeric
+types. See the "Web IDL Type Mapping" section for the complete list of validation rules.
+
+When a value could match multiple types in a union, JSG attempts to match types in a
+specific order based on their Web IDL category. Interface types are checked first, then
+dictionaries, then sequences, then primitives.
 
 ### Array types (`kj::Array<T>` and `kj::ArrayPtr<T>`)
 
@@ -499,18 +792,136 @@ func(1);  // prints 1
 The `jsg::Promise<T>` wraps a JavaScript promise with a syntax that makes it more
 natural and ergonomic to consume within C++.
 
-```cpp
-jsg::Lock& js = // ...
-jsg::Promise<int> promise = // ...
+#### Creating Promises
 
-promise.then(js, [&](jsg::Lock& js, int value) {
-  // Do something with value.
-}, [&](jsg::Lock& js, jsg::Value exception) {
-  // There was an error! Handle it!
-})
+Use `jsg::Lock` to create promises:
+
+```cpp
+// Create an already-resolved promise
+jsg::Promise<int> resolved = js.resolvedPromise(42);
+jsg::Promise<void> resolvedVoid = js.resolvedPromise();
+
+// Create a rejected promise
+jsg::Promise<int> rejected = js.rejectedPromise<int>(js.error("Something went wrong"));
+
+// Create a promise with a resolver for later fulfillment
+auto [promise, resolver] = js.newPromiseAndResolver<int>();
+// Later...
+resolver.resolve(js, 42);
+// Or reject:
+resolver.reject(js, js.error("Failed"));
 ```
 
-TODO(soon): Lots more to add here.
+#### Chaining with `.then()` and `.catch_()`
+
+```cpp
+jsg::Promise<int> promise = // ...
+
+// Chain with both success and error handlers
+promise.then(js, [](jsg::Lock& js, int value) {
+  // Called when the promise resolves successfully
+  return value * 2;  // Returns jsg::Promise<int>
+}, [](jsg::Lock& js, jsg::Value exception) {
+  // Called when the promise rejects
+  return 0;  // Must return the same type as the success handler
+});
+
+// Chain with only a success handler (errors propagate)
+promise.then(js, [](jsg::Lock& js, int value) {
+  return kj::str("Value: ", value);  // Returns jsg::Promise<kj::String>
+});
+
+// Chain with only an error handler
+promise.catch_(js, [](jsg::Lock& js, jsg::Value exception) {
+  // Handle error, must return the promise's type
+  return 0;
+});
+```
+
+**Important:** Both handlers passed to `.then()` must return exactly the same type.
+
+#### `Promise<void>`
+
+For promises that don't carry a value:
+
+```cpp
+jsg::Promise<void> promise = // ...
+
+promise.then(js, [](jsg::Lock& js) {
+  // No value parameter for Promise<void>
+});
+```
+
+#### The Resolver
+
+`jsg::Promise<T>::Resolver` allows you to fulfill or reject a promise from elsewhere:
+
+```cpp
+class MyAsyncOperation {
+  jsg::Promise<kj::String>::Resolver resolver;
+
+public:
+  jsg::Promise<kj::String> start(jsg::Lock& js) {
+    auto [promise, r] = js.newPromiseAndResolver<kj::String>();
+    resolver = kj::mv(r);
+    // Start async work...
+    return kj::mv(promise);
+  }
+
+  void complete(jsg::Lock& js, kj::String result) {
+    resolver.resolve(js, kj::mv(result));
+  }
+
+  void fail(jsg::Lock& js, kj::Exception error) {
+    resolver.reject(js, kj::mv(error));
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(resolver);  // Important for GC!
+  }
+};
+```
+
+#### `.whenResolved()`
+
+Unlike `.then()`, `whenResolved()` doesn't consume the promise and can be called multiple
+times to create branches:
+
+```cpp
+jsg::Promise<int> promise = // ...
+
+// Create a Promise<void> that resolves when the original resolves
+jsg::Promise<void> done = promise.whenResolved(js);
+```
+
+#### Consuming the Handle
+
+To pass a promise to V8 APIs or return it directly:
+
+```cpp
+v8::Local<v8::Promise> handle = promise.consumeHandle(js);
+```
+
+After calling `consumeHandle()`, the `jsg::Promise` is consumed and cannot be used again.
+
+#### Returning Promises from Methods
+
+Methods exposed to JavaScript can return promises:
+
+```cpp
+class MyApi: public jsg::Object {
+public:
+  jsg::Promise<kj::String> fetchData(jsg::Lock& js) {
+    auto [promise, resolver] = js.newPromiseAndResolver<kj::String>();
+    // ... start async operation ...
+    return kj::mv(promise);
+  }
+
+  JSG_RESOURCE_TYPE(MyApi) {
+    JSG_METHOD(fetchData);
+  }
+};
+```
 
 ### Symbols with `jsg::Name`
 
@@ -652,7 +1063,6 @@ when the application passes the same value later.
 struct Foo {
   int value;
   JSG_STRUCT(value);
-};
 };
 
 void doSomething(jsg::Identified<Foo> obj) {
@@ -1266,7 +1676,36 @@ assert(true);  // error
 
 #### Additional configuration and compatibility flags
 
-TODO(soon): TBD
+The `JSG_RESOURCE_TYPE` macro can accept an optional second parameter: a
+`CompatibilityFlags::Reader` that allows you to conditionally expose different APIs based on
+the worker's compatibility date and flags.
+
+```cpp
+class MyApi: public jsg::Object {
+public:
+  kj::String oldMethod() { return kj::str("old"); }
+  kj::String newMethod() { return kj::str("new"); }
+
+  JSG_RESOURCE_TYPE(MyApi, workerd::CompatibilityFlags::Reader flags) {
+    // Always expose the old method
+    JSG_METHOD(oldMethod);
+
+    // Only expose the new method when the feature flag is enabled
+    if (flags.getMyNewFeature()) {
+      JSG_METHOD(newMethod);
+    }
+  }
+};
+```
+
+This pattern is used extensively in workerd to maintain backward compatibility while gradually
+rolling out new APIs and behaviors. The compatibility flags are defined in
+`src/workerd/io/compatibility-date.capnp`.
+
+Common use cases:
+- Adding new methods or properties that shouldn't be available to older workers
+- Changing behavior of existing methods based on compatibility settings
+- Enabling experimental features behind flags
 
 ## Declaring the Type System (advanced)
 
@@ -1301,6 +1740,13 @@ Each of those `EW_*_ISOLATE_TYPES` macros are defined in their respective header
 as a shortcut to make managing the list easier.
 
 The `JSG_DECLARE_ISOLATE_TYPE` macro should only be defined once in your application.
+
+---
+
+# Part 3: Memory Management
+
+This section covers garbage collection, GC visitation, memory tracking, and the
+mechanisms JSG provides for safe memory management across the C++/JavaScript boundary.
 
 ## Garbage Collection and GC Visitation
 
@@ -1387,36 +1833,983 @@ support GC visitation. These types evolve over time so the list below may not be
 * `jsg::AsyncGenerator<T>`
 * `kj::Maybe<T>` (when `T` is a GC-visitable type)
 
+---
+
+# Part 4: Utilities and Helpers
+
+This section covers utility functions, helper types, and performance optimizations
+provided by JSG for common development tasks.
+
 ## Utilities
 
-TODO(soon): TBD
+This section covers utility functions and helper types provided by JSG for common tasks
+like error handling, string manipulation, and interacting with V8.
+
+### JsValue Types
+
+The `JsValue` family of types provides a modern abstraction layer over V8's `v8::Local<T>` handles.
+These types are designed to reduce direct use of the V8 API and make code more readable and
+type-safe.
+
+#### Overview
+
+```cpp
+void example(jsg::Lock& js) {
+  // Create values using jsg::Lock methods
+  JsString str = js.str("hello");
+  JsNumber num = js.num(42);
+  JsBoolean flag = js.boolean(true);
+  JsObject obj = js.obj();
+
+  // Set properties on objects
+  obj.set(js, "message", str);
+  obj.set(js, "count", num);
+
+  // Get properties
+  JsValue val = obj.get(js, "message");
+
+  // Type checking and casting
+  if (val.isString()) {
+    KJ_IF_SOME(s, val.tryCast<JsString>()) {
+      kj::String cppStr = s.toString(js);
+    }
+  }
+}
+```
+
+#### Key Characteristics
+
+1. **Stack-only allocation**: `JsValue` types can only be allocated on the stack (enforced in
+   debug builds). They are lightweight wrappers around V8 handles.
+
+2. **Implicit conversion to V8 types**: All `JsValue` types can be implicitly converted to their
+   underlying `v8::Local<T>` type, allowing seamless interop with V8 APIs.
+
+3. **Implicit conversion to `JsValue`**: All specific types (`JsString`, `JsNumber`, etc.) can
+   be implicitly converted to `JsValue`.
+
+4. **Use `JsRef<T>` for persistence**: To store a JavaScript value beyond the current scope,
+   use `JsRef<T>` (see below).
+
+#### Creating Values with `jsg::Lock`
+
+The `jsg::Lock` class provides factory methods for creating `JsValue` types:
+
+```cpp
+void createValues(jsg::Lock& js) {
+  // Primitives
+  JsValue undef = js.undefined();
+  JsValue null = js.null();
+  JsBoolean b = js.boolean(true);
+
+  // Numbers (various overloads for different integer types)
+  JsNumber n = js.num(3.14);
+  JsInt32 i32 = js.num(42);           // int8_t, int16_t, int32_t
+  JsUint32 u32 = js.num(42u);         // uint8_t, uint16_t, uint32_t
+  JsBigInt big = js.bigInt(INT64_MAX);
+
+  // Strings
+  JsString empty = js.str();
+  JsString s = js.str("hello");
+  JsString interned = js.strIntern("propertyName");  // Deduplicated in V8
+
+  // Objects and collections
+  JsObject obj = js.obj();
+  JsObject noProto = js.objNoProto();  // Object with null prototype
+  JsMap map = js.map();
+  JsArray arr = js.arr(js.num(1), js.num(2), js.num(3));
+  JsSet set = js.set(js.str("a"), js.str("b"));
+
+  // Symbols
+  JsSymbol sym = js.symbol("mySymbol");
+  JsSymbol shared = js.symbolShared("Symbol.for('shared')");
+
+  // Dates
+  JsDate date = js.date(1234567890.0);  // From timestamp
+  JsDate kjDate = js.date(kj::UNIX_EPOCH + 1000 * kj::MILLISECONDS);
+
+  // Errors
+  JsValue err = js.error("Something went wrong");
+  JsValue typeErr = js.typeError("Expected a string");
+  JsValue rangeErr = js.rangeError("Value out of range");
+
+  // Global object
+  JsObject global = js.global();
+}
+```
+
+#### Available Types
+
+| Type | V8 Equivalent | Description |
+|------|---------------|-------------|
+| `JsValue` | `v8::Value` | Generic value, can hold any JS value |
+| `JsBoolean` | `v8::Boolean` | Boolean value |
+| `JsNumber` | `v8::Number` | Double-precision number |
+| `JsInt32` | `v8::Int32` | 32-bit signed integer |
+| `JsUint32` | `v8::Uint32` | 32-bit unsigned integer |
+| `JsBigInt` | `v8::BigInt` | Arbitrary precision integer |
+| `JsString` | `v8::String` | String value |
+| `JsSymbol` | `v8::Symbol` | Symbol value |
+| `JsObject` | `v8::Object` | Object |
+| `JsArray` | `v8::Array` | Array |
+| `JsMap` | `v8::Map` | Map collection |
+| `JsSet` | `v8::Set` | Set collection |
+| `JsFunction` | `v8::Function` | Function |
+| `JsPromise` | `v8::Promise` | Promise (for state inspection only) |
+| `JsDate` | `v8::Date` | Date object |
+| `JsRegExp` | `v8::RegExp` | Regular expression |
+| `JsArrayBuffer` | `v8::ArrayBuffer` | ArrayBuffer |
+| `JsArrayBufferView` | `v8::ArrayBufferView` | TypedArray or DataView |
+| `JsUint8Array` | `v8::Uint8Array` | Uint8Array |
+| `JsProxy` | `v8::Proxy` | Proxy object |
+
+#### Type Checking and Casting
+
+`JsValue` provides numerous `is*()` methods for type checking:
+
+```cpp
+void checkTypes(jsg::Lock& js, JsValue value) {
+  // Check specific types
+  if (value.isString()) { /* ... */ }
+  if (value.isNumber()) { /* ... */ }
+  if (value.isObject()) { /* ... */ }
+  if (value.isArray()) { /* ... */ }
+  if (value.isFunction()) { /* ... */ }
+  if (value.isPromise()) { /* ... */ }
+
+  // Check for null/undefined
+  if (value.isNull()) { /* ... */ }
+  if (value.isUndefined()) { /* ... */ }
+  if (value.isNullOrUndefined()) { /* ... */ }
+
+  // Check typed arrays
+  if (value.isTypedArray()) { /* ... */ }
+  if (value.isUint8Array()) { /* ... */ }
+  if (value.isArrayBuffer()) { /* ... */ }
+}
+```
+
+Use `tryCast<T>()` to safely cast to a more specific type:
+
+```cpp
+void castExample(jsg::Lock& js, JsValue value) {
+  KJ_IF_SOME(str, value.tryCast<JsString>()) {
+    // str is a JsString
+    kj::String cppStr = str.toString(js);
+  }
+
+  KJ_IF_SOME(arr, value.tryCast<JsArray>()) {
+    // arr is a JsArray
+    uint32_t len = arr.size();
+  }
+}
+```
+
+#### Working with Objects
+
+```cpp
+void objectOperations(jsg::Lock& js) {
+  JsObject obj = js.obj();
+
+  // Set properties
+  obj.set(js, "name", js.str("Alice"));
+  obj.set(js, js.symbol("id"), js.num(123));
+
+  // Set read-only property
+  obj.setReadOnly(js, "version", js.str("1.0"));
+
+  // Get properties
+  JsValue name = obj.get(js, "name");
+  JsValue missing = obj.get(js, "nonexistent");  // Returns undefined
+
+  // Check property existence
+  if (obj.has(js, "name")) { /* ... */ }
+  if (obj.has(js, "name", JsObject::HasOption::OWN)) { /* own property only */ }
+
+  // Delete properties
+  obj.delete_(js, "name");
+
+  // Get all property names
+  JsArray names = obj.getPropertyNames(js,
+      KeyCollectionFilter::OWN_ONLY,
+      PropertyFilter::ONLY_ENUMERABLE,
+      IndexFilter::INCLUDE_INDICES);
+
+  // Get prototype
+  JsValue proto = obj.getPrototype(js);
+
+  // Check if object is instance of a JSG resource type
+  if (obj.isInstanceOf<MyResourceType>(js)) {
+    auto ref = KJ_ASSERT_NONNULL(obj.tryUnwrapAs<MyResourceType>(js));
+  }
+
+  // Freeze/seal
+  obj.seal(js);
+  obj.recursivelyFreeze(js);
+
+  // Clone via JSON (deep copy, loses non-JSON-serializable values)
+  JsObject clone = obj.jsonClone(js);
+}
+```
+
+#### Working with Strings
+
+```cpp
+void stringOperations(jsg::Lock& js) {
+  JsString str = js.str("Hello, World!");
+
+  // Get length
+  int len = str.length(js);          // UTF-16 code units
+  size_t utf8Len = str.utf8Length(js);  // UTF-8 bytes
+
+  // Convert to KJ string
+  kj::String cppStr = str.toString(js);
+
+  // Check string properties
+  bool flat = str.isFlat();
+  bool oneByte = str.containsOnlyOneByte();
+
+  // Concatenate strings
+  JsString combined = JsString::concat(js, js.str("Hello, "), js.str("World!"));
+
+  // Internalize (deduplicate)
+  JsString interned = str.internalize(js);
+
+  // Write to buffer
+  kj::Array<char> buf = kj::heapArray<char>(100);
+  auto status = str.writeInto(js, buf, JsString::WriteFlags::NULL_TERMINATION);
+  // status.read = characters read from string
+  // status.written = bytes written to buffer
+}
+```
+
+#### Working with Arrays
+
+```cpp
+void arrayOperations(jsg::Lock& js) {
+  // Create array with initial values
+  JsArray arr = js.arr(js.num(1), js.num(2), js.num(3));
+
+  // Or create from a C++ array
+  kj::Array<int> values = kj::heapArray<int>({1, 2, 3, 4, 5});
+  JsArray arr2 = js.arr(values.asPtr(), [](jsg::Lock& js, int v) {
+    return js.num(v);
+  });
+
+  // Get size
+  uint32_t len = arr.size();
+
+  // Get element
+  JsValue elem = arr.get(js, 0);
+
+  // Add element
+  arr.add(js, js.str("new item"));
+}
+```
+
+#### Working with Functions
+
+```cpp
+void functionOperations(jsg::Lock& js, JsFunction func) {
+  // Call with receiver
+  JsValue result = func.call(js, js.global(), js.num(1), js.str("arg"));
+
+  // Call without receiver (uses null, which becomes global in non-strict mode)
+  JsValue result2 = func.callNoReceiver(js, js.num(42));
+
+  // Get function properties
+  size_t length = func.length(js);  // Number of declared parameters
+  JsString name = func.name(js);
+
+  // Can be used as an object
+  JsObject funcAsObj = func;
+  funcAsObj.set(js, "customProp", js.num(123));
+}
+```
+
+#### JSON Operations
+
+```cpp
+void jsonOperations(jsg::Lock& js, JsValue value) {
+  // Convert to JSON string
+  kj::String json = value.toJson(js);
+
+  // Parse JSON string
+  JsValue parsed = JsValue::fromJson(js, R"({"key": "value"})");
+
+  // Parse JSON from another JsValue (string)
+  JsValue parsed2 = JsValue::fromJson(js, js.str(R"([1, 2, 3])"));
+}
+```
+
+#### Structured Clone
+
+```cpp
+void cloneExample(jsg::Lock& js, JsValue value) {
+  // Deep clone using structured clone algorithm
+  JsValue cloned = value.structuredClone(js);
+
+  // Clone with transferables (e.g., ArrayBuffers)
+  kj::Array<JsValue> transfers = kj::heapArray<JsValue>({someArrayBuffer});
+  JsValue cloned2 = value.structuredClone(js, kj::mv(transfers));
+}
+```
+
+#### Persisting Values with `JsRef<T>`
+
+`JsValue` types are only valid within the current scope. To store a JavaScript value persistently,
+use `JsRef<T>`:
+
+```cpp
+class MyClass: public jsg::Object {
+public:
+  void storeValue(jsg::Lock& js, JsValue value) {
+    stored = value.addRef(js);
+  }
+
+  JsValue getStored(jsg::Lock& js) {
+    return stored.getHandle(js);
+  }
+
+  JSG_RESOURCE_TYPE(MyClass) {
+    JSG_METHOD(storeValue);
+    JSG_METHOD(getStored);
+  }
+
+private:
+  JsRef<JsValue> stored;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(stored);  // Important for garbage collection!
+  }
+};
+```
+
+`JsRef<T>` can hold any `JsValue` type:
+
+```cpp
+JsRef<JsValue> genericRef;
+JsRef<JsString> stringRef;
+JsRef<JsObject> objectRef;
+JsRef<JsFunction> functionRef;
+```
+
+#### Comparison and Equality
+
+```cpp
+void compareValues(jsg::Lock& js, JsValue a, JsValue b) {
+  // Abstract equality (==)
+  bool equal = (a == b);
+
+  // Strict equality (===)
+  bool strictEqual = a.strictEquals(b);
+
+  // Truthiness
+  bool truthy = a.isTruthy(js);
+
+  // Type of
+  kj::String type = a.typeOf(js);  // "string", "number", "object", etc.
+}
+```
+
+#### Note on `JsPromise` vs `jsg::Promise<T>`
+
+`JsPromise` and `jsg::Promise<T>` serve different purposes:
+
+- **`JsPromise`**: A thin wrapper around `v8::Promise` for inspecting promise state. Cannot be
+  awaited in C++. Use when you need to check if a promise is pending/fulfilled/rejected or
+  access its result directly.
+
+- **`jsg::Promise<T>`**: A higher-level abstraction for working with promises in C++. Provides
+  `.then()`, `.catch_()` methods and integrates with the JSG type system. Use this for most
+  promise handling.
+
+### Serialization
+
+JSG provides a serialization system built on V8's `ValueSerializer` that supports the
+[structured clone algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm).
+This is used for `structuredClone()`, passing data between workers, and storing data in
+Durable Objects.
+
+#### Basic Usage
+
+For simple structured clone operations on JavaScript values:
+
+```cpp
+void cloneExample(jsg::Lock& js, JsValue value) {
+  // Simple clone
+  JsValue cloned = jsg::structuredClone(js, value);
+
+  // Clone with transferables (e.g., ArrayBuffers)
+  kj::Array<JsValue> transfers = kj::heapArray<JsValue>({someArrayBuffer});
+  JsValue cloned2 = jsg::structuredClone(js, value, kj::mv(transfers));
+}
+```
+
+#### Using Serializer and Deserializer Directly
+
+For more control, use `Serializer` and `Deserializer` directly:
+
+```cpp
+void serializeExample(jsg::Lock& js, JsValue value) {
+  // Serialize
+  Serializer::Released serialized = ({
+    Serializer ser(js);
+    ser.write(js, value);
+    ser.release();
+  });
+
+  // serialized.data contains the serialized bytes
+  // serialized.sharedArrayBuffers contains any SharedArrayBuffers
+  // serialized.transferredArrayBuffers contains any transferred ArrayBuffers
+
+  // Deserialize
+  JsValue result = ({
+    Deserializer deser(js, serialized);
+    deser.readValue(js);
+  });
+}
+```
+
+You can serialize multiple values:
+
+```cpp
+void multiValueExample(jsg::Lock& js) {
+  Serializer ser(js);
+  ser.write(js, js.str("first"));
+  ser.write(js, js.num(42));
+  ser.write(js, js.obj());
+  auto released = ser.release();
+
+  Deserializer deser(js, released);
+  JsValue first = deser.readValue(js);   // "first"
+  JsValue second = deser.readValue(js);  // 42
+  JsValue third = deser.readValue(js);   // {}
+}
+```
+
+#### Serializer Options
+
+```cpp
+Serializer::Options options {
+  .version = kj::none,              // Override wire format version
+  .omitHeader = false,              // Skip serialization header
+  .treatClassInstancesAsPlainObjects = true,  // How to handle class instances
+  .externalHandler = kj::none,      // Handler for external resources
+};
+Serializer ser(js, options);
+```
+
+#### Transferring ArrayBuffers
+
+Use `transfer()` to move ArrayBuffers instead of copying:
+
+```cpp
+void transferExample(jsg::Lock& js, JsArrayBuffer buffer) {
+  Serializer ser(js);
+  ser.transfer(js, buffer);  // Mark for transfer before writing
+  ser.write(js, buffer);
+  auto released = ser.release();
+  // buffer is now detached (neutered)
+
+  // On the receiving side, pass the transferred buffers
+  Deserializer deser(js, released.data,
+      released.transferredArrayBuffers.asPtr(),
+      released.sharedArrayBuffers.asPtr());
+  JsValue result = deser.readValue(js);
+}
+```
+
+#### Making Resource Types Serializable (`JSG_SERIALIZABLE`)
+
+To make a JSG Resource Type serializable via structured clone, implement `serialize()` and
+`deserialize()` methods and use the `JSG_SERIALIZABLE` macro:
+
+```cpp
+// Define a tag enum for your serializable types (Cap'n Proto enum recommended)
+enum class SerializationTag {
+  MY_TYPE_V1 = 1,
+  MY_TYPE_V2 = 2,  // For versioning
+};
+
+class MyType: public jsg::Object {
+public:
+  MyType(uint32_t id, kj::String name): id(id), name(kj::mv(name)) {}
+
+  static jsg::Ref<MyType> constructor(jsg::Lock& js, uint32_t id, kj::String name) {
+    return js.alloc<MyType>(id, kj::mv(name));
+  }
+
+  JSG_RESOURCE_TYPE(MyType) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(id, getId);
+    JSG_READONLY_PROTOTYPE_PROPERTY(name, getName);
+  }
+
+  // Serialize the object's state
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    serializer.writeRawUint32(id);
+    serializer.writeLengthDelimited(name);
+  }
+
+  // Deserialize and reconstruct the object
+  static jsg::Ref<MyType> deserialize(
+      jsg::Lock& js,
+      SerializationTag tag,
+      jsg::Deserializer& deserializer) {
+    uint32_t id = deserializer.readRawUint32();
+    kj::String name = deserializer.readLengthDelimitedString();
+    return js.alloc<MyType>(id, kj::mv(name));
+  }
+
+  // Declare serializable with current tag (can list old tags for backwards compat)
+  JSG_SERIALIZABLE(SerializationTag::MY_TYPE_V1);
+
+private:
+  uint32_t id;
+  kj::String name;
+
+  uint32_t getId() { return id; }
+  kj::String getName() { return kj::str(name); }
+};
+```
+
+**Important notes:**
+
+- `JSG_SERIALIZABLE` must appear **after** the `JSG_RESOURCE_TYPE` block, not inside it
+- The tag enum values must never change once data has been serialized
+- `deserialize()` receives the tag so it can handle multiple versions
+
+#### Versioning Serializable Types
+
+To evolve a serializable type while maintaining backwards compatibility:
+
+```cpp
+enum class SerializationTag {
+  MY_TYPE_V1 = 1,
+  MY_TYPE_V2 = 2,
+};
+
+class MyType: public jsg::Object {
+public:
+  // V2 adds an optional description field
+  MyType(uint32_t id, kj::String name, kj::Maybe<kj::String> description = kj::none)
+      : id(id), name(kj::mv(name)), description(kj::mv(description)) {}
+
+  // ... constructor and JSG_RESOURCE_TYPE ...
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    // Always write the current (V2) format
+    serializer.writeRawUint32(id);
+    serializer.writeLengthDelimited(name);
+    KJ_IF_SOME(desc, description) {
+      serializer.writeRawUint32(1);  // has description
+      serializer.writeLengthDelimited(desc);
+    } else {
+      serializer.writeRawUint32(0);  // no description
+    }
+  }
+
+  static jsg::Ref<MyType> deserialize(
+      jsg::Lock& js,
+      SerializationTag tag,
+      jsg::Deserializer& deserializer) {
+    uint32_t id = deserializer.readRawUint32();
+    kj::String name = deserializer.readLengthDelimitedString();
+
+    kj::Maybe<kj::String> description;
+    if (tag == SerializationTag::MY_TYPE_V2) {
+      // V2 format includes optional description
+      if (deserializer.readRawUint32() == 1) {
+        description = deserializer.readLengthDelimitedString();
+      }
+    }
+    // V1 format has no description field
+
+    return js.alloc<MyType>(id, kj::mv(name), kj::mv(description));
+  }
+
+  // First tag is current version, others are accepted old versions
+  JSG_SERIALIZABLE(SerializationTag::MY_TYPE_V2, SerializationTag::MY_TYPE_V1);
+
+private:
+  uint32_t id;
+  kj::String name;
+  kj::Maybe<kj::String> description;
+};
+```
+
+#### Using TypeHandlers in Serialization
+
+Both `serialize()` and `deserialize()` can request `TypeHandler` arguments for converting
+between C++ and JavaScript types:
+
+```cpp
+void serialize(jsg::Lock& js, jsg::Serializer& serializer,
+               const jsg::TypeHandler<kj::String>& stringHandler) {
+  // Convert C++ string to JS string and serialize as a JS value
+  serializer.write(js, JsValue(stringHandler.wrap(js, kj::str(text))));
+}
+
+static jsg::Ref<MyType> deserialize(
+    jsg::Lock& js,
+    SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<kj::String>& stringHandler) {
+  // Deserialize JS value and convert to C++ string
+  JsValue jsVal = deserializer.readValue(js);
+  kj::String text = KJ_ASSERT_NONNULL(stringHandler.tryUnwrap(js, jsVal));
+  return js.alloc<MyType>(kj::mv(text));
+}
+```
+
+#### Raw Read/Write Methods
+
+The `Serializer` and `Deserializer` provide low-level methods for custom binary formats:
+
+```cpp
+// Serializer write methods
+serializer.writeRawUint32(uint32_t value);
+serializer.writeRawUint64(uint64_t value);
+serializer.writeRawBytes(kj::ArrayPtr<const kj::byte> bytes);
+serializer.writeLengthDelimited(kj::ArrayPtr<const kj::byte> bytes);  // size + bytes
+serializer.writeLengthDelimited(kj::StringPtr text);
+serializer.write(js, JsValue value);  // Full V8 serialization
+
+// Deserializer read methods
+uint32_t u32 = deserializer.readRawUint32();
+uint64_t u64 = deserializer.readRawUint64();
+kj::ArrayPtr<const kj::byte> bytes = deserializer.readRawBytes(size);
+kj::ArrayPtr<const kj::byte> delimited = deserializer.readLengthDelimitedBytes();
+kj::String str = deserializer.readLengthDelimitedString();
+JsValue val = deserializer.readValue(js);  // Full V8 deserialization
+uint32_t version = deserializer.getVersion();  // Wire format version
+```
+
+#### One-Way Serialization (`JSG_SERIALIZABLE_ONEWAY`)
+
+For types that serialize to a different type (e.g., a legacy type that should deserialize
+as a newer type):
+
+```cpp
+class LegacyType: public jsg::Object {
+  // ...
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    // Serialize in NewType's format
+    serializer.writeRawUint32(value);
+  }
+
+  // No deserialize() method - uses NewType's deserializer
+  JSG_SERIALIZABLE_ONEWAY(SerializationTag::NEW_TYPE);
+};
+```
 
 ### Errors
 
-TODO(soon): TBD
+JSG provides a comprehensive error handling system that bridges C++ exceptions and JavaScript
+errors. The key components are:
 
-* `makeInternalError(...)`
-* `throwInternalError(...)`
-* `throwTypeError(...)`
-* //...
+#### Error Macros
+
+JSG provides macros that work similarly to KJ's assertion macros but produce JavaScript-friendly
+error messages:
+
+```cpp
+// Throws a TypeError if the condition is false
+JSG_REQUIRE(condition, TypeError, "Expected a valid value, got ", value);
+
+// Like JSG_REQUIRE but returns the unwrapped value from a kj::Maybe
+auto& val = JSG_REQUIRE_NONNULL(maybeValue, TypeError, "Value must not be null");
+
+// Unconditionally throws an error
+JSG_FAIL_REQUIRE(RangeError, "Index ", index, " is out of bounds");
+
+// Like KJ_ASSERT but produces a JSG-style error
+JSG_ASSERT(condition, Error, "Internal assertion failed");
+```
+
+The `jsErrorType` parameter can be one of:
+- `TypeError`, `Error`, `RangeError` - Standard JavaScript error types
+- `DOMOperationError`, `DOMDataError`, `DOMInvalidStateError`, etc. - DOMException types
+
+Unlike `KJ_REQUIRE`, `JSG_REQUIRE` passes all message arguments through `kj::str()`, so you are
+responsible for formatting the entire message string.
+
+#### `js.error()`, `js.throwException()`, and `JsExceptionThrown`
+
+When C++ code needs to throw a JavaScript exception:
+1. Create the error object with `js.error("Error reason")`
+2. Throw using `js.throwException()`
+
+```cpp
+void someMethod(jsg::Lock& js) {
+  if (somethingWrong) {
+    js.throwException(js.error("Something went wrong"));
+    // Or using the lower-level API:
+    // isolate->ThrowException(v8::Exception::Error(...));
+    // throw JsExceptionThrown();
+  }
+}
+```
+
+Under the hood, `js.throwException()` uses V8's lower level API, `isolate->ThrowException()`, to
+throw the exception in the V8 engine. It then throws a special C++ object of type
+`JsExceptionThrown`, whose purpose is to unwind the C++ stack back to the point where JavaScript
+called into C++. This C++ exception is caught by JSG's callback glue before returning to V8. This
+approach is more ergonomic than V8's convention of returning `v8::Maybe` values.
+
+#### `JSG_TRY` and `JSG_CATCH`
+
+JSG provides `JSG_TRY` and `JSG_CATCH` macros which replace the normal `try` and `catch` keywords
+when you need to catch exceptions as JavaScript exceptions. Each take one argument: `JSG_TRY` takes
+the `jsg::Lock&` reference, and `JSG_CATCH` takes your desired variable name for the caught
+exception.
+
+```cpp
+void someMethod(jsg::Lock& js) {
+  JSG_TRY(js) {
+    someThrowyCode();
+  }
+  JSG_CATCH(e) {
+    // Just rethrow.
+    js.throwException(kj::mv(e));
+  }
+}
+```
+
+The example above actually illustrates a common, useful scenario of coercing any exception thrown
+into a JavaScript Error object. That is, if `someThrowyCode()` in the example above throws a KJ C++
+exception, `JSG_CATCH(e)` will catch it and convert it to a JavaScript error by calling
+`js.exceptionToJs()`.
+
+#### `makeInternalError()` and `throwInternalError()`
+
+These functions create JavaScript errors from internal C++ exceptions while obfuscating
+sensitive implementation details:
+
+```cpp
+// Creates a JS error value, logging the full details to stderr
+v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
+
+// Creates and throws the error
+void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
+void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception);
+```
+
+If the exception was created using `throwTunneledException()`, the original JavaScript
+exception is reconstructed instead of being obfuscated.
+
+#### `throwTypeError()`
+
+Throws a JavaScript `TypeError` with contextual information about where the type mismatch occurred:
+
+```cpp
+// With context about the error location
+throwTypeError(isolate, TypeErrorContext::methodArgument(typeid(MyClass), "doThing", 0),
+               "string");
+
+// With a free-form message
+throwTypeError(isolate, "Expected a string but got a number"_kj);
+```
+
+#### `check()`
+
+A utility template for unwrapping V8's `MaybeLocal` and `Maybe` types, throwing
+`JsExceptionThrown` if the value is empty (indicating V8 has already scheduled an exception):
+
+```cpp
+// Instead of:
+v8::Local<v8::String> str;
+if (!maybeStr.ToLocal(&str)) {
+  throw JsExceptionThrown();
+}
+
+// Use:
+v8::Local<v8::String> str = check(maybeStr);
+```
 
 #### `jsg::DOMException`
 
-TODO(soon): TBD
+`jsg::DOMException` is a JSG Resource Type that implements the standard Web IDL [DOMException][]
+interface. It is the only non-builtin JavaScript exception type that standard web APIs are
+allowed to throw per Web IDL.
+
+```cpp
+class DOMException: public jsg::Object {
+public:
+  DOMException(kj::String message, kj::String name);
+
+  static Ref<DOMException> constructor(
+      const v8::FunctionCallbackInfo<v8::Value>& args,
+      Optional<kj::String> message,
+      Optional<kj::String> name);
+
+  kj::StringPtr getName() const;
+  kj::StringPtr getMessage() const;
+  int getCode() const;
+
+  // Standard DOMException error codes as static constants
+  static constexpr int INDEX_SIZE_ERR = 1;
+  static constexpr int NOT_FOUND_ERR = 8;
+  static constexpr int NOT_SUPPORTED_ERR = 9;
+  // ... and many more
+
+  JSG_RESOURCE_TYPE(DOMException) {
+    JSG_INHERIT_INTRINSIC(v8::kErrorPrototype);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(name, getName);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(code, getCode);
+    // Static constants...
+  }
+};
+```
+
+To throw a DOMException from C++ code, use the `JSG_REQUIRE` macro with the appropriate
+DOMException error type:
+
+```cpp
+JSG_REQUIRE(isValid, DOMInvalidStateError, "The object is in an invalid state");
+JSG_REQUIRE(hasAccess, DOMNotSupportedError, "This operation is not supported");
+```
+
+[DOMException]: https://webidl.spec.whatwg.org/#idl-DOMException
 
 #### Tunneled Exceptions
 
-TODO(soon): TBD
+JSG supports "tunneling" JavaScript exceptions through KJ's exception system. This allows
+JavaScript exceptions to be thrown, caught as `kj::Exception`, passed across boundaries
+(like RPC), and then reconstructed back into the original JavaScript exception.
+
+To tunnel a JavaScript exception:
+
+```cpp
+// Given a JavaScript exception, create a KJ exception that can be tunneled
+kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
+
+// Or throw it directly
+[[noreturn]] void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
+```
+
+When a tunneled exception is later converted back to JavaScript via `makeInternalError()` or
+`exceptionToJs()`, the original JavaScript exception is reconstructed rather than being
+replaced with a generic internal error message.
+
+You can check if a `kj::Exception` contains a tunneled JavaScript exception:
+
+```cpp
+if (jsg::isTunneledException(exception.getDescription())) {
+  // This exception originated from JavaScript and can be reconstructed
+}
+```
+
+The tunneling mechanism encodes the JavaScript exception type and message in a special format
+within the KJ exception description. The format uses prefixes like `jsg.TypeError:` or
+`jsg.DOMException(NotFoundError):` to identify the exception type.
 
 ### `jsg::v8Str(...)` and `jsg::v8StrIntern(...)`
 
-TODO(soon): TBD
+These utility functions create V8 string values from C++ strings:
+
+```cpp
+// Create a V8 string from a kj::StringPtr (interpreted as UTF-8)
+v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::StringPtr str);
+
+// Create a V8 string from a kj::ArrayPtr<const char> (UTF-8)
+v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<const char> ptr);
+
+// Create a V8 string from a kj::ArrayPtr<const char16_t> (UTF-16)
+v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<const char16_t> ptr);
+
+// Create an internalized (deduplicated) V8 string - useful for property names
+v8::Local<v8::String> v8StrIntern(v8::Isolate* isolate, kj::StringPtr str);
+```
+
+**Note:** New code should prefer using the methods on `jsg::Lock` instead:
+
+```cpp
+void someMethod(jsg::Lock& js) {
+  // Preferred: use js.str() instead of v8Str()
+  JsString str = js.str("hello");
+
+  // For internalized strings
+  JsString internedStr = js.strIntern("propertyName");
+}
+```
+
+#### External Strings
+
+For static constant strings that will never be deallocated, you can use external strings
+which avoid copying the data into V8's heap:
+
+```cpp
+// For Latin-1 encoded static strings (NOT UTF-8!)
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
+
+// For UTF-16 encoded static strings
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
+```
+
+**Important:** The `OneByteString` variant interprets the buffer as Latin-1, not UTF-8. For
+text outside the Latin-1 range, you must use the two-byte (UTF-16) variant.
+
+## V8 Fast API
+
+V8 Fast API allows V8 to compile JavaScript code that calls native functions in a way that directly
+jumps to the C++ implementation without going through the usual JavaScript-to-C++ binding layers.
+This is accomplished by having V8 generate specialized machine code that knows how to call the C++
+function directly, skipping the overhead of value conversion and JavaScript calling conventions.
+
+### Requirements for Fast API compatibility
+
+For a method to be compatible with Fast API, it must adhere to several constraints due to V8 itself,
+and may change as the Fast API mechanism continues to evolve:
+
+1. **Return Type**: Must be one of these primitive types: `void`, `bool`, `int32_t`, `uint32_t`,
+   `float`, or `double`.
+
+2. **Parameter Types**: Can be the primitive types listed above, or V8 handle types like
+   `v8::Local<v8::Value>` or `v8::Local<v8::Object>`, or types that can be unwrapped from a V8
+   value using the TypeWrapper.
+
+3. **Method Structure**: Can be a regular instance method, a const instance method, or a method
+   that takes `jsg::Lock&` as its first parameter.
+
+### Using Fast API in workerd
+
+By default, any `JSG_METHOD(name)` will execute the fast path if the method signature is compatible
+with Fast API requirements. To explicitly assert that a function uses V8 Fast API in workerd, you
+can use `JSG_ASSERT_FASTAPI`:
+
+```cpp
+JSG_ASSERT_FASTAPI(MyClass::myMethod);
+```
+
+This will produce a compile-time error if the method signature is not Fast API compatible.
+
+### How it works
+
+When a method is registered with the V8 Fast API, workerd automatically:
+
+1. Checks if the method signature is compatible with Fast API requirements
+2. Registers both a regular (slow path) method handler and a Fast API handler
+3. Lets V8 optimize calls to this method when possible
+
+V8 determines at runtime whether to use the fast or slow path:
+
+- The fast path is used when the method is called from optimized code
+- The slow path is used when called from unoptimized code or when handling complex cases
 
 ["KJ Style Guide"]: https://github.com/capnproto/capnproto/blob/master/style-guide.md
 ["KJ Tour"]: https://github.com/capnproto/capnproto/blob/master/kjdoc/tour.md
-[ByteString]: https://webidl.spec.whatwg.org/#idl-ByteString
 [Record]: https://webidl.spec.whatwg.org/#idl-record
 [Sequence]: https://webidl.spec.whatwg.org/#idl-sequence
+
+---
+
+# Part 5: TypeScript and Async
+
+This section covers TypeScript definition generation and asynchronous programming
+support in JSG.
 
 ## TypeScript
 
@@ -1657,6 +3050,13 @@ KJ_DEFER(key->reset());
 // with the scope exits.
 ```
 
+---
+
+# Part 6: Advanced Topics
+
+This section covers advanced JSG features including memory tracking, internal
+implementation details, performance optimization, and the module system.
+
 ## `jsg::MemoryTracker` and heap snapshot detail collection
 
 The `jsg::MemoryTracker` is used to integrate with v8's `BuildEmbedderGraph` API.
@@ -1753,3 +3153,1438 @@ type should allocate. There is some allocation occurring internally while
 building the graph, of course, but the methods for visitation (in particular
 the `jsgGetMemoryInfo(...)` method) should not perform any allocations if it
 can be avoided.
+
+## Script Utilities
+
+JSG provides script compilation utilities in `script.h` for compiling and running non-module
+JavaScript code.
+
+### `jsg::NonModuleScript`
+
+`NonModuleScript` wraps a `v8::UnboundScript` - a script that has been compiled but is not yet
+bound to a specific context:
+
+```cpp
+#include <workerd/jsg/script.h>
+
+void runScript(jsg::Lock& js) {
+  // Compile a script
+  auto script = jsg::NonModuleScript::compile(js,
+      "console.log('Hello, World!'); return 42;",
+      "my-script.js");
+
+  // Run the script (binds to current context and executes)
+  script.run(js);
+
+  // Or run and get the return value
+  jsg::JsValue result = script.runAndReturn(js);
+}
+```
+
+Key features:
+- Scripts can be compiled once and run multiple times
+- Each run binds the unbound script to the current context
+- The script name is used for stack traces and debugging
+
+## URL Utilities
+
+JSG provides WHATWG-compliant URL parsing in `url.h`, powered by the ada-url library.
+
+### `jsg::Url`
+
+```cpp
+#include <workerd/jsg/url.h>
+
+void parseUrls() {
+  // Parse a URL
+  KJ_IF_SOME(url, jsg::Url::tryParse("https://example.com:8080/path?query=1#hash")) {
+    // Access components
+    kj::ArrayPtr<const char> protocol = url.getProtocol();  // "https:"
+    kj::ArrayPtr<const char> hostname = url.getHostname();  // "example.com"
+    kj::ArrayPtr<const char> port = url.getPort();          // "8080"
+    kj::ArrayPtr<const char> pathname = url.getPathname();  // "/path"
+    kj::ArrayPtr<const char> search = url.getSearch();      // "?query=1"
+    kj::ArrayPtr<const char> hash = url.getHash();          // "#hash"
+    kj::Array<const char> origin = url.getOrigin();         // "https://example.com:8080"
+
+    // Modify components
+    url.setPathname("/new/path");
+    url.setSearch(kj::Maybe<kj::ArrayPtr<const char>>("?new=query"));
+
+    // Get the full href
+    kj::ArrayPtr<const char> href = url.getHref();
+  }
+
+  // Parse with a base URL
+  KJ_IF_SOME(resolved, jsg::Url::tryParse("../other", "https://example.com/path/")) {
+    // resolved is "https://example.com/other"
+  }
+
+  // Check if a string can be parsed without creating a Url object
+  if (jsg::Url::canParse("https://example.com")) {
+    // Valid URL
+  }
+
+  // Using the literal operator
+  jsg::Url url = "https://example.com"_url;
+}
+```
+
+#### URL Comparison
+
+```cpp
+void compareUrls(const jsg::Url& a, const jsg::Url& b) {
+  // Basic equality
+  if (a == b) { /* same URLs */ }
+
+  // Comparison with options
+  using Option = jsg::Url::EquivalenceOption;
+
+  // Ignore fragments when comparing
+  if (a.equal(b, Option::IGNORE_FRAGMENTS)) { /* same ignoring #hash */ }
+
+  // Ignore search params
+  if (a.equal(b, Option::IGNORE_SEARCH)) { /* same ignoring ?query */ }
+
+  // Normalize percent-encoding in paths
+  if (a.equal(b, Option::NORMALIZE_PATH)) { /* %66oo == foo */ }
+
+  // Combine options
+  if (a.equal(b, Option::IGNORE_FRAGMENTS | Option::IGNORE_SEARCH)) { /* ... */ }
+}
+```
+
+### `jsg::UrlSearchParams`
+
+Parse and manipulate URL query parameters:
+
+```cpp
+void searchParams() {
+  KJ_IF_SOME(params, jsg::UrlSearchParams::tryParse("foo=1&bar=2&foo=3")) {
+    // Get values
+    KJ_IF_SOME(value, params.get("foo")) {
+      // value is "1" (first occurrence)
+    }
+
+    // Get all values for a key
+    auto allFoo = params.getAll("foo");  // ["1", "3"]
+
+    // Check existence
+    bool hasFoo = params.has("foo");
+    bool hasFooWithValue = params.has("foo", "1"_kj);
+
+    // Modify
+    params.append("baz", "4");
+    params.set("foo", "new");  // Replaces all "foo" entries
+    params.delete_("bar");
+
+    // Iterate
+    auto keys = params.getKeys();
+    while (keys.hasNext()) {
+      KJ_IF_SOME(key, keys.next()) { /* ... */ }
+    }
+
+    // Sort and stringify
+    params.sort();
+    kj::Array<const char> str = params.toStr();  // "baz=4&foo=new"
+  }
+}
+```
+
+### `jsg::UrlPattern`
+
+Compile and use URL patterns for routing:
+
+```cpp
+void urlPatterns() {
+  // Compile a pattern from a string
+  auto result = jsg::UrlPattern::tryCompile("/users/:id");
+  KJ_SWITCH_ONEOF(result) {
+    KJ_CASE_ONEOF(pattern, jsg::UrlPattern) {
+      // Access compiled components
+      auto& pathname = pattern.getPathname();
+      kj::StringPtr patternStr = pathname.getPattern();  // "/users/:id"
+      kj::StringPtr regex = pathname.getRegex();          // Generated regex
+      auto names = pathname.getNames();                   // ["id"]
+    }
+    KJ_CASE_ONEOF(error, kj::String) {
+      // Pattern compilation failed
+      KJ_LOG(ERROR, "Invalid pattern", error);
+    }
+  }
+
+  // Compile with options
+  jsg::UrlPattern::CompileOptions options {
+    .baseUrl = "https://example.com",
+    .ignoreCase = true,
+  };
+  auto result2 = jsg::UrlPattern::tryCompile("/path", options);
+}
+```
+
+## RTTI (Runtime Type Information)
+
+JSG provides a runtime type information system in `rtti.h` that produces Cap'n Proto descriptions
+of JSG structs, resources, and their members. This is used to generate TypeScript definitions,
+dynamically invoke methods, perform fuzzing, and check backward compatibility.
+
+### Overview
+
+The RTTI system introspects JSG types at runtime and produces structured metadata using the
+schema defined in `rtti.capnp`. This metadata includes:
+
+- Type information (primitives, arrays, optionals, unions, etc.)
+- Structure definitions (for `JSG_STRUCT` and `JSG_RESOURCE` types)
+- Method signatures
+- Property definitions
+
+### Using the RTTI Builder
+
+```cpp
+#include <workerd/jsg/rtti.h>
+
+// Your configuration type (often CompatibilityFlags::Reader)
+using Config = CompatibilityFlags::Reader;
+
+void inspectTypes(const Config& config) {
+  jsg::rtti::Builder<Config> rtti(config);
+
+  // Get type information for a primitive
+  auto intType = rtti.type<int>();
+
+  // Get structure information for a JSG type
+  auto myClassInfo = rtti.structure<MyClass>();
+
+  // Access structure members
+  for (auto member : myClassInfo.getMembers()) {
+    KJ_LOG(INFO, "Member:", member.getName());
+  }
+
+  // Lookup structure by name
+  KJ_IF_SOME(structInfo, rtti.structure("MyClass"_kj)) {
+    // Use structInfo...
+  }
+}
+```
+
+### Generated Metadata
+
+The RTTI system produces metadata in Cap'n Proto format (`rtti.capnp`):
+
+```
+# Type discriminator
+struct Type {
+  union {
+    unknown @0 :Void;
+    voidt @1 :Void;
+    boolt @2 :Void;
+    number @3 :NumberType;
+    string @4 :StringType;
+    object @5 :Void;
+    array @6 :Type;
+    maybe @7 :Type;
+    dict @8 :DictType;
+    oneOf @9 :List(Type);
+    promise @10 :Type;
+    structure @11 :Text;  # Reference by name
+    intrinsic @12 :Intrinsic;
+    function @13 :FunctionType;
+    jsgImpl @14 :JsgImplType;
+  }
+}
+
+# Structure definition
+struct Structure {
+  name @0 :Text;
+  members @1 :List(Member);
+  extends @2 :Text;
+  iterable @3 :Bool;
+  asyncIterable @4 :Bool;
+  # ... more fields
+}
+```
+
+### TypeScript Generation
+
+The primary use of RTTI is generating TypeScript definitions. The scripts in `/types` directory
+use RTTI to produce `.d.ts` files for the Workers runtime API.
+
+The generation process:
+1. Instantiate RTTI builder with appropriate configuration
+2. Iterate through all registered types
+3. Convert Cap'n Proto metadata to TypeScript syntax
+4. Apply any `JSG_TS_OVERRIDE` customizations
+
+### Supported Type Mappings
+
+| C++ Type | RTTI Kind |
+|----------|-----------|
+| `void` | `voidt` |
+| `bool` | `boolt` |
+| `int`, `double`, etc. | `number` |
+| `kj::String`, `USVString` | `string` |
+| `kj::Array<T>` | `array` |
+| `kj::Maybe<T>` | `maybe` |
+| `kj::OneOf<T...>` | `oneOf` |
+| `jsg::Promise<T>` | `promise` |
+| `jsg::Dict<V, K>` | `dict` |
+| `JSG_STRUCT` types | `structure` |
+| `JSG_RESOURCE` types | `structure` |
+| `jsg::Function<T>` | `function` |
+
+## Web IDL Type Mapping
+
+JSG provides type traits and concepts in `web-idl.h` to help validate and map between C++ types
+and Web IDL types. This is primarily used internally for validating `kj::OneOf` union types
+against Web IDL's union constraints.
+
+### Type Categories
+
+Web IDL defines nine distinguishable type categories. JSG maps these to C++ concepts:
+
+| Web IDL Category | JSG Concept | C++ Types |
+|------------------|-------------|-----------|
+| Boolean | `BooleanType` | `bool`, `NonCoercible<bool>` |
+| Numeric | `NumericType` | `int`, `double`, `uint32_t`, etc. |
+| String | `StringType` | `kj::String`, `USVString`, `DOMString`, `JsString` |
+| Object | `ObjectType` | `v8::Local<v8::Object>`, `v8::Global<v8::Object>` |
+| Symbol | `SymbolType` | (not yet implemented) |
+| Interface-like | `InterfaceLikeType` | `JSG_RESOURCE` types, `BufferSource` |
+| Callback function | `CallbackFunctionType` | `kj::Function<T>`, `Constructor<T>` |
+| Dictionary-like | `DictionaryLikeType` | `JSG_STRUCT` types, `Dict<V, K>` |
+| Sequence-like | `SequenceLikeType` | `kj::Array<T>`, `Sequence<T>` |
+
+### Union Type Validation
+
+When you use `kj::OneOf<T...>` in JSG API signatures, the `UnionTypeValidator` template
+validates at compile-time that your union is Web IDL-compliant:
+
+```cpp
+// Valid: different distinguishable categories
+kj::OneOf<kj::String, double, bool>  // string, numeric, boolean
+
+// Valid: multiple interface types (different classes)
+kj::OneOf<Ref<ClassA>, Ref<ClassB>>
+
+// Invalid: multiple numerics in same union
+kj::OneOf<int, double>  // Compile error!
+
+// Invalid: multiple strings in same union
+kj::OneOf<kj::String, USVString>  // Compile error!
+
+// Invalid: dictionary + nullable
+kj::OneOf<kj::Maybe<int>, MyStruct>  // Compile error!
+```
+
+### Key Validation Rules
+
+Per Web IDL specification:
+
+1. At most one boolean type
+2. At most one numeric type
+3. At most one string type
+4. At most one object type (and no interface-like, callback, dictionary-like, or sequence-like)
+5. At most one callback function type
+6. At most one dictionary-like type
+7. At most one sequence-like type
+8. At most one nullable (`kj::Maybe`) or dictionary type combined
+9. No duplicate types
+10. No `Optional<T>` types (use `kj::Maybe<T>` for nullable)
+
+### Using the Concepts
+
+You can use these concepts in your own code for type introspection:
+
+```cpp
+#include <workerd/jsg/web-idl.h>
+
+template <typename T>
+void process(T value) {
+  if constexpr (jsg::webidl::StringType<T>) {
+    // Handle string types
+  } else if constexpr (jsg::webidl::NumericType<T>) {
+    // Handle numeric types
+  } else if constexpr (jsg::webidl::NonCallbackInterfaceType<T>) {
+    // Handle JSG_RESOURCE types
+  }
+}
+```
+
+### Nullable Type Counting
+
+The `nullableTypeCount<T...>` template recursively counts nullable types in a union,
+including through nested `kj::OneOf` types:
+
+```cpp
+// Count = 1
+nullableTypeCount<kj::Maybe<int>>
+
+// Count = 2 (nested nullables)
+nullableTypeCount<kj::Maybe<kj::OneOf<kj::Maybe<int>, kj::String>>>
+```
+
+## CompileCache
+
+The `CompileCache` provides a process-lifetime in-memory cache for V8 compilation data,
+specifically designed for built-in JavaScript modules. Caching compilation data avoids
+re-parsing and re-compiling the same code repeatedly.
+
+**Important:** This cache is only appropriate for built-in modules. Entries are never removed
+or replaced during the process lifetime.
+
+### Usage
+
+```cpp
+#include <workerd/jsg/compile-cache.h>
+
+void compilingModule(v8::Isolate* isolate, kj::StringPtr moduleSource) {
+  // Get the singleton cache instance
+  const jsg::CompileCache& cache = jsg::CompileCache::get();
+
+  // Use a unique key for this module (typically the module specifier)
+  kj::StringPtr cacheKey = "node:fs";
+
+  // Check if cached compilation data exists
+  KJ_IF_SOME(cachedData, cache.find(cacheKey)) {
+    // Use cached data for compilation
+    auto v8CachedData = cachedData.AsCachedData();
+    v8::ScriptCompiler::Source source(sourceStr, v8::ScriptOrigin(...),
+                                       v8CachedData.release());
+    // Compile with cached data...
+  } else {
+    // Compile without cache
+    v8::ScriptCompiler::Source source(sourceStr, v8::ScriptOrigin(...));
+    auto module = v8::ScriptCompiler::CompileModule(isolate, &source,
+        v8::ScriptCompiler::kEagerCompile);
+
+    // Store the generated cache data for future use
+    if (source.GetCachedData() != nullptr) {
+      cache.add(cacheKey, std::shared_ptr<v8::ScriptCompiler::CachedData>(
+          source.GetCachedData()));
+    }
+  }
+}
+```
+
+### `CompileCache::Data`
+
+The cache stores `Data` objects that wrap V8's `ScriptCompiler::CachedData`:
+
+```cpp
+class CompileCache::Data {
+public:
+  // Create V8 cached data for use with ScriptCompiler
+  std::unique_ptr<v8::ScriptCompiler::CachedData> AsCachedData();
+
+  const uint8_t* data;  // Raw cached data
+  size_t length;        // Data length
+};
+```
+
+### Thread Safety
+
+The cache is internally mutex-guarded and safe for concurrent access from multiple threads.
+
+## Wrappable Internals
+
+This section covers the internal implementation details of how JSG connects C++ objects to
+JavaScript. Understanding these internals is helpful for debugging, performance optimization,
+and advanced use cases.
+
+### The `Wrappable` Base Class
+
+`Wrappable` is the base class for all C++ objects that can be exposed to JavaScript. It manages
+the connection between a C++ object and its JavaScript "wrapper" object.
+
+#### Key Concepts
+
+1. **Lazy Wrapper Creation**: JavaScript wrappers are created on-demand when a C++ object is
+   first passed to JavaScript, not when the C++ object is constructed.
+
+2. **Dual Reference Counting**:
+   - The `Wrappable` is ref-counted via `kj::Refcounted`. When a JS wrapper exists, it holds
+     a reference, keeping the C++ object alive.
+   - A second "strong ref" count tracks `jsg::Ref<T>` pointers that aren't visible to GC tracing.
+     While this count is non-zero, the JS wrapper won't be garbage-collected.
+
+3. **Identity Preservation**: The same C++ object always returns the same JS wrapper, preserving
+   object identity and any monkey-patches the script may have applied.
+
+#### Internal Fields
+
+JavaScript wrapper objects have two internal fields:
+
+```cpp
+enum InternalFields : int {
+  WRAPPABLE_TAG_FIELD_INDEX = 0,    // Contains WORKERD_WRAPPABLE_TAG to identify our objects
+  WRAPPED_OBJECT_FIELD_INDEX = 1,   // Pointer back to the Wrappable
+  INTERNAL_FIELD_COUNT = 2,
+};
+```
+
+You can check if an object is a workerd API object:
+
+```cpp
+if (jsg::Wrappable::isWorkerdApiObject(object)) {
+  // This is one of our wrapped C++ objects
+}
+```
+
+### Context Embedder Data Slots
+
+JSG uses V8's context embedder data to store pointers to important objects:
+
+```cpp
+enum class ContextPointerSlot : int {
+  RESERVED = 0,              // Never use slot 0 (V8 reserves it)
+  GLOBAL_WRAPPER = 1,        // Pointer to the global object wrapper
+  MODULE_REGISTRY = 2,       // Pointer to the module registry
+  EXTENDED_CONTEXT_WRAPPER = 3,  // Extended type wrapper for this context
+  VIRTUAL_FILE_SYSTEM = 4,   // Virtual file system
+  RUST_REALM = 5,            // Rust realm pointer
+};
+```
+
+Access these slots with the helper functions:
+
+```cpp
+// Set a pointer
+jsg::setAlignedPointerInEmbedderData(context, ContextPointerSlot::MODULE_REGISTRY, registry);
+
+// Get a pointer
+KJ_IF_SOME(registry, jsg::getAlignedPointerFromEmbedderData<ModuleRegistry>(
+    context, ContextPointerSlot::MODULE_REGISTRY)) {
+  // Use registry...
+}
+```
+
+### `HeapTracer`
+
+`HeapTracer` implements V8's `EmbedderRootsHandler` interface to integrate JSG's C++ object
+graph with V8's garbage collector.
+
+Key responsibilities:
+- Tracks all `Wrappable` objects that have JavaScript wrappers
+- Decides which wrappers can be collected during GC
+- Manages a freelist of reusable wrapper shim objects
+
+```cpp
+// Check if we're currently in a GC destructor
+if (jsg::HeapTracer::isInCppgcDestructor()) {
+  // Be careful - we're being destroyed during GC
+}
+```
+
+### Wrapper Lifecycle
+
+```
+1. C++ object created (no JS wrapper yet)
+         ↓
+2. Object passed to JavaScript
+         ↓
+3. attachWrapper() creates JS wrapper
+         ↓
+4. JS wrapper and C++ object linked
+         ↓
+5. GC may collect wrapper if:
+   - No JS references exist
+   - No strong Ref<T>s exist
+   - Wrapper is "unmodified"
+         ↓
+6. If wrapper collected but C++ object still alive:
+   - New wrapper created on next JS access
+         ↓
+7. When C++ object destroyed:
+   - detachWrapper() called
+   - JS wrapper becomes empty shell
+```
+
+### Strong vs Weak References
+
+```cpp
+class MyClass: public jsg::Object {
+public:
+  // Strong reference - prevents GC of the wrapper
+  jsg::Ref<OtherClass> strongRef;
+
+  // Weak reference - allows GC, must check before use
+  kj::Maybe<OtherClass&> weakRef;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    // Only visit strong refs that should prevent GC
+    visitor.visit(strongRef);
+    // Don't visit weakRef - it's allowed to be collected
+  }
+};
+```
+
+### Async Destructor Safety
+
+JSG enforces that JavaScript heap objects don't hold KJ I/O objects directly, as this could
+cause issues during garbage collection:
+
+```cpp
+// This macro helps catch bugs where I/O objects are incorrectly stored
+DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
+
+// If you need to store I/O objects, use IoOwn<T> which handles this correctly
+```
+
+## Observers
+
+JSG provides an observer system for monitoring various runtime events such as module resolution,
+compilation, and exceptions. These observers are useful for metrics collection, debugging, and
+implementing custom behavior.
+
+### `IsolateObserver`
+
+`IsolateObserver` is the main observer interface that combines `CompilationObserver`,
+`ResolveObserver`, and `InternalExceptionObserver`. You pass an `IsolateObserver` when creating
+an isolate:
+
+```cpp
+class MyObserver: public jsg::IsolateObserver {
+public:
+  // Override methods from CompilationObserver, ResolveObserver, etc.
+};
+
+auto observer = kj::heap<MyObserver>();
+MyIsolate isolate(v8System, kj::mv(observer));
+```
+
+#### Monitoring Dynamic Code Generation
+
+```cpp
+class MyObserver: public jsg::IsolateObserver {
+public:
+  void onDynamicEval(v8::Local<v8::Context> context,
+                     v8::Local<v8::Value> source,
+                     jsg::IsCodeLike isCodeLike) override {
+    // Called when eval(), new Function(), or similar is used
+    // isCodeLike indicates if source implements the "code-like" interface
+    KJ_LOG(WARNING, "Dynamic code generation detected");
+  }
+};
+```
+
+### `CompilationObserver`
+
+Monitors script and module compilation events. The `onXxxStart` methods return an
+`kj::Own<void>` that is destroyed when compilation completes, allowing RAII-style timing.
+
+```cpp
+class MyObserver: public jsg::IsolateObserver {
+public:
+  // ESM module compilation
+  kj::Own<void> onEsmCompilationStart(v8::Isolate* isolate,
+                                       kj::StringPtr name,
+                                       Option option) const override {
+    auto startTime = kj::systemCoarseMonotonicClock().now();
+    return kj::defer([startTime, name = kj::str(name)]() {
+      auto duration = kj::systemCoarseMonotonicClock().now() - startTime;
+      KJ_LOG(INFO, "ESM compilation", name, duration / kj::MILLISECONDS, "ms");
+    });
+  }
+
+  // Non-ESM script compilation
+  kj::Own<void> onScriptCompilationStart(v8::Isolate* isolate,
+                                          kj::Maybe<kj::StringPtr> name) const override {
+    return kj::Own<void>();  // No-op
+  }
+
+  // WebAssembly compilation
+  kj::Own<void> onWasmCompilationStart(v8::Isolate* isolate,
+                                        size_t codeSize) const override {
+    KJ_LOG(INFO, "Compiling WASM", codeSize, "bytes");
+    return kj::Own<void>();
+  }
+
+  // WebAssembly compilation from cache
+  kj::Own<void> onWasmCompilationFromCacheStart(v8::Isolate* isolate) const override {
+    return kj::Own<void>();
+  }
+
+  // JSON module parsing
+  kj::Own<void> onJsonCompilationStart(v8::Isolate* isolate,
+                                        size_t inputSize) const override {
+    return kj::Own<void>();
+  }
+
+  // Compile cache events
+  void onCompileCacheFound(v8::Isolate* isolate) const override {
+    // Called when cached compilation data is found
+  }
+
+  void onCompileCacheRejected(v8::Isolate* isolate) const override {
+    // Called when cached compilation data is rejected (e.g., version mismatch)
+  }
+
+  void onCompileCacheGenerated(v8::Isolate* isolate) const override {
+    // Called when new compilation cache data is generated
+  }
+
+  void onCompileCacheGenerationFailed(v8::Isolate* isolate) const override {
+    // Called when compilation cache generation fails
+  }
+};
+```
+
+The `Option` enum indicates the compilation context:
+- `Option::BUNDLE` - Compiling user code from the worker bundle
+- `Option::BUILTIN` - Compiling built-in runtime modules
+
+### `ResolveObserver`
+
+Monitors module resolution events. Useful for tracking which modules are imported.
+
+```cpp
+class MyObserver: public jsg::IsolateObserver {
+public:
+  kj::Own<ResolveStatus> onResolveModule(kj::StringPtr specifier,
+                                          Context context,
+                                          Source source) const override {
+    KJ_LOG(INFO, "Resolving module", specifier,
+           context == Context::BUNDLE ? "bundle" : "builtin",
+           source == Source::STATIC_IMPORT ? "static" :
+           source == Source::DYNAMIC_IMPORT ? "dynamic" :
+           source == Source::REQUIRE ? "require" : "internal");
+
+    // Return a ResolveStatus to track the resolution outcome
+    return kj::heap<MyResolveStatus>(specifier);
+  }
+};
+
+class MyResolveStatus: public jsg::ResolveObserver::ResolveStatus {
+public:
+  MyResolveStatus(kj::StringPtr specifier): specifier(kj::str(specifier)) {}
+
+  void found() override {
+    KJ_LOG(INFO, "Module found", specifier);
+  }
+
+  void notFound() override {
+    KJ_LOG(WARNING, "Module not found", specifier);
+  }
+
+  void exception(kj::Exception&& e) override {
+    KJ_LOG(ERROR, "Module resolution error", specifier, e.getDescription());
+  }
+
+private:
+  kj::String specifier;
+};
+```
+
+The `Context` enum indicates what is performing the resolution:
+- `Context::BUNDLE` - User code from the worker bundle
+- `Context::BUILTIN` - Built-in runtime modules
+- `Context::BUILTIN_ONLY` - Internal modules only resolvable from builtins (e.g., `node-internal:*`)
+
+The `Source` enum indicates how the resolution was triggered:
+- `Source::STATIC_IMPORT` - Static `import` statement
+- `Source::DYNAMIC_IMPORT` - Dynamic `import()` expression
+- `Source::REQUIRE` - CommonJS `require()` call
+- `Source::INTERNAL` - Internal module registry call
+
+### `InternalExceptionObserver`
+
+Monitors internal exceptions for metrics and debugging:
+
+```cpp
+class MyObserver: public jsg::IsolateObserver {
+public:
+  void reportInternalException(const kj::Exception& exception,
+                               Detail detail) override {
+    if (detail.isInternal) {
+      KJ_LOG(ERROR, "Internal exception", exception.getDescription());
+    }
+
+    if (detail.isFromRemote) {
+      KJ_LOG(INFO, "Exception from remote source");
+    }
+
+    if (detail.isDurableObjectReset) {
+      KJ_LOG(INFO, "Durable Object reset");
+    }
+
+    KJ_IF_SOME(errorId, detail.internalErrorId) {
+      KJ_LOG(INFO, "Error ID", kj::StringPtr(errorId.begin(), errorId.size()));
+    }
+  }
+};
+```
+
+The `Detail` struct provides context about the exception:
+- `isInternal` - True if this is an internal runtime error
+- `isFromRemote` - True if the exception originated from a remote source
+- `isDurableObjectReset` - True if this is a Durable Object reset
+- `internalErrorId` - Optional unique identifier for the error
+
+## BufferSource and BackingStore
+
+JSG provides `BufferSource` and `BackingStore` types for working with binary data (ArrayBuffers
+and TypedArrays). These types provide safe, efficient handling of buffer data with proper
+integration with V8's memory management and sandbox.
+
+### `jsg::BackingStore`
+
+`BackingStore` wraps a `v8::BackingStore` and retains type information (byte length, offset,
+element size) needed to recreate the original ArrayBuffer or TypedArray view.
+
+**Key feature:** Once allocated, a `BackingStore` can be safely used outside the isolate lock.
+
+#### Creating a BackingStore
+
+```cpp
+void createBackingStores(jsg::Lock& js) {
+  // From a kj::Array (takes ownership)
+  kj::Array<kj::byte> data = kj::heapArray<kj::byte>(1024);
+  auto backing1 = jsg::BackingStore::from<v8::Uint8Array>(js, kj::mv(data));
+
+  // Allocate a new zero-initialized buffer
+  auto backing2 = jsg::BackingStore::alloc<v8::Uint8Array>(js, 1024);
+
+  // Wrap external data with custom disposer
+  void* externalData = /* ... */;
+  auto backing3 = jsg::BackingStore::wrap<v8::Uint8Array>(
+      externalData, 1024,
+      [](void* data, size_t len, void* ctx) {
+        // Custom cleanup when backing store is destroyed
+        free(data);
+      },
+      nullptr  // context pointer passed to disposer
+  );
+}
+```
+
+The template parameter specifies the TypedArray type to create when converting back to JavaScript:
+- `v8::ArrayBuffer` - Raw ArrayBuffer
+- `v8::Uint8Array`, `v8::Int8Array`, `v8::Uint8ClampedArray`
+- `v8::Uint16Array`, `v8::Int16Array`
+- `v8::Uint32Array`, `v8::Int32Array`
+- `v8::Float32Array`, `v8::Float64Array`
+- `v8::BigInt64Array`, `v8::BigUint64Array`
+- `v8::DataView`
+
+#### Accessing Data
+
+```cpp
+void accessData(jsg::BackingStore& backing) {
+  // Get as kj::ArrayPtr<byte>
+  kj::ArrayPtr<kj::byte> bytes = backing.asArrayPtr();
+
+  // Or with a different element type
+  kj::ArrayPtr<uint32_t> u32s = backing.asArrayPtr<uint32_t>();
+
+  // Implicit conversion also works
+  kj::ArrayPtr<kj::byte> bytes2 = backing;
+
+  // Query properties
+  size_t size = backing.size();           // Byte length
+  size_t offset = backing.getOffset();    // Byte offset into underlying buffer
+  size_t elemSize = backing.getElementSize();  // Element size (1 for Uint8Array, 4 for Uint32Array, etc.)
+  bool isInt = backing.isIntegerType();   // True for integer typed arrays
+}
+```
+
+#### Manipulating Views
+
+```cpp
+void manipulateViews(jsg::Lock& js, jsg::BackingStore& backing) {
+  // Create a typed view over the same underlying data
+  auto uint16View = backing.getTypedView<v8::Uint16Array>();
+
+  // Create a slice (shares underlying buffer)
+  auto slice = backing.getTypedViewSlice<v8::Uint8Array>(10, 100);  // bytes 10-99
+
+  // Consume bytes from the front (useful for streaming)
+  backing.consume(10);  // Skip first 10 bytes
+
+  // Trim bytes from the end
+  backing.trim(10);     // Remove last 10 bytes
+
+  // Limit to specific size
+  backing.limit(100);   // Cap at 100 bytes
+
+  // Clone (shares underlying buffer, but independent view)
+  auto cloned = backing.clone();
+
+  // Copy (creates new buffer with copied data)
+  auto copied = backing.copy<v8::Uint8Array>(js);
+}
+```
+
+#### Converting Back to JavaScript
+
+```cpp
+void convertToJs(jsg::Lock& js, jsg::BackingStore& backing) {
+  // Create a JavaScript handle (ArrayBuffer or TypedArray based on template type)
+  v8::Local<v8::Value> handle = backing.createHandle(js);
+}
+```
+
+### `jsg::BufferSource`
+
+`BufferSource` wraps a JavaScript ArrayBuffer or ArrayBufferView and provides the ability to
+detach the backing store. It maintains a reference to the original JavaScript object.
+
+The name "BufferSource" comes from the Web IDL specification.
+
+#### Using BufferSource in API Methods
+
+```cpp
+class MyApi: public jsg::Object {
+public:
+  jsg::BufferSource processData(jsg::Lock& js, jsg::BufferSource source) {
+    // Access data while still attached
+    kj::ArrayPtr<kj::byte> data = source.asArrayPtr();
+    // ... read data ...
+
+    // Or detach to take ownership of the backing store
+    jsg::BackingStore backing = source.detach(js);
+
+    // Process the data
+    kj::ArrayPtr<kj::byte> ptr = backing.asArrayPtr();
+    for (auto& byte : ptr) {
+      byte ^= 0xFF;  // Example: invert all bytes
+    }
+
+    // Return a new BufferSource with the modified data
+    return jsg::BufferSource(js, kj::mv(backing));
+  }
+
+  JSG_RESOURCE_TYPE(MyApi) {
+    JSG_METHOD(processData);
+  }
+};
+```
+
+#### Creating BufferSource
+
+```cpp
+void createBufferSource(jsg::Lock& js) {
+  // From a BackingStore
+  auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(js, 1024);
+  jsg::BufferSource source1(js, kj::mv(backing));
+
+  // From a JavaScript handle
+  v8::Local<v8::Value> jsValue = /* ... */;
+  jsg::BufferSource source2(js, jsValue);
+
+  // Allocate directly (may return kj::none on allocation failure)
+  KJ_IF_SOME(source3, jsg::BufferSource::tryAlloc(js, 1024)) {
+    // Use source3...
+  }
+
+  // Wrap external data
+  auto source4 = jsg::BufferSource::wrap(js, externalPtr, size, disposer, context);
+
+  // From kj::Array using Lock helper
+  kj::Array<kj::byte> data = kj::heapArray<kj::byte>(100);
+  jsg::BufferSource source5 = js.arrayBuffer(kj::mv(data));
+}
+```
+
+#### Detaching
+
+Detaching removes the backing store from the BufferSource and neuters the JavaScript
+ArrayBuffer/ArrayBufferView:
+
+```cpp
+void detachExample(jsg::Lock& js, jsg::BufferSource& source) {
+  // Check if already detached
+  if (source.isDetached()) {
+    // Cannot access data
+    return;
+  }
+
+  // Check if detachable (some ArrayBuffers cannot be detached)
+  if (!source.canDetach(js)) {
+    JSG_FAIL_REQUIRE(TypeError, "Buffer cannot be detached");
+  }
+
+  // Detach and take ownership
+  jsg::BackingStore backing = source.detach(js);
+
+  // The original JavaScript ArrayBuffer is now neutered (zero-length)
+  // source.isDetached() is now true
+}
+```
+
+#### Detach Keys
+
+Some ArrayBuffers use detach keys for security:
+
+```cpp
+void detachWithKey(jsg::Lock& js, jsg::BufferSource& source) {
+  // Set a detach key
+  v8::Local<v8::Value> key = js.str("secret-key");
+  source.setDetachKey(js, key);
+
+  // Must provide the key to detach
+  jsg::BackingStore backing = source.detach(js, key);
+}
+```
+
+#### Other Operations
+
+```cpp
+void otherOps(jsg::Lock& js, jsg::BufferSource& source) {
+  // Get the JavaScript handle
+  v8::Local<v8::Value> handle = source.getHandle(js);
+
+  // Query properties
+  size_t size = source.size();
+  size_t offset = source.getOffset();
+  size_t elemSize = source.getElementSize();
+  bool isInt = source.isIntegerType();
+
+  // Get underlying ArrayBuffer size (if not detached)
+  KJ_IF_SOME(bufSize, source.underlyingArrayBufferSize(js)) {
+    // bufSize is the total ArrayBuffer size, not the view size
+  }
+
+  // Trim the view
+  source.trim(js, 10);  // Remove last 10 bytes
+
+  // Clone (shares backing, new JS handle)
+  jsg::BufferSource cloned = source.clone(js);
+
+  // Copy (new backing, new JS handle)
+  jsg::BufferSource copied = source.copy<v8::Uint8Array>(js);
+
+  // Get a typed slice
+  jsg::BufferSource slice = source.getTypedViewSlice<v8::Uint8Array>(js, 0, 100);
+
+  // Zero the buffer
+  source.setToZero();
+}
+```
+
+#### GC Visitation
+
+When storing a `BufferSource` as a member variable, you must visit it for GC:
+
+```cpp
+class MyClass: public jsg::Object {
+public:
+  void setBuffer(jsg::Lock& js, jsg::BufferSource buffer) {
+    this->buffer = kj::mv(buffer);
+  }
+
+  JSG_RESOURCE_TYPE(MyClass) {
+    JSG_METHOD(setBuffer);
+  }
+
+private:
+  kj::Maybe<jsg::BufferSource> buffer;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    KJ_IF_SOME(b, buffer) {
+      visitor.visit(b);
+    }
+  }
+};
+```
+
+### V8 Sandbox Considerations
+
+When V8 sandboxing is enabled, buffer memory must reside within the sandbox:
+
+- `BackingStore::from()` will copy data if the source array is outside the sandbox
+- `BackingStore::alloc()` always allocates inside the sandbox
+- A `BackingStore` cannot be passed to another isolate unless both are in the same `IsolateGroup`
+
+## V8 Platform Wrapper
+
+JSG provides `V8PlatformWrapper` in `v8-platform-wrapper.h`, a wrapper around V8's platform
+interface that allows JSG to intercept and customize platform operations.
+
+### Purpose
+
+The wrapper delegates most operations to an inner `v8::Platform` but wraps `JobTask` objects
+to provide additional functionality. This is primarily used for:
+
+- Monitoring background work scheduled by V8
+- Ensuring proper KJ event loop integration
+- Debugging and profiling V8's background tasks
+
+### Implementation
+
+```cpp
+class V8PlatformWrapper: public v8::Platform {
+public:
+  explicit V8PlatformWrapper(v8::Platform& inner);
+
+  // All Platform methods delegate to inner, except:
+  // - CreateJobImpl wraps the JobTask to add custom behavior
+
+  // ... delegates to inner platform ...
+};
+```
+
+Most users won't interact with `V8PlatformWrapper` directly - it's used internally by
+`V8System` to set up the V8 platform. However, understanding its existence helps when
+debugging V8 background task issues or implementing custom platform behavior.
+
+## Module System
+
+JSG provides a module system that supports ES modules (ESM), CommonJS-style modules, and
+various synthetic module types (JSON, WASM, data, text). There are two implementations:
+the original `ModuleRegistry` (`modules.h`) and a newer, more flexible implementation
+(`modules-new.h`).
+
+### Concepts
+
+**Module Types:**
+- `Type::BUNDLE` - Modules from the worker bundle (user code)
+- `Type::BUILTIN` - Built-in runtime modules (e.g., `node:buffer`, `cloudflare:sockets`)
+- `Type::INTERNAL` - Internal modules only importable by other built-ins (e.g., `node-internal:*`)
+
+**Resolution Priority:**
+1. When importing from bundle code: Bundle → Builtin → Fallback
+2. When importing from builtin code: Builtin → Internal
+3. When importing from internal code: Internal only
+
+**Module Info Types:**
+- ESM modules - Standard JavaScript modules compiled by V8
+- `CommonJsModuleInfo` - CommonJS-style modules with `require`/`exports`
+- `DataModuleInfo` - Binary data as ArrayBuffer
+- `TextModuleInfo` - Text content as string
+- `WasmModuleInfo` - WebAssembly modules
+- `JsonModuleInfo` - Parsed JSON data
+- `ObjectModuleInfo` - JSG C++ objects exposed as modules
+- `CapnpModuleInfo` - Cap'n Proto schema modules
+
+### Original Module Registry (`modules.h`)
+
+The original implementation provides a straightforward module registry:
+
+```cpp
+#include <workerd/jsg/modules.h>
+
+// Install a module registry in a context
+auto registry = jsg::ModuleRegistryImpl<MyTypeWrapper>::install(
+    isolate, context, observer);
+
+// Add a worker bundle module (ESM)
+kj::Path specifier = kj::Path::parse("worker.js");
+auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(js,
+    "worker.js",
+    sourceCode,
+    {},  // compile cache
+    jsg::ModuleInfoCompileOption::BUNDLE,
+    observer);
+registry->add(specifier, kj::mv(moduleInfo));
+
+// Add a built-in ESM module
+registry->addBuiltinModule("node:buffer", sourceCode, jsg::ModuleRegistry::Type::BUILTIN);
+
+// Add a built-in module from a bundle (capnp)
+registry->addBuiltinBundle(bundle);
+
+// Add a module backed by a C++ object
+registry->addBuiltinModule<MyApiClass>("workerd:my-api");
+
+// Add a module backed by an existing Ref
+registry->addBuiltinModule("workerd:instance", kj::mv(myRef));
+
+// Add a module with a factory callback
+registry->addBuiltinModule("workerd:dynamic",
+    [](jsg::Lock& js, auto method, auto& referrer) -> kj::Maybe<ModuleInfo> {
+      // Lazily create the module
+      return ModuleInfo(js, "workerd:dynamic", kj::none,
+          ObjectModuleInfo(js, createMyObject(js)));
+    });
+```
+
+#### Resolving Modules
+
+```cpp
+// Get the registry from the current context
+auto* registry = jsg::ModuleRegistry::from(js);
+
+// Resolve a module by specifier
+kj::Path specifier = kj::Path::parse("./utils.js");
+kj::Path referrer = kj::Path::parse("worker.js");
+
+KJ_IF_SOME(info, registry->resolve(js, specifier, referrer)) {
+  // Module found, get the V8 module handle
+  v8::Local<v8::Module> module = info.module.getHandle(js);
+
+  // Instantiate and evaluate
+  jsg::instantiateModule(js, module);
+
+  // Get the module namespace
+  v8::Local<v8::Value> ns = module->GetModuleNamespace();
+}
+
+// Resolve options
+registry->resolve(js, specifier, referrer,
+    ModuleRegistry::ResolveOption::BUILTIN_ONLY);  // Only search builtins
+registry->resolve(js, specifier, referrer,
+    ModuleRegistry::ResolveOption::INTERNAL_ONLY); // Only search internals
+```
+
+#### Creating Synthetic Modules
+
+```cpp
+// Data module (ArrayBuffer)
+kj::Array<kj::byte> data = loadBinaryData();
+v8::Local<v8::ArrayBuffer> buffer = js.wrapBytes(kj::mv(data));
+auto info = ModuleInfo(js, "data.bin", kj::none,
+    DataModuleInfo(js, buffer));
+
+// Text module
+v8::Local<v8::String> text = js.str("Hello, World!");
+auto info = ModuleInfo(js, "text.txt", kj::none,
+    TextModuleInfo(js, text));
+
+// JSON module
+auto jsonValue = jsg::check(v8::JSON::Parse(context, js.str(jsonContent)));
+auto info = ModuleInfo(js, "config.json", kj::none,
+    JsonModuleInfo(js, jsonValue));
+
+// WASM module
+auto wasmModule = jsg::compileWasmModule(js, wasmBytes, observer);
+auto info = ModuleInfo(js, "module.wasm", kj::none,
+    WasmModuleInfo(js, wasmModule));
+```
+
+#### CommonJS Modules
+
+```cpp
+// Create a CommonJS module provider
+class MyModuleProvider: public ModuleRegistry::CommonJsModuleInfo::CommonJsModuleProvider {
+public:
+  JsObject getContext(Lock& js) override {
+    // Return the object to use as 'this' context
+    return js.obj();
+  }
+
+  JsValue getExports(Lock& js) override {
+    // Return the initial exports object
+    return js.obj();
+  }
+};
+
+auto provider = kj::heap<MyModuleProvider>();
+auto info = ModuleRegistry::CommonJsModuleInfo(js, "module.js", sourceCode, kj::mv(provider));
+```
+
+### New Module Registry (`modules-new.h`)
+
+The new implementation provides better modularity, URL-based specifiers, thread safety,
+and support for module sharing across isolate replicas.
+
+#### Key Improvements
+
+1. **URL-based specifiers** - All module specifiers are URLs
+2. **Thread-safe** - Designed for sharing across isolate replicas
+3. **Modular bundles** - Separate `ModuleBundle` instances for different module sources
+4. **Better import.meta support** - `import.meta.url`, `import.meta.main`, `import.meta.resolve()`
+5. **Import attributes** - Support for import attributes (assertions)
+
+#### Creating Modules
+
+```cpp
+#include <workerd/jsg/modules-new.h>
+
+using namespace workerd::jsg::modules;
+
+// Create an ESM module (takes ownership of code)
+kj::Array<const char> code = loadSourceCode();
+auto esmModule = Module::newEsm(
+    "file:///bundle/worker.js"_url,
+    Module::Type::BUNDLE,
+    kj::mv(code),
+    Module::Flags::MAIN | Module::Flags::ESM);
+
+// Create an ESM module (references static code)
+auto builtinModule = Module::newEsm(
+    "node:buffer"_url,
+    Module::Type::BUILTIN,
+    STATIC_SOURCE_CODE);
+
+// Create a synthetic module
+auto syntheticModule = Module::newSynthetic(
+    "workerd:my-module"_url,
+    Module::Type::BUILTIN,
+    [](Lock& js, const Url& id, const Module::ModuleNamespace& ns,
+       const CompilationObserver& observer) -> bool {
+      // Set exports
+      ns.setDefault(js, js.obj());
+      ns.set(js, "foo", js.str("bar"));
+      return true;
+    },
+    kj::arr("foo"_kj));  // Named exports
+```
+
+#### Module Handlers for Common Types
+
+```cpp
+// Text module handler
+auto textHandler = Module::newTextModuleHandler(textContent);
+auto textModule = Module::newSynthetic(id, type, kj::mv(textHandler));
+
+// Data module handler (ArrayBuffer)
+auto dataHandler = Module::newDataModuleHandler(binaryData);
+auto dataModule = Module::newSynthetic(id, type, kj::mv(dataHandler));
+
+// JSON module handler
+auto jsonHandler = Module::newJsonModuleHandler(jsonContent);
+auto jsonModule = Module::newSynthetic(id, type, kj::mv(jsonHandler));
+
+// WASM module handler
+auto wasmHandler = Module::newWasmModuleHandler(wasmBytes);
+auto wasmModule = Module::newSynthetic(id, type, kj::mv(wasmHandler),
+    nullptr, Module::Flags::WASM);
+```
+
+#### Building Module Bundles
+
+```cpp
+// Build a worker bundle
+Url bundleBase = "file:///bundle"_url;
+ModuleBundle::BundleBuilder bundleBuilder(bundleBase);
+
+bundleBuilder
+    .addEsmModule("worker.js", workerSource, Module::Flags::MAIN | Module::Flags::ESM)
+    .addEsmModule("utils.js", utilsSource)
+    .addSyntheticModule("config", configHandler)
+    .alias("./lib", "./utils.js");
+
+auto workerBundle = bundleBuilder.finish();
+
+// Build a builtin bundle
+ModuleBundle::BuiltinBuilder builtinBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+
+builtinBuilder
+    .addEsm("node:buffer"_url, bufferSource)
+    .addEsm("node:path"_url, pathSource)
+    .addSynthetic("cloudflare:sockets"_url, socketsHandler);
+
+// Add a module backed by a C++ object
+builtinBuilder.addObject<MyApiClass, MyTypeWrapper>("workerd:my-api"_url);
+
+auto builtinBundle = builtinBuilder.finish();
+
+// Build an internal-only bundle
+ModuleBundle::BuiltinBuilder internalBuilder(ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+
+internalBuilder
+    .addEsm("node-internal:primordials"_url, primordialsSource)
+    .addEsm("node-internal:errors"_url, errorsSource);
+
+auto internalBundle = internalBuilder.finish();
+```
+
+#### CommonJS-Style Modules
+
+```cpp
+// The template type must be a jsg::Object with getExports(Lock&) method
+template <typename TypeWrapper>
+auto handler = Module::newCjsStyleModuleHandler<NodeFsContext, TypeWrapper>(
+    sourceCode, "node:fs");
+
+builtinBuilder.addSynthetic("node:fs"_url, kj::mv(handler));
+```
+
+#### Fallback Bundle (for local development)
+
+```cpp
+// Create a fallback bundle that dynamically resolves modules
+auto fallbackBundle = ModuleBundle::newFallbackBundle(
+    [](const ResolveContext& context)
+        -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+      // Try to load the module from external source
+      KJ_IF_SOME(code, fetchModule(context.normalizedSpecifier)) {
+        return Module::newEsm(
+            context.normalizedSpecifier.clone(),
+            Module::Type::FALLBACK,
+            kj::mv(code));
+      }
+
+      // Or return a redirect
+      if (shouldRedirect(context.normalizedSpecifier)) {
+        return kj::str("node:buffer");  // Redirect to another module
+      }
+
+      return kj::none;  // Module not found
+    });
+```
+
+#### Resolution Context
+
+The `ResolveContext` provides information about module resolution:
+
+```cpp
+struct ResolveContext {
+  Type type;           // BUNDLE, BUILTIN, or BUILTIN_ONLY
+  Source source;       // STATIC_IMPORT, DYNAMIC_IMPORT, REQUIRE, or INTERNAL
+
+  const Url& normalizedSpecifier;        // Fully resolved URL
+  const Url& referrerNormalizedSpecifier; // URL of importing module
+
+  kj::Maybe<kj::StringPtr> rawSpecifier;  // Original specifier before normalization
+
+  // Import attributes (e.g., { type: "json" })
+  kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
+};
+```
+
+### Module Instantiation
+
+Both implementations use similar instantiation:
+
+```cpp
+// Get the V8 module
+v8::Local<v8::Module> module = moduleInfo.module.getHandle(js);
+
+// Instantiate (resolves imports, links modules)
+jsg::instantiateModule(js, module);
+
+// Or with options
+jsg::instantiateModule(js, module, InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT);
+
+// Get the module namespace (exports)
+v8::Local<v8::Value> ns = module->GetModuleNamespace();
+```
+
+### Dynamic Import
+
+Dynamic imports are handled through V8's callback mechanism:
+
+```cpp
+// The registry handles dynamic imports automatically
+// In JavaScript:
+const module = await import('./other.js');
+const { foo } = await import('node:path');
+```
+
+### require() Support
+
+For CommonJS compatibility:
+
+```cpp
+// Get exports using require semantics
+JsValue exports = ModuleRegistry::requireImpl(js, moduleInfo);
+
+// Or get just the default export
+JsValue defaultExport = ModuleRegistry::requireImpl(js, moduleInfo,
+    ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT);
+```
+
+### Choosing Between Implementations
+
+Use the **original implementation** (`modules.h`) when:
+- You need simpler, more direct control
+- You're working with existing code that uses kj::Path specifiers
+- Thread safety across replicas isn't needed
+
+Use the **new implementation** (`modules-new.h`) when:
+- You need URL-based module specifiers
+- You need import.meta support
+- You need to share modules across isolate replicas
+- You need better import attribute handling
+- You're building new code from scratch

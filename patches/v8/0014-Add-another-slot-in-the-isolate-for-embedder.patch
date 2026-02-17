@@ -6,15 +6,15 @@ Subject: Add another slot in the isolate for embedder
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-internal.h b/include/v8-internal.h
-index 4bfbac0a8503fe4d728d0220473505ea67f50d9a..77cd8cd74e9111843c27c765990c66986c36396f 100644
+index 90e812a410505567de74e15a61e47b38daea7f23..36d17371d36c1e33c78d4c61d860fb722c817060 100644
 --- a/include/v8-internal.h
 +++ b/include/v8-internal.h
-@@ -919,7 +919,7 @@ class Internals {
-   static const int kExternalTwoByteRepresentationTag = 0x02;
-   static const int kExternalOneByteRepresentationTag = 0x0a;
+@@ -924,7 +924,7 @@ class Internals {
+   // AccessorInfo::data and InterceptorInfo::data field.
+   static const int kCallbackInfoDataOffset = 1 * kApiTaggedSize;
  
 -  static const uint32_t kNumIsolateDataSlots = 4;
-+  static const uint32_t kNumIsolateDataSlots = 5;
++  static const uint32_t kNumIsolateDataSlots = 6;
    static const int kStackGuardSize = 8 * kApiSystemPointerSize;
    static const int kNumberOfBooleanFlags = 6;
    static const int kErrorMessageParamSize = 1;

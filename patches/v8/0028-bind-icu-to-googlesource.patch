@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Eagle <alex@aspect.dev>
+Date: Thu, 2 Oct 2025 02:17:00 +0100
+Subject: bind icu to googlesource
+
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 6060015bc780e051c8afb2a8e35a383045b8ca41..1f927e2466a365342bf6634fb11e85612d0cdfc1 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -4577,7 +4577,7 @@ v8_library(
+     copts = ["-Wno-implicit-fallthrough"],
+     icu_deps = [
+         ":icu/generated_torque_definitions_headers",
+-        "//external:icu",
++        "@com_googlesource_chromium_icu//:icu",
+     ],
+     icu_srcs = [
+         ":generated_regexp_special_case",
+@@ -4700,7 +4700,7 @@ v8_binary(
+     ],
+     deps = [
+         ":v8_libbase",
+-        "//external:icu",
++        "@com_googlesource_chromium_icu//:icu",
+     ],
+ )
+ 

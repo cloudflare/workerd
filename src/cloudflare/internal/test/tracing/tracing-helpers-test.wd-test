@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "tracing-helpers-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tracing-helpers-test.js"),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+        streamingTails = ["tail"],
+        bindings = [
+          (
+            name = "tracingTest",
+            wrapped = (
+              moduleName = "cloudflare-internal:test-tracing-wrapper"
+            )
+          )
+        ],
+      )
+    ),
+    ( name = "tail", worker = .tailWorker, ),
+  ]
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tracing-helpers-instrumentation-test.js"),
+    (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);

@@ -18,6 +18,7 @@ import entrypoints from 'cloudflare-internal:workers';
 async function* readLines(
   stream: ReadableStream<Uint8Array>
 ): AsyncGenerator<string> {
+  // @ts-expect-error TS2345 TODO(soon): Fix this.
   const textStream = stream.pipeThrough(new TextDecoderStream());
   const reader = textStream.getReader();
 
@@ -86,7 +87,9 @@ type PipelineRecord = Record<string, unknown>;
 export class PipelineTransformImpl<
   I extends PipelineRecord,
   O extends PipelineRecord,
-> extends entrypoints.WorkerEntrypoint {
+>
+  extends entrypoints.WorkerEntrypoint
+{
   #batch?: Batch;
   #initalized: boolean = false;
 

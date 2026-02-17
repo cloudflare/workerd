@@ -218,8 +218,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
       void* schemaAsPtr;
       memcpy(&schemaAsPtr, &schema, sizeof(schema));
 
-      auto constructor = v8::FunctionTemplate::New(
-          js.v8Isolate, &constructorCallback, v8::External::New(js.v8Isolate, schemaAsPtr));
+      auto constructor = v8::FunctionTemplate::New(js.v8Isolate, &constructorCallback,
+          v8::External::New(js.v8Isolate, schemaAsPtr, v8::kExternalPointerTypeTagDefault));
 
       auto prototype = constructor->PrototypeTemplate();
       auto signature = v8::Signature::New(js.v8Isolate, constructor);
@@ -245,7 +245,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
           // the GC visitation callback.
           instance->SetInternalFieldCount(jsg::Wrappable::INTERNAL_FIELD_COUNT);
 
-          constructor->Inherit(wrapper.getTemplate(js.v8Isolate, (CapnpCapability*)nullptr));
+          constructor->Inherit(
+              wrapper.getTemplate(js.v8Isolate, static_cast<CapnpCapability*>(nullptr)));
           kj::HashSet<uint64_t> seen;
           addAllMethods(js, prototype, signature, schema.asInterface(), seen);
           break;
@@ -322,8 +323,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
       auto name = jsg::v8StrIntern(js.v8Isolate, method.getProto().getName());
       prototype->Set(name,
           v8::FunctionTemplate::New(js.v8Isolate, &methodCallback,
-              v8::External::New(js.v8Isolate, &method), signature, 0,
-              v8::ConstructorBehavior::kThrow));
+              v8::External::New(js.v8Isolate, &method, v8::kExternalPointerTypeTagDefault),
+              signature, 0, v8::ConstructorBehavior::kThrow));
     }
   }
 
@@ -331,7 +332,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     jsg::liftKj(args, [&]() {
       auto data = args.Data();
       KJ_ASSERT(data->IsExternal());
-      void* schemaAsPtr = data.As<v8::External>()->Value();
+      void* schemaAsPtr = data.As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault);
       capnp::Schema schema;
       memcpy(&schema, &schemaAsPtr, sizeof(schema));
 
@@ -364,8 +365,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     jsg::liftKj(args, [&]() {
       auto data = args.Data();
       KJ_ASSERT(data->IsExternal());
-      auto& method =
-          *reinterpret_cast<capnp::InterfaceSchema::Method*>(data.As<v8::External>()->Value());
+      auto& method = *reinterpret_cast<capnp::InterfaceSchema::Method*>(
+          data.As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
 
       auto& js = jsg::Lock::from(args.GetIsolate());
       auto obj = args.This();
@@ -384,7 +385,8 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
   }
   kj::Maybe<capnp::DynamicCapability::Client> tryUnwrapCap(
       jsg::Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> value) override {
-    return tryUnwrap(js, context, value, (capnp::DynamicCapability::Client*)nullptr, kj::none);
+    return tryUnwrap(
+        js, context, value, static_cast<capnp::DynamicCapability::Client*>(nullptr), kj::none);
   }
 
   v8::Local<v8::Promise> wrapPromise(jsg::Lock& js,
@@ -396,7 +398,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
   kj::Maybe<jsg::Promise<jsg::Value>> tryUnwrapPromise(
       jsg::Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> value) override {
     return static_cast<TypeWrapper&>(*this).tryUnwrap(
-        js, context, value, (jsg::Promise<jsg::Value>*)nullptr, kj::none);
+        js, context, value, static_cast<jsg::Promise<jsg::Value>*>(nullptr), kj::none);
   }
 };
 

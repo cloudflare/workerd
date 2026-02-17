@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "channel-token.h"
+
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker.h>
@@ -32,10 +34,11 @@ using api::pyodide::PythonConfig;
 //
 // The purpose of this class is to implement the core logic independently of the CLI itself,
 // in such a way that it can be unit-tested. workerd.c++ implements the CLI wrapper around this.
-class Server final: private kj::TaskSet::ErrorHandler {
+class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandler::Resolver {
  public:
   Server(kj::Filesystem& fs,
       kj::Timer& timer,
+      const kj::MonotonicClock& monotonicClock,
       kj::Network& network,
       kj::EntropySource& entropySource,
       Worker::LoggingOptions loggingOptions,
@@ -66,11 +69,14 @@ class Server final: private kj::TaskSet::ErrorHandler {
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
   }
-  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
-    pythonConfig.packageDiskCacheRoot = kj::mv(dkr);
+  void enableDebugPort(kj::String addr) {
+    debugPortOverride = kj::mv(addr);
   }
-  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dkr) {
-    pythonConfig.pyodideDiskCacheRoot = kj::mv(dkr);
+  void setPackageDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.packageDiskCacheRoot = kj::mv(dir);
+  }
+  void setPyodideDiskCacheRoot(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.pyodideDiskCacheRoot = kj::mv(dir);
   }
   void setPythonCreateSnapshot() {
     pythonConfig.createSnapshot = true;
@@ -80,6 +86,16 @@ class Server final: private kj::TaskSet::ErrorHandler {
   }
   void setPythonLoadSnapshot(kj::String snapshot) {
     pythonConfig.loadSnapshotFromDisk = kj::mv(snapshot);
+  }
+  void setPythonSnapshotDirectory(kj::Maybe<kj::Own<const kj::Directory>>&& dir) {
+    pythonConfig.snapshotDirectory = kj::mv(dir);
+  }
+
+  // Set the compatibility date to use for all workers. When set, workers in the config must NOT
+  // specify compatibilityDate (an error is reported if they do). This is used for testing to
+  // ensure tests run with both old and new compat dates.
+  void setTestCompatibilityDateOverride(kj::String date) {
+    testCompatibilityDateOverride = kj::mv(date);
   }
 
   // Runs the server using the given config.
@@ -119,6 +135,9 @@ class Server final: private kj::TaskSet::ErrorHandler {
  private:
   kj::Filesystem& fs;
   kj::Timer& timer;
+  // monotonicClock must produce time values consistent with those produced by timer whenever
+  // timer updates, but monotonicClock updates continuously (not just when system I/O is polled).
+  const kj::MonotonicClock& monotonicClock;
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
@@ -130,9 +149,15 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
   bool experimental = false;
 
+  // When set, overrides compatibilityDate for all workers and enforces that workers don't
+  // specify their own compatibilityDate.
+  kj::Maybe<kj::String> testCompatibilityDateOverride;
+
   Worker::LoggingOptions loggingOptions;
 
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
+
+  ChannelTokenHandler channelTokenHandler;
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
@@ -146,6 +171,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::Maybe<kj::String> inspectorOverride;
   kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorIsolateRegistrar;
   kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
+  kj::Maybe<kj::String> debugPortOverride;
 
   struct GlobalContext;
   // General context needed to construct workers. Initialized early in run().
@@ -241,10 +267,30 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::Own<ActorClass> lookupActorClass(
       config::ServiceDesignator::Reader designator, kj::String errorContext);
 
+  // Pretty similar to lookupService() and lookupActorClass(), but these callbacks are called by
+  // the `ChannelTokenHandler` when decoding tokens.
+  kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(
+      kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override;
+  kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(
+      kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override;
+
+  kj::Array<byte> encodeChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+      kj::StringPtr serviceName,
+      kj::Maybe<kj::StringPtr> entrypoint,
+      Frankenvalue& props);
+
+  void decodeChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+      kj::ArrayPtr<const byte> token,
+      kj::FunctionParam<void(
+          kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props)>
+          callback);
+
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,
       kj::StringPtr physicalProtocol,
       kj::Own<HttpRewriter> rewriter);
+
+  kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
 
   class InvalidConfigService;
   class InvalidConfigActorClass;
@@ -254,7 +300,9 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class DiskDirectoryService;
   class WorkerService;
   class WorkerEntrypointService;
+  class WorkerdBootstrapImpl;
   class HttpListener;
+  class DebugPortListener;
 
   struct ErrorReporter;
   struct ConfigErrorReporter;
@@ -286,9 +334,5 @@ class Server final: private kj::TaskSet::ErrorHandler {
   friend struct FutureSubrequestChannel;
   friend struct FutureActorClassChannel;
 };
-
-// An ActorStorage implementation which will always respond to reads as if the state is empty,
-// and will fail any writes.
-kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
 
 }  // namespace workerd::server

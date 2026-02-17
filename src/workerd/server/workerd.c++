@@ -5,6 +5,7 @@
 #include "server.h"
 #include "workerd-api.h"
 
+#include <workerd/api/unsafe.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/supported-compatibility-date.embed.h>
@@ -16,10 +17,14 @@
 #include <workerd/server/workerd-capnp-schema.embed.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/entropy.h>
 
+#include <errno.h>
 #include <fcntl.h>
-#include <openssl/rand.h>
+#ifdef __linux__
+#include <sys/mman.h>
 #include <sys/stat.h>
+#endif
 
 #include <capnp/dynamic.h>
 #include <capnp/message.h>
@@ -70,6 +75,32 @@
 
 #include <workerd/util/use-perfetto-categories.h>
 
+// since kj installs their global signal handlers
+// and exits with 1 Fuzzilli doesn't realize that an application crashed due to the signo.
+// Therefore, we install a handler before and just raise the signo
+#ifdef WORKERD_FUZZILLI
+
+void signalHandler(int signo, siginfo_t* info, void* context) noexcept {
+  // inform reprl - remove debug output for clean testing
+  struct sigaction sa = {};
+  sa.sa_handler = SIG_DFL;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(signo, &sa, nullptr);
+  raise(signo);
+}
+
+void initSignalHandlers() {
+  struct sigaction action {};
+  action.sa_flags = SA_SIGINFO;
+  action.sa_sigaction = &signalHandler;
+
+  for (auto signo: {SIGBUS, SIGFPE, SIGABRT, SIGILL, SIGTRAP, SIGSEGV}) {
+    KJ_SYSCALL(sigaction(signo, &action, nullptr));
+  }
+}
+#endif
+
 namespace workerd::server {
 namespace {
 
@@ -99,7 +130,7 @@ __lsan_default_suppressions() {
 class EntropySourceImpl: public kj::EntropySource {
  public:
   void generate(kj::ArrayPtr<kj::byte> buffer) override {
-    KJ_ASSERT(RAND_bytes(buffer.begin(), buffer.size()) == 1);
+    getEntropy(buffer);
   }
 };
 
@@ -654,6 +685,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         argv(argv),
         server(kj::heap<Server>(*fs,
             io.provider->getTimer(),
+            kj::systemPreciseMonotonicClock(),
             network,
             entropySource,
             Worker::LoggingOptions(Worker::ConsoleMode::STDOUT),
@@ -713,6 +745,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
           .addSubCommand("serve", KJ_BIND_METHOD(*this, getServe), "run the server")
           .addSubCommand(
               "compile", KJ_BIND_METHOD(*this, getCompile), "create a self-contained binary")
+#ifdef WORKERD_FUZZILLI
+          .addSubCommand("fuzzilli", KJ_BIND_METHOD(*this, getFuzz), "run reprl for fuzzing")
+#endif
           .addSubCommand("test", KJ_BIND_METHOD(*this, getTest), "run unit tests")
           .addSubCommand("pyodide-lock", KJ_BIND_METHOD(*this, getPyodideLock),
               "outputs the package lock file used by Pyodide")
@@ -765,7 +800,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "<addr> instead of the address specified in the config file.")
         .addOptionWithArg({'i', "inspector-addr"}, CLI_METHOD(enableInspector), "<addr>",
             "Enable the inspector protocol to connect to the address <addr>.")
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
         // TODO(later): In the future, we might want to enable providing a perfetto
         // TraceConfig structure here rather than just the categories.
         .addOptionWithArg({"p", "perfetto-trace"}, CLI_METHOD(enablePerfetto),
@@ -798,7 +833,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       return true;
     }, "Save a baseline snapshot to the disk cache")
         .addOptionWithArg({"python-load-snapshot"}, CLI_METHOD(setPythonLoadSnapshot), "<path>",
-            "Load a snapshot from the package disk cache.");
+            "Load a snapshot from the python snapshot directory.")
+        .addOptionWithArg({"python-snapshot-dir"}, CLI_METHOD(setPythonSnapshotDirectory), "<path>",
+            "Set the snapshot snapshot directory.");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {
@@ -812,6 +849,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         .addOptionWithArg({"control-fd"}, CLI_METHOD(enableControl), "<fd>",
             "Enable sending of control messages on descriptor <fd>. Currently this "
             "only reports the port each socket is listening on when ready.")
+        .addOptionWithArg({"debug-port"}, CLI_METHOD(enableDebugPort), "<addr>",
+            "Listen on the specified address for debug RPC connections. This exposes "
+            "a privileged interface that allows access to all services in the process. "
+            "For use by miniflare and local development only.")
         .callAfterParsing(CLI_METHOD(serve))
         .build();
   }
@@ -897,7 +938,27 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     },
             "Enable predictable mode. This makes workerd behave more deterministically by using "
             "pre-set values instead of random data or timestamps to facilitate testing.")
+        .addOption({"all-autogates"},
+            [this]() {
+      allAutogates = true;
+      return true;
+    },
+            "Enable all autogates. This is useful for testing code paths that are guarded by "
+            "autogates.")
+        .addOptionWithArg({"compat-date"}, CLI_METHOD(setTestCompatDate), "<date>",
+            "Set the compatibility date for all workers. When specified, workers must NOT "
+            "specify compatibilityDate in the config. Use '0000-00-00' for oldest behavior "
+            "or '9999-12-31' for newest behavior.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
+        .callAfterParsing(CLI_METHOD(test))
+        .build();
+  }
+
+  kj::MainFunc getFuzz() {
+    auto builder = kj::MainBuilder(context, getVersionString(),
+        "Creates a custom signal handler and depending on the config leverages Stdin.reprl() to communicate with fuzzilli.");
+
+    return addServeOrTestOptions(addConfigParsingOptionsNoConstName(builder))
         .callAfterParsing(CLI_METHOD(test))
         .build();
   }
@@ -1026,7 +1087,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     server->overrideExternal(kj::mv(name), kj::str(value));
   }
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
   void enablePerfetto(kj::StringPtr param) {
     auto [name, value] = parseOverride(param);
     perfettoTraceDestination = kj::str(name);
@@ -1042,6 +1103,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     int fd = KJ_UNWRAP_OR(param.tryParseAs<uint>(),
         CLI_ERROR("Output value must be a file descriptor (non-negative integer)."));
     server->enableControl(fd);
+  }
+
+  void enableDebugPort(kj::StringPtr param) {
+    server->enableDebugPort(kj::str(param));
   }
 
   void setPackageDiskCacheDir(kj::StringPtr pathStr) {
@@ -1061,6 +1126,12 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 
   void setPythonLoadSnapshot(kj::StringPtr pathStr) {
     server->setPythonLoadSnapshot(kj::str(pathStr));
+  }
+  void setPythonSnapshotDirectory(kj::StringPtr pathStr) {
+    kj::Path path = fs->getCurrentPath().eval(pathStr);
+    kj::Maybe<kj::Own<const kj::Directory>> dir =
+        fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
+    server->setPythonSnapshotDirectory(kj::mv(dir));
   }
 
   void parsePythonCompatFlag(kj::StringPtr compatFlagStr) {
@@ -1223,6 +1294,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       default:
         CLI_ERROR("Too many colons.");
     }
+  }
+
+  void setTestCompatDate(kj::StringPtr date) {
+    testCompatDate = kj::str(date);
   }
 
   void compile() {
@@ -1402,6 +1477,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     if (predictable) {
       setPredictableModeForTest();
     }
+    if (allAutogates) {
+      util::Autogate::initAllAutogates();
+    }
+
+    KJ_IF_SOME(compatDate, testCompatDate) {
+      server->setTestCompatibilityDateOverride(kj::str(compatDate));
+    }
 
     // Enable loopback sockets in tests only.
     network.enableLoopback();
@@ -1470,6 +1552,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool configOnly = false;
   bool noVerbose = false;
   bool predictable = false;
+  bool allAutogates = false;
+  kj::Maybe<kj::String> testCompatDate;
   kj::Maybe<FileWatcher> watcher;
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();
@@ -1490,7 +1574,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   kj::Maybe<kj::String> testServicePattern;
   kj::Maybe<kj::String> testEntrypointPattern;
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
   kj::Maybe<kj::String> perfettoTraceDestination;
   kj::Maybe<kj::String> perfettoTraceCategories;
 #endif
@@ -1662,11 +1746,16 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 
 int main(int argc, char* argv[]) {
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
+
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
+
+#if defined(WORKERD_FUZZILLI) && defined(__linux__)
+  initSignalHandlers();
+#endif
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }

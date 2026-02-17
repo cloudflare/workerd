@@ -1,9 +1,4 @@
-bazel_dep(name = "aspect_rules_esbuild", version = "0.22.1")
-bazel_dep(name = "aspect_rules_js", version = "2.5.0")
-bazel_dep(name = "aspect_rules_ts", version = "3.7.0")
-bazel_dep(name = "rules_nodejs", version = "6.5.0")
-
-NODE_VERSION = "22.18.0"
+NODE_VERSION = "22.21.1"
 
 # ========================================================================================
 # Node.js bootstrap
@@ -22,7 +17,18 @@ node.toolchain(
 npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
 npm.npm_translate_lock(
     name = "npm",
-    data = ["//:package.json"],
+    bins = {
+        # Expose CLI binaries for OpenNext builds
+        "esbuild": ["esbuild=bin/esbuild"],
+        "next": ["next=./dist/bin/next"],
+        "wrangler": ["wrangler=bin/wrangler.js"],
+    },
+    data = [
+        "//:package.json",
+        "//:pnpm-workspace.yaml",
+        "//images/container-client-test:package.json",
+        "//src/workerd/api/tests/opennextjs/src:package.json",
+    ],
     npmrc = "//:.npmrc",
     pnpm_lock = "//:pnpm-lock.yaml",
     verify_node_modules_ignored = "//:.bazelignore",

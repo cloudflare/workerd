@@ -148,12 +148,15 @@ declare namespace Rpc {
   export type Provider<
     T extends object,
     Reserved extends string = never,
-  > = MaybeCallableProvider<T> & {
-    [K in Exclude<
+  > = MaybeCallableProvider<T> & Pick<
+    {
+      [K in keyof T]: MethodOrProperty<T[K]>;
+    },
+    Exclude<
       keyof T,
       Reserved | symbol | keyof StubBase<never>
-    >]: MethodOrProperty<T[K]>;
-  };
+    >
+  >
 }
 
 declare namespace Cloudflare {
@@ -234,12 +237,14 @@ declare namespace CloudflareWorkersModule {
     protected env: Env;
     constructor(ctx: ExecutionContext, env: Env);
 
+    email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
-    tail?(events: TraceItem[]): void | Promise<void>;
-    trace?(traces: TraceItem[]): void | Promise<void>;
-    scheduled?(controller: ScheduledController): void | Promise<void>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+    scheduled?(controller: ScheduledController): void | Promise<void>;
+    tail?(events: TraceItem[]): void | Promise<void>;
+    tailStream?(event: TailStream.TailEvent<TailStream.Onset>): TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
     test?(controller: TestController): void | Promise<void>;
+    trace?(traces: TraceItem[]): void | Promise<void>;
   }
 
   export abstract class DurableObject<
@@ -253,8 +258,8 @@ declare namespace CloudflareWorkersModule {
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
 
-    fetch?(request: Request): Response | Promise<Response>;
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
+    fetch?(request: Request): Response | Promise<Response>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer
@@ -331,6 +336,17 @@ declare namespace CloudflareWorkersModule {
     ): Promise<WorkflowStepEvent<T>>;
   }
 
+  export type WorkflowInstanceStatus =
+    | 'queued'
+    | 'running'
+    | 'paused'
+    | 'errored'
+    | 'terminated'
+    | 'complete'
+    | 'waiting'
+    | 'waitingForPause'
+    | 'unknown';
+
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
@@ -351,7 +367,19 @@ declare namespace CloudflareWorkersModule {
 
   export function waitUntil(promise: Promise<unknown>): void;
 
+  export function withEnv(newEnv: unknown, fn: () => unknown): unknown;
+  export function withExports(
+    newExports: unknown,
+    fn: () => unknown
+  ): unknown;
+  export function withEnvAndExports(
+    newEnv: unknown,
+    newExports: unknown,
+    fn: () => unknown
+  ): unknown;
+
   export const env: Cloudflare.Env;
+  export const exports: Cloudflare.Exports;
 }
 
 declare module 'cloudflare:workers' {

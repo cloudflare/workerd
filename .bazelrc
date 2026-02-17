@@ -1,8 +1,10 @@
 common --enable_platform_specific_config
 build --verbose_failures
-build --build_tag_filters=-off-by-default
-test --test_tag_filters=-off-by-default
-test:asan --test_tag_filters=-off-by-default,-no-asan
+build --build_tag_filters=-off-by-default,-requires-container-engine
+# block network access by default
+build --nosandbox_default_allow_network
+test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
+test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
 build --test_size_filters=-enormous
 
@@ -10,16 +12,14 @@ build --test_size_filters=-enormous
 # corresponds to small,medium,large,enormous tests (medium is default)
 build --test_timeout=3,15,60,240
 
-# We're only using bzlmod in a nominal capacity so far
-common --enable_workspace
+# As part of starlarkification, Bazel 8 and 9 remove a number of rules which now need to be imported
+# from other repositories. In the long term, load() statements will be needed to import these rules.
+# For now, we can still autoload the affected repositories when needed. Do this only for a remaining
+# protobuf components and rules_cc (needed with Bazel 9).
+common --incompatible_autoload_externally="+ProtoInfo,+cc_binary,+cc_import,+cc_library,+cc_shared_library,+cc_test,+cc_toolchain"
 
-# As part of starlarkification, Bazel 8 removes a number of rules which now need to be imported from
-# other repositories. In the long term, load() statements will be needed to import these rules. For
-# now, we can still autoload the affected repositories when needed. Do this only for a few
-# handpicked rules_python rules_shell, and protobuf components instead of the larger default
-# autoload set – some dependencies aren't importing the required shell rules yet, but we don't want
-# to accidentally rely on autoloading more dependencies.
-build --incompatible_autoload_externally="+py_binary,+py_library,+ProtoInfo,+sh_binary,+proto_library,+cc_proto_library"
+# TODO(cleanup): Bazel 9 sets this by default, which breaks the macOS-cross build. Fix and re-enable.
+common --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=False
 
 # bazel7 enables Build without the Bytes (BwoB) by default. This significantly speeds up builds
 # using the remote cache since less data needs to be fetched.
@@ -30,70 +30,104 @@ build --incompatible_autoload_externally="+py_binary,+py_library,+ProtoInfo,+sh_
 # Import CI-specific configuration. As the amount of custom configuration settings we use grows,
 # consider moving more flags out to separate files.
 import %workspace%/build/ci.bazelrc
-
 import %workspace%/build/rust_lint.bazelrc
+import %workspace%/build/tools/clang_tidy/clang_tidy.bazelrc
 
-# Prevents bazel cache invalidation when switching terminals
-build --incompatible_strict_action_env
+# Continue building locally when remote cache entries fail to materialize
+build --incompatible_remote_local_fallback_for_remote_cache
 
-# Use compat repo mapping to avoid O(n^2) repo mapping size, speeding up bazel repo mapping phase
-# and conserving space
-build --incompatible_compact_repo_mapping_manifest
+# TODO(soon): Flipped by default in Bazel 9, add required variables to --repo_env and enable
+build --noincompatible_repo_env_ignores_action_env
+
+# Use -isystem for cc_library includes attribute – this prevents warnings for misbehaving external
+# code.
+build:linux --features=external_include_paths --host_features=external_include_paths
+
+# Forward compatibility with future Bazel versions:
+# Disable deprecated cfg = "host" Bazel rule setting. Blocked on perfetto.
+# common --incompatible_disable_starlark_host_transitions
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external@-Wno-suggest-override'
-build --per_file_copt='external/v8@-Wno-unused-function'
+build --per_file_copt='external/.*v8@-Wno-unused-function'
 build --per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
 build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations
 
+# opt in to capnp deprecation warnings about trying to attach to a refcounted object
+build --cxxopt=-DKJ_WARN_REFCOUNTED_ATTACH=1
+
 # TODO(cleanup): Causes warnings with LLVM20, fix and enable again
 build --copt=-Wno-nontrivial-memaccess
 
-# Increasing the optimization level of V8 significantly speeds up Python tests in GitHub Actions.
-# This is an optional performance hack intended for CI, although it might also be useful for local
-# development.
-build:v8-codegen-opt --per_file_copt=v8/src@-O2
+# Unconditionally optimize V8 heap.cc on macOS – when optimization or inlining are disabled, this
+# file appears to cause segfaults at workerd startup on macOS.
+# TODO(cleanup): Investigate why this happens, our patches do not modify heap.cc itself so the bug
+# might be introduced through a header included in heap.cc, through the Bazel build configuration or
+# a bug in Apple LLVM.
+build:macos --per_file_copt=v8/src/heap/heap.cc@-O3
+
+# The macOS Apple toolchain defines -DDEBUG for fastbuild, but the Linux toolchain does not. This
+# activates V8 DCHECK macros that reference symbols only available with V8_VERIFY_WRITE_BARRIERS
+# (a dbg-only define), causing compile errors. Undefine DEBUG to match Linux behavior.
+build:macos --copt=-UDEBUG
+
+# Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially
+# python tests. This is useful for both CI and local development and enabled by default, but still
+# kept in a separate configuration to make it easy to disable.
+build:v8-codegen-opt --per_file_copt=v8/src@-O3
 # V8 is heavily using absl for hashing now, optimize it too.
-build:v8-codegen-opt --per_file_copt=external/abseil-cpp@-O2
+build:v8-codegen-opt --per_file_copt=external/abseil-cpp@-O3
 # zlib and tcmalloc (for Linux) are also CPU-intensive, optimize them too.
-build:v8-codegen-opt --per_file_copt=external/tcmalloc@-O2
-build:v8-codegen-opt --per_file_copt=external/zlib@-O2
-build:v8-codegen-opt-windows --per_file_copt=v8/src@/O2
-build:v8-codegen-opt-windows --per_file_copt=external/abseil-cpp@/O2
-build:v8-codegen-opt-windows --per_file_copt=external/zlib@/O2
+build:v8-codegen-opt --per_file_copt=external/tcmalloc@-O3
+build:v8-codegen-opt --per_file_copt=external/zlib@-O3
+# BoringSSL is CPU-intensive for crypto tests, optimize it too.
+build:v8-codegen-opt --per_file_copt=external/boringssl@-O3
+# simdutf is used for fast string encoding/decoding
+build:v8-codegen-opt --per_file_copt=external/+http+simdutf@-O3
+# ICU and perfetto are generally updated with V8 and rarely need to be updated, optimize them too.
+build:v8-codegen-opt --per_file_copt=external/.*com_googlesource_chromium_icu@-O3
+build:v8-codegen-opt --per_file_copt=external/perfetto@-O3
+
+build:v8-codegen-opt-windows --per_file_copt=v8/src@/O2,/clang:-O3
+build:v8-codegen-opt-windows --per_file_copt=external/abseil-cpp@/O2,/clang:-O3
+build:v8-codegen-opt-windows --per_file_copt=external/zlib@/O2,/clang:-O3
+build:v8-codegen-opt-windows --per_file_copt=external/boringssl@/O2,/clang:-O3
+build:v8-codegen-opt-windows --per_file_copt=external/+http+simdutf@/O2,/clang:-O3
+build:v8-codegen-opt-windows --per_file_copt=external/.*com_googlesource_chromium_icu@/O2,/clang:-O3
+build:v8-codegen-opt-windows --per_file_copt=external/perfetto@/O2,/clang:-O3
+
+build:unix --config=v8-codegen-opt
+build:windows  --config=v8-codegen-opt-windows
 
 # In Google projects, exceptions are not used as a rule. Disabling them is more consistent with the
-# canonical V8 build and improves code size.
+# canonical V8 build and improves code size. Paths are adjusted for bzlmod mangling – V8 and ICU use
+# a wildcard for this as the prefix is some variation of +_repo_rules3+ where the number can change
+# when refactoring MODULE.bazel – setting this directly would be too brittle
 build:unix --per_file_copt=external/abseil-cpp@-fno-exceptions
 build:unix --per_file_copt=external/protobuf@-fno-exceptions
-build:unix --per_file_copt=external/com_google_tcmalloc@-fno-exceptions
-build:unix --per_file_copt=external/com_googlesource_chromium_icu@-fno-exceptions
+build:unix --per_file_copt=external/tcmalloc@-fno-exceptions
+build:unix --per_file_copt=external/.*com_googlesource_chromium_icu@-fno-exceptions
 build:unix --per_file_copt=external/perfetto@-fno-exceptions
-build:unix --per_file_copt=external/ssl@-fno-exceptions
-build:unix --per_file_copt=external/v8@-fno-exceptions
+build:unix --per_file_copt=external/boringssl@-fno-exceptions
+build:unix --per_file_copt=external/.*v8@-fno-exceptions
 build:unix --per_file_copt=external/ada-url@-fno-exceptions
-build:unix --per_file_copt=external/simdutf@-fno-exceptions
+build:unix --per_file_copt=external/+http+simdutf@-fno-exceptions
 build:windows --per_file_copt=external/abseil-cpp@/clang:-fno-exceptions
 build:windows --per_file_copt=external/protobuf@/clang:-fno-exceptions
-build:windows --per_file_copt=external/com_google_tcmalloc@/clang:-fno-exceptions
-build:windows --per_file_copt=external/com_googlesource_chromium_icu@/clang:-fno-exceptions
+build:windows --per_file_copt=external/tcmalloc@/clang:-fno-exceptions
+build:windows --per_file_copt=external/.*com_googlesource_chromium_icu@/clang:-fno-exceptions
 build:windows --per_file_copt=external/perfetto@/clang:-fno-exceptions
-build:windows --per_file_copt=external/ssl@/clang:-fno-exceptions
-build:windows --per_file_copt=external/v8@/clang:-fno-exceptions
+build:windows --per_file_copt=external/boringssl@/clang:-fno-exceptions
+build:windows --per_file_copt=external/.*v8@/clang:-fno-exceptions
 build:windows --per_file_copt=external/ada-url@/clang:-fno-exceptions
-build:windows --per_file_copt=external/simdutf@/clang:-fno-exceptions
+build:windows --per_file_copt=external/+http+simdutf@/clang:-fno-exceptions
 
 # V8 torque is an exception from this policy, see v8 BUILD.gn.
-build:unix --per_file_copt=external/v8/src/torque@-fexceptions
-build:windows --per_file_copt=external/v8/src/torque@/clang:-fexceptions
-
-# Disable relaxing all jumps during LLVM codegen under -O0, which previously led to build
-# performance improvements but makes code size worse. This will be the default in LLVM19.
-# https://maskray.me/blog/2024-04-27-clang-o0-output-branch-displacement-and-size-increase
-build:unix --copt="-mno-relax-all" --host_copt="-mno-relax-all"
+build:unix --per_file_copt=external/.*v8/src/torque@-fexceptions
+build:windows --per_file_copt=external/.*v8/src/torque@/clang:-fexceptions
 
 # Limit transitive header includes within libc++. This improves compliance with IWYU, helps avoid
 # errors with downstream projects that implicitly define this already and reduces total include size.
@@ -118,9 +152,9 @@ common --@aspect_rules_ts//ts:skipLibCheck=honor_tsconfig
 # Use "tsc" as the transpiler when ts_project has no `transpiler` set.
 common --@aspect_rules_ts//ts:default_to_tsc_transpiler
 
-# optimized LTO build. you'll need a fairly recent clang for this to work
+# optimized LTO build.
 build:thin-lto --config=opt
-build:thin-lto --cxxopt='-flto=thin'
+build:thin-lto --copt='-flto=thin'
 build:thin-lto --linkopt='-flto=thin'
 
 # configuration used for performance profiling
@@ -192,7 +226,21 @@ build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
 build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
-build:asan --per_file_copt='external/v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
+build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
+
+# fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
+build:fuzzilli --config=asan
+build:fuzzilli --copt="-DWORKERD_FUZZILLI"
+build:fuzzilli --linkopt="-DWORKERD_FUZZILLI"
+build:fuzzilli --copt="-fsanitize-coverage=trace-pc-guard"
+build:fuzzilli --linkopt="-fsanitize-coverage=trace-pc-guard"
+build:fuzzilli --linkopt="-static-libasan"
+# Set ASan/UBSan options globally to abort on error (raise SIGABRT) for proper Fuzzilli crash detection
+build:fuzzilli --action_env=ASAN_OPTIONS=abort_on_error=1:symbolize=false
+build:fuzzilli --action_env=UBSAN_OPTIONS=abort_on_error=1:symbolize=false
+# Override test filters to include requires-fuzzilli tests (inherits asan's -no-asan filter)
+test:fuzzilli --test_tag_filters=-off-by-default
 
 #
 # Linux and macOS
@@ -323,8 +371,8 @@ build:windows --copt='/Zc:dllexportInlines-'
 build:parse_headers --features=parse_headers --process_headers_in_dependencies
 # Silence some capnproto warnings/errors that are not relevant for header parsing
 build:parse_headers --per_file_copt='.*\.h@-Wno-unused-function,-Wno-pragma-system-header-outside-header'
-build:parse_headers --per_file_copt=external/capnp-cpp/src/kj/common.h@-Wno-unreachable-code
-build:parse_headers --per_file_copt=external/capnp-cpp/src/capnp/arena.h@-DCAPNP_PRIVATE
+build:parse_headers --per_file_copt=external/+http+capnp-cpp/src/kj/common.h@-Wno-unreachable-code
+build:parse_headers --per_file_copt=external/+http+capnp-cpp/src/capnp/arena.h@-DCAPNP_PRIVATE
 
 # optimized configuration
 build:opt -c opt
@@ -381,28 +429,65 @@ build:release_windows --per_file_copt=.*capnp/rpc\.c++@/clang:-O1
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
 build:windows --copt='/DWIN32_LEAN_AND_MEAN' --host_copt='/DWIN32_LEAN_AND_MEAN'
+build:windows --copt='/EHs' --host_copt='/EHs'
 # The `/std:c++23preview` argument is unused during BoringSSL compilation and we don't
 # want a warning when compiling each file.
-build:windows --per_file_copt=external/ssl@-Wno-unused-command-line-argument --host_per_file_copt=external/ssl@-Wno-unused-command-line-argument
+build:windows --per_file_copt=external/boringssl@-Wno-unused-command-line-argument --host_per_file_copt=external/boringssl@-Wno-unused-command-line-argument
 
 # MSVC disappointingly sets __cplusplus to 199711L by default. Defining /Zc:__cplusplus makes it
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.
 build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
-build:coverage --action_env=GCOV=llvm-profdata-19
+# Coverage configuration using LLVM tools. These environment variables are used by rules_cc
+# to locate LLVM coverage tools. Users should ensure llvm-profdata and llvm-cov are available
+# in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-19 llvm-cov).
 build:coverage --action_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
-build:coverage --copt=-DNDEBUG
-build:coverage --combined_report=lcov
+build:coverage --test_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
+# GCOV is used by rules_cc to merge raw profile data (.profraw) into indexed profile data (.profdata)
+build:coverage --action_env=GCOV=llvm-profdata
+build:coverage --test_env=GCOV=llvm-profdata
+# COVERAGE_GCOV_PATH is used by collect_cc_coverage.sh for merging .profraw files.
+build:coverage --action_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
+build:coverage --test_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
+# BAZEL_LLVM_COV is used by rules_cc to generate coverage reports from profile data
+build:coverage --action_env=BAZEL_LLVM_COV=llvm-cov
+build:coverage --test_env=BAZEL_LLVM_COV=llvm-cov
+# LLVM_COV is used by collect_cc_coverage.sh for generating LCOV output
+build:coverage --test_env=LLVM_COV=llvm-cov
+# GENERATE_LLVM_LCOV=1 tells collect_cc_coverage.sh to use llvm-cov export to generate LCOV format
+# instead of just outputting raw profdata. LLVM_COV specifies the llvm-cov binary to use.
+build:coverage --test_env=GENERATE_LLVM_LCOV=1
 build:coverage --experimental_use_llvm_covmap
 build:coverage --experimental_generate_llvm_lcov
+# Ensure that we fetch coverage data from remote cache
 build:coverage --experimental_fetch_all_coverage_outputs
+build:coverage --experimental_split_coverage_postprocessing
+# Allow coverage outputs to be writable for post-processing
+build:coverage --experimental_writable_outputs
 build:coverage --collect_code_coverage
-build:coverage --instrumentation_filter="^//,-//external"
+# Only instrument source code, not tests or tools - significantly speeds up coverage builds
+build:coverage --instrumentation_filter="^//src/workerd[/:],^//src/rust[/:]"
 build:coverage --instrument_test_targets
+# Disable coverage instrumentation for external dependencies to speed up compilation.
+# Coverage for V8/external code is not useful for our purposes.
+# These flags negate -fprofile-instr-generate and -fcoverage-mapping set by rules_cc.
+build:coverage --per_file_copt=external/.*@-fno-profile-instr-generate,-fno-coverage-mapping
+# KJ uses _exit() by default which bypasses atexit handlers and prevents LLVM profile runtime
+# from writing coverage data. KJ_CLEAN_SHUTDOWN forces use of normal exit() instead.
+build:coverage --test_env=KJ_CLEAN_SHUTDOWN=1
+# Use -O1 for faster compilation - coverage builds don't need heavy optimization
+build:coverage --copt=-O1
+# Reduce debug info for faster compilation and smaller binaries
+build:coverage --copt=-g1
+# Use limited coverage mode for smaller binaries and faster execution (used by Chromium)
+build:coverage --copt=-mllvm --copt=-limited-coverage-experimental=true
+coverage --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine,-lint,-benchmark,-workerd-benchmark,-no-coverage
+# Coverage instrumentation slows down test execution, so extend timeouts
+# We disable enormous tests due to the slowdown (CI jobs have a 6h max duration)
+coverage --test_size_filters=-enormous
+coverage --test_timeout=240,240,240,240
+coverage --build_tests_only
 
 # This config is defined internally and enabled on many machines.
 # Defining it as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
-
-coverage --build_tests_only
-coverage --config=coverage

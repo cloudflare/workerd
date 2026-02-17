@@ -162,14 +162,14 @@ KJ_TEST("Read/Write FetchEventInfo works") {
   kj::Vector<FetchEventInfo::Header> headers;
   headers.add(FetchEventInfo::Header(kj::str("foo"), kj::str("bar")));
 
-  tracing::FetchEventInfo info(
+  FetchEventInfo info(
       kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), headers.releaseAsArray());
 
   info.copyTo(fetchInfoBuilder);
 
   auto reader = fetchInfoBuilder.asReader();
 
-  tracing::FetchEventInfo info2(reader);
+  FetchEventInfo info2(reader);
   KJ_ASSERT(info2.method == kj::HttpMethod::GET);
   KJ_ASSERT(info2.url == "https://example.com"_kj);
   KJ_ASSERT(info2.cfJson == "{}"_kj);
@@ -177,7 +177,7 @@ KJ_TEST("Read/Write FetchEventInfo works") {
   KJ_ASSERT(info2.headers[0].name == "foo"_kj);
   KJ_ASSERT(info2.headers[0].value == "bar"_kj);
 
-  tracing::FetchEventInfo info3 = info.clone();
+  FetchEventInfo info3 = info.clone();
   KJ_ASSERT(info3.method == kj::HttpMethod::GET);
   KJ_ASSERT(info3.url == "https://example.com"_kj);
   KJ_ASSERT(info3.cfJson == "{}"_kj);
@@ -190,16 +190,16 @@ KJ_TEST("Read/Write JsRpcEventInfo works") {
   capnp::MallocMessageBuilder builder;
   auto jsRpcInfoBuilder = builder.initRoot<rpc::Trace::JsRpcEventInfo>();
 
-  tracing::JsRpcEventInfo info(kj::str("foo"));
+  JsRpcEventInfo info(kj::str("foo"));
 
   info.copyTo(jsRpcInfoBuilder);
 
   auto reader = jsRpcInfoBuilder.asReader();
 
-  tracing::JsRpcEventInfo info2(reader);
+  JsRpcEventInfo info2(reader);
   KJ_ASSERT(info2.methodName == "foo"_kj);
 
-  tracing::JsRpcEventInfo info3 = info.clone();
+  JsRpcEventInfo info3 = info.clone();
   KJ_ASSERT(info3.methodName == "foo"_kj);
 }
 
@@ -207,17 +207,17 @@ KJ_TEST("Read/Write ScheduledEventInfo workers") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::ScheduledEventInfo>();
 
-  tracing::ScheduledEventInfo info(1.2, kj::str("foo"));
+  ScheduledEventInfo info(1.2, kj::str("foo"));
 
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
-  tracing::ScheduledEventInfo info2(reader);
+  ScheduledEventInfo info2(reader);
   KJ_ASSERT(info2.scheduledTime == 1.2);
   KJ_ASSERT(info2.cron == "foo"_kj);
 
-  tracing::ScheduledEventInfo info3 = info.clone();
+  ScheduledEventInfo info3 = info.clone();
   KJ_ASSERT(info3.scheduledTime == 1.2);
   KJ_ASSERT(info3.cron == "foo"_kj);
 }
@@ -226,16 +226,16 @@ KJ_TEST("Read/Write AlarmEventInfo works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::AlarmEventInfo>();
 
-  tracing::AlarmEventInfo info(kj::UNIX_EPOCH);
+  AlarmEventInfo info(kj::UNIX_EPOCH);
 
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
-  tracing::AlarmEventInfo info2(reader);
+  AlarmEventInfo info2(reader);
   KJ_ASSERT(info.scheduledTime == info2.scheduledTime);
 
-  tracing::AlarmEventInfo info3 = info.clone();
+  AlarmEventInfo info3 = info.clone();
   KJ_ASSERT(info.scheduledTime == info3.scheduledTime);
 }
 
@@ -243,17 +243,17 @@ KJ_TEST("Read/Write QueueEventInfo works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::QueueEventInfo>();
 
-  tracing::QueueEventInfo info(kj::str("foo"), 1);
+  QueueEventInfo info(kj::str("foo"), 1);
 
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
-  tracing::QueueEventInfo info2(reader);
+  QueueEventInfo info2(reader);
   KJ_ASSERT(info2.queueName == "foo"_kj);
   KJ_ASSERT(info2.batchSize == 1);
 
-  tracing::QueueEventInfo info3 = info.clone();
+  QueueEventInfo info3 = info.clone();
   KJ_ASSERT(info2.queueName == "foo"_kj);
   KJ_ASSERT(info2.batchSize == 1);
 }
@@ -262,17 +262,17 @@ KJ_TEST("Read/Write EmailEventInfo works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::EmailEventInfo>();
 
-  tracing::EmailEventInfo info(kj::str("foo"), kj::str("bar"), 1);
+  EmailEventInfo info(kj::str("foo"), kj::str("bar"), 1);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
-  tracing::EmailEventInfo info2(reader);
+  EmailEventInfo info2(reader);
   KJ_ASSERT(info2.mailFrom == "foo"_kj);
   KJ_ASSERT(info2.rcptTo == "bar"_kj);
   KJ_ASSERT(info2.rawSize == 1);
 
-  tracing::EmailEventInfo info3 = info.clone();
+  EmailEventInfo info3 = info.clone();
   KJ_ASSERT(info3.mailFrom == "foo"_kj);
   KJ_ASSERT(info3.rcptTo == "bar"_kj);
   KJ_ASSERT(info3.rawSize == 1);
@@ -286,16 +286,16 @@ KJ_TEST("Read/Write TraceEventInfo works") {
   items.add(kj::heap<Trace>(kj::none, kj::str("foo"), kj::none, kj::none, kj::none,
       kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS));
 
-  tracing::TraceEventInfo info(items.asPtr());
+  TraceEventInfo info(items.asPtr());
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
-  tracing::TraceEventInfo info2(reader);
+  TraceEventInfo info2(reader);
   KJ_ASSERT(info2.traces.size() == 1);
   KJ_ASSERT(KJ_ASSERT_NONNULL(info2.traces[0].scriptName) == "foo"_kj);
 
-  tracing::TraceEventInfo info3 = info.clone();
+  TraceEventInfo info3 = info.clone();
   KJ_ASSERT(info2.traces.size() == 1);
   KJ_ASSERT(KJ_ASSERT_NONNULL(info2.traces[0].scriptName) == "foo"_kj);
 }
@@ -304,30 +304,30 @@ KJ_TEST("Read/Write HibernatableWebSocketEventInfo works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::HibernatableWebSocketEventInfo>();
 
-  tracing::HibernatableWebSocketEventInfo info(tracing::HibernatableWebSocketEventInfo::Message{});
+  HibernatableWebSocketEventInfo info(HibernatableWebSocketEventInfo::Message{});
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
-  tracing::HibernatableWebSocketEventInfo info2(reader);
-  KJ_ASSERT(info2.type.is<tracing::HibernatableWebSocketEventInfo::Message>());
+  HibernatableWebSocketEventInfo info2(reader);
+  KJ_ASSERT(info2.type.is<HibernatableWebSocketEventInfo::Message>());
 
-  tracing::HibernatableWebSocketEventInfo info3 = info.clone();
-  KJ_ASSERT(info3.type.is<tracing::HibernatableWebSocketEventInfo::Message>());
+  HibernatableWebSocketEventInfo info3 = info.clone();
+  KJ_ASSERT(info3.type.is<HibernatableWebSocketEventInfo::Message>());
 }
 
 KJ_TEST("Read/Write FetchResponseInfo works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::FetchResponseInfo>();
 
-  tracing::FetchResponseInfo info(123);
+  FetchResponseInfo info(123);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
-  tracing::FetchResponseInfo info2(reader);
+  FetchResponseInfo info2(reader);
   KJ_ASSERT(info2.statusCode == 123);
 
-  tracing::FetchResponseInfo info3 = info.clone();
+  FetchResponseInfo info3 = info.clone();
   KJ_ASSERT(info3.statusCode == 123);
 }
 
@@ -335,17 +335,17 @@ KJ_TEST("Read/Write DiagnosticChannelEvent works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::DiagnosticChannelEvent>();
 
-  tracing::DiagnosticChannelEvent info(kj::UNIX_EPOCH, kj::str("foo"), kj::Array<kj::byte>());
+  DiagnosticChannelEvent info(kj::UNIX_EPOCH, kj::str("foo"), kj::Array<kj::byte>());
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
-  tracing::DiagnosticChannelEvent info2(reader);
+  DiagnosticChannelEvent info2(reader);
   KJ_ASSERT(info2.timestamp == info.timestamp);
   KJ_ASSERT(info2.channel == "foo"_kj);
   KJ_ASSERT(info2.message.size() == 0);
 
-  tracing::DiagnosticChannelEvent info3 = info.clone();
+  DiagnosticChannelEvent info3 = info.clone();
   KJ_ASSERT(info3.timestamp == info.timestamp);
   KJ_ASSERT(info3.channel == "foo"_kj);
   KJ_ASSERT(info3.message.size() == 0);
@@ -355,16 +355,16 @@ KJ_TEST("Read/Write Log works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Log>();
 
-  tracing::Log info(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
+  Log info(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
-  tracing::Log info2(reader);
+  Log info2(reader);
   KJ_ASSERT(info.timestamp == info2.timestamp);
   KJ_ASSERT(info2.logLevel == LogLevel::INFO);
   KJ_ASSERT(info2.message == "foo"_kj);
 
-  tracing::Log info3 = info.clone();
+  Log info3 = info.clone();
   KJ_ASSERT(info.timestamp == info3.timestamp);
   KJ_ASSERT(info3.logLevel == LogLevel::INFO);
   KJ_ASSERT(info3.message == "foo"_kj);
@@ -374,32 +374,47 @@ KJ_TEST("Read/Write Exception works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Exception>();
 
-  tracing::Exception info(kj::UNIX_EPOCH, kj::str("foo"), kj::str("bar"), kj::none);
+  Exception info(kj::UNIX_EPOCH, kj::str("foo"), kj::str("bar"), kj::none);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
-  tracing::Exception info2(reader);
+  Exception info2(reader);
   KJ_ASSERT(info.timestamp == info2.timestamp);
   KJ_ASSERT(info2.name == "foo"_kj);
   KJ_ASSERT(info2.message == "bar"_kj);
   KJ_ASSERT(info2.stack == kj::none);
 
-  tracing::Exception info3 = info.clone();
+  Exception info3 = info.clone();
   KJ_ASSERT(info.timestamp == info3.timestamp);
   KJ_ASSERT(info3.name == "foo"_kj);
   KJ_ASSERT(info3.message == "bar"_kj);
   KJ_ASSERT(info3.stack == kj::none);
 }
 
+KJ_TEST("Read/Write StreamDiagnosticsEvent works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::StreamDiagnosticsEvent>();
+
+  StreamDiagnosticsEvent info(42);
+  info.copyTo(infoBuilder);
+
+  auto reader = infoBuilder.asReader();
+  StreamDiagnosticsEvent info2(reader);
+  KJ_ASSERT(info2.droppedEventsCount == 42);
+
+  StreamDiagnosticsEvent info3 = info.clone();
+  KJ_ASSERT(info3.droppedEventsCount == 42);
+}
+
 KJ_TEST("Read/Write Attribute works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Attribute>();
 
-  tracing::Attribute attr("foo"_kjc, {123.0, 321.2});
+  Attribute attr("foo"_kjc, {123.0, 321.2});
   attr.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
-  tracing::Attribute info2(reader);
+  Attribute info2(reader);
   KJ_ASSERT(info2.name == "foo"_kj);
   KJ_ASSERT(KJ_ASSERT_NONNULL(info2.value[0].tryGet<double>()) == 123.0);
   KJ_ASSERT(KJ_ASSERT_NONNULL(info2.value[1].tryGet<double>()) == 321.2);
@@ -409,16 +424,16 @@ KJ_TEST("Read/Write Return works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Return>();
 
-  tracing::FetchResponseInfo fetchInfo(123);
-  tracing::Return info(kj::mv(fetchInfo));
+  FetchResponseInfo fetchInfo(123);
+  Return info(kj::mv(fetchInfo));
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
-  tracing::Return info2(reader);
+  Return info2(reader);
   auto& fetchInfo2 = KJ_ASSERT_NONNULL(info2.info);
   KJ_ASSERT(fetchInfo2.statusCode == 123);
 
-  tracing::Return info3 = info.clone();
+  Return info3 = info.clone();
   auto& fetchInfo3 = KJ_ASSERT_NONNULL(info3.info);
   KJ_ASSERT(fetchInfo3.statusCode == 123);
 }
@@ -427,15 +442,15 @@ KJ_TEST("Read/Write SpanOpen works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanOpen>();
 
-  tracing::SpanOpen info(0x2a2a2a2a2a2a2a2a, kj::str("foo"), kj::none);
+  SpanOpen info(0x2a2a2a2a2a2a2a2a, "foo"_kjc, kj::none);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
-  tracing::SpanOpen info2(reader);
+  SpanOpen info2(reader);
   KJ_ASSERT(info2.operationName == "foo"_kj);
   KJ_ASSERT(info2.info == kj::none);
 
-  tracing::SpanOpen info3 = info.clone();
+  SpanOpen info3 = info.clone();
   KJ_ASSERT(info3.operationName == "foo"_kj);
   KJ_ASSERT(info3.info == kj::none);
 }
@@ -444,15 +459,15 @@ KJ_TEST("Read/Write SpanClose works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanClose>();
 
-  tracing::SpanClose info(EventOutcome::EXCEPTION);
+  SpanClose info(EventOutcome::EXCEPTION);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
-  tracing::SpanClose info2(reader);
+  SpanClose info2(reader);
   KJ_ASSERT(info2.outcome == EventOutcome::EXCEPTION);
 
-  tracing::SpanClose info3 = info.clone();
+  SpanClose info3 = info.clone();
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
 }
 
@@ -460,10 +475,10 @@ KJ_TEST("Read/Write Onset works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Onset>();
 
-  tracing::FetchEventInfo fetchInfo(
+  FetchEventInfo fetchInfo(
       kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr);
 
-  tracing::Onset info(tracing::staticSpanId, tracing::Onset::Info(kj::mv(fetchInfo)),
+  Onset info(staticSpanId, Onset::Info(kj::mv(fetchInfo)),
       {
         .scriptName = kj::str("foo"),
       },
@@ -471,16 +486,14 @@ KJ_TEST("Read/Write Onset works") {
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
-  tracing::Onset info2(reader);
-  tracing::FetchEventInfo& fetchInfo2 =
-      KJ_ASSERT_NONNULL(info2.info.tryGet<tracing::FetchEventInfo>());
+  Onset info2(reader);
+  FetchEventInfo& fetchInfo2 = KJ_ASSERT_NONNULL(info2.info.tryGet<FetchEventInfo>());
   KJ_ASSERT(fetchInfo2.method == kj::HttpMethod::GET);
   KJ_ASSERT(fetchInfo2.url == "https://example.com"_kj);
   KJ_ASSERT(info2.workerInfo.executionModel == ExecutionModel::STATELESS);
 
-  tracing::Onset info3 = info.clone();
-  tracing::FetchEventInfo& fetchInfo3 =
-      KJ_ASSERT_NONNULL(info3.info.tryGet<tracing::FetchEventInfo>());
+  Onset info3 = info.clone();
+  FetchEventInfo& fetchInfo3 = KJ_ASSERT_NONNULL(info3.info.tryGet<FetchEventInfo>());
   KJ_ASSERT(fetchInfo3.method == kj::HttpMethod::GET);
   KJ_ASSERT(fetchInfo3.url == "https://example.com"_kj);
   KJ_ASSERT(info3.workerInfo.executionModel == ExecutionModel::STATELESS);
@@ -490,16 +503,16 @@ KJ_TEST("Read/Write Outcome works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Outcome>();
 
-  tracing::Outcome info(EventOutcome::EXCEPTION, 1 * kj::MILLISECONDS, 2 * kj::MILLISECONDS);
+  Outcome info(EventOutcome::EXCEPTION, 1 * kj::MILLISECONDS, 2 * kj::MILLISECONDS);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
-  tracing::Outcome info2(reader);
+  Outcome info2(reader);
   KJ_ASSERT(info2.outcome == EventOutcome::EXCEPTION);
   KJ_ASSERT(info2.wallTime == 2 * kj::MILLISECONDS);
   KJ_ASSERT(info2.cpuTime == 1 * kj::MILLISECONDS);
 
-  tracing::Outcome info3 = info.clone();
+  Outcome info3 = info.clone();
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
   KJ_ASSERT(info3.wallTime == 2 * kj::MILLISECONDS);
   KJ_ASSERT(info3.cpuTime == 1 * kj::MILLISECONDS);
@@ -509,33 +522,33 @@ KJ_TEST("Read/Write TailEvent works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::TailEvent>();
 
-  auto context = tracing::SpanContext(TraceId(0, 0), {tracing::staticSpanId});
-  tracing::Log log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
+  auto context = SpanContext(TraceId(0, 0), {staticSpanId});
+  Log log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
   auto invocationId = TraceId(0, 0);
-  tracing::TailEvent info(
+  TailEvent info(
       context.getTraceId(), invocationId, context.getSpanId(), kj::UNIX_EPOCH, 0, kj::mv(log));
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
 
-  tracing::TailEvent info2(reader);
+  TailEvent info2(reader);
   KJ_ASSERT(info2.timestamp == kj::UNIX_EPOCH);
   KJ_ASSERT(info2.sequence == 0);
   KJ_ASSERT(info2.invocationId == invocationId);
   KJ_ASSERT(info2.spanContext == context);
 
-  auto& log2 = KJ_ASSERT_NONNULL(info2.event.tryGet<tracing::Log>());
+  auto& log2 = KJ_ASSERT_NONNULL(info2.event.tryGet<Log>());
   KJ_ASSERT(log2.timestamp == kj::UNIX_EPOCH);
   KJ_ASSERT(log2.logLevel == LogLevel::INFO);
   KJ_ASSERT(log2.message == "foo"_kj);
 
-  tracing::TailEvent info3 = info.clone();
+  TailEvent info3 = info.clone();
   KJ_ASSERT(info3.timestamp == kj::UNIX_EPOCH);
   KJ_ASSERT(info3.sequence == 0);
   KJ_ASSERT(info3.invocationId == invocationId);
   KJ_ASSERT(info3.spanContext == context);
 
-  auto& log3 = KJ_ASSERT_NONNULL(info3.event.tryGet<tracing::Log>());
+  auto& log3 = KJ_ASSERT_NONNULL(info3.event.tryGet<Log>());
   KJ_ASSERT(log3.timestamp == kj::UNIX_EPOCH);
   KJ_ASSERT(log3.logLevel == LogLevel::INFO);
   KJ_ASSERT(log3.message == "foo"_kj);
@@ -546,18 +559,18 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   auto infoBuilder = builder.initRoot<rpc::Trace::TailEvent>();
 
   TraceId traceId(0, 0);
-  auto context = tracing::SpanContext(traceId, {tracing::staticSpanId});
+  auto context = SpanContext(traceId, {staticSpanId});
 
   // An attribute event can have one or more Attributes specified.
-  kj::Vector<tracing::Attribute> attrs(2);
-  attrs.add(tracing::Attribute("foo"_kjc, true));
-  attrs.add(tracing::Attribute("bar"_kjc, (int64_t)123));
+  kj::Vector<Attribute> attrs(2);
+  attrs.add(Attribute("foo"_kjc, true));
+  attrs.add(Attribute("bar"_kjc, static_cast<int64_t>(123)));
 
-  tracing::TailEvent info(kj::mv(context), traceId, kj::UNIX_EPOCH, 0, attrs.releaseAsArray());
+  TailEvent info(kj::mv(context), traceId, kj::UNIX_EPOCH, 0, attrs.releaseAsArray());
   info.copyTo(infoBuilder);
 
-  tracing::TailEvent info2(infoBuilder.asReader());
-  auto& attrs2 = KJ_ASSERT_NONNULL(info2.event.tryGet<kj::Array<tracing::Attribute>>());
+  TailEvent info2(infoBuilder.asReader());
+  auto& attrs2 = KJ_ASSERT_NONNULL(info2.event.tryGet<kj::Array<Attribute>>());
   KJ_ASSERT(attrs2.size() == 2);
 
   KJ_ASSERT(attrs2[0].name == "foo"_kj);

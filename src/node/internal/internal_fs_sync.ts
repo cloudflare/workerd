@@ -95,12 +95,12 @@ import type {
   GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
-  ReadSyncOptions,
+  ReadOptions,
   RmOptions,
-  RmDirOptions,
   StatsFs,
   WriteFileOptions,
 } from 'node:fs';
+import type { RmDirOptions } from 'node-internal:internal_fs_utils';
 
 export function accessSyncImpl(
   path: URL,
@@ -212,7 +212,6 @@ export function cpSync(
     dereference = false,
     errorOnExist = false,
     force = true,
-    filter,
     mode = 0,
     preserveTimestamps = false,
     recursive = false,
@@ -241,9 +240,13 @@ export function cpSync(
   // change to the API or a new API that appropriately handles Buffer inputs and non
   // UTF-8 encoded names. We want to avoid implementing the filter option for now
   // until Node.js settles on a better implementation and API.
-  if (filter !== undefined) {
-    if (typeof filter !== 'function') {
-      throw new ERR_INVALID_ARG_TYPE('options.filter', 'function', filter);
+  if (options.filter !== undefined) {
+    if (typeof options.filter !== 'function') {
+      throw new ERR_INVALID_ARG_TYPE(
+        'options.filter',
+        'function',
+        options.filter
+      );
     }
     throw new ERR_UNSUPPORTED_OPERATION();
   }
@@ -627,7 +630,7 @@ export function readlinkSync(
 export function readSync(
   fd: number,
   buffer: NodeJS.ArrayBufferView,
-  offsetOrOptions: ReadSyncOptions | number = {},
+  offsetOrOptions: ReadOptions | number = {},
   length?: number,
   position: Position = null
 ): number {

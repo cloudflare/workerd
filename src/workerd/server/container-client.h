@@ -11,6 +11,7 @@
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/map.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 
 namespace workerd::server {
@@ -19,7 +20,11 @@ namespace workerd::server {
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
 // it's talking to Docker instead of a real RPC service.
-class ContainerClient final: public rpc::Container::Server {
+//
+// ContainerClient is reference-counted to support actor reconnection with inactivity timeouts.
+// When setInactivityTimeout() is called, a timer holds a reference to prevent premature
+// destruction. The ContainerClient can be shared across multiple actor lifetimes.
+class ContainerClient final: public rpc::Container::Server, public kj::Refcounted {
  public:
   ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       kj::Timer& timer,
@@ -27,7 +32,8 @@ class ContainerClient final: public rpc::Container::Server {
       kj::String dockerPath,
       kj::String containerName,
       kj::String imageName,
-      kj::TaskSet& waitUntilTasks);
+      kj::TaskSet& waitUntilTasks,
+      kj::Function<void()> cleanupCallback);
 
   ~ContainerClient() noexcept(false);
 
@@ -40,6 +46,8 @@ class ContainerClient final: public rpc::Container::Server {
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override;
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
+
+  kj::Own<ContainerClient> addRef();
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
@@ -77,11 +85,15 @@ class ContainerClient final: public rpc::Container::Server {
       kj::Maybe<kj::String> body = kj::none);
   kj::Promise<InspectResponse> inspectContainer();
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
-      kj::Maybe<capnp::List<capnp::Text>::Reader> environment);
+      kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
+      rpc::Container::StartParams::Reader params);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
   kj::Promise<void> destroyContainer();
+
+  // Cleanup callback to remove from ActorNamespace map when destroyed
+  kj::Function<void()> cleanupCallback;
 };
 
 }  // namespace workerd::server

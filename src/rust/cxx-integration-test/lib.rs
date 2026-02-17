@@ -1,7 +1,6 @@
 //! Non-production crate to help test various aspects of rust/c++ integration.
 
 use std::io::Error;
-use std::io::ErrorKind;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -100,7 +99,7 @@ fn result_ok() -> Result<i32> {
 }
 
 fn result_error() -> Result<i32> {
-    Err(Error::new(ErrorKind::Other, "test error"))
+    Err(Error::other("test error"))
 }
 
 fn log_every_level() {

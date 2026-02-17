@@ -30,12 +30,14 @@ class Evaluator {
   //   in cases that the isolate includes types that require configuration, but currently the
   //   type is always default-constructed. What if you want to specify a test config?
  public:
-  explicit Evaluator(V8System& v8System): v8System(v8System) {}
+  explicit Evaluator(V8System& v8System, ConfigurationType config = {})
+      : v8System(v8System),
+        config(config) {}
 
   IsolateType& getIsolate() {
     // Slightly more efficient to only instantiate each isolate type once (17s vs. 20s):
     static IsolateType isolate(
-        v8System, v8::IsolateGroup::GetDefault(), ConfigurationType(), kj::heap<IsolateObserver>());
+        v8System, v8::IsolateGroup::GetDefault(), config, kj::heap<IsolateObserver>());
     return isolate;
   }
 
@@ -162,6 +164,7 @@ class Evaluator {
 
  private:
   V8System& v8System;
+  ConfigurationType config;
 };
 
 struct NumberBox: public Object {
@@ -217,7 +220,6 @@ struct NumberBox: public Object {
   }
 
   JSG_RESOURCE_TYPE(NumberBox) {
-
     JSG_METHOD(increment);
     JSG_METHOD(incrementBy);
     JSG_METHOD(incrementByBox);

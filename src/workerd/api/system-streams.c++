@@ -47,6 +47,8 @@ class EncodedAsyncInputStream final: public ReadableStreamSource {
   // brotli streams.
   kj::Maybe<Tee> tryTee(uint64_t limit) override;
 
+  void cancel(kj::Exception reason) override;
+
  private:
   friend class EncodedAsyncOutputStream;
 
@@ -54,6 +56,7 @@ class EncodedAsyncInputStream final: public ReadableStreamSource {
 
   kj::Own<kj::AsyncInputStream> inner;
   StreamEncoding encoding;
+  kj::Canceler canceler;
 
   IoContext& ioContext;
 };
@@ -69,7 +72,8 @@ kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
   ensureIdentityEncoding();
 
   return kj::evalNow([&]() {
-    return inner->tryRead(buffer, minBytes, maxBytes).attach(ioContext.registerPendingEvent());
+    return canceler.wrap(inner->tryRead(buffer, minBytes, maxBytes))
+        .attach(ioContext.registerPendingEvent());
   }).catch_([](kj::Exception&& exception) -> kj::Promise<size_t> {
     KJ_IF_SOME(e,
         translateKjException(exception,
@@ -116,6 +120,13 @@ kj::Maybe<ReadableStreamSource::Tee> EncodedAsyncInputStream::tryTee(uint64_t li
   result.branches[0] = newSystemStream(newTeeErrorAdapter(kj::mv(tee.branches[0])), encoding);
   result.branches[1] = newSystemStream(newTeeErrorAdapter(kj::mv(tee.branches[1])), encoding);
   return kj::mv(result);
+}
+
+void EncodedAsyncInputStream::cancel(kj::Exception reason) {
+  // Cancel any pending read operations. This will cause the wrapped promises to be rejected
+  // with a cancellation exception, which properly cleans up the BlockedRead state in AsyncPipe
+  // before the pipe itself is destroyed.
+  canceler.cancel(kj::mv(reason));
 }
 
 void EncodedAsyncInputStream::ensureIdentityEncoding() {
@@ -304,6 +315,18 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
 }
 
 void EncodedAsyncOutputStream::abort(kj::Exception reason) {
+  KJ_SWITCH_ONEOF(inner) {
+    KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
+      stream->abortWrite(kj::mv(reason));
+    }
+    KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+      gz->abortWrite(kj::mv(reason));
+    }
+    KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+      br->abortWrite(kj::mv(reason));
+    }
+    KJ_CASE_ONEOF(e, Ended) {}
+  }
   inner.init<Ended>();
 }
 
@@ -357,13 +380,13 @@ kj::Own<WritableStreamSink> newSystemStream(
   return kj::heap<EncodedAsyncOutputStream>(kj::mv(inner), encoding, context);
 }
 
-SystemMultiStream newSystemMultiStream(kj::Own<kj::AsyncIoStream> stream, IoContext& context) {
+SystemMultiStream newSystemMultiStream(
+    kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>& stream, IoContext& context) {
 
-  auto wrapped = kj::refcountedWrapper(kj::mv(stream));
   return {.readable = kj::heap<EncodedAsyncInputStream>(
-              wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context),
+              stream.addWrappedRef(), StreamEncoding::IDENTITY, context),
     .writable = kj::heap<EncodedAsyncOutputStream>(
-        wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context)};
+        stream.addWrappedRef(), StreamEncoding::IDENTITY, context)};
 }
 
 ContentEncodingOptions::ContentEncodingOptions(CompatibilityFlags::Reader flags)

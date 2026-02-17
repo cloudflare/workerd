@@ -142,6 +142,8 @@ export type HostInfo = {
   HTTPS_REMOTE_ORIGIN: string;
   HTTP_PORT: string;
   HTTPS_PORT: string;
+  WS_PORT: string;
+  WSS_PORT: string;
 };
 
 export function getHostInfo(): HostInfo {
@@ -163,6 +165,8 @@ export function getHostInfo(): HostInfo {
     HTTPS_REMOTE_ORIGIN: httpsUrl.origin,
     HTTP_PORT: httpUrl.port,
     HTTPS_PORT: httpsUrl.port,
+    WS_PORT: (globalThis.state.env.WS_PORT as string | undefined) ?? '',
+    WSS_PORT: (globalThis.state.env.WSS_PORT as string | undefined) ?? '',
   };
 }
 

@@ -41,15 +41,19 @@ void HeapTracer::clearWrappers() {
 
   while (!wrappers.empty()) {
     // Don't freelist the shim because we're shutting down anyway.
-    wrappers.front().detachWrapper(false);
+    auto& wrappable = wrappers.front();
+    auto ownWrappable = wrappable.detachWrapper(false);
+    // Clear the isolate pointer so that any code that later tries to use it (e.g.,
+    // maybeDeferDestruction() or GcVisitor) will see that the isolate is gone and skip
+    // V8 operations. Without this, objects that outlive their isolate (like WebSockets
+    // stored in a HibernationManager) would have a dangling isolate pointer and crash
+    // when trying to check v8::Locker::IsLocked() or create V8 handles.
+    ownWrappable->isolate = nullptr;
   }
   clearFreelistedShims();
 }
 
 using JSGWrappable = workerd::jsg::Wrappable;
-#if (V8_MAJOR_VERSION >= 14 && V8_MINOR_VERSION >= 1) || (V8_MAJOR_VERSION > 14)
-#define HAS_V8_WRAPPABLE
-#endif
 
 // V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to
 // integrate with the GC in order to receive GC visitation callbacks, so that the GC is able to
@@ -77,11 +81,7 @@ using JSGWrappable = workerd::jsg::Wrappable;
 // reused for a future allocation, if that allocation occurs before the next major GC. When a
 // major GC occurs, the freelist is cleared, since any unreachable CppgcShim objects are likely
 // condemned after that point and will be deleted shortly thereafter.
-#ifdef HAS_V8_WRAPPABLE
 class Wrappable::CppgcShim final: public v8::Object::Wrappable {
-#else
-class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
-#endif
  public:
   CppgcShim(JSGWrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
@@ -114,11 +114,7 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
     }
   }
 
-#ifdef HAS_V8_WRAPPABLE
   void Trace(cppgc::Visitor* visitor) const override {
-#else
-  void Trace(cppgc::Visitor* visitor) const {
-#endif
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(active, Active) {
         active.wrappable->traceFromV8(*visitor);
@@ -132,11 +128,9 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
     }
   }
 
-#ifdef HAS_V8_WRAPPABLE
   const char* GetHumanReadableName() const override {
     return "CppgcShim";
   }
-#endif
 
   struct Active {
     kj::Own<JSGWrappable> wrappable;
@@ -416,15 +410,9 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
         v8::Local<v8::Object>::Cast(handle)->FindInstanceInPrototypeChain(
             IsolateBase::getOpaqueTemplate(isolate));
     if (!instance.IsEmpty()) {
-      // TODO(cleanup): Remove this #if when workerd's V8 version is updated to 14.2.
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-      return *reinterpret_cast<Wrappable*>(
-          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX));
-#else
       return *reinterpret_cast<Wrappable*>(
           instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX,
               static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX)));
-#endif
     }
   }
 

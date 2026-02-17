@@ -1,4 +1,4 @@
-FROM node:bullseye AS builder
+FROM node:trixie AS builder
 
 WORKDIR /workerd
 

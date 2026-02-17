@@ -7,10 +7,9 @@
 
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:public_process';
-import type {
-  Console as _Console,
-  ConsoleConstructorOptions,
-} from 'node:console';
+import type { Console as _Console, ConsoleOptions } from 'node:console';
+
+const noop: VoidFunction = () => {};
 
 // TODO(soon): This class is Node.js compatible but globalThis.console is not.
 // This is because globalThis.console is provided by the v8 runtime.
@@ -27,19 +26,14 @@ const globalConsole = globalThis.console as typeof globalThis.console & {
 
 globalConsole._times = new Map<string, number>();
 globalConsole._ignoreErrors = true;
-globalConsole._stderrErrorHandler = function _stderrErrorHandler(): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('Console._stderrErrorHandler');
-};
-
-globalConsole._stdoutErrorHandler = function _stdoutErrorHandler(): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('Console._stdoutErrorHandler');
-};
+globalConsole._stderrErrorHandler = noop;
+globalConsole._stdoutErrorHandler = noop;
 
 // We have this assertion because node-internal:public_process has undefined as the type
 globalConsole._stderr = processImpl.stderr as unknown as NodeJS.WritableStream;
 globalConsole._stdout = processImpl.stdout as unknown as NodeJS.WritableStream;
 
-export function Console(_options: ConsoleConstructorOptions): Console {
+export function Console(_options: ConsoleOptions): Console {
   throw new ERR_METHOD_NOT_IMPLEMENTED('Console');
 }
 // We want to make sure the following works:

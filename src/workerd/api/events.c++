@@ -87,9 +87,19 @@ void MessageEvent::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(maybeSource);
 }
 
+// ======================================================================================
+namespace {
+const kj::StringPtr kDefaultErrorEventName = "error"_kj;
+}  // namespace
+
+ErrorEvent::ErrorEvent(ErrorEventInit init): Event(kDefaultErrorEventName), init(kj::mv(init)) {}
+
 ErrorEvent::ErrorEvent(kj::String type, ErrorEventInit init)
     : Event(kj::mv(type)),
       init(kj::mv(init)) {}
+
+ErrorEvent::ErrorEvent(jsg::Lock& js, jsg::JsValue error)
+    : ErrorEvent(ErrorEventInit{.error = jsg::JsRef(js, error)}) {}
 
 jsg::Ref<ErrorEvent> ErrorEvent::constructor(
     jsg::Lock& js, kj::String type, jsg::Optional<ErrorEventInit> init) {
@@ -129,5 +139,30 @@ void ErrorEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
 void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(init.error);
 }
+
+// ======================================================================================
+namespace {
+constexpr kj::StringPtr kUnhandledRejectionEventName = "unhandledrejection"_kj;
+constexpr kj::StringPtr kRejectionHandledEventName = "rejectionhandled"_kj;
+
+constexpr kj::StringPtr getPromiseRejectionEventName(v8::PromiseRejectEvent type) {
+  switch (type) {
+    case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler:
+      return kUnhandledRejectionEventName;
+    case v8::PromiseRejectEvent::kPromiseHandlerAddedAfterReject:
+      return kRejectionHandledEventName;
+    default:
+      // Events are not emitted for the other reject types.
+      KJ_UNREACHABLE;
+  }
+}
+
+}  // namespace
+
+PromiseRejectionEvent::PromiseRejectionEvent(
+    v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason)
+    : Event(getPromiseRejectionEventName(type)),
+      promise(kj::mv(promise)),
+      reason(kj::mv(reason)) {}
 
 }  // namespace workerd::api

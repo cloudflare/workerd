@@ -46,8 +46,7 @@ import {
 
 import { inspect } from 'node-internal:internal_inspect';
 
-interface ExtendedAssertionErrorConstructorOptions
-  extends AssertionErrorConstructorOptions {
+interface ExtendedAssertionErrorConstructorOptions extends AssertionErrorConstructorOptions {
   generatedMessage?: boolean;
 }
 
@@ -934,9 +933,9 @@ function validateThrownError(
   if (
     error instanceof Function &&
     error.prototype !== undefined &&
-    error.prototype instanceof Error
+    (error === Error || error.prototype instanceof Error)
   ) {
-    // error is a constructor
+    // error is a constructor (Error itself or a subclass of Error)
     if (e instanceof error) {
       return true;
     }

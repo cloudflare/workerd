@@ -1,0 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ketan Gupta <ketan@cloudflare.com>
+Date: Wed, 4 Feb 2026 15:05:21 +0000
+Subject: Add verify_write_barriers flag in V8's bazel config
+
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 1f927e2466a365342bf6634fb11e85612d0cdfc1..0fd65f5c5aad003b45823f9df0083ff92c28cb3c 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -532,6 +532,7 @@ v8_config(
+         "@v8//bazel/config:is_debug": [
+             "DEBUG",
+             "V8_ENABLE_CHECKS",
++            "V8_VERIFY_WRITE_BARRIERS",
+         ],
+         "//conditions:default": [],
+     }) + select({

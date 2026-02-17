@@ -1,0 +1,745 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "settimeout-test.wd-test",
+    args = ["--experimental"],
+    data = ["settimeout-test.js"],
+)
+
+wd_test(
+    src = "actor-alarms-delete-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-alarms-delete-test.js"],
+)
+
+wd_test(
+    src = "actor-alarms-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-alarms-test.js"],
+)
+
+wd_test(
+    src = "tail-worker-test.wd-test",
+    args = [
+        "--experimental",
+    ],
+    data = [
+        # To reduce complexity, tail-worker-test calls into other tests to get traces from them and
+        # includes several tail worker implementations.
+        "actor-alarms-test.js",
+        "http-test.js",
+        "queue-test.js",
+        "tail-worker-test.js",
+        "tail-worker-test-receiver.js",
+        "tail-worker-test-dummy.js",
+        "tail-worker-test-invalid.js",
+        "tail-worker-test-jsrpc.js",
+        "websocket-hibernation.js",
+    ],
+)
+
+# Test to validate timing semantics for JSRPC streaming responses.
+# This test verifies that Return events occur when the handler returns,
+# NOT when the stream is fully consumed.
+wd_test(
+    src = "jsrpc-timing-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "jsrpc-timing-test.js",
+        "jsrpc-timing-test-tail.js",
+    ],
+    tags = ["no-coverage"],
+)
+
+# Test for a worker that can log to itself using the isTracer parameter
+wd_test(
+    src = "self-logger-test.wd-test",
+    data = [
+        "self-logger-test.js",
+    ],
+)
+
+wd_test(
+    src = "analytics-engine-test.wd-test",
+    args = ["--experimental"],
+    data = ["analytics-engine-test.js"],
+)
+
+wd_test(
+    src = "http-standard-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-standard-test.js"],
+)
+
+wd_test(
+    src = "http-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-test.js"],
+)
+
+wd_test(
+    src = "ctx-props-test.wd-test",
+    args = ["--experimental"],
+)
+
+wd_test(
+    src = "cache-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "cache-instrumentation-test.js",
+        "cache-mock.js",
+        "cache-operations-test.js",
+        "instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
+    src = "kv-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "instrumentation-tail-worker.js",
+        "kv-instrumentation-test.js",
+        "kv-test.js",
+    ],
+)
+
+wd_test(
+    src = "queue-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "queue-error-codes-test.js",
+        "queue-test.js",
+    ],
+)
+
+wd_test(
+    src = "r2-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "instrumentation-tail-worker.js",
+        "r2-instrumentation-test.js",
+        "r2-test.js",
+    ],
+)
+
+wd_test(
+    src = "rtti-test.wd-test",
+    args = ["--experimental"],
+    data = ["rtti-test.js"],
+)
+
+wd_test(
+    size = "enormous",
+    src = "sql-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "instrumentation-tail-worker.js",
+        "sql-test.js",
+        "sql-test-tail.js",
+    ],
+)
+
+wd_test(
+    src = "sync-kv-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "instrumentation-tail-worker.js",
+        "sync-kv-instrumentation-test.js",
+        "sync-kv-test.js",
+    ],
+)
+
+wd_test(
+    src = "abort-internal-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["abort-internal-streams-test.js"],
+)
+
+wd_test(
+    src = "abortable-fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["abortable-fetch-test.js"],
+)
+
+wd_test(
+    src = "abortsignal-test.wd-test",
+    args = ["--experimental"],
+    data = ["abortsignal-test.js"],
+)
+
+wd_test(
+    src = "actor-stub-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-stub-test.js"],
+)
+
+wd_test(
+    src = "als-only-test.wd-test",
+    args = ["--experimental"],
+    data = ["als-only-test.js"],
+)
+
+wd_test(
+    src = "als-test.wd-test",
+    args = ["--experimental"],
+    data = ["als-test.js"],
+)
+
+wd_test(
+    src = "blob-test.wd-test",
+    args = ["--experimental"],
+    data = ["blob-test.js"],
+)
+
+wd_test(
+    src = "blob2-test.wd-test",
+    args = ["--experimental"],
+    data = ["blob2-test.js"],
+)
+
+wd_test(
+    src = "commonjs-module-test.wd-test",
+    args = ["--experimental"],
+    data = ["commonjs-module-test.js"],
+)
+
+wd_test(
+    src = "crypto-extras-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto-extras-test.js"],
+)
+
+wd_test(
+    src = "crypto-impl-asymmetric-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto-impl-asymmetric-test.js"],
+)
+
+wd_test(
+    src = "crypto-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto-streams-test.js"],
+)
+
+wd_test(
+    src = "data-url-fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["data-url-fetch-test.js"],
+)
+
+wd_test(
+    src = "encoding-test.wd-test",
+    args = ["--experimental"],
+    data = ["encoding-test.js"],
+)
+
+wd_test(
+    src = "encoding-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["encoding-streams-test.js"],
+)
+
+wd_test(
+    src = "events-test.wd-test",
+    args = ["--experimental"],
+    data = ["events-test.js"],
+)
+
+wd_test(
+    src = "eventsource-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-test.js"],
+)
+
+wd_test(
+    src = "form-data-legacy-test.wd-test",
+    args = ["--experimental"],
+    data = ["form-data-legacy-test.js"],
+)
+
+wd_test(
+    src = "form-data-test.wd-test",
+    args = ["--experimental"],
+    data = ["form-data-test.js"],
+)
+
+wd_test(
+    src = "form-data-test-ts.wd-test",
+    args = ["--experimental"],
+    data = ["form-data-test-ts.ts"],
+)
+
+wd_test(
+    src = "warnings-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "warnings-tail.js",
+        "warnings-test.js",
+    ],
+)
+
+wd_test(
+    size = "large",
+    src = "global-scope-test.wd-test",
+    args = ["--experimental"],
+    data = ["global-scope-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "htmlrewriter-test.wd-test",
+    args = ["--experimental"],
+    data = ["htmlrewriter-test.js"],
+    # TODO(soon): Test is excessively flaky under ASan, re-enable once fixed
+    tags = ["no-asan"],
+)
+
+wd_test(
+    src = "js-rpc-flag.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-flag.js"],
+)
+
+wd_test(
+    src = "js-rpc-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-params-ownership-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-params-ownership-test.js"],
+)
+
+wd_test(
+    src = "memory-cache-test.wd-test",
+    args = ["--experimental"],
+    data = ["memory-cache-test.js"],
+)
+
+wd_test(
+    src = "module-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-test.js"],
+)
+
+wd_test(
+    src = "navigator-beacon-test.wd-test",
+    args = ["--experimental"],
+    data = ["navigator-beacon-test.js"],
+)
+
+wd_test(
+    src = "navigator-test.wd-test",
+    args = ["--experimental"],
+    data = ["navigator-test.js"],
+)
+
+wd_test(
+    src = "reporterror-test.wd-test",
+    args = ["--experimental"],
+    data = ["reporterror-test.js"],
+)
+
+wd_test(
+    src = "response-json.wd-test",
+    args = ["--experimental"],
+    data = ["response-json.js"],
+)
+
+wd_test(
+    src = "scheduler-test.wd-test",
+    args = ["--experimental"],
+    data = ["scheduler-test.js"],
+)
+
+wd_test(
+    src = "streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-test.js"],
+)
+
+wd_test(
+    src = "stub-storage-test.wd-test",
+    args = ["--experimental"],
+    data = ["stub-storage-test.js"],
+)
+
+wd_test(
+    src = "compression-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["compression-streams-test.js"],
+)
+
+wd_test(
+    src = "transform-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["transform-streams-test.js"],
+)
+
+wd_test(
+    src = "pipe-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["pipe-streams-test.js"],
+)
+
+wd_test(
+    src = "streams-r2-patterns-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-r2-patterns-test.js"],
+)
+
+wd_test(
+    src = "streams-respond-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-respond-test.js"],
+)
+
+wd_test(
+    src = "streams-no-auto-allocate-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-no-auto-allocate-test.js"],
+)
+
+wd_test(
+    src = "streams-js-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-js-test.js"],
+)
+
+wd_test(
+    src = "streams-iocontext-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-iocontext-test.js"],
+)
+
+wd_test(
+    src = "streams-backpressure-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-backpressure-test.js"],
+)
+
+wd_test(
+    src = "streams-error-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-error-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-byob-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byob-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-tee-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-tee-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-async-iterator-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-async-iterator-test.js"],
+)
+
+wd_test(
+    src = "unsafe-test.wd-test",
+    args = ["--experimental"],
+    data = ["unsafe-test.js"],
+)
+
+# Test that verifies autogates are ENABLED - only runs in @all-autogates variant
+wd_test(
+    src = "autogate-enabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["autogate-enabled-test.js"],
+    generate_all_compat_flags_variant = False,
+    generate_default_variant = False,
+)
+
+# Test that verifies autogates are DISABLED - only runs in default variant
+wd_test(
+    src = "autogate-disabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["autogate-disabled-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+# Test that verifies compat flags are ENABLED - only runs in @all-compat-flags variant
+wd_test(
+    src = "compat-flag-enabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["compat-flag-enabled-test.js"],
+    generate_all_autogates_variant = False,
+    generate_default_variant = False,
+)
+
+# Test that verifies compat flags are DISABLED - only runs in default variant
+wd_test(
+    src = "compat-flag-disabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["compat-flag-disabled-test.js"],
+    generate_all_autogates_variant = False,
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "url-test.wd-test",
+    args = ["--experimental"],
+    data = ["url-test.js"],
+)
+
+wd_test(
+    src = "websocket-constructor-test.wd-test",
+    args = ["--experimental"],
+    data = ["websocket-constructor-test.js"],
+)
+
+wd_test(
+    src = "websocket-hibernation.wd-test",
+    args = ["--experimental"],
+    data = ["websocket-hibernation.js"],
+)
+
+js_binary(
+    name = "websocket-client-error-sidecar",
+    entry_point = "websocket-client-error-sidecar.js",
+)
+
+wd_test(
+    src = "websocket-client-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "websocket-client-error-test.js",
+    ],
+    sidecar = "websocket-client-error-sidecar",
+    sidecar_port_bindings = [
+        "BIG_MESSAGE_SERVER_PORT",
+    ],
+)
+
+js_binary(
+    name = "http-socket-server",
+    entry_point = "http-socket-server.js",
+)
+
+wd_test(
+    src = "http-socket-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "http-socket-test.js",
+        "starttls-server.pem",
+    ],
+    sidecar = "http-socket-server",
+    sidecar_port_bindings = [
+        "HTTP_SOCKET_SERVER_PORT",
+        "SOCKET_PARTIALLY_WRITTEN",
+        "STARTTLS_SOCKET",
+        "FLUSH_HELLO_SOCKET",
+    ],
+)
+
+wd_test(
+    src = "js-rpc-socket-test.wd-test",
+    args = [
+        "--experimental",
+        "--no-verbose",
+    ],
+    data = ["js-rpc-test.js"],
+)
+
+wd_test(
+    src = "http-test-ts.ts-wd-test",
+    args = ["--experimental"],
+    data = ["http-test-ts.ts"],
+)
+
+wd_test(
+    src = "new-module-registry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-test.js",
+        "test.wasm",
+    ],
+)
+
+wd_test(
+    src = "cross-context-promise-test.wd-test",
+    args = ["--experimental"],
+    data = ["cross-context-promise-test.js"],
+)
+
+wd_test(
+    src = "error-in-error-event-test.wd-test",
+    args = ["--experimental"],
+    data = ["error-in-error-event-test.js"],
+)
+
+wd_test(
+    src = "no-to-string-tag-test.wd-test",
+    args = ["--experimental"],
+    data = ["no-to-string-tag-test.js"],
+    generate_all_compat_flags_variant = False,
+)
+
+wd_test(
+    src = "fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-test.js"],
+)
+
+wd_test(
+    src = "importable-env-test.wd-test",
+    args = ["--experimental"],
+    data = ["importable-env-test.js"],
+)
+
+wd_test(
+    src = "disable-importable-env-test.wd-test",
+    args = ["--experimental"],
+    data = ["disable-importable-env-test.js"],
+)
+
+wd_test(
+    src = "disable-importable-exports-test.wd-test",
+    args = ["--experimental"],
+    data = ["disable-importable-exports-test.js"],
+)
+
+wd_test(
+    src = "importable-exports-test.wd-test",
+    args = ["--experimental"],
+    data = ["importable-exports-test.js"],
+)
+
+wd_test(
+    src = "webfs-test.wd-test",
+    args = ["--experimental"],
+    data = ["webfs-test.js"],
+)
+
+wd_test(
+    src = "worker-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-test.js"],
+)
+
+wd_test(
+    src = "request-clone-test.wd-test",
+    args = ["--experimental"],
+    data = ["request-clone-test.js"],
+)
+
+wd_test(
+    src = "request-signal-enabled.wd-test",
+    args = ["--experimental"],
+    data = ["request-signal-enabled.js"],
+)
+
+wd_test(
+    src = "request-signal-disabled.wd-test",
+    args = ["--experimental"],
+    data = ["request-signal-disabled.js"],
+)
+
+wd_test(
+    src = "request-signal-passthrough.wd-test",
+    args = ["--experimental"],
+    data = ["request-signal-passthrough.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "worker-loader-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-test.js"],
+    tags = ["requires-network"],
+)
+
+wd_test(
+    src = "leak-fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["leak-fetch-test.js"],
+)
+
+wd_test(
+    src = "messageport-test.wd-test",
+    args = ["--experimental"],
+    data = ["messageport-test.js"],
+)
+
+js_binary(
+    name = "starttls-nodejs-server",
+    entry_point = "starttls-nodejs-server.js",
+)
+
+wd_test(
+    src = "starttls-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "starttls-nodejs-test.js",
+        "starttls-server.pem",
+    ],
+    sidecar = "starttls-nodejs-server",
+    sidecar_port_bindings = [
+        "STARTTLS_CA_PORT",
+    ],
+)
+
+wd_test(
+    src = "streams-circ-ref-regression-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-circ-ref-regression-test.js"],
+)
+
+wd_test(
+    src = "experimental-eval-test.wd-test",
+    args = ["--experimental"],
+    data = ["experimental-eval-test.js"],
+)
+
+wd_test(
+    src = "fetch-redirect-test.wd-test",
+    args = ["--experimental"],
+    data = ["fetch-redirect-test.js"],
+)
+
+wd_test(
+    src = "rpc-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "rpc-error-test.js",
+        "rpc-error-test.rpc.js",
+    ],
+)
+
+wd_test(
+    src = "actor-kv-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "actor-kv-test.js",
+        "actor-kv-test-tail.js",
+        "instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
+    src = "headers-immutable-prototype-test.wd-test",
+    args = ["--experimental"],
+    data = ["headers-immutable-prototype-test.js"],
+)
+
+wd_test(
+    src = "identity-transform-stream-state-machine-test.wd-test",
+    args = ["--experimental"],
+    data = ["identity-transform-stream-state-machine-test.js"],
+)
+
+wd_test(
+    src = "response-used-body-test.wd-test",
+    args = ["--experimental"],
+    data = ["response-used-body-test.js"],
+)

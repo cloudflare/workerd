@@ -2180,6 +2180,63 @@ export const maxOutputLength = {
   },
 };
 
+// Test for maxOutputLength: 0 - should throw immediately instead of infinite loop
+export const maxOutputLengthZero = {
+  async test() {
+    const expectedError = {
+      name: 'RangeError',
+      message:
+        /The value of "options\.maxOutputLength" is out of range\. It must be >= 1/,
+    };
+
+    // Sync zlib - deflateSync with maxOutputLength: 0 should throw
+    assert.throws(
+      () => zlib.deflateSync('data', { maxOutputLength: 0 }),
+      expectedError
+    );
+
+    // Sync zlib - inflateSync with maxOutputLength: 0 should throw
+    const compressed = zlib.deflateSync('data');
+    assert.throws(
+      () => zlib.inflateSync(compressed, { maxOutputLength: 0 }),
+      expectedError
+    );
+
+    // Sync brotli - brotliCompressSync with maxOutputLength: 0 should throw
+    assert.throws(
+      () => zlib.brotliCompressSync('data', { maxOutputLength: 0 }),
+      expectedError
+    );
+
+    // Sync brotli - brotliDecompressSync with maxOutputLength: 0 should throw
+    const brotliCompressed = zlib.brotliCompressSync('data');
+    assert.throws(
+      () => zlib.brotliDecompressSync(brotliCompressed, { maxOutputLength: 0 }),
+      expectedError
+    );
+
+    // Async zlib - deflate with maxOutputLength: 0 should error
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.deflate('data', { maxOutputLength: 0 }, (err) => {
+        assert.match(err.message, expectedError.message);
+        resolve();
+      });
+      await promise;
+    }
+
+    // Async brotli - brotliCompress with maxOutputLength: 0 should error
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.brotliCompress('data', { maxOutputLength: 0 }, (err) => {
+        assert.match(err.message, expectedError.message);
+        resolve();
+      });
+      await promise;
+    }
+  },
+};
+
 // Test taken from
 // https://github.com/nodejs/node/blob/24302c9fe94e1dd755ac8a8cc1f6aa4444f75cb3/test/parallel/test-zlib-invalid-arg-value-brotli-compress.js
 export const invalidArgValueBrotliCompress = {

@@ -1125,9 +1125,10 @@ function formatValue(
 
   // Memorize the context for custom inspection on proxies.
   const context = value;
+  let proxies = 0;
   // Always check for proxies to prevent side effects and to prevent triggering
   // any proxy handlers.
-  const proxy = internal.getProxyDetails(value);
+  let proxy = internal.getProxyDetails(value);
   if (proxy !== undefined) {
     if (proxy === null || proxy.target === null) {
       return ctx.stylize('<Revoked Proxy>', 'special');
@@ -1135,7 +1136,18 @@ function formatValue(
     if (ctx.showProxy) {
       return formatProxy(ctx, proxy, recurseTimes);
     }
-    value = proxy.target;
+    do {
+      if (proxy === null || proxy.target === null) {
+        let formatted = ctx.stylize('<Revoked Proxy>', 'special');
+        for (let i = 0; i < proxies; i++) {
+          formatted = `${ctx.stylize('Proxy(', 'special')}${formatted}${ctx.stylize(')', 'special')}`;
+        }
+        return formatted;
+      }
+      value = proxy.target;
+      proxy = internal.getProxyDetails(value);
+      proxies += 1;
+    } while (proxy !== undefined);
   }
 
   // Provide a hook for user-specified inspect functions.
@@ -1169,8 +1181,7 @@ function formatValue(
       // This makes sure the recurseTimes are reported as before while using
       // a counter internally.
       const depth = ctx.depth === null ? null : ctx.depth - recurseTimes;
-      const isCrossContext =
-        proxy !== undefined || !(context instanceof Object);
+      const isCrossContext = proxies !== 0 || !(context instanceof Object);
       const ret = Function.prototype.call.call(
         maybeCustom,
         context,
@@ -1206,7 +1217,15 @@ function formatValue(
     return ctx.stylize(`[Circular *${index}]`, 'special');
   }
 
-  return formatRaw(ctx, value, recurseTimes, typedArray);
+  let formatted = formatRaw(ctx, value, recurseTimes, typedArray);
+
+  if (proxies !== 0) {
+    for (let i = 0; i < proxies; i++) {
+      formatted = `${ctx.stylize('Proxy(', 'special')}${formatted}${ctx.stylize(')', 'special')}`;
+    }
+  }
+
+  return formatted;
 }
 
 function formatRaw(
@@ -2653,10 +2672,10 @@ function hasBuiltInToString(value: object): boolean {
   // Prevent triggering proxy traps.
   const proxyTarget = internal.getProxyDetails(value);
   if (proxyTarget !== undefined) {
-    if (proxyTarget === null) {
+    if (proxyTarget === null || proxyTarget.target === null) {
       return true;
     }
-    value = proxyTarget.target as object;
+    return hasBuiltInToString(proxyTarget.target as object);
   }
 
   // Count objects that have no `toString` function as built-in.

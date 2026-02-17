@@ -1,15 +1,17 @@
 """wd_cc_benchmark definition"""
 
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 def wd_cc_benchmark(
         name,
         linkopts = [],
         deps = [],
+        tags = [],
         visibility = None,
         **kwargs):
     """Wrapper for cc_binary that sets common attributes and links the benchmark library.
     """
-
-    native.cc_binary(
+    cc_test(
         name = name,
         defines = ["WD_IS_BENCHMARK"],
         # Use shared linkage for benchmarks, matching the approach used for tests. Unfortunately,
@@ -25,13 +27,13 @@ def wd_cc_benchmark(
         }),
         visibility = visibility,
         deps = deps + [
-            "@workerd-google-benchmark//:benchmark_main",
-            "//deps/rust:runtime",
+            "@google_benchmark//:benchmark_main",
             "//src/workerd/tests:bench-tools",
         ],
         # use the same malloc we use for server
         malloc = "//src/workerd/server:malloc",
-        tags = ["workerd-benchmark"],
+        tags = ["workerd-benchmark", "google_benchmark"] + tags,
+        size = "large",
         **kwargs
     )
 

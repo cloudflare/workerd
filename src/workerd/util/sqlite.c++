@@ -474,8 +474,6 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
 
-constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
-
 SqliteDatabase::SqliteDatabase(const Vfs& vfs,
     kj::Path path,
     kj::Maybe<kj::WriteMode> maybeMode,
@@ -1805,7 +1803,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
   // wrapped so that it sets `currentVfsRoot` while running.
   return {
     .iVersion = kj::min(3, native.iVersion),
-    .szOsFile = native.szOsFile + (int)sizeof(WrappedNativeFileImpl),
+    .szOsFile = native.szOsFile + static_cast<int>(sizeof(WrappedNativeFileImpl)),
     .mxPathname = native.mxPathname,
     .pNext = nullptr,
     .zName = name.cStr(),
@@ -2441,7 +2439,7 @@ class SqliteDatabase::Vfs::DefaultLockManager final: public SqliteDatabase::Lock
       auto slock = state->guarded.lockExclusive();
 
       for (uint i = start; i < start + count; i++) {
-        if (slock->walLocks[i] == (uint)kj::maxValue) {
+        if (slock->walLocks[i] == static_cast<uint>(kj::maxValue)) {
           // blocked by exclusive lock
           return false;
         }

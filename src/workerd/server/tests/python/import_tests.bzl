@@ -7,8 +7,10 @@ def _generate_import_py_file(imports):
     for imp in imports:
         res += "import " + imp + "\n"
 
-    res += "def test():\n"
-    res += "   pass"
+    res += "from workers import WorkerEntrypoint\n"
+    res += "class Default(WorkerEntrypoint):\n"
+    res += "    def test(self):\n"
+    res += "        pass"
     return res
 
 WD_FILE_TEMPLATE = """
@@ -22,7 +24,6 @@ const unitTests :Workerd.Config = (
                     (name = "worker.py", pythonModule = embed "./worker.py"),
                     {requirements}
                 ],
-                compatibilityDate = "2024-05-02",
                 compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
             )
         ),
@@ -37,16 +38,15 @@ def _generate_wd_test_file(name, requirements):
     return WD_FILE_TEMPLATE.format(name = name, requirements = requirements)
 
 def _test(name, directory, wd_test, py_file, python_version, **kwds):
-    pkg_tag = BUNDLE_VERSION_INFO[python_version]["packages"]
     py_wd_test(
         name = name,
         directory = directory,
         src = wd_test,
         python_flags = [python_version],
+        use_snapshot = None,
         make_snapshot = False,
-        args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels_%s" % pkg_tag],
         skip_default_data = True,
-        data = [py_file, "@all_pyodide_wheels_%s//:whls" % pkg_tag],
+        data = [py_file],
         **kwds
     )
 
@@ -54,6 +54,8 @@ def _test(name, directory, wd_test, py_file, python_version, **kwds):
 def _gen_import_tests(to_test, python_version, pkg_skip_versions):
     for lib in to_test.keys():
         skip_python_flags = [version for version, packages in pkg_skip_versions.items() if lib in packages]
+        if BUNDLE_VERSION_INFO["development"]["real_pyodide_version"] in skip_python_flags:
+            skip_python_flags.append("development")
         if lib.endswith("-tests"):
             # TODO: The pyodide-build-scripts should be updated to not emit these packages. Once
             # that's done we can remove this check.
@@ -99,7 +101,8 @@ def _pkg_permutations(lst):
     return _rotations(lst) + _rotations(reversed(lst))
 
 def _gen_rust_import_tests(python_version):
-    if python_version in ["0.26.0a2", "development"]:
+    pyodide_version = BUNDLE_VERSION_INFO[python_version]["real_pyodide_version"]
+    if pyodide_version == "0.26.0a2":
         pkgs = _rotations(["tiktoken", "pydantic"])
     else:
         pkgs = _pkg_permutations(["cryptography", "jiter", "tiktoken", "pydantic"])

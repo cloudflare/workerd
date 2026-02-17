@@ -762,7 +762,7 @@ export class ConnResetException extends NodeError {
 
 export function aggregateTwoErrors(
   innerError: unknown,
-  outerError: Error | null
+  outerError: Error | null | undefined
 ): AggregateError {
   if (innerError && outerError && innerError !== outerError) {
     if ('errors' in outerError && Array.isArray(outerError.errors)) {
@@ -980,6 +980,15 @@ export class ERR_PERFORMANCE_INVALID_TIMESTAMP extends NodeTypeError {
     super(
       'ERR_PERFORMANCE_INVALID_TIMESTAMP',
       `${value} is not a valid timestamp`
+    );
+  }
+}
+
+export class ERR_TRACE_EVENTS_CATEGORY_REQUIRED extends NodeTypeError {
+  constructor() {
+    super(
+      'ERR_TRACE_EVENTS_CATEGORY_REQUIRED',
+      'At least one category is required'
     );
   }
 }

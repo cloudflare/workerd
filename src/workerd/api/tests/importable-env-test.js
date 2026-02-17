@@ -39,6 +39,8 @@ export const importableEnv = {
     // But have all the same stuff...
     deepStrictEqual(env, argEnv);
 
+    deepStrictEqual(Object.keys(env).sort(), ['CACHE', 'FOO', 'RPC']);
+
     // It is populated inside a request
     strictEqual(env.FOO, 'BAR');
 
@@ -97,5 +99,25 @@ export const importableEnv = {
         },
       };
     });
+  },
+};
+
+export const nullableEnv = {
+  async test(_, argEnv) {
+    strictEqual(env.FOO, 'BAR');
+
+    await withEnv(null, async () => {
+      strictEqual(env.FOO, undefined);
+      strictEqual(env.CACHE, undefined);
+      strictEqual(typeof env, 'object');
+    });
+
+    await withEnv(undefined, async () => {
+      strictEqual(env.FOO, undefined);
+      strictEqual(env.CACHE, undefined);
+      strictEqual(typeof env, 'object');
+    });
+
+    strictEqual(env.FOO, 'BAR');
   },
 };

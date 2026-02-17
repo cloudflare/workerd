@@ -48,7 +48,7 @@ export interface ModifierRequirements {
   export?: boolean;
   declare?: boolean;
 }
-// Ensures a ndoe satisfies the specified modifier requirements
+// Ensures a node satisfies the specified modifier requirements
 function ensureModifierRequirements(
   ctx: ts.TransformationContext,
   node: ts.HasModifiers,

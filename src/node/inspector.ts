@@ -103,6 +103,19 @@ export const Network: typeof _Network = {
   loadingFailed(_params: _Network.LoadingFailedEventDataType): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFailed');
   },
+  webSocketCreated(_params: _Network.WebSocketCreatedEventDataType): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketCreated');
+  },
+  webSocketHandshakeResponseReceived(
+    _params: _Network.WebSocketHandshakeResponseReceivedEventDataType
+  ): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED(
+      'Network.webSocketHandshakeResponseReceived'
+    );
+  },
+  webSocketClosed(_params: _Network.WebSocketClosedEventDataType): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketClosed');
+  },
 };
 
 export default {

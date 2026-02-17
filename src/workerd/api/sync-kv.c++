@@ -11,8 +11,15 @@
 namespace workerd::api {
 
 jsg::JsValue SyncKvStorage::get(jsg::Lock& js, kj::String key) {
-  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_kv_get"_kjc);
+  TraceContext traceContext =
+      IoContext::current().makeUserTraceSpan("durable_object_storage_kv_get"_kjc);
+
   SqliteKv& sqliteKv = getSqliteKv(js);
+
+  traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
+  traceContext.setTag("db.operation.name"_kjc, "get"_kjc);
+  traceContext.setTag("cloudflare.durable_object.kv.query.keys"_kjc, key.asPtr());
+  traceContext.setTag("cloudflare.durable_object.kv.query.keys.count"_kjc, static_cast<int64_t>(1));
 
   kj::Maybe<jsg::JsValue> result;
   if (sqliteKv.get(key,
@@ -25,8 +32,34 @@ jsg::JsValue SyncKvStorage::get(jsg::Lock& js, kj::String key) {
 
 jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
     jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
-  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_kv_list"_kjc);
+  TraceContext traceContext =
+      IoContext::current().makeUserTraceSpan("durable_object_storage_kv_list"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
+
+  traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
+  traceContext.setTag("db.operation.name"_kjc, "list"_kjc);
+
+  KJ_IF_SOME(o, maybeOptions) {
+    KJ_IF_SOME(start, o.start) {
+      traceContext.setTag("cloudflare.durable_object.kv.query.start"_kjc, start.asPtr());
+    }
+    KJ_IF_SOME(startAfter, o.startAfter) {
+      traceContext.setTag("cloudflare.durable_object.kv.query.startAfter"_kjc, startAfter.asPtr());
+    }
+    KJ_IF_SOME(end, o.end) {
+      traceContext.setTag("cloudflare.durable_object.kv.query.end"_kjc, end.asPtr());
+    }
+    KJ_IF_SOME(prefix, o.prefix) {
+      traceContext.setTag("cloudflare.durable_object.kv.query.prefix"_kjc, prefix.asPtr());
+    }
+    KJ_IF_SOME(reverse, o.reverse) {
+      traceContext.setTag("cloudflare.durable_object.kv.query.reverse"_kjc, reverse);
+    }
+    KJ_IF_SOME(limit, o.limit) {
+      traceContext.setTag(
+          "cloudflare.durable_object.kv.query.limit"_kjc, static_cast<int64_t>(limit));
+    }
+  }
 
   // Convert our options to DurableObjectStorageOperations::ListOptions (which also have the
   // `allowConcurrency` and `noCache` options, which are irrelevant in the sync interface).
@@ -68,17 +101,34 @@ kj::Maybe<jsg::JsArray> SyncKvStorage::listNext(jsg::Lock& js, IoOwn<SqliteKv::L
 }
 
 void SyncKvStorage::put(jsg::Lock& js, kj::String key, jsg::JsValue value) {
-  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_kv_put"_kjc);
+  TraceContext traceContext =
+      IoContext::current().makeUserTraceSpan("durable_object_storage_kv_put"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
+
+  traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
+  traceContext.setTag("db.operation.name"_kjc, "put"_kjc);
+  traceContext.setTag("cloudflare.durable_object.kv.query.keys"_kjc, key.asPtr());
+  traceContext.setTag("cloudflare.durable_object.kv.query.keys.count"_kjc, static_cast<int64_t>(1));
 
   sqliteKv.put(key, serializeV8Value(js, value));
 }
 
 kj::OneOf<bool, int> SyncKvStorage::delete_(jsg::Lock& js, kj::String key) {
-  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_kv_delete"_kjc);
+  TraceContext traceContext =
+      IoContext::current().makeUserTraceSpan("durable_object_storage_kv_delete"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
 
-  return sqliteKv.delete_(key);
+  traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
+  traceContext.setTag("db.operation.name"_kjc, "delete"_kjc);
+  traceContext.setTag("cloudflare.durable_object.kv.query.keys"_kjc, key.asPtr());
+  traceContext.setTag("cloudflare.durable_object.kv.query.keys.count"_kjc, static_cast<int64_t>(1));
+
+  auto deleted = sqliteKv.delete_(key);
+
+  traceContext.setTag("cloudflare.durable_object.kv.response.deleted_count"_kjc,
+      static_cast<int64_t>(deleted ? 1 : 0));
+
+  return deleted;
 }
 
 }  // namespace workerd::api

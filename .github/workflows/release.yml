@@ -14,6 +14,10 @@ on:
         description: 'Is Prerelease'
         type: boolean
         default: false
+permissions:
+  id-token: write
+  contents: write
+  actions: write
 
 jobs:
   version:
@@ -73,31 +77,31 @@ jobs:
         include:
           - title: linux
             os-name: Linux
-            image: ubuntu-22.04
+            image: ubuntu-22.04-16core
             bazel-config: release_linux
             target-arch: X64
           - title: linux-arm64
             os-name: Linux
-            image: ubuntu-22.04-arm
+            image: ubuntu-22.04-arm-16core
             bazel-config: release_linux
             target-arch: ARM64
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
-          # release binaries on the macos-15 runner.
+          # release binaries on the macos-15-xlarge runner.
           - title: macOS-x64
             os-name: macOS
-            # This configuration is used for cross-compiling – macos-15 is Apple Silicon-based but
+            # This configuration is used for cross-compiling – macos-15-xlarge is Apple Silicon-based but
             # we use it to compile the x64 release.
-            image: macos-15
+            image: macos-15-xlarge
             bazel-config: release_macos_cross_x86_64
             target-arch: X64
           - title: macOS-arm64
             os-name: macOS
-            image: macos-15
+            image: macos-15-xlarge
             bazel-config: release_macos
             target-arch: ARM64
           - title: windows
             os-name: Windows
-            image: windows-2025
+            image: windows-2025-16core
             bazel-config: release_windows
             target-arch: X64
     name: build (${{ matrix.title }})
@@ -106,7 +110,7 @@ jobs:
       image: ${{ matrix.image }}
       os_name: ${{ matrix.os-name }}
       phase: '-release'
-      extra_bazel_args: '--strip=always --config=${{matrix.bazel-config}} --config=wpt-report'
+      extra_bazel_args: '--strip=always --config=${{matrix.bazel-config}} --config=ci-release --config=wpt-report'
       arch_name: ${{ matrix.target-arch }}
       upload_binary: true
       macos_use_lld: true
@@ -181,7 +185,7 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Modify package.json version
         run: node npm/scripts/bump-version.mjs npm/workerd-${{ matrix.arch }}/package.json
         env:
@@ -233,7 +237,7 @@ jobs:
   publish-wrapper:
     name: Publish `workerd` to NPM
     needs: [version, upload-artifacts]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -243,7 +247,7 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Cache
         id: cache
@@ -252,7 +256,7 @@ jobs:
         # sizes small and generate types with optimization enabled, should be slightly faster.
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
       - name: Build type generating Worker
@@ -288,16 +292,18 @@ jobs:
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd/.npmrc
       - run: cd npm/workerd && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
   build-and-publish-types:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     needs: [version, upload-artifacts]
     steps:
       - uses: actions/checkout@v4
         with:
           show-progress: false
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24 # needed for a version of npm that supports "trusted publishing".
       - name: Cache
         id: cache
         uses: actions/cache@v4
@@ -305,7 +311,7 @@ jobs:
         # sizes small and generate types with optimization enabled, should be slightly faster.
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
       - name: build types
@@ -320,5 +326,3 @@ jobs:
       - run: cp npm/workers-types/oldest/* npm/workers-types
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workers-types/.npmrc
       - run: cd npm/workers-types && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}

@@ -1,6 +1,6 @@
 import type { getRandomValues as getRandomValuesType } from 'pyodide-internal:topLevelEntropy/lib';
 import type { default as UnsafeEvalType } from 'internal:unsafe-eval';
-import { PythonRuntimeError } from 'pyodide-internal:util';
+import { PythonWorkersInternalError } from 'pyodide-internal:util';
 
 if (typeof FinalizationRegistry === 'undefined') {
   // @ts-expect-error cannot assign to globalThis
@@ -44,26 +44,52 @@ export function reportUndefinedSymbolsPatched(Module: Module): void {
   Module.reportUndefinedSymbols();
 }
 
-export function patchDynlibLookup(Module: Module, libName: string): Uint8Array {
+function dynlibLookup026Helper(
+  Module: Module,
+  path: string
+): string | undefined {
+  try {
+    Module.FS.lookupPath(path);
+  } catch (e) {
+    return undefined;
+  }
+  return path;
+}
+
+function dynlibLookup026(Module: Module, libName: string): string {
   // This function is for 0.26.0a2 only. In newer versions, we set LD_LIBRARY_PATH instead.
   if (Module.API.version !== '0.26.0a2') {
-    throw new Error('Should not happen');
+    throw new PythonWorkersInternalError('Should not happen');
   }
-  try {
-    return Module.FS.readFile('/usr/lib/' + libName);
-  } catch (e) {
-    try {
-      // For scipy and similar libraries that depend on Pyodide's dynamic library deps, we may need
-      // extra "system libraries". These we'll put in python_modules/lib. So try loading system
-      // libraries from there too.
-      return Module.FS.readFile(
-        '/session/metadata/python_modules/lib/' + libName
-      );
-    } catch (e) {
-      console.error('Failed to read ', libName, e);
-      throw e;
+  // Most libraries are loaded from /usr/lib. For scipy and similar libraries that depend on
+  // Pyodide's dynamic library deps, we may need extra "system libraries". These we'll put in
+  // python_modules/lib. So try loading system libraries from there too.
+  const result =
+    dynlibLookup026Helper(Module, '/usr/lib/' + libName) ??
+    dynlibLookup026Helper(
+      Module,
+      '/session/metadata/python_modules/lib/' + libName
+    );
+  if (!result) {
+    console.error('Failed to read ', libName);
+    throw new PythonWorkersInternalError('Should not happen');
+  }
+  return result;
+}
+
+export function patchedLoadLibData(
+  Module: Module,
+  path: string,
+  rpath: any
+): WebAssembly.Module {
+  if (!path.startsWith('/')) {
+    if (Module.API.version === '0.26.0a2') {
+      path = dynlibLookup026(Module, path);
+    } else {
+      path = Module.findLibraryFS(path, rpath);
     }
   }
+  return Module.compileModuleFromReadOnlyFS(Module, path);
 }
 
 export function patchedApplyFunc(
@@ -196,14 +222,16 @@ function checkCallee(): void {
   }
   if (!isOkay) {
     console.warn('Invalid call to `WebAssembly.Module`', funcName);
-    throw new PythonRuntimeError('Invalid call to `WebAssembly.Module`');
+    throw new PythonWorkersInternalError(
+      'Invalid call to `WebAssembly.Module`'
+    );
   }
 }
 
 /**
- * Helper function for checkCallee, returns `true` if the callee is
- * `convertJsFunctionToWasm` or `loadModule` in `pyodide.asm.js`, `false` if not. This will set
- * the `stack` field in the error so we can read back the result there.
+ * Helper function for checkCallee, returns `true` if the callee is `convertJsFunctionToWasm`,
+ * `generate`, or `getPyEMCountArgsPtr` in `pyodide.asm.js`, `false` if not. This will set the
+ * `stack` field in the error so we can read back the result there.
  */
 function prepareStackTrace(
   _error: Error,
@@ -224,12 +252,9 @@ function prepareStackTrace(
       return [false, funcName];
     }
     return [
-      [
-        'loadModule',
-        'convertJsFunctionToWasm',
-        'generate',
-        'getPyEMCountArgsPtr',
-      ].includes(funcName),
+      ['convertJsFunctionToWasm', 'generate', 'getPyEMCountArgsPtr'].includes(
+        funcName
+      ),
       funcName,
     ];
   } catch (e) {

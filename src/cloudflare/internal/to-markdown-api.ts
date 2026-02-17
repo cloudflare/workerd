@@ -6,20 +6,57 @@ interface Fetcher {
   fetch: typeof fetch;
 }
 
-export type ConversionResponse = {
+export type MarkdownDocument = {
   name: string;
-  mimeType: string;
-} & (
+  blob: Blob;
+};
+
+export type ConversionResponse =
   | {
+      id: string;
+      name: string;
+      mimeType: string;
       format: 'markdown';
       tokens: number;
       data: string;
     }
   | {
+      id: string;
+      name: string;
+      mimeType: string;
       format: 'error';
       error: string;
-    }
-);
+    };
+
+export type ImageConversionOptions = {
+  descriptionLanguage?: 'en' | 'es' | 'fr' | 'it' | 'pt' | 'de';
+};
+
+export type EmbeddedImageConversionOptions = ImageConversionOptions & {
+  convert?: boolean;
+  maxConvertedImages?: number;
+};
+
+export type ConversionOptions = {
+  html?: {
+    images?: EmbeddedImageConversionOptions & { convertOGImage?: boolean };
+    hostname?: string;
+  };
+  docx?: {
+    images?: EmbeddedImageConversionOptions;
+  };
+  image?: ImageConversionOptions;
+  pdf?: {
+    images?: EmbeddedImageConversionOptions;
+    metadata?: boolean;
+  };
+};
+
+export type ConversionRequestOptions = {
+  gateway?: GatewayOptions;
+  extraHeaders?: object;
+  conversionOptions?: ConversionOptions;
+};
 
 export type SupportedFileFormat = {
   mimeType: string;
@@ -39,19 +76,16 @@ export class ToMarkdownService {
   }
 
   async transform(
-    files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse[]>;
   async transform(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse>;
   async transform(
-    files: { name: string; blob: Blob } | { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument | MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse | ConversionResponse[]> {
     const input = Array.isArray(files) ? files : [files];
 
@@ -92,15 +126,15 @@ export class ToMarkdownService {
 
     const data = (await res.json()) as { result: ConversionResponse[] };
 
+    // If the user sent a list of files, return an array of results, otherwise, return just the first object
+    if (Array.isArray(files)) {
+      return data.result;
+    }
+
     if (data.result.length === 0) {
       throw new AiInternalError(
         'Internal Error Converting files into Markdown'
       );
-    }
-
-    // If the user sent a list of files, return an array of results, otherwise, return just the first object
-    if (Array.isArray(files)) {
-      return data.result;
     }
 
     const obj = data.result.at(0);

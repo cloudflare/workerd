@@ -54,8 +54,8 @@ class R2Admin: public jsg::Object {
         : R2Bucket(featureFlags, subrequestChannel, kj::mv(name), R2Bucket::friend_tag_t{}),
           created(created) {}
 
-    kj::String getName() const {
-      return kj::str(KJ_ASSERT_NONNULL(adminBucketName()));
+    kj::StringPtr getName() const {
+      return KJ_ASSERT_NONNULL(adminBucketName());
     }
     kj::Date getCreated() const {
       return created;

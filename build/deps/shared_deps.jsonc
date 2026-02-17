@@ -107,7 +107,6 @@
       "file_type": "executable",
       "freeze_version": "llvm-18.1.8"
     },
-    //wpt
     {
       "name": "wpt",
       "type": "github_release",
@@ -115,16 +114,7 @@
       "repo": "workerd-tools",
       "file_regex": "wpt-.*.tar.gz",
       "build_file": "@workerd//:build/BUILD.wpt",
-      "freeze_version": "wpt-c1ad85a22"
-    },
-    {
-      "name": "workerd-cxx",
-      "type": "github_tarball",
-      "owner": "cloudflare",
-      "repo": "workerd-cxx",
-      "repo_mapping": {
-        "@crates.io": "@crates_vendor"
-      }
+      "freeze_version": "wpt-11b9300f1"
     }
   ]
 }

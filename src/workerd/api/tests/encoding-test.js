@@ -401,10 +401,10 @@ export const allTheDecoders = {
       ['utf-8', 'utf-8'],
       ['utf8', 'utf-8'],
       ['x-unicode20utf8', 'utf-8'],
-      ['866', 'ibm-866'],
-      ['cp866', 'ibm-866'],
-      ['csibm866', 'ibm-866'],
-      ['ibm866', 'ibm-866'],
+      ['866', 'ibm866'],
+      ['cp866', 'ibm866'],
+      ['csibm866', 'ibm866'],
+      ['ibm866', 'ibm866'],
       ['csisolatin2', 'iso-8859-2'],
       ['iso-8859-2', 'iso-8859-2'],
       ['iso-ir-101', 'iso-8859-2'],
@@ -589,14 +589,14 @@ export const allTheDecoders = {
       ['x-euc-jp', 'euc-jp'],
       ['csiso2022jp', 'iso-2022-jp'],
       ['iso-2022-jp', 'iso-2022-jp'],
-      ['csshiftjis', 'shift-jis'],
-      ['ms932', 'shift-jis'],
-      ['ms_kanji', 'shift-jis'],
-      ['shift-jis', 'shift-jis'],
-      ['shift_jis', 'shift-jis'],
-      ['sjis', 'shift-jis'],
-      ['windows-31j', 'shift-jis'],
-      ['x-sjis', 'shift-jis'],
+      ['csshiftjis', 'shift_jis'],
+      ['ms932', 'shift_jis'],
+      ['ms_kanji', 'shift_jis'],
+      ['shift-jis', 'shift_jis'],
+      ['shift_jis', 'shift_jis'],
+      ['sjis', 'shift_jis'],
+      ['windows-31j', 'shift_jis'],
+      ['x-sjis', 'shift_jis'],
       ['cseuckr', 'euc-kr'],
       ['csksc56011987', 'euc-kr'],
       ['euc-kr', 'euc-kr'],
@@ -622,7 +622,7 @@ export const allTheDecoders = {
       ['unicodefeff', 'utf-16le'],
       ['utf-16', 'utf-16le'],
       ['utf-16le', 'utf-16le'],
-      ['x-user-defined', undefined],
+      ['x-user-defined', 'x-user-defined'],
       // Test that match is case-insensitive
       ['UTF-8', 'utf-8'],
       ['UtF-8', 'utf-8'],
@@ -645,6 +645,125 @@ export const allTheDecoders = {
   },
 };
 
+// Test that windows-1252 correctly decodes bytes 0x80-0x9F.
+// These bytes differ between windows-1252 and ISO-8859-1/Latin-1.
+// Per the WHATWG Encoding Standard, labels like "ascii", "latin1", and
+// "iso-8859-1" all map to windows-1252, so they must produce the
+// windows-1252 code points — not the raw byte values (C1 control chars).
+// See: https://encoding.spec.whatwg.org/#names-and-labels
+export const windows1252Decode = {
+  test() {
+    // The windows-1252 mapping for bytes 0x80-0x9F per the WHATWG Encoding Standard.
+    // See: https://encoding.spec.whatwg.org/index-windows-1252.txt
+    // Bytes 0x81, 0x8D, 0x8F, 0x90, 0x9D map to their C1 control character
+    // code points (identity) rather than being undefined.
+    const win1252UpperTable = {
+      0x80: 0x20ac, // € Euro Sign
+      0x81: 0x0081, // <control>
+      0x82: 0x201a, // ‚ Single Low-9 Quotation Mark
+      0x83: 0x0192, // ƒ Latin Small Letter F With Hook
+      0x84: 0x201e, // „ Double Low-9 Quotation Mark
+      0x85: 0x2026, // … Horizontal Ellipsis
+      0x86: 0x2020, // † Dagger
+      0x87: 0x2021, // ‡ Double Dagger
+      0x88: 0x02c6, // ˆ Modifier Letter Circumflex Accent
+      0x89: 0x2030, // ‰ Per Mille Sign
+      0x8a: 0x0160, // Š Latin Capital Letter S With Caron
+      0x8b: 0x2039, // ‹ Single Left-Pointing Angle Quotation Mark
+      0x8c: 0x0152, // Œ Latin Capital Ligature OE
+      0x8d: 0x008d, // <control>
+      0x8e: 0x017d, // Ž Latin Capital Letter Z With Caron
+      0x8f: 0x008f, // <control>
+      0x90: 0x0090, // <control>
+      0x91: 0x2018, // ' Left Single Quotation Mark
+      0x92: 0x2019, // ' Right Single Quotation Mark
+      0x93: 0x201c, // " Left Double Quotation Mark
+      0x94: 0x201d, // " Right Double Quotation Mark
+      0x95: 0x2022, // • Bullet
+      0x96: 0x2013, // – En Dash
+      0x97: 0x2014, // — Em Dash
+      0x98: 0x02dc, // ˜ Small Tilde
+      0x99: 0x2122, // ™ Trade Mark Sign
+      0x9a: 0x0161, // š Latin Small Letter S With Caron
+      0x9b: 0x203a, // › Single Right-Pointing Angle Quotation Mark
+      0x9c: 0x0153, // œ Latin Small Ligature OE
+      0x9d: 0x009d, // <control>
+      0x9e: 0x017e, // ž Latin Small Letter Z With Caron
+      0x9f: 0x0178, // Ÿ Latin Capital Letter Y With Diaeresis
+    };
+
+    // Test with all aliases that map to windows-1252
+    for (const label of [
+      'windows-1252',
+      'ascii',
+      'latin1',
+      'iso-8859-1',
+      'us-ascii',
+    ]) {
+      const decoder = new TextDecoder(label);
+      for (const [byte, expectedCodePoint] of Object.entries(
+        win1252UpperTable
+      )) {
+        const byteVal = Number(byte);
+        const decoded = decoder.decode(Uint8Array.of(byteVal));
+        const actualCodePoint = decoded.codePointAt(0);
+        strictEqual(
+          actualCodePoint,
+          expectedCodePoint,
+          `${label}: byte 0x${byteVal.toString(16)} should decode to ` +
+            `U+${expectedCodePoint.toString(16).toUpperCase().padStart(4, '0')}, ` +
+            `got U+${actualCodePoint.toString(16).toUpperCase().padStart(4, '0')}`
+        );
+      }
+    }
+
+    // Verify that bytes outside 0x80-0x9F still work correctly
+    const decoder = new TextDecoder('windows-1252');
+    // ASCII range (0x00-0x7F) should be identity
+    strictEqual(decoder.decode(Uint8Array.of(0x41)).codePointAt(0), 0x41); // 'A'
+    strictEqual(decoder.decode(Uint8Array.of(0x7f)).codePointAt(0), 0x7f);
+    // 0xA0-0xFF range is identical between latin-1 and windows-1252
+    strictEqual(decoder.decode(Uint8Array.of(0xa2)).codePointAt(0), 0xa2); // ¢
+    strictEqual(decoder.decode(Uint8Array.of(0xff)).codePointAt(0), 0xff); // ÿ
+  },
+};
+
+// Per the WHATWG encoding spec (section 10.1.1), GBK's decoder is gb18030's decoder.
+// The .encoding property must still return "gbk", but decoding results must match gb18030.
+// https://encoding.spec.whatwg.org/#gbk-decoder
+export const gbkDecoderIsGb18030Decoder = {
+  test() {
+    const gbk = new TextDecoder('gbk');
+    const gb18030 = new TextDecoder('gb18030');
+
+    // .encoding property must still distinguish the two
+    strictEqual(gbk.encoding, 'gbk');
+    strictEqual(gb18030.encoding, 'gb18030');
+
+    // Decoding results must be identical. These byte pairs exercise boundary
+    // conditions where gbk and gb18030 would diverge if the ICU converter
+    // for gbk were used directly instead of delegating to gb18030.
+    const testBytes = [
+      [0, 255],
+      [128, 255],
+      [129, 48],
+      [129, 255],
+      [254, 48],
+      [254, 255],
+      [255, 0],
+      [255, 255],
+    ];
+    for (const bytes of testBytes) {
+      const u8 = Uint8Array.from(bytes);
+      strictEqual(
+        gbk.decode(u8),
+        gb18030.decode(u8),
+        `gbk and gb18030 must decode [${bytes}] identically`
+      );
+    }
+  },
+};
+
 export const textDecoderStream = {
   test() {
     const stream = new TextDecoderStream('utf-16', {
@@ -657,5 +776,67 @@ export const textDecoderStream = {
 
     const enc = new TextEncoderStream();
     strictEqual(enc.encoding, 'utf-8');
+  },
+};
+
+// Test x-user-defined encoding per WHATWG spec
+// https://encoding.spec.whatwg.org/#x-user-defined-decoder
+export const xUserDefinedDecode = {
+  test() {
+    const decoder = new TextDecoder('x-user-defined');
+    strictEqual(decoder.encoding, 'x-user-defined');
+    strictEqual(decoder.fatal, false);
+    strictEqual(decoder.ignoreBOM, false);
+
+    // Test ASCII bytes (0x00-0x7F) - identity mapping
+    strictEqual(decoder.decode(Uint8Array.of(0x41)), 'A');
+    strictEqual(decoder.decode(Uint8Array.of(0x00)), '\u0000');
+    strictEqual(decoder.decode(Uint8Array.of(0x7f)), '\u007F');
+
+    // Test high bytes (0x80-0xFF) - map to Private Use Area U+F780-U+F7FF
+    strictEqual(decoder.decode(Uint8Array.of(0x80)), '\uF780');
+    strictEqual(decoder.decode(Uint8Array.of(0x81)), '\uF781');
+    strictEqual(decoder.decode(Uint8Array.of(0xff)), '\uF7FF');
+
+    // Test mixed sequence
+    const mixed = new Uint8Array([0x00, 0x7f, 0x80, 0x81, 0xff]);
+    strictEqual(decoder.decode(mixed), '\u0000\u007F\uF780\uF781\uF7FF');
+
+    // Test empty input
+    strictEqual(decoder.decode(new Uint8Array([])), '');
+    strictEqual(decoder.decode(), '');
+
+    // Test pure ASCII input (fast path)
+    strictEqual(
+      decoder.decode(new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f])),
+      'Hello'
+    );
+
+    // Test streaming (x-user-defined is single-byte, streaming is trivial)
+    const streamDecoder = new TextDecoder('x-user-defined');
+    let result = '';
+    result += streamDecoder.decode(Uint8Array.of(0x41), { stream: true });
+    result += streamDecoder.decode(Uint8Array.of(0x80), { stream: true });
+    result += streamDecoder.decode(Uint8Array.of(0xff), { stream: true });
+    result += streamDecoder.decode();
+    strictEqual(result, 'A\uF780\uF7FF');
+  },
+};
+
+// Test x-user-defined with fatal option (all 256 bytes are valid)
+export const xUserDefinedFatal = {
+  test() {
+    const decoder = new TextDecoder('x-user-defined', { fatal: true });
+    strictEqual(decoder.fatal, true);
+
+    // All 256 byte values are valid, fatal mode should never throw
+    for (let byte = 0; byte < 256; byte++) {
+      const decoded = decoder.decode(Uint8Array.of(byte));
+      if (byte < 0x80) {
+        strictEqual(decoded.codePointAt(0), byte);
+      } else {
+        strictEqual(decoded.codePointAt(0), 0xf700 + byte);
+      }
+    }
   },
 };

@@ -45,7 +45,7 @@ rust_library(
     ],
     version = "0.2.7",
     deps = [
-        "@crates_vendor__bytes-1.10.1//:bytes",
+        "@crates_vendor__bytes-1.11.1//:bytes",
         "@crates_vendor__serde-1.0.228//:serde",
     ],
 )

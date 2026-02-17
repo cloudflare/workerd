@@ -1,8 +1,21 @@
 #pragma once
 
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/script.h>
 #include <workerd/jsg/url.h>
+
+#include <csignal>
+#include <iostream>
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
+#include <workerd/api/fuzzilli.h>
 
 namespace workerd::api {
 
@@ -60,16 +73,60 @@ class UnsafeEval: public jsg::Object {
   }
 };
 
+// A special binding that allows access to stdin. Used for REPL.
+class Stdin: public jsg::Object {
+ public:
+  Stdin() = default;
+
+  void reprl(jsg::Lock& js);
+
+  kj::String getline(jsg::Lock& js) {
+    std::string res;
+    std::getline(std::cin, res);
+    return kj::heapString(res.c_str());
+  }
+
+  JSG_RESOURCE_TYPE(Stdin) {
+    JSG_METHOD(getline);
+#ifdef WORKERD_FUZZILLI
+    JSG_METHOD(reprl);
+#endif
+  }
+};
+
 class UnsafeModule: public jsg::Object {
  public:
   UnsafeModule() = default;
   UnsafeModule(jsg::Lock&, const jsg::Url&) {}
   jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);
 
+  // Returns true if the TEST_WORKERD autogate is enabled.
+  // This is used to verify that the all-autogates test variant is working correctly.
+  bool isTestAutogateEnabled();
+
   JSG_RESOURCE_TYPE(UnsafeModule) {
     JSG_METHOD(abortAllDurableObjects);
+    JSG_METHOD(isTestAutogateEnabled);
   }
 };
+
+#ifdef WORKERD_FUZZILLI
+// Fuzzilli fuzzing support for triggering crashes and printing debug output
+class Fuzzilli: public jsg::Object {
+ public:
+  Fuzzilli() = default;
+  Fuzzilli(jsg::Lock&, const jsg::Url&) {}
+
+  // Fuzzilli function for triggering crashes or printing debug output
+  // fuzzilli('FUZZILLI_CRASH', type: number): Triggers a crash based on type
+  // fuzzilli('FUZZILLI_PRINT', message: string): Prints message to fuzzer output
+  void fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args);
+
+  JSG_RESOURCE_TYPE(Fuzzilli) {
+    JSG_METHOD(fuzzilli);
+  }
+};
+#endif
 
 template <class Registry>
 void registerUnsafeModule(Registry& registry) {
@@ -79,12 +136,25 @@ void registerUnsafeModule(Registry& registry) {
       "workerd:unsafe-eval", workerd::jsg::ModuleRegistry::Type::BUILTIN);
 }
 
-#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, api::UnsafeModule
+#ifdef WORKERD_FUZZILLI
+#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, api::UnsafeModule, api::Stdin, api::Fuzzilli
+#else
+#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, api::UnsafeModule, api::Stdin
+#endif
 
 template <class Registry>
 void registerUnsafeModules(Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<UnsafeEval>(
       "internal:unsafe-eval", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+#ifdef WORKERD_FUZZILLI
+  registry.template addBuiltinModule<Stdin>(
+      "workerd:stdin", workerd::jsg::ModuleRegistry::Type::BUILTIN);
+
+  if (featureFlags.getWorkerdExperimental()) {
+    registry.template addBuiltinModule<Fuzzilli>(
+        "workerd:fuzzilli", workerd::jsg::ModuleRegistry::Type::BUILTIN);
+  }
+#endif
 }
 
 template <typename TypeWrapper>

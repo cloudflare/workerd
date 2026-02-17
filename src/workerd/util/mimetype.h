@@ -4,6 +4,7 @@
 #pragma once
 
 #include <workerd/jsg/memory.h>
+#include <workerd/util/strings.h>
 
 #include <kj/common.h>
 #include <kj/map.h>
@@ -13,6 +14,45 @@ namespace workerd {
 
 template <size_t>
 class StringBuffer;
+class MimeType;
+class ConstMimeType final {
+ public:
+  constexpr ConstMimeType(kj::StringPtr type, kj::StringPtr subtype)
+      : type_(type),
+        subtype_(subtype) {}
+
+  constexpr kj::StringPtr type() const {
+    return type_;
+  }
+  constexpr kj::StringPtr subtype() const {
+    return subtype_;
+  }
+
+  constexpr bool operator==(const ConstMimeType& other) const {
+    return this == &other || (type_ == other.type_ && subtype_ == other.subtype_);
+  }
+
+  bool operator==(const MimeType& other) const;
+  operator MimeType() const;
+  MimeType clone() const;
+
+  inline kj::String toString() const {
+    return kj::str(type_, "/", subtype_);
+  }
+
+  inline kj::String essence() const {
+    return toString();
+  }
+
+ private:
+  kj::StringPtr type_;
+  kj::StringPtr subtype_;
+};
+
+template <typename T>
+concept IsMimeType = kj::isSameType<T, MimeType>() || kj::isSameType<T, ConstMimeType>();
+static_assert(IsMimeType<MimeType>);
+static_assert(IsMimeType<ConstMimeType>);
 
 class MimeType final {
  public:
@@ -35,6 +75,7 @@ class MimeType final {
 
   explicit MimeType(
       kj::StringPtr type, kj::StringPtr subtype, kj::Maybe<MimeParams> params = kj::none);
+  explicit MimeType(kj::String type, kj::String subtype, kj::Maybe<MimeParams> params = kj::none);
 
   MimeType(MimeType&&) = default;
   MimeType& operator=(MimeType&&) = default;
@@ -68,35 +109,83 @@ class MimeType final {
 
   operator kj::String() const;
 
-  static bool isXml(const MimeType& mimeType);
-  static bool isJson(const MimeType& mimeType);
-  static bool isFont(const MimeType& mimeType);
-  static bool isJavascript(const MimeType& mimeType);
-  static bool isImage(const MimeType& mimeType);
-  static bool isVideo(const MimeType& mimeType);
-  static bool isAudio(const MimeType& mimeType);
-  static bool isText(const MimeType& mimeType);
+  template <IsMimeType T>
+  static constexpr bool isXml(const T& mimeType) {
+    auto type = mimeType.type();
+    auto subtype = mimeType.subtype();
+    return (type == "text" || type == "application") &&
+        (subtype == "xml" || subtype.endsWith("+xml"));
+  }
 
-  static const MimeType JSON;
+  template <IsMimeType T>
+  static constexpr bool isJson(const T& mimeType) {
+    auto type = mimeType.type();
+    auto subtype = mimeType.subtype();
+    return (type == "text" || type == "application") &&
+        (subtype == "json" || subtype.endsWith("+json"));
+  }
+
+  template <IsMimeType T>
+  static constexpr bool isFont(const T& mimeType) {
+    auto type = mimeType.type();
+    auto subtype = mimeType.subtype();
+    return (type == "font" || type == "application") &&
+        (subtype.startsWith("font-") || subtype.startsWith("x-font-"));
+  }
+
+  template <IsMimeType T>
+  static constexpr bool isJavascript(const T& mimeType) {
+    return JAVASCRIPT == mimeType || XJAVASCRIPT == mimeType || TEXT_JAVASCRIPT == mimeType;
+  }
+
+  template <IsMimeType T>
+  static constexpr bool isText(const T& mimeType) {
+    auto type = mimeType.type();
+    auto subtype = mimeType.subtype();
+    return type == "text" || isXml(mimeType) || isJson(mimeType) || isJavascript(mimeType) ||
+        (type == "application" && subtype == "dns-json");
+  }
+
+  template <IsMimeType T>
+  static constexpr bool isImage(const T& mimeType) {
+    return mimeType.type() == "image";
+  }
+
+  template <IsMimeType T>
+  static constexpr bool isVideo(const T& mimeType) {
+    return mimeType.type() == "video";
+  }
+
+  template <IsMimeType T>
+  static constexpr bool isAudio(const T& mimeType) {
+    return mimeType.type() == "audio";
+  }
+
   static const MimeType PLAINTEXT;
   static const MimeType PLAINTEXT_ASCII;
-  static const MimeType FORM_URLENCODED;
-  static const MimeType FORM_DATA;
-  static const MimeType OCTET_STREAM;
-  static const MimeType XHTML;
-  static const MimeType JAVASCRIPT;
-  static const MimeType XJAVASCRIPT;
-  static const MimeType HTML;
-  static const MimeType CSS;
-  static const MimeType TEXT_JAVASCRIPT;
-  static const MimeType MANIFEST_JSON;
-  static const MimeType VTT;
-  static const MimeType EVENT_STREAM;
-  static const MimeType WILDCARD;
+  static constexpr ConstMimeType JSON = ConstMimeType("application"_kj, "json"_kj);
+  static constexpr ConstMimeType FORM_URLENCODED =
+      ConstMimeType("application"_kj, "x-www-form-urlencoded"_kj);
+  static constexpr ConstMimeType FORM_DATA = ConstMimeType("multipart"_kj, "form-data"_kj);
+  static constexpr ConstMimeType OCTET_STREAM = ConstMimeType("application"_kj, "octet-stream"_kj);
+  static constexpr ConstMimeType XHTML = ConstMimeType("application"_kj, "xhtml+xml"_kj);
+  static constexpr ConstMimeType JAVASCRIPT = ConstMimeType("application"_kj, "javascript"_kj);
+  static constexpr ConstMimeType XJAVASCRIPT = ConstMimeType("application"_kj, "x-javascript"_kj);
+  static constexpr ConstMimeType TEXT_JAVASCRIPT = ConstMimeType("text"_kj, "javascript"_kj);
+  static constexpr ConstMimeType HTML = ConstMimeType("text"_kj, "html"_kj);
+  static constexpr ConstMimeType CSS = ConstMimeType("text"_kj, "css"_kj);
+  static constexpr ConstMimeType MANIFEST_JSON =
+      ConstMimeType("application"_kj, "manifest+json"_kj);
+  static constexpr ConstMimeType VTT = ConstMimeType("text"_kj, "vtt"_kj);
+  static constexpr ConstMimeType EVENT_STREAM = ConstMimeType("text"_kj, "event-stream"_kj);
+  static constexpr ConstMimeType WILDCARD = ConstMimeType("*"_kj, "*"_kj);
 
   // exposed directly for performance reasons
-  static const kj::StringPtr PLAINTEXT_STRING;
-  static const kj::StringPtr PLAINTEXT_ASCII_STRING;
+  static constexpr kj::StringPtr PLAINTEXT_STRING = "text/plain;charset=UTF-8"_kj;
+  static constexpr kj::StringPtr PLAINTEXT_ASCII_STRING = "text/plain;charset=US-ASCII"_kj;
+
+  static kj::String formDataWithBoundary(kj::StringPtr boundary);
+  static kj::String formUrlEncodedWithCharset(kj::StringPtr charset);
 
   // Extracts a mime type from a concatenated list of content-type values
   // per the algorithm defined in the fetch spec:
@@ -123,6 +212,19 @@ class MimeType final {
       kj::ArrayPtr<const char> input, ParseOptions options = ParseOptions::DEFAULT);
 };
 
+inline ConstMimeType::operator MimeType() const {
+  return MimeType(type_, subtype_);
+}
+
+inline MimeType ConstMimeType::clone() const {
+  return *this;
+}
+
+inline bool ConstMimeType::operator==(const MimeType& other) const {
+  return type_ == other.type() && subtype_ == other.subtype();
+}
+
 kj::String KJ_STRINGIFY(const MimeType& state);
+kj::String KJ_STRINGIFY(const ConstMimeType& state);
 
 }  // namespace workerd

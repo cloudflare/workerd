@@ -47,8 +47,12 @@ export const TRANSITIVE_REQUIREMENTS =
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 
 export type CompatibilityFlags = MetadataReader.CompatibilityFlags;
-export const COMPATIBILITY_FLAGS: MetadataReader.CompatibilityFlags =
-  MetadataReader.getCompatibilityFlags();
+export const COMPATIBILITY_FLAGS: MetadataReader.CompatibilityFlags = {
+  // Compat flags returned from getCompatibilityFlags is immutable,
+  // but in Pyodide 0.26, we modify the JS object that is exposed to the Python through
+  // registerJsModule so we create a new object here by copying the values.
+  ...MetadataReader.getCompatibilityFlags(),
+};
 export const WORKFLOWS_ENABLED: boolean =
   !!COMPATIBILITY_FLAGS.python_workflows;
 const NO_GLOBAL_HANDLERS: boolean =
@@ -62,3 +66,7 @@ const EXTERNAL_SDK = !!COMPATIBILITY_FLAGS.enable_python_external_sdk;
 export const LEGACY_GLOBAL_HANDLERS = !NO_GLOBAL_HANDLERS;
 export const LEGACY_VENDOR_PATH = !FORCE_NEW_VENDOR_PATH;
 export const LEGACY_INCLUDE_SDK = !EXTERNAL_SDK;
+export const CHECK_RNG_STATE = !!COMPATIBILITY_FLAGS.python_check_rng_state;
+
+export const setCpuLimitNearlyExceededCallback =
+  MetadataReader.setCpuLimitNearlyExceededCallback.bind(MetadataReader);

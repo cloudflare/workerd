@@ -11,10 +11,10 @@
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
-#include <workerd/io/limit-enforcer.h>
+#include <workerd/io/io-timers.h>
+#include <workerd/io/observer.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace.h>
-#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-source.h>
 #include <workerd/jsg/async-context.h>
@@ -22,7 +22,6 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/util/strong-bool.h>
-#include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
@@ -54,6 +53,10 @@ struct EmscriptenRuntime;
 KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api
+
+class IsolateLimitEnforcer;
+enum class UncaughtExceptionSource;
+class VirtualFileSystem;
 
 class ThreadContext;
 class IoContext;
@@ -125,8 +128,8 @@ class Worker: public kj::AtomicRefcounted {
     ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY;
     StructuredLogging structuredLogging = StructuredLogging::NO;
     ProcessStdioPrefixed processStdioPrefixed = ProcessStdioPrefixed::YES;
-    kj::String stdoutPrefix = kj::str("stdout:"_kj);
-    kj::String stderrPrefix = kj::str("stderr:"_kj);
+    kj::ConstString stdoutPrefix = "stdout:"_kjc;
+    kj::ConstString stderrPrefix = "stderr:"_kjc;
 
     LoggingOptions() = default;
     LoggingOptions(LoggingOptions&&) = default;
@@ -138,15 +141,15 @@ class Worker: public kj::AtomicRefcounted {
         : consoleMode(other.consoleMode),
           structuredLogging(other.structuredLogging),
           processStdioPrefixed(other.processStdioPrefixed),
-          stdoutPrefix(kj::str(other.stdoutPrefix)),
-          stderrPrefix(kj::str(other.stderrPrefix)) {}
+          stdoutPrefix(other.stdoutPrefix.clone()),
+          stderrPrefix(other.stderrPrefix.clone()) {}
 
     LoggingOptions& operator=(const LoggingOptions& other) {
       consoleMode = other.consoleMode;
       structuredLogging = other.structuredLogging;
       processStdioPrefixed = other.processStdioPrefixed;
-      stdoutPrefix = kj::str(other.stdoutPrefix);
-      stderrPrefix = kj::str(other.stderrPrefix);
+      stdoutPrefix = other.stdoutPrefix.clone();
+      stderrPrefix = other.stderrPrefix.clone();
       return *this;
     }
   };
@@ -158,7 +161,7 @@ class Worker: public kj::AtomicRefcounted {
           v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports)> compileBindings,
       IsolateObserver::StartType startType,
-      TraceParentContext spans,
+      SpanParent parentSpan,
       LockType lockType,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Duration&> startupTime = kj::none);
@@ -372,6 +375,16 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Get the current Worker::Isolate from the current jsg::Lock
   static const Isolate& from(jsg::Lock& js);
 
+  // This callback gets executed when the CPU limiter is nearly out of time. It has to be signal
+  // safe since we call it in a signal handler.
+  //
+  // We give a reference to the callback to the limit enforcer, so it has to outlive the limit
+  // enforcer. The Isolate outlives the limit enforcer. If this function is called a second time, we
+  // throw to avoid invalidating references.
+  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const;
+  // Returns a reference to cpuLimitNearlyExceededCallback. Can't outlive the Isolate.
+  kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
+
   inline IsolateObserver& getMetrics() {
     return *metrics;
   }
@@ -516,6 +529,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   kj::String id;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
+  kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>> cpuLimitNearlyExceededCallback;
   kj::Own<Api> api;
   LoggingOptions loggingOptions;
 
@@ -580,6 +594,9 @@ class Worker::Api {
   static const Api& current();
   // TODO(cleanup): This is a hack thrown in quickly because IoContext::current() doesn't work in
   //   the global scope (when no request is running). We need a better design here.
+
+  // Like `current()`, but returns `kj::none` if there is no current Api instance.
+  static kj::Maybe<const Api&> tryCurrent();
 
   // Take a lock on the isolate.
   virtual kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const = 0;
@@ -747,6 +764,9 @@ class Worker::Lock {
 
   // Get the C++ object representing the global scope.
   api::ServiceWorkerGlobalScope& getGlobalScope();
+
+  // Get the timeout ID generator from this worker's ServiceWorkerGlobalScope.
+  TimeoutId::Generator& getTimeoutIdGenerator();
 
   // Get the opaque storage key to use for recording trace information in async contexts.
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();

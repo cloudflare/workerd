@@ -1,0 +1,36 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "cache-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "cache-operations-test.js" )
+        ],
+        cacheApiOutbound = "cache-backend",
+        compatibilityFlags = ["nodejs_compat"],
+        streamingTails = ["tail"],
+      )
+    ),
+    ( name = "cache-backend",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "cache-mock.js" )
+        ],
+      )
+    ),
+    (name = "tail", worker = .tailWorker, ),
+  ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
+    ]
+  ) ]
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "cache-instrumentation-test.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);

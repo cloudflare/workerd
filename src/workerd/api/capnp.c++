@@ -70,8 +70,8 @@ struct JsCapnpConverter {
             // not exactly representable as a double, so casting it to double will actually change
             // the value (rounding it up to 2^64). The compiler will rightly produce a warning about
             // this.
-            if (value >= 0 && value < 0x1p64 && value == uint64_t(value)) {
-              return uint64_t(value);
+            if (value >= 0 && value < 0x1p64 && value == static_cast<uint64_t>(value)) {
+              return static_cast<uint64_t>(value);
             }
           } else {
             // Let V8 decide what types can be implicitly cast to BigInt.
@@ -88,8 +88,8 @@ struct JsCapnpConverter {
           // (See comments above for UInt64 case.)
           if (jsValue->IsNumber()) {
             double value = jsg::check(jsValue->NumberValue(js.v8Context()));
-            if (value >= -0x1p63 && value < 0x1p63 && value == uint64_t(value)) {
-              return uint64_t(value);
+            if (value >= -0x1p63 && value < 0x1p63 && value == static_cast<uint64_t>(value)) {
+              return static_cast<uint64_t>(value);
             }
           } else {
             auto bi = jsg::check(jsValue->ToBigInt(js.v8Context()));
@@ -285,7 +285,7 @@ struct JsCapnpConverter {
   // extended with properties representing the pipelined capabilities.
 
   struct PipelinedCap;
-  typedef kj::HashMap<capnp::StructSchema::Field, PipelinedCap> PipelinedCapMap;
+  using PipelinedCapMap = kj::HashMap<capnp::StructSchema::Field, PipelinedCap>;
 
   // We return a set of pipelined capabilities on the Promise returned by an RPC call. Later on,
   // that Promise resolves to a response object likely containing the same capabilities again.
@@ -384,11 +384,11 @@ struct JsCapnpConverter {
     return js.withinHandleScope([&]() -> v8::Local<v8::Value> {
       switch (value.getType()) {
         case capnp::DynamicValue::UNKNOWN:
-          return js.v8Undefined();
+          return js.undefined();
         case capnp::DynamicValue::VOID:
-          return js.v8Null();
+          return js.null();
         case capnp::DynamicValue::BOOL:
-          return v8::Boolean::New(js.v8Isolate, value.as<bool>());
+          return js.boolean(value.as<bool>());
         case capnp::DynamicValue::INT: {
           if (type.which() == capnp::schema::Type::INT64 ||
               type.which() == capnp::schema::Type::UINT64) {
@@ -466,7 +466,7 @@ struct JsCapnpConverter {
             return wrapper.wrapCap(js, js.v8Context(), value.as<capnp::DynamicCapability>());
           }
         case capnp::DynamicValue::ANY_POINTER:
-          return js.v8Null();
+          return js.null();
       }
 
       KJ_FAIL_ASSERT("Unimplemented DynamicValue type.");
@@ -634,8 +634,8 @@ CapnpCapability::~CapnpCapability() noexcept(false) {
     //   which is usually sooner (and more deterministic). But logging a warning during
     //   IoContext tear-down is problematic since logWarningOnce() is a method on
     //   IoContext...
-    if (IoContext::hasCurrent()) {
-      IoContext::current().logWarningOnce(
+    KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+      ioContext.logWarningOnce(
           kj::str("A Cap'n Proto capability of type ", schema.getShortDisplayName(),
               " was not closed properly. You must call close() on all capabilities in order to "
               "let the other side know that you are no longer using them. You cannot rely on "

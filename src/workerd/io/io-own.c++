@@ -20,16 +20,19 @@ void DeleteQueue::scheduleDeletion(OwnedObject* object) const {
 }
 
 void DeleteQueue::scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action) const {
-  KJ_IF_SOME(state, *crossThreadDeleteQueue.lockExclusive()) {
-    state.actions.add(kj::mv(action));
-    KJ_REQUIRE_NONNULL(state.crossThreadFulfiller)->fulfill();
-    return;
+  {
+    auto lock = crossThreadDeleteQueue.lockExclusive();
+    KJ_IF_SOME(state, *lock) {
+      state.actions.add(kj::mv(action));
+      KJ_REQUIRE_NONNULL(state.crossThreadFulfiller)->fulfill();
+      return;
+    }
   }
 
   // The queue was deleted, likely because the IoContext was destroyed and the
   // DeleteQueuePtr was invalidated. We are going to emit a warning and drop the
   // actions on the floor without scheduling them.
-  if (IoContext::hasCurrent()) {
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     // We are creating an error here just so we can include the JavaScript stack
     // with the warning if it exists. We are not going to throw this error.
     auto err = v8::Exception::Error(
@@ -47,7 +50,7 @@ void DeleteQueue::scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&&
     auto stack = jsg::check(err->Get(js.v8Context(), js.str("stack"_kj)));
 
     // Safe to mutate here since we have the exclusive lock on the queue above.
-    IoContext::current().logWarning(kj::str(stack));
+    ioContext.logWarning(kj::str(stack));
   }
 }
 
@@ -56,10 +59,8 @@ void DeleteQueue::checkFarGet(const DeleteQueue& deleteQueue, const std::type_in
 }
 
 void DeleteQueue::checkWeakGet(workerd::WeakRef<IoContext>& weak) {
-  if (!weak.isValid()) {
-    JSG_FAIL_REQUIRE(
-        Error, kj::str("Couldn't complete operation because the execution context has ended."));
-  }
+  JSG_REQUIRE(weak.isValid(), Error,
+      "Couldn't complete operation because the execution context has ended.");
 }
 
 kj::Promise<void> DeleteQueue::resetCrossThreadSignal() const {

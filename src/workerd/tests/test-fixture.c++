@@ -57,7 +57,7 @@ class DummyErrorHandler final: public kj::TaskSet::ErrorHandler {
 struct MockTimerChannel final: public TimerChannel {
   void syncTime() override {}
 
-  kj::Date now() override {
+  kj::Date now(kj::Maybe<kj::Date>) override {
     return kj::systemPreciseCalendarClock().now();
   }
 
@@ -68,6 +68,33 @@ struct MockTimerChannel final: public TimerChannel {
   kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
     return kj::NEVER_DONE;
   }
+};
+
+// A TimerChannel implementation that uses real timers from the KJ event loop.
+// Useful for tests that need actual timer functionality (e.g., benchmarks with
+// simulated I/O delays).
+struct RealTimerChannel final: public TimerChannel {
+  explicit RealTimerChannel(kj::Timer& timer): timer(timer) {}
+
+  void syncTime() override {}
+
+  kj::Date now(kj::Maybe<kj::Date>) override {
+    return kj::systemPreciseCalendarClock().now();
+  }
+
+  kj::Promise<void> atTime(kj::Date when) override {
+    auto nowTime = kj::systemPreciseCalendarClock().now();
+    if (when <= nowTime) {
+      return kj::READY_NOW;
+    }
+    return timer.afterDelay(when - nowTime);
+  }
+
+  kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
+    return timer.afterDelay(t);
+  }
+
+  kj::Timer& timer;
 };
 
 struct DummyIoChannelFactory final: public IoChannelFactory {
@@ -104,6 +131,7 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
+      ActorRoutingMode routingMode,
       SpanParent parentSpan) override {
     KJ_FAIL_REQUIRE("no actor channels");
   }
@@ -171,6 +199,7 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
+  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
@@ -317,7 +346,10 @@ TestFixture::TestFixture(SetupParams&& params)
       io(params.waitScope == kj::none ? kj::Maybe(kj::setupAsyncIo())
                                       : kj::Maybe<kj::AsyncIoContext>(kj::none)),
       timer(kj::heap<MockTimer>()),
-      timerChannel(kj::heap<MockTimerChannel>()),
+      timerChannel(params.useRealTimers && io != kj::none
+              ? kj::Own<TimerChannel>(
+                    kj::heap<RealTimerChannel>(KJ_ASSERT_NONNULL(io).provider->getTimer()))
+              : kj::Own<TimerChannel>(kj::heap<MockTimerChannel>())),
       entropySource(kj::heap<MockEntropySource>()),
       threadContextHeaderBundle(headerTableBuilder),
       httpOverCapnpFactory(byteStreamFactory,
@@ -364,7 +396,7 @@ TestFixture::TestFixture(SetupParams&& params)
             // no bindings, nothing to do
           },
           IsolateObserver::StartType::COLD,
-          TraceParentContext(nullptr, nullptr), /* spans */
+          SpanParent(nullptr),
           Worker::LockType(Worker::Lock::TakeSynchronously(kj::none)))),
       errorHandler(kj::heap<DummyErrorHandler>()),
       waitUntilTasks(*errorHandler),
@@ -422,10 +454,9 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
   auto context = kj::refcounted<IoContext>(
       threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
-  auto invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(kj::none, kj::none);
   auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(*context),
-      kj::heap<DummyIoChannelFactory>(*timerChannel), kj::refcounted<RequestObserver>(), nullptr,
-      kj::mv(invocationSpanContext));
+      kj::heap<DummyIoChannelFactory>(*timerChannel), kj::refcounted<RequestObserver>(), kj::none,
+      kj::none);
   incomingRequest->delivered();
   return incomingRequest;
 }

@@ -15,8 +15,8 @@ namespace workerd::api {
 namespace {
 template <typename T>
 jsg::Function<T> maybeAddFunctor(auto t) {
-  if (IoContext::hasCurrent()) {
-    return jsg::Function<T>(IoContext::current().addFunctor(kj::mv(t)));
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    return jsg::Function<T>(ioContext.addFunctor(kj::mv(t)));
   }
   return jsg::Function<T>(kj::mv(t));
 }

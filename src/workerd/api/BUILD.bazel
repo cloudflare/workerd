@@ -1,4 +1,3 @@
-load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
@@ -6,28 +5,48 @@ load("//:build/wd_test.bzl", "wd_test")
 
 filegroup(
     name = "srcs",
-    srcs = glob(
-        ["**/*.c++"],
+    # Only add files here when needed: Where possible, new src/header files should be defined in
+    # their own targets, modularizing bazel targets makes incremental rebuilds faster.
+    srcs = [
+        "actor.c++",
+        "actor-state.c++",
+        "basics.c++",
+        "blob.c++",
+        "cache.c++",
+        "cf-property.c++",
+        "container.c++",
+        "events.c++",
+        "eventsource.c++",
+        "export-loopback.c++",
+        "filesystem.c++",
+        "form-data.c++",
+        "global-scope.c++",
+        "headers.c++",
+        "hibernatable-web-socket.c++",
+        "http.c++",
+        "messagechannel.c++",
+        "performance.c++",
+        "queue.c++",
+        "scheduled.c++",
+        "sockets.c++",
+        "sql.c++",
+        "sync-kv.c++",
+        "system-streams.c++",
+        "trace.c++",
+        "unsafe.c++",
+        "url-standard.c++",
+        "web-socket.c++",
+        "worker-rpc.c++",
+    ] + glob(
+        [
+            "crypto/*.c++",
+            "streams/*.c++",
+        ],
         exclude = [
-            # TODO(cleanup): Continue shrinking the io target: Create independent targets for
-            # analytics-engine, kv and streams/compression, which either do not depend
-            # on io or do not have io depending on them.
             "**/*test*.c++",
-            "data-url.c++",
-            "encoding.c++",
-            "html-rewriter.c++",
-            "hyperdrive.c++",
-            "pyodide/pyodide.c++",
-            "pyodide/setup-emscripten.c++",
-            "pyodide/requirements.c++",
-            "memory-cache.c++",
-            "modules.c++",
-            "r2*.c++",
-            "rtti.c++",
-            "url.c++",
-            "urlpattern.c++",
-            "urlpattern-standard.c++",
-            "util.c++",
+            "crypto/crc-impl.c++",
+            "streams/compression.c++",
+            "streams/encoding.c++",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -35,29 +54,221 @@ filegroup(
 
 filegroup(
     name = "hdrs",
-    srcs = glob(
-        ["**/*.h"],
+    srcs = [
+        "actor.h",
+        "actor-state.h",
+        "basics.h",
+        "blob.h",
+        "cache.h",
+        "cf-property.h",
+        "container.h",
+        "events.h",
+        "eventsource.h",
+        "export-loopback.h",
+        "filesystem.h",
+        "form-data.h",
+        "global-scope.h",
+        "headers.h",
+        "hibernatable-web-socket.h",
+        "http.h",
+        "messagechannel.h",
+        "performance.h",
+        "queue.h",
+        "scheduled.h",
+        "sockets.h",
+        "sql.h",
+        "sync-kv.h",
+        "system-streams.h",
+        "trace.h",
+        "unsafe.h",
+        "url-standard.h",
+        "web-socket.h",
+        "worker-rpc.h",
+    ] + glob(
+        [
+            "crypto/*.h",
+            "streams/*.h",
+        ],
         exclude = [
-            "**/*test*.h",
-            "data-url.h",
-            "deferred-proxy.h",
-            "encoding.h",
-            "html-rewriter.h",
-            "hyperdrive.h",
-            "memory-cache.h",
-            "pyodide/pyodide.h",
-            "pyodide/setup-emscripten.h",
-            "pyodide/requirements.h",
-            "modules.h",
-            "r2*.h",
-            "rtti.h",
-            "url.h",
-            "urlpattern.h",
-            "urlpattern-standard.h",
-            "util.h",
+            "crypto/crc-impl.h",
+            "streams/compression.h",
+            "streams/encoding.h",
         ],
     ),
     visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "analytics-engine",
+    srcs = [
+        "analytics-engine.c++",
+    ],
+    hdrs = [
+        "analytics-engine.h",
+        "analytics-engine-impl.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "capnp",
+    srcs = [
+        "capnp.c++",
+    ],
+    hdrs = [
+        "capnp.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "worker-loader",
+    srcs = [
+        "worker-loader.c++",
+    ],
+    hdrs = [
+        "worker-loader.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "workers-module",
+    srcs = [
+        "workers-module.c++",
+    ],
+    hdrs = [
+        "workers-module.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "base64",
+    srcs = [
+        "base64.c++",
+    ],
+    hdrs = [
+        "base64.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@simdutf",
+    ],
+)
+
+wd_cc_library(
+    name = "commonjs",
+    srcs = [
+        "commonjs.c++",
+    ],
+    hdrs = [
+        "commonjs.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "crypto-crc-impl",
+    srcs = [
+        "crypto/crc-impl.c++",
+    ],
+    hdrs = [
+        "crypto/crc-impl.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "fuzzilli",
+    srcs = [
+        "fuzzilli.c++",
+    ],
+    hdrs = [
+        "fuzzilli.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/api:util",
+        "//src/workerd/util:immediate-crash",
+    ],
+)
+
+wd_cc_library(
+    name = "kv",
+    srcs = [
+        "kv.c++",
+    ],
+    hdrs = [
+        "kv.h",
+    ],
+    implementation_deps = [
+        "//src/workerd/util:mimetype",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+# for using EW_STREAMS_ISOLATE_TYPES with workerd-api etc. To use the different streams APIs,
+# include the headers you need directly.
+wd_cc_library(
+    name = "streams",
+    hdrs = ["streams.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":streams-compression",
+        ":streams-encoding",
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "streams-compression",
+    srcs = ["streams/compression.c++"],
+    hdrs = ["streams/compression.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/util:state-machine",
+        "@nbytes",
+    ],
+)
+
+wd_cc_library(
+    name = "streams-encoding",
+    srcs = ["streams/encoding.c++"],
+    hdrs = ["streams/encoding.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "hibernation-event-params",
+    hdrs = ["hibernation-event-params.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(
@@ -90,6 +301,17 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "tracing-module",
+    srcs = ["tracing-module.c++"],
+    hdrs = ["tracing-module.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+    ],
+)
+
+wd_cc_library(
     name = "rtti",
     srcs = [
         "modules.c++",
@@ -100,15 +322,26 @@ wd_cc_library(
         "rtti.h",
     ],
     implementation_deps = [
+        ":analytics-engine",
+        ":kv",
         ":pyodide",
+        ":streams",
+        ":streams-compression",
+        ":streams-encoding",
+        ":urlpattern",
+        ":urlpattern-standard",
+        ":worker-loader",
         "//src/workerd/jsg:rtti",
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":base64",
         ":html-rewriter",
         ":hyperdrive",
         ":memory-cache",
         ":r2",
+        ":tracing-module",
+        ":workers-module",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide",
@@ -134,6 +367,9 @@ wd_cc_library(
     name = "hyperdrive",
     srcs = ["hyperdrive.c++"],
     hdrs = ["hyperdrive.h"],
+    implementation_deps = [
+        "//src/workerd/util:entropy",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
@@ -154,7 +390,10 @@ wd_cc_library(
         "//src/pyodide:generated/pyodide_extra.capnp.h",
         "//src/pyodide:pyodide_static.capnp.h",
     ],
-    implementation_deps = ["//src/workerd/io"],
+    implementation_deps = [
+        "//src/workerd/io",
+        "//src/workerd/util:strings",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
@@ -177,12 +416,14 @@ wd_cc_library(
     name = "util",
     srcs = ["util.c++"],
     hdrs = ["util.h"],
-    implementation_deps = ["@simdutf"],
+    implementation_deps = [
+        "//src/workerd/util:mimetype",
+        "//src/workerd/util:strings",
+        "@simdutf",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",
-        "//src/workerd/util",
-        "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -191,13 +432,17 @@ wd_cc_library(
     name = "encoding",
     srcs = ["encoding.c++"],
     hdrs = ["encoding.h"],
+    implementation_deps = [
+        "//src/workerd/io:features",
+        "//src/workerd/util:strings",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":util",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/util",
         "@capnp-cpp//src/kj",
+        "@simdutf",
     ],
 )
 
@@ -207,11 +452,11 @@ wd_cc_library(
     hdrs = ["data-url.h"],
     implementation_deps = [
         ":encoding",
+        "//src/workerd/util:strings",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg:url",
-        "//src/workerd/util",
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
@@ -252,6 +497,7 @@ wd_cc_library(
     deps = [
         ":url",
         "//src/workerd/jsg",
+        "//src/workerd/util:own-util",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -276,6 +522,7 @@ wd_cc_library(
         src = f,
         deps = [
             "//src/workerd/io",
+            "//src/workerd/io:promise-wrapper",
         ],
     )
     for f in [
@@ -283,9 +530,21 @@ wd_cc_library(
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
+    ]
+]
+
+[
+    kj_test(
+        src = f,
+        deps = [
+            "//src/workerd/io",
+            "//src/workerd/io:promise-wrapper",
+            "//src/workerd/tests:test-fixture",
+        ],
+    )
+    for f in [
         "streams/queue-test.c++",
         "streams/standard-test.c++",
-        "util-test.c++",
     ]
 ]
 
@@ -293,6 +552,14 @@ kj_test(
     src = "data-url-test.c++",
     deps = [
         ":data-url",
+        "//src/workerd/io",
+    ],
+)
+
+kj_test(
+    src = "util-test.c++",
+    deps = [
+        ":util",
     ],
 )
 
@@ -312,6 +579,22 @@ kj_test(
 )
 
 kj_test(
+    src = "streams-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "system-streams-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "actor-state-iocontext-test.c++",
     deps = [
         "//src/workerd/io",
@@ -324,6 +607,9 @@ kj_test(
     deps = [
         ":encoding",
         ":html-rewriter",
+        ":streams",
+        ":urlpattern",
+        ":urlpattern-standard",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
     ],
@@ -348,6 +634,24 @@ kj_test(
 )
 
 kj_test(
+    src = "streams/writable-sink-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/readable-source-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "streams/writable-sink-adapter-test.c++",
     deps = [
         "//src/workerd/io",
@@ -366,534 +670,19 @@ kj_test(
 )
 
 wd_test(
-    src = "actor-alarms-delete-test.wd-test",
-    args = ["--experimental"],
-    data = ["actor-alarms-delete-test.js"],
-)
-
-wd_test(
-    src = "actor-alarms-test.wd-test",
-    args = ["--experimental"],
-    data = ["actor-alarms-test.js"],
-)
-
-wd_test(
-    src = "tail-worker-test.wd-test",
-    args = [
-        "--experimental",
-    ],
-    data = [
-        # To reduce complexity, tail-worker-test calls into other tests to get traces from them and
-        # includes several tail worker implementations.
-        "actor-alarms-test.js",
-        "http-test.js",
-        "queue-test.js",
-        "tail-worker-test.js",
-        "tail-worker-test-receiver.js",
-        "tail-worker-test-dummy.js",
-        "tail-worker-test-invalid.js",
-        "tail-worker-test-jsrpc.js",
-        "tests/websocket-hibernation.js",
-    ],
-)
-
-# Test for a worker that can log to itself using the isTracer parameter
-wd_test(
-    src = "self-logger-test.wd-test",
-    data = [
-        "self-logger-test.js",
-    ],
-)
-
-wd_test(
-    src = "analytics-engine-test.wd-test",
-    args = ["--experimental"],
-    data = ["analytics-engine-test.js"],
-)
-
-wd_test(
-    src = "http-standard-test.wd-test",
-    args = ["--experimental"],
-    data = ["http-standard-test.js"],
-)
-
-wd_test(
-    src = "http-test.wd-test",
-    args = ["--experimental"],
-    data = ["http-test.js"],
-)
-
-wd_test(
-    src = "ctx-props-test.wd-test",
-    args = ["--experimental"],
-)
-
-wd_test(
-    src = "kv-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "kv-instrumentation-test.js",
-        "kv-test.js",
-        "tests/instrumentation-tail-worker.js",
-    ],
-)
-
-wd_test(
-    src = "queue-test.wd-test",
-    args = ["--experimental"],
-    data = ["queue-test.js"],
-)
-
-wd_test(
-    src = "r2-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "r2-instrumentation-test.js",
-        "r2-test.js",
-        "tests/instrumentation-tail-worker.js",
-    ],
-)
-
-wd_test(
-    src = "rtti-test.wd-test",
-    args = ["--experimental"],
-    data = ["rtti-test.js"],
-)
-
-wd_test(
-    size = "large",
-    src = "sql-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "sql-test.js",
-        "sql-test-tail.js",
-    ],
-)
-
-wd_test(
-    src = "sync-kv-test.wd-test",
-    args = ["--experimental"],
-    data = ["sync-kv-test.js"],
-)
-
-wd_test(
     src = "streams/identitytransformstream-backpressure-test.wd-test",
     args = ["--experimental"],
     data = ["streams/identitytransformstream-backpressure-test.js"],
 )
 
 wd_test(
+    src = "streams/identitytransformstream-byob-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams/identitytransformstream-byob-test.js"],
+)
+
+wd_test(
     src = "streams/streams-test.wd-test",
     args = ["--experimental"],
     data = ["streams/streams-test.js"],
-)
-
-wd_test(
-    src = "tests/abort-internal-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/abort-internal-streams-test.js"],
-)
-
-wd_test(
-    src = "tests/abortable-fetch-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/abortable-fetch-test.js"],
-)
-
-wd_test(
-    src = "tests/abortsignal-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/abortsignal-test.js"],
-)
-
-wd_test(
-    src = "tests/actor-stub-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/actor-stub-test.js"],
-)
-
-wd_test(
-    src = "tests/als-only-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/als-only-test.js"],
-)
-
-wd_test(
-    src = "tests/als-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/als-test.js"],
-)
-
-wd_test(
-    src = "tests/blob-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/blob-test.js"],
-)
-
-wd_test(
-    src = "tests/blob2-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/blob2-test.js"],
-)
-
-wd_test(
-    src = "tests/commonjs-module-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/commonjs-module-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto-extras-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto-extras-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto-impl-asymmetric-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto-impl-asymmetric-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto-streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto-streams-test.js"],
-)
-
-wd_test(
-    src = "tests/data-url-fetch-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/data-url-fetch-test.js"],
-)
-
-wd_test(
-    src = "tests/encoding-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/encoding-test.js"],
-)
-
-wd_test(
-    src = "tests/events-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/events-test.js"],
-)
-
-wd_test(
-    src = "tests/eventsource-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/eventsource-test.js"],
-)
-
-wd_test(
-    src = "tests/form-data-legacy-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/form-data-legacy-test.js"],
-)
-
-wd_test(
-    src = "tests/form-data-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/form-data-test.js"],
-)
-
-wd_test(
-    size = "large",
-    src = "tests/global-scope-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/global-scope-test.js"],
-)
-
-wd_test(
-    size = "large",
-    src = "tests/htmlrewriter-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/htmlrewriter-test.js"],
-    # TODO(soon): Test is excessively flaky under ASan, re-enable once fixed
-    tags = ["no-asan"],
-)
-
-wd_test(
-    src = "tests/js-rpc-flag.wd-test",
-    args = ["--experimental"],
-    data = ["tests/js-rpc-flag.js"],
-)
-
-wd_test(
-    src = "tests/js-rpc-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/js-rpc-test.js"],
-)
-
-wd_test(
-    src = "tests/memory-cache-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/memory-cache-test.js"],
-)
-
-wd_test(
-    src = "tests/module-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/module-test.js"],
-)
-
-wd_test(
-    src = "tests/navigator-beacon-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/navigator-beacon-test.js"],
-)
-
-wd_test(
-    src = "tests/navigator-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/navigator-test.js"],
-)
-
-wd_test(
-    src = "tests/reporterror-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/reporterror-test.js"],
-)
-
-wd_test(
-    src = "tests/response-json.wd-test",
-    args = ["--experimental"],
-    data = ["tests/response-json.js"],
-)
-
-wd_test(
-    src = "tests/scheduler-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/scheduler-test.js"],
-)
-
-wd_test(
-    src = "tests/streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/streams-test.js"],
-)
-
-wd_test(
-    src = "tests/unsafe-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/unsafe-test.js"],
-)
-
-wd_test(
-    src = "tests/url-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/url-test.js"],
-)
-
-wd_test(
-    src = "tests/websocket-hibernation.wd-test",
-    args = ["--experimental"],
-    data = ["tests/websocket-hibernation.js"],
-)
-
-js_binary(
-    name = "websocket-client-error-sidecar",
-    entry_point = "tests/websocket-client-error-sidecar.js",
-)
-
-wd_test(
-    src = "tests/websocket-client-error-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "tests/websocket-client-error-test.js",
-    ],
-    sidecar = "websocket-client-error-sidecar",
-    sidecar_port_bindings = [
-        "BIG_MESSAGE_SERVER_PORT",
-    ],
-)
-
-js_binary(
-    name = "http-socket-server",
-    entry_point = "tests/http-socket-server.js",
-)
-
-wd_test(
-    src = "tests/http-socket-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "tests/http-socket-test.js",
-        "tests/starttls-server.pem",
-    ],
-    sidecar = "http-socket-server",
-    sidecar_port_bindings = [
-        "HTTP_SOCKET_SERVER_PORT",
-        "SOCKET_PARTIALLY_WRITTEN",
-        "STARTTLS_SOCKET",
-        "FLUSH_HELLO_SOCKET",
-    ],
-)
-
-wd_test(
-    src = "tests/js-rpc-socket-test.wd-test",
-    args = [
-        "--experimental",
-        "--no-verbose",
-    ],
-    data = ["tests/js-rpc-test.js"],
-)
-
-wd_test(
-    src = "http-test-ts.ts-wd-test",
-    args = ["--experimental"],
-    data = ["http-test-ts.ts"],
-)
-
-wd_test(
-    src = "tests/new-module-registry-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "tests/new-module-registry-test.js",
-        "tests/test.wasm",
-    ],
-)
-
-wd_test(
-    src = "tests/cross-context-promise-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/cross-context-promise-test.js"],
-)
-
-wd_test(
-    src = "tests/error-in-error-event-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/error-in-error-event-test.js"],
-)
-
-wd_test(
-    src = "tests/no-to-string-tag-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/no-to-string-tag-test.js"],
-)
-
-wd_test(
-    src = "tests/fetch-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fetch-test.js"],
-)
-
-wd_test(
-    src = "tests/importable-env-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/importable-env-test.js"],
-)
-
-wd_test(
-    src = "tests/disable-importable-env-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/disable-importable-env-test.js"],
-)
-
-wd_test(
-    src = "tests/webfs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/webfs-test.js"],
-)
-
-wd_test(
-    src = "tests/worker-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/worker-test.js"],
-)
-
-wd_test(
-    src = "tests/request-clone-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/request-clone-test.js"],
-)
-
-wd_test(
-    src = "tests/request-signal-enabled.wd-test",
-    args = ["--experimental"],
-    data = ["tests/request-signal-enabled.js"],
-)
-
-wd_test(
-    src = "tests/request-signal-disabled.wd-test",
-    args = ["--experimental"],
-    data = ["tests/request-signal-disabled.js"],
-)
-
-wd_test(
-    src = "tests/request-signal-passthrough.wd-test",
-    args = ["--experimental"],
-    data = ["tests/request-signal-passthrough.js"],
-)
-
-wd_test(
-    size = "large",
-    src = "worker-loader-test.wd-test",
-    args = ["--experimental"],
-    data = ["worker-loader-test.js"],
-)
-
-wd_test(
-    src = "tests/leak-fetch-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/leak-fetch-test.js"],
-)
-
-wd_test(
-    src = "tests/messageport-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/messageport-test.js"],
-)
-
-js_binary(
-    name = "starttls-nodejs-server",
-    entry_point = "tests/starttls-nodejs-server.js",
-)
-
-wd_test(
-    src = "tests/starttls-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "tests/starttls-nodejs-test.js",
-        "tests/starttls-server.pem",
-    ],
-    sidecar = "starttls-nodejs-server",
-    sidecar_port_bindings = [
-        "STARTTLS_CA_PORT",
-    ],
-)
-
-wd_test(
-    src = "tests/streams-circ-ref-regression-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/streams-circ-ref-regression-test.js"],
-)
-
-wd_test(
-    src = "tests/experimental-eval-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/experimental-eval-test.js"],
-)
-
-wd_test(
-    src = "tests/fetch-redirect-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fetch-redirect-test.js"],
-)
-
-wd_test(
-    src = "tests/rpc-error-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "tests/rpc-error-test.js",
-        "tests/rpc-error-test.rpc.js",
-    ],
-)
-
-wd_test(
-    src = "actor-kv-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "actor-kv-test.js",
-        "actor-kv-test-tail.js",
-        "tests/instrumentation-tail-worker.js",
-    ],
 )

@@ -21,6 +21,7 @@ wd_cc_library(
         ":jsg-core",
         ":memory-tracker",
         ":url",
+        "//src/rust/jsg",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
@@ -48,7 +49,6 @@ wd_cc_library(
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
-        "@simdutf",
         "@workerd-v8//:v8",
     ],
 )
@@ -111,23 +111,31 @@ wd_cc_library(
     ],
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],
+    implementation_deps = [
+        "//src/workerd/util:entropy",
+        "@simdutf",
+        "@ssl",
+    ],
     local_defines = ["JSG_IMPLEMENTATION"],
+    tags = ["no-clang-tidy"],
+    visibility = [
+        "//src/rust/jsg:__pkg__",
+        "//src/rust/jsg-test:__pkg__",
+    ],
     deps = [
         ":exception",
+        ":exception_metadata_capnp",
         ":macro-meta",
         ":memory-tracker",
         ":meta",
         ":modules_capnp",
         ":observer",
         ":url",
-        "//src/workerd/util",
+        "//src/workerd/util",  # Required for util/batch-queue.h
         "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
-        "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj",
-        "@simdutf",
-        "@ssl",
         "@workerd-v8//:v8",
     ],
 )
@@ -156,15 +164,15 @@ wd_cc_library(
     hdrs = [
         "inspector.h",
     ],
-    local_defines = ["JSG_IMPLEMENTATION"],
-    # Some JSG headers can't be compiled on their own
-    visibility = ["//visibility:public"],
-    deps = [
+    implementation_deps = [
         ":jsg-core",
         "@capnp-cpp//src/kj",
         "@simdutf",
         "@workerd-v8//:v8",
     ],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    # Some JSG headers can't be compiled on their own
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_library(
@@ -195,12 +203,12 @@ wd_cc_library(
         "url.h",
     ],
     implementation_deps = [
+        "//src/workerd/util:strings",
         "@ada-url",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":memory-tracker",
-        "//src/workerd/util:strings",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -218,6 +226,12 @@ wd_cc_library(
 wd_cc_capnp_library(
     name = "rtti_capnp",
     srcs = ["rtti.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_capnp_library(
+    name = "exception_metadata_capnp",
+    srcs = ["exception-metadata.capnp"],
     visibility = ["//visibility:public"],
 )
 

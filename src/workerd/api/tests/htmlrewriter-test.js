@@ -908,6 +908,64 @@ export const exceptionPropagation = {
   },
 };
 
+// handled HTMLRewriter errors must not poison the IoContext.
+export const continueAfterException = {
+  async test() {
+    const errorResponse = new HTMLRewriter()
+      .on('*', {
+        element() {
+          throw new Error('intentional error for testing');
+        },
+      })
+      .transform(new Response('<div>test</div>'));
+
+    await rejects(errorResponse.text(), {
+      message: 'intentional error for testing',
+    });
+
+    const successResponse = new HTMLRewriter()
+      .on('div', {
+        element(el) {
+          el.setInnerContent('success');
+        },
+      })
+      .transform(new Response('<div>original</div>'));
+
+    strictEqual(await successResponse.text(), '<div>success</div>');
+  },
+};
+
+export const continueAfterException2 = {
+  async test() {
+    const errorResponse = new HTMLRewriter()
+      .on('*', {
+        element() {
+          throw new Error('intentional error for pipeTo testing');
+        },
+      })
+      .transform(new Response('<div>test</div>'));
+
+    const { writable } = new TransformStream();
+
+    await rejects(errorResponse.body.pipeTo(writable), {
+      message: 'intentional error for pipeTo testing',
+    });
+
+    const successResponse = new HTMLRewriter()
+      .on('div', {
+        element(el) {
+          el.setInnerContent('success after pipeTo');
+        },
+      })
+      .transform(new Response('<div>original</div>'));
+
+    strictEqual(
+      await successResponse.text(),
+      '<div>success after pipeTo</div>'
+    );
+  },
+};
+
 export const sameToken = {
   async test() {
     const obj = {};
@@ -1013,5 +1071,32 @@ export const hugeNumberOfHandlersForAnElement = {
     for (let i = 0; i < numReads; i++) {
       await reader.read();
     }
+  },
+};
+
+// Test HTMLRewriter with JS-backed ReadableStream
+// This test was moved from streams-respond-test.js because it triggers
+// a flaky ASAN failure related to V8's cppgc memory validation.
+export const htmlRewriterStream = {
+  async test() {
+    const enc = new TextEncoder();
+
+    const readable = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(enc.encode('Hello World!'));
+        controller.close();
+      },
+    });
+
+    let response = new Response(readable, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    });
+
+    response = new HTMLRewriter().transform(response);
+
+    strictEqual(await response.text(), 'Hello World!');
   },
 };

@@ -16,6 +16,7 @@ using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
+using import "/workerd/io/frankenvalue.capnp".Frankenvalue;
 
 # A 128-bit trace ID used to identify traces.
 struct TraceId {
@@ -43,7 +44,7 @@ struct SpanContext {
   # For Hibernate and Mark this would be the span under which they were emitted.
   # This is only empty if:
   #  1. This is an Onset event
-  #  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+  #  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
   info :union {
     empty @1 :Void;
     spanId @2 :UInt64;
@@ -175,6 +176,20 @@ struct Trace @0x8e8d911203762d34 {
     message @2 :Data;
   }
 
+  # Indicates how many tail stream events were dropped in total.
+  struct DroppedEvents {
+    count @0 :UInt32;
+  }
+
+  struct StreamDiagnosticsEvent {
+    # In the future, we plan to support several types of events here, for now only the dropped
+    # events diagnostic is supported.
+    diagnostic :union {
+      undefined @0 :Void;
+      droppedEvents @1 :DroppedEvents;
+    }
+  }
+
   truncated @24 :Bool;
   # Indicates that the trace was truncated due to reaching the maximum size limit.
 
@@ -294,6 +309,7 @@ struct Trace @0x8e8d911203762d34 {
       diagnosticChannelEvent @10 :DiagnosticChannelEvent;
       exception @11 :Exception;
       log @12 :Log;
+      streamDiagnostics @13 :StreamDiagnosticsEvent;
     }
   }
 }
@@ -473,10 +489,19 @@ struct JsValue {
         # A ReadableStream. The sender of the JsValue will use the associated StreamSink to open a
         # stream of type `ByteStream`.
 
+        stream @10 :ExternalPusher.InputStream;
+        # If present, a stream pushed using the destination isolate's ExternalPusher.
+        #
+        # If null (deprecated), then the sender will use the associated StreamSink to open a stream
+        # of type `ByteStream`. StreamSink is in the process of being replaced by ExternalPusher.
+
         encoding @4 :StreamEncoding;
         # Bytes read from the stream have this encoding.
 
         expectedLength :union {
+          # NOTE: This is obsolete when `stream` is set. Instead, the length is passed to
+          #   ExternalPusher.pushByteStream().
+
           unknown @5 :Void;
           known @6 :UInt64;
         }
@@ -487,6 +512,16 @@ struct JsValue {
       # mechanism used to trigger the abort later. This is modeled as a stream, since the sender is
       # the one that will later on send the abort signal. This external will have an associated
       # stream in the corresponding `StreamSink` with type `AbortTrigger`.
+      #
+      # TODO(soon): This will be obsolete when we stop using `StreamSink`; `abortSignal` will
+      #   replace it. (The name is wrong anyway -- this is the signal end, not the trigger end.)
+
+      abortSignal @11 :ExternalPusher.AbortSignal;
+      # Indicates that an `AbortSignal` is being passed.
+
+      subrequestChannelToken @8 :Data;
+      actorClassChannelToken @9 :Data;
+      # Encoded ChannelTokens. See channel-token.capnp.
 
       # TODO(soon): WebSocket, Request, Response
     }
@@ -502,11 +537,59 @@ struct JsValue {
     #
     # Similarly, the caller passes a `resultsStreamSink` to the callee. If the response contains
     # any streams, it can start pushing to this immediately after responding.
+    #
+    # TODO(soon): This design is overcomplicated since it requires allocating StreamSinks for every
+    #   request, even when not used, and requires a lot of weird promise magic. The newer
+    #   ExternalPusher design is simpler, and only incurs overhead when used. Once all of
+    #   production has been updated to understand ExternalPusher, then we can flip an autogate to
+    #   use it by default. Once that has rolled out globally, we can remove StreamSink.
 
     startStream @0 (externalIndex :UInt32) -> (stream :Capability);
     # Opens a stream corresponding to the given index in the JsValue's `externals` array. The type
     # of capability returned depends on the type of external. E.g. for `readableStream`, it is a
     # `ByteStream`.
+  }
+
+  interface ExternalPusher {
+    # This object allows "pushing" external objects to a target isolate, so that they can
+    # sublequently be referenced by a `JsValue.External`. This allows implementing externals where
+    # the sender might need to send subsequent information to the receiver *before* the receiver
+    # has had a chance to call back to request it. For example, when a ReadableStream is sent over
+    # RPC, the sender will immediately start sending body bytes without waiting for a round trip.
+    #
+    # The key to ExternalPusher is that it constructs and returns capabilities pointing at objects
+    # living directly in the target isolate's runtime. These capabilities have empty interfaces,
+    # but can be passed back to the target in the `External` table of a `JsValue`. Since the
+    # capabilities point to objects directly in the recipient's memory space, they can then be
+    # unwrapped to obtain the underlying local object, which the recipient then uses to back the
+    # external value delivered to the application.
+    #
+    # Note that externals must be pushed BEFORE the JsValue that uses them is sent, so that they
+    # can be unwrapped immediately when deserializing the value.
+
+    pushByteStream @0 (lengthPlusOne :UInt64 = 0) -> (source :InputStream, sink :ByteStream);
+    # Creates a readable stream within the remote's memory space. `source` should be placed in a
+    # sublequent `External` of type `readableStream`. The caller should write bytes to `sink`.
+    #
+    # `lengthPlusOne` is the expected length of the stream, plus 1, with zero indicating no
+    # expectation. This is used e.g. when the `ReadableStream` was created with `FixedLengthStream`.
+    # (The weird "plus one" encoding is used because Cap'n Proto doesn't have a Maybe. Perhaps we
+    # can fix this eventually.)
+
+    interface InputStream {
+      # No methods. This will be unwrapped by the recipient to obtain the underlying local value.
+    }
+
+    pushAbortSignal @1 () -> (signal :AbortSignal, trigger :AbortTrigger);
+
+    interface AbortSignal {
+      # No methods. This can be unwrapped by the recipient to obtain a Promise<void> which
+      # rejects when the signal is aborted.
+    }
+
+    # TODO(soon):
+    # - AbortTrigger
+    # - Promises
   }
 }
 
@@ -527,7 +610,15 @@ interface AbortTrigger $Cxx.allowCancellation {
   # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
 }
 
-interface JsRpcTarget $Cxx.allowCancellation {
+interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
+  # Target on which RPC methods may be invoked.
+  #
+  # This is the backing capnp type for a JsRpcStub, as well as used to represent top-level RPC
+  # events.
+  #
+  # JsRpcTarget must implement `JsValue.ExternalPusher` to allow externals to be pushed to the
+  # target in advance of a call that uses them.
+
   struct CallParams {
     union {
       methodName @0 :Text;
@@ -573,8 +664,19 @@ interface JsRpcTarget $Cxx.allowCancellation {
       # "bar".
     }
 
-    resultsStreamSink @4 :JsValue.StreamSink;
-    # StreamSink used for ReadableStreams found in the results.
+    resultsStreamHandler :union {
+      # We're in the process of switching from `StreamSink` to `ExternalPusher`. A caller will only
+      # offer one or the other, and expect the callee to use that. (Initially, callers will still
+      # send StreamSink for backwards-compatibility, but once all recipients are able to understand
+      # ExternalPusher, we'll flip an autogate to make callers send it.)
+
+      streamSink @4 :JsValue.StreamSink;
+      # StreamSink used for ReadableStreams found in the results.
+
+      externalPusher @5 :JsValue.ExternalPusher;
+      # ExternalPusher object which will push into the caller's isolate. Use this to push externals
+      # that will be included in the results.
+    }
   }
 
   struct CallResults {
@@ -695,4 +797,21 @@ interface WorkerdBootstrap {
   #
   # TODO(someday): Pass cfBlobJson? Currently doesn't matter since the cf blob is only present for
   #   HTTP requests which can be delivered over regular HTTP instead of capnp.
+}
+
+interface WorkerdDebugPort {
+  # Bootstrap interface exposed on the debug RPC port, if one is configured. This exposes access
+  # to all services in the process, with the ability for the client to specify arbitrary props, so
+  # this interface should be considered privileged, and should probably only be used for testing
+  # purposes.
+  #
+  # This interface is subject to change. It is intended for use by miniflare.
+
+  getEntrypoint @0 (service :Text, entrypoint :Text, props :Frankenvalue)
+              -> (entrypoint :WorkerdBootstrap);
+  # Get direct access to a stateless entrypoint.
+
+  getActor @1 (service :Text, entrypoint :Text, actorId :Text) -> (actor :WorkerdBootstrap);
+  # Get an actor (Durable Object) stub.
+  # The actorId should be a hex string for Durable Objects or a plain string for ephemeral actors.
 }

@@ -1,10 +1,13 @@
 #include "common.h"
+#include "readable-source.h"
 #include "readable.h"
+
+#include <workerd/util/state-machine.h>
 
 namespace workerd::api::streams {
 
 // We provide two utility adapters here: ReadableStreamSourceJsAdapter and
-// ReadableStreamSourceKjAdapter.
+// ReadableSourceKjAdapter.
 //
 // ReadableStreamSourceJsAdapter adapts a ReadableStreamSource to a JavaScript-friendly
 // interface. It provides methods that return JavaScript promises and use
@@ -58,7 +61,7 @@ namespace workerd::api::streams {
 //     │  • cancel()                               │
 //     └───────────────────────────────────────────┘
 //
-// The ReadableStreamSourceKjAdapter adapts a ReadableStream to a KJ-friendly
+// The ReadableSourceKjAdapter adapts a ReadableStream to a KJ-friendly
 // ReadableStreamSource. It holds a strong reference to the ReadableStream and
 // locks it with a ReadableStreamDefaultReader. It is intended to be used by
 // KJ code that wants to read from a JavaScript-backed stream. It ensures that
@@ -66,7 +69,7 @@ namespace workerd::api::streams {
 // after itself if the adapter is dropped.
 //
 //     ┌───────────────────────────────────────────┐
-//     │   ReadableStreamSourceKjAdapter           │
+//     │         ReadableSourceKjAdapter           │
 //     │                                           │
 //     │  ┌─────────────────────────────────────┐  │
 //     │  │         KJ Native API               │  │
@@ -113,7 +116,7 @@ namespace workerd::api::streams {
 class ReadableStreamSourceJsAdapter final {
  public:
   ReadableStreamSourceJsAdapter(
-      jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
+      jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableSource> source);
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamSourceJsAdapter);
   ~ReadableStreamSourceJsAdapter() noexcept(false);
 
@@ -231,8 +234,25 @@ class ReadableStreamSourceJsAdapter final {
 
  private:
   struct Active;
-  struct Closed final {};
-  kj::OneOf<IoOwn<Active>, Closed, kj::Exception> state;
+  struct Closed final {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+  struct Open {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+    IoOwn<Active> active;
+  };
+
+  // State machine for tracking readable source adapter lifecycle:
+  //   Open -> Closed (normal close)
+  //   Open -> kj::Exception (error via cancel or read failure)
+  // Closed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using State = StateMachine<TerminalStates<Closed>,
+      ErrorState<kj::Exception>,
+      ActiveState<Open>,
+      Open,
+      Closed,
+      kj::Exception>;
+  State state;
 
   kj::Rc<WeakRef<ReadableStreamSourceJsAdapter>> selfRef;
 };
@@ -271,10 +291,10 @@ class ReadableStreamSourceJsAdapter final {
 // there are some protections in place to avoid use-after-free if the caller
 // drops the adapter. There's nothing we can do if the caller drops the
 // buffer, however, so that is still a hard requirement.
-// TODO(safety): This can be made safer by having tryRead take a kj::Array
+// TODO(safety): This can be made safer by having read take a kj::Array
 // as input instead of a raw pointer and size, then having the read return
 // the filled in Array after the read completes, but that's a larger refactor.
-class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
+class ReadableSourceKjAdapter final: public ReadableSource {
  public:
   enum class MinReadPolicy {
     // The read will complete as soon as at least minBytes have been read,
@@ -292,11 +312,11 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
     MinReadPolicy minReadPolicy;
   };
 
-  ReadableStreamSourceKjAdapter(jsg::Lock& js,
+  ReadableSourceKjAdapter(jsg::Lock& js,
       IoContext& ioContext,
       jsg::Ref<ReadableStream> stream,
       Options options = {.minReadPolicy = MinReadPolicy::OPPORTUNISTIC});
-  ~ReadableStreamSourceKjAdapter() noexcept(false);
+  ~ReadableSourceKjAdapter() noexcept(false);
 
   // Attempts to read at least minBytes and up to maxBytes into the provided
   // buffer. The returned promise resolves with the actual number of bytes read,
@@ -318,7 +338,13 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   // is in progress.
   //
   // The returned promise will never resolve with more than maxBytes.
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
+  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override;
+
+  // Reads all remaining bytes from the stream and returns them.
+  kj::Promise<kj::Array<const kj::byte>> readAllBytes(size_t limit) override;
+
+  // Reads all remaining bytes from the stream and returns them as a string.
+  kj::Promise<kj::String> readAllText(size_t limit) override;
 
   // Fully consume the stream and write it to the provided WritableStreamSink.
   // If "end" is true, the output stream will be ended once the input
@@ -326,28 +352,23 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   // Per the contract of pumpTo, it is the caller's responsibility to ensure
   // that both the WritableStreamSink and this adapter remain alive until
   // the returned promise resolves!
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override;
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableSink& output, EndAfterPump end) override;
 
   // If the stream is still active, tries to get the total length,
   // if known. If the length is not known, the encoding does not
   // match the encoding of the underlying stream, or the stream is closed
   // or errored, returns kj::none.
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
+  kj::Maybe<size_t> tryGetLength(StreamEncoding encoding) override;
 
   // Cancels the underlying source if it is still active.
   void cancel(kj::Exception reason) override;
 
-  StreamEncoding getPreferredEncoding() override {
-    // Our underlying ReadableStream produces non-encoded bytes.
+  StreamEncoding getEncoding() override {
+    // Our underlying ReadableStream produces non-encoded bytes (for now)
     return StreamEncoding::IDENTITY;
   };
 
-  kj::Maybe<Tee> tryTee(uint64_t limit) override {
-    // While ReadableStream in general supports teeing, we aren't going
-    // to support it here because of the complexity involved (and we
-    // just don't need it).
-    return kj::none;
-  }
+  Tee tee(size_t limit) override;
 
   struct ReadContext;
   KJ_DECLARE_NON_POLYMORPHIC(ReadContext);
@@ -355,15 +376,64 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
  private:
   struct Active;
   KJ_DECLARE_NON_POLYMORPHIC(Active);
-  struct Closed {};
-  kj::OneOf<kj::Own<Active>, Closed, kj::Exception> state;
-  const Options options;
-  kj::Rc<WeakRef<ReadableStreamSourceKjAdapter>> selfRef;
+  struct KjClosed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+  struct KjOpen {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+    kj::Own<Active> active;
+  };
 
-  kj::Promise<size_t> tryReadImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
-  kj::Promise<void> pumpToImpl(WritableStreamSink& output, bool end);
+  // State machine for tracking readable source adapter lifecycle:
+  //   KjOpen -> KjClosed (normal close)
+  //   KjOpen -> kj::Exception (error via cancel or read failure)
+  // KjClosed is terminal, kj::Exception is implicitly terminal via ErrorState.
+  using KjState = StateMachine<TerminalStates<KjClosed>,
+      ErrorState<kj::Exception>,
+      ActiveState<KjOpen>,
+      KjOpen,
+      KjClosed,
+      kj::Exception>;
+  KjState state;
+  const Options options;
+  kj::Rc<WeakRef<ReadableSourceKjAdapter>> selfRef;
+
+  // Checks if the inner Active state is Canceling or Canceled.
+  // If so, transitions to error state and throws the exception.
+  void throwIfCancelingOrCanceled(Active& active);
+
+  // Checks if the inner Active state is Canceling or Canceled.
+  // If so, transitions to error state and returns the exception.
+  kj::Maybe<kj::Exception> checkCancelingOrCanceled(Active& active);
+
+  kj::Promise<size_t> readImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
+
+  static kj::Promise<void> pumpToImpl(
+      kj::Own<Active> active, WritableSink& output, EndAfterPump end);
   static jsg::Promise<kj::Own<ReadContext>> readInternal(
       jsg::Lock& js, kj::Own<ReadContext> context, MinReadPolicy minReadPolicy);
+
+  template <typename T>
+  kj::Promise<kj::Array<T>> readAllImpl(size_t limit);
+
+  struct CancelationToken final {
+    kj::Rc<WeakRef<CancelationToken>> selfRef;
+    inline CancelationToken()
+        : selfRef(kj::rc<WeakRef<CancelationToken>>(kj::Badge<CancelationToken>{}, *this)) {}
+    inline ~CancelationToken() {
+      selfRef->invalidate();
+    }
+    inline kj::Rc<WeakRef<CancelationToken>> getWeakRef() {
+      return selfRef.addRef();
+    }
+  };
+
+  template <typename T>
+  static jsg::Promise<kj::Array<T>> readAllReadImpl(jsg::Lock& js,
+      IoOwn<Active> active,
+      kj::Vector<T> accumulated,
+      size_t limit,
+      kj::Rc<WeakRef<CancelationToken>> cancelationToken);
 };
 
 }  // namespace workerd::api::streams

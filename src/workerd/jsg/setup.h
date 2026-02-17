@@ -143,14 +143,6 @@ class IsolateBase {
     evalAllowed = true;
   }
 
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-  // JSPI was stabilized in V8 version 14.2, and this API removed.
-  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-  inline void setJspiEnabled(kj::Badge<Lock>, bool enabled) {
-    jspiEnabled = enabled;
-  }
-#endif
-
   inline void setCaptureThrowsAsRejections(kj::Badge<Lock>, bool capture) {
     captureThrowsAsRejections = capture;
   }
@@ -161,6 +153,10 @@ class IsolateBase {
 
   inline void setNodeJsProcessV2Enabled(kj::Badge<Lock>, bool enabled) {
     nodeJsProcessV2Enabled = enabled;
+  }
+
+  inline void setRequireReturnsDefaultExportEnabled(kj::Badge<Lock>, bool enabled) {
+    requireReturnsDefaultExportEnabled = enabled;
   }
 
   inline bool areWarningsLogged() const {
@@ -178,12 +174,24 @@ class IsolateBase {
     return nodeJsProcessV2Enabled;
   }
 
+  inline bool isRequireReturnsDefaultExportEnabled() const {
+    return requireReturnsDefaultExportEnabled;
+  }
+
   inline bool shouldSetToStringTag() const {
     return setToStringTag;
   }
 
   void enableSetToStringTag() {
     setToStringTag = true;
+  }
+
+  inline bool shouldSetImmutablePrototype() const {
+    return shouldSetImmutablePrototypeFlag;
+  }
+
+  void enableSetImmutablePrototype() {
+    shouldSetImmutablePrototypeFlag = true;
   }
 
   inline void disableTopLevelAwait() {
@@ -239,6 +247,10 @@ class IsolateBase {
     return *envAsyncContextKey;
   }
 
+  AsyncContextFrame::StorageKey& getExportsAsyncContextKey() {
+    return *exportsAsyncContextKey;
+  }
+
   void setUsingNewModuleRegistry() {
     usingNewModuleRegistry = true;
   }
@@ -263,6 +275,14 @@ class IsolateBase {
     return usingEnhancedErrorSerialization;
   }
 
+  void setUsingFastJsgStruct() {
+    usingFastJsgStruct = true;
+  }
+
+  bool getUsingFastJsgStruct() const {
+    return usingFastJsgStruct;
+  }
+
   bool pumpMsgLoop() {
     return v8System.pumpMsgLoop(ptr);
   }
@@ -271,6 +291,10 @@ class IsolateBase {
   // queue is drained under the isolate lock.
   void destroyUnderLock(kj::Own<void> item) {
     deferDestruction(kj::mv(item));
+  }
+
+  v8::Isolate* getIsolate() const {
+    return ptr;
   }
 
  private:
@@ -313,11 +337,6 @@ class IsolateBase {
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-  // JSPI was stabilized in V8 version 14.2, and this API removed.
-  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-  bool jspiEnabled = false;
-#endif
 
   // The Web Platform API specifications require that any API that returns a JavaScript Promise
   // should never throw errors synchronously. Rather, they are supposed to capture any synchronous
@@ -328,10 +347,13 @@ class IsolateBase {
   bool asyncContextTrackingEnabled = false;
   bool nodeJsCompatEnabled = false;
   bool nodeJsProcessV2Enabled = false;
+  bool requireReturnsDefaultExportEnabled = false;
   bool setToStringTag = false;
+  bool shouldSetImmutablePrototypeFlag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
+  bool usingFastJsgStruct = false;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;
@@ -347,6 +369,9 @@ class IsolateBase {
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
 
+  // Object used as the underlying storage for a workers exports.
+  v8::Global<v8::Object> workerExportsObj;
+
   /* *** External Memory accounting *** */
   // ExternalMemoryTarget holds a weak reference back to the isolate. ExternalMemoryAjustments
   // hold references to the ExternalMemoryTarget. This allows the ExternalMemoryAjustments to
@@ -355,6 +380,9 @@ class IsolateBase {
 
   // A shared async context key for accessing env
   kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
+
+  // A shared async context key for accessing exports
+  kj::Own<AsyncContextFrame::StorageKey> exportsAsyncContextKey;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.
@@ -368,6 +396,9 @@ class IsolateBase {
   // operation) outside of the queue lock.
   const kj::MutexGuarded<BatchQueue<Item>> queue{
     DESTRUCTION_QUEUE_INITIAL_SIZE, DESTRUCTION_QUEUE_MAX_CAPACITY};
+
+  enum QueueState { ACTIVE, DROPPING, DROPPED };
+  QueueState queueState = ACTIVE;
 
   struct CodeBlockInfo {
     size_t size = 0;
@@ -679,7 +710,7 @@ class Isolate: public IsolateBase {
     jsg::JsObject getConstructor(v8::Local<v8::Context> context) {
       v8::EscapableHandleScope scope(v8Isolate);
       v8::Local<v8::FunctionTemplate> tpl =
-          jsgIsolate.getWrapperByContext(context)->getTemplate(v8Isolate, (T*)nullptr);
+          jsgIsolate.getWrapperByContext(context)->getTemplate(v8Isolate, static_cast<T*>(nullptr));
       v8::Local<v8::Object> prototype = check(tpl->GetFunction(context));
       return jsg::JsObject(scope.Escape(prototype));
     }
@@ -791,6 +822,15 @@ class Isolate: public IsolateBase {
       return v8Ref<v8::Object>(jsgIsolate.workerEnvObj.Get(v8Isolate));
     }
 
+    void setWorkerExports(V8Ref<v8::Object> value) override {
+      jsgIsolate.workerExportsObj.Reset(v8Isolate, value.getHandle(*this));
+    }
+
+    kj::Maybe<V8Ref<v8::Object>> getWorkerExports() override {
+      if (jsgIsolate.workerExportsObj.IsEmpty()) return kj::none;
+      return v8Ref<v8::Object>(jsgIsolate.workerExportsObj.Get(v8Isolate));
+    }
+
    private:
     Isolate& jsgIsolate;
 
@@ -801,15 +841,9 @@ class Isolate: public IsolateBase {
       if (instance.IsEmpty()) {
         return kj::none;
       } else {
-        // TODO(cleanup): Remove this #if when workerd's V8 version is updated to 14.2.
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-        return *reinterpret_cast<Object*>(
-            instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
-#else
         return *reinterpret_cast<Object*>(
             instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
                 static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
-#endif
       }
     }
 

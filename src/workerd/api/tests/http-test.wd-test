@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "http-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "http-test.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-test" ),
+          ( name = "CACHE_ENABLED", json = "false" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_disabled", "url_standard", "workers_api_getters_setters_on_prototype", "fetch_legacy_url"],
+      )
+    ),
+    ( name = "http-test-cache-option-enabled",
+      worker = (
+        modules = [
+          ( name = "worker-cache-enabled", esModule = embed "http-test.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-test-cache-option-enabled" ),
+          ( name = "CACHE_ENABLED", json = "true" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_enabled", "url_standard", "workers_api_getters_setters_on_prototype", "fetch_legacy_url"],
+    ))
+  ],
+);

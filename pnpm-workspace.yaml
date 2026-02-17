@@ -1,0 +1,13 @@
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - '@types/node'
+  - 'wrangler'
+  - 'workerd'
+  - 'miniflare'
+  - '@cloudflare/workerd-*'
+  - '@opennextjs/cloudflare'
+  - '@opennextjs/aws'
+packages:
+  - .
+  - images/container-client-test
+  - src/workerd/api/tests/opennextjs/src

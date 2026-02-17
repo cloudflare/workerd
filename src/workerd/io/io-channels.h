@@ -17,7 +17,8 @@
 
 namespace kj {
 class HttpClient;
-}
+class Network;
+}  // namespace kj
 
 namespace workerd {
 
@@ -36,7 +37,7 @@ class CacheClient {
 
     // Serialized JSON value to pass in ew_compat field of control header to FL. This has the same
     // semantics as the field in IoChannelFactory::SubrequestMetadata.
-    kj::Maybe<kj::StringPtr> featureFlagsForFl;
+    kj::Maybe<kj::String> featureFlagsForFl;
   };
 
   // Get the default namespace, i.e. the one that fetch() will use for caching.
@@ -55,8 +56,10 @@ class TimerChannel {
   // Call each time control enters the isolate to set up the clock.
   virtual void syncTime() = 0;
 
-  // Return the current time.
-  virtual kj::Date now() = 0;
+  // Return the current time. `nextTimeout` is the time at which the next setTimeout() callback
+  // is scheduled; implementations performing Spectre mitigations should clamp to this value so
+  // that Date.now() never goes backwards or reveals timing side channels.
+  virtual kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none) = 0;
 
   // Returns a promise that resolves once `now() >= when`.
   virtual kj::Promise<void> atTime(kj::Date when) = 0;
@@ -102,16 +105,12 @@ class IoChannelFactory {
     kj::Maybe<kj::String> cfBlobJson;
 
     // Specifies the parent span for the subrequest for tracing purposes.
-    TraceParentContext tracing = TraceParentContext(nullptr, nullptr);
+    SpanParent parentSpan = SpanParent(nullptr);
 
     // Serialized JSON value to pass in ew_compat field of control header to FL. If this subrequest
     // does not go directly to FL, this value is ignored. Flags marked with `$neededByFl` in
     // `compatibility-date.capnp` end up here.
-    //
-    // This string remains valid at least until either the request has returned response headers
-    // or has been canceled. (In practice, this string's lifetime is that of the Isolate making
-    // the request.)
-    kj::Maybe<kj::StringPtr> featureFlagsForFl;
+    kj::Maybe<kj::String> featureFlagsForFl;
 
     // Timestamp for when a subrequest is started. (ms since the Unix Epoch)
     double startTime = dateNow();
@@ -142,6 +141,17 @@ class IoChannelFactory {
   virtual kj::Promise<void> writeLogfwdr(
       uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) = 0;
 
+  enum ChannelTokenUsage {
+    // Token is to be sent over RPC and hence will be converted back into a SubrequestChannel
+    // soon. Such tokens have limited lifetime but are otherwise irrevocable.
+    RPC,
+
+    // Token is to be stored in long-term storage. At present this must only be allowed to be
+    // used in workers that have the allow_irrevocable_stub_storage compat flag (checked by the
+    // caller). In the future the format for such tokens will change.
+    STORAGE,
+  };
+
   // Object representing somehere where generic workers subrequests can be sent. Multiple requests
   // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
   // created.
@@ -171,6 +181,11 @@ class IoChannelFactory {
     // dynamically-loaded workers cannot be serialized because the system does not know how to
     // reconstruct a dynamically-loaded worker from scratch.
     virtual void requireAllowsTransfer() = 0;
+
+    // Get a token representing this SubrequestChannel which can be converted back into a
+    // SubrequestChannel using subrequestChannelFromToken(). Default implementation throws a
+    // TypeError.
+    virtual kj::Array<byte> getToken(ChannelTokenUsage usage);
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -208,6 +223,7 @@ class IoChannelFactory {
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
+      ActorRoutingMode routingMode,
       SpanParent parentSpan) = 0;
 
   // Get an actor stub from the given namespace for the actor with the given name.
@@ -223,8 +239,9 @@ class IoChannelFactory {
       return kj::addRef(*this);
     }
 
-    // Same as SubrequestChannel::requireAllowsTransfer().
+    // Same as the corresponding methods on SubrequestChannel.
     virtual void requireAllowsTransfer() = 0;
+    virtual kj::Array<byte> getToken(ChannelTokenUsage usage);
 
     // This class has no functional methods, since it serves as a token to be passed to other
     // interfaces (namely the facets API).
@@ -245,14 +262,25 @@ class IoChannelFactory {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
 
-  // Use a dynamic Worker loader binding to obtain an Worker by name. If the named Worker
-  // doesn't already exist, the callback will be called to fetch the source code from which the
-  // Worker should be created.
+  // Use a dynamic Worker loader binding to obtain an Worker by name. If name is null, or if the named Worker doesn't already exist, the callback will be called to fetch the source code from which the Worker should be created.
   virtual kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
-      kj::String name,
+      kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
     JSG_FAIL_REQUIRE(Error, "Dynamic worker loading is not supported by this runtime.");
   }
+
+  // Get the network for connecting to workerd debug ports.
+  // This is used by the workerdDebugPort binding to connect to remote workerd instances.
+  virtual kj::Network& getWorkerdDebugPortNetwork() {
+    JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings are not supported by this runtime.");
+  }
+
+  // Converts a token created with {SubrequestChannel,ActorClassChannel}::getToken() back into a
+  // live channel. Default implementations throw.
+  virtual kj::Own<SubrequestChannel> subrequestChannelFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+  virtual kj::Own<ActorClassChannel> actorClassFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 };
 
 // Represents a dynamically-loaded Worker to which requests can be sent.

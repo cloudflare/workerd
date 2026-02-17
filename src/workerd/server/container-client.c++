@@ -107,16 +107,22 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String dockerPath,
     kj::String containerName,
     kj::String imageName,
-    kj::TaskSet& waitUntilTasks)
+    kj::TaskSet& waitUntilTasks,
+    kj::Function<void()> cleanupCallback)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
       network(network),
       dockerPath(kj::mv(dockerPath)),
       containerName(kj::encodeUriComponent(kj::mv(containerName))),
       imageName(kj::mv(imageName)),
-      waitUntilTasks(waitUntilTasks) {}
+      waitUntilTasks(waitUntilTasks),
+      cleanupCallback(kj::mv(cleanupCallback)) {}
 
 ContainerClient::~ContainerClient() noexcept(false) {
+  // Call the cleanup callback to remove this client from the ActorNamespace map
+  cleanupCallback();
+
+  // Destroy the Docker container
   waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", containerName, "?force=true"))
                          .ignoreResult());
@@ -250,13 +256,18 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   auto state = jsonRoot.getState();
   JSG_REQUIRE(state.hasStatus(), Error, "Malformed ContainerInspect response");
   auto status = state.getStatus();
-  bool running = status == "running";
+  // Treat both "running" and "restarting" as running. The "restarting" state occurs when
+  // Docker is automatically restarting a container (due to restart policy). From the user's
+  // perspective, a restarting container is still "alive" and should be treated as running
+  // so that start() correctly refuses to start a duplicate and destroy() can clean it up.
+  bool running = status == "running" || status == "restarting";
   co_return InspectResponse{.isRunning = running, .ports = kj::mv(portMappings)};
 }
 
 kj::Promise<void> ContainerClient::createContainer(
     kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
-    kj::Maybe<capnp::List<capnp::Text>::Reader> environment) {
+    kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
+    rpc::Container::StartParams::Reader params) {
   // Docker API: POST /containers/create
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
@@ -291,13 +302,24 @@ kj::Promise<void> ContainerClient::createContainer(
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
 
+  // When containersPidNamespace is NOT enabled, use host PID namespace for backwards compatibility.
+  // This allows the container to see processes on the host.
+  if (!params.getCompatibilityFlags().getContainersPidNamespace()) {
+    hostConfig.setPidMode("host");
+  }
+
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
 
   // statusCode 409 refers to "conflict". Occurs when a container with the given name exists.
-  // In that case we destroy and re-create the container.
-  if (response.statusCode == 409) {
+  // In that case we destroy and re-create the container. We retry a few times with delays
+  // because Docker may take a moment to fully release the container name after removal.
+  constexpr int MAX_RETRIES = 3;
+  constexpr auto RETRY_DELAY = 100 * kj::MILLISECONDS;
+
+  for (int attempt = 0; response.statusCode == 409 && attempt < MAX_RETRIES; ++attempt) {
     co_await destroyContainer();
+    co_await timer.afterDelay(RETRY_DELAY);
     response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
         kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
   }
@@ -355,12 +377,14 @@ kj::Promise<void> ContainerClient::destroyContainer() {
       network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
   // statusCode 204 refers to "no error"
   // statusCode 404 refers to "no such container"
-  // Both of which are fine for us since we're tearing down the container anyway.
-  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
+  // statusCode 409 refers to "removal already in progress" (race between concurrent destroys)
+  // All of which are fine for us since we're tearing down the container anyway.
+  JSG_REQUIRE(
+      response.statusCode == 204 || response.statusCode == 404 || response.statusCode == 409, Error,
       "Removing a container failed with: ", response.body);
   // Do not send a wait request if container doesn't exist. This avoids sending an
   // unnecessary request.
-  if (response.statusCode == 204) {
+  if (response.statusCode == 204 || response.statusCode == 409) {
     response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
         kj::str("/containers/", containerName, "/wait?condition=removed"));
     JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
@@ -387,7 +411,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     environment = params.getEnvironmentVariables();
   }
 
-  co_await createContainer(entrypoint, environment);
+  co_await createContainer(entrypoint, environment, params);
   co_await startContainer();
 }
 
@@ -427,7 +451,19 @@ kj::Promise<void> ContainerClient::signal(SignalContext context) {
 }
 
 kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutContext context) {
-  // empty implementation on purpose
+  auto params = context.getParams();
+  auto durationMs = params.getDurationMs();
+
+  JSG_REQUIRE(
+      durationMs > 0, Error, "setInactivityTimeout() requires durationMs > 0, got ", durationMs);
+
+  auto timeout = durationMs * kj::MILLISECONDS;
+
+  // Add a timer task that holds a reference to this ContainerClient.
+  waitUntilTasks.add(timer.afterDelay(timeout).then([self = kj::addRef(*this)]() {
+    // This callback does nothing but drop the reference
+  }));
+
   co_return;
 }
 
@@ -442,6 +478,10 @@ kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
 
 kj::Promise<void> ContainerClient::listenTcp(ListenTcpContext context) {
   KJ_UNIMPLEMENTED("listenTcp not implemented for Docker containers - use port mapping instead");
+}
+
+kj::Own<ContainerClient> ContainerClient::addRef() {
+  return kj::addRef(*this);
 }
 
 }  // namespace workerd::server

@@ -164,7 +164,11 @@ kj::Maybe<kj::Promise<void>> ActorCache::evictStale(kj::Date now) {
 }
 
 kj::OneOf<ActorCache::CancelAlarmHandler, ActorCache::RunAlarmHandler> ActorCache::armAlarmHandler(
-    kj::Date scheduledTime, bool noCache, kj::StringPtr actorId) {
+    kj::Date scheduledTime,
+    SpanParent parentSpan,
+    kj::Date currentTime KJ_UNUSED,
+    bool noCache,
+    kj::StringPtr actorId) {
   noCache = noCache || lru.options.noCache;
 
   KJ_ASSERT(!currentAlarmTime.is<DeferredAlarmDelete>());
@@ -191,6 +195,7 @@ kj::OneOf<ActorCache::CancelAlarmHandler, ActorCache::RunAlarmHandler> ActorCach
       .status = DeferredAlarmDelete::Status::WAITING,
       .timeToDelete = scheduledTime,
       .noCache = noCache,
+      .traceSpan = kj::mv(parentSpan),
     };
   }
   static const DeferredAlarmDeleter disposer;
@@ -231,14 +236,14 @@ kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
   return kj::none;
 }
 
-void ActorCache::requireNotTerminal() {
+void ActorCache::requireNotTerminal(SpanParent traceSpan) {
   KJ_IF_SOME(e, maybeTerminalException) {
     if (!gate.isBroken()) {
       // We've tried to use storage after shutdown, break the output gate via `flushImpl()` so that
       // we don't let the worker return stale state. This isn't strictly necessary but it does
       // mirror previous behavior wherein we would use disabled storage via `flushImpl()` and break
       // the output gate.
-      ensureFlushScheduled({});
+      ensureFlushScheduled({}, kj::mv(traceSpan));
     }
 
     kj::throwFatalException(kj::cp(e));
@@ -275,7 +280,7 @@ void ActorCache::evictOrOomIfNeeded(Lock& lock) {
       // that returns a promise which we'd then have to put somewhere so that we don't immediately
       // cancel it. Instead, we can ensure that a flush has been scheduled. `flushImpl()`, when
       // called, will throw an exception which breaks the gate.
-      ensureFlushScheduled(WriteOptions());
+      ensureFlushScheduled(WriteOptions(), nullptr);
     }
 
     kj::throwFatalException(kj::mv(exception));
@@ -406,7 +411,7 @@ kj::OneOf<kj::Maybe<ActorCache::Value>, kj::Promise<kj::Maybe<ActorCache::Value>
   ActorStorageLimits::checkMaxKeySize(key);
 
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotTerminal();
+  requireNotTerminal(nullptr);
 
   auto lock = lru.cleanList.lockExclusive();
   auto entry = findInCache(lock, kj::mv(key), options);
@@ -450,10 +455,9 @@ class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream
       : cache(cache),
         cachedEntries(kj::mv(cachedEntries)),
         keysToFetch(kj::mv(keysToFetchParam)),
+        nextExpectedKey(keysToFetch.begin()),
         fulfiller(kj::mv(fulfiller)),
-        options(options) {
-    nextExpectedKey = keysToFetch.begin();
-  }
+        options(options) {}
 
   kj::Promise<void> values(ValuesContext context) override {
     if (!fulfiller->isWaiting()) {
@@ -571,7 +575,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
   ActorStorageLimits::checkMaxPairsCount(keys.size());
 
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotTerminal();
+  requireNotTerminal(nullptr);
 
   std::sort(keys.begin(), keys.end());
 
@@ -916,7 +920,7 @@ class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStr
 kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> ActorCache::list(
     Key beginKey, kj::Maybe<Key> endKey, kj::Maybe<uint> limit, ReadOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotTerminal();
+  requireNotTerminal(nullptr);
 
   // We start by scanning the cache for entries satisfying the list range. If we can fully satisfy
   // the list using these, then we're done! Otherwise, we make a storage request to get the rest.
@@ -1268,7 +1272,7 @@ class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStr
 kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> ActorCache::
     listReverse(Key beginKey, kj::Maybe<Key> endKey, kj::Maybe<uint> limit, ReadOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotTerminal();
+  requireNotTerminal(nullptr);
 
   // Alas, everything needs to be done slightly differently when listing in reverse. This function
   // is an adjusted version of the previous function.
@@ -1850,23 +1854,25 @@ ActorCache::ReadCompletionChain::~ReadCompletionChain() noexcept(false) {
 // =======================================================================================
 // write operations
 
-kj::Maybe<kj::Promise<void>> ActorCache::put(Key key, Value value, WriteOptions options) {
+kj::Maybe<kj::Promise<void>> ActorCache::put(
+    Key key, Value value, WriteOptions options, SpanParent traceSpan) {
   ActorStorageLimits::checkMaxKeySize(key);
   ActorStorageLimits::checkMaxValueSize(key, value);
 
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotTerminal();
+  requireNotTerminal(traceSpan.addRef());
   {
     auto lock = lru.cleanList.lockExclusive();
     kj::Maybe<CountedDelete> maybeCountedDelete;
     auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), kj::mv(value));
-    putImpl(lock, kj::mv(entry), options, maybeCountedDelete);
+    putImpl(lock, kj::mv(entry), options, maybeCountedDelete, kj::mv(traceSpan));
     evictOrOomIfNeeded(lock);
   }
   return getBackpressure();
 }
 
-kj::Maybe<kj::Promise<void>> ActorCache::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
+kj::Maybe<kj::Promise<void>> ActorCache::put(
+    kj::Array<KeyValuePair> pairs, WriteOptions options, SpanParent traceSpan) {
   for (auto& pair: pairs) {
     // We check limits in a separate loop to fail the whole operation when any pair fails a check
     ActorStorageLimits::checkMaxKeySize(pair.key);
@@ -1874,13 +1880,13 @@ kj::Maybe<kj::Promise<void>> ActorCache::put(kj::Array<KeyValuePair> pairs, Writ
   }
 
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotTerminal();
+  requireNotTerminal(traceSpan.addRef());
   {
     auto lock = lru.cleanList.lockExclusive();
     for (auto& pair: pairs) {
       kj::Maybe<CountedDelete> maybeCountedDelete;
       auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(pair.key), kj::mv(pair.value));
-      putImpl(lock, kj::mv(entry), options, maybeCountedDelete);
+      putImpl(lock, kj::mv(entry), options, maybeCountedDelete, traceSpan.addRef());
     }
     evictOrOomIfNeeded(lock);
   }
@@ -1888,7 +1894,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::put(kj::Array<KeyValuePair> pairs, Writ
 }
 
 kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(
-    kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
+    kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) {
   options.noCache = options.noCache || lru.options.noCache;
   KJ_IF_SOME(time, currentAlarmTime.tryGet<KnownAlarmTime>()) {
     // If we're in the alarm handler and haven't set the time yet,
@@ -1911,7 +1917,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(
   currentAlarmTime = ActorCache::KnownAlarmTime{
     ActorCache::KnownAlarmTime::Status::DIRTY, newAlarmTime, options.noCache};
 
-  ensureFlushScheduled(options);
+  ensureFlushScheduled(options, kj::mv(traceSpan));
 
   return getBackpressure();
 }
@@ -1928,17 +1934,18 @@ kj::OneOf<std::invoke_result_t<F>, kj::PromiseForResult<F, void>> mapPromise(
 }
 }  // namespace
 
-kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions options) {
+kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(
+    Key key, WriteOptions options, SpanParent traceSpan) {
   ActorStorageLimits::checkMaxKeySize(key);
 
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotTerminal();
+  requireNotTerminal(traceSpan.addRef());
 
   auto countedDelete = kj::refcounted<CountedDelete>();
   {
     auto lock = lru.cleanList.lockExclusive();
     auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), EntryValueStatus::ABSENT);
-    putImpl(lock, kj::mv(entry), options, *countedDelete);
+    putImpl(lock, kj::mv(entry), options, *countedDelete, kj::mv(traceSpan));
     evictOrOomIfNeeded(lock);
   }
 
@@ -1947,27 +1954,28 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
   KJ_IF_SOME(p, getBackpressure()) {
     // This might be more than one flush but that's OK as long as our state gets taken care of.
     maybePromise = countedDelete->forgiveIfFinished(kj::mv(p));
-  } else if (countedDelete->entries.size()) {
+  } else if (!countedDelete->entries.empty()) {
     maybePromise = countedDelete->forgiveIfFinished(lastFlush.addBranch());
   }
   return mapPromise(kj::mv(maybePromise),
       [waiter = kj::mv(waiter)]() { return waiter->getCountedDelete().countDeleted > 0; });
 }
 
-kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, WriteOptions options) {
+kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(
+    kj::Array<Key> keys, WriteOptions options, SpanParent traceSpan) {
   for (auto& key: keys) {
     ActorStorageLimits::checkMaxKeySize(key);
   }
 
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotTerminal();
+  requireNotTerminal(traceSpan.addRef());
 
   auto countedDelete = kj::refcounted<CountedDelete>();
   {
     auto lock = lru.cleanList.lockExclusive();
     for (auto& key: keys) {
       auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), EntryValueStatus::ABSENT);
-      putImpl(lock, kj::mv(entry), options, *countedDelete);
+      putImpl(lock, kj::mv(entry), options, *countedDelete, traceSpan.addRef());
     }
     evictOrOomIfNeeded(lock);
   }
@@ -1977,7 +1985,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
   KJ_IF_SOME(p, getBackpressure()) {
     // This might be more than one flush but that's OK as long as our state gets taken care of.
     maybePromise = countedDelete->forgiveIfFinished(kj::mv(p));
-  } else if (countedDelete->entries.size()) {
+  } else if (!countedDelete->entries.empty()) {
     maybePromise = countedDelete->forgiveIfFinished(lastFlush.addBranch());
   }
   return mapPromise(kj::mv(maybePromise),
@@ -1988,7 +1996,7 @@ kj::Own<ActorCacheInterface::Transaction> ActorCache::startTransaction() {
   return kj::heap<Transaction>(*this);
 }
 
-ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
+ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options, SpanParent traceSpan) {
   // Since deleteAll() cannot be performed as part of another transaction, in order to maintain
   // our ordering guarantees, we will have to complete all writes that occurred prior to the
   // deleteAll(), then submit the deleteAll(), then do any writes afterwards. Conveniently, though,
@@ -1998,9 +2006,9 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
   // committed in the wrong order with respect to the deleteAll().)
 
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotTerminal();
+  requireNotTerminal(traceSpan.addRef());
 
-  kj::Promise<uint> result{(uint)0};
+  kj::Promise<uint> result{static_cast<uint>(0)};
 
   {
     auto lock = lru.cleanList.lockExclusive();
@@ -2034,7 +2042,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
       result = kj::mv(paf.promise);
       requestedDeleteAll = DeleteAllState{
         .deletedDirty = kj::mv(deletedDirty), .countFulfiller = kj::mv(paf.fulfiller)};
-      ensureFlushScheduled(options);
+      ensureFlushScheduled(options, kj::mv(traceSpan));
     } else {
       // A previous deleteAll() was scheduled and hasn't been committed yet. This means that we
       // can actually coalesce the two, and there's no need to commit any writes that happened
@@ -2048,13 +2056,20 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
     evictOrOomIfNeeded(lock);
   }
 
+  KJ_IF_SOME(t, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+    if (t.time != kj::none) {
+      LOG_WARNING_PERIODICALLY("NOSENTRY deleteAll() called on ActorCache with an alarm still set");
+    }
+  }
+
   return DeleteAllResults{.backpressure = getBackpressure(), .count = kj::mv(result)};
 }
 
 void ActorCache::putImpl(Lock& lock,
     kj::Own<Entry> newEntry,
     const WriteOptions& options,
-    kj::Maybe<CountedDelete&> maybeCountedDelete) {
+    kj::Maybe<CountedDelete&> maybeCountedDelete,
+    SpanParent traceSpan) {
   auto& map = currentValues.get(lock);
   auto ordered = map.ordered();
 
@@ -2158,10 +2173,10 @@ void ActorCache::putImpl(Lock& lock,
     addToDirtyList(*slot);
   }
 
-  ensureFlushScheduled(options);
+  ensureFlushScheduled(options, kj::mv(traceSpan));
 }
 
-void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
+void ActorCache::ensureFlushScheduled(const WriteOptions& options, SpanParent traceSpan) {
   if (lru.options.neverFlush) {
     // Skip all flushes. Used for preview sessions where data is strictly kept in memory.
 
@@ -2190,10 +2205,15 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
 
   if (!flushScheduled) {
     flushScheduled = true;
+    // Capture the trace span from the first write in this flush batch.
+    currentFlushSpan = kj::mv(traceSpan);
+
     auto flushPromise = lastFlush.addBranch()
                             .attach(kj::defer([this]() {
       flushScheduled = false;
       flushScheduledWithOutputGate = false;
+      // Reset the flush span for the next batch
+      currentFlushSpan = nullptr;
     })).then([this]() {
       ++flushesEnqueued;
       return kj::evalNow([this]() {
@@ -2205,18 +2225,19 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
     if (options.allowUnconfirmed) {
       // Don't apply output gate. But, if an exception is thrown, we still want to break the gate,
       // so arrange for that.
-      flushPromise = flushPromise.catch_(
-          [this](kj::Exception&& e) { return gate.lockWhile(kj::Promise<void>(kj::mv(e))); });
+      flushPromise = flushPromise.catch_([this](kj::Exception&& e) {
+        return gate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr);
+      });
     } else {
-      flushPromise = gate.lockWhile(kj::mv(flushPromise));
+      flushPromise = gate.lockWhile(kj::mv(flushPromise), currentFlushSpan.addRef());
       flushScheduledWithOutputGate = true;
     }
 
     lastFlush = flushPromise.fork();
   } else if (!flushScheduledWithOutputGate && !options.allowUnconfirmed) {
     // The flush has already been scheduled without the output gate, but we want to upgrade it to
-    // use the output gate now.
-    lastFlush = gate.lockWhile(lastFlush.addBranch()).fork();
+    // use the output gate now. The span was already captured when the flush was first scheduled.
+    lastFlush = gate.lockWhile(lastFlush.addBranch(), currentFlushSpan.addRef()).fork();
     flushScheduledWithOutputGate = true;
   }
 }
@@ -2225,7 +2246,7 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
 // a resolved jsg::Promise. This is meaningfully different from a ready kj::Promise because it
 // allows the next continuation to run immediately on the microtask queue instead of returning to
 // the kj event loop and fulfilling a resolver that enqueues the continuation.
-kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush() {
+kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush(SpanParent parentSpan) {
   if (lru.options.neverFlush) {
     // We won't ever flush (usually because we're a preview session), so return a falsy maybe.
     return kj::none;
@@ -2376,7 +2397,7 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
 
     // We will skip this CountedDelete if there are no entries that need to be deleted.
     // It will be removed from `countedDeletes` by the next flush.
-    if (entriesToDelete.size() == 0) {
+    if (entriesToDelete.empty()) {
       continue;
     }
 
@@ -2492,13 +2513,13 @@ kj::Promise<void> ActorCache::startFlushTransaction() {
   };
 
   uint typesOfDataToFlush = 0;
-  if (putFlush.batches.size() > 0) {
+  if (!putFlush.batches.empty()) {
     ++typesOfDataToFlush;
   }
-  if (mutedDeleteFlush.batches.size() > 0) {
+  if (!mutedDeleteFlush.batches.empty()) {
     ++typesOfDataToFlush;
   }
-  if (countedDeleteFlushes.size() > 0) {
+  if (!countedDeleteFlushes.empty()) {
     ++typesOfDataToFlush;
   }
   if (maybeAlarmChange.is<DirtyAlarm>()) {
@@ -3057,14 +3078,14 @@ kj::Maybe<kj::Promise<void>> ActorCache::Transaction::commit() {
   {
     auto lock = cache.lru.cleanList.lockExclusive();
     for (auto& change: entriesToWrite) {
-      cache.putImpl(lock, kj::mv(change.entry), change.options, kj::none);
+      cache.putImpl(lock, kj::mv(change.entry), change.options, kj::none, commitSpan.addRef());
     }
     entriesToWrite.clear();
     cache.evictOrOomIfNeeded(lock);
   }
 
   KJ_IF_SOME(change, alarmChange) {
-    cache.setAlarm(change.newTime, change.options);
+    cache.setAlarm(change.newTime, change.options, commitSpan.addRef());
   }
   alarmChange = kj::none;
 
@@ -3199,18 +3220,21 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
 // transaction writes
 
 kj::Maybe<kj::Promise<void>> ActorCache::Transaction::put(
-    Key key, Value value, WriteOptions options) {
+    Key key, Value value, WriteOptions options, SpanParent traceSpan) {
   options.noCache = options.noCache || cache.lru.options.noCache;
   auto lock = cache.lru.cleanList.lockExclusive();
   auto entry = kj::atomicRefcounted<Entry>(cache, kj::mv(key), kj::mv(value));
   putImpl(lock, kj::mv(entry), options);
+
+  // Capture span for use at commit time
+  commitSpan = kj::mv(traceSpan);
 
   // Don't apply backpressure because transactions can't be flushed anyway.
   return kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> ActorCache::Transaction::put(
-    kj::Array<KeyValuePair> pairs, WriteOptions options) {
+    kj::Array<KeyValuePair> pairs, WriteOptions options, SpanParent traceSpan) {
   options.noCache = options.noCache || cache.lru.options.noCache;
   auto lock = cache.lru.cleanList.lockExclusive();
 
@@ -3219,19 +3243,26 @@ kj::Maybe<kj::Promise<void>> ActorCache::Transaction::put(
     putImpl(lock, kj::mv(entry), options);
   }
 
+  // Capture span for use at commit time
+  commitSpan = kj::mv(traceSpan);
+
   // Don't apply backpressure because transactions can't be flushed anyway.
   return kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> ActorCache::Transaction::setAlarm(
-    kj::Maybe<kj::Date> newTime, WriteOptions options) {
+    kj::Maybe<kj::Date> newTime, WriteOptions options, SpanParent traceSpan) {
   options.noCache = options.noCache || cache.lru.options.noCache;
   alarmChange = DirtyAlarmWithOptions{DirtyAlarm{newTime}, options};
+
+  // Capture span for use at commit time
+  commitSpan = kj::mv(traceSpan);
 
   return kj::none;
 }
 
-kj::OneOf<bool, kj::Promise<bool>> ActorCache::Transaction::delete_(Key key, WriteOptions options) {
+kj::OneOf<bool, kj::Promise<bool>> ActorCache::Transaction::delete_(
+    Key key, WriteOptions options, SpanParent traceSpan) {
   options.noCache = options.noCache || cache.lru.options.noCache;
 
   uint count = 0;
@@ -3242,6 +3273,9 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::Transaction::delete_(Key key, Wri
     auto entry = kj::atomicRefcounted<Entry>(cache, kj::mv(key), EntryValueStatus::ABSENT);
     keyToCount = putImpl(lock, kj::mv(entry), options, count);
   }
+
+  // Capture span for use at commit time
+  commitSpan = kj::mv(traceSpan);
 
   KJ_IF_SOME(k, keyToCount) {
     // Unfortunately, to find out the count, we have to do a read.
@@ -3260,7 +3294,7 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::Transaction::delete_(Key key, Wri
 }
 
 kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
-    kj::Array<Key> keys, WriteOptions options) {
+    kj::Array<Key> keys, WriteOptions options, SpanParent traceSpan) {
   options.noCache = options.noCache || cache.lru.options.noCache;
 
   if (keys.size() == 0) {
@@ -3285,7 +3319,10 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
     }
   }
 
-  if (keysToCount.size() == 0) {
+  // Capture span for use at commit time
+  commitSpan = kj::mv(traceSpan);
+
+  if (keysToCount.empty()) {
     return count;
   } else {
     // HACK: Since we allow deletes of larger than our maxKeysPerRpc but these deletes can provoke

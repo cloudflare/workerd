@@ -7,7 +7,6 @@
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
-#include <workerd/jsg/promise.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -17,6 +16,9 @@
 #include <kj/map.h>
 
 namespace workerd::jsg {
+
+template <typename T>
+class Promise;
 
 enum class InstantiateModuleOptions {
   // Allows pending top-level await in the module when evaluated. Will cause
@@ -148,6 +150,12 @@ class ModuleRegistry {
     // For source phase imports - stores the module source object (e.g., WebAssembly.Module)
     kj::Maybe<V8Ref<v8::Object>> maybeModuleSourceObject;
 
+    // Cache for mutable module exports wrapper when require_returns_default_export flag is enabled.
+    // Used to ensure require() returns the same mutable object for the same module.
+    // This enables frameworks like Next.js to patch built-in module exports.
+    // See: https://github.com/cloudflare/workerd/issues/5844
+    mutable kj::Maybe<V8Ref<v8::Object>> maybeMutableExports;
+
     ModuleInfo(jsg::Lock& js,
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
@@ -215,7 +223,7 @@ class ModuleRegistry {
       const kj::Path& referrer,
       kj::StringPtr rawSpecifier) = 0;
 
-  virtual Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) = 0;
+  virtual Value resolveInternalImport(jsg::Lock& js, kj::StringPtr specifier) = 0;
 
   // The dynamic import callback is provided by the embedder to set up any context necessary
   // for instantiating the module during a dynamic import. The handler function passed into

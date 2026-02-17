@@ -43,15 +43,15 @@ export class Domain extends EventEmitter {
   }
 
   exit(): void {
-    // Insteading of throwing, we just don't do anything here.
+    // Instead of throwing, we just don't do anything here.
   }
 
   add(_ee: unknown): void {
-    // Insteading of throwing, we just don't do anything here.
+    // Instead of throwing, we just don't do anything here.
   }
 
   remove(_ee: unknown): void {
-    // Insteading of throwing, we just don't do anything here.
+    // Instead of throwing, we just don't do anything here.
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type

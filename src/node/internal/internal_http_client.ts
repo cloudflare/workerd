@@ -29,7 +29,7 @@ import {
   validateNumber,
 } from 'node-internal:validators';
 import { getTimerDuration } from 'node-internal:internal_net';
-import { addAbortSignal } from 'node-internal:streams_util';
+import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
 import { Writable } from 'node-internal:streams_writable';
 import type {
   ClientRequest as _ClientRequest,
@@ -43,7 +43,7 @@ import {
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
-import type { Socket } from 'net';
+import type { Socket } from 'node:net';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 
@@ -66,17 +66,12 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   #body: (Buffer | Uint8Array)[] = [];
   #incomingMessage?: IncomingMessage;
   #timer: number | null = null;
-  // TODO(soon): Types/node is wrong. RequestOptions should contain search and hash fields.
-  #options: RequestOptions & {
-    search?: string | undefined;
-    hash?: string | undefined;
-  };
 
   _ended: boolean = false;
 
   timeout?: number;
   method: string = 'GET';
-  path: string;
+  path: string = '/';
   host: string;
   protocol: string = 'http:';
   port: string = '80';
@@ -84,7 +79,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   agent: Agent | undefined;
 
   // Unused fields required to be Node.js compatible.
-  aborted: boolean = false;
+  override aborted: boolean = false;
   reusedSocket: boolean = false;
   maxHeadersCount: number = Infinity;
   connection: Socket | null = null;
@@ -173,7 +168,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     const signal = options.signal;
     if (signal) {
-      addAbortSignal(signal, this);
+      addAbortSignal(signal, this as unknown as Writable);
     }
     let method = options.method;
     const methodIsString = typeof method === 'string';
@@ -296,7 +291,6 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     });
 
     this[kUniqueHeaders] = parseUniqueHeadersOption(options.uniqueHeaders);
-    this.#options = options;
   }
 
   #onFinish(): void {
@@ -306,7 +300,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (this.method !== 'GET' && this.method !== 'HEAD') {
       if (this.#body.length > 0) {
         const value = this.getHeader('content-type') ?? '';
-        body = new Blob(this.#body, {
+        body = new Blob(this.#body as BlobPart[], {
           type: Array.isArray(value) ? value.join(', ') : `${value}`,
         });
       }
@@ -360,15 +354,15 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     }
 
     const host = this.getHeader('host') ?? this.host;
-    const url = new URL(`http://${host}`);
+    let url = new URL(`http://${host}`);
     url.protocol = this.protocol;
     url.port = this.port;
-    url.pathname = this.path;
-    if (this.#options.search != null) {
-      url.search = this.#options.search;
-    }
-    if (this.#options.hash != null) {
-      url.hash = this.#options.hash;
+
+    if (this.path.length > 0 && this.path !== '/') {
+      // We pass `path` as the first argument since it can contain search and hash components.
+      // Therefore, running the pathname setter will not work.
+      // Since this is an extremely costly operation, we only do it if necessary.
+      url = new URL(this.path, url);
     }
 
     // Our fetch implementation has the following limitations.

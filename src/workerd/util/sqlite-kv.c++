@@ -90,15 +90,15 @@ kj::Own<SqliteKv::ListCursor> SqliteKv::list(
   if (order == Order::FORWARD) {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimit, begin, e, (int64_t)l);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimit, begin, e,
+            static_cast<int64_t>(l));
       } else {
         return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEnd, begin, e);
       }
     } else {
       KJ_IF_SOME(l, limit) {
         return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimit, begin, (int64_t)l);
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimit, begin, static_cast<int64_t>(l));
       } else {
         return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtList, begin);
       }
@@ -106,16 +106,16 @@ kj::Own<SqliteKv::ListCursor> SqliteKv::list(
   } else {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimitReverse, begin, e, (int64_t)l);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimitReverse,
+            begin, e, static_cast<int64_t>(l));
       } else {
         return kj::heap<ListCursor>(
             kj::Badge<SqliteKv>(), *this, stmts.stmtListEndReverse, begin, e);
       }
     } else {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimitReverse, begin, (int64_t)l);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListLimitReverse, begin,
+            static_cast<int64_t>(l));
       } else {
         return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListReverse, begin);
       }
@@ -139,7 +139,7 @@ kj::Maybe<SqliteKv::ListCursor::KeyValuePair> SqliteKv::ListCursor::next() {
 }
 
 void SqliteKv::put(KeyPtr key, ValuePtr value) {
-  return put(key, value, {});
+  put(key, value, {});
 }
 
 void SqliteKv::put(KeyPtr key, ValuePtr value, WriteOptions options) {
@@ -169,6 +169,17 @@ uint SqliteKv::deleteAll() {
 void SqliteKv::beforeSqliteReset() {
   // We'll need to recreate the table on the next operation.
   tableCreated = false;
+}
+
+void SqliteKv::rollbackMultiPut(Initialized& stmts, WriteOptions options) {
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
+    // This should be rare, so we don't prepare a statement for it.
+    stmts.db.run({.regulator = stmts.regulator, .allowUnconfirmed = options.allowUnconfirmed},
+        kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
+    stmts.stmtMultiPutRelease.run({.allowUnconfirmed = options.allowUnconfirmed});
+  })) {
+    KJ_LOG(WARNING, "silencing exception encountered while rolling back multi-put", e);
+  }
 }
 
 }  // namespace workerd

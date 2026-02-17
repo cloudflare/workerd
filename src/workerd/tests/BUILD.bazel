@@ -6,12 +6,21 @@ load("//:build/wd_test.bzl", "wd_test")
 wd_cc_library(
     name = "bench-tools",
     hdrs = ["bench-tools.h"],
+    defines = select({
+        "//src/workerd/server:really_use_tcmalloc": ["WD_USE_TCMALLOC"],
+        "//conditions:default": [],
+    }),
     tags = ["workerd-benchmark"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj-test",
-        "@workerd-google-benchmark//:benchmark",
-    ],
+        "@google_benchmark//:benchmark",
+    ] + select({
+        # tcmalloc is only available on Linux and when use_tcmalloc is enabled.
+        # We use the malloc_extension API to configure tcmalloc for deterministic benchmarks.
+        "//src/workerd/server:really_use_tcmalloc": ["@tcmalloc//tcmalloc:malloc_extension"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_cc_library(
@@ -90,6 +99,41 @@ wd_cc_benchmark(
     ],
 )
 
+wd_cc_benchmark(
+    name = "bench-text-encoder",
+    srcs = ["bench-text-encoder.c++"],
+    deps = [":test-fixture"],
+)
+
+wd_cc_benchmark(
+    name = "bench-response",
+    srcs = ["bench-response.c++"],
+    deps = [":test-fixture"],
+)
+
+wd_cc_benchmark(
+    name = "bench-jsstring",
+    srcs = ["bench-jsstring.c++"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/jsg",
+    ],
+)
+
+# Benchmark for comparing stream piping implementations
+# Tagged manual because it takes too long for CI - run explicitly with:
+#   bazel run //src/workerd/tests:bench-stream-piping
+wd_cc_benchmark(
+    name = "bench-stream-piping",
+    srcs = ["bench-stream-piping.c++"],
+    tags = ["manual"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+    ],
+)
+
 wd_test(
     src = "unknown-import-assertions-test.wd-test",
     args = ["--experimental"],
@@ -110,16 +154,26 @@ wd_test(
     data = ["performance-test.js"],
 )
 
-filegroup(
-    name = "all_benchmarks",
-    srcs = [
-        ":bench-api-headers",
-        ":bench-global-scope",
-        ":bench-json",
-        ":bench-kj-headers",
-        ":bench-mimetype",
-        ":bench-regex",
-        ":bench-util",
+# REPRL tests using KJ test framework
+wd_cc_library(
+    name = "libreprl",
+    srcs = ["libreprl/libreprl.c"],
+    hdrs = ["libreprl/libreprl.h"],
+    copts = [
+        "-std=c23",
     ],
-    visibility = ["//visibility:public"],
+)
+
+kj_test(
+    src = "test-reprl.c++",
+    data = [
+        "//fuzzilli:config.capnp",
+        "//fuzzilli:worker.js",
+        "//src/workerd/server:workerd",
+    ],
+    tags = ["requires-fuzzilli"],
+    deps = [
+        ":libreprl",
+        "@bazel_tools//tools/cpp/runfiles",
+    ],
 )

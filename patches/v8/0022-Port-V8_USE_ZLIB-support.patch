@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sun, 8 Jun 2025 16:40:37 -0400
+Subject: Port V8_USE_ZLIB support
+
+Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 5d9c604425fb4d874d121e9b4f6c41320bc6a95b..80d30c7bd1dfd2b9425a0f347787d0f60e6f0a25 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -162,6 +162,11 @@ v8_flag(name = "v8_enable_verify_predictable")
+ 
+ v8_flag(name = "v8_enable_test_features")
+ 
++v8_flag(
++    name = "v8_use_zlib",
++    default = True,
++)
++
+ v8_flag(name = "v8_wasm_random_fuzzers")
+ 
+ v8_flag(
+@@ -513,6 +518,7 @@ v8_config(
+         "v8_enable_drumbrake_tracing": "V8_ENABLE_DRUMBRAKE_TRACING",
+         "v8_jitless": "V8_JITLESS",
+         "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
++        "v8_use_zlib": "V8_USE_ZLIB",
+     },
+     defines = [
+         "GOOGLE3",
+@@ -4600,6 +4606,8 @@ v8_library(
+         "@highway//:hwy",
+         "@fast_float",
+         "@simdutf",
++        "@zlib",
++        "@zlib//:compression_utils_portable",
+     ],
+ )
+ 
+diff --git a/src/deoptimizer/frame-translation-builder.cc b/src/deoptimizer/frame-translation-builder.cc
+index 3c1ed7cf1e45ab4b87dd134430f7cda321e5e338..fa41e87973bebbe36da35e90a513653779bc1915 100644
+--- a/src/deoptimizer/frame-translation-builder.cc
++++ b/src/deoptimizer/frame-translation-builder.cc
+@@ -11,7 +11,7 @@
+ #include "src/objects/fixed-array-inl.h"
+ 
+ #ifdef V8_USE_ZLIB
+-#include "third_party/zlib/google/compression_utils_portable.h"
++#include <google/compression_utils_portable.h>
+ #endif  // V8_USE_ZLIB
+ 
+ namespace v8 {
+diff --git a/src/objects/deoptimization-data.cc b/src/objects/deoptimization-data.cc
+index fc9805d59779984bf8f038673e2371662181c3fa..717a0ea734d41538bd9aa4186140bfff6e5cf5de 100644
+--- a/src/objects/deoptimization-data.cc
++++ b/src/objects/deoptimization-data.cc
+@@ -14,7 +14,7 @@
+ #include "src/objects/shared-function-info.h"
+ 
+ #ifdef V8_USE_ZLIB
+-#include "third_party/zlib/google/compression_utils_portable.h"
++#include <google/compression_utils_portable.h>
+ #endif  // V8_USE_ZLIB
+ 
+ namespace v8 {
+diff --git a/src/snapshot/snapshot-utils.cc b/src/snapshot/snapshot-utils.cc
+index ea04fcec0ecebd409d1ed9839dd0db3ac73160a9..e67eb478a0f49fa2a6c4f338e86a7e6a5e6d686f 100644
+--- a/src/snapshot/snapshot-utils.cc
++++ b/src/snapshot/snapshot-utils.cc
+@@ -7,7 +7,7 @@
+ #include "src/base/sanitizer/msan.h"
+ 
+ #ifdef V8_USE_ZLIB
+-#include "third_party/zlib/zlib.h"
++#include <zlib.h>
+ #endif
+ 
+ namespace v8 {

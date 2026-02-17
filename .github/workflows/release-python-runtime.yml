@@ -73,7 +73,7 @@ jobs:
           echo "Found open PR for branch $BRANCH_NAME"
 
           # Commit and push the changes
-          git add build/python_metadata.bzl
+          git add build/python_metadata.bzl build/deps/python.MODULE.bazel
           git commit --fixup HEAD -m "Update python_metadata.bzl with new bundle info
 
           This commit updates the backport and integrity values in python_metadata.bzl

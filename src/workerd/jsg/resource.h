@@ -14,6 +14,8 @@
 #include <workerd/jsg/memory.h>
 #include <workerd/jsg/meta.h>
 #include <workerd/jsg/modules.capnp.h>
+// JSG has very entrenched include cycles
+// NOLINTNEXTLINE(misc-header-include-cycle)
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
@@ -26,6 +28,10 @@
 
 #include <type_traits>
 #include <typeindex>
+
+// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {
@@ -633,16 +639,18 @@ struct GetterCallback;
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
-        auto obj = info.This();                                                                    \
+        auto obj = info.HolderV2();                                                                \
         auto& js = Lock::from(isolate);                                                            \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
-        if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
+        if (!isContext &&                                                                          \
+            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
         return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...));            \
+            (self.*method)(                                                                        \
+                wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));          \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -658,8 +666,8 @@ struct GetterCallback;
       auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
       return liftKj<ReturnType>(isolate, [&]() {                                                   \
-        return (self.*method)(                                                                     \
-            wrapper.template unwrapFastApi<Args>(lock, context, (kj::Decay<Args>*)nullptr)...);    \
+        return (self.*method)(wrapper.template unwrapFastApi<Args>(                                \
+            lock, context, static_cast<kj::Decay<Args>*>(nullptr))...);                            \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
@@ -678,15 +686,17 @@ struct GetterCallback;
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
         auto& js = Lock::from(isolate);                                                            \
-        auto obj = info.This();                                                                    \
+        auto obj = info.HolderV2();                                                                \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
-        if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
+        if (!isContext &&                                                                          \
+            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
         return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(js, wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...));        \
+            (self.*method)(                                                                        \
+                js, wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));      \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -702,8 +712,9 @@ struct GetterCallback;
       auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
       return liftKj<ReturnType>(isolate, [&]() {                                                   \
-        return (self.*method)(                                                                     \
-            js, wrapper.template unwrapFastApi<Args>(js, context, (kj::Decay<Args>*)nullptr)...);  \
+        return (self.*method)(js,                                                                  \
+            wrapper.template unwrapFastApi<Args>(                                                  \
+                js, context, static_cast<kj::Decay<Args>*>(nullptr))...);                          \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
@@ -755,12 +766,14 @@ struct PropertyGetterCallback;
         auto obj = info.This();                                                                    \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
-        if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
+        if (!isContext &&                                                                          \
+            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
         return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...));            \
+            (self.*method)(                                                                        \
+                wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));          \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -777,7 +790,8 @@ struct PropertyGetterCallback;
       auto& js = Lock::from(isolate);                                                              \
                                                                                                    \
       return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
-        return (self.*method)(wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...);          \
+        return (self.*method)(                                                                     \
+            wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...);               \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
@@ -799,12 +813,14 @@ struct PropertyGetterCallback;
         auto obj = info.This();                                                                    \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
-        if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
+        if (!isContext &&                                                                          \
+            !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {           \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
         auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
         return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(js, wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...));        \
+            (self.*method)(                                                                        \
+                js, wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...));      \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -821,7 +837,8 @@ struct PropertyGetterCallback;
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
                                                                                                    \
       return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
-        return (self.*method)(js, wrapper.unwrap(js, context, (kj::Decay<Args>*)nullptr)...);      \
+        return (self.*method)(                                                                     \
+            js, wrapper.unwrap(js, context, static_cast<kj::Decay<Args>*>(nullptr))...);           \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
@@ -867,10 +884,10 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isConte
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
       auto& js = Lock::from(isolate);
-      auto obj = info.This();
+      auto obj = info.HolderV2();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -893,10 +910,10 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), method, 
     liftKj(info, [&]() {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.This();
+      auto obj = info.HolderV2();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -933,7 +950,7 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method,
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -981,7 +998,7 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), 
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -1045,20 +1062,17 @@ struct DeserializeInvoker<TypeWrapper,
   }
 };
 
-// SFINAE to detect if a type has a static method called `constructor`.
-template <typename T, typename Constructor = decltype(&T::constructor)>
-constexpr bool hasConstructorMethod(T*) {
-  static_assert(!std::is_member_function_pointer_v<Constructor>,
-      "JSG resource type `constructor` member functions must be static.");
-  // TODO(cleanup): Write our own isMemberFunctionPointer and put it in KJ so we don't have to pull
-  //   in <type_traits>. (See the "Motivation" section of Boost.CallableTraits for why I didn't just
-  //   dive in and do it.)
+// SFINAE helper to detect if a type has a static method called `constructor`.
+// Includes a static_assert to provide a clear error if the method exists but is non-static.
+template <typename T, typename = void>
+constexpr bool HasConstructorMethod = false;
+
+template <typename T>
+constexpr bool HasConstructorMethod<T, std::void_t<decltype(&T::constructor)>> = [] {
+  static_assert(!std::is_member_function_pointer_v<decltype(&T::constructor)>,
+      "JSG_RESOURCE_TYPE constructor must be a static method.");
   return true;
-}
-// SFINAE to detect if a type has a static method called `constructor`.
-constexpr bool hasConstructorMethod(...) {
-  return false;
-}
+}();
 
 // Expose the global scope type as a nested type under the global scope itself, such that for some
 // global scope type `GlobalScope`, `this.GlobalScope === this.constructor` holds true. Note that
@@ -1185,7 +1199,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
       auto context = isolate->GetCurrentContext();
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
-      if (!wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, false>(context, obj);
@@ -1239,7 +1253,8 @@ struct ResourceTypeBuilder {
 
   template <typename Type>
   inline void registerInherit() {
-    constructor->Inherit(typeWrapper.template getTemplate<isContext>(isolate, (Type*)nullptr));
+    constructor->Inherit(
+        typeWrapper.template getTemplate<isContext>(isolate, static_cast<Type*>(nullptr)));
   }
 
   template <const char* name>
@@ -1261,15 +1276,15 @@ struct ResourceTypeBuilder {
                                        method, ArgumentIndexes<Method>>::callback);
   }
 
-  template <const char* name, typename Method, Method method>
+  template <const char* name, auto method>
   inline void registerMethod() {
-    if constexpr (isFastApiCompatible<Method>) {
+    if constexpr (isFastApiCompatible<decltype(method)>) {
       if (typeWrapper.isFastApiEnabled()) {
         auto cFunction = v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self,
-            Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
+            decltype(method), method, ArgumentIndexes<decltype(method)>>::template fastCallback<>);
         auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
+            &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
+                ArgumentIndexes<decltype(method)>>::callback,
             v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
             v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
 
@@ -1280,8 +1295,8 @@ struct ResourceTypeBuilder {
 
     prototype->Set(isolate, name,
         v8::FunctionTemplate::New(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
+            &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
+                ArgumentIndexes<decltype(method)>>::callback,
             v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow));
   }
 
@@ -1432,7 +1447,7 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() {
-    using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    using Gcb = PropertyGetterCallback<TypeWrapper, name, Getter, getter, isContext>;
 
     auto v8Name = v8StrIntern(isolate, name);
 
@@ -1440,7 +1455,8 @@ struct ResourceTypeBuilder {
     auto symbol = v8::Symbol::New(isolate, v8Name);
     inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
 
-    prototype->SetNativeDataProperty(symbol, &Gcb::callback, nullptr, v8::Local<v8::Value>(),
+    auto getterFn = v8::FunctionTemplate::New(isolate, &Gcb::callback);
+    prototype->SetAccessorProperty(symbol, getterFn, {},
         static_cast<v8::PropertyAttribute>(
             v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
   }
@@ -1507,7 +1523,7 @@ struct ResourceTypeBuilder {
   template <typename Type, const char* name>
   inline void registerNestedType() {
     static_assert(Type::JSG_KIND == ::workerd::jsg::JsgKind::RESOURCE,
-        "Type is not a resource type, and therefore cannot not be declared nested");
+        "Type is not a resource type, and therefore cannot be declared nested");
 
     constexpr auto hasGetTemplate =
         ::workerd::jsg::isDetected<::workerd::jsg::HasGetTemplateOverload, decltype(typeWrapper),
@@ -1515,7 +1531,7 @@ struct ResourceTypeBuilder {
     static_assert(
         hasGetTemplate, "Type must be listed in JSG_DECLARE_ISOLATE_TYPE to be declared nested.");
 
-    prototype->Set(isolate, name, typeWrapper.getTemplate(isolate, (Type*)nullptr));
+    prototype->Set(isolate, name, typeWrapper.getTemplate(isolate, static_cast<Type*>(nullptr)));
   }
 
   inline void registerTypeScriptRoot() { /* only needed for RTTI */ }
@@ -1560,7 +1576,7 @@ struct JsSetup {
   template <typename Method, Method method>
   inline void registerCallable() {}
 
-  template <const char* name, typename Method, Method method>
+  template <const char* name, auto method>
   inline void registerMethod() {}
 
   template <const char* name, typename Method, Method method>
@@ -1654,7 +1670,7 @@ class ResourceWrapper {
           static_cast<T&>(object).jsgInitReflection(wrapper);
         };
       }
-      return {wrapper.getTemplate(isolate, (T*)nullptr), rinit};
+      return {wrapper.getTemplate(isolate, static_cast<T*>(nullptr)), rinit};
     });
 
     if constexpr (static_cast<uint>(T::jsgSerializeTag) !=
@@ -1842,7 +1858,7 @@ class ResourceWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // Try to unwrap a value of type Ref<T>.
 
-    KJ_IF_SOME(p, tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
+    KJ_IF_SOME(p, tryUnwrap(js, context, handle, static_cast<T*>(nullptr), parentObject)) {
       return Ref<T>(kj::addRef(p));
     } else {
       return kj::none;
@@ -1857,7 +1873,7 @@ class ResourceWrapper {
       v8::EscapableHandleScope scope(isolate);
 
       v8::Local<v8::FunctionTemplate> constructor;
-      if constexpr (!isContext && hasConstructorMethod((T*)nullptr)) {
+      if constexpr (!isContext && HasConstructorMethod<T>) {
         constructor =
             v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback);
       } else {
@@ -1892,6 +1908,10 @@ class ResourceWrapper {
       prototype->Set(internalMarker, internalMarker,
           static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
               v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
+
+      if (getShouldSetImmutablePrototype(isolate)) {
+        constructor->ReadOnlyPrototype();
+      }
 
       constructor->SetClassName(classname);
 
@@ -1982,5 +2002,8 @@ class ObjectWrapper {
       Ref<Object>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
 };
+
+// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
+#pragma clang diagnostic pop
 
 }  // namespace workerd::jsg

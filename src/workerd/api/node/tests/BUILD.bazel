@@ -229,6 +229,12 @@ wd_test(
 )
 
 wd_test(
+    src = "module-require-mutable-exports-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-require-mutable-exports-test.js"],
+)
+
+wd_test(
     src = "process-exit-test.wd-test",
     args = ["--experimental"],
     data = ["process-exit-test.js"],
@@ -366,6 +372,12 @@ wd_test(
 )
 
 wd_test(
+    src = "timers-global-override-test.wd-test",
+    args = ["--experimental"],
+    data = ["timers-global-override-test.js"],
+)
+
+wd_test(
     src = "async_hooks-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["async_hooks-nodejs-test.js"],
@@ -424,6 +436,12 @@ wd_test(
     src = "streams-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["streams-nodejs-test.js"],
+)
+
+wd_test(
+    src = "streams-v24-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-v24-nodejs-test.js"],
 )
 
 js_binary(

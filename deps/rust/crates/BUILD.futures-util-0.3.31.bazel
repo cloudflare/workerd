@@ -65,9 +65,9 @@ rust_library(
         "@crates_vendor__futures-io-0.3.31//:futures_io",
         "@crates_vendor__futures-sink-0.3.31//:futures_sink",
         "@crates_vendor__futures-task-0.3.31//:futures_task",
-        "@crates_vendor__memchr-2.7.6//:memchr",
+        "@crates_vendor__memchr-2.8.0//:memchr",
         "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",
         "@crates_vendor__pin-utils-0.1.0//:pin_utils",
-        "@crates_vendor__slab-0.4.11//:slab",
+        "@crates_vendor__slab-0.4.12//:slab",
     ],
 )

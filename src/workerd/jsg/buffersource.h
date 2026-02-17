@@ -310,6 +310,9 @@ class BackingStore {
 class BufferSource {
  public:
   static kj::Maybe<BufferSource> tryAlloc(Lock& js, size_t size);
+
+  // The unsafe variant does not initialize the allocated memory. Use with caution!
+  static kj::Maybe<BufferSource> tryAllocUnsafe(Lock& js, size_t size);
   static BufferSource wrap(
       Lock& js, void* data, size_t size, BackingStore::Disposer disposer, void* ctx);
 
@@ -462,7 +465,6 @@ class BufferSource {
 };
 
 // TypeWrapper implementation for the BufferSource type.
-template <typename TypeWrapper>
 class BufferSourceWrapper {
  public:
   static constexpr const char* getName(BufferSource*) {

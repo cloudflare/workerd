@@ -143,8 +143,7 @@ class Default(WorkerEntrypoint):
             #
             # Try to grab headers which should contain a duplicated header.
             headers = request.headers.get_all("X-Custom-Header")
-            assert "some_value" in headers
-            assert "some_other_value" in headers
+            assert "some_value, some_other_value" in headers
             return Response("success")
         else:
             resp = await fetch("https://example.com/sub")
@@ -175,6 +174,7 @@ class Default(WorkerEntrypoint):
         await request_unit_tests(js_env)
         await can_use_event_decorator(js_env)
         await response_unit_tests(js_env)
+        await response_buffer_source_unit_tests(js_env)
         await can_fetch_python_request()
 
 
@@ -413,8 +413,48 @@ async def request_unit_tests(env):
     req_with_dup_headers = Request("http://example.com", headers=js_headers)
     assert req_with_dup_headers.url == "http://example.com/"
     encoding = req_with_dup_headers.headers.get_all("Accept-encoding")
-    assert "deflate" in encoding
-    assert "gzip" in encoding
+    assert encoding == ["deflate, gzip"]
+
+    # Verify that header values containing commas are preserved.
+    js_headers = js.Headers.new()
+    js_headers.set("User-Agent", "Example, Agent/1.0")
+    req_with_user_agent = Request("http://example.com", headers=js_headers)
+    assert req_with_user_agent.headers.get("User-Agent") == "Example, Agent/1.0"
+    assert req_with_user_agent.headers.get_all("User-Agent") == ["Example, Agent/1.0"]
+
+    # Verify that header values with commas are preserved when using Python dict.
+    req_dict_comma = Request(
+        "http://example.com",
+        headers={
+            "User-Agent": "Python, Client/2.0",
+            "Accept": "text/html, application/json",
+        },
+    )
+    assert req_dict_comma.headers.get("User-Agent") == "Python, Client/2.0"
+    assert "text/html" in req_dict_comma.headers.get("Accept")
+    assert "application/json" in req_dict_comma.headers.get("Accept")
+
+    # Verify that Set-Cookie headers are preserved as distinct values.
+    js_headers = js.Headers.new()
+    js_headers.append("Set-Cookie", "a=b, c=d")
+    js_headers.append("Set-Cookie", "e=f")
+    req_with_set_cookie = Request("http://example.com", headers=js_headers)
+    assert req_with_set_cookie.headers.get_all("Set-Cookie") == ["a=b, c=d", "e=f"]
+
+    # Verify that Set-Cookie headers work with Python list of tuples.
+    req_tuple_cookies = Request(
+        "http://example.com",
+        headers=[
+            ("Set-Cookie", "session=abc123"),
+            ("Set-Cookie", "token=xyz789"),
+            ("X-Custom", "value"),
+        ],
+    )
+    assert req_tuple_cookies.headers.get_all("Set-Cookie") == [
+        "session=abc123",
+        "token=xyz789",
+    ]
+    assert req_tuple_cookies.headers.get("X-Custom") == "value"
 
     # Verify that we can get a Blob.
     req_for_blob = Request("http://example.com", body="foobar", method="POST")
@@ -476,6 +516,10 @@ async def response_unit_tests(env):
     assert response_none.status == 204
     assert response_none.body is None
 
+    response_bytes = Response(b"test")
+    assert response_bytes.status == 200
+    assert await response_bytes.text() == "test"
+
     class Test:
         def __init__(self, x):
             self.x = x
@@ -502,10 +546,50 @@ async def response_unit_tests(env):
         assert str(err) == "Unsupported type in Response: Test"
 
     response_ws = Response(
-        "test", status=201, web_socket=js.WebSocket.new("ws://example.com/ignore")
+        None, status=101, web_socket=js.WebSocket.new("ws://example.com/ignore")
     )
     # TODO: it doesn't seem possible to access webSocket even in JS
-    assert response_ws.status == 201
+    assert response_ws.status == 101
+
+
+async def response_buffer_source_unit_tests(env):
+    buffer_source_cases = [
+        # TODO: Float16Array is not supported in Pyodide <= 0.29 (pyodide/pyodide#6005)
+        ("ArrayBuffer", js.Uint8Array.new(to_js([1, 2, 3, 4, 5, 6, 7, 8])).buffer),
+        ("DataView", js.DataView.new(js.Uint8Array.new(to_js([9, 10, 11, 12])).buffer)),
+        ("Uint8Array", js.Uint8Array.new(to_js([1, 2, 3, 4]))),
+        ("Uint8ClampedArray", js.Uint8ClampedArray.new(to_js([1, 2, 3, 4]))),
+        ("Int8Array", js.Int8Array.new(to_js([1, -1, 2, -2]))),
+        ("Uint16Array", js.Uint16Array.new(to_js([1, 2, 3, 4]))),
+        ("Int16Array", js.Int16Array.new(to_js([1, -2, 3, -4]))),
+        ("Uint32Array", js.Uint32Array.new(to_js([1, 2, 3, 4]))),
+        ("Int32Array", js.Int32Array.new(to_js([1, -2, 3, -4]))),
+        ("Float32Array", js.Float32Array.new(to_js([1.5, -2.5, 3.25, -4.75]))),
+        ("Float64Array", js.Float64Array.new(to_js([1.5, -2.5]))),
+        # BigInt64 not supported in Pyodide <= 0.26
+        # ("BigInt64Array", js.BigInt64Array.new(to_js([2**53 + 1, -(2**53 + 1), 2**54 + 2, -(2**54 + 2)]))),
+        # ("BigUint64Array", js.BigUint64Array.new(to_js([2**53 + 1, 2**54 + 2, 2**55 + 3, 2**56 + 4]))),
+        # Test partial views to verify they work correctly when not viewing the whole backing buffer
+        (
+            "Uint8Array.subarray",
+            js.Uint8Array.new(to_js([0, 1, 2, 3, 4, 5])).subarray(1),
+        ),
+        ("Int8Array.subarray", js.Int8Array.new(to_js([0, 1, -1, 2, -2])).subarray(1)),
+    ]
+
+    for type_name, body in buffer_source_cases:
+        expected_length = int(body.byteLength)
+        try:
+            response = Response(body)
+        except TypeError as exc:
+            raise AssertionError(
+                f"Response rejected BufferSource type {type_name}"
+            ) from exc
+
+        buffer = await response.buffer()
+        assert int(buffer.byteLength) == expected_length, (
+            f"Response buffer length mismatch for {type_name}"
+        )
 
 
 async def can_fetch_python_request():

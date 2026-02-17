@@ -39,6 +39,7 @@
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/sync-kv.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/tracing-module.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
@@ -54,9 +55,13 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+#ifdef WORKERD_USE_TRANSPILER
 #include <workerd/rust/transpiler/lib.rs.h>
+#endif  // defined(WORKERD_USE_TRANSPILER)
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
+#include <workerd/server/workerd-debug-port-client.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
@@ -138,7 +143,10 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_WORKERS_MODULE_ISOLATE_TYPES,
     EW_EXPORT_LOOPBACK_ISOLATE_TYPES,
     EW_PERFORMANCE_ISOLATE_TYPES,
+    EW_TRACING_MODULE_ISOLATE_TYPES,
+    EW_WORKERD_DEBUG_PORT_CLIENT_ISOLATE_TYPES,
     workerd::api::EnvModule,
+    workerd::api::PythonPatchedEnv,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -150,21 +158,6 @@ static const PythonConfig defaultConfig{
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
-
-kj::Maybe<kj::Array<kj::byte>> tryGetMetadataSnapshot(
-    const PythonConfig& pythonConfig, api::pyodide::SnapshotToDisk snapshotToDisk) {
-  kj::Maybe<kj::Array<kj::byte>> memorySnapshot = kj::none;
-  KJ_IF_SOME(snapshot, pythonConfig.loadSnapshotFromDisk) {
-    auto& root = KJ_REQUIRE_NONNULL(pythonConfig.packageDiskCacheRoot);
-    kj::Path path(snapshot);
-    auto maybeFile = root->tryOpenFile(path);
-    if (maybeFile == kj::none) {
-      KJ_FAIL_REQUIRE("Expected to find", snapshot, "in the package cache directory");
-    }
-    memorySnapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
-  }
-  return kj::mv(memorySnapshot);
-}
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
 // and will fail any writes.
@@ -223,12 +216,6 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
 
 }  // namespace
 
-jsg::Bundle::Reader retrievePyodideBundle(
-    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
-  auto result = pyConfig.pyodideBundleManager.getPyodideBundle(version);
-  return KJ_ASSERT_NONNULL(result, "Failed to get Pyodide bundle", version);
-}
-
 /**
  * This function matches the implementation of `getPythonRequirements` in the internal repo. But it
  * works on the workerd ModulesSource definition rather than the WorkerBundle.
@@ -265,6 +252,10 @@ struct WorkerdApi::Impl final {
           jsgConfig(jsg::JsgConfig{
             .noSubstituteNull = features.getNoSubstituteNull(),
             .unwrapCustomThenables = features.getUnwrapCustomThenables(),
+            .fetchIterableTypeSupport = features.getFetchIterableTypeSupport(),
+            .fetchIterableTypeSupportOverrideAdjustment =
+                features.getFetchIterableTypeSupportOverrideAdjustment(),
+            .fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API),
           }) {}
     operator const CompatibilityFlags::Reader() const {
       return features;
@@ -484,6 +475,7 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       case config::Worker::Module::ES_MODULE:
         // TODO(soon): Update this to also support full TS transform
         // with a separate compat flag.
+#ifdef WORKERD_USE_TRANSPILER
         if (featureFlags.getTypescriptStripTypes()) {
           auto output = rust::transpiler::ts_strip(
               // value comes from capnp so it is a valid utf-8
@@ -505,6 +497,7 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
             KJ_FAIL_REQUIRE(description);
           }
         }
+#endif  // defined(WORKERD_USE_TRANSPILER)
         return Worker::Script::EsModule{static_cast<kj::StringPtr>(conf.getEsModule())};
       case config::Worker::Module::COMMON_JS_MODULE: {
         Worker::Script::CommonJsModule result{.body = conf.getCommonJsModule()};
@@ -545,70 +538,6 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
     using namespace workerd::api::pyodide;
     auto featureFlags = getFeatureFlags();
-    if (source.isPython) {
-      KJ_REQUIRE(featureFlags.getPythonWorkers(),
-          "The python_workers compatibility flag is required to use Python.");
-      auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-      auto version = getPythonBundleName(pythonRelease);
-      auto bundle = retrievePyodideBundle(impl->pythonConfig, version);
-      // Inject SetupEmscripten module
-      {
-        auto emscriptenRuntime =
-            api::pyodide::EmscriptenRuntime::initialize(lockParam, true, bundle);
-        modules->addBuiltinModule("internal:setup-emscripten",
-            lockParam.alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
-            workerd::jsg::ModuleRegistry::Type::INTERNAL);
-      }
-
-      // Inject Pyodide bundle
-      modules->addBuiltinBundle(bundle, kj::none);
-      // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
-      {
-        Worker::Script::Module module{
-          .name = source.mainModule, .content = Worker::Script::EsModule{PYTHON_ENTRYPOINT}};
-
-        auto info = tryCompileLegacyModule(
-            lockParam, module.name, module.content, modules->getObserver(), featureFlags);
-
-        auto path = kj::Path::parse(source.mainModule);
-        modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
-      }
-
-      // Inject metadata that the entrypoint module will read.
-      api::pyodide::CreateBaselineSnapshot createBaselineSnapshot(
-          impl->pythonConfig.createBaselineSnapshot);
-      api::pyodide::SnapshotToDisk snapshotToDisk(
-          impl->pythonConfig.createSnapshot || createBaselineSnapshot);
-      auto snapshot = tryGetMetadataSnapshot(impl->pythonConfig, snapshotToDisk);
-      modules->addBuiltinModule("pyodide-internal:runtime-generated/metadata",
-          lockParam.alloc<PyodideMetadataReader>(
-              workerd::modules::python::createPyodideMetadataState(source,
-                  api::pyodide::IsWorkerd::YES, api::pyodide::IsTracing::NO, snapshotToDisk,
-                  createBaselineSnapshot, pythonRelease, kj::mv(snapshot), featureFlags)),
-          jsg::ModuleRegistry::Type::INTERNAL);
-
-      // Inject packages tar file
-      modules->addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
-          workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
-      // Inject artifact bundler.
-      modules->addBuiltinModule("pyodide-internal:artifacts",
-          lockParam.alloc<ArtifactBundler>(kj::mv(artifacts).orDefault(
-              []() { return api::pyodide::ArtifactBundler::makeDisabledBundler(); })),
-          jsg::ModuleRegistry::Type::INTERNAL);
-
-      // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
-      modules->addBuiltinModule("pyodide-internal:internalJaeger",
-          DisabledInternalJaeger::create(lockParam), jsg::ModuleRegistry::Type::INTERNAL);
-
-      // Inject disk cache module
-      modules->addBuiltinModule("pyodide-internal:disk_cache",
-          lockParam.alloc<DiskCache>(impl->pythonConfig.packageDiskCacheRoot),
-          jsg::ModuleRegistry::Type::INTERNAL);
-
-      // Inject a (disabled) SimplePythonLimiter
-      modules->addBuiltinModule("pyodide-internal:limiter",
-          SimplePythonLimiter::makeDisabled(lockParam), jsg::ModuleRegistry::Type::INTERNAL);
-    }
 
     for (auto& module: source.modules) {
       auto path = kj::Path::parse(module.name);
@@ -620,6 +549,11 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     }
 
     api::registerModules(*modules, featureFlags);
+
+    if (source.isPython) {
+      modules::python::registerPythonWorkerdModules<JsgWorkerdIsolate>(
+          lockParam, *modules, featureFlags, kj::mv(artifacts), impl->pythonConfig, source);
+    }
 
     for (auto extension: impl->extensions) {
       for (auto module: extension.getModules()) {
@@ -820,6 +754,10 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           lock.alloc<api::WorkerLoader>(
               workerLoader.channel, CompatibilityDateValidation::CODE_VERSION));
     }
+
+    KJ_CASE_ONEOF(_, Global::WorkerdDebugPort) {
+      value = lock.wrap(context, lock.alloc<WorkerdDebugPortConnector>());
+    }
   }
 
   return value;
@@ -924,6 +862,9 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
     }
     KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
       result.value = workerLoader.clone();
+    }
+    KJ_CASE_ONEOF(workerdDebugPort, Global::WorkerdDebugPort) {
+      result.value = workerdDebugPort.clone();
     }
   }
 

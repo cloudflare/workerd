@@ -23,16 +23,14 @@ build:ci --color=yes
 # Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
 build:ci --terminal_columns=100
 
+# Emit build profile so that slow builds can be investigated
+build:ci --profile build.bazel-profile.gz
+test:ci --profile test.bazel-profile.gz
 test:ci --test_output=errors --test_summary=terse
 build:ci --disk_cache=~/bazel-disk-cache
 
 # test CI jobs don't need any top-level artifacts and just verify things
 build:ci-test --remote_download_minimal
-# Enable v8-codegen-opt for test so that python tests run in an acceptable time frame but not for
-# release builds – this sets -O2 and release should keep -O3. For Windows, we can enable /O2
-# unconditionally, release already uses that and just adds "/clang:-O3" on top of it.
-build:ci-test --config=v8-codegen-opt
-build:ci-windows --config=v8-codegen-opt-windows
 
 # limit storage usage on ci
 # Exclude large benchmarking binaries created in debug and asan configurations to avoid
@@ -45,7 +43,9 @@ build:ci-windows --config=v8-codegen-opt-windows
 # LLVM produces a bit more debug info on macOS by default to facilitate debugging with
 # LLDB. This is not needed for this use case, so disable it using -fno-standalone-debug –
 # this is already the default for Linux/Windows.
-build:ci-limit-storage --build_tag_filters=-off-by-default,-workerd-benchmark
+build:ci-disable-benchmarks --build_tag_filters=-off-by-default,-requires-container-engine,-workerd-benchmark
+test:ci-disable-benchmarks --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine,-workerd-benchmark
+build:ci-limit-storage --config=ci-disable-benchmarks
 build:ci-limit-storage --copt="-g1"
 build:ci-limit-storage --copt="-fno-standalone-debug"
 
@@ -73,11 +73,15 @@ build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
 build:ci-linux-asan --config=asan --copt="-g0" --strip=always
 build:ci-linux-arm-asan --config=ci-linux-asan
 
+# Build container tests on Linux CI
+build:ci-linux --build_tag_filters=-off-by-default
+build:ci-linux-arm --build_tag_filters=-off-by-default
 
 # Unlike the bazel Unix toolchain the macOS toolchain sets "-O0 -DDEBUG" for fastbuild by
 # default. This is unhelpful for compile speeds and test performance, remove the DEBUG
 # define.
 build:ci-macOS --copt=-UDEBUG
+test:ci-macOS --config=ci-disable-benchmarks
 
 build:ci-macOS-debug --config=debug
 
@@ -94,14 +98,22 @@ test:ci-linux --test_size_filters=
 test:ci-macOS --test_size_filters=
 test:ci-windows --test_size_filters=
 
+# Run container tests on Linux CI
+test:ci-linux --test_tag_filters=-off-by-default,-requires-fuzzilli
+test:ci-linux-arm --test_tag_filters=-off-by-default,-requires-fuzzilli
+
 # Enable reporting whenever WPT tests are run
 test:ci-test --config=wpt-test
 common:wpt-test --test_env=GEN_TEST_REPORT=1
 common:wpt-test --test_env=GEN_TEST_STATS=1
 
-# Config to produce a full WPT report (also disables test caching)
+# Config to produce a full WPT report. Also ensures that test targets are fetched, even under remote_download_minimal.
 common:wpt-report --config=wpt-test
-common:wpt-report --cache_test_results=no
+common:wpt-report --remote_download_regex=".*src/wpt/.*"
 
 # Let tests know they're running in CI
 test:ci-test --test_env=CI=true
+
+# release CI – use remote_download_minimal, but always fetch the workerd binary so we can add it to
+# the release artifacts.
+build:ci-release --remote_download_minimal --remote_download_regex=".*src/workerd/server/workerd.*"

@@ -5,7 +5,7 @@
 #pragma once
 // INTERNAL IMPLEMENTATION FILE
 //
-// Type traits to help us map between C++ and Web IDL types/concepts.
+// Type traits and concepts to help us map between C++ and Web IDL types.
 
 #include <workerd/jsg/jsg.h>
 
@@ -15,12 +15,42 @@
 
 namespace workerd::jsg::webidl {
 
+// =======================================================================================
+// Base detection concepts and helpers
+
+// True if T has a JSG_KIND static member (i.e., is a JSG type).
+template <typename T>
+concept HasJsgKind = requires { T::JSG_KIND; };
+
+// Helper to detect and unwrap Ref<T> types
+template <typename T>
+struct RefTraits_ {
+  static constexpr bool isRef = false;
+};
+template <typename T>
+struct RefTraits_<Ref<T>> {
+  static constexpr bool isRef = true;
+  using Type = T;
+};
+
+template <typename T>
+concept IsRef = RefTraits_<T>::isRef;
+
+template <IsRef T>
+using RefType = typename RefTraits_<T>::Type;
+
+// =======================================================================================
+// Optional type detection
+
 template <typename T>
 constexpr bool isOptional = false;
 template <typename T>
 constexpr bool isOptional<Optional<T>> = true;
 template <typename T>
 constexpr bool isOptional<LenientOptional<T>> = true;
+
+template <typename T>
+concept OptionalType = isOptional<T>;
 
 // Counts the number of Web IDL nullable types (modeled with kj::Maybe in JSG) that exist in
 // `T...`. This variable template is designed to accept unflattened OneOfs -- it will recurse
@@ -50,116 +80,137 @@ constexpr size_t nullableTypeCount<kj::OneOf<T...>, U...> =
 //
 // Note that these categories do not cover all Web IDL types, like Promises. Such types are not
 // allowed in unions under any circumstances.
-//
-// TODO(cleanup): Making these traits free variable templates is probably a mistake. Perhaps these
-//   categories should be added to JsgKind and we should replace this:
-//       `constexpr bool isResourcetype(T*)`
-//   with:
-//       `constexpr JsgKind getKind(T*)`
 
-// True if T is a Web IDL dictionary type (modeled with JSG_STRUCT), false otherwise.
-template <typename T, typename = void>
-constexpr bool isDictionaryType = false;
-
-// True if T is a Web IDL dictionary type (modeled with JSG_STRUCT), false otherwise.
+// True if T is a Web IDL dictionary type (modeled with JSG_STRUCT).
 template <typename T>
-constexpr bool isDictionaryType<T, kj::VoidSfinae<decltype(T::JSG_KIND)>> =
-    T::JSG_KIND == JsgKind::STRUCT;
+concept DictionaryType = HasJsgKind<T> && (T::JSG_KIND == JsgKind::STRUCT);
 
-// True if T is a Web IDL non-callback interface type (modeled with JSG_RESOURCE), false otherwise.
-//
-// Note: This covers Web IDL exception types as well. This doesn't seem to be a problem in practice,
-//   but it's worth knowing that the Web IDL spec considers the two categories distinct.
-template <typename T, typename = void>
-constexpr bool isNonCallbackInterfaceType = false;
-
-// True if T is a Web IDL non-callback interface type (modeled with JSG_RESOURCE), false otherwise.
-//
 // Note: This covers Web IDL exception types as well. This doesn't seem to be a problem in practice,
 //   but it's worth knowing that the Web IDL spec considers the two categories distinct.
 template <typename T>
-constexpr bool isNonCallbackInterfaceType<T, kj::VoidSfinae<decltype(T::JSG_KIND)>> =
-    T::JSG_KIND == JsgKind::RESOURCE;
+concept NonCallbackInterfaceType_ = HasJsgKind<T> && (T::JSG_KIND == JsgKind::RESOURCE);
 
-// True if T is a Web IDL non-callback interface type (modeled with JSG_RESOURCE), false otherwise.
-//
-// Note: This covers Web IDL exception types as well. This doesn't seem to be a problem in practice,
-//   but it's worth knowing that the Web IDL spec considers the two categories distinct.
+// Helper to check if Ref<T> wraps a resource type
 template <typename T>
-constexpr bool isNonCallbackInterfaceType<Ref<T>, kj::VoidSfinae<decltype(T::JSG_KIND)>> =
-    T::JSG_KIND == JsgKind::RESOURCE;
+constexpr bool isRefToResource_() {
+  if constexpr (IsRef<T>) {
+    return NonCallbackInterfaceType_<RefType<T>>;
+  } else {
+    return false;
+  }
+}
+
+// True if T is a Web IDL non-callback interface type (modeled with JSG_RESOURCE).
+// Handles both T and Ref<T> cases.
+template <typename T>
+concept NonCallbackInterfaceType = NonCallbackInterfaceType_<T> || isRefToResource_<T>();
 
 template <typename T>
-constexpr bool isBufferSourceType = kj::isSameType<T, kj::Array<kj::byte>>() ||
+concept BufferSourceType = kj::isSameType<T, kj::Array<kj::byte>>() ||
     kj::isSameType<T, kj::ArrayPtr<kj::byte>>() || kj::isSameType<T, kj::Array<const kj::byte>>() ||
     kj::isSameType<T, kj::ArrayPtr<const kj::byte>>() || kj::isSameType<T, jsg::BufferSource>();
 
+// Helper for record type detection
 template <typename T>
-constexpr bool isRecordType = false;
+struct IsRecordType_: std::false_type {};
 template <typename K, typename V>
-constexpr bool isRecordType<Dict<V, K>> = true;
+struct IsRecordType_<Dict<V, K>>: std::true_type {};
 
 template <typename T>
-constexpr bool isBooleanType = kj::isSameType<T, bool>() || kj::isSameType<T, NonCoercible<bool>>();
+concept RecordType = IsRecordType_<T>::value;
 
 template <typename T>
-constexpr bool isIntegerType = kj::isSameType<T, int8_t>() || kj::isSameType<T, int16_t>() ||
+concept BooleanType = StrictlyBool<T> || kj::isSameType<T, NonCoercible<bool>>();
+
+template <typename T>
+concept IntegerType = kj::isSameType<T, int8_t>() || kj::isSameType<T, int16_t>() ||
     kj::isSameType<T, int>() || kj::isSameType<T, int64_t>() || kj::isSameType<T, uint8_t>() ||
     kj::isSameType<T, uint16_t>() || kj::isSameType<T, uint32_t>() ||
     kj::isSameType<T, uint64_t>() || kj::isSameType<T, v8::Local<v8::BigInt>>();
 
 template <typename T>
-constexpr bool isNumericType =
-    isIntegerType<T> || kj::isSameType<T, double>() || kj::isSameType<T, NonCoercible<double>>();
+concept NumericType =
+    IntegerType<T> || kj::isSameType<T, double>() || kj::isSameType<T, NonCoercible<double>>();
 
 template <typename T>
-constexpr bool isStringType = kj::isSameType<T, kj::String>() || kj::isSameType<T, ByteString>() ||
-    kj::isSameType<T, USVString>() || kj::isSameType<T, DOMString>() ||
-    kj::isSameType<T, v8::Local<v8::String>>() || kj::isSameType<T, jsg::V8Ref<v8::String>>() ||
-    kj::isSameType<T, NonCoercible<kj::String>>() || kj::isSameType<T, NonCoercible<USVString>>() ||
-    kj::isSameType<T, NonCoercible<DOMString>>() || kj::isSameType<T, jsg::JsString>();
+concept StringType = kj::isSameType<T, kj::String>() || kj::isSameType<T, USVString>() ||
+    kj::isSameType<T, DOMString>() || kj::isSameType<T, v8::Local<v8::String>>() ||
+    kj::isSameType<T, jsg::V8Ref<v8::String>>() || kj::isSameType<T, NonCoercible<kj::String>>() ||
+    kj::isSameType<T, NonCoercible<USVString>>() || kj::isSameType<T, NonCoercible<DOMString>>() ||
+    kj::isSameType<T, jsg::JsString>();
 
 template <typename T>
-constexpr bool isObjectType =
+concept ObjectType =
     kj::isSameType<T, v8::Local<v8::Object>>() || kj::isSameType<T, v8::Global<v8::Object>>();
 
 template <typename T>
-constexpr bool isSymbolType = false;
-// TODO(soon): isSameType<T, v8::Local<v8::Symbol>>()?
+concept SymbolType = false;
+// TODO(soon): kj::isSameType<T, v8::Local<v8::Symbol>>()?
+
+// Helper for callback function type detection
+template <typename T>
+struct IsCallbackFunctionType_: std::false_type {};
+template <typename T>
+struct IsCallbackFunctionType_<kj::Function<T>>: std::true_type {};
+template <typename T>
+struct IsCallbackFunctionType_<Constructor<T>>: std::true_type {};
 
 template <typename T>
-constexpr bool isCallbackFunctionType = false;
-template <typename T>
-constexpr bool isCallbackFunctionType<kj::Function<T>> = true;
-template <typename T>
-constexpr bool isCallbackFunctionType<Constructor<T>> = true;
+concept CallbackFunctionType = IsCallbackFunctionType_<T>::value;
 
 // True if T is a Web IDL buffer source type, exception type, or non-callback interface type. The
 // latter two cases are both modeled with JSG_RESOURCE_TYPE, which is why this trait only has two
 // predicates, rather than three.
-template <typename T, typename = void>
-constexpr bool isInterfaceLikeType = isBufferSourceType<T> || isNonCallbackInterfaceType<T>;
+template <typename T>
+concept InterfaceLikeType = BufferSourceType<T> || NonCallbackInterfaceType<T>;
 
+// TODO(someday): Or callback interface types. Callback interface types seem to be going the way of
+//   the dodo -- fingers crossed that we won't have to implement them.
 template <typename T>
-constexpr bool isDictionaryLikeType = isDictionaryType<T> || isRecordType<T>;
-// TODO(someday): Or callback interface types. Callback interface types seem to be going the way of the
-//   dodo -- fingers crossed that we won't have to implement them.
+concept DictionaryLikeType = DictionaryType<T> || RecordType<T>;
 
+// Helper for sequence-like type detection
 template <typename T>
-constexpr bool isSequenceLikeType = false;
+struct IsSequenceLikeType_: std::false_type {};
 template <typename T>
-constexpr bool isSequenceLikeType<kj::Array<T>> =
-    !kj::isSameType<T, kj::byte>() && !kj::isSameType<T, const kj::byte>();
+struct IsSequenceLikeType_<kj::Array<T>>
+    : std::bool_constant<!kj::isSameType<T, kj::byte>() && !kj::isSameType<T, const kj::byte>()> {};
 template <typename T>
-constexpr bool isSequenceLikeType<Sequence<T>> = true;
+struct IsSequenceLikeType_<Sequence<T>>: std::true_type {};
+
 // TODO(soon): And frozen array types.
+template <typename T>
+concept SequenceLikeType = IsSequenceLikeType_<T>::value;
 
-// True if T is not listed in the table in Web IDL's distinguishable type algorithm:
+// True if T is listed in the table in Web IDL's distinguishable type algorithm:
 // https://heycam.github.io/webidl/#dfn-distinguishable, step 4.
 template <typename T>
-constexpr bool isIndistinguishableType = !(isBooleanType<T> || isNumericType<T> ||
-    isStringType<T> || isObjectType<T> || isSymbolType<T> || isInterfaceLikeType<T> ||
-    isCallbackFunctionType<T> || isDictionaryLikeType<T> || isSequenceLikeType<T>);
+concept DistinguishableType =
+    BooleanType<T> || NumericType<T> || StringType<T> || ObjectType<T> || SymbolType<T> ||
+    InterfaceLikeType<T> || CallbackFunctionType<T> || DictionaryLikeType<T> || SequenceLikeType<T>;
+
+template <typename T>
+concept IndistinguishableType = !DistinguishableType<T>;
+
+// =======================================================================================
+// Backward-compatible variable templates
+//
+// These provide backward compatibility with code that uses the old constexpr bool style
+// that cannot use the concepts directly.
+
+template <typename T>
+constexpr bool isNonCallbackInterfaceType = NonCallbackInterfaceType<T>;
+template <typename T>
+constexpr bool isRecordType = RecordType<T>;
+template <typename T>
+constexpr bool isBooleanType = BooleanType<T>;
+template <typename T>
+constexpr bool isNumericType = NumericType<T>;
+template <typename T>
+constexpr bool isStringType = StringType<T>;
+
+// =======================================================================================
+// Type list utilities
 
 template <typename... T>
 constexpr bool hasDuplicateTypes = false;
@@ -167,23 +218,27 @@ template <typename T, typename U, typename... V>
 constexpr bool hasDuplicateTypes<T, U, V...> =
     kj::isSameType<T, U>() || hasDuplicateTypes<T, V...> || hasDuplicateTypes<U, V...>;
 
+// Traits computed over a flattened type list. Used for Web IDL union validation.
+// Uses the concept-based variable templates for counting.
 template <typename... T>
 struct FlattenedTypeTraits_ {
-  static constexpr size_t dictionaryTypeCount = ((size_t)isDictionaryType<T> + ...);
+  static constexpr size_t dictionaryTypeCount = (static_cast<size_t>(DictionaryType<T>) + ...);
+  static constexpr size_t booleanTypeCount = (static_cast<size_t>(BooleanType<T>) + ...);
+  static constexpr size_t numericTypeCount = (static_cast<size_t>(NumericType<T>) + ...);
+  static constexpr size_t stringTypeCount = (static_cast<size_t>(StringType<T>) + ...);
+  static constexpr size_t objectTypeCount = (static_cast<size_t>(ObjectType<T>) + ...);
+  static constexpr size_t symbolTypeCount = (static_cast<size_t>(SymbolType<T>) + ...);
+  static constexpr size_t interfaceLikeTypeCount =
+      (static_cast<size_t>(InterfaceLikeType<T>) + ...);
+  static constexpr size_t callbackFunctionTypeCount =
+      (static_cast<size_t>(CallbackFunctionType<T>) + ...);
+  static constexpr size_t dictionaryLikeTypeCount =
+      (static_cast<size_t>(DictionaryLikeType<T>) + ...);
+  static constexpr size_t sequenceLikeTypeCount = (static_cast<size_t>(SequenceLikeType<T>) + ...);
 
-  static constexpr size_t booleanTypeCount = ((size_t)isBooleanType<T> + ...);
-  static constexpr size_t numericTypeCount = ((size_t)isNumericType<T> + ...);
-  static constexpr size_t stringTypeCount = ((size_t)isStringType<T> + ...);
-  static constexpr size_t objectTypeCount = ((size_t)isObjectType<T> + ...);
-  static constexpr size_t symbolTypeCount = ((size_t)isSymbolType<T> + ...);
-  static constexpr size_t interfaceLikeTypeCount = ((size_t)isInterfaceLikeType<T> + ...);
-  static constexpr size_t callbackFunctionTypeCount = ((size_t)isCallbackFunctionType<T> + ...);
-  static constexpr size_t dictionaryLikeTypeCount = ((size_t)isDictionaryLikeType<T> + ...);
-  static constexpr size_t sequenceLikeTypeCount = ((size_t)isSequenceLikeType<T> + ...);
-
-  static constexpr size_t hasDuplicateTypes = webidl::hasDuplicateTypes<T...>;
-  static constexpr size_t hasIndistinguishableTypes = (isIndistinguishableType<T> || ...);
-  static constexpr size_t hasOptionalTypes = (isOptional<T> || ...);
+  static constexpr bool hasDuplicateTypes = webidl::hasDuplicateTypes<T...>;
+  static constexpr bool hasIndistinguishableTypes = (IndistinguishableType<T> || ...);
+  static constexpr bool hasOptionalTypes = (OptionalType<T> || ...);
 };
 
 template <typename Traits, typename... T>

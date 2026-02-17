@@ -9,6 +9,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
 
@@ -46,6 +47,18 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
 
   TimeoutId setTimeout(
       IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) override {
+    // Verify the generator is from the correct ServiceWorkerGlobalScope. If we have been passed a
+    // different `timeoutIdGenerator`, then that means this IoContext is active at a time when
+    // JavaScript in a different V8 context is executing. This _should_ be impossible, but we're
+    // occasionally seeing timeout ID collision assertion failures in `addState()`, and one possible
+    // explanation is that an IoContext is somehow current for a different V8 context.
+    //
+    // TODO(cleanup): Find a more general way to assert that the JS API surface is being used under
+    //   the correct IoContext, get rid of this function's `generator` parameter, and instead rely
+    //   on the IoContext to provide the generator.
+    KJ_ASSERT(&generator == &context.getCurrentLock().getTimeoutIdGenerator(),
+        "TimeoutId Generator mismatch - using a generator from wrong ServiceWorkerGlobalScope");
+
     auto [id, it] = addState(generator, kj::mv(params));
     setTimeoutImpl(context, it);
     return id;
@@ -137,7 +150,6 @@ IoContext::IoContext(ThreadContext& thread,
     kj::Maybe<Worker::Actor&> actorParam,
     kj::Own<LimitEnforcer> limitEnforcerParam)
     : thread(thread),
-      tmpDirStoreScope(TmpDirStoreScope::create()),
       worker(kj::mv(workerParam)),
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
@@ -181,6 +193,9 @@ IoContext::IoContext(ThreadContext& thread,
 
     return promise;
   };
+  KJ_IF_SOME(cb, this->worker->getIsolate().getCpuLimitNearlyExceededCallback()) {
+    limitEnforcer->setCpuLimitNearlyExceededCallback(kj::mv(cb));
+  }
 
   // Arrange to abort when limits expire.
   abortWhen(makeLimitsPromise());
@@ -201,12 +216,27 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Own<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-    tracing::InvocationSpanContext invocationSpanContext)
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
-      invocationSpanContext(kj::mv(invocationSpanContext)) {}
+      maybeTriggerInvocationSpan(kj::mv(maybeTriggerInvocationSpan)) {}
+
+tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanContext() {
+  // Creating a new InvocationSpanContext can be a bit expensive since it needs to
+  // generate random IDs, so we only create it lazily when requested, which should
+  // only be when tracing is enabled and we need to record spans.
+  KJ_IF_SOME(ctx, invocationSpanContext) {
+    return ctx;
+  }
+
+  invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
+      maybeTriggerInvocationSpan.map(
+          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
+      context->getEntropySource());
+  return KJ_ASSERT_NONNULL(invocationSpanContext);
+}
 
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
 // that sets waitedForWaitUntil). So, we can now safely add the request to
@@ -231,6 +261,10 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   deliveredLocation = location;
   metrics->delivered();
 
+  KJ_IF_SOME(workerTracer, workerTracer) {
+    currentUserTraceSpan = workerTracer->makeUserRequestSpan();
+  }
+
   KJ_IF_SOME(a, context->actor) {
     // Re-synchronize the timer and top up limits for every new incoming request to an actor.
     ioChannelFactory->getTimer().syncTime();
@@ -244,13 +278,16 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   }
 }
 
-kj::Date IoContext::IncomingRequest::now() {
+kj::Date IoContext::IncomingRequest::now(kj::Maybe<kj::Date> nextTimeout) {
   metrics->clockRead();
-  return ioChannelFactory->getTimer().now();
+  return ioChannelFactory->getTimer().now(kj::mv(nextTimeout));
 }
 
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (!wasDelivered) {
+    KJ_IF_SOME(w, workerTracer) {
+      w->markUnused();
+    }
     // Request was never added to context->incomingRequests in the first place.
     return;
   }
@@ -272,8 +309,6 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
           kj::getStackTrace());
     }
   }
-
-  context->incomingRequests.remove(*this);
 
   KJ_IF_SOME(a, context->actor) {
     a.getMetrics().endRequest();
@@ -301,10 +336,15 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
       context->waitUntilTasks.clear();
     }
   }
+
+  // Remove incoming request after canceling waitUntil tasks, which may have spans attached that
+  // require accessing a timer from the active request.
+  context->incomingRequests.remove(*this);
 }
 
 InputGate::Lock IoContext::getInputLock() {
-  return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context").addRef();
+  return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context")
+      .addRef(getCurrentTraceSpan());
 }
 
 kj::Maybe<kj::Own<InputGate::CriticalSection>> IoContext::getCriticalSection() {
@@ -329,7 +369,8 @@ bool IoContext::hasOutputGate() {
 }
 
 kj::Maybe<kj::Promise<void>> IoContext::waitForOutputLocksIfNecessary() {
-  return actor.map([](Worker::Actor& actor) { return actor.getOutputGate().wait(); });
+  return actor.map(
+      [this](Worker::Actor& actor) { return actor.getOutputGate().wait(getCurrentTraceSpan()); });
 }
 
 kj::Maybe<IoOwn<kj::Promise<void>>> IoContext::waitForOutputLocksIfNecessaryIoOwn() {
@@ -351,6 +392,11 @@ bool IoContext::isInspectorEnabled() {
 
 bool IoContext::isFiddle() {
   return thread.isFiddle();
+}
+
+bool IoContext::hasWarningHandler() {
+  return isInspectorEnabled() || getWorkerTracer() != kj::none ||
+      ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO);
 }
 
 void IoContext::logWarning(kj::StringPtr description) {
@@ -491,17 +537,11 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
   }
 
   kj::Promise<void> timeoutPromise = nullptr;
-  auto timeoutLogPromise = [this]() -> kj::Promise<void> {
-    return context->run([this](Worker::Lock&) {
-      context->logWarning(
-          "IoContext timed out due to inactivity, waitUntil tasks were cancelled without completing.");
-    });
-  };
   KJ_IF_SOME(a, context->actor) {
     // For actors, all promises are canceled on actor shutdown, not on a fixed timeout,
     // because work doesn't necessarily happen on a per-request basis in actors and we don't want
     // work being unexpectedly canceled based on which request initiated it.
-    timeoutPromise = a.onShutdown().then(kj::mv(timeoutLogPromise));
+    timeoutPromise = a.onShutdown();
 
     // Also arrange to cancel the drain if a new request arrives, since it will take over
     // responsibility for background tasks.
@@ -510,6 +550,13 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     timeoutPromise = timeoutPromise.exclusiveJoin(kj::mv(drainPaf.promise));
   } else {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
+    auto timeoutLogPromise = [this]() -> kj::Promise<void> {
+      return context->run([this](Worker::Lock&) {
+        context->logWarning(
+            "waitUntil() tasks did not complete within the allowed time after invocation end and have been cancelled. "
+            "See: https://developers.cloudflare.com/workers/runtime-apis/context/#waituntil");
+      });
+    };
     timeoutPromise = context->limitEnforcer->limitDrain().then(kj::mv(timeoutLogPromise));
   }
   return context->waitUntilTasks.onEmpty()
@@ -688,8 +735,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
   auto paf = kj::newPromiseAndFulfiller<void>();
 
-  // Always schedule the timeout relative to what Date.now() currently returns, so that the delay
-  // appear exact. Otherwise, the delay could reveal non-determinism containing side channels.
+  // Schedule relative to Date.now() so the delay appears exact to the application.
   auto when = context.now() + state.params.msDelay * kj::MILLISECONDS;
   // TODO(cleanup): The manual use of run() here (including carrying over the critical section) is
   //   kind of ugly, but using awaitIo() doesn't work here because we need the ability to cancel
@@ -842,37 +888,39 @@ size_t IoContext::getTimeoutCount() {
 }
 
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
-  kj::Date adjustedTime = incomingRequest.now();
-
-  KJ_IF_SOME(maybeNextTimeout, timeoutManager->getNextTimeout()) {
-    // Don't return a time beyond when the next setTimeout() callback is intended to run. This
-    // ensures that Date.now() inside the callback itself always returns exactly the time at which
-    // the callback was scheduled (hiding non-determinism which could contain side channels), and
-    // that the time returned by Date.now() never goes backwards.
-    return kj::min(adjustedTime, maybeNextTimeout);
-  } else {
-    return adjustedTime;
+  if (getWorker().getScript().getIsolate().getApi().getFeatureFlags().getPreciseTimers()) {
+    auto now = kj::systemPreciseCalendarClock().now();
+    // Round to 3ms granularity
+    int64_t ms = (now - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+    int64_t roundedMs = (ms / 3) * 3;
+    return kj::UNIX_EPOCH + roundedMs * kj::MILLISECONDS;
   }
+
+  // Let TimerChannel decide whether to clamp to the next timeout time. This is how Spectre
+  // mitigations ensure Date.now() inside a callback returns exactly the scheduled time.
+  return incomingRequest.now(timeoutManager->getNextTimeout());
 }
 
 kj::Date IoContext::now() {
   return now(getCurrentIncomingRequest());
 }
 
+kj::Rc<ExternalPusherImpl> IoContext::getExternalPusher() {
+  KJ_IF_SOME(ep, externalPusher) {
+    return ep.addRef();
+  } else {
+    return externalPusher.emplace(kj::rc<ExternalPusherImpl>(getByteStreamFactory())).addRef();
+  }
+}
+
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
-  SpanBuilder span = nullptr;
-  SpanBuilder userSpan = nullptr;
-
+  TraceContext tracing;
   KJ_IF_SOME(n, options.operationName) {
-    // TODO(cleanup): Using kj::Maybe<kj::LiteralStringConst> for operationName instead would remove
-    // a memory allocation here, but there might be use cases for dynamically allocated strings.
-    span = makeTraceSpan(kj::ConstString(kj::str(n)));
-    userSpan = makeUserTraceSpan(kj::ConstString(kj::mv(n)));
+    tracing = makeUserTraceSpan(n.clone());
   }
 
-  TraceContext tracing(kj::mv(span), kj::mv(userSpan));
   kj::Own<WorkerInterface> ret;
   KJ_IF_SOME(existing, options.existingTraceContext) {
     ret = func(existing, getIoChannelFactory());
@@ -887,11 +935,9 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
 
-  if (tracing.span.isObserved()) {
-    ret = ret.attach(kj::mv(tracing.span));
-  }
-  if (tracing.userSpan.isObserved()) {
-    ret = ret.attach(kj::mv(tracing.userSpan));
+  if (tracing.isObserved()) {
+    auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing)));
+    ret = ret.attach(kj::mv(ioOwnedSpan));
   }
 
   return kj::mv(ret);
@@ -932,26 +978,6 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       });
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    kj::ConstString operationName,
-    kj::Vector<Span::Tag> tags) {
-  return getSubrequest(
-      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
-    for (Span::Tag& tag: tags) {
-      tracing.userSpan.setTag(kj::mv(tag.key), kj::mv(tag.value));
-    }
-    return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
-  },
-      SubrequestOptions{
-        .inHouse = isInHouse,
-        .wrapMetrics = !isInHouse,
-        .operationName = kj::mv(operationName),
-      });
-}
-
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
@@ -975,8 +1001,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     IoChannelFactory& channelFactory) {
   IoChannelFactory::SubrequestMetadata metadata{
     .cfBlobJson = kj::mv(cfBlobJson),
-    .tracing = tracing,
-    .featureFlagsForFl = worker->getIsolate().getFeatureFlagsForFl(),
+    .parentSpan = tracing.getInternalSpanParent(),
+    .featureFlagsForFl = mapCopyString(worker->getIsolate().getFeatureFlagsForFl()),
   };
 
   auto client = channelFactory.startSubrequest(channel, kj::mv(metadata));
@@ -990,26 +1016,9 @@ kj::Own<kj::HttpClient> IoContext::getHttpClient(
       getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
 }
 
-kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    kj::ConstString operationName,
-    kj::Vector<Span::Tag> tags) {
-  return asHttpClient(getSubrequestChannelWithSpans(
-      channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
-}
-
 kj::Own<kj::HttpClient> IoContext::getHttpClient(
     uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext) {
   return asHttpClient(getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), traceContext));
-}
-
-kj::Own<kj::HttpClient> IoContext::getHttpClientNoChecks(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<kj::ConstString> operationName) {
-  return asHttpClient(
-      getSubrequestChannelNoChecks(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
 }
 
 kj::Own<CacheClient> IoContext::getCacheClient() {
@@ -1023,12 +1032,23 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
+  static const SpanParent dummySpanParent = nullptr;
+
   jsg::Lock& js = lock;
   kj::Own<SpanParent> spanParent;
   KJ_IF_SOME(spo, kj::mv(spanParentOverride)) {
     spanParent = kj::heap(kj::mv(spo));
   } else {
-    spanParent = kj::heap(getMetrics().getSpan());
+    // TODO(cleanup): Can we also elide the other memory allocations for the (unused) storage
+    // scope if tracing is disabled?
+    SpanParent metricsSpan = getMetrics().getSpan();
+    if (!metricsSpan.isObserved()) {
+      // const_cast is ok: There's no state that could be changed in a non-observed span parent.
+      spanParent = kj::Own<SpanParent>(
+          &const_cast<SpanParent&>(dummySpanParent), kj::NullDisposer::instance);
+    } else {
+      spanParent = kj::heap(kj::mv(metricsSpan));
+    }
   }
   auto ioOwnSpanParent = IoContext::current().addObject(kj::mv(spanParent));
   auto spanHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnSpanParent));
@@ -1055,20 +1075,25 @@ SpanParent IoContext::getCurrentTraceSpan() {
 }
 
 SpanParent IoContext::getCurrentUserTraceSpan() {
-  // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
-  // context, as with Jaeger spans.
-  KJ_IF_SOME(workerTracer, getWorkerTracer()) {
-    return workerTracer.getUserRequestSpan();
+  if (incomingRequests.empty()) {
+    return SpanParent(nullptr);
+  } else {
+    return getCurrentIncomingRequest().getCurrentUserTraceSpan();
   }
-  return SpanParent(nullptr);
+}
+
+SpanParent IoContext_IncomingRequest::getCurrentUserTraceSpan() {
+  return currentUserTraceSpan.addRef();
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
   return getCurrentTraceSpan().newChild(kj::mv(operationName));
 }
 
-SpanBuilder IoContext::makeUserTraceSpan(kj::ConstString operationName) {
-  return getCurrentUserTraceSpan().newChild(kj::mv(operationName));
+TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
+  auto span = makeTraceSpan(operationName.clone());
+  auto userSpan = getCurrentUserTraceSpan().newChild(kj::mv(operationName));
+  return TraceContext(kj::mv(span), kj::mv(userSpan));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {
@@ -1306,6 +1331,14 @@ IoContext& IoContext::current() {
   }
 }
 
+kj::Maybe<IoContext&> IoContext::tryCurrent() {
+  if (threadLocalRequest == nullptr) {
+    return kj::none;
+  } else {
+    return *threadLocalRequest;
+  }
+}
+
 bool IoContext::hasCurrent() {
   return threadLocalRequest != nullptr;
 }
@@ -1315,8 +1348,8 @@ bool IoContext::isCurrent() {
 }
 
 auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
-  if (hasCurrent()) {
-    return IoContext::current().getWeakRef();
+  KJ_IF_SOME(ioContext, tryCurrent()) {
+    return ioContext.getWeakRef();
   } else {
     return kj::none;
   }
@@ -1483,14 +1516,13 @@ WarningAggregator::WarningAggregator(IoContext& context, EmitCallback emitter)
 
 WarningAggregator::~WarningAggregator() noexcept(false) {
   auto lock = warnings.lockExclusive();
-  if (lock->size() > 0) {
+  if (!lock->empty()) {
     auto emitter = kj::mv(this->emitter);
     auto warnings = lock->releaseAsArray();
-    if (IoContext::hasCurrent()) {
+    KJ_IF_SOME(context, IoContext::tryCurrent()) {
       // We are currently in a JavaScript execution context. The object is likely being
       // destroyed during garbage collection. V8 does not like having most of its API
       // invoked in the middle of GC. So we'll delay our warning until GC finished.
-      auto& context = IoContext::current();
       context.addTask(
           context.run([emitter = kj::mv(emitter), warnings = kj::mv(warnings)](
                           Worker::Lock& lock) mutable { emitter(lock, kj::mv(warnings)); }));

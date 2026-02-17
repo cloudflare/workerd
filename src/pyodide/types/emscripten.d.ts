@@ -10,6 +10,7 @@ interface PyodideConfig {
   indexURL?: string;
   _makeSnapshot?: boolean;
   lockFileURL: '';
+  enableRunUntilComplete: boolean;
 }
 
 type SerializedHiwireValue = { path: string[] } | { serialized: any } | null;
@@ -38,6 +39,7 @@ interface API {
   };
   serializeHiwireState(serializer: (obj: any) => any): SnapshotConfig;
   pyVersionTuple: [number, number, number];
+  scheduleCallback: (callback: () => void, timeout: number) => void;
 }
 
 interface LDSO {
@@ -56,6 +58,11 @@ interface DSO {
   exports: WebAssembly.Exports;
 }
 
+// https://github.com/emscripten-core/emscripten/blob/main/src/lib/libpath.js
+interface PATH {
+  normalizeArray: (parts: string[], allowAboveRoot: boolean) => string[];
+}
+
 type PreRunHook = (mod: Module) => void;
 
 interface EmscriptenSettings {
@@ -69,9 +76,7 @@ interface EmscriptenSettings {
   ) => WebAssembly.Exports;
   reportUndefinedSymbolsNoOp: () => void;
   noInitialRun?: boolean;
-  API: {
-    config: API['config'];
-  };
+  API: Pick<API, 'config'>;
   readyPromise: Promise<Module>;
   rejectReadyPromise: (e: any) => void;
 }
@@ -84,6 +89,7 @@ interface Module {
   API: API;
   ENV: ENV;
   LDSO: LDSO;
+  PATH: PATH;
   newDSO: (path: string, opt: object | undefined, handle: string) => DSO;
   _Py_Version: number;
   _py_version_major?: () => number;
@@ -126,4 +132,12 @@ interface Module {
   getEmptyTableSlot(): number;
   freeTableIndexes: number[];
   LD_LIBRARY_PATH: string;
+  Py_EmscriptenSignalBuffer: Uint8Array;
+  _Py_EMSCRIPTEN_SIGNAL_HANDLING: number;
+  ___memory_base: WebAssembly.Global<'i32'>;
+  compileModuleFromReadOnlyFS: (
+    Module: Module,
+    path: string
+  ) => WebAssembly.Module;
+  findLibraryFS: (libName: string, rpath: any) => string;
 }

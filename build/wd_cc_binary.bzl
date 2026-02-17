@@ -1,14 +1,17 @@
 """wd_cc_binary definition"""
 
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
 def wd_cc_binary(
         name,
         linkopts = [],
         visibility = None,
         deps = [],
+        target_compatible_with = [],
         **kwargs):
     """Wrapper for cc_binary that sets common attributes
     """
-    native.cc_binary(
+    cc_binary(
         name = name,
         # -dead_strip is the macOS equivalent of -ffunction-sections, -Wl,--gc-sections.
         # -no_exported_symbols is used to not include the exports trie, which significantly reduces
@@ -28,11 +31,9 @@ def wd_cc_binary(
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
-        }),
+        }) + target_compatible_with,
         visibility = visibility,
-        deps = deps + [
-            "//deps/rust:runtime",
-        ],
+        deps = deps,
         **kwargs
     )
 
@@ -46,6 +47,5 @@ def wd_cc_binary(
             "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/{}/{}.aarch64-linux-gnu".format(pkg, prebuilt_binary_name),
             "//conditions:default": name,
         }),
-        # Propagate InstrumentedFilesInfo through the alias for coverage support
         testonly = kwargs.get("testonly", False),
     )

@@ -83,6 +83,15 @@ class MessageEvent final: public Event {
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
+class OpenEvent final: public Event {
+ public:
+  OpenEvent(): Event("open"_kjc) {}
+  static jsg::Ref<OpenEvent> constructor() = delete;
+  JSG_RESOURCE_TYPE(OpenEvent) {
+    JSG_INHERIT(Event);
+  }
+};
+
 class ErrorEvent: public Event {
  public:
   struct ErrorEventInit {
@@ -94,7 +103,9 @@ class ErrorEvent: public Event {
     JSG_STRUCT(message, filename, lineno, colno, error);
   };
 
+  ErrorEvent(ErrorEventInit init);
   ErrorEvent(kj::String type, ErrorEventInit init);
+  ErrorEvent(jsg::Lock& js, jsg::JsValue error);
 
   static jsg::Ref<ErrorEvent> constructor(
       jsg::Lock& js, kj::String type, jsg::Optional<ErrorEventInit> init);
@@ -125,8 +136,43 @@ class ErrorEvent: public Event {
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
+// ======================================================================================
+class PromiseRejectionEvent: public Event {
+ public:
+  PromiseRejectionEvent(
+      v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason);
+
+  static jsg::Ref<PromiseRejectionEvent> constructor(kj::String type) = delete;
+
+  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) {
+    return promise.addRef(js);
+  }
+  jsg::Value getReason(jsg::Lock& js) {
+    return reason.addRef(js);
+  }
+
+  JSG_RESOURCE_TYPE(PromiseRejectionEvent) {
+    JSG_INHERIT(Event);
+    JSG_READONLY_INSTANCE_PROPERTY(promise, getPromise);
+    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("promise", promise);
+    tracker.trackField("reason", reason);
+  }
+
+ private:
+  jsg::V8Ref<v8::Promise> promise;
+  jsg::Value reason;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(promise, reason);
+  }
+};
+
 #define EW_EVENTS_ISOLATE_TYPES                                                                    \
   api::ErrorEvent, api::ErrorEvent::ErrorEventInit, api::MessageEvent,                             \
-      api::MessageEvent::Initializer
+      api::MessageEvent::Initializer, api::PromiseRejectionEvent, api::OpenEvent
 
 }  // namespace workerd::api

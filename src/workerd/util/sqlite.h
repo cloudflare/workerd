@@ -512,7 +512,7 @@ class SqliteDatabase::Query final: private ResetListener {
 
   // Advance to the next row.
   void nextRow() {
-    return nextRow(/*first=*/false);
+    nextRow(/*first=*/false);
   }
 
   // How many columns does each row of the result have?
@@ -694,7 +694,7 @@ class SqliteDatabase::Query final: private ResetListener {
   void handleCriticalError(kj::Maybe<int> errorCode,
       kj::StringPtr errorMessage,
       kj::Maybe<const kj::Exception&> maybeException) {
-    return db.handleCriticalError(errorCode, errorMessage, maybeException);
+    db.handleCriticalError(errorCode, errorMessage, maybeException);
   }
 
   // Some reasonable automatic conversions.
@@ -715,7 +715,7 @@ class SqliteDatabase::Query final: private ResetListener {
   template <typename... T, size_t... i>
   void bindAll(std::index_sequence<i...>, T&&... value) {
     checkRequirements(sizeof...(T));
-    (bind(i, value), ...);
+    (bind(i, kj::fwd<T>(value)), ...);
     nextRow(/*first=*/true);
   }
 

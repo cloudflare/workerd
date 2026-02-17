@@ -6,8 +6,11 @@
 
 #include <workerd/api/basics.h>
 #include <workerd/io/compatibility-date.capnp.h>
-#include <workerd/io/limit-enforcer.h>
 #include <workerd/jsg/jsg.h>
+
+namespace workerd {
+class IsolateLimitEnforcer;
+};
 
 namespace workerd::api {
 
@@ -36,7 +39,8 @@ namespace workerd::api {
 
 class PerformanceEntry: public jsg::Object {
  public:
-  PerformanceEntry(kj::String name, kj::String entryType, double startTime, uint32_t duration)
+  PerformanceEntry(
+      kj::String name, kj::LiteralStringConst entryType, double startTime, uint32_t duration)
       : name(kj::mv(name)),
         entryType(kj::mv(entryType)),
         startTime(startTime),
@@ -67,7 +71,7 @@ class PerformanceEntry: public jsg::Object {
 
  protected:
   kj::String name;
-  kj::String entryType;
+  kj::LiteralStringConst entryType;
   double startTime;
   uint32_t duration;
 };
@@ -85,7 +89,7 @@ class PerformanceMark: public PerformanceEntry {
 
   PerformanceMark(
       kj::String name, jsg::Optional<jsg::JsRef<jsg::JsObject>> detail, double startTime)
-      : PerformanceEntry(kj::mv(name), kj::str("mark"), startTime, 0),
+      : PerformanceEntry(kj::mv(name), "mark"_kjc, startTime, 0),
         detail(kj::mv(detail)) {}
 
   static jsg::Ref<PerformanceMark> constructor(
@@ -110,7 +114,7 @@ class PerformanceMark: public PerformanceEntry {
 class PerformanceMeasure: public PerformanceEntry {
  public:
   PerformanceMeasure(kj::String name, double startTime, uint32_t duration)
-      : PerformanceEntry(kj::mv(name), kj::str("measure"), startTime, duration) {}
+      : PerformanceEntry(kj::mv(name), "measure"_kjc, startTime, duration) {}
 
   friend class Performance;
 
@@ -152,7 +156,7 @@ class PerformanceMeasure: public PerformanceEntry {
 class PerformanceResourceTiming: public PerformanceEntry {
  public:
   PerformanceResourceTiming(kj::String name, double startTime, uint32_t duration)
-      : PerformanceEntry(kj::mv(name), kj::str("resource"), startTime, duration) {}
+      : PerformanceEntry(kj::mv(name), "resource"_kjc, startTime, duration) {}
 
   uint32_t getConnectEnd() {
     return 0;

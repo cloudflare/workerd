@@ -73,6 +73,10 @@ declare global {
     descriptionOrFunc: string | ThrowingFn,
     maybeDescription?: string
   ): void;
+  function assert_throws_quotaexceedederror(
+    func: ThrowingFn,
+    description?: string
+  ): void;
   function promise_rejects_dom(
     test: Test,
     type: number | string,
@@ -81,9 +85,14 @@ declare global {
     maybeDescription?: string
   ): Promise<unknown>;
 
+  function assert_own_property(
+    object: object,
+    property_name: string | symbol,
+    description?: string
+  ): void;
   function assert_not_own_property(
     object: object,
-    property_name: string,
+    property_name: string | symbol,
     description?: string
   ): void;
   function promise_rejects_js(
@@ -98,6 +107,24 @@ declare global {
     description?: string
   ): void;
   function assert_greater_than(
+    actual: number,
+    expected: number,
+    description?: string
+  ): void;
+
+  function assert_greater_than_equal(
+    actual: number,
+    expected: number,
+    description?: string
+  ): void;
+
+  function assert_less_than(
+    actual: number,
+    expected: number,
+    description?: string
+  ): void;
+
+  function assert_less_than_equal(
     actual: number,
     expected: number,
     description?: string
@@ -350,6 +377,19 @@ globalThis.assert_throws_dom = (
 };
 
 /**
+ * Assert a QuotaExceededError DOMException is thrown.
+ *
+ * This is a convenience wrapper around assert_throws_dom for the common case
+ * of checking for QuotaExceededError.
+ *
+ * @param func - Function which should throw.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_throws_quotaexceedederror = (func, description): void => {
+  assert_throws_dom('QuotaExceededError', func, description ?? '');
+};
+
+/**
  * Assert that a Promise is rejected with the right DOMException.
  *
  * For the remaining arguments, there are two ways of calling
@@ -422,6 +462,21 @@ globalThis.promise_rejects_dom = (
 };
 
 /**
+ * Assert that ``object`` has an own property with name ``property_name``.
+ *
+ * @param object - Object that should have the given property.
+ * @param property_name - Property name to test.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_own_property = (object, property_name, description): void => {
+  ok(
+    Object.prototype.hasOwnProperty.call(object, property_name),
+    `expected property ${String(property_name)} missing on object: ` +
+      (description ?? '')
+  );
+};
+
+/**
  * Assert that ``object`` does not have an own property with name ``property_name``.
  *
  * @param object - Object that should not have the given property.
@@ -435,7 +490,7 @@ globalThis.assert_not_own_property = (
 ): void => {
   ok(
     !Object.prototype.hasOwnProperty.call(object, property_name),
-    `unexpected property ${property_name} is found on object: ` +
+    `unexpected property ${String(property_name)} is found on object: ` +
       (description ?? '')
   );
 };
@@ -479,6 +534,43 @@ globalThis.assert_regexp_match = (actual, expected, description): void => {
  */
 globalThis.assert_greater_than = (actual, expected, description): void => {
   ok(actual > expected, description);
+};
+
+/**
+ * Assert that ``actual`` is a number greater than or equal to ``expected``.
+ *
+ * @param actual - Test value.
+ * @param expected - Number that ``actual`` must be greater than or equal to.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_greater_than_equal = (
+  actual,
+  expected,
+  description
+): void => {
+  ok(actual >= expected, description);
+};
+
+/**
+ * Assert that ``actual`` is a number less than ``expected``.
+ *
+ * @param actual - Test value.
+ * @param expected - Number that ``actual`` must be less than.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_less_than = (actual, expected, description): void => {
+  ok(actual < expected, description);
+};
+
+/**
+ * Assert that ``actual`` is a number less than or equal to ``expected``.
+ *
+ * @param actual - Test value.
+ * @param expected - Number that ``actual`` must be less than or equal to.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_less_than_equal = (actual, expected, description): void => {
+  ok(actual <= expected, description);
 };
 
 /**

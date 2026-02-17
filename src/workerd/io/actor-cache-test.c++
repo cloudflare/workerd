@@ -179,22 +179,22 @@ struct ActorCacheConvenienceWrappers {
   }
 
   auto put(kj::StringPtr key, kj::StringPtr value, ActorCache::WriteOptions options = {}) {
-    return target.put(kj::str(key), kj::heapArray(value.asBytes()), options);
+    return target.put(kj::str(key), kj::heapArray(value.asBytes()), options, nullptr);
   }
   auto put(kj::ArrayPtr<const KeyValuePtr> kvs, ActorCache::WriteOptions options = {}) {
     return target.put(KJ_MAP(kv, kvs) {
       return ActorCache::KeyValuePair{kj::str(kv.key), kj::heapArray(kv.value.asBytes())};
-    }, options);
+    }, options, nullptr);
   }
   auto setAlarm(kj::Maybe<kj::Date> newTime, ActorCache::WriteOptions options = {}) {
-    return target.setAlarm(newTime, options);
+    return target.setAlarm(newTime, options, nullptr);
   }
 
   auto delete_(kj::StringPtr key, ActorCache::WriteOptions options = {}) {
-    return target.delete_(kj::str(key), options);
+    return target.delete_(kj::str(key), options, nullptr);
   }
   auto delete_(kj::ArrayPtr<const kj::StringPtr> keys, ActorCache::WriteOptions options = {}) {
-    return target.delete_(KJ_MAP(k, keys) { return kj::str(k); }, options);
+    return target.delete_(KJ_MAP(k, keys) { return kj::str(k); }, options, nullptr);
   }
 
  private:
@@ -700,7 +700,7 @@ KJ_TEST("ActorCache batching due to max storage RPC words") {
   for (int i = 0; i < 128; ++i) {
     test.cache.put(kj::str(i),
         kj::Array<const byte>(bigVal.begin(), bigVal.size(), kj::NullArrayDisposer::instance),
-        ActorCache::WriteOptions());
+        ActorCache::WriteOptions(), nullptr);
   }
 
   auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
@@ -736,7 +736,7 @@ KJ_TEST("ActorCache deleteAll()") {
   test.put("baz", "789");  // overwrites a counted delete
   test.delete_("garply");  // uncounted delete
 
-  auto deleteAll = test.cache.deleteAll({});
+  auto deleteAll = test.cache.deleteAll({}, nullptr);
 
   // Post-deleteAll writes.
   test.put("grault", "12345");
@@ -819,7 +819,7 @@ KJ_TEST("ActorCache deleteAll() during transaction commit") {
 
     // Issue a put and a deleteAll() here!
     test.put("bar", "456");
-    test.cache.deleteAll({});
+    test.cache.deleteAll({}, nullptr);
 
     kj::mv(inProgressFlush).thenReturn(CAPNP());
   }
@@ -861,7 +861,7 @@ KJ_TEST("ActorCache deleteAll() again when previous one isn't done yet") {
   test.put("baz", "789");  // overwrites a counted delete
   test.delete_("garply");  // uncounted delete
 
-  auto deleteAllA = test.cache.deleteAll({});
+  auto deleteAllA = test.cache.deleteAll({}, nullptr);
 
   // Post-deleteAll writes.
   test.put("grault", "12345");
@@ -884,7 +884,7 @@ KJ_TEST("ActorCache deleteAll() again when previous one isn't done yet") {
   }
 
   // Do another deleteAll() before the first one is done.
-  auto deleteAllB = test.cache.deleteAll({});
+  auto deleteAllB = test.cache.deleteAll({}, nullptr);
 
   // And a write after that.
   test.put("fred", "2323");
@@ -1241,14 +1241,14 @@ KJ_TEST("ActorCache output gate blocked during flush") {
   auto& mockStorage = test.mockStorage;
 
   // Gate is currently not blocked.
-  KJ_ASSERT(test.gate.wait().poll(ws));
+  KJ_ASSERT(test.gate.wait(nullptr).poll(ws));
 
   // Do a put.
   test.put("foo", "123");
   test.delete_("bar");
 
   // Now it is blocked.
-  auto gatePromise = test.gate.wait();
+  auto gatePromise = test.gate.wait(nullptr);
   KJ_ASSERT(!gatePromise.poll(ws));
 
   // Complete the transaction.
@@ -1279,13 +1279,13 @@ KJ_TEST("ActorCache output gate bypass") {
   auto& mockStorage = test.mockStorage;
 
   // Gate is currently not blocked.
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 
   // Do a put.
   test.put("foo", "123", {.allowUnconfirmed = true});
 
   // Gate still isn't blocked, because we set `allowUnconfirmed`.
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 
   // Complete the transaction.
   {
@@ -1294,7 +1294,7 @@ KJ_TEST("ActorCache output gate bypass") {
         .thenReturn(CAPNP());
   }
 
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 }
 
 KJ_TEST("ActorCache output gate bypass on one put but not the next") {
@@ -1303,7 +1303,7 @@ KJ_TEST("ActorCache output gate bypass on one put but not the next") {
   auto& mockStorage = test.mockStorage;
 
   // Gate is currently not blocked.
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 
   // Do two puts, only bypassing on the first. The net result should be that the output gate is
   // in effect.
@@ -1311,7 +1311,7 @@ KJ_TEST("ActorCache output gate bypass on one put but not the next") {
   test.put("bar", "456");
 
   // Now it is blocked.
-  auto gatePromise = test.gate.wait();
+  auto gatePromise = test.gate.wait(nullptr);
   KJ_ASSERT(!gatePromise.poll(ws));
 
   // Complete the transaction.
@@ -1363,7 +1363,7 @@ KJ_TEST("ActorCache flush hard failure with output gate bypass") {
   test.put("foo", "123", {.allowUnconfirmed = true});
 
   // The output gate is not applied.
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
   KJ_ASSERT(!promise.poll(ws));
 
   {
@@ -1374,7 +1374,7 @@ KJ_TEST("ActorCache flush hard failure with output gate bypass") {
 
   // The failure was still propagated to the output gate.
   KJ_EXPECT_THROW_MESSAGE("flush failed hard", promise.wait(ws));
-  KJ_EXPECT_THROW_MESSAGE("flush failed hard", test.gate.wait().wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("flush failed hard", test.gate.wait(nullptr).wait(ws));
 
   // Further writes won't even try to start any new transactions because the failure killed them all.
   test.put("bar", "456");
@@ -3588,7 +3588,7 @@ KJ_TEST("ActorCache LRU purge ordering") {
   mockStorage->expectCall("put", ws).thenReturn(CAPNP());
 
   // Ensure the flush actually completes (marking dirty entries as clean) before continuing.
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 
   // Touch foo.
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "123");
@@ -3659,7 +3659,7 @@ KJ_TEST("ActorCache LRU purge larger") {
         .thenReturn(CAPNP(value = "123"));
     mockStorage->expectCall("put", ws).thenReturn(CAPNP());
     // Ensure the flush actually completes (marking dirty entries as clean) before continuing.
-    test.gate.wait().wait(ws);
+    test.gate.wait(nullptr).wait(ws);
   }
 
   (void)expectUncached(test.get("bar"));
@@ -3710,7 +3710,7 @@ KJ_TEST("ActorCache evict on timeout") {
   auto ackFlush = [&]() {
     mockStorage->expectCall("put", ws).thenReturn(CAPNP());
     // Ensure the flush actually completes (marking dirty entries as clean) before continuing.
-    test.gate.wait().wait(ws);
+    test.gate.wait(nullptr).wait(ws);
   };
 
   test.put("foo", "123");
@@ -4240,7 +4240,7 @@ KJ_TEST("ActorCache skip cache") {
   }
 
   // Wait on the output gate to make sure the flush is actually done.
-  test.gate.wait().wait(test.ws);
+  test.gate.wait(nullptr).wait(test.ws);
 
   // After the put completes, it's not in cache anymore.
   {
@@ -4267,7 +4267,7 @@ KJ_TEST("ActorCache skip cache") {
   }
 
   // Wait on the output gate to make sure the flush is actually done.
-  test.gate.wait().wait(test.ws);
+  test.gate.wait(nullptr).wait(test.ws);
 
   // This time it stayed in cache!
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "qux");
@@ -4584,7 +4584,7 @@ KJ_TEST("ActorCache transaction output gate blocked during flush") {
   auto& mockStorage = test.mockStorage;
 
   // Gate is currently not blocked.
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 
   // Do a transaction with a put.
   ActorCache::Transaction txn(test.cache);
@@ -4593,7 +4593,7 @@ KJ_TEST("ActorCache transaction output gate blocked during flush") {
   txn.commit();
 
   // Now it is blocked.
-  auto gatePromise = test.gate.wait();
+  auto gatePromise = test.gate.wait(nullptr);
   KJ_ASSERT(!gatePromise.poll(ws));
 
   // Complete the transaction.
@@ -4617,7 +4617,7 @@ KJ_TEST("ActorCache transaction output gate bypass") {
   auto& mockStorage = test.mockStorage;
 
   // Gate is currently not blocked.
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 
   // Do a transaction with a put.
   ActorCache::Transaction txn(test.cache);
@@ -4626,14 +4626,14 @@ KJ_TEST("ActorCache transaction output gate bypass") {
   txn.commit();
 
   // Gate still isn't blocked, because we set `allowUnconfirmed`.
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 
   // Complete the transaction with a flush.
   mockStorage->expectCall("put", ws)
       .withParams(CAPNP(entries = [(key = "foo", value = "123")]))
       .thenReturn(CAPNP());
 
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 }
 
 KJ_TEST("ActorCache transaction output gate bypass on one put but not the next") {
@@ -4642,7 +4642,7 @@ KJ_TEST("ActorCache transaction output gate bypass on one put but not the next")
   auto& mockStorage = test.mockStorage;
 
   // Gate is currently not blocked.
-  test.gate.wait().wait(ws);
+  test.gate.wait(nullptr).wait(ws);
 
   // Do a transaction with two puts, only bypassing on the first. The net result should be that
   // the output gate is in effect.
@@ -4653,7 +4653,7 @@ KJ_TEST("ActorCache transaction output gate bypass on one put but not the next")
   txn.commit();
 
   // Now it is blocked.
-  auto gatePromise = test.gate.wait();
+  auto gatePromise = test.gate.wait(nullptr);
   KJ_ASSERT(!gatePromise.poll(ws));
 
   // Complete the transaction.
@@ -4898,7 +4898,7 @@ KJ_TEST("ActorCache never-flush") {
 
   // Puts don't start a transaction.
   KJ_EXPECT(test.put("foo", "123") == nullptr);
-  KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
+  KJ_EXPECT(test.cache.onNoPendingFlush(nullptr) == nullptr);
   mockStorage->expectNoActivity(ws);
 
   // Gets still see the put() value.
@@ -4938,6 +4938,8 @@ KJ_TEST("ActorCache alarm get/put") {
 
   auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
   auto twoMs = 2 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+  // Used as the "current time" parameter for armAlarmHandler in tests.
+  auto testCurrentTime = kj::UNIX_EPOCH;
   {
     // Test alarm writes happen transactionally with storage ops
     test.setAlarm(oneMs);
@@ -4968,7 +4970,7 @@ KJ_TEST("ActorCache alarm get/put") {
         .withParams(CAPNP(timeToDeleteMs = 0))
         .thenReturn(CAPNP(deleted = true));
     // Wait on the output gate to make sure the flush is actually done before checking the cache.
-    test.gate.wait().wait(test.ws);
+    test.gate.wait(nullptr).wait(test.ws);
   }
 
   {
@@ -4979,7 +4981,8 @@ KJ_TEST("ActorCache alarm get/put") {
 
   {
     // we have a cached time == nullptr, so we should not attempt to run an alarm
-    auto armResult = test.cache.armAlarmHandler(10 * kj::SECONDS + kj::UNIX_EPOCH, false);
+    auto armResult =
+        test.cache.armAlarmHandler(10 * kj::SECONDS + kj::UNIX_EPOCH, nullptr, testCurrentTime);
     KJ_ASSERT(armResult.is<ActorCache::CancelAlarmHandler>());
     auto cancelResult = kj::mv(armResult.get<ActorCache::CancelAlarmHandler>());
     KJ_ASSERT(cancelResult.waitBeforeCancel.poll(ws));
@@ -4997,7 +5000,7 @@ KJ_TEST("ActorCache alarm get/put") {
   {
     // Test that alarm handler handle clears alarm when dropped with no writes
     {
-      auto armResult = test.cache.armAlarmHandler(oneMs, false);
+      auto armResult = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
     }
     mockStorage->expectCall("deleteAlarm", ws)
@@ -5010,7 +5013,7 @@ KJ_TEST("ActorCache alarm get/put") {
 
     // Test that alarm handler handle does not clear alarm when dropped with writes
     {
-      auto armResult = test.cache.armAlarmHandler(oneMs, false);
+      auto armResult = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
       test.setAlarm(twoMs);
     }
@@ -5024,25 +5027,25 @@ KJ_TEST("ActorCache alarm get/put") {
 
     // Test that alarm handler handle does not cache delete when it fails
     {
-      auto armResult = test.cache.armAlarmHandler(oneMs, false);
+      auto armResult = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
     }
     mockStorage->expectCall("deleteAlarm", ws)
         .withParams(CAPNP(timeToDeleteMs = 1))
         .thenReturn(CAPNP(deleted = false));
-    test.gate.wait().wait(test.ws);
+    test.gate.wait(nullptr).wait(test.ws);
   }
 
   {
     // Test that alarm handler handle does not cache alarm delete when noCache == true
     {
-      auto armResult = test.cache.armAlarmHandler(twoMs, true);
+      auto armResult = test.cache.armAlarmHandler(twoMs, nullptr, testCurrentTime, true);
       KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
     }
     mockStorage->expectCall("deleteAlarm", ws)
         .withParams(CAPNP(timeToDeleteMs = 2))
         .thenReturn(CAPNP(deleted = true));
-    test.gate.wait().wait(test.ws);
+    test.gate.wait(nullptr).wait(test.ws);
   }
 
   {
@@ -5073,6 +5076,7 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
   auto& mockStorage = test.mockStorage;
 
   auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+  auto testCurrentTime = kj::UNIX_EPOCH;
 
   {
     auto time = expectUncached(test.getAlarm());
@@ -5090,7 +5094,7 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
   // we want to test that even if a flush is retried
   // that the post-delete actions for a checked delete happen.
   {
-    auto handle = test.cache.armAlarmHandler(oneMs, false);
+    auto handle = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
 
     auto time = expectCached(test.getAlarm());
     KJ_ASSERT(time == kj::none);
@@ -5107,7 +5111,7 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
         .withParams(CAPNP(timeToDeleteMs = 1))
         .thenReturn(CAPNP(deleted = false));
     // Wait on the output gate to make sure the flush is actually done.
-    test.gate.wait().wait(test.ws);
+    test.gate.wait(nullptr).wait(test.ws);
   }
 
   {
@@ -5133,7 +5137,7 @@ KJ_TEST("ActorCache can wait for flush") {
   };
 
   // There is no pending flush since nothing has been done!
-  KJ_ASSERT(test.cache.onNoPendingFlush() == nullptr);
+  KJ_ASSERT(test.cache.onNoPendingFlush(nullptr) == nullptr);
 
   struct VerifyOptions {
     bool skipSecondOperation;
@@ -5141,11 +5145,11 @@ KJ_TEST("ActorCache can wait for flush") {
   size_t secondaryPutIndex = 0;
   auto verify = [&](auto receiveRequest, auto sendResponse, VerifyOptions options) {
     // We haven't sent our request yet, but we should have a promise now.
-    auto scheduledPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
+    auto scheduledPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush(nullptr));
 
     // We have sent our request, but it hasn't responded yet. We should still have a promise.
     auto req = receiveRequest();
-    auto inFlightPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
+    auto inFlightPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush(nullptr));
 
     // Do an additional put to make a separate flush.
     struct SecondOperation {
@@ -5156,7 +5160,7 @@ KJ_TEST("ActorCache can wait for flush") {
     if (!options.skipSecondOperation) {
       auto key = kj::str("foo-", secondaryPutIndex++);
       test.put(key, "bar");
-      auto secondPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
+      auto secondPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush(nullptr));
       KJ_ASSERT(!secondPromise.poll(ws));
       maybeSecondOperation.emplace(SecondOperation{
         .key = kj::mv(key),
@@ -5185,7 +5189,7 @@ KJ_TEST("ActorCache can wait for flush") {
     }
 
     // We finished our flush, nothing left to do.
-    KJ_ASSERT(test.cache.onNoPendingFlush() == nullptr);
+    KJ_ASSERT(test.cache.onNoPendingFlush(nullptr) == nullptr);
   };
 
   {
@@ -5283,7 +5287,7 @@ KJ_TEST("ActorCache can wait for flush") {
 
   {
     // Join in on a scheduled deleteAll.
-    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = false});
+    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = false}, nullptr);
 
     verify(
         [&]() {
@@ -5301,7 +5305,7 @@ KJ_TEST("ActorCache can wait for flush") {
 
   {
     // Join in on a scheduled deleteAll with allowUnconfirmed.
-    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = true});
+    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = true}, nullptr);
 
     verify(
         [&]() {
@@ -5340,7 +5344,7 @@ KJ_TEST("ActorCache can shutdown") {
 
     // Shutdown and observe the pending flush to break the io gate.
     test.cache.shutdown(options.maybeError);
-    auto maybeShutdownPromise = test.cache.onNoPendingFlush();
+    auto maybeShutdownPromise = test.cache.onNoPendingFlush(nullptr);
 
     afterShutdown(test, kj::mv(res.maybeReq));
 
@@ -5352,14 +5356,14 @@ KJ_TEST("ActorCache can shutdown") {
       // We expected the output gate to break async after shutdown.
       auto& shutdownPromise = KJ_REQUIRE_NONNULL(maybeShutdownPromise);
       WD_EXPECT_THROW(error, shutdownPromise.wait(ws));
-      KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
-      WD_EXPECT_THROW(error, test.gate.wait().wait(ws));
+      KJ_EXPECT(test.cache.onNoPendingFlush(nullptr) == nullptr);
+      WD_EXPECT_THROW(error, test.gate.wait(nullptr).wait(ws));
     } else KJ_IF_SOME(promise, maybeShutdownPromise) {
       // The in-flight flush should resolve cleanly without any follow on or breaking the output
       // gate.
       promise.wait(ws);
-      KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
-      test.gate.wait().wait(ws);
+      KJ_EXPECT(test.cache.onNoPendingFlush(nullptr) == nullptr);
+      test.gate.wait(nullptr).wait(ws);
     }
 
     // Puts and deletes, even with allowedUnconfirmed, should throw.
@@ -5370,10 +5374,10 @@ KJ_TEST("ActorCache can shutdown") {
 
     if (!res.shouldBreakOutputGate) {
       // We tried to use storage after shutdown, we should now be breaking the output gate.
-      auto afterShutdownPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
+      auto afterShutdownPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush(nullptr));
       WD_EXPECT_THROW(error, afterShutdownPromise.wait(ws));
-      KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
-      WD_EXPECT_THROW(error, test.gate.wait().wait(ws));
+      KJ_EXPECT(test.cache.onNoPendingFlush(nullptr) == nullptr);
+      WD_EXPECT_THROW(error, test.gate.wait(nullptr).wait(ws));
     }
   };
 
@@ -5427,7 +5431,7 @@ KJ_TEST("ActorCache can shutdown") {
 
     auto op = test.mockStorage->expectCall("put", test.ws)
                   .withParams(CAPNP(entries = [(key = "foo", value = "bar")]));
-    auto promise = KJ_REQUIRE_NONNULL(test.cache.onNoPendingFlush());
+    auto promise = KJ_REQUIRE_NONNULL(test.cache.onNoPendingFlush(nullptr));
     KJ_EXPECT(!promise.poll(test.ws));
 
     return BeforeShutdownResult{
@@ -5454,7 +5458,7 @@ KJ_TEST("ActorCache can shutdown") {
 
     auto op = test.mockStorage->expectCall("put", test.ws)
                   .withParams(CAPNP(entries = [(key = "foo", value = "bar")]));
-    auto promise = KJ_REQUIRE_NONNULL(test.cache.onNoPendingFlush());
+    auto promise = KJ_REQUIRE_NONNULL(test.cache.onNoPendingFlush(nullptr));
     KJ_EXPECT(!promise.poll(test.ws));
 
     return BeforeShutdownResult{

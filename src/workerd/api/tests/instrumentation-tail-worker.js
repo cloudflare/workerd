@@ -32,14 +32,18 @@ export const testTailHandler = {
           });
           break;
         case 'attributes': {
-          // Filter out top-level attributes events (jsRpcSession span)
+          let span = spans.get(spanKey);
           if (event.spanContext.spanId === topLevelSpanId) {
-            // Ignore attributes for the top-level span
+            // top-level JsRpc method name attribute – transform into a span with the given name
+            const rpcMethodName = event.event.info.find(
+              (item) => item['name'] === 'jsrpc.method'
+            ).value;
+            span = { name: rpcMethodName };
+            spans.set(spanKey, span);
             break;
           }
 
           // attributes references an existing span via spanContext.spanId
-          let span = spans.get(spanKey);
           if (!span) {
             throw new Error(`Attributes event for unknown span: ${spanKey}`);
           }

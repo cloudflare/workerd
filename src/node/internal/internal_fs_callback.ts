@@ -91,12 +91,12 @@ import type {
   GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
-  ReadAsyncOptions,
+  ReadOptionsWithBuffer,
   RmOptions,
-  RmDirOptions,
   StatsFs,
   WriteFileOptions,
 } from 'node:fs';
+import type { RmDirOptions } from 'node-internal:internal_fs_utils';
 
 export type ErrorOnlyCallback = (err: unknown) => void;
 export type SingleArgCallback<T> = (err: unknown, result?: T) => void;
@@ -295,7 +295,6 @@ export function cp(
     dereference = false,
     errorOnExist = false,
     force = true,
-    filter,
     mode = 0,
     preserveTimestamps = false,
     recursive = false,
@@ -317,9 +316,13 @@ export function cp(
     );
   }
 
-  if (filter !== undefined) {
-    if (typeof filter !== 'function') {
-      throw new ERR_INVALID_ARG_TYPE('options.filter', 'function', filter);
+  if (options.filter !== undefined) {
+    if (typeof options.filter !== 'function') {
+      throw new ERR_INVALID_ARG_TYPE(
+        'options.filter',
+        'function',
+        options.filter
+      );
     }
     // We do not implement the filter option currently. There's a bug in the Node.js
     // implementation of fs.cp and the option.filter in which non-UTF-8 encoded file
@@ -656,10 +659,10 @@ export function read<T extends NodeJS.ArrayBufferView>(
   fd: number,
   bufferOptionsOrCallback:
     | T
-    | ReadAsyncOptions<T>
+    | ReadOptionsWithBuffer<T>
     | DoubleArgCallback<number, T>,
   offsetOptionsOrCallback?:
-    | ReadAsyncOptions<T>
+    | ReadOptionsWithBuffer<T>
     | number
     | DoubleArgCallback<number, T>,
   lengthOrCallback?: null | number | DoubleArgCallback<number, T>,
@@ -1101,8 +1104,9 @@ export function rmdir(
   callback?: ErrorOnlyCallback
 ): void {
   let options: RmDirOptions;
+  let cb: ErrorOnlyCallback | undefined = callback;
   if (typeof optionsOrCallback === 'function') {
-    callback = optionsOrCallback;
+    cb = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
@@ -1110,7 +1114,7 @@ export function rmdir(
   const { path: normalizedPath, recursive } = validateRmDirArgs(path, options);
   callWithErrorOnlyCallback(() => {
     fssync.rmdirSync(normalizedPath, { recursive });
-  }, callback);
+  }, cb);
 }
 
 export function rm(

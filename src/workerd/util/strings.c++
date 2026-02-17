@@ -98,4 +98,18 @@ kj::Array<kj::byte> stripInnerWhitespace(kj::ArrayPtr<kj::byte> input) {
   return result.first(len).attach(kj::mv(result));
 };
 
+bool strcaseeq(kj::ArrayPtr<const char> a, kj::ArrayPtr<const char> b) {
+  // This could likely be optimized further but this is more than sufficient for now.
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    char ca = a[i];
+    char cb = b[i];
+    // Convert to lowercase for comparison
+    if (isAlphaUpper(ca)) ca += 32;
+    if (isAlphaUpper(cb)) cb += 32;
+    if (ca != cb) return false;
+  }
+  return true;
+}
+
 }  // namespace workerd

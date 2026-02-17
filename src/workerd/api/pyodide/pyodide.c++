@@ -13,6 +13,7 @@
 #include <pyodide/generated/pyodide_extra.capnp.h>
 
 #include <capnp/dynamic.h>
+#include <capnp/schema.h>
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
@@ -20,8 +21,7 @@
 #include <kj/debug.h>
 #include <kj/string.h>
 
-// for std::sort
-#include <algorithm>
+#include <algorithm>  // for std::sort
 
 namespace workerd::api::pyodide {
 
@@ -87,6 +87,19 @@ kj::Array<kj::StringPtr> PyodideMetadataReader::getNames(
     builder.add(state->moduleInfo.names[i]);
   }
   return builder.releaseAsArray();
+}
+
+void PyodideMetadataReader::setCpuLimitNearlyExceededCallback(
+    jsg::Lock& js, kj::Array<kj::byte> wasm_memory, int sig_clock, int sig_flag) {
+  // This callback has to be implemented in C++ because we don't hold the isolate lock when we call
+  // it. It also has to be signal safe since we call it from the cpu time limiter.
+  Worker::Isolate::from(js).setCpuLimitNearlyExceededCallback(
+      [wasm_memory = kj::mv(wasm_memory), sig_clock, sig_flag]() mutable {
+    // Set signal handling clock to fire on the next check.
+    wasm_memory[sig_clock] = 0;
+    // Set signal handling to on
+    wasm_memory[sig_flag] = 1;
+  });
 }
 
 kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {
@@ -546,8 +559,6 @@ jsg::Optional<kj::Array<kj::byte>> DiskCache::get(jsg::Lock& js, kj::String key)
   }
 }
 
-// TODO: DiskCache is currently only used for --python-save-snapshot. Can we use ArtifactBundler for
-// this instead and remove DiskCache completely?
 void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   KJ_IF_SOME(root, cacheRoot) {
     kj::Path path(key);
@@ -563,12 +574,22 @@ void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   }
 }
 
+void DiskCache::putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
+  KJ_IF_SOME(root, snapshotRoot) {
+    kj::Path path(key);
+    auto file = root->tryOpenFile(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+    KJ_IF_SOME(f, file) {
+      f->writeAll(data);
+    } else {
+      KJ_LOG(ERROR, "DiskCache: Failed to open file", key);
+    }
+  } else {
+    return;
+  }
+}
+
 jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-  // JSPI was stabilized in V8 version 14.2, and this API removed.
-  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-  js.installJspi();
-#endif
   return emscriptenRuntime.emscriptenRuntime.getHandle(js);
 }
 
@@ -577,11 +598,6 @@ void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 }  // namespace workerd::api::pyodide
-
-#include "workerd/io/compatibility-date.h"
-
-#include <capnp/dynamic.h>
-#include <capnp/schema.h>
 
 namespace workerd {
 

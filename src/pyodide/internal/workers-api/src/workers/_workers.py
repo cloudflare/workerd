@@ -6,12 +6,21 @@ import functools
 import inspect
 import json
 from asyncio import create_task, gather
-from collections.abc import Awaitable, Generator, Iterable, MutableMapping
+from collections.abc import (
+    Awaitable,
+    Generator,
+    Iterable,
+    Iterator,
+    MutableMapping,
+    Sequence,
+)
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
 from types import LambdaType
 from typing import Any, Never, Protocol, TypedDict, Unpack
+
+import _cloudflare_compat_flags
 
 # Get globals modules and import function from the entrypoint-helper
 import _pyodide_entrypoint_helper
@@ -94,6 +103,15 @@ def import_from_javascript(module_name: str) -> Any:
                 f"Failed to import '{module_name}': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
             ) from e
         raise
+
+
+@contextmanager
+def patch_env(
+    d: dict[str, Any] | Sequence[tuple[str, Any]] | None = None, **kwds: dict[str, Any]
+) -> Iterator[None]:
+    if d:
+        kwds = dict(d) | kwds
+    yield from _pyodide_entrypoint_helper.patch_env_helper(to_js(kwds))
 
 
 type JSBody = (
@@ -257,6 +275,7 @@ async def fetch(
         resource = resource.js_object
     if "method" in other_options and isinstance(other_options["method"], HTTPMethod):
         other_options["method"] = other_options["method"].value
+
     resp = await _pyfetch_patched(resource, **other_options)
     return Response(resp.js_response)
 
@@ -301,6 +320,16 @@ def _is_js_instance(val, js_cls_name):
     return hasattr(val, "constructor") and val.constructor.name == js_cls_name
 
 
+try:
+    import _cloudflare_compat_flags
+except ImportError:
+    _cloudflare_compat_flags = object()
+
+
+def get_compat_flag(flag: str) -> bool:
+    return getattr(_cloudflare_compat_flags, flag, False)
+
+
 def _to_js_headers(headers: Headers):
     if isinstance(headers, list):
         # We should have a list[tuple[str, str]]
@@ -311,6 +340,49 @@ def _to_js_headers(headers: Headers):
         return headers
     else:
         raise TypeError("Received unexpected type for headers argument")
+
+
+@contextmanager
+def _get_js_body(body):
+    if isinstance(body, bytes):
+        proxy_bytes = create_proxy(body)
+        proxy_buffer = proxy_bytes.getBuffer()
+        try:
+            yield proxy_buffer.data
+            return
+        finally:
+            proxy_buffer.release()
+            proxy_bytes.destroy()
+    if isinstance(body, FormData):
+        yield body.js_object
+        return
+    yield body
+
+
+RESPONSE_ACCEPTED_TYPES = {
+    # BufferSource types
+    "Blob",
+    "ArrayBuffer",
+    "TypedArray",
+    "DataView",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int8Array",
+    "Uint16Array",
+    "Int16Array",
+    "Uint32Array",
+    "Int32Array",
+    "Float16Array",
+    "Float32Array",
+    "Float64Array",
+    "BigInt64Array",
+    "BigUint64Array",
+    # Other types
+    "FormData",
+    "ReadableStream",
+    "URLSearchParams",
+    "Response",
+}
 
 
 class Response(FetchResponse):
@@ -335,20 +407,11 @@ class Response(FetchResponse):
         """
         # Verify passed in types.
         if hasattr(body, "constructor"):
-            if body.constructor.name not in (
-                "Blob",
-                "ArrayBuffer",
-                "TypedArray",
-                "DataView",
-                "FormData",
-                "ReadableStream",
-                "URLSearchParams",
-                "Response",
-            ):
+            if body.constructor.name not in RESPONSE_ACCEPTED_TYPES:
                 raise TypeError(
                     f"Unsupported type in Response: {body.constructor.name}"
                 )
-        elif not isinstance(body, str | FormData) and body is not None:
+        elif not isinstance(body, str | FormData | bytes) and body is not None:
             raise TypeError(f"Unsupported type in Response: {type(body).__name__}")
 
         # Handle constructing a Response from a JS Response.
@@ -360,13 +423,13 @@ class Response(FetchResponse):
             super().__init__(body.url, body)
             return
 
-        options = self._create_options(status, status_text, headers)
+        options = self._create_options(status, status_text, headers, web_socket)
 
-        # Initialize via the FetchResponse super-class which gives us access to
-        # methods that we would ordinarily have to redeclare.
-        js_resp = js.Response.new(
-            body.js_object if isinstance(body, FormData) else body, **options
-        )
+        # To avoid unnecessary copies we use this context manager.
+        with _get_js_body(body) as js_body:
+            # Initialize via the FetchResponse super-class which gives us access to
+            # methods that we would ordinarily have to redeclare.
+            js_resp = js.Response.new(js_body, **options)
         super().__init__(js_resp.url, js_resp)
 
     def __repr__(self):
@@ -724,10 +787,26 @@ class Request:
         import http.client
 
         result = http.client.HTTPMessage()
+        if not get_compat_flag("python_request_headers_preserve_commas"):
+            for key, val in self.js_object.headers:
+                result[key] = val.strip()
 
-        for key, val in self.js_object.headers:
-            for subval in val.split(","):
-                result[key] = subval.strip()
+            return result
+
+        # With the exception of Set-Cookie, duplicate headers can and are combined with a comma
+        # in the JS Headers API. We do the same when returning the headers to Python.
+        #
+        # See https://httpwg.org/specs/rfc9110.html#rfc.section.5.3.
+        js_headers = self.js_object.headers
+        set_cookie_headers = js_headers.getSetCookie()
+        if set_cookie_headers:
+            for value in set_cookie_headers:
+                result.add_header("Set-Cookie", value.strip())
+
+        for key, val in js_headers:
+            if key.lower() == "set-cookie":
+                continue
+            result.add_header(key, val.strip())
 
         return result
 
@@ -879,6 +958,10 @@ def _raise_on_disabled_type(value):
     if isinstance(value, (tuple, bytearray, LambdaType)):
         raise TypeError(f"{type(value)} cannot be sent over RPC.")
 
+    if inspect.isawaitable(value):
+        # The caller is expected to await the value prior to conversion.
+        raise TypeError(f"Awaitable {type(value)} cannot be sent over RPC.")
+
     if _is_iterable(value):
         if isinstance(value, dict):
             for v in value.values():
@@ -969,6 +1052,60 @@ class _DurableObjectNamespaceWrapper:
     def get(self, *args, **kwargs):
         return _FetcherWrapper(self._binding.get(*args, **kwargs))
 
+    def getByName(self, *args, **kwargs):
+        return _FetcherWrapper(self._binding.getByName(*args, **kwargs))
+
+    def jurisdiction(self, *args, **kwargs):
+        return _DurableObjectNamespaceWrapper(
+            self._binding.jurisdiction(*args, **kwargs)
+        )
+
+
+class _WorkflowInstanceWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def __getattr__(self, name):
+        return getattr(self._binding, name)
+
+    async def send_event(self, *args, **kwargs):
+        return self._binding.sendEvent(*args, **kwargs)
+
+    async def pause(self, *args, **kwargs):
+        return self._binding.pause(*args, **kwargs)
+
+    async def resume(self, *args, **kwargs):
+        return self._binding.resume(*args, **kwargs)
+
+    async def terminate(self, *args, **kwargs):
+        return self._binding.terminate(*args, **kwargs)
+
+    async def restart(self, *args, **kwargs):
+        return self._binding.restart(*args, **kwargs)
+
+    async def status(self, *args, **kwargs):
+        return self._binding.status(*args, **kwargs)
+
+
+class _WorkflowBindingWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def __getattr__(self, name):
+        return getattr(self._binding, name)
+
+    async def get(self, *args, **kwargs):
+        return _WorkflowInstanceWrapper(await self._binding.get(*args, **kwargs))
+
+    async def create(self, *args, **kwargs):
+        return _WorkflowInstanceWrapper(await self._binding.create(*args, **kwargs))
+
+    async def create_batch(self, *args, **kwargs):
+        return [
+            _WorkflowInstanceWrapper(w)
+            for w in await self._binding.createBatch(*args, **kwargs)
+        ]
+
 
 class _EnvWrapper:
     def __init__(self, env: Any):
@@ -981,6 +1118,9 @@ class _EnvWrapper:
 
         if _is_js_instance(binding, "DurableObjectNamespace"):
             return _DurableObjectNamespaceWrapper(binding)
+
+        if _is_js_instance(binding, "WorkflowImpl"):
+            return _WorkflowBindingWrapper(binding)
 
         # TODO: Implement APIs for bindings.
         return binding
@@ -1018,28 +1158,103 @@ class _WorkflowStepWrapper:
         self._js_step = js_step
         self._memoized_dependencies = {}
         self._in_flight = {}
+        self.step_closures = {}
 
-    def do(self, name, depends=None, concurrent=False, config=None):
+        # Assign the appropriate method based on compat flag
+        if _cloudflare_compat_flags.python_workflows_implicit_dependencies:
+            self.do = self._do_implicit
+        else:
+            self.do = self._do_legacy
+
+    def _do_legacy(self, name, depends=None, concurrent=False, config=None):
+        """Original signature - positional args allowed, explicit depends parameter."""
+        return self._create_step_decorator(
+            name=name,
+            depends=depends,
+            concurrent=concurrent,
+            config=config,
+            implicit=False,
+        )
+
+    def _do_implicit(self, name=None, *, concurrent=False, config=None):
+        """New signature - keyword-only args, dependencies resolved from param names."""
+        return self._create_step_decorator(
+            name=name,
+            depends=None,
+            concurrent=concurrent,
+            config=config,
+            implicit=True,
+        )
+
+    def _create_step_decorator(self, name, depends, concurrent, config, implicit):
+        """Shared decorator factory for both legacy and implicit modes."""
+
         def decorator(func):
-            async def wrapper():
-                if concurrent:
-                    results = await gather(
-                        *[self._resolve_dependency(dep) for dep in depends or []]
-                    )
-                else:
-                    results = [
-                        await self._resolve_dependency(dep) for dep in depends or []
-                    ]
-                python_results = [python_from_rpc(result) for result in results]
-                return await _do_call(self, name, config, func, *python_results)
+            step_name = func.__name__ if name is None else name
 
-            wrapper._step_name = name
+            async def wrapper():
+                results_future_list = self._build_dependency_list(
+                    func, depends, implicit
+                )
+                results = await self._gather_results(results_future_list, concurrent)
+                return await _do_call(self, step_name, config, func, *results)
+
+            wrapper._step_name = step_name
+            self.step_closures[step_name] = wrapper
             return wrapper
 
         return decorator
 
+    def _build_dependency_list(self, func, depends, implicit):
+        """Build the dependency list based on mode (implicit vs legacy)."""
+        sig = inspect.signature(func)
+        results_future_list = []
+
+        if implicit:
+            # Implicit mode: resolve dependencies from parameter names
+            for p in sig.parameters.values():
+                if p.name in self.step_closures:
+                    results_future_list.append(self.step_closures[p.name])
+                elif p.name == "ctx":
+                    results_future_list.append(p)
+                else:
+                    raise TypeError(f"Received unexpected parameter {p.name}")
+        else:
+            # Legacy mode: use explicit depends list, support ctx parameter
+            non_ctx_params = [p for p in sig.parameters.values() if p.name != "ctx"]
+
+            if depends is None and len(non_ctx_params) > 0:
+                raise TypeError(
+                    f"Step has {len(non_ctx_params)} non-ctx parameter(s) but no 'depends' list provided"
+                )
+
+            elif depends is not None and len(depends) != len(non_ctx_params):
+                raise TypeError(
+                    f"Step declares {len(non_ctx_params)} non-ctx parameter(s) but 'depends' has {len(depends)} item(s)"
+                )
+
+            curr = 0
+            for p in sig.parameters.values():
+                if p.name == "ctx":
+                    results_future_list.append(p)
+                else:
+                    results_future_list.append(depends[curr])
+                    curr += 1
+
+        return results_future_list
+
+    async def _gather_results(self, results_future_list, concurrent):
+        """Resolve dependencies concurrently or sequentially."""
+        if concurrent:
+            return await gather(
+                *[self._resolve_dependency(dep) for dep in results_future_list or []]
+            )
+        else:
+            return [
+                await self._resolve_dependency(dep) for dep in results_future_list or []
+            ]
+
     def sleep(self, *args, **kwargs):
-        # all types should be primitives - no need for explicit translation
         return self._js_step.sleep(*args, **kwargs)
 
     def sleep_until(self, name, timestamp):
@@ -1058,7 +1273,9 @@ class _WorkflowStepWrapper:
         )
 
     async def _resolve_dependency(self, dep):
-        if dep._step_name in self._memoized_dependencies:
+        if hasattr(dep, "name") and dep.name == "ctx":
+            return dep
+        elif dep._step_name in self._memoized_dependencies:
             return self._memoized_dependencies[dep._step_name]
         elif dep._step_name in self._in_flight:
             return await self._in_flight[dep._step_name]
@@ -1067,8 +1284,15 @@ class _WorkflowStepWrapper:
 
 
 async def _do_call(entrypoint, name, config, callback, *results):
-    async def _callback():
-        result = callback(*results)
+    async def _callback(ctx=None):
+        # deconstruct the actual ctx object
+        resolved_results = tuple(
+            python_from_rpc(ctx)
+            if isinstance(r, inspect.Parameter) and r.name == "ctx"
+            else r
+            for r in results
+        )
+        result = callback(*resolved_results)
 
         if inspect.iscoroutine(result):
             result = await result

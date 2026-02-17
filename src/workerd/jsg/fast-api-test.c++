@@ -170,7 +170,10 @@ struct Test {
 
 CallCounter runTest(Test test) {
   jsg::callCounter.reset();
-  jsg::test::Evaluator<FastMethodContext, FastMethodIsolate> e(v8System);
+  JsgConfig config = {
+    .fastApiEnabled = true,
+  };
+  jsg::test::Evaluator<FastMethodContext, FastMethodIsolate, JsgConfig> e(v8System, config);
 
   auto target = test.target == ""_kjc ? kj::str(test.expr) : kj::str(test.target, ".", test.expr);
   e.expectEval(target, test.expectedReturnType, test.expectedReturnValue);
@@ -234,7 +237,10 @@ KJ_TEST("Fast methods should work with getters/setters") {
 
 KJ_TEST("Fast methods properly catch JSG_FAIL_REQUIRE errors") {
   jsg::callCounter.reset();
-  jsg::test::Evaluator<FastMethodContext, FastMethodIsolate> e(v8System);
+  JsgConfig config = {
+    .fastApiEnabled = true,
+  };
+  jsg::test::Evaluator<FastMethodContext, FastMethodIsolate, JsgConfig> e(v8System, config);
 
   // Test that directly calling the method results in an error
   e.expectEval("throwError(42)", "throws", "TypeError: Test error with code 42");

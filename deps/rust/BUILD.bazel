@@ -1,5 +1,6 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//crate_universe:defs.bzl", "crates_vendor", "render_config")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
 load("cargo.bzl", "PACKAGES")
@@ -76,9 +77,7 @@ crates_vendor(
     ],
 )
 
-# Windows build fixes due to rust libraries missing symbols:
-# https://github.com/bazelbuild/rules_rust/blob/144d34fd/ffi/cc/global_allocator_library/BUILD.bazel#L3
-# `empty_lib` static library will bring all the symbols in.
+# Adds missing symbols following Rust mangling change, plus missing system library on Windows.
 cc_library(
     name = "runtime",
     linkopts = select({
@@ -88,10 +87,7 @@ cc_library(
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
-    deps = select({
-        "@platforms//os:windows": [":empty_lib"],
-        "//conditions:default": [],
-    }),
+    deps = [":empty_lib"],
 )
 
 write_file(

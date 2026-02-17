@@ -449,8 +449,6 @@ class IsolateModuleRegistry final {
   // like the CommonJS require. Returns the instantiated/evaluated module namespace.
   // If an empty v8::MaybeLocal is returned and the default option is given, then an
   // exception has been scheduled.
-  // Note that this returns the module namespace object. In CommonJS, the require()
-  // function will actually return the default export from the module namespace object.
   v8::MaybeLocal<v8::Object> require(
       Lock& js, const ResolveContext& context, RequireOption option = RequireOption::DEFAULT) {
     static constexpr auto evaluate = [](Lock& js, Entry& entry, const Url& id,
@@ -1701,25 +1699,29 @@ kj::ArrayPtr<const kj::StringPtr> Module::ModuleNamespace::getNamedExports() con
 Module::EvaluateCallback Module::newTextModuleHandler(kj::ArrayPtr<const char> data) {
   return [data](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver&) -> bool {
-    return js.tryCatch([&] { return ns.setDefault(js, js.str(data)); }, [&](Value exception) {
+    JSG_TRY(js) {
+      return ns.setDefault(js, js.str(data));
+    }
+    JSG_CATCH(exception) {
       js.v8Isolate->ThrowException(exception.getHandle(js));
       return false;
-    });
+    }
   };
 }
 
 Module::EvaluateCallback Module::newDataModuleHandler(kj::ArrayPtr<const kj::byte> data) {
   return [data](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver&) -> bool {
-    return js.tryCatch([&] {
+    JSG_TRY(js) {
       auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, data.size());
       backing.asArrayPtr().copyFrom(data);
       auto buffer = jsg::BufferSource(js, kj::mv(backing));
       return ns.setDefault(js, JsValue(buffer.getHandle(js)));
-    }, [&](Value exception) {
+    }
+    JSG_CATCH(exception) {
       js.v8Isolate->ThrowException(exception.getHandle(js));
       return false;
-    });
+    }
   };
 }
 
@@ -1738,7 +1740,7 @@ Module::EvaluateCallback Module::newJsonModuleHandler(kj::ArrayPtr<const char> d
 
 Module::EvaluateCallback Module::newWasmModuleHandler(kj::ArrayPtr<const kj::byte> data) {
   struct Cache final {
-    kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex{};
+    kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex;
   };
   return [data, cache = kj::heap<Cache>()](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver& observer) mutable -> bool {

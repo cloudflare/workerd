@@ -2,7 +2,6 @@
 
 #include "impl.h"
 #include "keys.h"
-#include "simdutf.h"
 #include "util.h"
 
 #include <openssl/bn.h>
@@ -840,7 +839,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(jsg::
       InternalDOMOperationError, "Error setting up RSA keygen.");
 
   auto rsaPrivateKey = OSSL_NEW(RSA);
-  OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), 0));
+  OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), nullptr));
   auto privateEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_RSA(privateEvpPKey.get(), rsaPrivateKey.get()));
   kj::Own<RSA> rsaPublicKey = OSSLCALL_OWN(RSA, RSAPublicKey_dup(rsaPrivateKey.get()),

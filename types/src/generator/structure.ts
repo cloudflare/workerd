@@ -375,7 +375,7 @@ export function createStructureNode(
   structure: Structure,
   opts: CreateStructureNodeOptions
 ): ts.InterfaceDeclaration | ts.ClassDeclaration {
-  const { asClass, ambientContext = false } = opts;
+  const { asClass, ambientContext } = opts;
   const modifiers: ts.Modifier[] = [];
   const name = getTypeName(structure);
   const fullyQualifiedName = structure.fullyQualifiedName;

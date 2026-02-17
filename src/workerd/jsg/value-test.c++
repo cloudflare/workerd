@@ -115,6 +115,7 @@ JSG_DECLARE_ISOLATE_TYPE(OptionalIsolate,
 
 KJ_TEST("optionals and maybes") {
   Evaluator<OptionalContext, OptionalIsolate> e(v8System);
+  e.getIsolate().setUsingFastJsgStruct();
   e.expectEval("takeOptional(new NumberBox(123))", "number", "123");
   e.expectEval("takeOptional()", "number", "321");
   e.expectEval("takeOptional(undefined)", "number", "321");
@@ -161,14 +162,14 @@ KJ_TEST("optionals and maybes") {
 
   e.expectEval(
       "var object = makeTestOptionalFields(undefined, undefined, null);\n" ENUMERATE_OBJECT,
-      "string", "nullable: null");
+      "string", "optional: undefined, lenient: undefined, nullable: null");
   e.expectEval("var object = makeTestOptionalFields('foo', 'bar', null);\n" ENUMERATE_OBJECT,
       "string", "optional: foo, lenient: bar, nullable: null");
   e.expectEval("var object = makeTestOptionalFields('foo', 'bar', 'baz');\n" ENUMERATE_OBJECT,
       "string", "optional: foo, lenient: bar, nullable: baz");
   e.expectEval(
       "var object = makeTestOptionalFields(undefined, undefined, 'bar');\n" ENUMERATE_OBJECT,
-      "string", "nullable: bar");
+      "string", "optional: undefined, lenient: undefined, nullable: bar");
 #undef ENUMERATE_OBJECT
 
   e.expectEval("readTestAllOptionalFields({})", "string", "(absent), 321");
@@ -846,27 +847,6 @@ KJ_TEST("jsg::DOMStrings") {
   e.expectEval("[...takeDOMString('\\uD835x')]", "object", u8"\uFFFD,\uFFFD,\uFFFD,x");
   e.expectEval("[...takeDOMString('\\uD835x\\uDC53')]", "object",
       u8"\uFFFD,\uFFFD,\uFFFD,x,\uFFFD,\uFFFD,\uFFFD");
-}
-
-// ========================================================================================
-
-struct ByteStringContext: public ContextGlobalObject {
-  ByteString takeByteString(ByteString s) {
-    return kj::mv(s);
-  }
-  JSG_RESOURCE_TYPE(ByteStringContext) {
-    JSG_METHOD(takeByteString);
-  }
-};
-JSG_DECLARE_ISOLATE_TYPE(ByteStringIsolate, ByteStringContext);
-
-KJ_TEST("ByteStrings") {
-  Evaluator<ByteStringContext, ByteStringIsolate> e(v8System);
-  e.expectEval("takeByteString('foo\\0bar') === 'foo\\0bar'", "boolean", "true");
-  // ﬃ is 0xEF 0xAC 0x83 in UTF-8.
-  e.expectEval("takeByteString('\\xEF\\xAC\\x83') === '\\xEF\\xAC\\x83'", "boolean", "true");
-
-  // TODO(cleanup): ByteString should become HeaderString somewhere in the api directory.
 }
 
 // ========================================================================================

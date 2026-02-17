@@ -12,18 +12,37 @@ export class DurableObjectExample extends DurableObject {
     }
     assert.strictEqual(container.running, false);
 
-    // Start container with valid configuration
-    await container.start({
-      entrypoint: ['node', 'nonexistant.js'],
-    });
+    // Start container with invalid entrypoint
+    {
+      container.start({
+        entrypoint: ['node', 'nonexistant.js'],
+      });
 
-    let exitCode = undefined;
-    await container.monitor().catch((err) => {
-      exitCode = err.exitCode;
-    });
+      let exitCode = undefined;
+      await container.monitor().catch((err) => {
+        exitCode = err.exitCode;
+      });
 
-    assert.strictEqual(typeof exitCode, 'number');
-    assert.notEqual(0, exitCode);
+      assert.strictEqual(typeof exitCode, 'number');
+      assert.notEqual(0, exitCode);
+    }
+
+    // Start container with valid entrypoint and stop it
+    {
+      container.start();
+
+      await scheduler.wait(500);
+
+      let exitCode = undefined;
+      const monitor = container.monitor().catch((err) => {
+        exitCode = err.exitCode;
+      });
+      await container.destroy();
+      await monitor;
+
+      assert.strictEqual(typeof exitCode, 'number');
+      assert.equal(137, exitCode);
+    }
   }
 
   async testBasics() {
@@ -36,8 +55,7 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
 
     // Start container with valid configuration
-    await container.start({
-      entrypoint: ['node', 'app.js'],
+    container.start({
       env: { A: 'B', C: 'D', L: 'F' },
       enableInternet: true,
     });
@@ -47,20 +65,29 @@ export class DurableObjectExample extends DurableObject {
     // Test HTTP requests to container
     {
       let resp;
-      for (let i = 0; i < 6; i++) {
+      // The retry count here is arbitrary. Can increase it if necessary.
+      const maxRetries = 6;
+      for (let i = 1; i <= maxRetries; i++) {
         try {
           resp = await container
             .getTcpPort(8080)
             .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
           break;
         } catch (e) {
-          await scheduler.wait(500);
-          if (i === 5) {
+          if (!e.message.includes('container port not found')) {
+            throw e;
+          }
+          console.info(
+            `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
+          );
+          console.info(e);
+          if (i === maxRetries) {
             console.error(
               `Failed to connect to container ${container.id}. Retried ${i} times`
             );
             throw e;
           }
+          await scheduler.wait(500);
         }
       }
 
@@ -73,28 +100,50 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
   }
 
-  async leaveRunning() {
-    // Start container and leave it running
+  async testSetInactivityTimeout(timeout) {
     const container = this.ctx.container;
-    if (!container.running) {
-      await container.start({
-        entrypoint: ['leave-running'],
-      });
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
     }
+    assert.strictEqual(container.running, false);
+
+    container.start();
 
     assert.strictEqual(container.running, true);
-  }
 
-  async checkRunning() {
-    // Check container was started using leaveRunning()
-    const container = this.ctx.container;
+    // Wait for container to be running
+    await scheduler.wait(500);
 
-    // Let's guard in case the test assumptions are wrong.
-    if (!container.running) {
-      return;
+    try {
+      await container.setInactivityTimeout(0);
+    } catch (err) {
+      assert.strictEqual(err.name, 'TypeError');
+      assert.match(
+        err.message,
+        /setInactivityTimeout\(\) cannot be called with a durationMs <= 0/
+      );
     }
 
-    await container.destroy();
+    if (timeout > 0) {
+      await container.setInactivityTimeout(timeout);
+    }
+  }
+
+  async start() {
+    assert.strictEqual(this.ctx.container.running, false);
+    this.ctx.container.start();
+    assert.strictEqual(this.ctx.container.running, true);
+
+    // Wait for container to be running
+    await scheduler.wait(500);
+  }
+
+  // Assert that the container is running
+  async expectRunning(running) {
+    assert.strictEqual(this.ctx.container.running, running);
+    await this.ctx.container.destroy();
   }
 
   async abort() {
@@ -122,7 +171,7 @@ export class DurableObjectExample extends DurableObject {
 
   async startAlarm(start, ms) {
     if (start && !this.ctx.container.running) {
-      await this.ctx.container.start();
+      this.ctx.container.start();
     }
     await this.ctx.storage.setAlarm(Date.now() + ms);
   }
@@ -140,25 +189,44 @@ export class DurableObjectExample extends DurableObject {
     const { container } = this.ctx;
 
     if (!container.running) {
-      await container.start({
-        entrypoint: ['node', 'app.js'],
+      container.start({
         env: { WS_ENABLED: 'true' },
         enableInternet: true,
       });
     }
 
-    // Wait for container to be ready
-    await scheduler.wait(2000);
-
-    // Test WebSocket upgrade request
-    const res = await container.getTcpPort(8080).fetch('http://foo/ws', {
-      headers: {
-        Upgrade: 'websocket',
-        Connection: 'Upgrade',
-        'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
-        'Sec-WebSocket-Version': '13',
-      },
-    });
+    // Wait for container to be ready with retry loop
+    let res;
+    // The retry count here is arbitrary. Can increase it if necessary.
+    const maxRetries = 6;
+    for (let i = 1; i <= maxRetries; i++) {
+      try {
+        res = await container.getTcpPort(8080).fetch('http://foo/ws', {
+          headers: {
+            Upgrade: 'websocket',
+            Connection: 'Upgrade',
+            'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
+            'Sec-WebSocket-Version': '13',
+          },
+        });
+        break;
+      } catch (e) {
+        if (!e.message.includes('container port not found')) {
+          throw e;
+        }
+        console.info(
+          `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
+        );
+        console.info(e);
+        if (i === maxRetries) {
+          console.error(
+            `Failed to connect to container for WebSocket ${container.id}. Retried ${i} times`
+          );
+          throw e;
+        }
+        await scheduler.wait(1000);
+      }
+    }
 
     // Should get WebSocket upgrade response
     assert.strictEqual(res.status, 101);
@@ -191,6 +259,57 @@ export class DurableObjectExample extends DurableObject {
 
   getStatus() {
     return this.ctx.container.running;
+  }
+
+  async testPidNamespace() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+    assert.strictEqual(container.running, false);
+
+    container.start({
+      enableInternet: true,
+    });
+
+    const monitor = container.monitor().catch((_err) => {});
+
+    // Fetch the /pid-namespace endpoint which returns info about the PID namespace
+    let resp;
+    const maxRetries = 6;
+    for (let i = 1; i <= maxRetries; i++) {
+      try {
+        resp = await container
+          .getTcpPort(8080)
+          .fetch('http://foo/pid-namespace');
+        break;
+      } catch (e) {
+        if (!e.message.includes('container port not found')) {
+          throw e;
+        }
+        console.info(
+          `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
+        );
+        if (i === maxRetries) {
+          console.error(
+            `Failed to connect to container ${container.id}. Retried ${i} times`
+          );
+          throw e;
+        }
+        await scheduler.wait(500);
+      }
+    }
+
+    assert.equal(resp.status, 200);
+    const data = await resp.json();
+
+    await container.destroy();
+    await monitor;
+    assert.strictEqual(container.running, false);
+
+    return data;
   }
 }
 
@@ -229,25 +348,6 @@ export const testExitCode = {
   },
 };
 
-// Test container persistence across durable object instances
-export const testAlreadyRunning = {
-  async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName('testAlreadyRunning');
-    let stub = env.MY_CONTAINER.get(id);
-
-    await stub.leaveRunning();
-
-    await assert.rejects(() => stub.abort(), {
-      name: 'Error',
-      message: 'Application called abort() to reset Durable Object.',
-    });
-
-    // Recreate stub to get a new instance
-    stub = env.MY_CONTAINER.get(id);
-    await stub.checkRunning();
-  },
-};
-
 // Test WebSocket functionality
 export const testWebSockets = {
   async test(_ctrl, env) {
@@ -257,7 +357,7 @@ export const testWebSockets = {
   },
 };
 
-// // Test alarm functionality with containers
+// Test alarm functionality with containers
 export const testAlarm = {
   async test(_ctrl, env) {
     // Test that we can recover the use_containers flag correctly in setAlarm
@@ -275,6 +375,9 @@ export const testAlarm = {
       retries++;
     }
 
+    // Wait for container to start
+    await scheduler.wait(500);
+
     // Set alarm for future and abort
     await stub.startAlarm(false, 1000);
 
@@ -284,10 +387,98 @@ export const testAlarm = {
       // Expected to throw
     }
 
-    // Wait for alarm to run after abort
-    await scheduler.wait(1500);
-
+    // Poll for the alarm to run after abort. The DO must be re-created and the
+    // alarm handler must fire, which can take variable time on CI.
+    // 50 iterations * 200ms = 10s max wait, which gives plenty of headroom for
+    // slow CI environments where Docker and DO reconstruction add latency.
     stub = env.MY_CONTAINER.get(id);
-    await stub.checkAlarmAbortConfirmation();
+    let confirmed = false;
+    for (let i = 0; i < 50 && !confirmed; i++) {
+      await scheduler.wait(200);
+      try {
+        await stub.checkAlarmAbortConfirmation();
+        confirmed = true;
+      } catch (e) {
+        assert.match(
+          e.message,
+          /Abort confirmation did not get inserted/,
+          `Unexpected error while polling for alarm: ${e.message}`
+        );
+      }
+    }
+    if (!confirmed) {
+      await stub.checkAlarmAbortConfirmation();
+    }
+  },
+};
+
+export const testContainerShutdown = {
+  async test(_, env) {
+    {
+      const stub = env.MY_CONTAINER.getByName('testContainerShutdown');
+      await stub.start();
+      await assert.rejects(() => stub.abort(), {
+        name: 'Error',
+        message: 'Application called abort() to reset Durable Object.',
+      });
+    }
+
+    // Wait for the container to be shutdown after the DO aborts
+    await scheduler.wait(500);
+
+    {
+      const stub = env.MY_CONTAINER.getByName('testContainerShutdown');
+
+      // Container should not be running after DO exited
+      await stub.expectRunning(false);
+    }
+  },
+};
+
+export const testSetInactivityTimeout = {
+  async test(_ctrl, env) {
+    {
+      const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
+
+      await stub.testSetInactivityTimeout(3000);
+
+      await assert.rejects(() => stub.abort(), {
+        name: 'Error',
+        message: 'Application called abort() to reset Durable Object.',
+      });
+    }
+
+    // Here we wait to ensure that if setInactivityTimeout *doesn't* work, the
+    // container has enough time to shutdown after the DO is aborted. If we
+    // don't wait then ctx.container.running will always be true, even without
+    // setInactivityTimeout, because the container won't have stoped yet.
+    await scheduler.wait(500);
+
+    {
+      const stub = env.MY_CONTAINER.getByName('testSetInactivityTimeout');
+
+      // Container should still be running after DO exited
+      await stub.expectRunning(true);
+    }
+  },
+};
+
+// Test PID namespace isolation behavior
+// When containers_pid_namespace is ENABLED, the container has its own isolated PID namespace.
+// We verify this by checking that PID 1 in the container's namespace is the container's
+// init process, not the host's init process (systemd, launchd, etc.).
+export const testPidNamespace = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName('testPidNamespace');
+    const stub = env.MY_CONTAINER.get(id);
+    const data = await stub.testPidNamespace();
+
+    // When using an isolated PID namespace, PID 1 should be the container's entrypoint
+    // (a bash script that runs node), not the host's init process (systemd, launchd, init).
+    assert.match(
+      data.init,
+      /container-client-test/,
+      `Expected PID 1 to be the container entrypoint, but got: ${data.init}`
+    );
   },
 };

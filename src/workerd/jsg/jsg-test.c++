@@ -234,11 +234,16 @@ KJ_TEST("can't use builtin as prototype") {
   e.expectEval("function JsType() {}\n"
                "JsType.prototype = new NumberBox(123);\n"
                "new JsType().value",
-      "throws", kIllegalInvocation);
+      "number", "123");
+  e.expectEval("function JsType() {}\n"
+               "JsType.prototype = new NumberBox(123);\n"
+               "let t = new JsType();\n"
+               "Reflect.get(JsType.prototype, 'value', t)\n",
+      "number", "123");
   e.expectEval("function JsType() {}\n"
                "JsType.prototype = new ExtendedNumberBox(123, 'foo');\n"
                "new JsType().value",
-      "throws", kIllegalInvocation);
+      "number", "123");
   e.expectEval("function JsType() {}\n"
                "JsType.prototype = this;\n"
                "new JsType().getContextProperty()",
@@ -532,6 +537,37 @@ KJ_TEST("Memory Allocation Error Propagation") {
     KJ_EXPECT_THROW_MESSAGE(
         "Failed to allocate ArrayBuffer backing store", lock.allocBackingStore(100 * 1024));
   });
+}
+
+struct MpkContext: public ContextGlobalObject {
+  JSG_RESOURCE_TYPE(MpkContext) {}
+};
+JSG_DECLARE_ISOLATE_TYPE(MpkIsolate, MpkContext);
+KJ_TEST("MemoryProtectionKeyScope") {
+  // In workerd, since V8_ENABLE_SANDBOX is not defined, this test is largely
+  // a non-op, however, when v8 is built with V8_ENABLE_SANDBOX enabled and
+  // the isolate has a memory protection key, this test will (eventually)
+  // verify that the array buffer allocation is writable within the scope.
+  // Essentially once backing stores are protected, and mpk's are enabled,
+  // this shouldn't crash.
+  MpkIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  std::shared_ptr<v8::BackingStore> store;
+  auto mpkScope = isolate.runInLockScope([&](MpkIsolate::Lock& lock) {
+    store = v8::ArrayBuffer::NewBackingStore(lock.v8Isolate, 10);
+    return lock.getMemoryProtectionKeyScope();
+  });
+  bool called = false;
+  // Now that we have our backing store, try writing to it outside the
+  // isolate lock, but within the mpk scope. If mpk's are enabled writing
+  // to the backing store without the mpk scope should segfault, but within
+  // the mpk scope it should succeed.
+  kj::ArrayPtr<kj::byte> bytes(static_cast<kj::byte*>(store->Data()), store->ByteLength());
+  KJ_EXPECT(mpkScope.runWithKey([&] {
+    called = true;
+    bytes.fill(1);
+    return 1;
+  }) == 1);
+  KJ_EXPECT(called);
 }
 
 }  // namespace

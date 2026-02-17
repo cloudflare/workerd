@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ketan Gupta <ketan@cloudflare.com>
+Date: Wed, 4 Feb 2026 15:48:36 +0000
+Subject: Change lamba signature to get around windows build failure
+
+
+diff --git a/src/objects/backing-store.cc b/src/objects/backing-store.cc
+index 693a03f54e3c96efe6153f8fa2afd8a564d847f8..055c3565065ac18598ad3bc2e641b714a53f94e0 100644
+--- a/src/objects/backing-store.cc
++++ b/src/objects/backing-store.cc
+@@ -308,7 +308,7 @@ std::unique_ptr<BackingStore> BackingStore::TryAllocateAndPartiallyCommitMemory(
+   // For accounting purposes, whether a GC was necessary.
+   bool did_retry = false;
+ 
+-  auto gc_retry = [&](const std::function<bool()>& fn) {
++  auto gc_retry = [&](auto&& fn) {
+     if (fn()) return true;
+     // Collect garbage and retry.
+     did_retry = true;

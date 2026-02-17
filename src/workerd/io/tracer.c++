@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
@@ -22,93 +23,15 @@ namespace {
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 }  // namespace
 
-namespace tracing {
-TailStreamWriter::TailStreamWriter(Reporter reporter): state(State(kj::mv(reporter))) {}
-
-void TailStreamWriter::report(
-    const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
-  // Becomes a no-op if a terminal event (close) has been reported, or if the stream closed due to
-  // not receiving a well-formed event handler. We need to disambiguate these cases as the former
-  // indicates an implementation error resulting in trailing events whereas the latter case is
-  // caused by a user error and events being reported after the stream being closed are expected –
-  // reject events following an outcome event, but otherwise just exit if the state has been closed.
-  // This could be an assert, but just log an error in case this is prevalent in some edge case.
-  if (outcomeSeen) {
-    KJ_LOG(ERROR, "reported tail stream event after stream close ", event, kj::getStackTrace());
-  }
-  auto& s = KJ_UNWRAP_OR_RETURN(state);
-
-  // The onset event must be first and must only happen once.
-  if (event.is<tracing::Onset>()) {
-    KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
-    onsetSeen = true;
-  } else {
-    KJ_ASSERT(onsetSeen, "Tail stream onset was not reported");
-    if (event.is<tracing::Outcome>()) {
-      outcomeSeen = true;
-    }
-  }
-
-  // A zero spanId at the TailEvent level signifies that no spanId should be provided to the tail
-  // worker (for Onset events). We go to great lengths to rule out getting an all-zero spanId by
-  // chance (see SpanId::fromEntropy()), so this should be safe.
-  tracing::TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
-      context.getSpanId() == tracing::SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()),
-      timestamp, s.sequence++, kj::mv(event));
-
-  // If the reporter returns false, then we will treat it as a close signal.
-  if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
-}
-}  // namespace tracing
-
-PipelineTracer::~PipelineTracer() noexcept(false) {
-  KJ_IF_SOME(f, completeFulfiller) {
-    f.get()->fulfill(traces.releaseAsArray());
-  }
-}
-
-void PipelineTracer::addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces) {
-  for (auto& t: traces) {
-    this->traces.add(kj::addRef(*t));
-  }
-}
-
-kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
+kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
   KJ_REQUIRE(completeFulfiller == kj::none, "onComplete() can only be called once");
 
-  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::Own<Trace>>>();
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<Trace>>();
   completeFulfiller = kj::mv(paf.fulfiller);
   return kj::mv(paf.promise);
 }
 
-kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
-    ExecutionModel executionModel,
-    kj::Maybe<kj::String> scriptId,
-    kj::Maybe<kj::String> stableId,
-    kj::Maybe<kj::String> scriptName,
-    kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-    kj::Maybe<kj::String> dispatchNamespace,
-    kj::Array<kj::String> scriptTags,
-    kj::Maybe<kj::String> entrypoint,
-    kj::Maybe<kj::String> durableObjectId,
-    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter) {
-  auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
-      kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint),
-      executionModel, kj::mv(durableObjectId));
-  traces.add(kj::addRef(*trace));
-  return kj::refcounted<WorkerTracer>(
-      addRefToThis(), kj::mv(trace), pipelineLogLevel, kj::mv(maybeTailStreamWriter));
-}
-
-void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
-  traces.add(kj::refcounted<Trace>(reader));
-}
-
-void PipelineTracer::addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer) {
-  tailStreamWriters.add(kj::mv(writer));
-}
-
-WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
+WorkerTracer::WorkerTracer(kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline,
     kj::Own<Trace> trace,
     PipelineLogLevel pipelineLogLevel,
     kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter)
@@ -117,39 +40,48 @@ WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       parentPipeline(kj::mv(parentPipeline)),
       maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {}
 
-WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
-    : pipelineLogLevel(pipelineLogLevel),
-      trace(kj::refcounted<Trace>(
-          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)) {}
-
 WorkerTracer::~WorkerTracer() noexcept(false) {
-  // Report the outcome event, which should have been delivered by now. Note that this can happen
-  // when there are no tail events delivered to the tracer at all (such as when a worker interface
-  // gets set up without being used for an event), so this may not indicate an error.
-  if (trace->outcome == EventOutcome::UNKNOWN) {
-    return;
-  }
+  // Report the outcome event, which should have been delivered by now.
 
   // Do not attempt to report an outcome event if logging is disabled, as with other event types.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
 
-  // For worker events where we never set the event info (such as WorkerEntrypoint::test() used in
-  // wd_test), we never set up a tail stream and accordingly should not report an outcome
-  // event. Worker events that should be traced need to set the event info at the start of the
-  // invocation to submit the onset event before any other tail events.
+  // Report the outcome event if STWs are present. All worker events need to call setEventInfo at
+  // the start of the invocation to submit the onset event before any other tail events.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
-
-    if (isPredictableModeForTest()) {
-      writer->report(spanContext,
-          tracing::Outcome(trace->outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS),
-          completeTime);
-    } else {
-      writer->report(spanContext, tracing::Outcome(trace->outcome, trace->cpuTime, trace->wallTime),
-          completeTime);
+    KJ_IF_SOME(spanContext, topLevelInvocationSpanContext) {
+      if (markedUnused) {
+        LOG_WARNING_PERIODICALLY("WorkerTracer was marked unused but actually was used");
+      }
+      if (isPredictableModeForTest()) {
+        writer->report(spanContext,
+            tracing::Outcome(trace->outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS),
+            completeTime, 0);
+      } else {
+        writer->report(spanContext,
+            tracing::Outcome(trace->outcome, trace->cpuTime, trace->wallTime), completeTime, 0);
+      }
+    } else if (!markedUnused) {
+      // If no span context is available, we have a streaming tail worker set up but shut down the
+      // worker tracer without ever sending an Onset event. In that case we either failed to set up
+      // the Onset properly (indicating a bug – all event types are required to report an Onset at
+      // the start – although this is more likely to manifest as a "Tail stream onset was not
+      // reported" error) or we created a WorkerInterface with WorkerTracer without ever invoking it
+      // (which is not incorrect behavior, but likely indicates inefficient code that sets up
+      // WorkerInterfaces and then ends up not using it due to an error/incorrect parameters; such
+      // error checking should be done beforehand to avoid unused allocations). Report such cases.
+      // Note: If markedUnused is true, this tracer was intentionally not used (e.g., duplicate
+      // alarm request deduplication) and the warning should be suppressed.
+      LOG_ERROR_PERIODICALLY(
+          "destructed WorkerTracer with STW without reporting Onset event", kj::getStackTrace());
     }
+  }
+
+  // Report the completed trace, if fulfiller is set up.
+  KJ_IF_SOME(f, completeFulfiller) {
+    f.get()->fulfill(kj::mv(trace));
   }
 };
 
@@ -166,13 +98,13 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
 
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
-  // to the legacy trace object is not needed; this will be addressed in a future refactor.
+  // to the buffered trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     // If message is too big on its own, truncate it.
+    size_t messageSize = kj::min(message.size(), MAX_TRACE_BYTES);
     writer->report(context,
-        {(tracing::Log(timestamp, logLevel,
-            kj::str(message.first(kj::min(message.size(), MAX_TRACE_BYTES)))))},
-        timestamp);
+        {tracing::Log(timestamp, logLevel, kj::str(message.first(messageSize)))}, timestamp,
+        messageSize);
   }
 
   if (trace->exceededLogLimit) {
@@ -191,31 +123,32 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   }
 }
 
-void WorkerTracer::addSpan(CompleteSpan&& span) {
+void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
   // This is where we'll actually encode the span.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
 
-  // Note: spans are not available in the legacy tail worker, so we don't need an exceededSpanLimit
+  // Note: spans are not available in the buffered tail worker, so we don't need an exceededSpanLimit
   // variable for it and it can't cause truncation.
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
 
   adjustSpanTime(span);
 
-  size_t messageSize = span.operationName.size();
+  size_t spanTagsSize = 0;
+  size_t spanNameSize = span.operationName.size();
   for (const Span::TagMap::Entry& tag: span.tags) {
-    messageSize += tag.key.size();
+    spanTagsSize += tag.key.size();
     KJ_SWITCH_ONEOF(tag.value) {
-      KJ_CASE_ONEOF(str, kj::String) {
-        messageSize += str.size();
+      KJ_CASE_ONEOF(str, kj::ConstString) {
+        spanTagsSize += str.size();
       }
       KJ_CASE_ONEOF(val, bool) {
-        messageSize++;
+        spanTagsSize++;
       }
       // int64_t and double
       KJ_CASE_ONEOF_DEFAULT {
-        messageSize += sizeof(int64_t);
+        spanTagsSize += sizeof(int64_t);
       }
     }
   }
@@ -236,16 +169,16 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
   auto spanComponentContext = tracing::InvocationSpanContext(
       topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
 
-  tailStreamWriter->report(
-      spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)), span.startTime);
+  tailStreamWriter->report(spanOpenContext,
+      tracing::SpanOpen(span.spanId, span.operationName.clone()), span.startTime, spanNameSize);
   // If a span manages to exceed the size limit, truncate it by not providing span attributes.
-  if (span.tags.size() && messageSize <= MAX_TRACE_BYTES) {
+  if (span.tags.size() && spanTagsSize <= MAX_TRACE_BYTES) {
     tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
-      return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+      return tracing::Attribute(tag.key.clone(), kj::mv(tag.value));
     };
-    tailStreamWriter->report(spanComponentContext, kj::mv(attr), span.startTime);
+    tailStreamWriter->report(spanComponentContext, kj::mv(attr), span.startTime, spanTagsSize);
   }
-  tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime);
+  tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime, 0);
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
@@ -269,14 +202,17 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     auto maybeTruncatedMessage =
         message.first(kj::min(message.size(), MAX_TRACE_BYTES - maybeTruncatedName.size()));
     kj::Maybe<kj::String> maybeTruncatedStack;
+    auto maybeTruncatedStackSize = 0;
     KJ_IF_SOME(s, stack) {
-      maybeTruncatedStack = kj::heapString(s.first(kj::min(
-          s.size(), MAX_TRACE_BYTES - maybeTruncatedName.size() - maybeTruncatedMessage.size())));
+      maybeTruncatedStackSize = kj::min(
+          s.size(), MAX_TRACE_BYTES - maybeTruncatedName.size() - maybeTruncatedMessage.size());
+      maybeTruncatedStack = kj::heapString(s.first(maybeTruncatedStackSize));
     }
     writer->report(context,
         {tracing::Exception(timestamp, kj::str(maybeTruncatedName), kj::str(maybeTruncatedMessage),
             kj::mv(maybeTruncatedStack))},
-        timestamp);
+        timestamp,
+        maybeTruncatedName.size() + maybeTruncatedMessage.size() + maybeTruncatedStackSize);
   }
 
   if (trace->exceededExceptionLimit) {
@@ -310,7 +246,7 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
       writer->report(context,
           {tracing::DiagnosticChannelEvent(
               timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))},
-          timestamp);
+          timestamp, messageSize);
     }
   }
 
@@ -394,10 +330,11 @@ void WorkerTracer::setEventInfoInternal(
     auto onsetContext = tracing::InvocationSpanContext(
         context.getTraceId(), context.getInvocationId(), tracing::SpanId::nullId);
 
+    // Not applying size accounting for Onset since it is sent separately
     writer->report(onsetContext,
         tracing::Onset(context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo),
             attributes.releaseAsArray()),
-        timestamp);
+        timestamp, 0);
   }
 
   // truncation should only be needed for fetch events, since we only set eventSize there.
@@ -417,10 +354,6 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->outcome = outcome;
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
-
-  // Free the userRequestSpan – no more traces should come after this point (and thus the observer
-  // and the reference to WorkerTracer it holds, unless there are more open spans)
-  userRequestSpan = nullptr;
 
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
   // reported when the metrics request is deallocated, but with ctx.waitUntil() there might be spans
@@ -458,7 +391,7 @@ kj::Date BaseTracer::getTime() {
   return timestamp;
 }
 
-void BaseTracer::adjustSpanTime(CompleteSpan& span) {
+void BaseTracer::adjustSpanTime(tracing::CompleteSpan& span) {
   // To report I/O time, we need the IOContext to still be alive.
   // weakIoContext is only none if we are tracing via RPC (in this case span times have already been
   // adjusted) or if we failed to transmit an Onset event (in that case we'll get an error based on
@@ -483,8 +416,8 @@ void BaseTracer::adjustSpanTime(CompleteSpan& span) {
           KJ_FAIL_ASSERT(
               "reported span without current request", span.operationName, hasCompleteTime);
         } else {
-          KJ_LOG(WARNING, "reported span without current request", span.operationName,
-              hasCompleteTime);
+          LOG_WARNING_PERIODICALLY(
+              "reported span without current request", span.operationName, hasCompleteTime);
         }
       }
     });
@@ -512,9 +445,8 @@ void BaseTracer::adjustSpanTime(CompleteSpan& span) {
 
 void WorkerTracer::setReturn(
     kj::Maybe<kj::Date> timestamp, kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo) {
-  // Match the behavior of setEventInfo(). Any resolution of the TODO comments
-  // in setEventInfo() that are related to this check while probably also affect
-  // this function.
+  // Match the behavior of setEventInfo(). Any resolution of the TODO comments in setEventInfo()
+  // that are related to this check will probably also affect this function.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -525,10 +457,10 @@ void WorkerTracer::setReturn(
     // Fall back to weak IoContext if no timestamp is available
     writer->report(spanContext,
         tracing::Return({fetchResponseInfo.map([](auto& info) { return info.clone(); })}),
-        timestamp.orDefault([&]() { return getTime(); }));
+        timestamp.orDefault([&]() { return getTime(); }), 0);
   }
 
-  // Add fetch response info for legacy tail worker
+  // Add fetch response info for buffered tail worker
   KJ_IF_SOME(info, fetchResponseInfo) {
     KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
     KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
@@ -536,24 +468,32 @@ void WorkerTracer::setReturn(
   }
 }
 
-void BaseTracer::setUserRequestSpan(SpanParent&& span) {
-  KJ_ASSERT(span.isObserved(), "span argument must be observed");
-  KJ_ASSERT(!userRequestSpan.isObserved(), "setUserRequestSpan can only be called once");
-  userRequestSpan = kj::mv(span);
+void BaseTracer::setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func) {
+  KJ_ASSERT(
+      makeUserRequestSpanFunc == kj::none, "setMakeUserRequestSpanFunc can only be called once");
+  makeUserRequestSpanFunc = kj::mv(func);
 }
 
 void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value) {
   attributes.add(tracing::Attribute{kj::mv(key), kj::mv(value)});
 }
 
-SpanParent BaseTracer::getUserRequestSpan() {
-  return userRequestSpan.addRef();
+SpanParent BaseTracer::makeUserRequestSpan() {
+  KJ_IF_SOME(func, makeUserRequestSpanFunc) {
+    return func();
+  } else {
+    return SpanParent(nullptr);
+  }
 }
 
 void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     const kj::ConstString& methodName) {
-  // Update the method name in the already-set JsRpcEventInfo for LTW compatibility
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  // Update the method name in the already-set JsRpcEventInfo for buffered tail worker compatibility
   KJ_IF_SOME(info, trace->eventInfo) {
     KJ_SWITCH_ONEOF(info) {
       KJ_CASE_ONEOF(jsRpcInfo, tracing::JsRpcEventInfo) {
@@ -564,10 +504,22 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
   }
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto attr = kj::heapArrayBuilder<tracing::Attribute>(1);
-    attr.add(tracing::Attribute("jsrpc.method"_kjc, kj::str(methodName)));
-    writer->report(context, attr.finish(), timestamp);
+    auto tag = tracing::Attribute("jsrpc.method"_kjc, methodName.clone());
+    writer->report(context, kj::arr(kj::mv(tag)), timestamp, methodName.size());
   }
+}
+
+kj::Own<SpanObserver> UserSpanObserver::newChild() {
+  return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId);
+}
+
+void UserSpanObserver::report(const Span& span) {
+  submitter->submitSpan(spanId, parentSpanId, span);
+}
+
+// Provide I/O time to the tracing system for user spans.
+kj::Date UserSpanObserver::getTime() {
+  return IoContext::current().now();
 }
 
 }  // namespace workerd

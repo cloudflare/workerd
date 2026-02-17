@@ -8,8 +8,7 @@ const unitTests :Workerd.Config = (
           (name = "worker.py", pythonModule = embed "worker.py"),
           (name = "fastapi", pythonRequirement = "fastapi")
         ],
-        compatibilityDate = "2025-08-14",
-        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "disable_python_dedicated_snapshot"],
       )
     ),
   ],

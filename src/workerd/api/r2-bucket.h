@@ -260,17 +260,17 @@ class R2Bucket: public jsg::Object {
           storageClass(kj::mv(storageClass)),
           ssecKeyMd5(kj::mv(ssecKeyMd5)) {}
 
-    kj::String getName() const {
-      return kj::str(name);
+    kj::StringPtr getName() const {
+      return name;
     }
-    kj::String getVersion() const {
-      return kj::str(version);
+    kj::StringPtr getVersion() const {
+      return version;
     }
     double getSize() const {
       return size;
     }
-    kj::String getEtag() const {
-      return kj::str(etag);
+    kj::StringPtr getEtag() const {
+      return etag;
     }
     kj::String getHttpEtag() const {
       return kj::str('"', etag, '"');

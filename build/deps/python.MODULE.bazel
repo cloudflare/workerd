@@ -1,5 +1,3 @@
-bazel_dep(name = "rules_python", version = "1.6.1")
-
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(python_version = "3.13")
 use_repo(python, "python_3_13")
@@ -18,3 +16,6 @@ pip.parse(
     requirements_lock = "//build/deps:requirements.txt",
 )
 use_repo(pip, "py_deps", "v8_python_deps")
+
+pyodide = use_extension("//build/deps:dep_pyodide.bzl", "pyodide")
+use_repo(pyodide, "all_pyodide_wheels_20240829.4", "all_pyodide_wheels_20250808", "beautifulsoup4_src_0.26.0a2", "beautifulsoup4_src_0.28.2", "beautifulsoup4_src_development", "fastapi_src_0.26.0a2", "fastapi_src_0.28.2", "fastapi_src_development", "pyodide-0.26.0a2", "pyodide-0.28.2", "pyodide-lock_20240829.4.json", "pyodide-lock_20250808.json", "pyodide-snapshot-baseline-4569679fb.bin", "pyodide-snapshot-baseline-61eedf943.bin", "pyodide-snapshot-ew-py-package-snapshot_fastapi-v2.bin", "pyodide-snapshot-ew-py-package-snapshot_numpy-v2.bin", "pyodide-snapshot-package_snapshot_fastapi-a6ccb56fe.bin", "pyodide-snapshot-package_snapshot_numpy-60c9cb28e.bin", "pyodide-snapshot-snapshot_a6b652a95810783f5078b9a5dbd4a07c30718acb4ff724e82c25db7353dd7f2d.bin", "pyodide_0.26.0a2_2024-03-01_77.capnp.bin", "pyodide_0.28.2_2025-01-16_8.capnp.bin", "pyodide_dev.capnp.bin", "pytest-asyncio_src_0.26.0a2", "pytest-asyncio_src_0.28.2", "pytest-asyncio_src_development", "python-workers-runtime-sdk_src_0.26.0a2", "python-workers-runtime-sdk_src_0.28.2", "python-workers-runtime-sdk_src_development", "scipy_src_0.26.0a2", "shapely_src_0.28.2", "shapely_src_development")

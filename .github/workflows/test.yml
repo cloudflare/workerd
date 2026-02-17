@@ -33,10 +33,10 @@ jobs:
       matrix:
         os:
           [
-            { name: linux, arch: X64, image: ubuntu-22.04 },
-            { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm },
-            { name: macOS, arch: ARM64, image: macos-15 },
-            { name: windows, arch: X64, image: windows-2025 },
+            { name: linux, arch: X64, image: ubuntu-22.04-16core },
+            { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm-16core },
+            { name: macOS, arch: ARM64, image: macos-15-xlarge, use_lld: true },
+            { name: windows, arch: X64, image: windows-2025-16core },
           ]
         config: [
             # Default build: no suffix or additional bazel arguments
@@ -46,7 +46,7 @@ jobs:
           ]
         include:
           # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
-          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04-16core }
             config: { suffix: -asan }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
           # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
@@ -55,17 +55,17 @@ jobs:
           # - os:     { name : windows, image : windows-2025 }
           #   config: { suffix: -debug, bazel-args: --config=windows_dbg }
         exclude:
-          - os: { name: windows, arch: X64, image: windows-2025 }
+          - os: { name: windows, arch: X64, image: windows-2025-16core }
             config: { suffix: -debug }
           # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
           # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the
           # debug configuration.
-          - os: { name: macOS, arch: ARM64 ,image: macos-15 }
+          - os: { name: macOS, arch: ARM64, image: macos-15-xlarge }
             config: { suffix: -debug }
-          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04-16core }
             config: { suffix: -debug }
             # linux release is handled by separate test-linux job
-          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04-16core }
             config: { suffix: '' }
       fail-fast: false
     name: test (${{ matrix.os.name }}, ${{ matrix.os.image}}${{matrix.config.suffix != '' && format(', {0}', matrix.config.suffix) || ''}})
@@ -76,6 +76,7 @@ jobs:
       arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
       extra_bazel_args: '--config=ci-test --config=ci-${{matrix.os.name}}${{matrix.config.suffix}}'
+      macos_use_lld: ${{ matrix.os.use_lld || false }}
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
@@ -84,21 +85,45 @@ jobs:
   test-linux:
     uses: ./.github/workflows/_bazel.yml
     with:
-      image: ubuntu-22.04
+      image: ubuntu-22.04-16core
       os_name: linux
       arch_name: 'X64'
       suffix: ''
       extra_bazel_args: '--config=ci-test --config=ci-linux'
       upload_test_logs: true
       upload_binary: true
+      build_container_images: true
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
 
+  coverage-linux:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04-16core
+      os_name: linux
+      arch_name: 'X64'
+      suffix: 'coverage'
+      # Don't use ci-test here because it enables --remote_download_minimal which prevents
+      # coverage data from being fetched from cache. The coverage config already sets
+      # --test_env=CI=true and --config=wpt-test which are the relevant parts of ci-test.
+      # Use ci-linux-common instead of ci-linux to avoid overriding coverage test_tag_filters
+      # (ci-linux sets test_tag_filters that would include container tests which require docker)
+      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage --test_env=CI=true --config=wpt-test'
+      upload_test_logs: true
+      upload_binary: false
+      build_container_images: false
+      run_coverage: true
+      run_tests: false
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:
-      extra_bazel_args: '--config=lint --config=ci-test --config=ci-linux'
+      extra_bazel_args: '--config=lint --config=clang-tidy --config=ci-test --config=ci-linux-common'
       run_tests: false
       parse_headers: true
     secrets:
@@ -106,7 +131,7 @@ jobs:
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
 
   check-snapshot:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     steps:
       - uses: actions/checkout@v4
         with:
@@ -118,7 +143,7 @@ jobs:
         # sizes small and generate types with optimization enabled, should be slightly faster.
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
       - name: build types
@@ -168,7 +193,7 @@ jobs:
   workers-sdk-test:
     needs: [test-linux, check-snapshot]
     name: Run workers-sdk tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout workers-sdk
         uses: actions/checkout@v4
@@ -181,7 +206,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           # Match workers-sdk node version
-          node-version: 20.19.1
+          node-version: 20.19.6
           cache: 'pnpm'
       - name: Install workers-sdk dependencies
         run: pnpm install
@@ -211,8 +236,26 @@ jobs:
           EOF
           pnpm add /tmp/test-types -w
 
-      - name: Run Wrangler, Miniflare, Vitest, Vite unit tests
-        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
+      - name: Run Wrangler unit tests
+        # Run all the wrangler unit tests besides the ConfigController ones since those
+        # are currently very flaky (the ANT team will look into stabilizing them and
+        # re-enabling them here as soon as possible, ref: https://jira.cfdata.org/browse/DEVX-2309)
+        run: pnpm test:ci --filter wrangler -- -t '^((?!(ConfigController)).)*$'
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Miniflare unit tests
+        run: pnpm test:ci --filter miniflare
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Vite unit tests
+        run: pnpm test:ci --filter @cloudflare/vite-plugin
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Vitest unit tests
+        run: pnpm test:ci --filter="./fixtures/vitest-pool-workers-examples"
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
 
@@ -225,6 +268,6 @@ jobs:
     needs: [test-linux]
     uses: ./.github/workflows/_wpt.yml
     with:
-      image: 'ubuntu-22.04'
+      image: 'ubuntu-22.04-16core'
       logs_artifact: 'test-logs-linux-X64.zip'
       report_artifact: 'wpt-report-linux-X64.json'

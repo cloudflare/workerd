@@ -17,7 +17,6 @@ extern "C" {
 #include <kj/vector.h>
 
 #include <algorithm>
-#include <map>
 #include <regex>
 #include <string>
 #include <vector>
@@ -73,8 +72,8 @@ kj::Array<const char> normalizePathEncoding(kj::ArrayPtr<const char> pathname) {
   std::vector<std::string> parts;
 
   while (true) {
-    if (input.size() == 0) {
-      parts.push_back("");
+    if (input.empty()) {
+      parts.emplace_back("");
       break;
     }
     KJ_IF_SOME(pos, findNext(input)) {
@@ -314,13 +313,13 @@ void Url::setHash(kj::Maybe<kj::ArrayPtr<const char>> value) {
 }
 
 Url::SchemeType Url::getSchemeType() const {
-  uint8_t value = ada_get_scheme_type(const_cast<void*>(getInner<ada_url>(inner)));
+  uint8_t value = ada_get_scheme_type(getInner<ada_url>(inner));
   KJ_REQUIRE(value <= static_cast<uint8_t>(SchemeType::FILE));
   return static_cast<SchemeType>(value);
 }
 
 Url::HostType Url::getHostType() const {
-  uint8_t value = ada_get_host_type(const_cast<void*>(getInner<ada_url>(inner)));
+  uint8_t value = ada_get_host_type(getInner<ada_url>(inner));
   KJ_REQUIRE(value <= static_cast<uint8_t>(HostType::IPV6));
   return static_cast<HostType>(value);
 }
@@ -846,7 +845,7 @@ struct Token {
 
   Type type = Type::INVALID_CHAR;
   size_t index = 0;
-  kj::OneOf<char, kj::ArrayPtr<const char>> value = (char)0;
+  kj::OneOf<char, kj::ArrayPtr<const char>> value = static_cast<char>(0);
   Part::Modifier modifier = Part::Modifier::NONE;
 
   operator kj::String() const {

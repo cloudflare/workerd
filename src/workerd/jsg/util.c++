@@ -7,8 +7,11 @@
 #include "ser.h"
 #include "setup.h"
 
-#include <openssl/rand.h>
+#include <workerd/jsg/exception-metadata.capnp.h>
+#include <workerd/util/entropy.h>
 
+#include <capnp/message.h>
+#include <capnp/serialize.h>
 #include <kj/debug.h>
 
 #include <cstdlib>
@@ -28,6 +31,11 @@ bool getCaptureThrowsAsRejections(v8::Isolate* isolate) {
 bool getShouldSetToStringTag(v8::Isolate* isolate) {
   auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
   return jsgIsolate.shouldSetToStringTag();
+}
+
+bool getShouldSetImmutablePrototype(v8::Isolate* isolate) {
+  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+  return jsgIsolate.shouldSetImmutablePrototype();
 }
 
 #if _WIN32
@@ -110,7 +118,7 @@ InternalErrorId makeInternalErrorId() {
       id[i] = i;
     }
   } else {
-    KJ_ASSERT(RAND_bytes(id.asPtr().asBytes().begin(), id.size()) == 1);
+    getEntropy(kj::asBytes(id));
   }
   for (auto i: kj::indices(id)) {
     id[i] = BASE32_DIGITS[static_cast<unsigned char>(id[i]) % 32];
@@ -206,13 +214,12 @@ DecodedException decodeTunneledException(
   result.isDoNotLogException = tunneledInfo.isDoNotLogException;
 
   auto errorType = tunneledInfo.message;
-  auto appMessage = [&](kj::StringPtr errorString) -> kj::ConstString {
+  auto appMessage = [&](kj::StringPtr errorString) -> kj::String {
     if (tunneledInfo.isInternal) {
       result.internalErrorId = makeInternalErrorId();
-      return kj::ConstString(renderInternalError(KJ_ASSERT_NONNULL(result.internalErrorId)));
+      return renderInternalError(KJ_ASSERT_NONNULL(result.internalErrorId));
     } else {
-      // .attach() to convert StringPtr to ConstString:
-      return trimErrorMessage(errorString).attach();
+      return kj::str(trimErrorMessage(errorString));
     }
   };
   result.isInternal = tunneledInfo.isInternal;
@@ -254,7 +261,7 @@ DecodedException decodeTunneledException(
         auto& js = Lock::from(isolate);
         auto errorName = kj::str(errorType.first(closeParen));
         auto message = appMessage(errorType.slice(1 + closeParen));
-        auto exception = js.domException(kj::mv(errorName), kj::str(message));
+        auto exception = js.domException(kj::mv(errorName), kj::mv(message));
         result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
         addAdditionalInfo();
         return result;
@@ -455,6 +462,48 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
   }
 }
 
+void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
+  // Extract JavaScript error type and stack trace
+  if (!handle->IsObject()) {
+    return;  // Not an error object, nothing to extract
+  }
+
+  auto errorObj = jsg::JsObject(handle.As<v8::Object>());
+
+  // Build Cap'n Proto message
+  capnp::MallocMessageBuilder message;
+  auto metadata = message.initRoot<JsExceptionMetadata>();
+
+  // Limit for user-controlled fields (4KB)
+  constexpr size_t MAX_FIELD_SIZE = 4096;
+
+  // Extract error name (e.g., "Error", "TypeError", "RangeError")
+  auto nameProp = errorObj.get(js, "name"_kj);
+  if (nameProp.isString()) {
+    auto errorType = nameProp.toString(js);
+    // Truncate to 4KB if needed
+    if (errorType.size() > MAX_FIELD_SIZE) {
+      errorType = kj::str(errorType.slice(0, MAX_FIELD_SIZE));
+    }
+    metadata.setErrorType(errorType);
+  }
+
+  // Extract stack trace string
+  auto stackProp = errorObj.get(js, "stack"_kj);
+  if (stackProp.isString()) {
+    auto stackTrace = stackProp.toString(js);
+    // Truncate to 4KB if needed
+    if (stackTrace.size() > MAX_FIELD_SIZE) {
+      stackTrace = kj::str(stackTrace.slice(0, MAX_FIELD_SIZE));
+    }
+    metadata.setStackTrace(stackTrace);
+  }
+
+  // Serialize to bytes using Cap'n Proto
+  auto words = capnp::messageToFlatArray(message);
+  exception.setDetail(JS_EXCEPTION_METADATA_DETAIL_ID, kj::heapArray(words.asBytes()));
+}
+
 static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType) {
   kj::String type;
 
@@ -625,6 +674,19 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   }
 }
 
+// TODO(soon): If the returned kj::Array<kj::byte> is used outside of the isolate lock,
+// we'll need to ensure it works correctly once MPK (Memory Protection Keys) enforcement
+// is fully in place.
+kj::Array<kj::byte> asBytes(v8::Local<v8::SharedArrayBuffer> sharedArrayBuffer) {
+  auto backing = sharedArrayBuffer->GetBackingStore();
+  kj::ArrayPtr bytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
+  if (bytes == nullptr) {
+    return getEmptyArray();
+  } else {
+    return bytes.attach(kj::mv(backing));
+  }
+}
+
 void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value) {
   if (value->IsArray()) {
     // Optimize array freezing (Array is a subclass of Object, but we can iterate it faster).
@@ -685,15 +747,13 @@ void returnRejectedPromiseImpl(auto info, v8::Local<v8::Value> exception, v8::Tr
 void returnRejectedPromise(const v8::FunctionCallbackInfo<v8::Value>& info,
     v8::Local<v8::Value> exception,
     v8::TryCatch& tryCatch) {
-  return returnRejectedPromiseImpl<const v8::FunctionCallbackInfo<v8::Value>&>(
-      info, exception, tryCatch);
+  returnRejectedPromiseImpl<const v8::FunctionCallbackInfo<v8::Value>&>(info, exception, tryCatch);
 }
 
 void returnRejectedPromise(const v8::PropertyCallbackInfo<v8::Value>& info,
     v8::Local<v8::Value> exception,
     v8::TryCatch& tryCatch) {
-  return returnRejectedPromiseImpl<const v8::PropertyCallbackInfo<v8::Value>&>(
-      info, exception, tryCatch);
+  returnRejectedPromiseImpl<const v8::PropertyCallbackInfo<v8::Value>&>(info, exception, tryCatch);
 }
 
 // ======================================================================================
@@ -789,6 +849,21 @@ v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint
 }
 
 // ======================================================================================
+// Module utilities
+
+JsObject createMutableModuleExports(Lock& js, JsObject moduleNamespace) {
+  auto result = js.objNoProto();
+  auto names = moduleNamespace.getPropertyNames(js, OWN_ONLY, ALL_PROPERTIES, INCLUDE_INDICES);
+
+  for (uint32_t i = 0; i < names.size(); i++) {
+    auto name = names.get(js, i);
+    result.set(js, name, moduleNamespace.get(js, name));
+  }
+
+  return result;
+}
+
+// ======================================================================================
 // Node.js Compat
 
 namespace {
@@ -833,6 +908,10 @@ bool isNodeJsCompatEnabled(jsg::Lock& js) {
 
 bool isNodeJsProcessV2Enabled(jsg::Lock& js) {
   return IsolateBase::from(js.v8Isolate).isNodeJsProcessV2Enabled();
+}
+
+bool isRequireReturnsDefaultExportEnabled(jsg::Lock& js) {
+  return IsolateBase::from(js.v8Isolate).isRequireReturnsDefaultExportEnabled();
 }
 
 }  // namespace workerd::jsg

@@ -1,0 +1,134 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    # Embedded tests we get traces from
+    ( name = "http-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "http-test.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-test" ),
+          ( name = "CACHE_ENABLED", json = "false" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_disabled", "queues_json_messages", "url_standard", "workers_api_getters_setters_on_prototype", "fetch_legacy_url"],
+        streamingTails = ["log", "log-invalid"],
+      ),
+    ),
+    ( name = "queue-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "queue-test.js" )
+        ],
+        bindings = [
+          ( name = "QUEUE", queue = "queue-test" ),
+          ( name = "SERVICE", service = "queue-test" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "queues_json_messages", "rpc", "capture_async_api_throws", "disable_fast_jsg_struct"],
+        streamingTails = ["log"],
+      )
+    ),
+    (name = "alarms", worker = .alarmsWorker),
+    (name = "hiber", worker = .hiberWorker),
+    (name = "js-rpc-test", worker = .jsRpcWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+    # Dummy buffered tail worker (gets traces from alarms worker and produces trace for main tracer)
+    (name = "buffered", worker = .logBuffered, ),
+    # Receives trace events from STW, used to check that STW produces trace events properly
+    (name = "receiver", worker = .logReceiver, ),
+    # Unified tail worker with tests
+    # tests are executed in order, so logWorker needs to be last to have all traces available
+    (name = "log", worker = .logWorker, ),
+    # tail worker that fails to return a valid handler, used to confirm that this is handled
+    # gracefully, i.e. only results in a user-level error.
+    ( name = "log-invalid",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tail-worker-test-invalid.js")
+        ],
+      ),
+    )
+  ],
+);
+
+const alarmsWorker :Workerd.Worker = (
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "actor-alarms-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+  ],
+  # tailed by the main tail worker and the dummy buffered tail worker, to get traces for it too.
+  tails = ["buffered"],
+  streamingTails = ["log"],
+);
+
+const hiberWorker :Workerd.Worker = (
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "websocket-hibernation.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+  ],
+  streamingTails = ["log"],
+);
+
+const jsRpcWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test-jsrpc.js")
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental"],
+
+  bindings = [
+    (name = "MyService", service = (name = "js-rpc-test", entrypoint = "MyService")),
+    (name = "MyActor", durableObjectNamespace = "MyActor"),
+  ],
+  durableObjectNamespaces = [
+    (className = "MyActor", uniqueKey = "foo"),
+  ],
+  durableObjectStorage = (inMemory = void),
+
+  streamingTails = ["log"],
+);
+
+const logWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+  streamingTails = ["receiver"],
+);
+
+const logReceiver :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test-receiver.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);
+
+const logBuffered :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test-dummy.js")
+  ],
+  compatibilityFlags = ["streaming_tail_worker"],
+  streamingTails = ["log"],
+);

@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "importable-exports-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "importable-exports-test.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "env_module_nullable_support", "rpc"],
+        durableObjectNamespaces = [
+          (className = "MyService", uniqueKey = "myservice"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [],
+      )
+    ),
+  ]
+);

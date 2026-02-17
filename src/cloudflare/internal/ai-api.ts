@@ -6,11 +6,16 @@ import { AiGateway, type GatewayOptions } from 'cloudflare-internal:aig-api';
 import { AutoRAG } from 'cloudflare-internal:autorag-api';
 import {
   ToMarkdownService,
+  type ConversionRequestOptions,
   type ConversionResponse,
+  type MarkdownDocument,
 } from 'cloudflare-internal:to-markdown-api';
+
+type AiSearchService = object;
 
 interface Fetcher {
   fetch: typeof fetch;
+  aiSearch: () => AiSearchService;
 }
 
 interface AiError {
@@ -40,7 +45,7 @@ export type AiOptions = {
 };
 
 export type AiInputReadableStream = {
-  body: ReadableStream;
+  body: ReadableStream | FormData;
   contentType: string;
 };
 
@@ -85,14 +90,12 @@ export class AiInternalError extends Error {
   }
 }
 
-// TODO: merge this function with the one with images-api.ts
 function isReadableStream(obj: unknown): obj is ReadableStream {
-  return !!(
-    obj &&
-    typeof obj === 'object' &&
-    'getReader' in obj &&
-    typeof obj.getReader === 'function'
-  );
+  return obj instanceof ReadableStream;
+}
+
+function isFormData(obj: unknown): obj is FormData {
+  return obj instanceof FormData;
 }
 
 /**
@@ -109,9 +112,9 @@ function findReadableStreamKeys(
       value &&
       typeof value === 'object' &&
       'body' in value &&
-      isReadableStream(value.body);
+      (isReadableStream(value.body) || isFormData(value.body));
 
-    if (hasReadableStreamBody || isReadableStream(value)) {
+    if (hasReadableStreamBody || isReadableStream(value) || isFormData(value)) {
       readableStreamKeys.push(key);
     }
   }
@@ -392,19 +395,16 @@ export class Ai {
 
   toMarkdown(): ToMarkdownService;
   async toMarkdown(
-    files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse[]>;
   async toMarkdown(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse>;
   toMarkdown(
-    files?: { name: string; blob: Blob } | { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files?: MarkdownDocument | MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): ToMarkdownService | Promise<ConversionResponse | ConversionResponse[]> {
     const service = new ToMarkdownService(this.#fetcher);
 
@@ -424,6 +424,10 @@ export class Ai {
 
   autorag(autoragId?: string): AutoRAG {
     return new AutoRAG(this.#fetcher, autoragId);
+  }
+
+  aiSearch(): AiSearchService {
+    return this.#fetcher.aiSearch();
   }
 }
 

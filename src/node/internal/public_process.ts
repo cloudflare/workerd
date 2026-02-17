@@ -61,13 +61,12 @@ function chunkToBuffer(
 // For stdout, we emulate `nohup node foo.js`
 class SyncWriteStream extends Writable {
   fd: number;
-  readable: boolean;
+  override readable: boolean = false;
   _type = 'fs';
   _isStdio = true;
   constructor(fd: number) {
     super({ autoDestroy: true });
     this.fd = fd;
-    this.readable = false;
   }
   override _write(
     chunk: string | Buffer | ArrayBufferView | DataView,
@@ -340,13 +339,21 @@ export const report = {
   directory: '',
   filename: '',
   getReport: (): Record<string, unknown> => {
-    throw new ERR_METHOD_NOT_IMPLEMENTED('process.report.getReport');
+    // We do not intend to implement process.report in workerd, but there
+    // are some modules in the ecosystem that call it expecting it to exist and
+    // not throw. Returning an empty object for now to satisfy that use case.
+    return {};
   },
   reportOnFatalError: false,
   reportOnSignal: false,
   reportOnUncaughtException: false,
+  excludeNetwork: false,
+  excludeEnv: false,
   signal: 'SIGUSR2',
   writeReport: (): string => {
+    // In this case, there's an expectation that the function will produce
+    // a report on disk and return the filename. Since we do not intend
+    // to implement this API in workerd, we throw to indicate that.
     throw new ERR_METHOD_NOT_IMPLEMENTED('process.report.writeReport');
   },
 };

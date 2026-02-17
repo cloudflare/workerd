@@ -15,6 +15,11 @@ prepare:
   cargo install gen-compile-commands watchexec-cli
   just create-external
   just compile-commands
+  just prepare-rust
+
+prepare-rust:
+  rustup install 1.91.0
+  rustup component add rust-analyzer --toolchain 1.91.0
 
 prepare-ubuntu:
   sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
@@ -47,11 +52,11 @@ test-asan *args="//...":
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test *args:
-  bazel test {{args}} --test_output=streamed --nocache_test_results --config=debug --test_tag_filters= --test_size_filters=
+  bazel test {{args}} --test_output=streamed --nocache_test_results --test_tag_filters= --test_size_filters=
 
 # e.g. just node-test zlib
 node-test test_name *args:
-  just stream-test //src/workerd/api/node/tests:{{test_name}}-nodejs-test {{args}}
+  just stream-test //src/workerd/api/node/tests:{{test_name}}-nodejs-test@ {{args}}
 
 # e.g. just wpt-test urlpattern
 wpt-test test_name:
@@ -72,7 +77,12 @@ new-wpt-test test_name:
   echo 'wpt_test(name = "{{test_name}}", config = "{{test_name}}-test.ts", wpt_directory = "@wpt//:{{test_name}}@module")' >> src/wpt/BUILD.bazel
 
   ./tools/cross/format.py
-  bazel test //src/wpt:{{test_name}} --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
+  bazel test //src/wpt:{{test_name}}@ --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
+
+# Specify the full Bazel target name for the test to be created.
+# e.g. just new-test //src/workerd/api/tests:v8-temporal-test
+new-test test_name:
+  ./tools/unix/new-test.sh {{test_name}}
 
 format: rustfmt
   python3 tools/cross/format.py
@@ -99,6 +109,10 @@ bench path:
 clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
 
+# example: just clang-tidy //src/rust/jsg:ffi
+clang-tidy target="//...":
+  bazel build {{target}} --config=clang-tidy
+
 generate-types:
   bazel build //types
   cp -r bazel-bin/types/definitions/latest types/generated-snapshot/
@@ -108,28 +122,31 @@ update-reported-node-version:
   python3 tools/update_node_version.py src/workerd/api/node/node-version.h
 
 # called by rust-analyzer discoverConfig (quiet recipe with no output)
+# rust-analyzer doesn't like stderr output, redirect it to /dev/null
 @_rust-analyzer:
   rm -rf ./rust-project.json
-  # rust-analyzer doesn't like stderr output, redirect it to /dev/null
   bazel run @rules_rust//tools/rust_analyzer:discover_bazel_rust_project 2>/dev/null
 
 create-external:
   tools/unix/create-external.sh
 
 bench-all:
-  bazel query 'deps(//src/workerd/tests:all_benchmarks, 1)' --output=label | grep -v 'all_benchmarks' | xargs -I {} bazel run --config=benchmark {}
+  bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label | xargs -I {} bazel run --config=benchmark {}
+
+lint: eslint
 
 eslint:
   just stream-test \
     //src/cloudflare:cloudflare@eslint \
     //src/node:node@eslint \
     //src/pyodide:pyodide_static@eslint \
-    //src/wpt:wpt-all@eslint \
+    //src/wpt:wpt-all@tsproject@eslint \
     //types:types_lib@eslint
 
+# Generate code coverage report (Linux only)
 coverage path="//...":
-  bazel coverage {{path}}
-  genhtml --branch-coverage --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
+  bazel coverage --config=coverage {{path}}
+  genhtml --branch-coverage --ignore-errors category --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
   open coverage/index.html
 
 profile path:

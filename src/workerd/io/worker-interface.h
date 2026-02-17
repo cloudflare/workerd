@@ -132,10 +132,7 @@ class WorkerInterface: public kj::HttpService {
     virtual uint16_t getType() = 0;
 
     // Get event info for tracing.
-    // Return none if this event type doesn't need tracing.
-    virtual kj::Maybe<tracing::EventInfo> getEventInfo() const {
-      return kj::none;
-    }
+    virtual tracing::EventInfo getEventInfo() const = 0;
 
     // If the CustomEvent fails before any of the other methods are called, this may be invoked
     // to report the failure reason.
@@ -186,13 +183,11 @@ class LazyWorkerInterface final: public WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
-    throwIfInvalidHeaderValue(headers);
     ensureResolve();
     KJ_IF_SOME(w, worker) {
       co_await w->request(method, url, headers, requestBody, response);
     } else {
       co_await KJ_ASSERT_NONNULL(promise);
-      throwIfInvalidHeaderValue(headers);
       co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
     }
   }

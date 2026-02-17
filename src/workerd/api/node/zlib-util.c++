@@ -39,11 +39,11 @@ class GrowableBuffer final {
   // A copy of kj::Vector with some additional methods for use as a growable buffer with a maximum
   // size
  public:
-  inline explicit GrowableBuffer(size_t _chunkSize, size_t _maxCapacity) {
-    auto maxChunkSize = kj::min(_chunkSize, _maxCapacity);
+  inline explicit GrowableBuffer(size_t _chunkSize, size_t _maxCapacity)
+      : maxCapacity(_maxCapacity) {
+    auto maxChunkSize = kj::min(_chunkSize, maxCapacity);
     builder = kj::heapArrayBuilder<kj::byte>(maxChunkSize);
     chunkSize = maxChunkSize;
-    maxCapacity = _maxCapacity;
   }
 
   size_t size() const {
@@ -826,7 +826,9 @@ kj::Array<kj::byte> ZlibUtil::zlibSync(
   JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, RangeError,
       kj::str("The value of \"options.chunkSize\" is out of range. It must be >= ", Z_MIN_CHUNK,
           " and <= ", Z_MAX_CHUNK, ". Received ", chunkSize));
-  JSG_REQUIRE(maxOutputLength <= Z_MAX_CHUNK, RangeError, "Invalid maxOutputLength"_kj);
+  JSG_REQUIRE(maxOutputLength >= 1 && maxOutputLength <= Z_MAX_CHUNK, RangeError,
+      kj::str("The value of \"options.maxOutputLength\" is out of range. It must be >= 1 and <= ",
+          Z_MAX_CHUNK, ". Received ", maxOutputLength));
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
   ctx.initialize(opts.level.orDefault(Z_DEFAULT_LEVEL),
@@ -879,7 +881,9 @@ kj::Array<kj::byte> ZlibUtil::brotliSync(
   JSG_REQUIRE(Z_MIN_CHUNK <= chunkSize && chunkSize <= Z_MAX_CHUNK, RangeError,
       kj::str("The value of \"options.chunkSize\" is out of range. It must be >= ", Z_MIN_CHUNK,
           " and <= ", Z_MAX_CHUNK, ". Received ", chunkSize));
-  JSG_REQUIRE(maxOutputLength <= Z_MAX_CHUNK, Error, "Invalid maxOutputLength"_kj);
+  JSG_REQUIRE(maxOutputLength >= 1 && maxOutputLength <= Z_MAX_CHUNK, RangeError,
+      kj::str("The value of \"options.maxOutputLength\" is out of range. It must be >= 1 and <= ",
+          Z_MAX_CHUNK, ". Received ", maxOutputLength));
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
   KJ_IF_SOME(err,

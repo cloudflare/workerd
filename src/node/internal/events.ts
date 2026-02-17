@@ -146,7 +146,10 @@ export class EventEmitterAsyncResource
   }
 }
 
-export function addAbortListener(signal: AbortSignal, listener: any) {
+export function addAbortListener(
+  signal: AbortSignal | undefined,
+  listener: any
+) {
   if (signal === undefined) {
     throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
   }

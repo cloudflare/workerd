@@ -289,6 +289,16 @@ class ReverseIoOwn {
   ReverseIoOwn& operator=(ReverseIoOwn&& other);
   ReverseIoOwn& operator=(decltype(nullptr));
 
+  // Try to get the underlying object if safe to dereference.
+  // Returns kj::none if the IoContext has been destroyed or if this is null.
+  // This is a safe alternative to operator->() that won't throw or crash.
+  kj::Maybe<T&> tryGet() {
+    if (item != nullptr && weakRef->isValid()) {
+      return *item->ptr.get();
+    }
+    return kj::none;
+  }
+
  private:
   friend class IoContext;
   friend class DeleteQueue;

@@ -24,9 +24,9 @@ permissions:
 jobs:
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     env:
-      BAZEL_ARGS: --config=benchmark --@workerd-google-benchmark//:codspeed_mode=instrumentation --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
+      BAZEL_ARGS: --config=benchmark --@google_benchmark//:codspeed_mode=simulation --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,29 +37,30 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache-benchmarks-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: bazel-disk-cache-benchmarks-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
 
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
 
       - name: Build benchmarks
         run: |
-          bazel build ${{ env.BAZEL_ARGS }} //src/workerd/tests:all_benchmarks
+          bazel build ${{ env.BAZEL_ARGS }} --build_tag_filters=google_benchmark //... @capnp-cpp//...
 
       - name: Generate benchmark script
         run: |
           echo '#!/bin/bash' > run_benchmarks.sh
-          echo 'set -e' >> run_benchmarks.sh
-          targets=$(bazel query 'deps(//src/workerd/tests:all_benchmarks, 1)' --output=label 2>/dev/null | grep -E '^//src/workerd/tests:bench-' | grep -v '@')
+          echo 'set -ex' >> run_benchmarks.sh
+          targets=$(bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...) except attr(tags, "[\[ ]manual[,\]]", //...)' --output=label 2>/dev/null)
           for target in $targets; do
             echo "echo 'Running benchmark: $target'" >> run_benchmarks.sh
-            echo "bazel run ${{ env.BAZEL_ARGS }} $target" >> run_benchmarks.sh
+            echo "bazel run ${{ env.BAZEL_ARGS }} $target -- --benchmark_min_time=1s" >> run_benchmarks.sh
           done
           chmod +x run_benchmarks.sh
 
       - name: Run benchmarks
-        uses: CodSpeedHQ/action@v3
+        uses: CodSpeedHQ/action@v4
         with:
+          mode: simulation
           run: ./run_benchmarks.sh
 
       - name: Bazel shutdown

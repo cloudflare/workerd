@@ -21,8 +21,8 @@ bool verifySpkac(kj::ArrayPtr<const kj::byte> input) {
   // Alternatively we could choose to implement our own version of the validation that
   // bypasses BoringSSL's FIPS configuration. For now tho, this does end up matching
   // Node.js' behavior when FIPS is enabled so I guess that's something.
-  if (IoContext::hasCurrent()) {
-    IoContext::current().logWarningOnce(
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    ioContext.logWarningOnce(
         "The verifySpkac function is currently of limited value in workers because "
         "the SPKAC signature verification uses MD5, which is not supported in FIPS mode. "
         "All workers run in FIPS mode. Accordingly, this method will currently always "

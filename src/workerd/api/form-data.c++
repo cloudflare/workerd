@@ -8,6 +8,7 @@
 
 #include <workerd/io/io-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/own-util.h>
 
 #include <kj/compat/http.h>
 #include <kj/parse/char.h>
@@ -133,8 +134,7 @@ void addEscapingQuotes(kj::Vector<char>& builder, kj::StringPtr value) {
 }
 
 void assertUtf8(const auto& params) {
-  KJ_IF_SOME(charsetParam, params.find("charset"_kj)) {
-    auto charset = kj::str(charsetParam);
+  KJ_IF_SOME(charset, params.find("charset"_kj)) {
     JSG_REQUIRE(strcasecmp(charset.cStr(), "utf-8") == 0 ||
             strcasecmp(charset.cStr(), "utf8") == 0 ||
             strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
@@ -241,7 +241,7 @@ void FormData::parseFormDataImpl(
 
     if (message.size() > 0) {
       // If we skipped a CR, we must avoid including it in the message data.
-      message = message.first(message.size() - uint(message.back() == '\r'));
+      message = message.first(message.size() - static_cast<uint>(message.back() == '\r'));
     }
 
     callback(name, filename.map([](auto& str) { return str.asPtr(); }), type, message.asBytes());
@@ -267,7 +267,7 @@ kj::Array<FormData::EntryWithoutLock> FormData::parseWithoutLock(
           data.add(FormData::EntryWithoutLock{
             .name = kj::str(name),
             .filename = kj::str(filename),
-            .type = maybeType.map([](kj::StringPtr str) { return kj::str(str); }),
+            .type = mapCopyString(maybeType),
             .value = kj::heapArray<kj::byte>(message),
           });
         } else {
@@ -512,6 +512,9 @@ void FormData::forEach(jsg::Lock& js,
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items
   // are added to the search params unconditionally on each iteration.
+  // Silence clang-tidy warning, using an iterator would not work correctly if callback
+  // increases the array size.
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < this->data.size(); i++) {
     auto& [key, value] = this->data[i];
     callback(js, clone(js, value), key, JSG_THIS);

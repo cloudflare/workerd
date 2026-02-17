@@ -177,7 +177,7 @@ class EventSourceSink final: public WritableStreamSink {
   }
 
   void release() {
-    if (pendingMessages.size() == 0) return;
+    if (pendingMessages.empty()) return;
     auto pending = pendingMessages.releaseAsArray();
     // If the event source is gone, just drop the messages on the floor.
     KJ_IF_SOME(es, eventSource) {
@@ -307,7 +307,7 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
     for (auto& message: messages) {
       auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
       if (data.size() == 0) continue;
-      kj::String type = kj::mv(message.event).orDefault(kj::str("message"));
+      kj::String type = kj::mv(message.event).orDefault([]() { return kj::str("message"); });
       dispatchEventImpl(js,
           js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
               kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
@@ -362,10 +362,8 @@ void EventSource::start(jsg::Lock& js) {
             js, self, kj::str("The response status code was ", response->getStatus(), "."));
         }
 
-        // TODO(cleanup): Using jsg::ByteString here is really annoying. It would be nice to have
-        // an internal alternative that doesn't require an allocation.
         KJ_IF_SOME(contentType,
-            response->getHeaders(js)->get(js, jsg::ByteString(kj::str("content-type")))) {
+            response->getHeaders(js)->getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
         bool invalid = false;
         KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
         invalid = parsed != MimeType::EVENT_STREAM;
@@ -421,12 +419,10 @@ void EventSource::start(jsg::Lock& js) {
       });
 
   auto headers = js.alloc<Headers>();
-  headers->set(
-      js, jsg::ByteString(kj::str("accept")), jsg::ByteString(MimeType::EVENT_STREAM.essence()));
-  headers->set(js, jsg::ByteString(kj::str("cache-control")), jsg::ByteString(kj::str("no-cache")));
+  headers->setCommon(capnp::CommonHeaderName::ACCEPT, MimeType::EVENT_STREAM.essence());
+  headers->setCommon(capnp::CommonHeaderName::CACHE_CONTROL, kj::str("no-cache"));
   if (lastEventId != ""_kjc) {
-    headers->set(
-        js, jsg::ByteString(kj::str("last-event-id")), jsg::ByteString(kj::str(lastEventId)));
+    headers->setUnguarded(js, kj::str("last-event-id"), kj::str(lastEventId));
   }
 
   fetchImpl(js, kj::mv(fetcher), kj::str(i.url),

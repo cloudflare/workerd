@@ -24,6 +24,7 @@ from .allow_entropy import (
 )
 from .import_patch_manager import (
     block_calls,
+    register_after_snapshot,
     register_before_first_request,
     register_create_patch,
     register_exec_patch,
@@ -56,6 +57,9 @@ def rust_package_context(module):
         yield
 
 
+RANDOM_STATE = None
+
+
 @register_exec_patch("random")
 @contextmanager
 def random_exec(random):
@@ -68,7 +72,19 @@ def random_exec(random):
     # instantiating it without a seed will call getentropy() and fail.
     # Instantiating SystemRandom is fine, calling its methods will call
     # getentropy() and fail.
+    global RANDOM_STATE
+    RANDOM_STATE = random.getstate()
     block_calls(random, allowlist=("Random", "SystemRandom"))
+
+
+@register_after_snapshot("random")
+def random_after_snapshot(random):
+    # Check that random seed hasn't been advanced somehow while executing top level scope
+    r1 = random.random()
+    random.setstate(RANDOM_STATE)
+    r2 = random.random()
+    if r1 != r2:
+        raise RuntimeError("random seed in bad state")
 
 
 @register_before_first_request("random")
@@ -104,6 +120,9 @@ def _random_before_first_request(_random):
     _random.Random.seed = orig_Random_seed
 
 
+NUMPY_RANDOM_STATE = None
+
+
 @register_exec_patch("numpy.random")
 @contextmanager
 def numpy_random_context(numpy_random):
@@ -119,6 +138,15 @@ def numpy_random_context(numpy_random):
     block_calls(numpy_random, allowlist=("default_rng", "RandomState"))
 
 
+@register_after_snapshot("numpy.random")
+def numpy_random_after_snapshot(numpy_random):
+    r1 = numpy_random.random()
+    numpy_random.set_state(NUMPY_RANDOM_STATE)
+    r2 = numpy_random.random()
+    if r1 != r2:
+        raise RuntimeError("random seed in bad state")
+
+
 @register_before_first_request("numpy.random")
 def numpy_random_before_first_request(numpy_random):
     numpy_random.seed()
@@ -132,6 +160,8 @@ def numpy_random_mtrand_context(module):
     with allow_bad_entropy_calls(1):
         yield
     # Block calls until we get a chance to replace the bad random seed.
+    global NUMPY_RANDOM_STATE
+    NUMPY_RANDOM_STATE = module.get_state()
     block_calls(module, allowlist=("RandomState",))
 
 

@@ -25,11 +25,13 @@ SqlStorage::~SqlStorage() {}
 
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
-  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_exec"_kjc);
-  userSpan.setTag("db.system.name"_kjc, kj::str("cloudflare-durable-object-sql"_kjc));
-  userSpan.setTag("db.operation.name"_kjc, kj::str("exec"_kjc));
-  userSpan.setTag("db.query.text"_kjc, kj::str(querySql));
-  userSpan.setTag("cloudflare.durable_object.query.bindings"_kjc, int64_t(bindings.size()));
+  auto& context = IoContext::current();
+  TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_exec"_kjc);
+  traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
+  traceContext.setTag("db.operation.name"_kjc, "exec"_kjc);
+  traceContext.setTag("db.query.text"_kjc, kj::str(querySql));
+  traceContext.setTag(
+      "cloudflare.durable_object.query.bindings"_kjc, static_cast<int64_t>(bindings.size()));
 
   // Internalize the string, so that the cache can be keyed by string identity rather than content.
   // Any string we put into the cache is expected to live there for a while anyway, so even if it
@@ -51,6 +53,19 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
   }
   statementCache.lru.add(*slot.get());
 
+  // In order to get accurate statistics, we have to keep the spans around until the query is
+  // actually done, which for read queries that iterate over a cursor won't be until later.
+  kj::Maybe<kj::Function<void(Cursor&)>> doneCallback;
+  if (traceContext.isObserved()) {
+    doneCallback = [traceContext = context.addObject(kj::heap(kj::mv(traceContext)))](
+                       Cursor& cursor) mutable {
+      int64_t rowsRead = cursor.getRowsRead();
+      int64_t rowsWritten = cursor.getRowsWritten();
+      traceContext->setTag("cloudflare.durable_object.response.rows_read"_kjc, rowsRead);
+      traceContext->setTag("cloudflare.durable_object.response.rows_written"_kjc, rowsWritten);
+    };
+  }
+
   if (slot->isShared()) {
     // Oops, this CachedStatement is currently in-use (presumably by a Cursor).
     //
@@ -60,10 +75,11 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     // In theory we could try to cache multiple copies of the statement, but as this is probably
     // exceedingly rare, it is not worth the added code complexity.
     SqliteDatabase::Regulator& regulator = *this;
-    return js.alloc<Cursor>(js, db, regulator, js.toString(querySql), kj::mv(bindings));
+    return js.alloc<Cursor>(
+        js, kj::mv(doneCallback), db, regulator, js.toString(querySql), kj::mv(bindings));
   }
 
-  auto result = js.alloc<Cursor>(js, slot.addRef(), kj::mv(bindings));
+  auto result = js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings));
 
   // If the statement cache grew too big, drop the least-recently-used entry.
   while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
@@ -74,22 +90,22 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     KJ_ASSERT(statementCache.map.eraseMatch(oldQuery));
   }
 
-  userSpan.setTag(
-      "cloudflare.durable_object.response.rows_read"_kjc, int64_t(result->getRowsRead()));
-  userSpan.setTag(
-      "cloudflare.durable_object.response.rows_written"_kjc, int64_t(result->getRowsWritten()));
   return result;
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
-  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_ingest"_kjc);
+  auto& context = IoContext::current();
+  TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_ingest"_kjc);
   SqliteDatabase::Regulator& regulator = *this;
   auto result = getDb(js).ingestSql(regulator, querySql);
-  userSpan.setTag("cloudflare.durable_object.response.rows_read"_kjc, int64_t(result.rowsRead));
-  userSpan.setTag(
-      "cloudflare.durable_object.response.rows_written"_kjc, int64_t(result.rowsWritten));
-  userSpan.setTag(
-      "cloudflare.durable_object.response.statement_count"_kjc, int64_t(result.statementCount));
+
+  traceContext.setTag(
+      "cloudflare.durable_object.response.rows_read"_kjc, static_cast<int64_t>(result.rowsRead));
+  traceContext.setTag("cloudflare.durable_object.response.rows_written"_kjc,
+      static_cast<int64_t>(result.rowsWritten));
+  traceContext.setTag("cloudflare.durable_object.response.statement_count"_kjc,
+      static_cast<int64_t>(result.statementCount));
+
   return IngestResult(
       kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }
@@ -104,15 +120,17 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString
 }
 
 double SqlStorage::getDatabaseSize(jsg::Lock& js) {
-  auto userSpan =
-      IoContext::current().makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);
-  userSpan.setTag("db.operation.name"_kjc, kj::str("getDatabaseSize"_kjc));
+  auto& context = IoContext::current();
+  TraceContext traceContext =
+      context.makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);
+  traceContext.setTag("db.operation.name"_kjc, "getDatabaseSize"_kjc);
   auto& db = getDb(js);
   int64_t pages = execMemoized(db, pragmaPageCount,
       "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
                       .getInt64(0);
   auto dbSize = pages * getPageSize(db);
-  userSpan.setTag("cloudflare.durable_object.response.db_size"_kjc, int64_t(dbSize));
+  traceContext.setTag(
+      "cloudflare.durable_object.response.db_size"_kjc, static_cast<int64_t>(dbSize));
   return dbSize;
 }
 
@@ -373,6 +391,11 @@ void SqlStorage::Cursor::endQuery(State& stateRef) {
   // Save off row counts before the query goes away.
   rowsRead = stateRef.query.getRowsRead();
   rowsWritten = stateRef.query.getRowsWritten();
+
+  KJ_IF_SOME(cb, doneCallback) {
+    cb(*this);
+    doneCallback = kj::none;
+  }
 
   // Clean up the query proactively.
   state = kj::none;

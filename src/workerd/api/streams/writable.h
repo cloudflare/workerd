@@ -23,7 +23,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
   jsg::MemoizedIdentity<jsg::Promise<void>>& getReady();
-  kj::Maybe<int> getDesiredSize(jsg::Lock& js);
+  kj::Maybe<int> getDesiredSize();
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
@@ -39,7 +39,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   //   complete on this side if we don't care that they're actually read?
   jsg::Promise<void> close(jsg::Lock& js);
 
-  jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> chunk);
+  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk);
   void releaseLock(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(WritableStreamDefaultWriter, CompatibilityFlags::Reader flags) {
