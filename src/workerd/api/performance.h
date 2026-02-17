@@ -450,8 +450,9 @@ class Performance: public EventTarget {
   // - measure(measureName, measureOptions, endMark)
   jsg::Ref<PerformanceMeasure> measure(jsg::Lock& js,
       kj::String measureName,
-      kj::OneOf<PerformanceMeasure::Options, kj::String> measureOptionsOrStartMark,
-      jsg::Optional<kj::String> maybeEndMark);
+      jsg::Optional<kj::OneOf<PerformanceMeasure::Options, kj::String>> measureOptionsOrStartMark =
+          kj::none,
+      jsg::Optional<kj::String> maybeEndMark = kj::none);
 
   void setResourceTimingBufferSize(uint32_t size);
   void eventLoopUtilization();
