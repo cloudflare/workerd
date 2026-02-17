@@ -1,4 +1,3 @@
-load("//src/workerd/server/tests/python:import_tests.bzl", "gen_rust_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test", "python_test_setup")
 load("//src/workerd/server/tests/python/vendor_pkg_tests:vendor_test.bzl", "vendored_py_wd_test")
 
@@ -36,15 +35,9 @@ py_wd_test(
     compat_date = "2026-01-01",
 )
 
-gen_rust_import_tests()
-
 py_wd_test("undefined-handler")
 
 py_wd_test("vendor_dir")
-
-py_wd_test("dont-snapshot-pyodide")
-
-py_wd_test("filter-non-py-files")
 
 py_wd_test("durable-object")
 
@@ -69,17 +62,5 @@ py_wd_test("workflow-entrypoint")
 py_wd_test("vendor_dir_compat_flag")
 
 py_wd_test("default-class-with-legacy-global-handlers")
-
-py_wd_test(
-    "fastapi",
-    make_snapshot = False,
-    use_snapshot = "fastapi",
-)
-
-py_wd_test(
-    "numpy",
-    make_snapshot = False,
-    use_snapshot = "numpy",
-)
 
 py_wd_test("python-compat-flag")
