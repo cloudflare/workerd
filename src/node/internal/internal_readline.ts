@@ -101,6 +101,7 @@ export class Interface extends EventEmitter implements Readline.Interface {
 
   // Yield a single empty string so that `for await...of` loops complete
   // immediately without blocking, consistent with no-op stub behavior.
+  // eslint-disable-next-line @typescript-eslint/require-await
   async *[Symbol.asyncIterator](): NodeJS.AsyncIterator<string> {
     yield '';
   }
