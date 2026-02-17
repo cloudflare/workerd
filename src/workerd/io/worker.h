@@ -43,7 +43,6 @@ class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
-class Socket;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class ExecutionContext;
