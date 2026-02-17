@@ -56,8 +56,10 @@ class TimerChannel {
   // Call each time control enters the isolate to set up the clock.
   virtual void syncTime() = 0;
 
-  // Return the current time.
-  virtual kj::Date now() = 0;
+  // Return the current time. `nextTimeout` is the time at which the next setTimeout() callback
+  // is scheduled; implementations performing Spectre mitigations should clamp to this value so
+  // that Date.now() never goes backwards or reveals timing side channels.
+  virtual kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none) = 0;
 
   // Returns a promise that resolves once `now() >= when`.
   virtual kj::Promise<void> atTime(kj::Date when) = 0;

@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "worker_threads-nodejs-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_worker_threads_module", "experimental", "global_navigator", "expose_global_message_channel"]
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_worker_threads_module", "experimental", "global_navigator"]
       )
     ),
   ],

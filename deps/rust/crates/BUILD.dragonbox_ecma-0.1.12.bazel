@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "anyhow",
+    name = "dragonbox_ecma",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -31,23 +31,23 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "std",
+        "ecma",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=anyhow",
+        "crate-name=dragonbox_ecma",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.100",
+    version = "0.1.12",
     deps = [
-        "@crates_vendor__anyhow-1.0.100//:build_script_build",
+        "@crates_vendor__dragonbox_ecma-0.1.12//:build_script_build",
     ],
 )
 
@@ -72,7 +72,7 @@ cargo_build_script(
     ),
     crate_features = [
         "default",
-        "std",
+        "ecma",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -88,19 +88,19 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2018",
-    pkg_name = "anyhow",
+    edition = "2021",
+    pkg_name = "dragonbox_ecma",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=anyhow",
+        "crate-name=dragonbox_ecma",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.100",
+    version = "0.1.12",
     visibility = ["//visibility:private"],
 )
 

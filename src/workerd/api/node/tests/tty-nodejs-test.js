@@ -1,5 +1,5 @@
 import * as tty from 'node:tty';
-import { strictEqual, deepStrictEqual, throws, ok } from 'node:assert';
+import { strictEqual, deepStrictEqual, ok } from 'node:assert';
 
 export const ttyTest = {
   test() {
@@ -18,64 +18,32 @@ export const ttyTest = {
     strictEqual(tty.isatty(-1), false); // invalid fd
     strictEqual(tty.isatty(999), false); // high fd number
 
-    // Test ReadStream constructor - should throw ERR_METHOD_NOT_IMPLEMENTED
-    throws(
-      () => {
-        new tty.ReadStream(0);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // Test ReadStream constructor - should succeed and store fd
+    const readStream = new tty.ReadStream(0);
+    strictEqual(readStream.fd, 0);
+    strictEqual(readStream.isRaw, false);
+    strictEqual(readStream.isTTY, false);
 
-    throws(
-      () => {
-        new tty.ReadStream(0, {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const readStream2 = new tty.ReadStream(1, {});
+    strictEqual(readStream2.fd, 1);
 
-    throws(
-      () => {
-        new tty.ReadStream(1, { readable: true });
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const readStream3 = new tty.ReadStream(2, { readable: true });
+    strictEqual(readStream3.fd, 2);
 
-    // Test WriteStream constructor - should throw ERR_METHOD_NOT_IMPLEMENTED
-    throws(
-      () => {
-        new tty.WriteStream(1);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // Test WriteStream constructor - should succeed and store fd
+    const writeStream = new tty.WriteStream(1);
+    strictEqual(writeStream.fd, 1);
+    strictEqual(writeStream.columns, 0);
+    strictEqual(writeStream.rows, 0);
+    strictEqual(writeStream.isTTY, true);
 
-    throws(
-      () => {
-        new tty.WriteStream(2, {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const writeStream2 = new tty.WriteStream(2, {});
+    strictEqual(writeStream2.fd, 2);
 
-    throws(
-      () => {
-        new tty.WriteStream(1, { writable: true });
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const writeStream3 = new tty.WriteStream(1, { writable: true });
+    strictEqual(writeStream3.fd, 1);
 
     // Test ReadStream prototype methods and properties
-    // Note: We can't instantiate ReadStream, but we can test the prototype
     strictEqual(typeof tty.ReadStream.prototype.setRawMode, 'function');
 
     // Test WriteStream prototype properties and methods
@@ -89,114 +57,84 @@ export const ttyTest = {
     strictEqual(typeof tty.WriteStream.prototype.clearScreenDown, 'function');
     strictEqual(typeof tty.WriteStream.prototype.getWindowSize, 'function');
 
-    // Test WriteStream prototype methods behavior
-    // We can call methods directly on the prototype to test their behavior
-    const mockThis = {};
-
+    // Test WriteStream instance methods behavior
     // Test getColorDepth - should return 8
-    const colorDepth = tty.WriteStream.prototype.getColorDepth.call(mockThis);
+    const colorDepth = writeStream.getColorDepth();
     strictEqual(colorDepth, 8);
 
     // Test hasColors - should return false
-    const hasColors = tty.WriteStream.prototype.hasColors.call(mockThis);
+    const hasColors = writeStream.hasColors();
     strictEqual(hasColors, false);
 
     // Test _refreshSize - should be a no-op (not throw)
-    tty.WriteStream.prototype._refreshSize.call(mockThis);
+    writeStream._refreshSize();
 
-    // Test getWindowSize - should return [0, 0]
-    const windowSize = tty.WriteStream.prototype.getWindowSize.call(mockThis);
+    // Test getWindowSize - should return [columns, rows]
+    const windowSize = writeStream.getWindowSize();
     deepStrictEqual(windowSize, [0, 0]);
 
-    // Test cursorTo - should throw ERR_METHOD_NOT_IMPLEMENTED
-    throws(
-      () => {
-        tty.WriteStream.prototype.cursorTo.call(mockThis, 10, 5);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    throws(
-      () => {
-        tty.WriteStream.prototype.cursorTo.call(mockThis, 0, 0, () => {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    // Test moveCursor - should throw ERR_METHOD_NOT_IMPLEMENTED
-    throws(
-      () => {
-        tty.WriteStream.prototype.moveCursor.call(mockThis, 1, 1);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    throws(
-      () => {
-        tty.WriteStream.prototype.moveCursor.call(mockThis, -1, 0, () => {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    // Test clearLine - should throw ERR_METHOD_NOT_IMPLEMENTED
-    throws(
-      () => {
-        tty.WriteStream.prototype.clearLine.call(mockThis, 0);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    throws(
-      () => {
-        tty.WriteStream.prototype.clearLine.call(mockThis, 1, () => {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    // Test clearScreenDown - should throw ERR_METHOD_NOT_IMPLEMENTED
-    throws(
-      () => {
-        tty.WriteStream.prototype.clearScreenDown.call(mockThis);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    throws(
-      () => {
-        tty.WriteStream.prototype.clearScreenDown.call(mockThis, () => {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    // Test ReadStream setRawMode - should return this and not throw
-    const mockReadStream = {};
-    const setRawModeResult = tty.ReadStream.prototype.setRawMode.call(
-      mockReadStream,
-      true
-    );
-    strictEqual(setRawModeResult, mockReadStream);
-
-    const setRawModeFalseResult = tty.ReadStream.prototype.setRawMode.call(
-      mockReadStream,
+    // Test cursorTo - should be a no-op and return false
+    strictEqual(writeStream.cursorTo(10, 5), false);
+    let callbackCalled = false;
+    strictEqual(
+      writeStream.cursorTo(0, 0, () => {
+        callbackCalled = true;
+      }),
       false
     );
-    strictEqual(setRawModeFalseResult, mockReadStream);
+    strictEqual(callbackCalled, true);
+
+    // Test cursorTo with callback as second argument
+    callbackCalled = false;
+    strictEqual(
+      writeStream.cursorTo(0, () => {
+        callbackCalled = true;
+      }),
+      false
+    );
+    strictEqual(callbackCalled, true);
+
+    // Test moveCursor - should be a no-op and return false
+    strictEqual(writeStream.moveCursor(1, 1), false);
+    callbackCalled = false;
+    strictEqual(
+      writeStream.moveCursor(-1, 0, () => {
+        callbackCalled = true;
+      }),
+      false
+    );
+    strictEqual(callbackCalled, true);
+
+    // Test clearLine - should be a no-op and return false
+    strictEqual(writeStream.clearLine(0), false);
+    callbackCalled = false;
+    strictEqual(
+      writeStream.clearLine(1, () => {
+        callbackCalled = true;
+      }),
+      false
+    );
+    strictEqual(callbackCalled, true);
+
+    // Test clearScreenDown - should be a no-op and return false
+    strictEqual(writeStream.clearScreenDown(), false);
+    callbackCalled = false;
+    strictEqual(
+      writeStream.clearScreenDown(() => {
+        callbackCalled = true;
+      }),
+      false
+    );
+    strictEqual(callbackCalled, true);
+
+    // Test ReadStream setRawMode - should set isRaw and return this
+    const setRawModeResult = readStream.setRawMode(true);
+    strictEqual(setRawModeResult, readStream);
+    strictEqual(readStream.isRaw, true);
+
+    const setRawModeFalseResult = readStream.setRawMode(false);
+    strictEqual(setRawModeFalseResult, readStream);
+    strictEqual(readStream.isRaw, false);
 
     // Test edge cases for isatty
     strictEqual(tty.isatty(Number.MAX_SAFE_INTEGER), false);
@@ -216,49 +154,20 @@ export const ttyTest = {
     strictEqual(tty.default.ReadStream, tty.ReadStream);
     strictEqual(tty.default.WriteStream, tty.WriteStream);
 
-    // Test that prototype methods can handle different argument types
-    // (Even though they might throw, they should handle the arguments properly)
-
     // Test hasColors with different arguments (should always return false)
-    strictEqual(tty.WriteStream.prototype.hasColors.call(mockThis), false);
-    strictEqual(tty.WriteStream.prototype.hasColors.call(mockThis, 8), false);
-    strictEqual(tty.WriteStream.prototype.hasColors.call(mockThis, 256), false);
+    strictEqual(writeStream.hasColors(), false);
+    strictEqual(writeStream.hasColors(8), false);
+    strictEqual(writeStream.hasColors(256), false);
 
     // Test getColorDepth with different arguments (should always return 8)
-    strictEqual(tty.WriteStream.prototype.getColorDepth.call(mockThis), 8);
-    strictEqual(tty.WriteStream.prototype.getColorDepth.call(mockThis, {}), 8);
+    strictEqual(writeStream.getColorDepth(), 8);
+    strictEqual(writeStream.getColorDepth({}), 8);
 
     // Test setRawMode with different argument types
-    strictEqual(
-      tty.ReadStream.prototype.setRawMode.call(mockReadStream, true),
-      mockReadStream
-    );
-    strictEqual(
-      tty.ReadStream.prototype.setRawMode.call(mockReadStream, false),
-      mockReadStream
-    );
-    strictEqual(
-      tty.ReadStream.prototype.setRawMode.call(mockReadStream, 1),
-      mockReadStream
-    );
-    strictEqual(
-      tty.ReadStream.prototype.setRawMode.call(mockReadStream, 0),
-      mockReadStream
-    );
-    strictEqual(
-      tty.ReadStream.prototype.setRawMode.call(mockReadStream, 'true'),
-      mockReadStream
-    );
-
-    // Verify getWindowSize consistently returns [0, 0]
-    const windowSize2 = tty.WriteStream.prototype.getWindowSize.call({});
-    deepStrictEqual(windowSize2, [0, 0]);
-    const windowSize3 = tty.WriteStream.prototype.getWindowSize.call(null);
-    deepStrictEqual(windowSize3, [0, 0]);
-
-    // Test _refreshSize with different contexts (should be no-op)
-    tty.WriteStream.prototype._refreshSize.call({});
-    tty.WriteStream.prototype._refreshSize.call(null);
-    tty.WriteStream.prototype._refreshSize.call(undefined);
+    strictEqual(readStream.setRawMode(true), readStream);
+    strictEqual(readStream.setRawMode(false), readStream);
+    strictEqual(readStream.setRawMode(1), readStream);
+    strictEqual(readStream.setRawMode(0), readStream);
+    strictEqual(readStream.setRawMode('true'), readStream);
   },
 };

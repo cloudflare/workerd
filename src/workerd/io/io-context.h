@@ -166,7 +166,7 @@ class IoContext_IncomingRequest final {
   // Access the event loop's current time point. This will remain constant between ticks. This is
   // used to implement IoContext::now(), which should be preferred so that time can be adjusted
   // based on setTimeout() when needed.
-  kj::Date now();
+  kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none);
 
   RequestObserver& getMetrics() {
     return *metrics;
@@ -326,12 +326,17 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   bool isInspectorEnabled();
   bool isFiddle();
 
-  // Log a warning to the inspector. This is a no-op if the inspector is not enabled.
+  // Returns true if there is something listening for warnings — the Chrome DevTools inspector,
+  // a streaming tail worker tracer, or --verbose stderr logging. Use this to guard expensive
+  // warning-message construction that should be skipped when nobody would see the result.
+  bool hasWarningHandler();
+
+  // Log a warning. Emits to the Chrome DevTools inspector (if connected), stderr, and to the
+  // streaming tail worker tracer (if active).
   void logWarning(kj::StringPtr description);
 
-  // Log a warning to the inspector. This is a no-op if the inspector is not enabled. Deduplicates
-  // warning messages such that a single unique message will only be logged once for the lifetime of
-  // an isolate.
+  // Log a warning, deduplicating so that each unique message is only logged once for the lifetime
+  // of an isolate. Emits to the same destinations as logWarning().
   void logWarningOnce(kj::StringPtr description);
 
   // Log an internal error message. Deduplicates log messages such that a single unique message will

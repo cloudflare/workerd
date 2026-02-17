@@ -3381,12 +3381,12 @@ class Server::WorkerService final: public Service,
     // Nothing to do
   }
 
-  kj::Date now() override {
+  kj::Date now(kj::Maybe<kj::Date>) override {
     return kj::systemPreciseCalendarClock().now();
   }
 
   kj::Promise<void> atTime(kj::Date when) override {
-    auto delay = when - now();
+    auto delay = when - now(kj::none);
     // We can't use `afterDelay(delay)` here because kj::Timer::afterDelay() is equivalent to
     // `atTime(timer.now() + delay)`, and kj::Timer::now() only advances when the event loop
     // polls for I/O. If JavaScript executed for a significant amount of time since the last

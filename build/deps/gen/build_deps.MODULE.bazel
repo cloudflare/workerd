@@ -5,7 +5,7 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 # abseil-cpp
-bazel_dep(name = "abseil-cpp", version = "20260107.0")
+bazel_dep(name = "abseil-cpp", version = "20260107.1")
 
 # apple_support
 bazel_dep(name = "apple_support", version = "2.2.0")
@@ -17,13 +17,13 @@ bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")
 bazel_dep(name = "aspect_rules_js", version = "2.9.2")
 
 # aspect_rules_lint
-bazel_dep(name = "aspect_rules_lint", version = "1.13.0")
+bazel_dep(name = "aspect_rules_lint", version = "2.1.0")
 
 # aspect_rules_ts
-bazel_dep(name = "aspect_rules_ts", version = "3.8.3")
+bazel_dep(name = "aspect_rules_ts", version = "3.8.4")
 
 # bazel_lib
-bazel_dep(name = "bazel_lib", version = "3.1.1")
+bazel_dep(name = "bazel_lib", version = "3.2.0")
 
 # bazel_skylib
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
@@ -117,7 +117,7 @@ bazel_dep(name = "rules_nodejs", version = "6.7.3")
 bazel_dep(name = "rules_oci", version = "2.2.7")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "1.8.0")
+bazel_dep(name = "rules_python", version = "1.8.4")
 
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.6.1")

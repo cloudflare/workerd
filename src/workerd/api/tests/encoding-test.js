@@ -622,7 +622,7 @@ export const allTheDecoders = {
       ['unicodefeff', 'utf-16le'],
       ['utf-16', 'utf-16le'],
       ['utf-16le', 'utf-16le'],
-      ['x-user-defined', undefined],
+      ['x-user-defined', 'x-user-defined'],
       // Test that match is case-insensitive
       ['UTF-8', 'utf-8'],
       ['UtF-8', 'utf-8'],
@@ -728,6 +728,42 @@ export const windows1252Decode = {
   },
 };
 
+// Per the WHATWG encoding spec (section 10.1.1), GBK's decoder is gb18030's decoder.
+// The .encoding property must still return "gbk", but decoding results must match gb18030.
+// https://encoding.spec.whatwg.org/#gbk-decoder
+export const gbkDecoderIsGb18030Decoder = {
+  test() {
+    const gbk = new TextDecoder('gbk');
+    const gb18030 = new TextDecoder('gb18030');
+
+    // .encoding property must still distinguish the two
+    strictEqual(gbk.encoding, 'gbk');
+    strictEqual(gb18030.encoding, 'gb18030');
+
+    // Decoding results must be identical. These byte pairs exercise boundary
+    // conditions where gbk and gb18030 would diverge if the ICU converter
+    // for gbk were used directly instead of delegating to gb18030.
+    const testBytes = [
+      [0, 255],
+      [128, 255],
+      [129, 48],
+      [129, 255],
+      [254, 48],
+      [254, 255],
+      [255, 0],
+      [255, 255],
+    ];
+    for (const bytes of testBytes) {
+      const u8 = Uint8Array.from(bytes);
+      strictEqual(
+        gbk.decode(u8),
+        gb18030.decode(u8),
+        `gbk and gb18030 must decode [${bytes}] identically`
+      );
+    }
+  },
+};
+
 export const textDecoderStream = {
   test() {
     const stream = new TextDecoderStream('utf-16', {
@@ -740,5 +776,67 @@ export const textDecoderStream = {
 
     const enc = new TextEncoderStream();
     strictEqual(enc.encoding, 'utf-8');
+  },
+};
+
+// Test x-user-defined encoding per WHATWG spec
+// https://encoding.spec.whatwg.org/#x-user-defined-decoder
+export const xUserDefinedDecode = {
+  test() {
+    const decoder = new TextDecoder('x-user-defined');
+    strictEqual(decoder.encoding, 'x-user-defined');
+    strictEqual(decoder.fatal, false);
+    strictEqual(decoder.ignoreBOM, false);
+
+    // Test ASCII bytes (0x00-0x7F) - identity mapping
+    strictEqual(decoder.decode(Uint8Array.of(0x41)), 'A');
+    strictEqual(decoder.decode(Uint8Array.of(0x00)), '\u0000');
+    strictEqual(decoder.decode(Uint8Array.of(0x7f)), '\u007F');
+
+    // Test high bytes (0x80-0xFF) - map to Private Use Area U+F780-U+F7FF
+    strictEqual(decoder.decode(Uint8Array.of(0x80)), '\uF780');
+    strictEqual(decoder.decode(Uint8Array.of(0x81)), '\uF781');
+    strictEqual(decoder.decode(Uint8Array.of(0xff)), '\uF7FF');
+
+    // Test mixed sequence
+    const mixed = new Uint8Array([0x00, 0x7f, 0x80, 0x81, 0xff]);
+    strictEqual(decoder.decode(mixed), '\u0000\u007F\uF780\uF781\uF7FF');
+
+    // Test empty input
+    strictEqual(decoder.decode(new Uint8Array([])), '');
+    strictEqual(decoder.decode(), '');
+
+    // Test pure ASCII input (fast path)
+    strictEqual(
+      decoder.decode(new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f])),
+      'Hello'
+    );
+
+    // Test streaming (x-user-defined is single-byte, streaming is trivial)
+    const streamDecoder = new TextDecoder('x-user-defined');
+    let result = '';
+    result += streamDecoder.decode(Uint8Array.of(0x41), { stream: true });
+    result += streamDecoder.decode(Uint8Array.of(0x80), { stream: true });
+    result += streamDecoder.decode(Uint8Array.of(0xff), { stream: true });
+    result += streamDecoder.decode();
+    strictEqual(result, 'A\uF780\uF7FF');
+  },
+};
+
+// Test x-user-defined with fatal option (all 256 bytes are valid)
+export const xUserDefinedFatal = {
+  test() {
+    const decoder = new TextDecoder('x-user-defined', { fatal: true });
+    strictEqual(decoder.fatal, true);
+
+    // All 256 byte values are valid, fatal mode should never throw
+    for (let byte = 0; byte < 256; byte++) {
+      const decoded = decoder.decode(Uint8Array.of(byte));
+      if (byte < 0x80) {
+        strictEqual(decoded.codePointAt(0), byte);
+      } else {
+        strictEqual(decoded.codePointAt(0), 0xf700 + byte);
+      }
+    }
   },
 };

@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "trigger",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "warnings-test.js" )
+        ],
+        bindings = [
+          ( name = "SELF", service = "trigger" ),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+        streamingTails = ["tail"],
+      ),
+    ),
+    ( name = "tail",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "warnings-tail.js" )
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+      ),
+    ),
+  ],
+);

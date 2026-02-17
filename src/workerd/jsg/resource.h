@@ -639,7 +639,7 @@ struct GetterCallback;
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
-        auto obj = info.This();                                                                    \
+        auto obj = info.HolderV2();                                                                \
         auto& js = Lock::from(isolate);                                                            \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
@@ -686,7 +686,7 @@ struct GetterCallback;
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
         auto& js = Lock::from(isolate);                                                            \
-        auto obj = info.This();                                                                    \
+        auto obj = info.HolderV2();                                                                \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
         /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */   \
         if (!isContext &&                                                                          \
@@ -884,9 +884,7 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isConte
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
       auto& js = Lock::from(isolate);
-      // TODO(soon): resolve .This() -> .HolderV2() deprecation message.  When doing so, please
-      // also remove the "#pragma clang diagnostic ignored "-Wdeprecated-declarations"" above.
-      auto obj = info.This();
+      auto obj = info.HolderV2();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
       if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
@@ -912,7 +910,7 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), method, 
     liftKj(info, [&]() {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.This();
+      auto obj = info.HolderV2();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
       if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
@@ -1449,7 +1447,7 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() {
-    using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    using Gcb = PropertyGetterCallback<TypeWrapper, name, Getter, getter, isContext>;
 
     auto v8Name = v8StrIntern(isolate, name);
 
@@ -1457,7 +1455,8 @@ struct ResourceTypeBuilder {
     auto symbol = v8::Symbol::New(isolate, v8Name);
     inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
 
-    prototype->SetNativeDataProperty(symbol, &Gcb::callback, nullptr, v8::Local<v8::Value>(),
+    auto getterFn = v8::FunctionTemplate::New(isolate, &Gcb::callback);
+    prototype->SetAccessorProperty(symbol, getterFn, {},
         static_cast<v8::PropertyAttribute>(
             v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
   }

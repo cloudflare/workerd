@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "capnp_futures",
+    name = "memchr",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,11 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "alloc",
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,15 +40,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=capnp-futures",
+        "crate-name=memchr",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.25.0",
-    deps = [
-        "@crates_vendor__capnp-0.25.0//:capnp",
-        "@crates_vendor__futures-channel-0.3.31//:futures_channel",
-        "@crates_vendor__futures-util-0.3.31//:futures_util",
-    ],
+    version = "2.8.0",
 )

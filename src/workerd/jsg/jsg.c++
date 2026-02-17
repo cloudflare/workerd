@@ -583,4 +583,32 @@ MemoryProtectionKeyScope::PkeyScope::~PkeyScope() {
 }
 #endif
 
+namespace _ {
+
+JsgCatchScope::JsgCatchScope(Lock& js): js(js) {
+  tryCatchHolder.emplace(js.v8Isolate);
+}
+
+void JsgCatchScope::catchException(ExceptionToJsOptions options) {
+  // Be sure to release our TryCatch on the way out.
+  KJ_DEFER(tryCatchHolder = kj::none);
+
+  auto& tryCatch = KJ_ASSERT_NONNULL(tryCatchHolder).tryCatch;
+
+  // Same logic as that found in `jsg::Lock::tryCatch()`.
+  try {
+    throw;
+  } catch (JsExceptionThrown&) {
+    if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+      tryCatch.ReThrow();
+      throw;
+    }
+    caughtException.emplace(js.v8Isolate, tryCatch.Exception());
+  } catch (kj::Exception& e) {
+    caughtException.emplace(js.exceptionToJs(kj::mv(e), options));
+  }
+}
+
+}  // namespace _
+
 }  // namespace workerd::jsg

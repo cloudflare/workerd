@@ -2996,6 +2996,101 @@ inline Value SelfRef::asValue(Lock& js) const {
   return Value(js.v8Isolate, getHandle(js).As<v8::Value>());
 }
 
+namespace _ {
+
+// Helper class for JSG_TRY / JSG_CATCH macros.
+//
+// Sets up a v8::TryCatch on construction and converts caught exceptions to jsg::Value.
+// Handles both JsExceptionThrown (returns V8 exception directly) and kj::Exception
+// (converts via Lock::exceptionToJs()).
+//
+// This class is an implementation detail of the JSG_TRY / JSG_CATCH macros and should
+// not be used directly.
+class JsgCatchScope {
+ public:
+  explicit JsgCatchScope(Lock& js);
+
+  // Converts the in-flight exception to a jsg::Value and stores it.
+  // Called by JSG_CATCH macro.
+  void catchException(ExceptionToJsOptions options = {});
+
+  // Returns the caught exception. Must be called after catchException().
+  Value& getCaughtException() {
+    return KJ_ASSERT_NONNULL(caughtException);
+  }
+
+ private:
+  Lock& js;
+
+  // Simple wrapper to work around v8::TryCatch's deleted operator new.
+  struct Holder {
+    v8::TryCatch tryCatch;
+    explicit Holder(v8::Isolate* isolate): tryCatch(isolate) {}
+  };
+
+  // We use two separate Maybe members rather than kj::OneOf<Holder, Value> because v8::TryCatch
+  // has deleted copy/move constructors, making it incompatible with OneOf's internal storage.
+  // The tryCatchHolder is active during the try block and released by catchException(), which
+  // then populates caughtException.
+
+  // Active during the try block, consumed by catchException().
+  kj::Maybe<Holder> tryCatchHolder;
+
+  // Populated by catchException(), returned by getCaughtException().
+  kj::Maybe<Value> caughtException;
+};
+
+}  // namespace _
+
+// JSG_TRY / JSG_CATCH macros for exception handling in JSG code.
+//
+// These macros provide clean exception handling that automatically converts both JavaScript
+// exceptions (JsExceptionThrown) and KJ exceptions (kj::Exception) to jsg::Value. This is
+// the recommended way to handle exceptions in JSG code.
+//
+// Usage:
+//   JSG_TRY(js) {
+//     someCodeThatMightThrow();
+//   } JSG_CATCH(exception) {
+//     // `exception` is a jsg::Value& containing the caught exception
+//     return js.rejectedPromise<void>(kj::mv(exception));
+//   }
+//
+// With ExceptionToJsOptions:
+//   JSG_TRY(js) {
+//     someCodeThatMightThrow();
+//   } JSG_CATCH(exception, {.ignoreDetail = true}) {
+//     // Handle exception with custom conversion options
+//   }
+//
+// JSG_TRY(js): Sets up exception handling with the given jsg::Lock. The `js` parameter makes
+// the isolate explicit and enables future coroutine support.
+//
+// JSG_CATCH(name, ...): Catches any exception and converts it to a jsg::Value. The `name`
+// parameter is a user-chosen identifier that will be a `jsg::Value&` in the handler block.
+// Optional ExceptionToJsOptions can be passed as a second argument.
+//
+// IMPORTANT: The code block following JSG_CATCH is NOT a true catch handler:
+// - You CANNOT rethrow with `throw` (there is no current exception)
+//
+// To rethrow the exception, use: js.throwException(kj::mv(exception));
+
+// Since we have two macros -- JSG_TRY and JSG_CATCH -- which must both access the same state,
+// we use a hard-coded variable name. This causes benign shadowing in nested JSG_TRY/JSG_CATCHes,
+// so we disable shadowing warnings. The `_jsg` prefix makes name collision unlikely.
+#define JSG_TRY(js)                                                                                \
+  KJ_SILENCE_SHADOWING_BEGIN                                                                       \
+  if (::workerd::jsg::_::JsgCatchScope _jsgTryCatch(js); true) try KJ_SILENCE_SHADOWING_END
+
+#define JSG_CATCH(exception, ...)                                                                  \
+  catch (...) {                                                                                    \
+    _jsgTryCatch.catchException(__VA_ARGS__);                                                      \
+    goto KJ_UNIQUE_NAME(_jsgTryCatchHandler);                                                      \
+  }                                                                                                \
+  else KJ_UNIQUE_NAME(_jsgTryCatchHandler)                                                         \
+      : if (auto& exception = _jsgTryCatch.getCaughtException(); false) {}                         \
+  else
+
 }  // namespace workerd::jsg
 
 // clang-format off
