@@ -194,12 +194,11 @@ class WorkerTracer final: public BaseTracer {
 
 class SpanSubmitter: public kj::Refcounted {
  public:
-  virtual void submitSpan(tracing::SpanId context, tracing::SpanId spanId, const Span& span) = 0;
   virtual void submitSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) = 0;
-  virtual void submitSpanEnd(tracing::SpanId spanId, const Span& span) = 0;
+  virtual void submitSpan(tracing::SpanId context, tracing::SpanId spanId, const Span& span) = 0;
 
   virtual tracing::SpanId makeSpanId() = 0;
 };
