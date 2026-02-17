@@ -31,8 +31,8 @@ jsg::JsObject PerformanceMark::toJSON(jsg::Lock& js) {
   obj.set(js, "entryType"_kj, js.str(entryType));
   obj.set(js, "startTime"_kj, js.num(startTime));
   obj.set(js, "duration"_kj, js.num(duration));
-  KJ_IF_SOME(d, getDetail(js)) {
-    obj.set(js, "detail"_kj, d);
+  KJ_IF_SOME(d, detail) {
+    obj.set(js, "detail"_kj, d.getHandle(js));
   }
   return kj::mv(obj);
 }
@@ -43,8 +43,8 @@ jsg::JsObject PerformanceMeasure::toJSON(jsg::Lock& js) {
   obj.set(js, "entryType"_kj, js.str(entryType));
   obj.set(js, "startTime"_kj, js.num(startTime));
   obj.set(js, "duration"_kj, js.num(duration));
-  KJ_IF_SOME(d, getDetail(js)) {
-    obj.set(js, "detail"_kj, d);
+  KJ_IF_SOME(d, detail) {
+    obj.set(js, "detail"_kj, d.getHandle(js));
   }
   return kj::mv(obj);
 }
@@ -226,7 +226,7 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
     }
   }
 
-  uint32_t duration = endTime >= startTime ? endTime - startTime : 0;
+  double duration = endTime >= startTime ? endTime - startTime : 0;
   auto measure = js.alloc<PerformanceMeasure>(kj::mv(measureName), startTime, duration);
 
   // Per the spec, detail defaults to null. Only set it if explicitly provided in options.

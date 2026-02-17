@@ -40,7 +40,7 @@ namespace workerd::api {
 class PerformanceEntry: public jsg::Object {
  public:
   PerformanceEntry(
-      kj::String name, kj::LiteralStringConst entryType, double startTime, uint32_t duration)
+      kj::String name, kj::LiteralStringConst entryType, double startTime, double duration)
       : name(kj::mv(name)),
         entryType(kj::mv(entryType)),
         startTime(startTime),
@@ -55,7 +55,7 @@ class PerformanceEntry: public jsg::Object {
   double getStartTime() {
     return startTime;
   };
-  uint32_t getDuration() {
+  double getDuration() {
     return duration;
   };
 
@@ -73,7 +73,7 @@ class PerformanceEntry: public jsg::Object {
   kj::String name;
   kj::LiteralStringConst entryType;
   double startTime;
-  uint32_t duration;
+  double duration;
 };
 
 class PerformanceMark: public PerformanceEntry {
@@ -95,8 +95,11 @@ class PerformanceMark: public PerformanceEntry {
   static jsg::Ref<PerformanceMark> constructor(
       jsg::Lock& js, kj::String name, jsg::Optional<Options> maybeOptions);
 
-  jsg::Optional<jsg::JsObject> getDetail(jsg::Lock& js) {
-    return detail.map([&js](auto& val) { return val.getHandle(js); });
+  jsg::JsValue getDetail(jsg::Lock& js) {
+    KJ_IF_SOME(d, detail) {
+      return d.getHandle(js);
+    }
+    return js.null();
   }
 
   jsg::JsObject toJSON(jsg::Lock& js);
@@ -113,7 +116,7 @@ class PerformanceMark: public PerformanceEntry {
 
 class PerformanceMeasure: public PerformanceEntry {
  public:
-  PerformanceMeasure(kj::String name, double startTime, uint32_t duration)
+  PerformanceMeasure(kj::String name, double startTime, double duration)
       : PerformanceEntry(kj::mv(name), "measure"_kjc, startTime, duration) {}
 
   friend class Performance;
@@ -122,7 +125,7 @@ class PerformanceMeasure: public PerformanceEntry {
     kj::String entryType;
     kj::String name;
     kj::OneOf<kj::Date, double> startTime;
-    uint32_t duration;
+    double duration;
     jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
 
     JSG_STRUCT(entryType, name, startTime, duration, detail);
@@ -131,14 +134,17 @@ class PerformanceMeasure: public PerformanceEntry {
   struct Options {
     jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
     jsg::Optional<double> start;
-    jsg::Optional<uint32_t> duration;
+    jsg::Optional<double> duration;
     jsg::Optional<double> end;
 
     JSG_STRUCT(detail, start, duration, end);
   };
 
-  jsg::Optional<jsg::JsObject> getDetail(jsg::Lock& js) {
-    return detail.map([&js](auto& val) { return val.getHandle(js); });
+  jsg::JsValue getDetail(jsg::Lock& js) {
+    KJ_IF_SOME(d, detail) {
+      return d.getHandle(js);
+    }
+    return js.null();
   }
 
   jsg::JsObject toJSON(jsg::Lock& js);
@@ -155,7 +161,7 @@ class PerformanceMeasure: public PerformanceEntry {
 
 class PerformanceResourceTiming: public PerformanceEntry {
  public:
-  PerformanceResourceTiming(kj::String name, double startTime, uint32_t duration)
+  PerformanceResourceTiming(kj::String name, double startTime, double duration)
       : PerformanceEntry(kj::mv(name), "resource"_kjc, startTime, duration) {}
 
   uint32_t getConnectEnd() {
