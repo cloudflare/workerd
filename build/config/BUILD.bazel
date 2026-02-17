@@ -20,3 +20,11 @@ config_setting(
     values = {"define": "never_match=true"},  # This will never match
     visibility = ["//visibility:public"],
 )
+
+# Set via --define=rbe=true in --config=rbe (see .bazelrc).
+# Use with select() to mark targets incompatible under remote build execution.
+config_setting(
+    name = "is_rbe",
+    values = {"define": "rbe=true"},
+    visibility = ["//visibility:public"],
+)

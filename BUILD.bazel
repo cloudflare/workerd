@@ -71,6 +71,32 @@ platform(
     ],
 )
 
+# Local macOS platform — listed first in --extra_execution_platforms for RBE so
+# that actions without toolchain requirements (genrules, Python tools) prefer the
+# local platform and compile their tools for macOS.
+platform(
+    name = "host_macos_arm64",
+    constraint_values = [
+        "@platforms//os:macos",
+        "@platforms//cpu:aarch64",
+    ],
+    exec_properties = {
+        # Prevent actions on this platform from being sent to the remote executor.
+        # In cross-platform RBE (macOS → Linux), only actions on the Linux exec
+        # platform should run remotely.
+        "no-remote": "1",
+    },
+)
+
+# Platform definition for remote build execution on CF Containers
+platform(
+    name = "rbe_linux_x86_64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
 # Used for cross-compilation
 platform(
     name = "macOS_x86",

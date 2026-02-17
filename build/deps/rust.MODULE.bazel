@@ -19,6 +19,8 @@ bazel_dep(name = "rules_rust", version = "0.68.1")
 archive_override(
     module_name = "rules_rust",
     integrity = "sha256-dtn87CNPspDl5xEfAGEl0eQ4HBf07vpxIdMNPRHqMqM=",
+    patch_strip = 1,
+    patches = ["//:patches/rules_rust/0001-Fix-symlink_sysroot_tree-to-use-target_files-param.patch"],
     strip_prefix = "bazelbuild-rules_rust-cb9d412",
     type = "tgz",
     url = "https://github.com/bazelbuild/rules_rust/tarball/cb9d412afdb95578bd533b60483eecb373119c36",
