@@ -271,6 +271,15 @@ wd_test(
 )
 
 wd_test(
+    src = "warnings-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "warnings-tail.js",
+        "warnings-test.js",
+    ],
+)
+
+wd_test(
     size = "large",
     src = "global-scope-test.wd-test",
     args = ["--experimental"],
@@ -727,4 +736,10 @@ wd_test(
     src = "identity-transform-stream-state-machine-test.wd-test",
     args = ["--experimental"],
     data = ["identity-transform-stream-state-machine-test.js"],
+)
+
+wd_test(
+    src = "response-used-body-test.wd-test",
+    args = ["--experimental"],
+    data = ["response-used-body-test.js"],
 )

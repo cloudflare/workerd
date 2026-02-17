@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "zerocopy",
+    name = "nix",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,7 +30,7 @@ rust_library(
         ],
     ),
     crate_features = [
-        "simd",
+        "default",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -39,14 +39,17 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zerocopy",
+        "crate-name=nix",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.8.37",
+    version = "0.30.1",
     deps = [
-        "@crates_vendor__zerocopy-0.8.37//:build_script_build",
+        "@crates_vendor__bitflags-2.11.0//:bitflags",
+        "@crates_vendor__cfg-if-1.0.4//:cfg_if",
+        "@crates_vendor__libc-0.2.182//:libc",
+        "@crates_vendor__nix-0.30.1//:build_script_build",
     ],
 )
 
@@ -70,7 +73,7 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "simd",
+        "default",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -87,19 +90,22 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "zerocopy",
+    pkg_name = "nix",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zerocopy",
+        "crate-name=nix",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.8.37",
+    version = "0.30.1",
     visibility = ["//visibility:private"],
+    deps = [
+        "@crates_vendor__cfg_aliases-0.2.1//:cfg_aliases",
+    ],
 )
 
 alias(

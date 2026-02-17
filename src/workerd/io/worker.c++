@@ -1924,6 +1924,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               impl->permanentException, currentSpan);
         }
       });
+
+      // Reset this back to its default after startup execution
+      // Leaving it on comes at the expense of collecting stack traces for all thrown exceptions
+      // Ref: https://github.com/cloudflare/workerd/issues/5332
+      if (script->isolate->impl->inspector == kj::none) {
+        lock.v8Isolate->SetCaptureStackTraceForUncaughtExceptions(false);
+      }
     });
   });
 }
