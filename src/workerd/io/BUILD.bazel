@@ -382,6 +382,7 @@ wd_capnp_library(src = "frankenvalue.capnp")
 wd_capnp_library(
     src = "container.capnp",
     deps = [
+        ":compatibility-date_capnp",
         "@capnp-cpp//src/capnp/compat:byte-stream_capnp",
     ],
 )

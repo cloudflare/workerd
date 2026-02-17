@@ -266,7 +266,8 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
 
 kj::Promise<void> ContainerClient::createContainer(
     kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
-    kj::Maybe<capnp::List<capnp::Text>::Reader> environment) {
+    kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
+    rpc::Container::StartParams::Reader params) {
   // Docker API: POST /containers/create
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
@@ -301,13 +302,24 @@ kj::Promise<void> ContainerClient::createContainer(
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
 
+  // When containersPidNamespace is NOT enabled, use host PID namespace for backwards compatibility.
+  // This allows the container to see processes on the host.
+  if (!params.getCompatibilityFlags().getContainersPidNamespace()) {
+    hostConfig.setPidMode("host");
+  }
+
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
 
   // statusCode 409 refers to "conflict". Occurs when a container with the given name exists.
-  // In that case we destroy and re-create the container.
-  if (response.statusCode == 409) {
+  // In that case we destroy and re-create the container. We retry a few times with delays
+  // because Docker may take a moment to fully release the container name after removal.
+  constexpr int MAX_RETRIES = 3;
+  constexpr auto RETRY_DELAY = 100 * kj::MILLISECONDS;
+
+  for (int attempt = 0; response.statusCode == 409 && attempt < MAX_RETRIES; ++attempt) {
     co_await destroyContainer();
+    co_await timer.afterDelay(RETRY_DELAY);
     response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
         kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
   }
@@ -399,7 +411,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
     environment = params.getEnvironmentVariables();
   }
 
-  co_await createContainer(entrypoint, environment);
+  co_await createContainer(entrypoint, environment, params);
   co_await startContainer();
 }
 
