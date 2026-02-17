@@ -37,7 +37,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
       KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
         numFiles++;
       }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+      KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
         numRequirements++;
       }
       KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
@@ -77,7 +77,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
         names.add(kj::str(module.name));
         contents.add(kj::heapArray(content.body.asBytes()));
       }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+      KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
         requirements.add(kj::str(module.name));
       }
       KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
