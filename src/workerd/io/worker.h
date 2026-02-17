@@ -27,9 +27,12 @@
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 
+#include <memory>  // for std::shared_ptr
+
 namespace v8 {
+class BackingStore;
 class Isolate;
-}
+}  // namespace v8
 
 namespace workerd {
 
@@ -372,6 +375,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const;
   // Returns a reference to cpuLimitNearlyExceededCallback. Can't outlive the Isolate.
   kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
+
+  // Registers a WASM module's linear memory and offset for receiving the "shut down" signal.
+  // See IsolateLimitEnforcer::registerWasmShutdownSignal() for details.
+  void registerWasmShutdownSignal(
+      std::shared_ptr<v8::BackingStore> backingStore, uint32_t offset) const;
 
   inline IsolateObserver& getMetrics() {
     return *metrics;
