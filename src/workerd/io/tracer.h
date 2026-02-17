@@ -31,8 +31,6 @@ class BaseTracer: public kj::Refcounted {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) = 0;
-  // Add a complete span.
-  virtual void addSpan(tracing::CompleteSpan&& span) = 0;
   // Add information about a span when it is opened, corresponds to SpanOpen event.
   virtual void addSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
@@ -95,8 +93,7 @@ class BaseTracer: public kj::Refcounted {
   // acordingly.
   kj::Date getTime();
 
-  // helper method for addSpan() implementations
-  void adjustSpanTime(tracing::CompleteSpan& span);
+  // helper method for addSpanEnd() implementations
   void adjustSpanTime(tracing::SpanEndData& span);
 
   // Function to create the root span for the new tracing format.
@@ -133,7 +130,6 @@ class WorkerTracer final: public BaseTracer {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) override;
-  void addSpan(tracing::CompleteSpan&& span) override;
   void addSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
