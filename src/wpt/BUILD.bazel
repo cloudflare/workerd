@@ -75,7 +75,10 @@ wpt_test(
 
 wpt_test(
     name = "encoding",
-    compat_flags = ["pedantic_wpt"],
+    compat_flags = [
+        "pedantic_wpt",
+        "text_decoder_cjk_decoder",
+    ],
     config = "encoding-test.ts",
     wpt_directory = "@wpt//:encoding@module",
 )

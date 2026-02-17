@@ -63,6 +63,7 @@
 -isystembazel-bin/src/rust/jsg/_virtual_includes/lib.rs@cxx
 -isystembazel-bin/src/rust/jsg/_virtual_includes/v8.rs@cxx
 -isystembazel-bin/src/rust/jsg-test/_virtual_includes/ffi-hdrs
+-isystembazel-bin/src/rust/encoding/_virtual_includes/lib.rs@cxx
 -isystembazel-bin/src/rust/jsg-test/_virtual_includes/lib.rs@cxx
 -isystembazel-bin/src/rust/gen-compile-cache/_virtual_includes/cxx-bridge
 -isystembazel-bin/src/rust/gen-compile-cache/_virtual_includes/gen-compile-cache@cxx

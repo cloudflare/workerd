@@ -17,6 +17,7 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     "clang-ast": crate.spec(version = "0"),
     "clap": crate.spec(version = "4", default_features = False, features = ["derive", "std", "help"]),
     "codespan-reporting": crate.spec(version = "0"),
+    "encoding_rs": crate.spec(version = "0"),
     "flate2": crate.spec(version = "1"),
     "futures": crate.spec(version = "0"),
     "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html", tag = "v2.7.1"),
