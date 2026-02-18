@@ -513,14 +513,12 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
 
   auto options = kj::mv(maybeOptions).orDefault({});
   options.pipeThrough = true;
+  // The lambda intentionally captures self as a visitable reference, ensuring
+  // JSG_THIS stays alive until the pipe promise resolves.
   controller.pipeTo(js, destination, kj::mv(options))
       .then(js,
           JSG_VISITABLE_LAMBDA(
-              (self = JSG_THIS), (self), (jsg::Lock& js) { return js.resolvedPromise(); }),
-          JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self),
-              (jsg::Lock& js, auto&& exception) {
-                return js.rejectedPromise<void>(kj::mv(exception));
-              }))
+              (self = JSG_THIS), (self), (jsg::Lock& js) { return js.resolvedPromise(); }))
       .markAsHandled(js);
   return kj::mv(transform.readable);
 }
@@ -583,11 +581,16 @@ jsg::Promise<void> ReadableStream::returnFunction(
     if (!state.preventCancel) {
       auto promise = reader->cancel(js, value.map([&](jsg::Value& v) { return v.getHandle(js); }));
       reader->releaseLock(js);
-      return promise.then(js,
+      auto result = promise.then(js,
           JSG_VISITABLE_LAMBDA((reader = kj::mv(reader)), (reader), (jsg::Lock& js) {
             // Ensure that the reader is not garbage collected until the cancel promise resolves.
             return js.resolvedPromise();
           }));
+      // When the stream is already errored, cancel() returns a rejected promise
+      // that propagates through the .then() chain. Mark it as handled so V8 does
+      // not fire unhandledrejection events during iterator teardown.
+      result.markAsHandled(js);
+      return kj::mv(result);
     }
 
     reader->releaseLock(js);
