@@ -405,6 +405,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
         return entry->module(js, observer, referrer, method);
       }
+      // Also allow BUILTIN modules for internal resolution. This allows
+      // extension modules to import public built-in modules like cloudflare:workers.
+      KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUILTIN))) {
+        return entry->module(js, observer, referrer, method);
+      }
       return kj::none;
     } else if (option == ResolveOption::BUILTIN_ONLY) {
       KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUILTIN))) {
