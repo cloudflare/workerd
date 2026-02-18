@@ -15,20 +15,28 @@ SqliteMetadata::SqliteMetadata(SqliteDatabase& db): ResetListener(db) {
 
 kj::Maybe<kj::Date> SqliteMetadata::getAlarm() {
   if (cacheState == kj::none) {
-    cacheState = Cache{.alarmTime = getAlarmUncached()};
+    cacheState = Cache{};
   }
-  return KJ_ASSERT_NONNULL(cacheState).alarmTime;
+  auto& cache = KJ_ASSERT_NONNULL(cacheState);
+  if (!cache.hasAlarmTime) {
+    cache.alarmTime = getAlarmUncached();
+    cache.hasAlarmTime = true;
+  }
+  return cache.alarmTime;
 }
 
 bool SqliteMetadata::setAlarm(kj::Maybe<kj::Date> currentTime, bool allowUnconfirmed) {
   KJ_IF_SOME(c, cacheState) {
-    if (c.alarmTime == currentTime) {
+    if (c.hasAlarmTime && c.alarmTime == currentTime) {
       return false;
     }
   }
   setAlarmUncached(currentTime, allowUnconfirmed);
   db.onRollback([this, oldCacheState = cacheState]() { cacheState = oldCacheState; });
-  cacheState = Cache{.alarmTime = currentTime};
+  Cache cache;
+  cache.alarmTime = currentTime;
+  cache.hasAlarmTime = true;
+  cacheState = kj::mv(cache);
   return true;
 }
 
@@ -73,6 +81,55 @@ void SqliteMetadata::setLocalDevelopmentBookmark(uint64_t bookmark) {
   KJ_REQUIRE(bookmark <= static_cast<int64_t>(kj::maxValue));
   ensureInitialized(/*allowUnconfirmed=*/false)
       .stmtSetLocalDevelopmentBookmark.run(static_cast<int64_t>(bookmark));
+}
+
+kj::Maybe<kj::String> SqliteMetadata::getActorName() {
+  if (cacheState == kj::none) {
+    cacheState = Cache{};
+  }
+  auto& cache = KJ_ASSERT_NONNULL(cacheState);
+  if (!cache.hasActorName) {
+    cache.actorName = getActorNameUncached();
+    cache.hasActorName = true;
+  }
+  return cache.actorName.map([](kj::String& name) { return kj::str(name); });
+}
+
+bool SqliteMetadata::setActorName(kj::StringPtr name, bool allowUnconfirmed) {
+  KJ_IF_SOME(c, cacheState) {
+    if (c.hasActorName) {
+      KJ_IF_SOME(existingName, c.actorName) {
+        if (existingName == name) {
+          return false;
+        }
+      }
+    }
+  }
+  setActorNameUncached(name, allowUnconfirmed);
+  db.onRollback([this, oldCacheState = cacheState]() { cacheState = oldCacheState; });
+  Cache cache;
+  cache.actorName = kj::str(name);
+  cache.hasActorName = true;
+  cacheState = kj::mv(cache);
+  return true;
+}
+
+kj::Maybe<kj::String> SqliteMetadata::getActorNameUncached() {
+  if (!tableCreated) {
+    return kj::none;
+  }
+
+  auto query = ensureInitialized(/*allowUnconfirmed=*/false).stmtGetActorName.run();
+  if (query.isDone() || query.isNull(0)) {
+    return kj::none;
+  } else {
+    return kj::str(query.getText(0));
+  }
+}
+
+void SqliteMetadata::setActorNameUncached(kj::StringPtr name, bool allowUnconfirmed) {
+  ensureInitialized(allowUnconfirmed).stmtSetActorName.run(
+      {.allowUnconfirmed = allowUnconfirmed}, name);
 }
 
 SqliteMetadata::Initialized& SqliteMetadata::ensureInitialized(bool allowUnconfirmed) {

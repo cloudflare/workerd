@@ -1998,9 +1998,8 @@ KJ_TEST("Server: Durable Objects (in memory)") {
                 `      throw new Error("durable ID should be type DurableObjectId, " +
                 `                      `got: ${this.id.constructor.name}`);
                 `    }
-                `    if (this.id.name) {
-                `      throw new Error("ctx.id for Durable Object should not have a .name " +
-                `                      `property, got: ${this.id.name}`);
+                `    if (!this.id.name) {
+                `      throw new Error("ctx.id for Durable Object should have a .name property");
                 `    }
                 `  }
                 `  async fetch(request) {
@@ -2173,7 +2172,9 @@ KJ_TEST("Server: Durable Objects (on disk)") {
               esModule =
                 `export default {
                 `  async fetch(request, env) {
-                `    let id = env.ns.idFromName(request.url)
+                `    let id = request.url.endsWith("/by-id")
+                `        ? env.ns.idFromString("59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234")
+                `        : env.ns.idFromName(request.url)
                 `    let actor = env.ns.get(id)
                 `    return await actor.fetch(request)
                 `  }
@@ -2185,6 +2186,9 @@ KJ_TEST("Server: Durable Objects (on disk)") {
                 `    if (this.id.constructor.name != "DurableObjectId") {
                 `      throw new Error("durable ID should be type DurableObjectId, " +
                 `                      `got: ${this.id.constructor.name}`);
+                `    }
+                `    if (!this.id.name) {
+                `      throw new Error("ctx.id for Durable Object should have a .name property");
                 `    }
                 `  }
                 `  async fetch(request) {
@@ -2281,8 +2285,8 @@ KJ_TEST("Server: Durable Objects (on disk)") {
 
     test.start();
     auto conn = test.connect("test-addr");
-    conn.httpGet200(
-        "/", "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 4");
+    conn.httpGet200("/by-id",
+        "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/by-id 4");
     conn.httpGet200(
         "/", "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 5");
     conn.httpGet200("/bar",

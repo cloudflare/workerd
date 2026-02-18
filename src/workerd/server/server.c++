@@ -33,6 +33,7 @@
 #include <workerd/server/fallback-service.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/sqlite-metadata.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/websocket-error-handler.h>
@@ -2225,14 +2226,6 @@ class Server::WorkerService final: public Service,
     }
 
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
-      KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
-        // To emulate production, we have to recreate this ID.
-        ActorIdFactoryImpl::ActorIdImpl* idImpl =
-            dynamic_cast<ActorIdFactoryImpl::ActorIdImpl*>(doId.get());
-        KJ_ASSERT(idImpl != nullptr, "Unexpected ActorId type?");
-        idImpl->clearName();
-      }
-
       return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)));
     }
 
@@ -2380,6 +2373,15 @@ class Server::WorkerService final: public Service,
       }
       kj::Own<ActorContainer> addRef() {
         return kj::addRef(*this);
+      }
+
+      void maybeLearnNameFromId(const Worker::Actor::Id& incomingId) {
+        KJ_IF_SOME(name, ActorNamespace::getDurableObjectName(incomingId)) {
+          KJ_IF_SOME(info, classAndId.tryGet<ClassAndId>()) {
+            ActorNamespace::setDurableObjectNameIfMissing(info.id, name);
+          }
+          maybePersistActorName(name);
+        }
       }
 
       // Get the actor, starting it if it's not already running.
@@ -2590,6 +2592,34 @@ class Server::WorkerService final: public Service,
         }
       }
 
+      kj::Maybe<kj::String> maybeRestorePersistedActorName(Worker::Actor::Id& id) {
+        KJ_IF_SOME(name, ActorNamespace::getDurableObjectName(id)) {
+          return kj::str(name);
+        }
+
+        auto& as = KJ_UNWRAP_OR(ns.actorStorage, return kj::none);
+        auto path = getSqlitePathForId(getFacetId());
+
+        KJ_UNWRAP_OR(as.directory->tryOpenFile(path, kj::WriteMode::MODIFY), return kj::none);
+
+        SqliteDatabase db(as.vfs, kj::mv(path), kj::WriteMode::MODIFY);
+        SqliteMetadata metadata(db);
+        KJ_IF_SOME(name, metadata.getActorName()) {
+          ActorNamespace::setDurableObjectNameIfMissing(id, name);
+          return kj::mv(name);
+        }
+
+        return kj::none;
+      }
+
+      void maybePersistActorName(kj::StringPtr name) {
+        auto& as = KJ_UNWRAP_OR(ns.actorStorage, return);
+        auto path = getSqlitePathForId(getFacetId());
+        SqliteDatabase db(as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+        SqliteMetadata metadata(db);
+        metadata.setActorName(name, /*allowUnconfirmed=*/false);
+      }
+
       void deleteDescendantStorage(const kj::Directory& dir, uint parentId) {
         KJ_IF_SOME(index, getFacetTreeIndexIfNotEmpty()) {
           deleteDescendantStorage(dir, index, parentId);
@@ -2702,9 +2732,15 @@ class Server::WorkerService final: public Service,
       void start(kj::Own<ActorClass>& actorClass, Worker::Actor::Id& id) {
         KJ_REQUIRE(actor == nullptr);
 
-        auto makeActorCache = [this](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
-                                  ActorCache::Hooks& hooks,
-                                  SqliteObserver& sqliteObserver) mutable {
+        auto maybeKnownName = maybeRestorePersistedActorName(id);
+        auto makeActorCache =
+            [this,
+                maybeKnownName = maybeKnownName.map([](kj::String& name) {
+                  return kj::str(name);
+                })](const ActorCache::SharedLru& sharedLru,
+                OutputGate& outputGate,
+                ActorCache::Hooks& hooks,
+                SqliteObserver& sqliteObserver) mutable {
           return ns.config.tryGet<Durable>().map(
               [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
             KJ_IF_SOME(as, ns.actorStorage) {
@@ -2726,6 +2762,10 @@ class Server::WorkerService final: public Service,
               auto path = getSqlitePathForId(selfId);
               auto db = kj::heap<SqliteDatabase>(
                   as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+              KJ_IF_SOME(name, maybeKnownName) {
+                SqliteMetadata metadata(*db);
+                metadata.setActorName(name, /*allowUnconfirmed=*/false);
+              }
 
               // Before we do anything, make sure the database is in WAL mode. We also need to
               // do this after reset() is used, so register a callback for that.
@@ -2829,14 +2869,18 @@ class Server::WorkerService final: public Service,
         }
       }
 
-      return actors
-          .findOrCreate(key, [&]() mutable {
-        auto container = kj::refcounted<ActorContainer>(kj::mv(key), *this, kj::none,
-            ActorContainer::ClassAndId(kj::addRef(*actorClass), kj::mv(id)), timer);
+      KJ_IF_SOME(entry, actors.findEntry(key)) {
+        entry.value->maybeLearnNameFromId(id);
+        return entry.value->addRef();
+      }
 
-        return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
-          container->getKey(), kj::mv(container)};
-      })->addRef();
+      auto container = kj::refcounted<ActorContainer>(kj::mv(key), *this, kj::none,
+          ActorContainer::ClassAndId(kj::addRef(*actorClass), kj::mv(id)), timer);
+
+      auto result = container->addRef();
+      auto containerKey = container->getKey();
+      actors.insert(containerKey, kj::mv(container));
+      return result;
     }
 
     kj::Own<ContainerClient> getContainerClient(
@@ -2872,6 +2916,24 @@ class Server::WorkerService final: public Service,
     }
 
    private:
+    static kj::Maybe<kj::StringPtr> getDurableObjectName(const Worker::Actor::Id& id) {
+      KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
+        return doId->getName();
+      }
+      return kj::none;
+    }
+
+    static bool setDurableObjectNameIfMissing(Worker::Actor::Id& id, kj::StringPtr name) {
+      KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
+        auto* idImpl = dynamic_cast<ActorIdFactoryImpl::ActorIdImpl*>(doId.get());
+        if (idImpl != nullptr) {
+          return idImpl->setNameIfMissing(name);
+        }
+      }
+
+      return false;
+    }
+
     kj::Own<ActorClass> actorClass;
     const ActorConfig& config;
 

@@ -20,8 +20,12 @@ class ActorIdFactoryImpl final: public ActorIdFactory {
     bool equals(const ActorId& other) const override;
     kj::Own<ActorId> clone() const override;
 
-    void clearName() {
-      name = kj::none;
+    bool setNameIfMissing(kj::StringPtr newName) {
+      if (name != kj::none) {
+        return false;
+      }
+      name = kj::str(newName);
+      return true;
     }
 
    private:
