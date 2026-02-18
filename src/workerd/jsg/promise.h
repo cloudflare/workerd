@@ -712,6 +712,10 @@ class UnhandledRejectionHandler {
       jsg::V8Ref<v8::Promise> promise,
       jsg::Value value);
 
+  void setUseMicrotasksCompletedCallback(bool value) {
+    useMicrotasksCompletedCallback = value;
+  }
+
   void clear();
 
   JSG_MEMORY_INFO(UnhandledRejectionHandler) {
@@ -804,6 +808,8 @@ class UnhandledRejectionHandler {
 
   kj::Function<Handler> handler;
   bool scheduled = false;
+  // Controlled by the unhandled_rejection_after_microtask_checkpoint compat flag.
+  bool useMicrotasksCompletedCallback = false;
 
   using UnhandledRejectionsTable =
       kj::Table<UnhandledRejection, kj::HashIndex<UnhandledRejectionCallbacks>>;
@@ -814,6 +820,10 @@ class UnhandledRejectionHandler {
   void rejectedWithNoHandler(jsg::Lock& js, jsg::V8Ref<v8::Promise> promise, jsg::Value value);
   void handledAfterRejection(jsg::Lock& js, jsg::V8Ref<v8::Promise> promise);
   void ensureProcessingWarnings(jsg::Lock& js);
+  void processWarnings(jsg::Lock& js);
+
+  // Must be static: V8 requires a plain C function pointer for this callback.
+  static void onMicrotasksCompleted(v8::Isolate* isolate, void* data);
 };
 
 }  // namespace workerd::jsg

@@ -294,6 +294,13 @@ wd_test(
 
 wd_test(
     size = "large",
+    src = "unhandled-rejection-test.wd-test",
+    args = ["--experimental"],
+    data = ["unhandled-rejection-test.js"],
+)
+
+wd_test(
+    size = "large",
     src = "htmlrewriter-test.wd-test",
     args = ["--experimental"],
     data = ["htmlrewriter-test.js"],
