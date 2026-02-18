@@ -77,9 +77,8 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getEntrypoint(jsg::
     Frankenvalue::fromJs(js, p.getHandle(js)).toCapnp(req.initProps());
   }
 
-  auto stateRef = state->addRef();
   return context.awaitIo(js, req.send(),
-      [&context, stateRef = kj::mv(stateRef)](
+      [&context, stateRef = state->addRef()](
           jsg::Lock& js, auto result) mutable -> jsg::Ref<api::Fetcher> {
     return wrapBootstrapAsFetcher(js, context, result.getEntrypoint(), kj::mv(stateRef));
   });
@@ -94,9 +93,8 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getActor(
   req.setEntrypoint(entrypoint);
   req.setActorId(actorId);
 
-  auto stateRef = state->addRef();
   return context.awaitIo(js, req.send(),
-      [&context, stateRef = kj::mv(stateRef)](
+      [&context, stateRef = state->addRef()](
           jsg::Lock& js, auto result) mutable -> jsg::Ref<api::Fetcher> {
     return wrapBootstrapAsFetcher(js, context, result.getActor(), kj::mv(stateRef));
   });
