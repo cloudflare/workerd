@@ -4,11 +4,12 @@
 
 #include "workerd-debug-port-client.h"
 
-#include <kj/memory.h>
 #include <workerd/api/http.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.h>
+
+#include <kj/memory.h>
 
 namespace workerd::server {
 
@@ -33,8 +34,7 @@ class WorkerdBootstrapSubrequestChannel final: public IoChannelFactory::Subreque
     auto dispatcher = bootstrap.startEventRequest().send().getDispatcher();
     // Attach connection ref for deferred proxying - the HTTP response body/WebSocket
     // will get this WorkerInterface attached, keeping the connection alive.
-    return kj::heap<RpcWorkerInterface>(
-        httpOverCapnpFactory, byteStreamFactory, kj::mv(dispatcher))
+    return kj::heap<RpcWorkerInterface>(httpOverCapnpFactory, byteStreamFactory, kj::mv(dispatcher))
         .attach(connectionState->addRef());
   }
 
@@ -49,12 +49,13 @@ class WorkerdBootstrapSubrequestChannel final: public IoChannelFactory::Subreque
   kj::Own<DebugPortConnectionState> connectionState;
 };
 
-jsg::Ref<api::Fetcher> wrapBootstrapAsFetcher(
-    jsg::Lock& js, IoContext& context, rpc::WorkerdBootstrap::Client bootstrap,
+jsg::Ref<api::Fetcher> wrapBootstrapAsFetcher(jsg::Lock& js,
+    IoContext& context,
+    rpc::WorkerdBootstrap::Client bootstrap,
     kj::Own<DebugPortConnectionState> connectionState) {
   kj::Own<IoChannelFactory::SubrequestChannel> subrequestChannel =
-      kj::refcounted<WorkerdBootstrapSubrequestChannel>(
-          kj::mv(bootstrap), context.getHttpOverCapnpFactory(), context.getByteStreamFactory(),
+      kj::refcounted<WorkerdBootstrapSubrequestChannel>(kj::mv(bootstrap),
+          context.getHttpOverCapnpFactory(), context.getByteStreamFactory(),
           kj::mv(connectionState));
   return js.alloc<api::Fetcher>(
       context.addObject(kj::mv(subrequestChannel)), api::Fetcher::RequiresHostAndProtocol::NO);
@@ -80,8 +81,8 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getEntrypoint(jsg::
   return context.awaitIo(js, req.send(),
       [&context, stateRef = kj::mv(stateRef)](
           jsg::Lock& js, auto result) mutable -> jsg::Ref<api::Fetcher> {
-        return wrapBootstrapAsFetcher(js, context, result.getEntrypoint(), kj::mv(stateRef));
-      });
+    return wrapBootstrapAsFetcher(js, context, result.getEntrypoint(), kj::mv(stateRef));
+  });
 }
 
 jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getActor(
@@ -97,8 +98,8 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getActor(
   return context.awaitIo(js, req.send(),
       [&context, stateRef = kj::mv(stateRef)](
           jsg::Lock& js, auto result) mutable -> jsg::Ref<api::Fetcher> {
-        return wrapBootstrapAsFetcher(js, context, result.getActor(), kj::mv(stateRef));
-      });
+    return wrapBootstrapAsFetcher(js, context, result.getActor(), kj::mv(stateRef));
+  });
 }
 
 jsg::Promise<jsg::Ref<WorkerdDebugPortClient>> WorkerdDebugPortConnector::connect(
