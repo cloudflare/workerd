@@ -906,9 +906,10 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
       // blocking alarm execution on the AlarmManager sync when storage is overloaded. The alarm
       // will either delete itself on success or reschedule on failure.
       if ((willFireEarlier(localAlarmState, currentTime))) {
+        auto localAlarmTime = KJ_ASSERT_NONNULL(localAlarmState);
         LOG_WARNING_PERIODICALLY(
             "NOSENTRY SQLite alarm overdue, running despite AlarmManager mismatch", scheduledTime,
-            KJ_ASSERT_NONNULL(localAlarmState), currentTime, actorId);
+            localAlarmTime, currentTime, actorId);
         haveDeferredDelete = true;
         inAlarmHandler = true;
         deferredAlarmSpan = kj::mv(parentSpan);
