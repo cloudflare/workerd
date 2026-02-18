@@ -114,6 +114,56 @@ class PerformanceMark: public PerformanceEntry {
   jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
 };
 
+// PerformanceNodeTiming provides Node.js-specific timing information.
+// In workerd, this returns stub values since actual Node.js startup metrics are not applicable.
+// This class is only exposed when the Node.js perf_hooks compat flag is enabled.
+//
+// Spec: https://nodejs.org/api/perf_hooks.html#class-performancenodetiming
+class PerformanceNodeTiming: public PerformanceEntry {
+ public:
+  PerformanceNodeTiming(): PerformanceEntry(kj::str("node"), "node"_kjc, 0, 0) {}
+
+  static jsg::Ref<PerformanceNodeTiming> constructor() = delete;
+
+  // All timing values return 0 as stubs since Node.js startup metrics
+  // are not applicable in the Workers context.
+  double getNodeStart() {
+    return 0;
+  }
+  double getV8Start() {
+    return 0;
+  }
+  double getBootstrapComplete() {
+    return 0;
+  }
+  double getEnvironment() {
+    return 0;
+  }
+  double getLoopStart() {
+    return 0;
+  }
+  double getLoopExit() {
+    return 0;
+  }
+  double getIdleTime() {
+    return 0;
+  }
+
+  jsg::JsObject toJSON(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(PerformanceNodeTiming) {
+    JSG_INHERIT(PerformanceEntry);
+    JSG_READONLY_PROTOTYPE_PROPERTY(nodeStart, getNodeStart);
+    JSG_READONLY_PROTOTYPE_PROPERTY(v8Start, getV8Start);
+    JSG_READONLY_PROTOTYPE_PROPERTY(bootstrapComplete, getBootstrapComplete);
+    JSG_READONLY_PROTOTYPE_PROPERTY(environment, getEnvironment);
+    JSG_READONLY_PROTOTYPE_PROPERTY(loopStart, getLoopStart);
+    JSG_READONLY_PROTOTYPE_PROPERTY(loopExit, getLoopExit);
+    JSG_READONLY_PROTOTYPE_PROPERTY(idleTime, getIdleTime);
+    JSG_METHOD(toJSON);
+  }
+};
+
 class PerformanceMeasure: public PerformanceEntry {
  public:
   PerformanceMeasure(kj::String name, double startTime, double duration)
@@ -477,6 +527,10 @@ class Performance: public EventTarget {
 
   EventLoopUtilization eventLoopUtilization();
 
+  // Returns the PerformanceNodeTiming object containing Node.js-specific timing metrics.
+  // In workerd, this returns stub values since Node.js startup metrics are not applicable.
+  jsg::Ref<PerformanceNodeTiming> getNodeTiming(jsg::Lock& js);
+
   // In the browser, this function is not public. However, it must be used inside fetch
   // which is a Node.js dependency, not an internal module.
   // Returns void as a no-op stub since resource timing is not applicable in Workers.
@@ -506,6 +560,7 @@ class Performance: public EventTarget {
     }
 
     if (flags.getEnableNodeJsPerfHooksModule()) {
+      JSG_READONLY_PROTOTYPE_PROPERTY(nodeTiming, getNodeTiming);
       JSG_METHOD(eventLoopUtilization);
       JSG_METHOD(markResourceTiming);
       JSG_METHOD(timerify);
@@ -518,12 +573,13 @@ class Performance: public EventTarget {
 };
 
 #define EW_PERFORMANCE_ISOLATE_TYPES                                                               \
-  api::Performance, api::Performance::EventLoopUtilization, api::PerformanceMark,                  \
-      api::PerformanceMeasure, api::PerformanceMark::Options, api::PerformanceMeasure::Options,    \
-      api::PerformanceMeasure::Entry, api::PerformanceObserverEntryList, api::PerformanceEntry,    \
-      api::PerformanceResourceTiming, api::PerformanceObserver,                                    \
-      api::PerformanceObserver::ObserveOptions, api::PerformanceObserver::CallbackOptions,         \
-      api::EventCounts, api::EventCounts::EntryIterator, api::EventCounts::EntryIterator::Next,    \
+  api::Performance, api::Performance::EventLoopUtilization, api::PerformanceNodeTiming,            \
+      api::PerformanceMark, api::PerformanceMeasure, api::PerformanceMark::Options,                \
+      api::PerformanceMeasure::Options, api::PerformanceMeasure::Entry,                            \
+      api::PerformanceObserverEntryList, api::PerformanceEntry, api::PerformanceResourceTiming,    \
+      api::PerformanceObserver, api::PerformanceObserver::ObserveOptions,                          \
+      api::PerformanceObserver::CallbackOptions, api::EventCounts,                                 \
+      api::EventCounts::EntryIterator, api::EventCounts::EntryIterator::Next,                      \
       api::EventCounts::KeyIterator, api::EventCounts::KeyIterator::Next,                          \
       api::EventCounts::ValueIterator, api::EventCounts::ValueIterator::Next
 

@@ -149,8 +149,60 @@ export const testStandaloneTimerify = {
 
 export const testPerformanceNodeTiming = {
   test() {
-    // nodeTiming is a Node.js-specific property
-    ok(perfHooksPerformance.nodeTiming, 'nodeTiming should exist');
+    // nodeTiming is a Node.js-specific property available on both
+    // the perf_hooks performance export and globalThis.performance
+    ok(
+      perfHooksPerformance.nodeTiming,
+      'nodeTiming should exist on perf_hooks'
+    );
+    ok(
+      globalThis.performance.nodeTiming,
+      'nodeTiming should exist on globalThis'
+    );
+    console.log(
+      'globalThis.performance.nodeTiming:',
+      globalThis.performance.nodeTiming
+    );
+    console.log(
+      'globalThis.performance.eventCounts:',
+      globalThis.performance.eventCounts
+    );
+    console.log(
+      'globalThis.performance.eventLoopUtilization:',
+      globalThis.performance.eventLoopUtilization
+    );
+    console.log(
+      'perfHooksPerformance === globalThis.performance:',
+      perfHooksPerformance === globalThis.performance
+    );
+    console.log('has nodeTiming:', 'nodeTiming' in globalThis.performance);
+    console.log('has eventCounts:', 'eventCounts' in globalThis.performance);
+
+    ok(
+      perfHooksPerformance.nodeTiming,
+      'nodeTiming should exist on perf_hooks'
+    );
+    ok(
+      globalThis.performance.nodeTiming,
+      'nodeTiming should exist on globalThis'
+    );
+    console.log(
+      'globalThis.performance.nodeTiming:',
+      globalThis.performance.nodeTiming
+    );
+    console.log(
+      'perfHooksPerformance === globalThis.performance:',
+      perfHooksPerformance === globalThis.performance
+    );
+
+    ok(
+      perfHooksPerformance.nodeTiming,
+      'nodeTiming should exist on perf_hooks'
+    );
+    ok(
+      globalThis.performance.nodeTiming,
+      'nodeTiming should exist on globalThis'
+    );
 
     const nodeTiming = perfHooksPerformance.nodeTiming;
     strictEqual(nodeTiming.name, 'node', 'name should be "node"');

@@ -62,6 +62,22 @@ jsg::JsObject PerformanceResourceTiming::toJSON(jsg::Lock& js) {
   JSG_FAIL_REQUIRE(Error, "PerformanceResourceTiming.toJSON is not implemented"_kj);
 }
 
+jsg::JsObject PerformanceNodeTiming::toJSON(jsg::Lock& js) {
+  auto obj = js.objNoProto();
+  obj.set(js, "name"_kj, js.str(name));
+  obj.set(js, "entryType"_kj, js.str(entryType));
+  obj.set(js, "startTime"_kj, js.num(startTime));
+  obj.set(js, "duration"_kj, js.num(duration));
+  obj.set(js, "nodeStart"_kj, js.num(0));
+  obj.set(js, "v8Start"_kj, js.num(0));
+  obj.set(js, "bootstrapComplete"_kj, js.num(0));
+  obj.set(js, "environment"_kj, js.num(0));
+  obj.set(js, "loopStart"_kj, js.num(0));
+  obj.set(js, "loopExit"_kj, js.num(0));
+  obj.set(js, "idleTime"_kj, js.num(0));
+  return kj::mv(obj);
+}
+
 void Performance::clearMarks(jsg::Optional<kj::String> name) {
   kj::Vector<jsg::Ref<PerformanceEntry>> filtered;
 
@@ -279,6 +295,10 @@ Performance::EventLoopUtilization Performance::eventLoopUtilization() {
     .active = 0,
     .utilization = 0,
   };
+}
+
+jsg::Ref<PerformanceNodeTiming> Performance::getNodeTiming(jsg::Lock& js) {
+  return js.alloc<PerformanceNodeTiming>();
 }
 
 void Performance::markResourceTiming() {

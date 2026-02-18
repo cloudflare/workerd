@@ -47,21 +47,6 @@ export interface EventLoopUtilization {
   utilization: number;
 }
 
-export interface PerformanceNodeTiming {
-  name: string;
-  entryType: string;
-  startTime: number;
-  duration: number;
-  nodeStart: number;
-  v8Start: number;
-  bootstrapComplete: number;
-  environment: number;
-  loopStart: number;
-  loopExit: number;
-  idleTime: number;
-  toJSON(): object;
-}
-
 // Standalone function exports for Node.js compatibility
 export function eventLoopUtilization(
   _utilization1?: EventLoopUtilization,
@@ -78,50 +63,9 @@ export function timerify<T extends (...params: unknown[]) => unknown>(
   return fn;
 }
 
-// Create nodeTiming stub object
-const nodeTimingStub: PerformanceNodeTiming = {
-  name: 'node',
-  entryType: 'node',
-  startTime: 0,
-  duration: 0,
-  nodeStart: 0,
-  v8Start: 0,
-  bootstrapComplete: 0,
-  environment: 0,
-  loopStart: 0,
-  loopExit: 0,
-  idleTime: 0,
-  toJSON() {
-    return this;
-  },
-};
-
-// Create a Proxy to wrap globalThis.performance with Node.js-specific extensions.
-// Using a Proxy ensures that method calls are properly delegated to the original
-// performance object with the correct `this` binding.
-export const performance = new Proxy(globalThis.performance, {
-  get(target, prop, _receiver) {
-    // Add Node.js-specific nodeTiming property
-    if (prop === 'nodeTiming') {
-      return nodeTimingStub;
-    }
-    // For all other properties, delegate to the original performance object
-    const value = Reflect.get(target, prop, target);
-    // Bind methods to the original target to maintain correct `this` context
-    if (typeof value === 'function') {
-      return value.bind(target);
-    }
-    return value;
-  },
-  has(target, prop) {
-    if (prop === 'nodeTiming') {
-      return true;
-    }
-    return Reflect.has(target, prop);
-  },
-}) as typeof globalThis.performance & {
-  nodeTiming: PerformanceNodeTiming;
-};
+// Re-export globalThis.performance which includes nodeTiming when the
+// enable_nodejs_perf_hooks_module flag is enabled (handled in C++).
+export const performance = globalThis.performance;
 
 export function createHistogram(): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('createHistogram');
