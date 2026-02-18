@@ -43,7 +43,6 @@ class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
-class Socket;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class ExecutionContext;
@@ -210,15 +209,6 @@ class Worker: public kj::AtomicRefcounted {
   kj::Promise<AsyncLock> takeAsyncLockWhenActorCacheReady(
       kj::Date now, Actor& actor, RequestObserver& request) const;
 
-  // Track a set of address->callback overrides for which the connect(address) behavior should be
-  // overridden via callbacks rather than using the default Socket connect() logic.
-  // This is useful for allowing generic client libraries to connect to private local services using
-  // just a provided address (rather than requiring them to support being passed a binding to call
-  // binding.connect() on).
-  using ConnectFn = kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)>;
-  void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
-  kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
-
   static void setupContext(
       jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions);
 
@@ -233,8 +223,6 @@ class Worker: public kj::AtomicRefcounted {
 
   struct Impl;
   kj::Own<Impl> impl;
-
-  kj::HashMap<kj::String, ConnectFn> connectOverrides;
 
   struct ActorClassInfo {
     EntrypointClass cls;
