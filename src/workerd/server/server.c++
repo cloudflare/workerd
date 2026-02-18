@@ -2756,10 +2756,16 @@ class Server::WorkerService final: public Service,
               kj::heap<SqliteDatabase>(as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
         }
 
-        maybeRestorePersistedActorName(id, maybeOpenedDb.map(
+        auto maybeKnownName = maybeRestorePersistedActorName(id, maybeOpenedDb.map(
             [](kj::Own<SqliteDatabase>& db) -> SqliteDatabase& { return *db; }));
+        bool shouldPersistKnownName = maybeKnownName != kj::none && !knownActorNamePersisted;
         auto makeActorCache =
-            [this, maybeOpenedDb = kj::mv(maybeOpenedDb)](const ActorCache::SharedLru& sharedLru,
+            [this,
+                maybeKnownName = maybeKnownName.map([](kj::String& name) {
+                  return kj::str(name);
+                }),
+                shouldPersistKnownName,
+                maybeOpenedDb = kj::mv(maybeOpenedDb)](const ActorCache::SharedLru& sharedLru,
                 OutputGate& outputGate,
                 ActorCache::Hooks& hooks,
                 SqliteObserver& sqliteObserver) mutable {
@@ -2789,6 +2795,13 @@ class Server::WorkerService final: public Service,
                 auto path = getSqlitePathForId(selfId);
                 db = kj::heap<SqliteDatabase>(
                     as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+              }
+              KJ_IF_SOME(name, maybeKnownName) {
+                if (shouldPersistKnownName) {
+                  SqliteMetadata metadata(*db);
+                  metadata.setActorName(name, /*allowUnconfirmed=*/false);
+                  knownActorNamePersisted = true;
+                }
               }
               // Before we do anything, make sure the database is in WAL mode. We also need to
               // do this after reset() is used, so register a callback for that.
