@@ -5875,5 +5875,100 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
   auto conn = test.connect("test-addr");
   conn.httpGet200("/", "DO actor test passed!");
 }
+
+KJ_TEST("Server: workerdDebugPort WebSocket passthrough via WorkerEntrypoint") {
+  // This test verifies that a WebSocket obtained via the debug port can be passed through
+  // a service binding response (from a WorkerEntrypoint). This was previously broken because
+  // the debug port connection was destroyed when the intermediate IoContext finished.
+  TestServer test(R"((
+    services = [
+      ( name = "target-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export default {
+                `  async fetch(request) {
+                `    // Accept WebSocket upgrade and echo messages with a prefix
+                `    const upgradeHeader = request.headers.get("Upgrade");
+                `    if (upgradeHeader === "websocket") {
+                `      const pair = new WebSocketPair();
+                `      pair[1].accept();
+                `      pair[1].addEventListener("message", (e) => {
+                `        pair[1].send("echo:" + e.data);
+                `      });
+                `      return new Response(null, { status: 101, webSocket: pair[0] });
+                `    }
+                `    return new Response("Not a WebSocket request");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "proxy-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `
+                `// This WorkerEntrypoint gets a WebSocket via debug port and passes it through
+                `export class Proxy extends WorkerEntrypoint {
+                `  async fetch(request) {
+                `    const client = await this.env.debugPort.connect("debug-addr");
+                `    const fetcher = await client.getEntrypoint("target-service");
+                `    const response = await fetcher.fetch(request);
+                `    if (response.webSocket) {
+                `      // Pass through the WebSocket from the debug port
+                `      return new Response(null, { status: 101, webSocket: response.webSocket });
+                `    }
+                `    return response;
+                `  }
+                `}
+                `
+                `export default {
+                `  async fetch(request, env) {
+                `    // Route through the Proxy entrypoint to test WebSocket passthrough
+                `    return env.proxy.fetch(request);
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "debugPort", workerdDebugPort = void ),
+            ( name = "proxy", service = (name = "proxy-service", entrypoint = "Proxy") )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "proxy-service" )
+    ]
+  ))"_kj);
+
+  test.server.enableDebugPort(kj::str("debug-addr"));
+  test.server.allowExperimental();
+
+  test.start();
+
+  // Connect and upgrade to WebSocket
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // Send a message and verify we get the echoed response
+  // WebSocket frame: 0x81 = final frame + text, 0x05 = payload length 5
+  constexpr kj::StringPtr testMessage = "hello"_kj;
+  wsConn.send(kj::str("\x81\x05", testMessage));
+  wsConn.recvWebSocket("echo:hello");
+
+  // Send another message to verify the connection stays alive
+  constexpr kj::StringPtr testMessage2 = "world"_kj;
+  wsConn.send(kj::str("\x81\x05", testMessage2));
+  wsConn.recvWebSocket("echo:world");
+}
 }  // namespace
 }  // namespace workerd::server

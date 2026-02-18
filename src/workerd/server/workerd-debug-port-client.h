@@ -17,8 +17,23 @@ class Fetcher;
 
 namespace workerd::server {
 
-// Holds the I/O state for a debug port connection.
-struct DebugPortConnectionState {
+// Holds the I/O state for a debug port connection: the TCP stream, capnp RPC client,
+// and debug port capability. Refcounted to support deferred proxying - response bodies
+// and WebSockets are proxied through the capnp connection, so it must stay alive until
+// they're fully consumed. See WorkerdBootstrapSubrequestChannel::startRequest().
+class DebugPortConnectionState: public kj::Refcounted {
+ public:
+  DebugPortConnectionState(kj::Own<kj::AsyncIoStream> connection,
+      kj::Own<capnp::TwoPartyClient> rpcClient,
+      rpc::WorkerdDebugPort::Client debugPort)
+      : connection(kj::mv(connection)),
+        rpcClient(kj::mv(rpcClient)),
+        debugPort(kj::mv(debugPort)) {}
+
+  kj::Own<DebugPortConnectionState> addRef() {
+    return kj::addRef(*this);
+  }
+
   kj::Own<kj::AsyncIoStream> connection;
   kj::Own<capnp::TwoPartyClient> rpcClient;
   rpc::WorkerdDebugPort::Client debugPort;
@@ -30,6 +45,7 @@ struct DebugPortConnectionState {
 class WorkerdDebugPortClient: public jsg::Object {
  public:
   // Create a WorkerdDebugPortClient with an established connection.
+  // Takes an IoOwn reference to the connection state.
   explicit WorkerdDebugPortClient(IoOwn<DebugPortConnectionState> state): state(kj::mv(state)) {}
 
   // Get access to a stateless entrypoint on the remote workerd instance.
