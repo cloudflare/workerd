@@ -51,7 +51,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // machines before being considered durable.
   explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       OutputGate& outputGate,
-      kj::Function<kj::Promise<void>()> commitCallback,
+      kj::Function<kj::Promise<void>(SpanParent)> commitCallback,
       Hooks& hooks = Hooks::getDefaultHooks(),
       bool debugAlarmSync = false);
 
@@ -109,7 +109,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
  private:
   kj::Own<SqliteDatabase> db;
   OutputGate& outputGate;
-  kj::Function<kj::Promise<void>()> commitCallback;
+  kj::Function<kj::Promise<void>(SpanParent)> commitCallback;
   Hooks& hooks;
   SqliteKv kv;
   SqliteMetadata metadata;
