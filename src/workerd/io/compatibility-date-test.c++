@@ -143,9 +143,7 @@ KJ_TEST("compatibility flag parsing") {
       "2021-05-17", {"unknown_feature"_kj}, "()", {"No such compatibility flag: unknown_feature"});
 
   expectCompileCompatibilityFlags("2252-04-01", {}, "()",
-      {kj::str(
-          "Can't set compatibility date in the future: \"2252-04-01\". Today's date (UTC) is \"",
-          currentDateStr(), "\".")},
+      {"Can't set compatibility date in the future: 2252-04-01"_kj},
       CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE);
 
   expectCompileCompatibilityFlags("2252-04-01", {}, "()",
