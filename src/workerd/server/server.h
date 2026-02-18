@@ -9,7 +9,6 @@
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker.h>
-#include <workerd/server/alarm-scheduler.h>
 #include <workerd/server/workerd.capnp.h>
 
 #include <kj/async-io.h>
@@ -196,9 +195,6 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
-  // Initialized in startAlarmScheduler().
-  kj::Own<AlarmScheduler> alarmScheduler;
-
   // An HttpServer object maintained in a linked list.
   struct ListedHttpServer {
     Server& owner;
@@ -317,9 +313,6 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen);
-
-  // Must be called after startServices!
-  void startAlarmScheduler(config::Config::Reader config);
 
   kj::Promise<void> listenOnSockets(config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
