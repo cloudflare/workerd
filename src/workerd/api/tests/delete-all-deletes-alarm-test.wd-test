@@ -1,0 +1,38 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "delete-all-deletes-alarm-enabled",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "delete-all-deletes-alarm-test.js" )
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "delete_all_deletes_alarm"],
+        durableObjectNamespaces = [
+          (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+          (name = "EXPECT_ALARM_DELETED", text = "true"),
+        ],
+      )
+    ),
+    ( name = "delete-all-preserves-alarm-disabled",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "delete-all-deletes-alarm-test.js" )
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "delete_all_preserves_alarm"],
+        durableObjectNamespaces = [
+          (className = "DurableObjectExample", uniqueKey = "310bd0cbd803ef7883a1ee9d86cce06f"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+          (name = "EXPECT_ALARM_DELETED", text = "false"),
+        ],
+      )
+    ),
+  ],
+);
