@@ -9,6 +9,8 @@ import {
   PerformanceResourceTiming,
   createHistogram,
   monitorEventLoopDelay,
+  eventLoopUtilization,
+  timerify,
   constants,
 } from 'node:perf_hooks';
 import {
@@ -32,6 +34,8 @@ export const testPerformanceExports = {
     ok(PerformanceResourceTiming);
     ok(createHistogram);
     ok(monitorEventLoopDelay);
+    ok(eventLoopUtilization);
+    ok(timerify);
     ok(constants);
 
     // Test that performance is an instance of Performance
@@ -42,17 +46,37 @@ export const testPerformanceExports = {
 export const testPerformanceConstants = {
   test() {
     deepStrictEqual(constants, {
-      NODE_PERFORMANCE_GC_FLAGS_ALL_AVAILABLE_GARBAGE: 16,
-      NODE_PERFORMANCE_GC_FLAGS_ALL_EXTERNAL_MEMORY: 32,
-      NODE_PERFORMANCE_GC_FLAGS_CONSTRUCT_RETAINED: 2,
-      NODE_PERFORMANCE_GC_FLAGS_FORCED: 4,
-      NODE_PERFORMANCE_GC_FLAGS_NO: 0,
-      NODE_PERFORMANCE_GC_FLAGS_SCHEDULE_IDLE: 64,
-      NODE_PERFORMANCE_GC_FLAGS_SYNCHRONOUS_PHANTOM_PROCESSING: 8,
-      NODE_PERFORMANCE_GC_INCREMENTAL: 8,
+      // GC type constants
       NODE_PERFORMANCE_GC_MAJOR: 4,
       NODE_PERFORMANCE_GC_MINOR: 1,
+      NODE_PERFORMANCE_GC_INCREMENTAL: 8,
       NODE_PERFORMANCE_GC_WEAKCB: 16,
+
+      // GC flags constants
+      NODE_PERFORMANCE_GC_FLAGS_NO: 0,
+      NODE_PERFORMANCE_GC_FLAGS_CONSTRUCT_RETAINED: 2,
+      NODE_PERFORMANCE_GC_FLAGS_FORCED: 4,
+      NODE_PERFORMANCE_GC_FLAGS_SYNCHRONOUS_PHANTOM_PROCESSING: 8,
+      NODE_PERFORMANCE_GC_FLAGS_ALL_AVAILABLE_GARBAGE: 16,
+      NODE_PERFORMANCE_GC_FLAGS_ALL_EXTERNAL_MEMORY: 32,
+      NODE_PERFORMANCE_GC_FLAGS_SCHEDULE_IDLE: 64,
+
+      // Entry type constants
+      NODE_PERFORMANCE_ENTRY_TYPE_GC: 0,
+      NODE_PERFORMANCE_ENTRY_TYPE_HTTP: 1,
+      NODE_PERFORMANCE_ENTRY_TYPE_HTTP2: 2,
+      NODE_PERFORMANCE_ENTRY_TYPE_NET: 3,
+      NODE_PERFORMANCE_ENTRY_TYPE_DNS: 4,
+
+      // Milestone constants
+      NODE_PERFORMANCE_MILESTONE_TIME_ORIGIN_TIMESTAMP: 0,
+      NODE_PERFORMANCE_MILESTONE_TIME_ORIGIN: 1,
+      NODE_PERFORMANCE_MILESTONE_ENVIRONMENT: 2,
+      NODE_PERFORMANCE_MILESTONE_NODE_START: 3,
+      NODE_PERFORMANCE_MILESTONE_V8_START: 4,
+      NODE_PERFORMANCE_MILESTONE_LOOP_START: 5,
+      NODE_PERFORMANCE_MILESTONE_LOOP_EXIT: 6,
+      NODE_PERFORMANCE_MILESTONE_BOOTSTRAP_COMPLETE: 7,
     });
     ok(Object.isFrozen(constants));
   },
@@ -80,10 +104,142 @@ export const testPerformanceBasicFunctionality = {
 
 export const testUnimplementedMethods = {
   test() {
+    // These methods throw because they cannot be meaningfully stubbed
     throws(() => createHistogram(), { message: /is not implemented/ });
     throws(() => monitorEventLoopDelay(), {
       message: /is not implemented/,
     });
+  },
+};
+
+export const testStandaloneEventLoopUtilization = {
+  test() {
+    // eventLoopUtilization returns stub values for compatibility
+    const result = eventLoopUtilization();
+    ok(typeof result === 'object', 'should return an object');
+    strictEqual(result.idle, 0, 'idle should be 0');
+    strictEqual(result.active, 0, 'active should be 0');
+    strictEqual(result.utilization, 0, 'utilization should be 0');
+
+    // Should accept optional parameters without error
+    const result2 = eventLoopUtilization(result);
+    ok(
+      typeof result2 === 'object',
+      'should return an object with one argument'
+    );
+
+    const result3 = eventLoopUtilization(result, result2);
+    ok(
+      typeof result3 === 'object',
+      'should return an object with two arguments'
+    );
+  },
+};
+
+export const testStandaloneTimerify = {
+  test() {
+    // timerify returns the function as-is (stub behavior)
+    const testFn = () => 42;
+    const timerified = timerify(testFn);
+
+    strictEqual(timerified, testFn, 'timerify should return the same function');
+    strictEqual(timerified(), 42, 'timerified function should work correctly');
+  },
+};
+
+export const testPerformanceNodeTiming = {
+  test() {
+    // nodeTiming is a Node.js-specific property
+    ok(perfHooksPerformance.nodeTiming, 'nodeTiming should exist');
+
+    const nodeTiming = perfHooksPerformance.nodeTiming;
+    strictEqual(nodeTiming.name, 'node', 'name should be "node"');
+    strictEqual(nodeTiming.entryType, 'node', 'entryType should be "node"');
+    strictEqual(
+      typeof nodeTiming.startTime,
+      'number',
+      'startTime should be a number'
+    );
+    strictEqual(
+      typeof nodeTiming.duration,
+      'number',
+      'duration should be a number'
+    );
+    strictEqual(
+      typeof nodeTiming.nodeStart,
+      'number',
+      'nodeStart should be a number'
+    );
+    strictEqual(
+      typeof nodeTiming.v8Start,
+      'number',
+      'v8Start should be a number'
+    );
+    strictEqual(
+      typeof nodeTiming.bootstrapComplete,
+      'number',
+      'bootstrapComplete should be a number'
+    );
+    strictEqual(
+      typeof nodeTiming.environment,
+      'number',
+      'environment should be a number'
+    );
+    strictEqual(
+      typeof nodeTiming.loopStart,
+      'number',
+      'loopStart should be a number'
+    );
+    strictEqual(
+      typeof nodeTiming.loopExit,
+      'number',
+      'loopExit should be a number'
+    );
+    strictEqual(
+      typeof nodeTiming.idleTime,
+      'number',
+      'idleTime should be a number'
+    );
+
+    // toJSON should work
+    ok(typeof nodeTiming.toJSON === 'function', 'toJSON should be a function');
+    const json = nodeTiming.toJSON();
+    ok(typeof json === 'object', 'toJSON should return an object');
+  },
+};
+
+export const testPerformanceEventLoopUtilization = {
+  test() {
+    // performance.eventLoopUtilization() should return stub values (not throw)
+    const result = perfHooksPerformance.eventLoopUtilization();
+    ok(typeof result === 'object', 'should return an object');
+    strictEqual(result.idle, 0, 'idle should be 0');
+    strictEqual(result.active, 0, 'active should be 0');
+    strictEqual(result.utilization, 0, 'utilization should be 0');
+  },
+};
+
+export const testPerformanceTimerify = {
+  test() {
+    // performance.timerify() should return the function as-is (stub behavior)
+    const testFn = () => 'test';
+    const timerified = perfHooksPerformance.timerify(testFn);
+
+    strictEqual(timerified, testFn, 'timerify should return the same function');
+    strictEqual(
+      timerified(),
+      'test',
+      'timerified function should work correctly'
+    );
+  },
+};
+
+export const testPerformanceMarkResourceTiming = {
+  test() {
+    // markResourceTiming should not throw (no-op stub)
+    perfHooksPerformance.markResourceTiming();
+    // If we get here without throwing, the test passes
+    ok(true, 'markResourceTiming should not throw');
   },
 };
 

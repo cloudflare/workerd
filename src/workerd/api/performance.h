@@ -461,10 +461,25 @@ class Performance: public EventTarget {
       jsg::Optional<kj::String> maybeEndMark = kj::none);
 
   void setResourceTimingBufferSize(uint32_t size);
-  void eventLoopUtilization();
 
-  // In the browser, this function is not public.  However, it must be used inside fetch
-  // which is a Node.js dependency, not a internal module
+  // Node.js-specific performance extensions.
+  // These are provided as stubs for compatibility with code that expects Node.js APIs.
+
+  // EventLoopUtilization represents the utilization of the event loop.
+  // In workerd, we return stub values since actual event loop metrics are not available.
+  struct EventLoopUtilization {
+    double idle = 0;
+    double active = 0;
+    double utilization = 0;
+
+    JSG_STRUCT(idle, active, utilization);
+  };
+
+  EventLoopUtilization eventLoopUtilization();
+
+  // In the browser, this function is not public. However, it must be used inside fetch
+  // which is a Node.js dependency, not an internal module.
+  // Returns void as a no-op stub since resource timing is not applicable in Workers.
   void markResourceTiming();
   jsg::Function<void()> timerify(jsg::Lock& js, jsg::Function<void()> fn);
 
@@ -503,12 +518,12 @@ class Performance: public EventTarget {
 };
 
 #define EW_PERFORMANCE_ISOLATE_TYPES                                                               \
-  api::Performance, api::PerformanceMark, api::PerformanceMeasure, api::PerformanceMark::Options,  \
-      api::PerformanceMeasure::Options, api::PerformanceMeasure::Entry,                            \
-      api::PerformanceObserverEntryList, api::PerformanceEntry, api::PerformanceResourceTiming,    \
-      api::PerformanceObserver, api::PerformanceObserver::ObserveOptions,                          \
-      api::PerformanceObserver::CallbackOptions, api::EventCounts,                                 \
-      api::EventCounts::EntryIterator, api::EventCounts::EntryIterator::Next,                      \
+  api::Performance, api::Performance::EventLoopUtilization, api::PerformanceMark,                  \
+      api::PerformanceMeasure, api::PerformanceMark::Options, api::PerformanceMeasure::Options,    \
+      api::PerformanceMeasure::Entry, api::PerformanceObserverEntryList, api::PerformanceEntry,    \
+      api::PerformanceResourceTiming, api::PerformanceObserver,                                    \
+      api::PerformanceObserver::ObserveOptions, api::PerformanceObserver::CallbackOptions,         \
+      api::EventCounts, api::EventCounts::EntryIterator, api::EventCounts::EntryIterator::Next,    \
       api::EventCounts::KeyIterator, api::EventCounts::KeyIterator::Next,                          \
       api::EventCounts::ValueIterator, api::EventCounts::ValueIterator::Next
 

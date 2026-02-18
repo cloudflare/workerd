@@ -7,10 +7,13 @@ import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import { default as util } from 'node-internal:util';
 
 export const constants = Object.freeze({
+  // GC type constants
   NODE_PERFORMANCE_GC_MAJOR: 4,
   NODE_PERFORMANCE_GC_MINOR: 1,
   NODE_PERFORMANCE_GC_INCREMENTAL: 8,
   NODE_PERFORMANCE_GC_WEAKCB: 16,
+
+  // GC flags constants
   NODE_PERFORMANCE_GC_FLAGS_NO: 0,
   NODE_PERFORMANCE_GC_FLAGS_CONSTRUCT_RETAINED: 2,
   NODE_PERFORMANCE_GC_FLAGS_FORCED: 4,
@@ -18,9 +21,107 @@ export const constants = Object.freeze({
   NODE_PERFORMANCE_GC_FLAGS_ALL_AVAILABLE_GARBAGE: 16,
   NODE_PERFORMANCE_GC_FLAGS_ALL_EXTERNAL_MEMORY: 32,
   NODE_PERFORMANCE_GC_FLAGS_SCHEDULE_IDLE: 64,
+
+  // Entry type constants
+  NODE_PERFORMANCE_ENTRY_TYPE_GC: 0,
+  NODE_PERFORMANCE_ENTRY_TYPE_HTTP: 1,
+  NODE_PERFORMANCE_ENTRY_TYPE_HTTP2: 2,
+  NODE_PERFORMANCE_ENTRY_TYPE_NET: 3,
+  NODE_PERFORMANCE_ENTRY_TYPE_DNS: 4,
+
+  // Milestone constants
+  NODE_PERFORMANCE_MILESTONE_TIME_ORIGIN_TIMESTAMP: 0,
+  NODE_PERFORMANCE_MILESTONE_TIME_ORIGIN: 1,
+  NODE_PERFORMANCE_MILESTONE_ENVIRONMENT: 2,
+  NODE_PERFORMANCE_MILESTONE_NODE_START: 3,
+  NODE_PERFORMANCE_MILESTONE_V8_START: 4,
+  NODE_PERFORMANCE_MILESTONE_LOOP_START: 5,
+  NODE_PERFORMANCE_MILESTONE_LOOP_EXIT: 6,
+  NODE_PERFORMANCE_MILESTONE_BOOTSTRAP_COMPLETE: 7,
 });
 
-export const performance = globalThis.performance;
+// Type definitions for Node.js-specific extensions
+export interface EventLoopUtilization {
+  idle: number;
+  active: number;
+  utilization: number;
+}
+
+export interface PerformanceNodeTiming {
+  name: string;
+  entryType: string;
+  startTime: number;
+  duration: number;
+  nodeStart: number;
+  v8Start: number;
+  bootstrapComplete: number;
+  environment: number;
+  loopStart: number;
+  loopExit: number;
+  idleTime: number;
+  toJSON(): object;
+}
+
+// Standalone function exports for Node.js compatibility
+export function eventLoopUtilization(
+  _utilization1?: EventLoopUtilization,
+  _utilization2?: EventLoopUtilization
+): EventLoopUtilization {
+  // Return stub values - actual event loop utilization is not available in workerd
+  return { idle: 0, active: 0, utilization: 0 };
+}
+
+export function timerify<T extends (...params: unknown[]) => unknown>(
+  fn: T
+): T {
+  // Return the function as-is - timing wrapper is not implemented in workerd
+  return fn;
+}
+
+// Create nodeTiming stub object
+const nodeTimingStub: PerformanceNodeTiming = {
+  name: 'node',
+  entryType: 'node',
+  startTime: 0,
+  duration: 0,
+  nodeStart: 0,
+  v8Start: 0,
+  bootstrapComplete: 0,
+  environment: 0,
+  loopStart: 0,
+  loopExit: 0,
+  idleTime: 0,
+  toJSON() {
+    return this;
+  },
+};
+
+// Create a Proxy to wrap globalThis.performance with Node.js-specific extensions.
+// Using a Proxy ensures that method calls are properly delegated to the original
+// performance object with the correct `this` binding.
+export const performance = new Proxy(globalThis.performance, {
+  get(target, prop, _receiver) {
+    // Add Node.js-specific nodeTiming property
+    if (prop === 'nodeTiming') {
+      return nodeTimingStub;
+    }
+    // For all other properties, delegate to the original performance object
+    const value = Reflect.get(target, prop, target);
+    // Bind methods to the original target to maintain correct `this` context
+    if (typeof value === 'function') {
+      return value.bind(target);
+    }
+    return value;
+  },
+  has(target, prop) {
+    if (prop === 'nodeTiming') {
+      return true;
+    }
+    return Reflect.has(target, prop);
+  },
+}) as typeof globalThis.performance & {
+  nodeTiming: PerformanceNodeTiming;
+};
 
 export function createHistogram(): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('createHistogram');
@@ -51,6 +152,8 @@ export default {
   PerformanceResourceTiming,
   monitorEventLoopDelay,
   createHistogram,
+  eventLoopUtilization,
+  timerify,
   performance,
   constants,
 };

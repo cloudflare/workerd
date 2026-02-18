@@ -271,12 +271,19 @@ kj::ArrayPtr<const kj::StringPtr> PerformanceObserver::getSupportedEntryTypes() 
   return supportedEntryTypes.asPtr();
 }
 
-void Performance::eventLoopUtilization() {
-  JSG_FAIL_REQUIRE(Error, "Performance.eventLoopUtilization is not implemented");
+Performance::EventLoopUtilization Performance::eventLoopUtilization() {
+  // Return stub values - actual event loop utilization metrics are not available in workerd.
+  // This provides compatibility with code that expects Node.js-style performance APIs.
+  return EventLoopUtilization{
+    .idle = 0,
+    .active = 0,
+    .utilization = 0,
+  };
 }
 
 void Performance::markResourceTiming() {
-  JSG_FAIL_REQUIRE(Error, "Performance.markResourceTiming is not implemented");
+  // No-op stub - resource timing is not applicable in the Workers context.
+  // This provides compatibility with code that expects this API to exist.
 }
 
 jsg::Function<void()> Performance::timerify(jsg::Lock& js, jsg::Function<void()> fn) {
