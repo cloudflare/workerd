@@ -86,6 +86,7 @@ jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& functi
 ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
   return ExportedHandler{
     .fetch{mapAddRef(js, fetch)},
+    .connect{mapAddRef(js, connect)},
     .tail{mapAddRef(js, tail)},
     .trace{mapAddRef(js, trace)},
     .tailStream{mapAddRef(js, tailStream)},
@@ -116,6 +117,91 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope()
 void ServiceWorkerGlobalScope::clear() {
   removeAllHandlers();
   unhandledRejections.clear();
+}
+
+kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoStream& connection,
+    kj::HttpService::ConnectResponse& response,
+    kj::Maybe<kj::StringPtr> cfBlobJson,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
+  ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
+      "Connect ingress is not currently supported with Service Workers syntax.");
+  KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
+      "TCP ingress requires the experimental flag.");
+
+  KJ_IF_SOME(handler, eh.connect) {
+    // Has a connect handler!
+    kj::HttpHeaderTable table;
+    kj::HttpHeaders headers(table);
+    response.accept(200, "OK", headers);
+
+    // TODO(cleanup): There's a fair amount of duplication between this and
+    // the request() method, and much of this could likely be cleaned up to
+    // use co_awaits rather than the promise syntax.
+    auto ownConnection = newNeuterableIoStream(connection);
+    auto deferredNeuter = kj::defer([ownConnection = kj::addRef(*ownConnection)]() mutable {
+      ownConnection->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    });
+    KJ_ON_SCOPE_FAILURE(ownConnection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
+    auto conn2 = kj::addRef(*ownConnection);
+
+    auto& ioContext = IoContext::current();
+    jsg::Lock& js = lock;
+
+    CfProperty cf(cfBlobJson);
+
+    auto ownConn2 = kj::addRef(*ownConnection);
+    auto conn = newSystemMultiStream(ownConn2, ioContext);
+    auto jsInbound = js.alloc<ReadableStream>(ioContext, kj::mv(conn.readable));
+
+    kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
+    auto event = js.alloc<ConnectEvent>(kj::mv(jsInbound), kj::mv(cf));
+    auto promise = handler(js, kj::mv(event), eh.env.addRef(js), eh.getCtx());
+
+    auto canceled = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
+
+    return ioContext
+        .awaitJs(js,
+            promise.then(js,
+                ioContext.addFunctor([canceled = canceled->addWrappedRef(),
+                                         outbound = kj::mv(conn.writable), span = kj::mv(span)](
+                                         jsg::Lock& js, jsg::Ref<ReadableStream> jsOutbound) mutable
+                    -> IoOwn<kj::Promise<DeferredProxy<void>>> {
+      auto& context = IoContext::current();
+      span = kj::none;
+      if (*canceled) {
+        // The client disconnected before the response was ready. The outbound is a dangling
+        // reference, let's not use it.
+        return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
+      } else {
+        return context.addObject(kj::heap(jsOutbound->pumpTo(js, kj::mv(outbound), true)));
+      }
+    })))
+        .attach(
+            kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->getWrapped() = true; }))
+        .then(
+            [ownConnection = kj::mv(ownConnection), deferredNeuter = kj::mv(deferredNeuter)](
+                DeferredProxy<void> deferredProxy) mutable {
+      deferredProxy.proxyTask = deferredProxy.proxyTask
+                                    .then([connection = kj::addRef(*ownConnection)]() mutable {
+        connection->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
+      }, [connection = kj::addRef(*ownConnection)](kj::Exception&& e) mutable {
+        connection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+        kj::throwFatalException(kj::mv(e));
+      }).attach(kj::mv(deferredNeuter));
+
+      return deferredProxy;
+    },
+            [connection = kj::mv(conn2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
+      // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
+      //   so `deferredNeuter` hasn't been destroyed yet.
+      connection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+      kj::throwFatalException(kj::mv(e));
+    });
+  }
+  lock.logWarningOnce("Received a connect event but we lack a handler. "
+                      "Did you remember to export a connect() function?");
+  JSG_FAIL_REQUIRE(Error, "Handler does not export a connect() function.");
 }
 
 kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMethod method,
