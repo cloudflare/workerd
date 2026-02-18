@@ -17,6 +17,7 @@ KJ_TEST("SQLite-METADATA") {
 
   // Initial state has empty alarm
   KJ_EXPECT(metadata.getAlarm() == kj::none);
+  KJ_EXPECT(metadata.getActorName() == kj::none);
 
   // Can set alarm to an explicit time
   constexpr kj::Date anAlarmTime1 =
@@ -40,6 +41,19 @@ KJ_TEST("SQLite-METADATA") {
   metadata.setAlarm(kj::UNIX_EPOCH, /*allowUnconfirmed=*/false);
   KJ_EXPECT(metadata.getAlarm() == kj::UNIX_EPOCH);
 
+  // Can set and retrieve actor name.
+  metadata.setActorName("name1", /*allowUnconfirmed=*/false);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(metadata.getActorName()) == "name1");
+
+  // Updating alarm should not clear cached actor name.
+  metadata.setAlarm(anAlarmTime1, /*allowUnconfirmed=*/false);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(metadata.getActorName()) == "name1");
+
+  // Updating actor name should not clear cached alarm.
+  metadata.setActorName("name2", /*allowUnconfirmed=*/false);
+  KJ_EXPECT(metadata.getAlarm() == anAlarmTime1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(metadata.getActorName()) == "name2");
+
   // Can recreate table after resetting database
   metadata.setAlarm(anAlarmTime1, /*allowUnconfirmed=*/false);
   KJ_EXPECT(metadata.getAlarm() == anAlarmTime1);
@@ -55,6 +69,14 @@ KJ_TEST("SQLite-METADATA") {
   KJ_EXPECT(metadata.getAlarm() == anAlarmTime1);
   db.run("ROLLBACK TRANSACTION");
   KJ_EXPECT(metadata.getAlarm() == anAlarmTime2);
+
+  // Can invalidate actor name cache after rolling back.
+  metadata.setActorName("name3", /*allowUnconfirmed=*/false);
+  db.run("BEGIN TRANSACTION");
+  metadata.setActorName("name4", /*allowUnconfirmed=*/false);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(metadata.getActorName()) == "name4");
+  db.run("ROLLBACK TRANSACTION");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(metadata.getActorName()) == "name3");
 }
 
 }  // namespace

@@ -109,7 +109,10 @@ export default {
     this.commitTokensReceived.push(reqCommitToken);
 
     try {
-      const stub = env.db.get(env.db.idFromName('test'));
+      // Use a string-derived ID so Durable Object name persistence logic doesn't
+      // perturb sqlite metadata observed by D1 instrumentation tests.
+      const namedId = env.db.idFromName('test');
+      const stub = env.db.get(env.db.idFromString(namedId.toString()));
 
       // Add a commitToken to all responses.
       return stub

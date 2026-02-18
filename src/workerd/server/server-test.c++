@@ -2294,6 +2294,89 @@ KJ_TEST("Server: Durable Objects (on disk)") {
   }
 }
 
+KJ_TEST("Server: Durable Objects (on disk, idFromString then name survives restart)") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = request.url.endsWith("/by-name")
+                `        ? env.ns.idFromName("http://foo/")
+                `        : env.ns.idFromString("59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234")
+                `    let actor = env.ns.get(id)
+                `    return await actor.fetch(request)
+                `  }
+                `}
+                `export class MyActorClass {
+                `  constructor(state, env) {
+                `    this.id = state.id;
+                `    if (this.id.constructor.name != "DurableObjectId") {
+                `      throw new Error("durable ID should be type DurableObjectId, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
+                `  }
+                `  async fetch(request) {
+                `    return new Response(this.id.name || "missing");
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../var/do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+
+  {
+    TestServer test(config);
+    test.root->transfer(kj::Path({"var"_kj, "do-storage"_kj}),
+        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT, *dir, nullptr,
+        kj::TransferMode::LINK);
+
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/by-id", "missing");
+    conn.httpGet200("/by-name", "missing");
+    conn.httpGet200("/by-id", "missing");
+  }
+
+  {
+    TestServer test(config);
+    test.root->transfer(kj::Path({"var"_kj, "do-storage"_kj}),
+        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT, *dir, nullptr,
+        kj::TransferMode::LINK);
+
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/by-id", "http://foo/");
+  }
+}
+
 KJ_TEST("Server: Ephemeral Objects") {
   TestServer test(R"((
     services = [

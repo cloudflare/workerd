@@ -26,17 +26,21 @@ kj::Maybe<kj::Date> SqliteMetadata::getAlarm() {
 }
 
 bool SqliteMetadata::setAlarm(kj::Maybe<kj::Date> currentTime, bool allowUnconfirmed) {
-  KJ_IF_SOME(c, cacheState) {
-    if (c.hasAlarmTime && c.alarmTime == currentTime) {
-      return false;
-    }
+  if (cacheState == kj::none) {
+    cacheState = Cache{};
   }
+  auto oldCacheState = cacheState;
+  auto& cache = KJ_ASSERT_NONNULL(cacheState);
+  if (cache.hasAlarmTime && cache.alarmTime == currentTime) {
+    return false;
+  }
+
   setAlarmUncached(currentTime, allowUnconfirmed);
-  db.onRollback([this, oldCacheState = cacheState]() { cacheState = oldCacheState; });
-  Cache cache;
+  db.onRollback([this, oldCacheState = kj::mv(oldCacheState)]() mutable {
+    cacheState = kj::mv(oldCacheState);
+  });
   cache.alarmTime = currentTime;
   cache.hasAlarmTime = true;
-  cacheState = kj::mv(cache);
   return true;
 }
 
@@ -96,21 +100,24 @@ kj::Maybe<kj::String> SqliteMetadata::getActorName() {
 }
 
 bool SqliteMetadata::setActorName(kj::StringPtr name, bool allowUnconfirmed) {
-  KJ_IF_SOME(c, cacheState) {
-    if (c.hasActorName) {
-      KJ_IF_SOME(existingName, c.actorName) {
-        if (existingName == name) {
-          return false;
-        }
+  if (cacheState == kj::none) {
+    cacheState = Cache{};
+  }
+  auto oldCacheState = cacheState;
+  auto& cache = KJ_ASSERT_NONNULL(cacheState);
+  if (cache.hasActorName) {
+    KJ_IF_SOME(existingName, cache.actorName) {
+      if (existingName == name) {
+        return false;
       }
     }
   }
   setActorNameUncached(name, allowUnconfirmed);
-  db.onRollback([this, oldCacheState = cacheState]() { cacheState = oldCacheState; });
-  Cache cache;
+  db.onRollback([this, oldCacheState = kj::mv(oldCacheState)]() mutable {
+    cacheState = kj::mv(oldCacheState);
+  });
   cache.actorName = kj::str(name);
   cache.hasActorName = true;
-  cacheState = kj::mv(cache);
   return true;
 }
 

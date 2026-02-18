@@ -2377,10 +2377,17 @@ class Server::WorkerService final: public Service,
 
       void maybeLearnNameFromId(const Worker::Actor::Id& incomingId) {
         KJ_IF_SOME(name, ActorNamespace::getDurableObjectName(incomingId)) {
+          bool learnedName = false;
           KJ_IF_SOME(info, classAndId.tryGet<ClassAndId>()) {
-            ActorNamespace::setDurableObjectNameIfMissing(info.id, name);
+            learnedName = ActorNamespace::setDurableObjectNameIfMissing(info.id, name) || learnedName;
           }
-          maybePersistActorName(name);
+          if (knownActorName == kj::none) {
+            knownActorName = kj::str(name);
+            learnedName = true;
+          }
+          if (learnedName || !knownActorNamePersisted) {
+            maybePersistActorName(name);
+          }
         }
       }
 
@@ -2533,6 +2540,9 @@ class Server::WorkerService final: public Service,
       // ID of this facet. Initialized when getFacetId() is first called.
       kj::Maybe<uint> facetId;
 
+      kj::Maybe<kj::String> knownActorName;
+      bool knownActorNamePersisted = false;
+
       ActorMap facets;
 
       // Get the facet ID for this facet. The root facet always has ID zero, but all other facets
@@ -2592,20 +2602,19 @@ class Server::WorkerService final: public Service,
         }
       }
 
-      kj::Maybe<kj::String> maybeRestorePersistedActorName(Worker::Actor::Id& id) {
+      kj::Maybe<kj::String> maybeRestorePersistedActorName(
+          Worker::Actor::Id& id, kj::Maybe<SqliteDatabase&> maybeDb) {
         KJ_IF_SOME(name, ActorNamespace::getDurableObjectName(id)) {
+          knownActorName = kj::str(name);
           return kj::str(name);
         }
 
-        auto& as = KJ_UNWRAP_OR(ns.actorStorage, return kj::none);
-        auto path = getSqlitePathForId(getFacetId());
-
-        KJ_UNWRAP_OR(as.directory->tryOpenFile(path, kj::WriteMode::MODIFY), return kj::none);
-
-        SqliteDatabase db(as.vfs, kj::mv(path), kj::WriteMode::MODIFY);
+        auto& db = KJ_UNWRAP_OR(maybeDb, return kj::none);
         SqliteMetadata metadata(db);
         KJ_IF_SOME(name, metadata.getActorName()) {
           ActorNamespace::setDurableObjectNameIfMissing(id, name);
+          knownActorName = kj::str(name);
+          knownActorNamePersisted = true;
           return kj::mv(name);
         }
 
@@ -2613,11 +2622,19 @@ class Server::WorkerService final: public Service,
       }
 
       void maybePersistActorName(kj::StringPtr name) {
+        KJ_IF_SOME(existingName, knownActorName) {
+          if (knownActorNamePersisted && existingName == name) {
+            return;
+          }
+        }
+
         auto& as = KJ_UNWRAP_OR(ns.actorStorage, return);
         auto path = getSqlitePathForId(getFacetId());
         SqliteDatabase db(as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
         SqliteMetadata metadata(db);
         metadata.setActorName(name, /*allowUnconfirmed=*/false);
+        knownActorName = kj::str(name);
+        knownActorNamePersisted = true;
       }
 
       void deleteDescendantStorage(const kj::Directory& dir, uint parentId) {
@@ -2732,12 +2749,17 @@ class Server::WorkerService final: public Service,
       void start(kj::Own<ActorClass>& actorClass, Worker::Actor::Id& id) {
         KJ_REQUIRE(actor == nullptr);
 
-        auto maybeKnownName = maybeRestorePersistedActorName(id);
+        kj::Maybe<kj::Own<SqliteDatabase>> maybeOpenedDb;
+        KJ_IF_SOME(as, ns.actorStorage) {
+          auto path = getSqlitePathForId(getFacetId());
+          maybeOpenedDb =
+              kj::heap<SqliteDatabase>(as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+        }
+
+        maybeRestorePersistedActorName(id, maybeOpenedDb.map(
+            [](kj::Own<SqliteDatabase>& db) -> SqliteDatabase& { return *db; }));
         auto makeActorCache =
-            [this,
-                maybeKnownName = maybeKnownName.map([](kj::String& name) {
-                  return kj::str(name);
-                })](const ActorCache::SharedLru& sharedLru,
+            [this, maybeOpenedDb = kj::mv(maybeOpenedDb)](const ActorCache::SharedLru& sharedLru,
                 OutputGate& outputGate,
                 ActorCache::Hooks& hooks,
                 SqliteObserver& sqliteObserver) mutable {
@@ -2759,14 +2781,15 @@ class Server::WorkerService final: public Service,
               }
 
               uint selfId = getFacetId();
-              auto path = getSqlitePathForId(selfId);
-              auto db = kj::heap<SqliteDatabase>(
-                  as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
-              KJ_IF_SOME(name, maybeKnownName) {
-                SqliteMetadata metadata(*db);
-                metadata.setActorName(name, /*allowUnconfirmed=*/false);
+              kj::Own<SqliteDatabase> db;
+              KJ_IF_SOME(openedDb, maybeOpenedDb) {
+                db = kj::mv(openedDb);
+                maybeOpenedDb = kj::none;
+              } else {
+                auto path = getSqlitePathForId(selfId);
+                db = kj::heap<SqliteDatabase>(
+                    as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
               }
-
               // Before we do anything, make sure the database is in WAL mode. We also need to
               // do this after reset() is used, so register a callback for that.
               db->run("PRAGMA journal_mode=WAL;");
