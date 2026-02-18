@@ -1658,8 +1658,14 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       auto memory = info[0].As<v8::WasmMemoryObject>();
       auto offset = info[1].As<v8::Uint32>()->Value();
       auto backingStore = memory->Buffer()->GetBackingStore();
-      Worker::Isolate::from(jsg::Lock::from(isolate))
-          .registerWasmShutdownSignal(kj::mv(backingStore), offset);
+      KJ_IF_SOME(e, kj::runCatchingExceptions([&] {
+        Worker::Isolate::from(jsg::Lock::from(isolate))
+            .registerWasmShutdownSignal(kj::mv(backingStore), offset);
+      })) {
+        // Convert KJ exception to a JavaScript Error object
+        auto message = jsg::v8Str(isolate, e.getDescription());
+        isolate->ThrowException(v8::Exception::Error(message));
+      }
     });
   };
   auto registerFn = jsg::check(v8::Function::New(context, registerCb));
@@ -1675,12 +1681,31 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   //   wa                   - the WebAssembly object
   auto shimSource = jsg::v8Str(isolate,
       "(function(originalInstantiate, originalInstance, registerShutdown, wa) {\n"
-      "  function checkExports(instance) {\n"
+      "  // Find memory from exports or imports. Returns Memory instance or undefined.\n"
+      "  function findMemory(instance, imports) {\n"
+      "    // First, check if memory is exported\n"
+      "    var memory = instance.exports['memory'];\n"
+      "    if (memory instanceof wa.Memory) return memory;\n"
+      "    // Otherwise, search imports for a Memory instance\n"
+      "    if (imports) {\n"
+      "      for (var ns in imports) {\n"
+      "        var mod = imports[ns];\n"
+      "        if (mod && typeof mod === 'object') {\n"
+      "          for (var key in mod) {\n"
+      "            if (mod[key] instanceof wa.Memory) return mod[key];\n"
+      "          }\n"
+      "        }\n"
+      "      }\n"
+      "    }\n"
+      "    return undefined;\n"
+      "  }\n"
+      "\n"
+      "  function checkExports(instance, imports) {\n"
       "    var exports = instance.exports;\n"
       "    var shutdownGlobal = exports['signal_address_v1'];\n"
       "    if (shutdownGlobal instanceof wa.Global) {\n"
-      "      var memory = exports['memory'];\n"
-      "      if (memory instanceof wa.Memory) {\n"
+      "      var memory = findMemory(instance, imports);\n"
+      "      if (memory) {\n"
       "        registerShutdown(memory, shutdownGlobal.value);\n"
       "      }\n"
       "    }\n"
@@ -1690,14 +1715,14 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       "    return originalInstantiate.call(wa, moduleOrBytes, imports).then(function(result) {\n"
       "      // When called with bytes, result is {module, instance}.\n"
       "      // When called with a Module, result is just an Instance directly.\n"
-      "      checkExports(result.instance || result);\n"
+      "      checkExports(result.instance || result, imports);\n"
       "      return result;\n"
       "    });\n"
       "  };\n"
       "\n"
       "  wa.Instance = function Instance(module, imports) {\n"
       "    var instance = new originalInstance(module, imports);\n"
-      "    checkExports(instance);\n"
+      "    checkExports(instance, imports);\n"
       "    return instance;\n"
       "  };\n"
       "  wa.Instance.prototype = originalInstance.prototype;\n"
