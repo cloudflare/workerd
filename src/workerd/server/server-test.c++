@@ -2247,12 +2247,13 @@ KJ_TEST("Server: Durable Objects (on disk)") {
     conn.httpGet200("/bar",
         "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
 
-    // The storage directory contains .sqlite and .sqlite-wal files for both objects. Note that
-    // the `-shm` files are missing because SQLite doesn't actually tell the VFS to create these
-    // as separate files, it leaves it up to the VFS to decide how shared memory works, and our
-    // KJ-wrapping VFS currently doesn't put this in SHM files. If we were using a real disk
-    // directory, though, they would be there.
-    KJ_EXPECT(dir->openSubdir(kj::Path({"mykey"}))->listNames().size() == 4);
+    // The storage directory contains .sqlite and .sqlite-wal files for both objects, plus the
+    // per-namespace metadata.sqlite (alarm scheduler) and its WAL file. Note that the `-shm`
+    // files are missing because SQLite doesn't actually tell the VFS to create these as separate
+    // files, it leaves it up to the VFS to decide how shared memory works, and our KJ-wrapping
+    // VFS currently doesn't put this in SHM files. If we were using a real disk directory,
+    // though, they would be there.
+    KJ_EXPECT(dir->openSubdir(kj::Path({"mykey"}))->listNames().size() == 6);
     KJ_EXPECT(dir->exists(kj::Path(
         {"mykey", "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79.sqlite"})));
     KJ_EXPECT(dir->exists(kj::Path(
@@ -2261,10 +2262,12 @@ KJ_TEST("Server: Durable Objects (on disk)") {
         {"mykey", "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234.sqlite"})));
     KJ_EXPECT(dir->exists(kj::Path(
         {"mykey", "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234.sqlite-wal"})));
+    KJ_EXPECT(dir->exists(kj::Path({"mykey", "metadata.sqlite"})));
+    KJ_EXPECT(dir->exists(kj::Path({"mykey", "metadata.sqlite-wal"})));
   }
 
   // Having torn everything down, the WAL files should be gone.
-  KJ_EXPECT(dir->openSubdir(kj::Path({"mykey"}))->listNames().size() == 2);
+  KJ_EXPECT(dir->openSubdir(kj::Path({"mykey"}))->listNames().size() == 3);
   KJ_EXPECT(dir->exists(kj::Path(
       {"mykey", "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79.sqlite"})));
   KJ_EXPECT(dir->exists(kj::Path(
@@ -2287,6 +2290,102 @@ KJ_TEST("Server: Durable Objects (on disk)") {
         "/", "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 5");
     conn.httpGet200("/bar",
         "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 3");
+  }
+}
+
+KJ_TEST("Server: Durable Object alarm persistence (on disk)") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName("alarm-actor")
+                `    let actor = env.ns.get(id)
+                `    return await actor.fetch(request)
+                `  }
+                `}
+                `export class MyActorClass {
+                `  constructor(state, env) {
+                `    this.storage = state.storage;
+                `  }
+                `  async fetch(request) {
+                `    let url = new URL(request.url);
+                `    if (url.pathname === "/set") {
+                `      let time = parseInt(url.searchParams.get("t"));
+                `      await this.storage.setAlarm(time);
+                `      return new Response("alarm set to " + time);
+                `    } else if (url.pathname === "/get") {
+                `      let alarm = await this.storage.getAlarm();
+                `      return new Response("alarm=" + alarm);
+                `    } else {
+                `      return new Response("unknown path", {status: 404});
+                `    }
+                `  }
+                `  async alarm() {}
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "alarmkey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../var/do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+
+  // A far-future alarm time (won't fire during the test).
+  kj::StringPtr alarmTime = "4102444800000";
+
+  {
+    TestServer test(config);
+    test.root->transfer(kj::Path({"var"_kj, "do-storage"_kj}),
+        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT, *dir, nullptr,
+        kj::TransferMode::LINK);
+
+    test.start();
+    auto conn = test.connect("test-addr");
+
+    conn.httpGet200(kj::str("/set?t=", alarmTime), kj::str("alarm set to ", alarmTime));
+    conn.httpGet200("/get", kj::str("alarm=", alarmTime));
+  }
+
+  // Verify metadata.sqlite exists on disk in the namespace directory.
+  KJ_EXPECT(dir->exists(kj::Path({"alarmkey", "metadata.sqlite"})));
+
+  // Start a new server and verify the alarm is still there.
+  {
+    TestServer test(config);
+    test.root->transfer(kj::Path({"var"_kj, "do-storage"_kj}),
+        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT, *dir, nullptr,
+        kj::TransferMode::LINK);
+
+    test.start();
+    auto conn = test.connect("test-addr");
+
+    conn.httpGet200("/get", kj::str("alarm=", alarmTime));
   }
 }
 
@@ -4932,9 +5031,11 @@ KJ_TEST("Server: Durable Object facets") {
       kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.5.sqlite"})));
 
   // We didn't create any other durable objects in the namespace. All files in the namespace should
-  // be prefixed with our one DO ID.
+  // be prefixed with our one DO ID, except for metadata.sqlite (the per-namespace alarm scheduler).
   for (auto& name: nsDir->listNames()) {
-    KJ_EXPECT(name.startsWith("3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a."),
+    KJ_EXPECT(
+        name.startsWith("3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.") ||
+            name.startsWith("metadata.sqlite"),
         "unexpected file found in namespace storage", name);
   }
 

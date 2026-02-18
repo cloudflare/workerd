@@ -4,6 +4,7 @@
 
 #include "server.h"
 
+#include "alarm-scheduler.h"
 #include "container-client.h"
 #include "pyodide.h"
 #include "workerd-api.h"
@@ -1875,7 +1876,6 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<ActorClass>> actorClass;
     kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> cache;
     kj::Maybe<const kj::Directory&> actorStorage;
-    AlarmScheduler& alarmScheduler;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
     kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
@@ -1929,9 +1929,9 @@ class Server::WorkerService final: public Service,
       }
 
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
-      auto ns =
-          kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value, threadContext.getUnsafeTimer(),
-              threadContext.getByteStreamFactory(), network, dockerPath, waitUntilTasks);
+      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
+          kj::systemPreciseCalendarClock(), threadContext.getUnsafeTimer(),
+          threadContext.getByteStreamFactory(), network, dockerPath, waitUntilTasks);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -2035,7 +2035,7 @@ class Server::WorkerService final: public Service,
     auto linked = callback(*this, errorReporter);
 
     for (auto& ns: actorNamespaces) {
-      ns.value->link(linked.actorStorage, linked.alarmScheduler);
+      ns.value->link(linked.actorStorage);
     }
 
     ioChannels = kj::mv(linked);
@@ -2193,6 +2193,7 @@ class Server::WorkerService final: public Service,
    public:
     ActorNamespace(kj::Own<ActorClass> actorClass,
         const ActorConfig& config,
+        const kj::Clock& clock,
         kj::Timer& timer,
         capnp::ByteStreamFactory& byteStreamFactory,
         kj::Network& dockerNetwork,
@@ -2200,24 +2201,52 @@ class Server::WorkerService final: public Service,
         kj::TaskSet& waitUntilTasks)
         : actorClass(kj::mv(actorClass)),
           config(config),
+          clock(clock),
           timer(timer),
           byteStreamFactory(byteStreamFactory),
           dockerNetwork(dockerNetwork),
           dockerPath(dockerPath),
           waitUntilTasks(waitUntilTasks) {}
 
-    // Called at link time to provide needed resources.
-    void link(kj::Maybe<const kj::Directory&> serviceActorStorage,
-        kj::Maybe<AlarmScheduler&> alarmScheduler) {
+    void link(kj::Maybe<const kj::Directory&> serviceActorStorage) {
       KJ_IF_SOME(dir, serviceActorStorage) {
         KJ_IF_SOME(d, config.tryGet<Durable>()) {
-          // Create a subdirectory for this namespace based on the unique key.
           this->actorStorage.emplace(dir.openSubdir(
               kj::Path({d.uniqueKey}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY));
+
+          // Create per-namespace alarm scheduler backed by on-disk storage in the
+          // namespace directory, alongside the per-actor .sqlite files.
+          auto& as = KJ_ASSERT_NONNULL(this->actorStorage);
+          this->ownAlarmScheduler =
+              kj::heap<AlarmScheduler>(clock, timer, as.vfs, kj::Path({"metadata.sqlite"}));
         }
       }
 
-      this->alarmScheduler = alarmScheduler;
+      if (ownAlarmScheduler == kj::none) {
+        if (config.tryGet<Durable>() != kj::none) {
+          // No on-disk storage -- create an in-memory alarm scheduler.
+          auto memDir = kj::newInMemoryDirectory(clock);
+          auto vfs = kj::heap<SqliteDatabase::Vfs>(*memDir);
+          this->ownAlarmScheduler =
+              kj::heap<AlarmScheduler>(clock, timer, *vfs, kj::Path({"metadata.sqlite"}))
+                  .attach(kj::mv(vfs), kj::mv(memDir));
+        }
+      }
+
+      KJ_IF_SOME(sched, ownAlarmScheduler) {
+        this->alarmScheduler = *sched;
+
+        KJ_IF_SOME(d, config.tryGet<Durable>()) {
+          auto idFactory = kj::heap<ActorIdFactoryImpl>(d.uniqueKey);
+          sched->registerNamespace(d.uniqueKey,
+              [this, idFactory = kj::mv(idFactory)](
+                  kj::String idStr) mutable -> kj::Own<WorkerInterface> {
+            Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
+            auto actorContainer = this->getActorContainer(kj::mv(id));
+            return newPromisedWorkerInterface(actorContainer->startRequest({}));
+          });
+        }
+      }
     }
 
     const ActorConfig& getConfig() {
@@ -2874,6 +2903,7 @@ class Server::WorkerService final: public Service,
    private:
     kj::Own<ActorClass> actorClass;
     const ActorConfig& config;
+    const kj::Clock& clock;
 
     struct ActorStorage {
       kj::Own<const kj::Directory> directory;
@@ -2884,9 +2914,10 @@ class Server::WorkerService final: public Service,
             vfs(*directory) {}
     };
 
-    // Note: The Vfs must not be torn down until all actors have been torn down, so we have to
-    //   declare `actorStorage` before `actors`.
+    // Note: The Vfs, actorStorage, and ownAlarmScheduler must not be torn down until all actors
+    // have been torn down, so we declare them before `actors`.
     kj::Maybe<ActorStorage> actorStorage;
+    kj::Maybe<kj::Own<AlarmScheduler>> ownAlarmScheduler;
 
     // If the actor is broken, we remove it from the map. However, if it's just evicted due to
     // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
@@ -4570,7 +4601,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
   auto linkCallback = [this, def = kj::mv(def), totalActorChannels](WorkerService& workerService,
                           Worker::ValidationErrorReporter& errorReporter) mutable {
-    WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
+    WorkerService::LinkedIoChannels result;
 
     auto entrypointNames = workerService.getEntrypointNames();
     auto actorClassNames = workerService.getActorClassNames();
@@ -4672,24 +4703,6 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       } else {
         errorReporter.addError(kj::str("durableObjectStorage config refers to a service \"",
             diskName, "\", but no such service is defined."));
-      }
-    }
-
-    kj::HashMap<kj::StringPtr, WorkerService::ActorNamespace&> durableNamespacesByUniqueKey;
-    for (auto& [className, ns]: workerService.getActorNamespaces()) {
-      KJ_IF_SOME(config, ns->getConfig().tryGet<Server::Durable>()) {
-        auto& actorNs =
-            ns;  // clangd gets confused trying to use ns directly in the capture below??
-
-        auto idFactory = kj::heap<ActorIdFactoryImpl>(config.uniqueKey);
-
-        alarmScheduler->registerNamespace(config.uniqueKey,
-            [&actorNs, idFactory = kj::mv(idFactory)](
-                kj::String idStr) mutable -> kj::Own<WorkerInterface> {
-          Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
-          auto actorContainer = actorNs->getActorContainer(kj::mv(id));
-          return newPromisedWorkerInterface(actorContainer->startRequest({}));
-        });
       }
     }
 
@@ -5445,17 +5458,6 @@ kj::Promise<void> Server::run(
   co_return co_await listenPromise.exclusiveJoin(kj::mv(fatalPromise));
 }
 
-void Server::startAlarmScheduler(config::Config::Reader config) {
-  auto& clock = kj::systemPreciseCalendarClock();
-  auto dir = kj::newInMemoryDirectory(clock);
-  auto vfs = kj::heap<SqliteDatabase::Vfs>(*dir).attach(kj::mv(dir));
-
-  // TODO(someday): support persistent storage for alarms
-
-  alarmScheduler =
-      kj::heap<AlarmScheduler>(clock, timer, *vfs, kj::Path({"alarms.sqlite"})).attach(kj::mv(vfs));
-}
-
 // Configure and start the inspector socket, returning the port the socket started on.
 uint startInspector(
     kj::StringPtr inspectorAddress, Server::InspectorServiceIsolateRegistrar& registrar) {
@@ -5653,9 +5655,6 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
 
     return decltype(services)::Entry{kj::str("internet"_kj), kj::mv(service)};
   });
-
-  // Start the alarm scheduler before linking services
-  startAlarmScheduler(config);
 
   // Third pass: Cross-link services.
   for (auto& service: services) {
