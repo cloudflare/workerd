@@ -532,8 +532,36 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       // can avoid doing it in the future.
       auto backing = theStore->GetBackingStore();
 
-      auto ptr = static_cast<kj::byte*>(backing->Data());
-      auto bytes = kj::arrayPtr(ptr + byteOffset, byteLength);
+      // For resizable ArrayBuffers, the buffer may be resized while the read is
+      // pending, decommitting memory pages and making the pointer invalid (SIGSEGV).
+      // We read into a temporary buffer and copy the data back in the .then()
+      // callback, where we can validate the buffer is still large enough.
+      bool isResizable = theStore->IsResizableByUserJavaScript();
+
+      kj::Array<kj::byte> tempBuffer;
+      kj::byte* readPtr;
+      if (isResizable) {
+        auto currentByteLength = theStore->ByteLength();
+        if (byteOffset >= currentByteLength) {
+          readPending = false;
+          return js.resolvedPromise(ReadResult{
+            .value = js.v8Ref(v8::Uint8Array::New(theStore, 0, 0).As<v8::Value>()),
+            .done = false,
+          });
+        }
+        if (byteOffset + byteLength > currentByteLength) {
+          byteLength = currentByteLength - byteOffset;
+          if (atLeast > byteLength) {
+            atLeast = byteLength > 0 ? byteLength : 1;
+          }
+        }
+        tempBuffer = kj::heapArray<kj::byte>(byteLength);
+        readPtr = tempBuffer.begin();
+      } else {
+        auto ptr = static_cast<kj::byte*>(backing->Data());
+        readPtr = ptr + byteOffset;
+      }
+      auto bytes = kj::arrayPtr(readPtr, byteLength);
 
       auto promise = kj::evalNow([&] {
         return readable->tryRead(bytes.begin(), atLeast, bytes.size()).attach(kj::mv(backing));
@@ -554,7 +582,8 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
           .then(js,
               ioContext.addFunctor([this, store = js.v8Ref(store), byteOffset, byteLength,
-                                       isByob = maybeByobOptions != kj::none](jsg::Lock& js,
+                                       isByob = maybeByobOptions != kj::none, isResizable, readPtr,
+                                       tempBuffer = kj::mv(tempBuffer)](jsg::Lock& js,
                                        size_t amount) mutable -> jsg::Promise<ReadResult> {
         readPending = false;
         KJ_ASSERT(amount <= byteLength);
@@ -602,7 +631,6 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
 
         if (byteOffset + amount > handle->ByteLength()) {
           // If the buffer was resized smaller, we return a truncated result.
-          // Any bytes that would have been written past the new end are lost.
 
           IoContext::current().logWarningOnce(
               "A buffer that was being used for a read operation on a ReadableStream was resized "
@@ -612,13 +640,27 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
               "streams_byob_reader_detaches_buffer compatibility flag, to prevent this from "
               "happening."_kj);
 
-          amount = handle->ByteLength() > byteOffset ? handle->ByteLength() - byteOffset : 0;
+          if (byteOffset >= handle->ByteLength()) {
+            return js.resolvedPromise(ReadResult{
+              .value = js.v8Ref(v8::Uint8Array::New(store.getHandle(js), 0, 0).As<v8::Value>()),
+              .done = false,
+            });
+          }
+          amount = handle->ByteLength() - byteOffset;
+        }
+
+        if (isResizable && byteOffset + amount <= handle->ByteLength()) {
+          // For resizable buffers, the data was read into a temporary buffer.
+          // Copy it back into the user's (still valid) buffer region.
+          auto destPtr = static_cast<kj::byte*>(handle->GetBackingStore()->Data());
+          memcpy(destPtr + byteOffset, readPtr, amount);
         }
 
         return js.resolvedPromise(ReadResult{
           .value = js.v8Ref(
               v8::Uint8Array::New(store.getHandle(js), byteOffset, amount).As<v8::Value>()),
-          .done = false});
+          .done = false,
+        });
       }),
               ioContext.addFunctor(
                   [this](jsg::Lock& js, jsg::Value reason) -> jsg::Promise<ReadResult> {
