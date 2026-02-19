@@ -4229,9 +4229,31 @@ export declare abstract class Performance extends EventTarget {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/setResourceTimingBufferSize)
    */
   setResourceTimingBufferSize(size: number): void;
-  eventLoopUtilization(): void;
+  get nodeTiming(): PerformanceNodeTiming;
+  eventLoopUtilization(): PerformanceEventLoopUtilization;
   markResourceTiming(): void;
   timerify(fn: () => void): () => void;
+}
+export interface PerformanceEventLoopUtilization {
+  idle: number;
+  active: number;
+  utilization: number;
+}
+export interface PerformanceNodeTiming extends PerformanceEntry {
+  readonly nodeStart: number;
+  readonly v8Start: number;
+  readonly bootstrapComplete: number;
+  readonly environment: number;
+  readonly loopStart: number;
+  readonly loopExit: number;
+  readonly idleTime: number;
+  readonly uvMetricsInfo: UvMetricsInfo;
+  toJSON(): any;
+}
+export interface UvMetricsInfo {
+  loopCount: number;
+  events: number;
+  eventsWaiting: number;
 }
 /**
  * **`PerformanceMark`** is an interface for PerformanceEntry objects with an PerformanceEntry.entryType of `'mark'`.
