@@ -3729,8 +3729,9 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
 }
 
 void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-  // Clear algorithms to break circular references before changing state
+  // Clear algorithms and reject pending writes before changing state
   KJ_IF_SOME(controller, state.tryGet<Controller>()) {
+    controller->cancelPendingWrites(js, jsg::JsValue(reason));
     controller->clearAlgorithms();
   }
 
@@ -3738,9 +3739,11 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   KJ_IF_SOME(locked, lock.state.tryGet<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
-  } else if (lock.state.tryGet<WritableLockImpl::PipeLocked>() != kj::none) {
-    lock.state.init<Unlocked>();
   }
+  // Note: When pipe-locked, we intentionally do NOT release the pipe lock here.
+  // The pipe loop checks for the Errored state at the start of each iteration and
+  // will handle releasing the pipe lock, canceling the source, and rejecting the
+  // pipe promise with the error reason.
 }
 
 kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
