@@ -1417,6 +1417,85 @@ KJ_TEST("DrainingReader read from byte stream with BYOB support") {
   });
 }
 
+KJ_TEST("DrainingReader error during pull in value stream") {
+  // Test: Calling controller.error() synchronously inside pull during a draining
+  // read must not cause a use-after-free. The pull callback transitions the
+  // ConsumerImpl from Ready→Errored which destroys the Ready struct (and its
+  // RingBuffer). The drainingRead loop must detect this and stop.
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            c->enqueue(js, toBytes(js, kj::str("before-error")));
+            c->error(js, js.error("deliberate error"));
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_FAIL_ASSERT("Should have rejected, not resolved");
+      }, [&](jsg::Lock& js, jsg::Value&& err) {
+        // The draining read should reject with the error from controller.error().
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted, "Read should have completed with rejection");
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader error during pull in byte stream") {
+  // Test: Same as above but for byte streams (ByteQueue path).
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
+            c->enqueue(js, toBufferSource(js, kj::str("before-error")));
+            c->error(js, js.error("deliberate error"));
+            return js.resolvedPromise();
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_FAIL_ASSERT("Should have rejected, not resolved");
+      }, [&](jsg::Lock& js, jsg::Value&& err) { readCompleted = true; });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted, "Read should have completed with rejection");
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
 KJ_TEST("DrainingReader read from stream with transform-like pattern") {
   // Test: DrainingReader works correctly with a stream that simulates the
   // TransformStream pattern where data is written to writable and read from readable
