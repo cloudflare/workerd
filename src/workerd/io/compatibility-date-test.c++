@@ -143,13 +143,16 @@ KJ_TEST("compatibility flag parsing") {
       "2021-05-17", {"unknown_feature"_kj}, "()", {"No such compatibility flag: unknown_feature"});
 
   expectCompileCompatibilityFlags("2252-04-01", {}, "()",
-      {"Can't set compatibility date in the future: 2252-04-01"},
+      {"Can't set compatibility date in the future: 2252-04-01"_kj},
       CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE);
 
   expectCompileCompatibilityFlags("2252-04-01", {}, "()",
       {kj::str("This Worker requires compatibility date \"2252-04-01\", but the newest date "
                "supported by this server binary is \"",
-          SUPPORTED_COMPATIBILITY_DATE, "\".")},
+           SUPPORTED_COMPATIBILITY_DATE, "\"."),
+        kj::str("Can't set compatibility date in the future: \"2252-04-01\". Today's date (UTC) "
+                "is \"",
+            currentDateStr(), "\".")},
       CompatibilityDateValidation::CODE_VERSION);
 
   // Test experimental requirement using durable_object_rename as it is obsolete
