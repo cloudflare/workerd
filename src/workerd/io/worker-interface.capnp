@@ -792,11 +792,11 @@ interface EventDispatcher @0xf20697475ec1752d {
 interface WorkerdBootstrap {
   # Bootstrap interface exposed by workerd when serving Cap'n Proto RPC.
 
-  startEvent @0 () -> (dispatcher :EventDispatcher);
+  startEvent @0 (cfBlobJson :Text) -> (dispatcher :EventDispatcher);
   # Start a new event. Exactly one event should be delivered to the returned EventDispatcher.
   #
-  # TODO(someday): Pass cfBlobJson? Currently doesn't matter since the cf blob is only present for
-  #   HTTP requests which can be delivered over regular HTTP instead of capnp.
+  # If the event is an HTTP request, `cfBlobJson` optionally carries the JSON-encoded `request.cf`
+  # object. The dispatcher will pass it through to the worker via SubrequestMetadata.
 }
 
 interface WorkerdDebugPort {

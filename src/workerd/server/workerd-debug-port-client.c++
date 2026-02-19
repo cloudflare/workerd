@@ -31,7 +31,13 @@ class WorkerdBootstrapSubrequestChannel final: public IoChannelFactory::Subreque
         connectionState(kj::mv(connectionState)) {}
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    auto dispatcher = bootstrap.startEventRequest().send().getDispatcher();
+    // Pass cfBlobJson as an RPC parameter on startEvent so the server can include it
+    // in SubrequestMetadata when creating the WorkerInterface.
+    auto req = bootstrap.startEventRequest();
+    KJ_IF_SOME(cf, metadata.cfBlobJson) {
+      req.setCfBlobJson(cf);
+    }
+    auto dispatcher = req.send().getDispatcher();
     // Attach connection ref for deferred proxying - the HTTP response body/WebSocket
     // will get this WorkerInterface attached, keeping the connection alive.
     return kj::heap<RpcWorkerInterface>(httpOverCapnpFactory, byteStreamFactory, kj::mv(dispatcher))
