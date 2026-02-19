@@ -125,7 +125,6 @@ interface RequestInitCfProperties extends Record<string, unknown> {
   minify?: RequestInitCfPropertiesImageMinify;
   mirage?: boolean;
   polish?: "lossy" | "lossless" | "off";
-  r2?: RequestInitCfPropertiesR2;
   /**
    * Redirects the request to an alternate origin server. You can use this,
    * for example, to implement load balancing across several origins.
@@ -343,13 +342,6 @@ interface RequestInitCfPropertiesImageMinify {
   javascript?: boolean;
   css?: boolean;
   html?: boolean;
-}
-
-interface RequestInitCfPropertiesR2 {
-  /**
-   * Colo id of bucket that an object is stored in
-   */
-  bucketColoId?: number;
 }
 
 /**
