@@ -24,6 +24,10 @@
       "type": "bazel_dep"
     },
     {
+      "name": "zstd",
+      "type": "bazel_dep"
+    },
+    {
       "name": "tcmalloc",
       "type": "bazel_dep"
     },

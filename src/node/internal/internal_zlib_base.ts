@@ -7,6 +7,7 @@ import {
   default as zlibUtil,
   type ZlibOptions,
   type BrotliOptions,
+  type ZstdOptions,
 } from 'node-internal:zlib';
 import { Buffer, kMaxLength } from 'node-internal:internal_buffer';
 import {
@@ -18,6 +19,7 @@ import {
   ERR_BUFFER_TOO_LARGE,
   ERR_INVALID_ARG_TYPE,
   ERR_BROTLI_INVALID_PARAM,
+  ERR_ZSTD_INVALID_PARAM,
   ERR_ZLIB_INITIALIZATION_FAILED,
   NodeError,
 } from 'node-internal:internal_errors';
@@ -62,20 +64,29 @@ const {
   CONST_BROTLI_OPERATION_EMIT_METADATA,
   CONST_BROTLI_OPERATION_FINISH,
   CONST_BROTLI_OPERATION_FLUSH,
+  CONST_ZSTD_ENCODE,
+  CONST_ZSTD_DECODE,
+  CONST_ZSTD_e_continue,
+  CONST_ZSTD_e_end,
+  CONST_ZSTD_e_flush,
 } = zlibUtil;
 
 // This type contains all possible handler types.
 type ZlibHandleType =
   | zlibUtil.ZlibStream
   | zlibUtil.BrotliEncoder
-  | zlibUtil.BrotliDecoder;
+  | zlibUtil.BrotliDecoder
+  | zlibUtil.ZstdEncoder
+  | zlibUtil.ZstdDecoder;
 export const owner_symbol = Symbol('owner');
 
 const FLUSH_BOUND_IDX_NORMAL: number = 0;
 const FLUSH_BOUND_IDX_BROTLI: number = 1;
-const FLUSH_BOUND: [[number, number], [number, number]] = [
+const FLUSH_BOUND_IDX_ZSTD: number = 2;
+const FLUSH_BOUND: [[number, number], [number, number], [number, number]] = [
   [CONST_Z_NO_FLUSH, CONST_Z_BLOCK],
   [CONST_BROTLI_OPERATION_PROCESS, CONST_BROTLI_OPERATION_EMIT_METADATA],
+  [CONST_ZSTD_e_continue, CONST_ZSTD_e_end],
 ];
 
 const kFlushFlag = Symbol('kFlushFlag');
@@ -369,10 +380,12 @@ export class ZlibBase extends Transform {
     let maxOutputLength = kMaxLength;
 
     let flushBoundIdx;
-    if (mode !== CONST_BROTLI_ENCODE && mode !== CONST_BROTLI_DECODE) {
-      flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
-    } else {
+    if (mode === CONST_BROTLI_ENCODE || mode === CONST_BROTLI_DECODE) {
       flushBoundIdx = FLUSH_BOUND_IDX_BROTLI;
+    } else if (mode === CONST_ZSTD_ENCODE || mode === CONST_ZSTD_DECODE) {
+      flushBoundIdx = FLUSH_BOUND_IDX_ZSTD;
+    } else {
+      flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
     }
 
     /* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */
@@ -795,6 +808,88 @@ export class Brotli extends ZlibBase {
     }
 
     super(options ?? {}, mode, handle, brotliDefaultOptions);
+    this._writeState = _writeState;
+  }
+}
+
+export const kMaxZstdCParam = Math.max(
+  ...Object.entries(constants).map(([key, value]) =>
+    key.startsWith('ZSTD_c_') ? value : 0
+  )
+);
+export const zstdInitCParamsArray = new Int32Array(kMaxZstdCParam + 1);
+
+export const kMaxZstdDParam = Math.max(
+  ...Object.entries(constants).map(([key, value]) =>
+    key.startsWith('ZSTD_d_') ? value : 0
+  )
+);
+export const zstdInitDParamsArray = new Int32Array(kMaxZstdDParam + 1);
+
+const zstdDefaultOptions: ZlibDefaultOptions = {
+  flush: CONST_ZSTD_e_continue,
+  finishFlush: CONST_ZSTD_e_end,
+  fullFlush: CONST_ZSTD_e_flush,
+};
+
+export class Zstd extends ZlibBase {
+  constructor(
+    options: ZstdOptions | undefined | null,
+    mode: number,
+    initParamsArray: Int32Array,
+    maxParam: number
+  ) {
+    ok(mode === CONST_ZSTD_DECODE || mode === CONST_ZSTD_ENCODE);
+    initParamsArray.fill(-1);
+
+    if (options?.params) {
+      for (const [origKey, value] of Object.entries(options.params)) {
+        const key = +origKey;
+        if (
+          Number.isNaN(key) ||
+          key < 0 ||
+          key > maxParam ||
+          ((initParamsArray[key] as number) | 0) !== -1
+        ) {
+          throw new ERR_ZSTD_INVALID_PARAM(origKey);
+        }
+
+        if (typeof value !== 'number' && typeof value !== 'boolean') {
+          throw new ERR_INVALID_ARG_TYPE(
+            'options.params[key]',
+            'number',
+            value
+          );
+        }
+        // as number is required to avoid force type coercion on runtime.
+        // boolean has number representation, but typescript doesn't understand it.
+        initParamsArray[key] = value as number;
+      }
+    }
+
+    const handle =
+      mode === CONST_ZSTD_DECODE
+        ? new zlibUtil.ZstdDecoder(mode)
+        : new zlibUtil.ZstdEncoder(mode);
+
+    const _writeState = new Uint32Array(2);
+
+    const pledgedSrcSize = options?.pledgedSrcSize;
+
+    if (
+      !handle.initialize(
+        initParamsArray,
+        _writeState,
+        () => {
+          queueMicrotask(processCallback.bind(handle));
+        },
+        pledgedSrcSize
+      )
+    ) {
+      throw new ERR_ZLIB_INITIALIZATION_FAILED();
+    }
+
+    super(options ?? {}, mode, handle, zstdDefaultOptions);
     this._writeState = _writeState;
   }
 }
