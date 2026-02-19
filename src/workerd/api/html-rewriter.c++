@@ -442,54 +442,64 @@ const kj::FiberPool& getFiberPool() {
 
 kj::Promise<void> Rewriter::write(kj::ArrayPtr<const byte> buffer) {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  return getFiberPool().startFiber([this, buffer](kj::WaitScope& scope) {
-    maybeWaitScope = scope;
-    if (!isPoisoned()) {
-      // Cannot use `check()` because `finishWrite()` implements the error path.
-      auto rc = lol_html_rewriter_write(rewriter, buffer.asChars().begin(), buffer.size());
-      tryHandleCancellation(rc);
-      if (rc == -1) {
-        maybePoison(getLastError());
+  // Defer fiber creation until the event loop runs. If this promise is dropped synchronously
+  // (e.g. by Canceler::cancel() during PumpToReader destruction), no fiber is created, avoiding
+  // a KJ assertion failure when destroying an unfired fiber. Once the event loop processes this,
+  // the fiber is created and immediately fires (armDepthFirst), so cancellation works normally.
+  return kj::evalLater([this, buffer]() {
+    return getFiberPool().startFiber([this, buffer](kj::WaitScope& scope) {
+      maybeWaitScope = scope;
+      if (!isPoisoned()) {
+        // Cannot use `check()` because `finishWrite()` implements the error path.
+        auto rc = lol_html_rewriter_write(rewriter, buffer.asChars().begin(), buffer.size());
+        tryHandleCancellation(rc);
+        if (rc == -1) {
+          maybePoison(getLastError());
+        }
       }
-    }
-    return finishWrite();
+      return finishWrite();
+    });
   });
 }
 
 kj::Promise<void> Rewriter::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
-    maybeWaitScope = scope;
-    if (!isPoisoned()) {
-      for (auto bytes: pieces) {
-        auto chars = bytes.asChars();
-        // Cannot use `check()` because `finishWrite()` implements the error path.
-        auto rc = lol_html_rewriter_write(rewriter, chars.begin(), chars.size());
-        tryHandleCancellation(rc);
-        if (rc == -1) {
-          maybePoison(getLastError());
-          // A handler threw an exception; stop calling `lol_html_rewriter_write()`.
-          break;
+  return kj::evalLater([this, pieces]() {
+    return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
+      maybeWaitScope = scope;
+      if (!isPoisoned()) {
+        for (auto bytes: pieces) {
+          auto chars = bytes.asChars();
+          // Cannot use `check()` because `finishWrite()` implements the error path.
+          auto rc = lol_html_rewriter_write(rewriter, chars.begin(), chars.size());
+          tryHandleCancellation(rc);
+          if (rc == -1) {
+            maybePoison(getLastError());
+            // A handler threw an exception; stop calling `lol_html_rewriter_write()`.
+            break;
+          }
         }
       }
-    }
-    return finishWrite();
+      return finishWrite();
+    });
   });
 }
 
 kj::Promise<void> Rewriter::end() {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  return getFiberPool().startFiber([this](kj::WaitScope& scope) {
-    maybeWaitScope = scope;
-    if (!isPoisoned()) {
-      // Cannot use `check()` because `finishWrite()` implements the error path.
-      auto rc = lol_html_rewriter_end(rewriter);
-      tryHandleCancellation(rc);
-      if (rc == -1) {
-        maybePoison(getLastError());
+  return kj::evalLater([this]() {
+    return getFiberPool().startFiber([this](kj::WaitScope& scope) {
+      maybeWaitScope = scope;
+      if (!isPoisoned()) {
+        // Cannot use `check()` because `finishWrite()` implements the error path.
+        auto rc = lol_html_rewriter_end(rewriter);
+        tryHandleCancellation(rc);
+        if (rc == -1) {
+          maybePoison(getLastError());
+        }
       }
-    }
-    return finishWrite().then([this]() { return inner->end(); });
+      return finishWrite().then([this]() { return inner->end(); });
+    });
   });
 }
 
