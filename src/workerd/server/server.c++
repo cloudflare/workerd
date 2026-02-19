@@ -2746,7 +2746,7 @@ class Server::WorkerService final: public Service,
               });
 
               return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
-                  []() -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
+                  [](SpanParent) -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
                   .attach(kj::mv(sqliteHooks));
             } else {
               // Create an ActorCache backed by a fake, empty storage. Elsewhere, we configure

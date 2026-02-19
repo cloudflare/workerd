@@ -122,7 +122,7 @@ struct ActorSqliteTest final {
     }
   }
 
-  kj::Promise<void> commitCallback() {
+  kj::Promise<void> commitCallback(SpanParent) {
     auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
     calls.add(Call{kj::str("commit"), kj::mv(fulfiller)});
     return kj::mv(promise);

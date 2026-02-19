@@ -42,7 +42,7 @@ void disableAllowUnconfirmed(ActorCacheOps::WriteOptions& options, kj::StringPtr
 
 ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
     OutputGate& outputGate,
-    kj::Function<kj::Promise<void>()> commitCallback,
+    kj::Function<kj::Promise<void>(SpanParent)> commitCallback,
     Hooks& hooks,
     bool debugAlarmSyncParam)
     : db(kj::mv(dbParam)),
@@ -497,7 +497,7 @@ kj::Promise<void> ActorSqlite::commitImpl(
         logDate(alarmStateForCommit), alarmVersionBeforeAsync);
   }
 
-  auto commitCallbackPromise = commitCallback();
+  auto commitCallbackPromise = commitCallback(SpanParent(commitSpan));
   pendingCommit = kj::none;
 
   // Wait for the db to persist.
