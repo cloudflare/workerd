@@ -508,7 +508,8 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
     KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
       // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
       // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-      SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath.toString().cStr(), &db, flags, nullptr));
+      SQLITE_CALL_NODB(
+          sqlite3_open_v2(rootedPath.toNativeString(true).cStr(), &db, flags, nullptr));
     } else {
       SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db, flags, vfs.getName().cStr()));
     }
@@ -516,8 +517,8 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
     KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
       // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
       // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-      SQLITE_CALL_NODB(
-          sqlite3_open_v2(rootedPath.toString().cStr(), &db, SQLITE_OPEN_READONLY, nullptr));
+      SQLITE_CALL_NODB(sqlite3_open_v2(
+          rootedPath.toNativeString(true).cStr(), &db, SQLITE_OPEN_READONLY, nullptr));
     } else {
       SQLITE_CALL_NODB(
           sqlite3_open_v2(path.toString().cStr(), &db, SQLITE_OPEN_READONLY, vfs.getName().cStr()));
