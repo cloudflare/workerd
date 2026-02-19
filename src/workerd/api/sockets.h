@@ -47,7 +47,11 @@ struct SocketOptions {
   JSG_STRUCT(secureTransport, allowHalfOpen, highWaterMark);
   JSG_MEMORY_INFO(SocketOptions) {
     tracker.trackField("secureTransport", secureTransport);
-  }
+  };
+  JSG_TS_OVERRIDE({
+    allowHalfOpen?: boolean;
+    secureTransport?: "off" | "on" | "starttls";
+  });
 };
 
 struct TlsOptions {
