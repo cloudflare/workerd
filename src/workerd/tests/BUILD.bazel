@@ -140,6 +140,20 @@ wd_cc_benchmark(
     ],
 )
 
+# Benchmark for PumpToReader (ReadableStream::pumpTo path in standard.c++).
+# Run before and after DrainingReader adoption to measure improvement.
+#   bazel run --config=opt //src/workerd/tests:bench-pumpto
+wd_cc_benchmark(
+    name = "bench-pumpto",
+    srcs = ["bench-pumpto.c++"],
+    tags = ["manual"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+    ],
+)
+
 wd_test(
     src = "unknown-import-assertions-test.wd-test",
     args = ["--experimental"],

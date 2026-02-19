@@ -227,6 +227,11 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       size_t prevChunkCount = chunks.size();
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
+      // The pull callback may have closed or errored the consumer, which
+      // destroys the Ready state (and its RingBuffer). We must not touch
+      // `ready` after that.
+      if (!impl.state.isActive()) break;
+
       // Drain all buffered data that was added by the pull.
       KJ_IF_SOME(errorPromise, drainBuffer(js, impl, ready, chunks, totalRead, isClosing)) {
         return kj::mv(errorPromise);
@@ -237,6 +242,19 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
         break;
       }
     }
+  }
+
+  // If the consumer was closed or errored during pumping, the `ready`
+  // reference is dangling. Return what we have or the appropriate error.
+  if (!impl.state.isActive()) {
+    KJ_IF_SOME(errored, impl.state.tryGetErrorUnsafe()) {
+      return js.rejectedPromise<DrainingReadResult>(errored.reason.getHandle(js));
+    }
+    // Closed — all data was already drained. Return collected chunks.
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = chunks.releaseAsArray(),
+      .done = true,
+    });
   }
 
   // If we collected data, return it immediately.
@@ -651,6 +669,11 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
       size_t prevChunkCount = chunks.size();
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
+      // The pull callback may have closed or errored the consumer, which
+      // destroys the Ready state (and its RingBuffer). We must not touch
+      // `ready` after that.
+      if (!impl.state.isActive()) break;
+
       // Drain all buffered data that was added by the pull.
       drainBuffer(ready, chunks, totalRead, isClosing);
 
@@ -659,6 +682,19 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
         break;
       }
     }
+  }
+
+  // If the consumer was closed or errored during pumping, the `ready`
+  // reference is dangling. Return what we have or the appropriate error.
+  if (!impl.state.isActive()) {
+    KJ_IF_SOME(errored, impl.state.tryGetErrorUnsafe()) {
+      return js.rejectedPromise<DrainingReadResult>(errored.reason.getHandle(js));
+    }
+    // Closed — all data was already drained. Return collected chunks.
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = chunks.releaseAsArray(),
+      .done = true,
+    });
   }
 
   // If we collected data, return it immediately.
