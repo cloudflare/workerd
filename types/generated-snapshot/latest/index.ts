@@ -11395,8 +11395,14 @@ export interface MediaTransformer {
    * @returns A generator for producing the transformed media output
    */
   transform(
-    transform: MediaTransformationInputOptions,
+    transform?: MediaTransformationInputOptions,
   ): MediaTransformationGenerator;
+  /**
+   * Generates the final media output with specified options.
+   * @param output - Configuration for the output format and parameters
+   * @returns The final transformation result containing the transformed media
+   */
+  output(output?: MediaTransformationOutputOptions): MediaTransformationResult;
 }
 /**
  * Generator for producing media transformation results.
@@ -11408,7 +11414,7 @@ export interface MediaTransformationGenerator {
    * @param output - Configuration for the output format and parameters
    * @returns The final transformation result containing the transformed media
    */
-  output(output: MediaTransformationOutputOptions): MediaTransformationResult;
+  output(output?: MediaTransformationOutputOptions): MediaTransformationResult;
 }
 /**
  * Result of a media transformation operation.
@@ -11417,19 +11423,19 @@ export interface MediaTransformationGenerator {
 export interface MediaTransformationResult {
   /**
    * Returns the transformed media as a readable stream of bytes.
-   * @returns A stream containing the transformed media data
+   * @returns A promise containing a readable stream with the transformed media
    */
-  media(): ReadableStream<Uint8Array>;
+  media(): Promise<ReadableStream<Uint8Array>>;
   /**
    * Returns the transformed media as an HTTP response object.
-   * @returns The transformed media as a Response, ready to store in cache or return to users
+   * @returns The transformed media as a Promise<Response>, ready to store in cache or return to users
    */
-  response(): Response;
+  response(): Promise<Response>;
   /**
    * Returns the MIME type of the transformed media.
-   * @returns The content type string (e.g., 'image/jpeg', 'video/mp4')
+   * @returns A promise containing the content type string (e.g., 'image/jpeg', 'video/mp4')
    */
-  contentType(): string;
+  contentType(): Promise<string>;
 }
 /**
  * Configuration options for transforming media input.
