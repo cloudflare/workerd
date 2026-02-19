@@ -157,7 +157,8 @@ class DurableObjectNamespace: public jsg::Object {
         ActorGetMode mode,
         bool enableReplicaRouting,
         ActorRoutingMode routingMode,
-        SpanParent parentSpan) = 0;
+        SpanParent parentSpan,
+        kj::Maybe<ActorVersion> version) = 0;
   };
 
   DurableObjectNamespace(uint channel, kj::Own<ActorIdFactory> idFactory)
@@ -202,17 +203,39 @@ class DurableObjectNamespace: public jsg::Object {
     //    - "primary-only": guarantees we route directly to the primary (skip any replicas).
     jsg::Optional<kj::String> routingMode;
 
-    JSG_STRUCT(locationHint, routingMode);
+    struct VersionOptions {
+      jsg::Optional<kj::String> cohort;
+      JSG_STRUCT(cohort);
+      JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+        if (!flags.getWorkerdExperimental()) {
+          JSG_TS_OVERRIDE(type VersionOptions = never);
+        }
+      }
+    };
+    jsg::Optional<VersionOptions> version;
+
+    JSG_STRUCT(locationHint, routingMode, version);
 
     // DurableObjectLocationHint values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#providing-a-location-hint
     JSG_STRUCT_TS_DEFINE(
       type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me";
       type DurableObjectRoutingMode = "primary-only");
 
-    JSG_STRUCT_TS_OVERRIDE({
-      locationHint?: DurableObjectLocationHint;
-      routingMode?: DurableObjectRoutingMode;
-    });
+    JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+      if (flags.getWorkerdExperimental()) {
+        JSG_TS_OVERRIDE({
+          locationHint?: DurableObjectLocationHint;
+          routingMode?: DurableObjectRoutingMode;
+          version?: { cohort?: string };
+        });
+      } else {
+        JSG_TS_OVERRIDE({
+          locationHint?: DurableObjectLocationHint;
+          routingMode?: DurableObjectRoutingMode;
+          version: never;
+        });
+      }
+    }
   };
 
   // Gets a durable object by ID or creates it if it doesn't already exist.
@@ -281,13 +304,15 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
-      ActorRoutingMode routingMode)
+      ActorRoutingMode routingMode,
+      kj::Maybe<ActorVersion> version)
       : channelIdOrFactory(kj::mv(channelIdOrFactory)),
         id(kj::mv(id)),
         locationHint(kj::mv(locationHint)),
         mode(mode),
         enableReplicaRouting(enableReplicaRouting),
-        routingMode(routingMode) {}
+        routingMode(routingMode),
+        version(kj::mv(version)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
 
@@ -298,6 +323,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   ActorGetMode mode;
   bool enableReplicaRouting;
   ActorRoutingMode routingMode;
+  kj::Maybe<ActorVersion> version;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
@@ -367,6 +393,7 @@ class DurableObjectClass: public jsg::Object {
 #define EW_ACTOR_ISOLATE_TYPES                                                                     \
   api::ColoLocalActorNamespace, api::DurableObject, api::DurableObjectId,                          \
       api::DurableObjectNamespace, api::DurableObjectNamespace::NewUniqueIdOptions,                \
-      api::DurableObjectNamespace::GetDurableObjectOptions, api::DurableObjectClass
+      api::DurableObjectNamespace::GetDurableObjectOptions, api::DurableObjectClass,               \
+      api::DurableObjectNamespace::GetDurableObjectOptions::VersionOptions
 
 }  // namespace workerd::api

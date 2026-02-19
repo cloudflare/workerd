@@ -23,6 +23,11 @@ enum class ActorRoutingMode {
   PRIMARY_ONLY
 };
 
+// Version information for an actor. Used to specify cohort.
+struct ActorVersion {
+  kj::Maybe<kj::String> cohort;
+};
+
 // An abstract class that implements generation of global actor IDs in a particular namespace.
 //
 // This is NOT at I/O type. Each global actor namespace binding holds one instance of this which

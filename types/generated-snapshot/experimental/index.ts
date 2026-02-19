@@ -640,10 +640,16 @@ export type DurableObjectRoutingMode = "primary-only";
 export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
   routingMode?: DurableObjectRoutingMode;
+  version?: {
+    cohort?: string;
+  };
 }
 export interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {}
+export interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
+  cohort?: string;
+}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
@@ -652,6 +658,7 @@ export interface DurableObjectState<Props = unknown> {
   readonly storage: DurableObjectStorage;
   container?: Container;
   facets: DurableObjectFacets;
+  version?: DurableObjectStateVersion;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): WebSocket[];
@@ -785,6 +792,9 @@ export interface FacetStartupOptions<
 > {
   id?: DurableObjectId | string;
   class: DurableObjectClass<T>;
+}
+export interface DurableObjectStateVersion {
+  cohort?: string;
 }
 export interface AnalyticsEngineDataset {
   writeDataPoint(event?: AnalyticsEngineDataPoint): void;
