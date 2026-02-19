@@ -122,7 +122,6 @@ struct UvMetricsInfo {
   double eventsWaiting;
 
   JSG_STRUCT(loopCount, events, eventsWaiting);
-  JSG_MEMORY_INFO(UvMetricsInfo) {}
 };
 
 // PerformanceNodeTiming provides Node.js-specific timing information.
