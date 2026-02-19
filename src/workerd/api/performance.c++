@@ -75,6 +75,12 @@ jsg::JsObject PerformanceNodeTiming::toJSON(jsg::Lock& js) {
   obj.set(js, "loopStart"_kj, js.num(0));
   obj.set(js, "loopExit"_kj, js.num(0));
   obj.set(js, "idleTime"_kj, js.num(0));
+  // Include uvMetricsInfo in the JSON representation
+  auto uvObj = js.objNoProto();
+  uvObj.set(js, "loopCount"_kj, js.num(0));
+  uvObj.set(js, "events"_kj, js.num(0));
+  uvObj.set(js, "eventsWaiting"_kj, js.num(0));
+  obj.set(js, "uvMetricsInfo"_kj, uvObj);
   return kj::mv(obj);
 }
 

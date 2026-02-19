@@ -159,50 +159,6 @@ export const testPerformanceNodeTiming = {
       globalThis.performance.nodeTiming,
       'nodeTiming should exist on globalThis'
     );
-    console.log(
-      'globalThis.performance.nodeTiming:',
-      globalThis.performance.nodeTiming
-    );
-    console.log(
-      'globalThis.performance.eventCounts:',
-      globalThis.performance.eventCounts
-    );
-    console.log(
-      'globalThis.performance.eventLoopUtilization:',
-      globalThis.performance.eventLoopUtilization
-    );
-    console.log(
-      'perfHooksPerformance === globalThis.performance:',
-      perfHooksPerformance === globalThis.performance
-    );
-    console.log('has nodeTiming:', 'nodeTiming' in globalThis.performance);
-    console.log('has eventCounts:', 'eventCounts' in globalThis.performance);
-
-    ok(
-      perfHooksPerformance.nodeTiming,
-      'nodeTiming should exist on perf_hooks'
-    );
-    ok(
-      globalThis.performance.nodeTiming,
-      'nodeTiming should exist on globalThis'
-    );
-    console.log(
-      'globalThis.performance.nodeTiming:',
-      globalThis.performance.nodeTiming
-    );
-    console.log(
-      'perfHooksPerformance === globalThis.performance:',
-      perfHooksPerformance === globalThis.performance
-    );
-
-    ok(
-      perfHooksPerformance.nodeTiming,
-      'nodeTiming should exist on perf_hooks'
-    );
-    ok(
-      globalThis.performance.nodeTiming,
-      'nodeTiming should exist on globalThis'
-    );
 
     const nodeTiming = perfHooksPerformance.nodeTiming;
     strictEqual(nodeTiming.name, 'node', 'name should be "node"');
@@ -253,10 +209,62 @@ export const testPerformanceNodeTiming = {
       'idleTime should be a number'
     );
 
-    // toJSON should work
+    // uvMetricsInfo should return an object with libuv metrics (stub values)
+    ok(
+      typeof nodeTiming.uvMetricsInfo === 'object',
+      'uvMetricsInfo should be an object'
+    );
+    strictEqual(
+      nodeTiming.uvMetricsInfo.loopCount,
+      0,
+      'uvMetricsInfo.loopCount should be 0'
+    );
+    strictEqual(
+      nodeTiming.uvMetricsInfo.events,
+      0,
+      'uvMetricsInfo.events should be 0'
+    );
+    strictEqual(
+      nodeTiming.uvMetricsInfo.eventsWaiting,
+      0,
+      'uvMetricsInfo.eventsWaiting should be 0'
+    );
+
+    // Verify that nodeTiming properties are instance (own) properties, not prototype properties
+    // This matches Node.js behavior where Reflect.ownKeys(performance.nodeTiming) includes
+    // all properties like nodeStart, v8Start, etc.
+    const ownKeys = Reflect.ownKeys(nodeTiming);
+    ok(ownKeys.includes('nodeStart'), 'nodeStart should be an own property');
+    ok(ownKeys.includes('v8Start'), 'v8Start should be an own property');
+    ok(
+      ownKeys.includes('bootstrapComplete'),
+      'bootstrapComplete should be an own property'
+    );
+    ok(
+      ownKeys.includes('environment'),
+      'environment should be an own property'
+    );
+    ok(ownKeys.includes('loopStart'), 'loopStart should be an own property');
+    ok(ownKeys.includes('loopExit'), 'loopExit should be an own property');
+    ok(ownKeys.includes('idleTime'), 'idleTime should be an own property');
+    ok(
+      ownKeys.includes('uvMetricsInfo'),
+      'uvMetricsInfo should be an own property'
+    );
+
+    // Verify prototype only has constructor and toJSON (matching Node.js behavior)
+    const protoKeys = Reflect.ownKeys(Object.getPrototypeOf(nodeTiming));
+    ok(protoKeys.includes('constructor'), 'prototype should have constructor');
+    ok(protoKeys.includes('toJSON'), 'prototype should have toJSON');
+
+    // toJSON should work and include uvMetricsInfo
     ok(typeof nodeTiming.toJSON === 'function', 'toJSON should be a function');
     const json = nodeTiming.toJSON();
     ok(typeof json === 'object', 'toJSON should return an object');
+    ok(
+      typeof json.uvMetricsInfo === 'object',
+      'toJSON should include uvMetricsInfo'
+    );
   },
 };
 

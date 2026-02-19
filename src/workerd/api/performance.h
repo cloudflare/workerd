@@ -114,6 +114,17 @@ class PerformanceMark: public PerformanceEntry {
   jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
 };
 
+// UvMetricsInfo represents libuv event loop metrics.
+// In workerd, this returns stub values since actual libuv metrics are not available.
+struct UvMetricsInfo {
+  double loopCount;
+  double events;
+  double eventsWaiting;
+
+  JSG_STRUCT(loopCount, events, eventsWaiting);
+  JSG_MEMORY_INFO(UvMetricsInfo) {}
+};
+
 // PerformanceNodeTiming provides Node.js-specific timing information.
 // In workerd, this returns stub values since actual Node.js startup metrics are not applicable.
 // This class is only exposed when the Node.js perf_hooks compat flag is enabled.
@@ -149,17 +160,33 @@ class PerformanceNodeTiming: public PerformanceEntry {
     return 0;
   }
 
+  // uvMetricsInfo returns libuv event loop metrics.
+  // In workerd, this returns stub values since actual libuv metrics are not available.
+  // Spec: https://nodejs.org/api/perf_hooks.html#performancenodetiminguvmetricsinfo
+  UvMetricsInfo getUvMetricsInfo(jsg::Lock& js) {
+    return UvMetricsInfo{
+      .loopCount = 0,
+      .events = 0,
+      .eventsWaiting = 0,
+    };
+  }
+
   jsg::JsObject toJSON(jsg::Lock& js);
 
+  // Node.js exposes these as instance properties (own properties on the object),
+  // not prototype properties. This matches Node.js behavior where:
+  //   Reflect.ownKeys(performance.nodeTiming) includes all these properties
+  //   Reflect.ownKeys(performance.nodeTiming.__proto__) only has constructor, toJSON
   JSG_RESOURCE_TYPE(PerformanceNodeTiming) {
     JSG_INHERIT(PerformanceEntry);
-    JSG_READONLY_PROTOTYPE_PROPERTY(nodeStart, getNodeStart);
-    JSG_READONLY_PROTOTYPE_PROPERTY(v8Start, getV8Start);
-    JSG_READONLY_PROTOTYPE_PROPERTY(bootstrapComplete, getBootstrapComplete);
-    JSG_READONLY_PROTOTYPE_PROPERTY(environment, getEnvironment);
-    JSG_READONLY_PROTOTYPE_PROPERTY(loopStart, getLoopStart);
-    JSG_READONLY_PROTOTYPE_PROPERTY(loopExit, getLoopExit);
-    JSG_READONLY_PROTOTYPE_PROPERTY(idleTime, getIdleTime);
+    JSG_READONLY_INSTANCE_PROPERTY(nodeStart, getNodeStart);
+    JSG_READONLY_INSTANCE_PROPERTY(v8Start, getV8Start);
+    JSG_READONLY_INSTANCE_PROPERTY(bootstrapComplete, getBootstrapComplete);
+    JSG_READONLY_INSTANCE_PROPERTY(environment, getEnvironment);
+    JSG_READONLY_INSTANCE_PROPERTY(loopStart, getLoopStart);
+    JSG_READONLY_INSTANCE_PROPERTY(loopExit, getLoopExit);
+    JSG_READONLY_INSTANCE_PROPERTY(idleTime, getIdleTime);
+    JSG_READONLY_INSTANCE_PROPERTY(uvMetricsInfo, getUvMetricsInfo);
     JSG_METHOD(toJSON);
   }
 };
@@ -574,12 +601,12 @@ class Performance: public EventTarget {
 
 #define EW_PERFORMANCE_ISOLATE_TYPES                                                               \
   api::Performance, api::Performance::EventLoopUtilization, api::PerformanceNodeTiming,            \
-      api::PerformanceMark, api::PerformanceMeasure, api::PerformanceMark::Options,                \
-      api::PerformanceMeasure::Options, api::PerformanceMeasure::Entry,                            \
-      api::PerformanceObserverEntryList, api::PerformanceEntry, api::PerformanceResourceTiming,    \
-      api::PerformanceObserver, api::PerformanceObserver::ObserveOptions,                          \
-      api::PerformanceObserver::CallbackOptions, api::EventCounts,                                 \
-      api::EventCounts::EntryIterator, api::EventCounts::EntryIterator::Next,                      \
+      api::UvMetricsInfo, api::PerformanceMark, api::PerformanceMeasure,                           \
+      api::PerformanceMark::Options, api::PerformanceMeasure::Options,                             \
+      api::PerformanceMeasure::Entry, api::PerformanceObserverEntryList, api::PerformanceEntry,    \
+      api::PerformanceResourceTiming, api::PerformanceObserver,                                    \
+      api::PerformanceObserver::ObserveOptions, api::PerformanceObserver::CallbackOptions,         \
+      api::EventCounts, api::EventCounts::EntryIterator, api::EventCounts::EntryIterator::Next,    \
       api::EventCounts::KeyIterator, api::EventCounts::KeyIterator::Next,                          \
       api::EventCounts::ValueIterator, api::EventCounts::ValueIterator::Next
 

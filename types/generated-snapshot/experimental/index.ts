@@ -4240,14 +4240,20 @@ export interface PerformanceEventLoopUtilization {
   utilization: number;
 }
 export interface PerformanceNodeTiming extends PerformanceEntry {
-  get nodeStart(): number;
-  get v8Start(): number;
-  get bootstrapComplete(): number;
-  get environment(): number;
-  get loopStart(): number;
-  get loopExit(): number;
-  get idleTime(): number;
+  readonly nodeStart: number;
+  readonly v8Start: number;
+  readonly bootstrapComplete: number;
+  readonly environment: number;
+  readonly loopStart: number;
+  readonly loopExit: number;
+  readonly idleTime: number;
+  readonly uvMetricsInfo: UvMetricsInfo;
   toJSON(): any;
+}
+export interface UvMetricsInfo {
+  loopCount: number;
+  events: number;
+  eventsWaiting: number;
 }
 /**
  * **`PerformanceMark`** is an interface for PerformanceEntry objects with an PerformanceEntry.entryType of `'mark'`.
