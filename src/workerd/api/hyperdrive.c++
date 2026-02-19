@@ -6,6 +6,7 @@
 
 #include "sockets.h"
 
+#include <workerd/api/global-scope.h>
 #include <workerd/util/entropy.h>
 
 #include <kj/compat/http.h>
@@ -67,11 +68,16 @@ kj::StringPtr Hyperdrive::getScheme() {
 
 kj::StringPtr Hyperdrive::getHost() {
   if (!registeredConnectOverride) {
-    IoContext::current().getCurrentLock().getWorker().setConnectOverride(
-        kj::str(this->randomHost, ":", getPort()), KJ_BIND_METHOD(*this, connect));
+    // Returns the random hostname and ensures the connect override is registered on the
+    // ServiceWorkerGlobalScope for the Worker. This getter has a side effect: it registers (or
+    // re-registers) an entry in the ServiceWorkerGlobalScope's connectOverrides HashMap so that
+    // cloudflare:sockets's connect() will route connections to this magic hostname through Hyperdrive.
+    auto& globalScope = IoContext::current().getCurrentLock().getGlobalScope();
+    globalScope.setConnectOverride(kj::str(randomHost, ":", getPort()),
+        [self = JSG_THIS](jsg::Lock& js) mutable { return self->connect(js); });
     registeredConnectOverride = true;
   }
-  return this->randomHost;
+  return randomHost;
 }
 
 // Always returns the default postgres port

@@ -1378,4 +1378,29 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, the UTF-16le TextDecoder will replace lone surrogates with U+FFFD
   # (the Unicode replacement character) as required by the spec. Previously, lone
   # surrogates were passed through unchanged, producing non-well-formed strings.
+
+  containersPidNamespace @160 :Bool
+    $compatEnableFlag("containers_pid_namespace")
+    $compatDisableFlag("no_containers_pid_namespace")
+    $experimental;
+  # When enabled, containers attached to Durable Objects do NOT share the host PID namespace
+  # (they get their own isolated PID namespace). When disabled (the default), containers share
+  # the host PID namespace.
+
+  deleteAllDeletesAlarm @161 :Bool
+    $compatEnableFlag("delete_all_deletes_alarm")
+    $compatDisableFlag("delete_all_preserves_alarm")
+    $compatEnableDate("2026-02-24");
+  # When enabled, calling storage.deleteAll() on a Durable Object also deletes
+  # any scheduled alarm, in addition to deleting all stored key-value data.
+  #
+  # Previously, deleteAll() preserved the alarm state. This was surprising
+  # behavior since the intent of deleteAll() is to clear all state.
+
+  unhandledRejectionAfterMicrotaskCheckpoint @162 :Bool
+    $compatEnableFlag("unhandled_rejection_after_microtask_checkpoint")
+    $compatDisableFlag("no_unhandled_rejection_after_microtask_checkpoint")
+    $compatEnableDate("2026-03-03");
+  # When enabled, unhandledrejection processing is deferred until the microtask
+  # checkpoint completes, avoiding misfires on multi-tick promise chains.
 }

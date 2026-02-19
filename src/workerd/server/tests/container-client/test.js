@@ -260,6 +260,57 @@ export class DurableObjectExample extends DurableObject {
   getStatus() {
     return this.ctx.container.running;
   }
+
+  async testPidNamespace() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+    assert.strictEqual(container.running, false);
+
+    container.start({
+      enableInternet: true,
+    });
+
+    const monitor = container.monitor().catch((_err) => {});
+
+    // Fetch the /pid-namespace endpoint which returns info about the PID namespace
+    let resp;
+    const maxRetries = 6;
+    for (let i = 1; i <= maxRetries; i++) {
+      try {
+        resp = await container
+          .getTcpPort(8080)
+          .fetch('http://foo/pid-namespace');
+        break;
+      } catch (e) {
+        if (!e.message.includes('container port not found')) {
+          throw e;
+        }
+        console.info(
+          `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
+        );
+        if (i === maxRetries) {
+          console.error(
+            `Failed to connect to container ${container.id}. Retried ${i} times`
+          );
+          throw e;
+        }
+        await scheduler.wait(500);
+      }
+    }
+
+    assert.equal(resp.status, 200);
+    const data = await resp.json();
+
+    await container.destroy();
+    await monitor;
+    assert.strictEqual(container.running, false);
+
+    return data;
+  }
 }
 
 export class DurableObjectExample2 extends DurableObjectExample {}
@@ -409,5 +460,25 @@ export const testSetInactivityTimeout = {
       // Container should still be running after DO exited
       await stub.expectRunning(true);
     }
+  },
+};
+
+// Test PID namespace isolation behavior
+// When containers_pid_namespace is ENABLED, the container has its own isolated PID namespace.
+// We verify this by checking that PID 1 in the container's namespace is the container's
+// init process, not the host's init process (systemd, launchd, etc.).
+export const testPidNamespace = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName('testPidNamespace');
+    const stub = env.MY_CONTAINER.get(id);
+    const data = await stub.testPidNamespace();
+
+    // When using an isolated PID namespace, PID 1 should be the container's entrypoint
+    // (a bash script that runs node), not the host's init process (systemd, launchd, init).
+    assert.match(
+      data.init,
+      /container-client-test/,
+      `Expected PID 1 to be the container entrypoint, but got: ${data.init}`
+    );
   },
 };

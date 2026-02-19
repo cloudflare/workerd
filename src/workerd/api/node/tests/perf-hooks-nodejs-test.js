@@ -148,6 +148,11 @@ export const testPerformanceMeasure = {
       mark1.startTime,
       'measure startTime should match start mark'
     );
+    strictEqual(
+      measure1.detail,
+      null,
+      'detail should be null when using string marks'
+    );
 
     const measure2 = perfHooksPerformance.measure('test-measure-2', {
       start: 50,
@@ -162,6 +167,11 @@ export const testPerformanceMeasure = {
       measure2.duration,
       100,
       'measure with options should have correct duration'
+    );
+    strictEqual(
+      measure2.detail,
+      null,
+      'detail should be null when not provided in options'
     );
 
     const measure3 = perfHooksPerformance.measure('test-measure-3', {
@@ -178,6 +188,11 @@ export const testPerformanceMeasure = {
       50,
       'measure with duration should have correct duration'
     );
+    strictEqual(
+      measure3.detail,
+      null,
+      'detail should be null when not provided in options'
+    );
 
     const customDetail = { customKey: 'customValue' };
     const measure4 = perfHooksPerformance.measure('test-measure-4', {
@@ -192,6 +207,36 @@ export const testPerformanceMeasure = {
     ok(measures.length >= 4, 'should have at least 4 measures');
 
     perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+  },
+};
+
+export const testPerformanceMeasureNameOnly = {
+  test() {
+    perfHooksPerformance.clearMarks();
+    perfHooksPerformance.clearMeasures();
+
+    const before = perfHooksPerformance.now();
+    const measure = perfHooksPerformance.measure('name-only-measure');
+    const after = perfHooksPerformance.now();
+
+    ok(
+      measure instanceof PerformanceMeasure,
+      'measure should return a PerformanceMeasure instance'
+    );
+    strictEqual(measure.name, 'name-only-measure', 'measure name should match');
+    strictEqual(measure.entryType, 'measure', 'entryType should be "measure"');
+    strictEqual(measure.startTime, 0, 'startTime should be 0 (timeOrigin)');
+    ok(
+      measure.duration >= before && measure.duration <= after,
+      'duration should be approximately the current time'
+    );
+    strictEqual(
+      measure.detail,
+      null,
+      'detail should be null when not provided'
+    );
+
     perfHooksPerformance.clearMeasures();
   },
 };
@@ -535,9 +580,8 @@ export const testPerformanceMeasureToJSON = {
     const json1 = measure1.toJSON();
     strictEqual(json1.name, 'test-json');
     strictEqual(json1.entryType, 'measure');
-    ok(json1.detail);
-    ok(typeof json1.detail.start === 'number');
-    ok(typeof json1.detail.end === 'number');
+    // detail should not be in JSON when not provided (it's null)
+    ok(!('detail' in json1), 'detail should not be in JSON when not provided');
 
     const customDetail = { value: 42 };
     const measure2 = perfHooksPerformance.measure('test-json-2', {

@@ -734,8 +734,19 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(jsg::Lock& js,
   };
 
   if (hasHandlers() || hasInspector()) {
+    unhandledRejections.setUseMicrotasksCompletedCallback(
+        FeatureFlags::get(js).getUnhandledRejectionAfterMicrotaskCheckpoint());
     unhandledRejections.report(js, event, kj::mv(promise), kj::mv(value));
   }
+}
+
+void ServiceWorkerGlobalScope::setConnectOverride(kj::String networkAddress, ConnectFn connectFn) {
+  connectOverrides.upsert(kj::mv(networkAddress), kj::mv(connectFn));
+}
+
+kj::Maybe<ServiceWorkerGlobalScope::ConnectFn&> ServiceWorkerGlobalScope::getConnectOverride(
+    kj::StringPtr networkAddress) {
+  return connectOverrides.find(networkAddress);
 }
 
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {

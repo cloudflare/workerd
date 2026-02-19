@@ -4211,7 +4211,7 @@ declare abstract class Performance extends EventTarget {
    */
   measure(
     measureName: string,
-    measureOptionsOrStartMark: PerformanceMeasureOptions | string,
+    measureOptionsOrStartMark?: PerformanceMeasureOptions | string,
     maybeEndMark?: string,
   ): PerformanceMeasure;
   /**
@@ -4236,7 +4236,7 @@ declare class PerformanceMark extends PerformanceEntry {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark/detail)
    */
-  get detail(): any | undefined;
+  get detail(): any;
   toJSON(): any;
 }
 /**
@@ -4250,7 +4250,7 @@ declare abstract class PerformanceMeasure extends PerformanceEntry {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure/detail)
    */
-  get detail(): any | undefined;
+  get detail(): any;
   toJSON(): any;
 }
 interface PerformanceMarkOptions {

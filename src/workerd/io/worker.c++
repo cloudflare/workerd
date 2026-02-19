@@ -3695,14 +3695,6 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
   co_return co_await getIsolate().takeAsyncLockImpl(kj::mv(lockTiming));
 }
 
-void Worker::setConnectOverride(kj::String networkAddress, ConnectFn connectFn) {
-  connectOverrides.upsert(kj::mv(networkAddress), kj::mv(connectFn));
-}
-
-kj::Maybe<Worker::ConnectFn&> Worker::getConnectOverride(kj::StringPtr networkAddress) {
-  return connectOverrides.find(networkAddress);
-}
-
 Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<RequestTracker&> tracker,
     Actor::Id actorId,

@@ -122,7 +122,7 @@ struct ActorSqliteTest final {
     }
   }
 
-  kj::Promise<void> commitCallback() {
+  kj::Promise<void> commitCallback(SpanParent) {
     auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
     calls.add(Call{kj::str("commit"), kj::mv(fulfiller)});
     return kj::mv(promise);
@@ -1339,6 +1339,170 @@ KJ_TEST("calling deleteAll() during an implicit transaction preserves alarm stat
 
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("deleteAll with deleteAlarm option deletes alarm") {
+  // Tests that deleteAll() with deleteAlarm=true deletes the alarm along with KV data,
+  // instead of preserving the alarm as it does by default.
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Call deleteAll() with deleteAlarm=true.
+  ActorCache::DeleteAllResults results = test.actor.deleteAll({}, nullptr, {.deleteAlarm = true});
+
+  // The alarm should now be deleted.
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+  // Commit should include scheduling the alarm cancellation.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(results.count.wait(test.ws) == 0);
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+}
+
+KJ_TEST("deleteAll without deleteAlarm option preserves alarm") {
+  // Tests that deleteAll() without deleteAlarm (the default) preserves the alarm,
+  // which is the existing behavior.
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Call deleteAll() without deleteAlarm (default behavior).
+  ActorCache::DeleteAllResults results = test.actor.deleteAll({}, nullptr);
+
+  // The alarm should be preserved.
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(results.count.wait(test.ws) == 0);
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("deleteAll with deleteAlarm during alarm handler cancels deferred delete") {
+  // Tests that calling deleteAll() with deleteAlarm=true while an alarm handler is running
+  // correctly deletes the alarm and cancels the deferred alarm deletion (haveDeferredDelete).
+  // When the handler's DeferredAlarmDeleter is dropped, it should NOT write a null alarm row
+  // since deleteAll already handled the deletion.
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  {
+    auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+
+    // During the handler, getAlarm() should return none (deferred delete is active).
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+    // Call deleteAll() with deleteAlarm=true while the handler is running.
+    auto results = test.actor.deleteAll({}, nullptr, {.deleteAlarm = true});
+
+    // getAlarm() should still return none.
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+    // Drop the DeferredAlarmDeleter (simulating handler success). Since deleteAll already
+    // cleared haveDeferredDelete, this should NOT write to the metadata table.
+  }
+
+  // The deleteAll commit should go through commitImpl(), which detects the alarm moved to none
+  // and schedules the cancellation.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+}
+
+KJ_TEST("deleteAll without deleteAlarm during alarm handler still has deferred delete") {
+  // Tests that calling deleteAll() without deleteAlarm while an alarm handler is running
+  // restores the alarm in metadata but leaves haveDeferredDelete active. When the handler
+  // finishes, the deferred deletion deletes the restored alarm.
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  {
+    auto armResult = test.actor.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+
+    // During the handler, getAlarm() should return none (deferred delete is active).
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+    // Call deleteAll() without deleteAlarm while the handler is running.
+    // This restores the alarm in metadata, but haveDeferredDelete is still true.
+    test.actor.deleteAll({}, nullptr);
+
+    // getAlarm() still returns none because haveDeferredDelete is still active.
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+    // Drop the DeferredAlarmDeleter (simulating handler success). This triggers
+    // maybeDeleteDeferredAlarm() which deletes the restored alarm.
+  }
+
+  // The deleteAll commit goes first, then the deferred alarm deletion triggers its own commit
+  // with alarm scheduling.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+}
+
+KJ_TEST("deleteAll deleteAlarm does not schedule alarm cancellation if setAlarm interleaves") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Start deleteAll with deleteAlarm=true and hold the commit.
+  test.actor.deleteAll({}, nullptr, {.deleteAlarm = true});
+  auto deleteAllCommit = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+
+  // While deleteAll commit is in-flight, set a later alarm.
+  test.setAlarm(twoMs);
+  auto setAlarmCommit = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  // Completing the deleteAll commit should NOT schedule a cancel because setAlarm interleaved.
+  deleteAllCommit->fulfill();
+  test.pollAndExpectCalls({});
+
+  // Completing the setAlarm commit should schedule the new alarm time.
+  setAlarmCommit->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
 }
 
 KJ_TEST("rolling back transaction leaves alarm in expected state") {

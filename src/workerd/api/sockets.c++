@@ -4,6 +4,7 @@
 
 #include "sockets.h"
 
+#include "global-scope.h"
 #include "streams/standard.h"
 #include "system-streams.h"
 
@@ -233,7 +234,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
     // Support calling into arbitrary callbacks for any registered "magic" addresses for which
     // custom connect() logic is needed. Note that these overrides should only apply to calls of the
     // global connect() method, not for fetcher->connect(), hence why we check for them here.
-    KJ_IF_SOME(fn, ioContext.getCurrentLock().getWorker().getConnectOverride(addressStr)) {
+    KJ_IF_SOME(fn, ioContext.getCurrentLock().getGlobalScope().getConnectOverride(addressStr)) {
       return fn(js);
     }
     actualFetcher =

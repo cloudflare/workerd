@@ -14,6 +14,12 @@ wd_test(
 )
 
 wd_test(
+    src = "delete-all-deletes-alarm-test.wd-test",
+    args = ["--experimental"],
+    data = ["delete-all-deletes-alarm-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-test.js"],
@@ -284,6 +290,20 @@ wd_test(
     src = "global-scope-test.wd-test",
     args = ["--experimental"],
     data = ["global-scope-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "unhandled-rejection-test.wd-test",
+    args = ["--experimental"],
+    data = ["unhandled-rejection-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "decompression-stream-unhandled-rejection-test.wd-test",
+    args = ["--experimental"],
+    data = ["decompression-stream-unhandled-rejection-test.js"],
 )
 
 wd_test(

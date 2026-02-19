@@ -815,7 +815,7 @@ class AsyncIteratorBase: public Object {
 
   void pushCurrent(Lock& js, Promise<void> promise) {
     auto& inner = state.template get<InnerState>();
-    inner.impl.pushCurrent(promise.whenResolved(js).then(js, [this, self = JSG_THIS](Lock& js) {
+    auto result = promise.whenResolved(js).then(js, [this, self = JSG_THIS](Lock& js) {
       // If state is Finished, then there's nothing we need to do here.
       KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
         inner.impl.popCurrent();
@@ -826,7 +826,11 @@ class AsyncIteratorBase: public Object {
         inner.impl.popCurrent();
       }
       return js.rejectedPromise<void>(kj::mv(value));
-    }));
+    });
+    // The error is already propagated through the promise returned by nextImpl/returnImpl.
+    // Mark as handled so the internally-held promise does not trigger unhandledrejection.
+    result.markAsHandled(js);
+    inner.impl.pushCurrent(kj::mv(result));
   }
 
   Promise<Next> nextImpl(Lock& js, NextSignature nextFunc) {

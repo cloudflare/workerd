@@ -51,7 +51,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // machines before being considered durable.
   explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       OutputGate& outputGate,
-      kj::Function<kj::Promise<void>()> commitCallback,
+      kj::Function<kj::Promise<void>(SpanParent)> commitCallback,
       Hooks& hooks = Hooks::getDefaultHooks(),
       bool debugAlarmSync = false);
 
@@ -91,7 +91,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // See ActorCacheOps.
 
   kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
-  DeleteAllResults deleteAll(WriteOptions options, SpanParent traceSpan) override;
+  DeleteAllResults deleteAll(
+      WriteOptions options, SpanParent traceSpan, DeleteAllOptions deleteAllOptions = {}) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(kj::Date scheduledTime,
@@ -108,7 +109,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
  private:
   kj::Own<SqliteDatabase> db;
   OutputGate& outputGate;
-  kj::Function<kj::Promise<void>()> commitCallback;
+  kj::Function<kj::Promise<void>(SpanParent)> commitCallback;
   Hooks& hooks;
   SqliteKv kv;
   SqliteMetadata metadata;

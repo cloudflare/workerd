@@ -49,16 +49,18 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
-  IoContext::current().addTask(req.sendIgnoringResult());
-
-  running = true;
-
   if (flags.getWorkerdExperimental()) {
     KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
       JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
       req.setHardTimeoutMs(hardTimeoutMs);
     }
   }
+
+  req.setCompatibilityFlags(flags);
+
+  IoContext::current().addTask(req.sendIgnoringResult());
+
+  running = true;
 }
 
 jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {
