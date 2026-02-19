@@ -153,6 +153,25 @@ bool AlarmScheduler::deleteAlarm(ActorKey actor) {
   return query.changeCount() > 0;
 }
 
+void AlarmScheduler::deleteAllAlarms() {
+  stmtDeleteAllAlarms.run();
+
+  alarms.eraseAll([this](ActorKey& key, ScheduledAlarm& value) {
+    KJ_IF_SOME(queued, value.queuedAlarm) {
+      if (value.status == AlarmStatus::STARTED) {
+        // If we are currently running an alarm, we want to delete the queued instead of current.
+        value.queuedAlarm = kj::none;
+      } else {
+        alarms.upsert(key, scheduleAlarm(clock.now(), kj::mv(value.actor), queued));
+      }
+      return false;
+    } else {
+      // We can't remove running alarms.
+      return value.status != AlarmStatus::STARTED;
+    }
+  });
+}
+
 kj::Promise<AlarmScheduler::RetryInfo> AlarmScheduler::runAlarm(
     const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount) {
   KJ_IF_SOME(ns, namespaces.find(actor.uniqueKey)) {
