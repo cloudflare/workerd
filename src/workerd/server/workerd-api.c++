@@ -1035,15 +1035,17 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
     // configured to use the fallback will send a request to the fallback
     // service to try resolving.
     KJ_IF_SOME(fallbackService, maybeFallbackService) {
+      auto fallbackClient =
+          kj::heap<workerd::fallback::FallbackServiceClient>(kj::str(fallbackService));
       builder.add(jsg::modules::ModuleBundle::newFallbackBundle(
-          [fallbackService = kj::str(fallbackService), featureFlags](
-              const jsg::modules::ResolveContext& context)
-              -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
+          [client = kj::mv(fallbackClient), featureFlags](
+              const jsg::modules::ResolveContext& context) mutable
+          -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
         auto normalizedSpecifier = kj::str(context.normalizedSpecifier.getHref());
         auto referrer = kj::str(context.referrerNormalizedSpecifier.getHref());
         KJ_IF_SOME(resolved,
-            workerd::fallback::tryResolve(workerd::fallback::Version::V2,
-                workerd::fallback::ImportType::IMPORT, fallbackService, normalizedSpecifier,
+            client->tryResolve(workerd::fallback::Version::V2,
+                workerd::fallback::ImportType::IMPORT, normalizedSpecifier,
                 context.rawSpecifier.orDefault(nullptr), referrer, context.attributes)) {
           KJ_SWITCH_ONEOF(resolved) {
             KJ_CASE_ONEOF(str, kj::String) {

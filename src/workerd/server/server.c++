@@ -4444,20 +4444,22 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       // to load certain modules from a fallback service. This is generally intended for local
       // dev/testing purposes only.
       auto& apiIsolate = isolate->getApi();
+      auto fallbackClient =
+          kj::heap<workerd::fallback::FallbackServiceClient>(kj::str(moduleFallback));
       apiIsolate.setModuleFallbackCallback(
-          [address = kj::str(moduleFallback), featureFlags = apiIsolate.getFeatureFlags()](
+          [client = kj::mv(fallbackClient), featureFlags = apiIsolate.getFeatureFlags()](
               jsg::Lock& js, kj::StringPtr specifier, kj::Maybe<kj::String> referrer,
               jsg::CompilationObserver& observer, jsg::ModuleRegistry::ResolveMethod method,
               kj::Maybe<kj::StringPtr> rawSpecifier) mutable
           -> kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>> {
         kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
         KJ_IF_SOME(moduleOrRedirect,
-            workerd::fallback::tryResolve(workerd::fallback::Version::V1,
+            client->tryResolve(workerd::fallback::Version::V1,
                 method == jsg::ModuleRegistry::ResolveMethod::IMPORT
                     ? workerd::fallback::ImportType::IMPORT
                     : workerd::fallback::ImportType::REQUIRE,
-                address, specifier, rawSpecifier.orDefault(nullptr),
-                referrer.orDefault(kj::String()), attributes)) {
+                specifier, rawSpecifier.orDefault(nullptr), referrer.orDefault(kj::String()),
+                attributes)) {
           KJ_SWITCH_ONEOF(moduleOrRedirect) {
             KJ_CASE_ONEOF(redirect, kj::String) {
               // If a string is returned, then the fallback service returned a 301 redirect.
