@@ -764,7 +764,9 @@ struct ExternalServer {
   # - "[1234:5678::abcd]:80": Connect to the given IPv6 address and port.
   # - "unix:/path/to/socket": Connect to the given Unix Domain socket by path.
   # - "unix-abstract:name": On Linux, connect to the given "abstract" Unix socket name.
-  # - "example.com:80": Perform a DNS lookup to determine the address, and then connect to it.
+  # - "example.com:80": Perform a DNS lookup once on startup to determine the address, and then
+  #    connect to it. (If you need to track changes to DNS responses over time, use a Network
+  #    instead.)
   #
   # (These are the formats supported by KJ's parseAddress().)
 
