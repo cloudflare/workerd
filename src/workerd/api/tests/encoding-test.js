@@ -15,8 +15,6 @@ function decodeStreaming(decoder, input) {
   return x;
 }
 
-const u = (...args) => Uint8Array.of(...args);
-
 // From https://developer.mozilla.org/en-US/docs/Web/API/Encoding_API/Encodings
 const windows1252Labels = [
   'ansi_x3.4-1968',
@@ -888,11 +886,11 @@ export const stickyMultibyteStateIso2022JpLoose = {
 
     const d = new TextDecoder('iso-2022-jp');
     for (const [bytes, text] of vectors) {
-      strictEqual(d.decode(u(0x40)), '@');
+      strictEqual(d.decode(Uint8Array.of(0x40)), '@');
       strictEqual(d.decode(Uint8Array.from(bytes)), text);
-      strictEqual(d.decode(u(0x40)), '@');
-      strictEqual(d.decode(u(0x2a)), '*');
-      strictEqual(d.decode(u(0x42)), 'B');
+      strictEqual(d.decode(Uint8Array.of(0x40)), '@');
+      strictEqual(d.decode(Uint8Array.of(0x2a)), '*');
+      strictEqual(d.decode(Uint8Array.of(0x42)), 'B');
     }
   },
 };
@@ -904,7 +902,9 @@ export const fatalStreamGb18030Gbk = {
         const d = new TextDecoder(encoding, { fatal: true });
         strictEqual(d.decode(Uint8Array.of(0x80), { stream: true }), '\u20AC');
         throws(() =>
-          d.decode(u(0x81, 0x30, 0x21, 0x21, 0x21), { stream: true })
+          d.decode(Uint8Array.of(0x81, 0x30, 0x21, 0x21, 0x21), {
+            stream: true,
+          })
         );
         strictEqual(d.decode(Uint8Array.of(0x80)), '\u20AC');
       }
@@ -913,7 +913,9 @@ export const fatalStreamGb18030Gbk = {
         const d = new TextDecoder(encoding, { fatal: true });
         strictEqual(d.decode(Uint8Array.of(0x80), { stream: true }), '\u20AC');
         throws(() =>
-          d.decode(u(0x81, 0x30, 0x81, 0x42, 0x42), { stream: true })
+          d.decode(Uint8Array.of(0x81, 0x30, 0x81, 0x42, 0x42), {
+            stream: true,
+          })
         );
         strictEqual(d.decode(Uint8Array.of(0x80)), '\u20AC');
       }
