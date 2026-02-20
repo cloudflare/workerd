@@ -1,0 +1,49 @@
+# Input file for aria2c CLI download tool. Run like so:
+#   aria2c --check-integrity=true --input-file <this file>
+#
+# The --check-integrity=true parameter tells aria2c not to re-download a file if it exists and its
+# checksum matches the one in this file.
+
+# ----------------------------------------------------------
+# windows-2022/base dependencies
+
+# Virtio driver ISO. These drivers allow guests to use more performant virtualized hardware that
+# QEMU has to offer. The ISO also includes virtiofsd, which, when installed, allows you to configure
+# a shared folder with the Windows guest OS, as well as QEMU and SPICE guest agents.
+#
+# Depending on how you construct the link, you may:
+#
+# - Un-pin, using whatever the latest stable version is: .../stable-virtio/virtio-win.iso
+# - Pin to the latest stable version, breaking on update: .../stable-virtio/virtio-win-x.y.z.iso
+# - Pin to a specific version: .../archive-virtio/virtio-win-0.1.266-1/virtio-win-0.1.266.iso
+#
+# You can find links to the latest stable version, and version archives, here:
+# - https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/
+# - https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/
+https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.266-1/virtio-win-0.1.266.iso
+  dir=base/deps
+  out=virtio-win.iso
+  checksum=sha-256=57b0f6dc8dc92dc2ae8621f8b1bfbd8a873de9bedc788c4c4b305ea28acc77cd
+
+# ----------------------------------------------------------
+# windows-2022 dependencies
+
+# Virtiofs service dependencies
+https://github.com/winfsp/winfsp/releases/download/v2.0/winfsp-2.0.23075.msi
+  dir=deps
+  out=winfsp.msi
+  checksum=sha-256=6324dc81194a6a08f97b6aeca303cf5c2325c53ede153bae9fc4378f0838c101
+
+# Winget dependencies
+https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx
+  dir=deps
+  out=Microsoft.VCLibs.x64.14.Desktop.zip
+  checksum=sha-256=b56a9101f706f9d95f815f5b7fa6efbac972e86573d378b96a07cff5540c5961
+https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/2.7.1
+  dir=deps
+  out=Microsoft.UI.Xaml.zip
+  checksum=sha-256=4ffd18beb1e26dff9f5bdfc8762882efbda3c241952efadbb7d1280e4796f85d
+https://github.com/microsoft/winget-cli/releases/download/v1.9.25200/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle
+  dir=deps
+  out=Microsoft.DesktopAppInstaller.zip
+  checksum=sha-256=46d46bb5deacef0fd8ac30a223072b45ac2d5d5262d1591f2c08fb6ee15e4b22
