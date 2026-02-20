@@ -919,6 +919,15 @@ export const processRejectionListeners = {
       const { promise: promise2 } = await handledPromise;
       assert.strictEqual(promise, promise2);
     }
+
+    {
+      let uncaughtException;
+      process.on('uncaughtException', (exc) => {
+        uncaughtException = exc;
+      });
+      reportError(new Error('unhandled error'));
+      assert.strictEqual(uncaughtException.message, 'unhandled error');
+    }
   },
 };
 
