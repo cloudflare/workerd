@@ -5,11 +5,13 @@
 #pragma once
 
 #include <workerd/io/outcome.capnp.h>
+#include <workerd/io/wasm-shutdown-signal.h>
 
 #include <v8-array-buffer.h>
 #include <v8-isolate.h>
 
 #include <kj/async.h>   // For Promise
+#include <kj/debug.h>   // For KJ_REQUIRE
 #include <kj/memory.h>  // for Own
 #include <kj/one-of.h>  // for OneOf
 #include <kj/time.h>    // for Duration
@@ -103,21 +105,39 @@ class IsolateLimitEnforcer: public kj::Refcounted {
 
   // Registers a WASM module for receiving the "shut down" signal when CPU time is nearly
   // exhausted. The signal handler will write 1 (as a uint32) into the module's linear memory
-  // at `offset` bytes from the start of `backingStore`.
+  // at `signalOffset` bytes from the start of `backingStore`. The runtime reads
+  // `terminatedOffset` in a GC prologue to detect when the module has exited.
   //
   // Must be called with the isolate lock held.
-  virtual void registerWasmShutdownSignal(
-      std::shared_ptr<v8::BackingStore> backingStore, uint32_t offset) const {
-    // Default no-op for open-source workerd and test fixtures.
+  void registerWasmShutdownSignal(std::shared_ptr<v8::BackingStore> backingStore,
+      uint32_t signalOffset,
+      uint32_t terminatedOffset) const {
+    KJ_REQUIRE(
+        static_cast<size_t>(signalOffset) + WASM_SIGNAL_FIELD_BYTES <= backingStore->ByteLength(),
+        "__signal_address offset is out of bounds: need ", WASM_SIGNAL_FIELD_BYTES,
+        " bytes but memory is too small");
+    KJ_REQUIRE(static_cast<size_t>(terminatedOffset) + WASM_SIGNAL_FIELD_BYTES <=
+            backingStore->ByteLength(),
+        "__terminated_address offset is out of bounds: need ", WASM_SIGNAL_FIELD_BYTES,
+        " bytes but memory is too small");
+    wasmShutdownSignals.pushFront(
+        WasmShutdownSignal{kj::mv(backingStore), signalOffset, terminatedOffset});
   }
 
   // Filters out WASM shutdown signal entries where the module has exited (indicated by a
-  // non-zero value in the module_exited field at offset+4). This should be called from a
-  // GC prologue hook to allow linear memory to be reclaimed.
+  // non-zero value at the terminated address). This should be called from a GC prologue
+  // hook to allow linear memory to be reclaimed.
   //
   // Must be called with the isolate lock held.
-  virtual void filterWasmShutdownSignals() const {
-    // Default no-op for open-source workerd and test fixtures.
+  void filterWasmShutdownSignals() const {
+    wasmShutdownSignals.filter(
+        [](const WasmShutdownSignal& signal) { return signal.isModuleListening(); });
+  }
+
+  // Returns the list of registered WASM shutdown signals. The list itself is signal-safe for
+  // reading (via iterate()), so a signal handler can safely walk it.
+  const AtomicList<WasmShutdownSignal>& getWasmShutdownSignals() const {
+    return wasmShutdownSignals;
   }
 
   // Inserts a custom mark event named `name` into this isolate's perf event data stream. At
@@ -129,6 +149,16 @@ class IsolateLimitEnforcer: public kj::Refcounted {
   //  coupled with our CPU time limiting system, so adding this function here is a path of least
   //  resistance.
   virtual void markPerfEvent(kj::LiteralStringConst name) const {};
+
+ private:
+  // WASM modules that have opted into receiving the "shut down" signal by exporting i32 globals
+  // named "__signal_address" and "__terminated_address". When the CPU time limiter fires
+  // NEARLY_OUT_OF_TIME, it writes 1 into each module's linear memory at the signal address.
+  //
+  // Marked mutable because registration happens through `const IsolateLimitEnforcer&` (the
+  // standard access pattern), and the AtomicList itself uses atomic stores for safe concurrent
+  // access from signal handlers on the same thread.
+  mutable AtomicList<WasmShutdownSignal> wasmShutdownSignals;
 };
 
 // Abstract interface that enforces resource limits on a IoContext.
