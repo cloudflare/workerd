@@ -48,14 +48,6 @@ use_repo(rust, "rust_toolchains")
 
 register_toolchains("@rust_toolchains//:all")
 
-crate_repositories = use_extension("//deps/rust:extension.bzl", "crate_repositories")
-use_repo(
-    crate_repositories,
-    "crates_vendor",
-    # Needed to retrieve lol-html header
-    "crates_vendor__lol_html_c_api-1.3.1",
-)
-
 # rust-based lolhtml dependency, including the API header.
 # Presented as a separate repository to allow overrides.
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
@@ -72,6 +64,40 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 inject_repo(
     http,
     **{"crates.io": "crates_vendor"}
+)
+
+bazel_dep(name = "rules_rs", version = "0.0.30")
+archive_override(
+    module_name = "rules_rs",
+    integrity = "sha256-3w+2nGAtvtUPkufQRNPL4EeFad5kDhlZYBLKjwyIWgE=",
+    patch_args = ["-p1"],
+    patches = [
+        "//:patches/rules_rs/0001-rust-deps-ccinfo.patch",
+    ],
+    strip_prefix = "rules_rs-0.0.30",
+    type = "tgz",
+    url = "https://github.com/dzbarsky/rules_rs/releases/download/v0.0.30/rules_rs-v0.0.30.tar.gz",
+)
+
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.annotation(
+    additive_build_file_content = """exports_files(["include/lol_html.h"])""",
+    crate = "lol_html_c_api",
+    strip_prefix = "c-api",
+)
+crate.from_cargo(
+    # TODO(zbarsky): This name is a bit misleading now that we don't vendor.
+    # We can clean it up as a followup.
+    name = "crates_vendor",
+    cargo_lock = "//deps/rust:Cargo.lock",
+    cargo_toml = "//deps/rust:Cargo.toml",
+    platform_triples = RUST_TARGET_TRIPLES,
+)
+use_repo(
+    crate,
+    "crates_vendor",
+    # Needed to retrieve lol-html header
+    "crates_vendor__lol_html_c_api-1.3.1",
 )
 
 http.archive(

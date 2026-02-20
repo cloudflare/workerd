@@ -31,7 +31,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Update rust dependencies
-        run: bazel run //deps/rust:crates_vendor -- --repin full
+        run: cd deps/rust && bazel run @rules_rust//tools/upstream_wrapper:cargo -- update
       - name: Reformat changed files
         run: ./tools/cross/format.py git
       - name: Open pull request
