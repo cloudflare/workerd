@@ -671,22 +671,17 @@ struct SpanEndData {
   // Represents the data needed when closing a span, including the Attributes and SpanClose events.
   tracing::SpanId spanId;
 
-  kj::Date startTime;
   kj::Date endTime;
   // Should be Span::TagMap, but we can't forward-declare that.
   kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
 
-  // Convert CompleteSpan to SpanEndData
-  explicit SpanEndData(CompleteSpan&& span);
   SpanEndData(rpc::SpanEndData::Reader reader);
   void copyTo(rpc::SpanEndData::Builder builder) const;
   explicit SpanEndData(tracing::SpanId spanId,
-      kj::Date startTime,
       kj::Date endTime,
       kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
           kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
       : spanId(spanId),
-        startTime(startTime),
         endTime(endTime),
         tags(kj::mv(tags)) {}
 };
