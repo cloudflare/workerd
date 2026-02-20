@@ -666,110 +666,6 @@ class NoDeferredProxySource final: public ReadableSourceWrapper {
   IoContext& ioctx;
 };
 
-static const WarningAggregator::Key unusedStreamBranchKey;
-// A ReadableSource wrapper that emits a warning if it is never read from
-// before being destroyed. The warning aggregates multiple instances together and
-// prints a single warning message when the associated WarningAggregator is destroyed.
-// The message includes a stack trace of where each unused stream was created to
-// aid in debugging.
-class WarnIfUnusedStream final: public ReadableSourceWrapper {
- public:
-  class UnusedStreamWarningContext final: public WarningAggregator::WarningContext {
-   public:
-    UnusedStreamWarningContext(jsg::Lock& js): exception(jsg::JsRef(js, js.error(""_kjc))) {}
-
-    kj::String toString(jsg::Lock& js) override {
-      auto handle = exception.getHandle(js);
-      auto obj = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsObject>());
-      obj.set(js, "name"_kjc, js.strIntern("Unused stream created:"_kjc));
-      return obj.get(js, "stack"_kjc).toString(js);
-    }
-
-   private:
-    jsg::JsRef<jsg::JsValue> exception;
-  };
-
-  static kj::Own<WarningAggregator> createWarningAggregator(IoContext& context) {
-    return kj::atomicRefcounted<WarningAggregator>(
-        context, [](jsg::Lock& js, kj::Array<kj::Own<WarningAggregator::WarningContext>> warnings) {
-      StringBuffer<1024> message(1024);
-      if (warnings.size() > 1) {
-        message.append(
-            kj::str(warnings.size()), " ReadableStream branches were created but never consumed. ");
-      } else {
-        message.append("A ReadableStream branch was created but never consumed. ");
-      }
-      message.append("Such branches can be created, for instance, by calling the tee() "
-                     "method on a ReadableStream, or by calling the clone() method on a "
-                     "Request or Response object. If a branch is created but never consumed, "
-                     "it can force the runtime to buffer the entire body of the stream in "
-                     "memory, which may cause the Worker to exceed its memory limit and be "
-                     "terminated. To avoid this, ensure that all branches created are consumed.\n");
-
-      if (warnings.size() > 1) {
-        for (int n = 0; n < warnings.size(); n++) {
-          auto& warning = warnings[n];
-          message.append("\n ", kj::str(n + 1), ". ", warning->toString(js), "\n");
-        }
-      } else {
-        message.append("\n * ", warnings[0]->toString(js), "\n");
-      }
-      auto msg = message.toString();
-      js.logWarning(msg);
-    });
-  }
-
-  explicit WarnIfUnusedStream(jsg::Lock& js, kj::Own<ReadableSource> inner, IoContext& ioContext)
-      : ReadableSourceWrapper(kj::mv(inner)),
-        warningAggregator(ioContext.getWarningAggregator(unusedStreamBranchKey,
-            [](IoContext& context) { return createWarningAggregator(context); })),
-        warningContext(kj::heap<UnusedStreamWarningContext>(js)) {}
-
-  ~WarnIfUnusedStream() {
-    if (!wasRead) {
-      warningAggregator->add(kj::mv(warningContext));
-    }
-  }
-
-  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) override {
-    wasRead = true;
-    return ReadableSourceWrapper::read(buffer, minBytes);
-  }
-
-  kj::Promise<kj::Array<const kj::byte>> readAllBytes(size_t limit) override {
-    wasRead = true;
-    return ReadableSourceWrapper::readAllBytes(limit);
-  }
-
-  kj::Promise<kj::String> readAllText(size_t limit) override {
-    wasRead = true;
-    return ReadableSourceWrapper::readAllText(limit);
-  }
-
-  kj::Promise<DeferredProxy<void>> pumpTo(
-      WritableSink& output, EndAfterPump end = EndAfterPump::YES) override {
-    wasRead = true;
-    return ReadableSourceWrapper::pumpTo(output, end);
-  }
-
-  void cancel(kj::Exception reason) override {
-    wasRead = true;
-    return ReadableSourceWrapper::cancel(kj::mv(reason));
-  }
-
-  Tee tee(size_t limit) override {
-    wasRead = true;
-    return ReadableSourceWrapper::tee(limit);
-  }
-
- private:
-  kj::Own<WarningAggregator> warningAggregator;
-  kj::Own<UnusedStreamWarningContext> warningContext;
-  kj::Own<ReadableSource> inner;
-  // Used for tracking if this body was ever used.
-  bool wasRead = false;
-};
-
 // A ReadableSource implementation that lazily wraps an innner Gzip or Brotli
 // encoded AsyncInputStream when the first read() is called, or when pumpTo is called,
 // the encoding will be selectively and lazily applied to the inner stream.
@@ -884,11 +780,6 @@ kj::Own<ReadableSource> newErroredReadableSource(kj::Exception exception) {
 
 kj::Own<ReadableSource> newReadableSource(kj::Own<kj::AsyncInputStream> inner) {
   return kj::heap<ReadableSourceImpl>(kj::mv(inner));
-}
-
-kj::Own<ReadableSource> newWarnIfUnusedReadableSource(
-    jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableSource> inner) {
-  return kj::heap<WarnIfUnusedStream>(js, kj::mv(inner), ioContext);
 }
 
 kj::Own<ReadableSource> newEncodedReadableSource(

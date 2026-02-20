@@ -206,11 +206,6 @@ kj::Own<ReadableSource> newReadableSourceFromProducer(
     kj::Function<kj::Promise<size_t>(kj::ArrayPtr<kj::byte>, size_t)> producer,
     kj::Maybe<uint64_t> expectedLength = kj::none);
 
-// Creates a ReadableSource that wraps the given source and emits a warning if it is
-// never read from before being destroyed
-kj::Own<ReadableSource> newWarnIfUnusedReadableSource(
-    jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableSource> inner);
-
 // Creates a ReadableSource that decodes the given stream according to the given encoding.
 kj::Own<ReadableSource> newEncodedReadableSource(
     rpc::StreamEncoding encoding, kj::Own<kj::AsyncInputStream> inner);
