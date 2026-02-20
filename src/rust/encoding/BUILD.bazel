@@ -6,6 +6,6 @@ wd_rust_crate(
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/cxx-integration",
-        "@crates_vendor//:encoding_rs",
+        "@crates_vendor//:encoding_rs-0.8.35",
     ],
 )

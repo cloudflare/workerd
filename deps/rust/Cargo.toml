@@ -1,0 +1,45 @@
+[package]
+name = "direct-cargo-bazel-deps"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+# This synthetic crate exists only to drive Cargo dependency resolution for Bazel.
+[lib]
+path = "fake.rs"
+
+[dependencies]
+# Keep explicit features minimal to bound compile times and binary size.
+ada-url = "3"
+anyhow = "1"
+async-trait = { version = "0", default-features = false }
+capnp = "0"
+capnp-rpc = "0"
+capnpc = "0"
+cc = "1"
+clang-ast = "0"
+clap = { version = "4", default-features = false, features = ["derive", "std", "help"] }
+codespan-reporting = "0"
+flate2 = "1"
+foldhash = "0"
+futures = "0"
+lol_html_c_api = { git = "https://github.com/cloudflare/lol-html", tag = "v2.7.1" }
+nix = "0"
+pico-args = "0"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
+ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
+ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
+rustversion = "1"
+scratch = "1"
+serde = { version = "1", features = ["derive"] }
+# param_extractor depends on `unbounded_depth`.
+serde_json = { version = "1", features = ["unbounded_depth"] }
+static_assertions = "1"
+swc_common = "18"
+swc_ts_fast_strip = "43"
+syn = { version = "2", features = ["full"] }
+thiserror = "2"
+# Tokio is large; enable only the features we use.
+tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "time"] }
+tracing = { version = "0", default-features = false, features = ["std"] }
