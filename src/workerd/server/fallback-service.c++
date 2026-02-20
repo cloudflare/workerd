@@ -40,7 +40,7 @@ ModuleOrRedirect handleReturnPayload(
     // The response from the fallback service must be a valid JSON serialization
     // of the workerd module configuration. If it is not, or if there is any other
     // error when processing here, we'll log the exception and return nothing.
-    try {
+    KJ_TRY {
       capnp::MallocMessageBuilder moduleMessage;
       capnp::JsonCodec json;
       json.handleByAnnotation<server::config::Worker::Module>();
@@ -63,8 +63,8 @@ ModuleOrRedirect handleReturnPayload(
 
       kj::Own<server::config::Worker::Module::Reader> ret = capnp::clone(moduleBuilder.asReader());
       return ModuleOrRedirect(kj::mv(ret));
-    } catch (...) {
-      auto exception = kj::getCaughtExceptionAsKj();
+    }
+    KJ_CATCH(exception) {
       KJ_LOG(ERROR, "Fallback service failed to fetch module", exception, specifier);
       return kj::none;
     }
@@ -119,7 +119,7 @@ ModuleOrRedirect tryResolveV1(ImportType type,
     // so that the destructor joins the current thread (blocking it). The thread will
     // either set the jsonPayload variable or not.
     kj::Thread loaderThread([&spec, address, &jsonPayload, &redirect, type]() mutable {
-      try {
+      KJ_TRY {
         kj::AsyncIoContext io = kj::setupAsyncIo();
         kj::HttpHeaderTable::Builder builder;
         kj::HttpHeaderId kMethod = builder.add("x-resolve-method");
@@ -153,8 +153,8 @@ ModuleOrRedirect tryResolveV1(ImportType type,
         } else {
           jsonPayload = resp.body->readAllText().wait(io.waitScope);
         }
-      } catch (...) {
-        auto exception = kj::getCaughtExceptionAsKj();
+      }
+      KJ_CATCH(exception) {
         KJ_LOG(ERROR, "Fallback service failed to fetch module", exception, spec);
       }
     });
@@ -199,7 +199,7 @@ ModuleOrRedirect tryResolveV2(ImportType type,
   {
     kj::Thread loaderThread(
         [&address, &jsonPayload, payload = kj::mv(payload), &redirect, &specifier]() mutable {
-      try {
+      KJ_TRY {
         kj::AsyncIoContext io = kj::setupAsyncIo();
         kj::HttpHeaderTable::Builder builder;
         auto headerTable = builder.build();
@@ -235,8 +235,8 @@ ModuleOrRedirect tryResolveV2(ImportType type,
         } else {
           jsonPayload = resp.body->readAllText().wait(io.waitScope);
         }
-      } catch (...) {
-        auto exception = kj::getCaughtExceptionAsKj();
+      }
+      KJ_CATCH(exception) {
         KJ_LOG(ERROR, "Fallback service failed to fetch module", exception);
       }
     });
@@ -304,7 +304,7 @@ ModuleOrRedirect FallbackServiceClient::tryResolve(Version version,
 }
 
 void FallbackServiceClient::threadMain() {
-  try {
+  KJ_TRY {
     // Set up the async I/O context, DNS resolution, and HTTP client once.
     // These are reused for all subsequent requests.
     kj::AsyncIoContext io = kj::setupAsyncIo();
@@ -372,7 +372,7 @@ void FallbackServiceClient::threadMain() {
 
         // Retry once on disconnect (stale pooled connection).
         for (int attempt = 0; attempt < 2; attempt++) {
-          try {
+          KJ_TRY {
             kj::HttpHeaders headers(*headerTable);
             headers.setPtr(kMethod, getMethodFromType(type));
             headers.setPtr(kj::HttpHeaderId::HOST, "localhost"_kj);
@@ -396,8 +396,8 @@ void FallbackServiceClient::threadMain() {
               jsonPayload = resp.body->readAllText().wait(io.waitScope);
             }
             break;  // Success, no retry needed.
-          } catch (...) {
-            auto exception = kj::getCaughtExceptionAsKj();
+          }
+          KJ_CATCH(exception) {
             if (attempt == 0 && exception.getType() == kj::Exception::Type::DISCONNECTED) {
               // Stale pooled connection; retry with a fresh one.
               continue;
@@ -439,7 +439,7 @@ void FallbackServiceClient::threadMain() {
 
         // Retry once on disconnect (stale pooled connection).
         for (int attempt = 0; attempt < 2; attempt++) {
-          try {
+          KJ_TRY {
             kj::HttpHeaders headers(*headerTable);
             headers.setPtr(kj::HttpHeaderId::HOST, "localhost");
 
@@ -464,8 +464,8 @@ void FallbackServiceClient::threadMain() {
               jsonPayload = resp.body->readAllText().wait(io.waitScope);
             }
             break;  // Success, no retry needed.
-          } catch (...) {
-            auto exception = kj::getCaughtExceptionAsKj();
+          }
+          KJ_CATCH(exception) {
             if (attempt == 0 && exception.getType() == kj::Exception::Type::DISCONNECTED) {
               // Stale pooled connection; retry with a fresh one.
               continue;
@@ -484,8 +484,8 @@ void FallbackServiceClient::threadMain() {
         lock->responseReady = true;
       }
     }
-  } catch (...) {
-    auto exception = kj::getCaughtExceptionAsKj();
+  }
+  KJ_CATCH(exception) {
     KJ_LOG(ERROR, "Fallback service background thread failed", exception);
     // Signal any waiting caller and prevent future requests.
     auto lock = state.lockExclusive();

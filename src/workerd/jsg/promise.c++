@@ -153,12 +153,13 @@ void UnhandledRejectionHandler::onMicrotasksCompleted(v8::Isolate* isolate, void
   KJ_DEFER(isolate->RemoveMicrotasksCompletedCallback(
       &UnhandledRejectionHandler::onMicrotasksCompleted, data));
   auto& js = Lock::from(isolate);
-  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+  KJ_TRY {
     handler->processWarnings(js);
 
     // Ensure microtasks scheduled by unhandledrejection handlers run promptly.
     js.requestExtraMicrotaskCheckpoint();
-  })) {
+  }
+  KJ_CATCH(exception) {
     handler->scheduled = false;
     KJ_LOG(ERROR, "uncaught exception while processing unhandled rejections", exception);
   }
