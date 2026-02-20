@@ -370,6 +370,11 @@ class WarnIfUnusedStream final: public ReadableStreamSource {
 
     kj::String toString(jsg::Lock& js) override {
       auto handle = exception.getHandle(js);
+      if (!handle.isObject()) {
+        LOG_WARNING_PERIODICALLY(
+            "NOSENTRY Unexpected non-object exception in WarnIfUnusedStream", handle.typeOf(js));
+        return handle.toString(js);
+      }
       auto obj = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsObject>());
       obj.set(js, "name"_kjc, js.str("Unused stream created:"_kjc));
       return obj.get(js, "stack"_kjc).toString(js);
