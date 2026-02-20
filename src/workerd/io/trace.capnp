@@ -57,13 +57,10 @@ struct SpanEndData {
   # Representation of an event that indicates completion of a user span. This information is
   # provided to the streaming tail worker in the Attributes and SpanClose events.
 
-  # TODO(cleanup): startTimeNs is merely used as a fallback timestamp, consider obsoleting it.
-  startTimeNs @0 :Int64;
-  # Nanoseconds since Unix epoch
-  endTimeNs @1 :Int64;
+  endTimeNs @0 :Int64;
   # Nanoseconds since Unix epoch
 
   # List of span attributes
-  tags @2 :List(Tag);
-  spanId @3 :UInt64;
+  tags @1 :List(Tag);
+  spanId @2 :UInt64;
 }
