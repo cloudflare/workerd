@@ -29,10 +29,10 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "fetch-request-memory-adjustment"_kj;
     case AutogateKey::RUST_BACKED_NODE_DNS:
       return "rust-backed-node-dns"_kj;
-    case AutogateKey::IDENTITY_TRANSFORM_STREAM_USE_STATE_MACHINE:
-      return "identity-transform-stream-use-state-machine"_kj;
     case AutogateKey::RPC_USE_EXTERNAL_PUSHER:
       return "rpc-use-external-pusher"_kj;
+    case AutogateKey::BLOB_USE_STREAMS_NEW_MEMORY_SOURCE:
+      return "blob-use-streams-new-memory-source"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

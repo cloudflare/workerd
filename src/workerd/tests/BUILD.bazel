@@ -10,7 +10,13 @@ wd_cc_library(
         "//src/workerd/server:really_use_tcmalloc": ["WD_USE_TCMALLOC"],
         "//conditions:default": [],
     }),
-    tags = ["workerd-benchmark"],
+    # clang-tidy fails on this target when using clang-tidy-21 together with llvm-19 headers due to
+    # changes in how intrinsics are defined - disable clang-tidy here until we start using LLVM 21
+    # everywhere.
+    tags = [
+        "no-clang-tidy",
+        "workerd-benchmark",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj-test",

@@ -62,6 +62,28 @@ jsg::JsObject PerformanceResourceTiming::toJSON(jsg::Lock& js) {
   JSG_FAIL_REQUIRE(Error, "PerformanceResourceTiming.toJSON is not implemented"_kj);
 }
 
+jsg::JsObject PerformanceNodeTiming::toJSON(jsg::Lock& js) {
+  auto obj = js.objNoProto();
+  obj.set(js, "name"_kj, js.str(name));
+  obj.set(js, "entryType"_kj, js.str(entryType));
+  obj.set(js, "startTime"_kj, js.num(startTime));
+  obj.set(js, "duration"_kj, js.num(duration));
+  obj.set(js, "nodeStart"_kj, js.num(0));
+  obj.set(js, "v8Start"_kj, js.num(0));
+  obj.set(js, "bootstrapComplete"_kj, js.num(0));
+  obj.set(js, "environment"_kj, js.num(0));
+  obj.set(js, "loopStart"_kj, js.num(0));
+  obj.set(js, "loopExit"_kj, js.num(0));
+  obj.set(js, "idleTime"_kj, js.num(0));
+  // Include uvMetricsInfo in the JSON representation
+  auto uvObj = js.objNoProto();
+  uvObj.set(js, "loopCount"_kj, js.num(0));
+  uvObj.set(js, "events"_kj, js.num(0));
+  uvObj.set(js, "eventsWaiting"_kj, js.num(0));
+  obj.set(js, "uvMetricsInfo"_kj, uvObj);
+  return kj::mv(obj);
+}
+
 void Performance::clearMarks(jsg::Optional<kj::String> name) {
   kj::Vector<jsg::Ref<PerformanceEntry>> filtered;
 
@@ -271,12 +293,23 @@ kj::ArrayPtr<const kj::StringPtr> PerformanceObserver::getSupportedEntryTypes() 
   return supportedEntryTypes.asPtr();
 }
 
-void Performance::eventLoopUtilization() {
-  JSG_FAIL_REQUIRE(Error, "Performance.eventLoopUtilization is not implemented");
+Performance::EventLoopUtilization Performance::eventLoopUtilization() {
+  // Return stub values - actual event loop utilization metrics are not available in workerd.
+  // This provides compatibility with code that expects Node.js-style performance APIs.
+  return EventLoopUtilization{
+    .idle = 0,
+    .active = 0,
+    .utilization = 0,
+  };
+}
+
+jsg::Ref<PerformanceNodeTiming> Performance::getNodeTiming(jsg::Lock& js) {
+  return js.alloc<PerformanceNodeTiming>();
 }
 
 void Performance::markResourceTiming() {
-  JSG_FAIL_REQUIRE(Error, "Performance.markResourceTiming is not implemented");
+  // No-op stub - resource timing is not applicable in the Workers context.
+  // This provides compatibility with code that expects this API to exist.
 }
 
 jsg::Function<void()> Performance::timerify(jsg::Lock& js, jsg::Function<void()> fn) {

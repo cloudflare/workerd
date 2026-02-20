@@ -189,9 +189,12 @@ export const pipeThroughJsToInternalErroredDest = {
     ok(!transform.readable.locked);
     ok(!transform.writable.locked);
 
-    // Our JavaScript ReadableStream should no longer be usable.
+    // Our JavaScript ReadableStream should be closed (not errored).
+    // Cancel propagates back and closes the source stream.
     const reader2 = rs.getReader();
-    await rejects(reader2.read(), { message: 'boom' });
+    const result = await reader2.read();
+    ok(result.done);
+    strictEqual(result.value, undefined);
   },
 };
 
@@ -221,9 +224,12 @@ export const pipeToJsToInternalErroredDest = {
     ok(!readable.locked);
     ok(!writable.locked);
 
-    // Our JavaScript ReadableStream should no longer be usable.
+    // Our JavaScript ReadableStream should be closed (not errored).
+    // Cancel propagates back and closes the source stream.
     const reader2 = rs.getReader();
-    await rejects(reader2.read(), { message: 'boom' });
+    const result = await reader2.read();
+    ok(result.done);
+    strictEqual(result.value, undefined);
   },
 };
 

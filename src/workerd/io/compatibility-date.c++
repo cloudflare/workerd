@@ -115,6 +115,16 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
                 "date supported by this server binary is \"",
                 SUPPORTED_COMPATIBILITY_DATE, "\"."));
       }
+
+      // workerd is built with SUPPORTED_COMPATIBILITY_DATE set a little bit into the future, so
+      // that the build can support setting the compat date to today until the next release is
+      // ready. But we don't want people to actually set their compat date in the future, so let's
+      // check against the clock time as well.
+      if (CompatDate::today() < parsedCompatDate) {
+        errorReporter.addError(kj::str("Can't set compatibility date in the future: \"",
+            parsedCompatDate, "\". Today's date (UTC) is \"", CompatDate::today(), "\"."));
+      }
+
       break;
 
     case CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE:
