@@ -1703,16 +1703,17 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
     // This code path is workerd-only, we can safely utilize submitSpanOpen here.
     submitSpanOpen(spanId, parentSpanId, span.operationName.clone(), span.startTime);
-    tracing::SpanEndData span2(spanId, span.startTime, span.endTime);
+    kj::Date startTime = span.startTime;
+    tracing::SpanEndData span2(spanId, span.endTime);
     span2.tags.reserve(span.tags.size());
     for (auto& tag: span.tags) {
       span2.tags.insert(tag.key.clone(), spanTagClone(tag.value));
     }
     if (isPredictableModeForTest()) {
-      span2.startTime = span2.endTime = kj::UNIX_EPOCH;
+      startTime = span2.endTime = kj::UNIX_EPOCH;
     }
 
-    workerTracer->addSpanEnd(kj::mv(span2));
+    workerTracer->addSpanEnd(kj::mv(span2), startTime);
   }
 
   void submitSpanOpen(tracing::SpanId spanId,
