@@ -359,109 +359,6 @@ class TeeBranch final: public ReadableStreamSource {
 
   kj::Own<kj::AsyncInputStream> inner;
 };
-
-static const WarningAggregator::Key unusedStreamBranchKey;
-
-class WarnIfUnusedStream final: public ReadableStreamSource {
- public:
-  class UnusedStreamWarningContext final: public WarningAggregator::WarningContext {
-   public:
-    UnusedStreamWarningContext(jsg::Lock& js): exception(jsg::JsRef(js, js.error(""_kjc))) {}
-
-    kj::String toString(jsg::Lock& js) override {
-      auto handle = exception.getHandle(js);
-      auto obj = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsObject>());
-      obj.set(js, "name"_kjc, js.str("Unused stream created:"_kjc));
-      return obj.get(js, "stack"_kjc).toString(js);
-    }
-
-   private:
-    jsg::JsRef<jsg::JsValue> exception;
-  };
-
-  static kj::Own<WarningAggregator> createWarningAggregator(IoContext& context) {
-    return kj::atomicRefcounted<WarningAggregator>(
-        context, [](jsg::Lock& js, kj::Array<kj::Own<WarningAggregator::WarningContext>> warnings) {
-      StringBuffer<1024> message(1024);
-      if (warnings.size() > 1) {
-        message.append(
-            kj::str(warnings.size()), " ReadableStream branches were created but never consumed. ");
-      } else {
-        message.append("A ReadableStream branch was created but never consumed. ");
-      }
-      message.append("Such branches can be created, for instance, by calling the tee() "
-                     "method on a ReadableStream, or by calling the clone() method on a "
-                     "Request or Response object. If a branch is created but never consumed, "
-                     "it can force the runtime to buffer the entire body of the stream in "
-                     "memory, which may cause the Worker to exceed its memory limit and be "
-                     "terminated. To avoid this, ensure that all branches created are consumed.\n");
-
-      if (warnings.size() > 1) {
-        for (int n = 0; n < warnings.size(); n++) {
-          auto& warning = warnings[n];
-          message.append("\n ", kj::str(n + 1), ". ", warning->toString(js), "\n");
-        }
-      } else {
-        message.append("\n * ", warnings[0]->toString(js), "\n");
-      }
-      auto msg = message.toString();
-      js.logWarning(msg);
-    });
-  }
-
-  explicit WarnIfUnusedStream(
-      jsg::Lock& js, kj::Own<ReadableStreamSource> inner, IoContext& ioContext)
-      : warningAggregator(ioContext.getWarningAggregator(unusedStreamBranchKey,
-            [](IoContext& context) { return createWarningAggregator(context); })),
-        warningContext(kj::heap<UnusedStreamWarningContext>(js)),
-        inner(kj::mv(inner)) {}
-
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    wasRead = true;
-    return inner->pumpTo(output, end);
-  }
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    wasRead = true;
-    return inner->tryRead(buffer, minBytes, maxBytes);
-  }
-
-  // TODO(someday): we set `wasRead` to avoid warning here, but TeeBranch might still buffer the
-  // body. We should fix it not to buffer when cancelled.
-  void cancel(kj::Exception reason) override {
-    wasRead = true;
-    return inner->cancel(reason);
-  }
-
-  // No special behavior, just forward these verbatim.
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-    return inner->tryGetLength(encoding);
-  }
-
-  kj::Maybe<Tee> tryTee(uint64_t limit) override {
-    KJ_IF_SOME(tee, inner->tryTee(limit)) {
-      // If creating the tee this way is successful, we have to make sure we mark
-      // this particular stream as read so we don't warn about it.
-      // Refs: https://github.com/cloudflare/workerd/issues/983
-      wasRead = true;
-      return kj::mv(tee);
-    }
-    return kj::none;
-  }
-
-  ~WarnIfUnusedStream() {
-    if (!wasRead) {
-      warningAggregator->add(kj::mv(warningContext));
-    }
-  }
-
- private:
-  kj::Own<WarningAggregator> warningAggregator;
-  kj::Own<UnusedStreamWarningContext> warningContext;
-  kj::Own<ReadableStreamSource> inner;
-  // Used for tracking if this body was ever used.
-  bool wasRead = false;
-};
 }  // namespace
 
 // =======================================================================================
@@ -924,10 +821,6 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
       auto makeTee = [&](kj::Own<ReadableStreamSource> b1,
                          kj::Own<ReadableStreamSource> b2) -> Tee {
         doClose(js);
-        if (ioContext.hasWarningHandler()) {
-          b1 = kj::heap<WarnIfUnusedStream>(js, kj::mv(b1), ioContext);
-          b2 = kj::heap<WarnIfUnusedStream>(js, kj::mv(b2), ioContext);
-        }
         return Tee{
           .branch1 = js.alloc<ReadableStream>(ioContext, kj::mv(b1)),
           .branch2 = js.alloc<ReadableStream>(ioContext, kj::mv(b2)),

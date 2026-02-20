@@ -51,56 +51,6 @@ WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 
 class IoContext;
 
-// A WarningAggregator is a helper utility for deduplicating related warning messages.
-// It is a ref-counted object that is initially acquired from the IoContext, but is
-// capable of outliving the IoContext. When destroyed, if there are any pending warnings,
-// those will be emitted all at once with a single header message followed by contextual
-// information for each individual collected instance.
-class WarningAggregator final: public kj::AtomicRefcounted {
- public:
-  // The IoContext will maintain a map of WarningAggregators based on an opaque key.
-  class Key final {
-   public:
-    Key(): hash(kj::hashCode(this)) {}
-    KJ_DISALLOW_COPY_AND_MOVE(Key);
-    inline uint hashCode() const {
-      return hash;
-    }
-    inline bool operator==(const Key& other) const {
-      return this == &other;
-    }
-
-   private:
-    uint hash;
-  };
-
-  // Captures the contextual information for a specific aggregated warning.
-  class WarningContext {
-   public:
-    virtual ~WarningContext() noexcept(false) = default;
-    virtual kj::String toString(jsg::Lock& js) = 0;
-  };
-
-  // The EmitCallback is called when the WarningAggregator is destroyed. It is
-  // responsible for actually emitting the warnings that are collected. It will
-  // only be called once and only if there are any collected warnings.
-  using EmitCallback =
-      kj::Function<void(Worker::Lock& lock, kj::Array<kj::Own<WarningContext>> warnings)>;
-
-  WarningAggregator(IoContext& context, EmitCallback emitter);
-  ~WarningAggregator() noexcept(false);
-
-  void add(kj::Own<WarningContext> warning) const;
-
-  using Map = kj::HashMap<const Key&, kj::Own<WarningAggregator>>;
-
- private:
-  kj::Own<const Worker> worker;
-  kj::Own<RequestObserver> requestMetrics;
-  EmitCallback emitter;
-  kj::MutexGuarded<kj::Vector<kj::Own<WarningContext>>> warnings;
-};
-
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
 // there is only ever one IncomingRequest per IoContext, but with actors there could be many.
 //
@@ -953,10 +903,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   jsg::JsObject getPromiseContextTag(jsg::Lock& js);
 
-  // Returns the existing WarningAggregator for the specified key, or calls load to create one.
-  kj::Own<WarningAggregator> getWarningAggregator(
-      const WarningAggregator::Key& key, kj::Function<kj::Own<WarningAggregator>(IoContext&)> load);
-
   // The IoChannelFactory must be accessed through the
   // currentIncomingRequest because it has some tracing context built in.
   //
@@ -1007,8 +953,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Maybe<PendingEvent&> pendingEvent;
   kj::Maybe<kj::Promise<void>> abortFromHangTask;
-
-  WarningAggregator::Map warningAggregatorMap;
 
   // Objects pointed to by IoOwn<T>s.
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed
