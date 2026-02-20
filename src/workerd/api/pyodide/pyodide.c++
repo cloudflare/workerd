@@ -8,6 +8,7 @@
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
+#include <workerd/io/io-context.h>
 #include <workerd/util/strings.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
@@ -729,6 +730,12 @@ kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
   }
 
   return res.releaseAsArray();
+}
+
+void WorkerFatalReporter::reportFatal(jsg::Lock& js, kj::String error) {
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    kj::runCatchingExceptions([&]() { ioContext.getMetrics().setWorkerFatal(); });
+  }
 }
 
 }  // namespace api::pyodide

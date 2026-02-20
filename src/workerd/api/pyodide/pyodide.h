@@ -447,6 +447,20 @@ class DiskCache: public jsg::Object {
   }
 };
 
+// Reports worker fatal errors to the request observer for Runtime Analytics.
+// This is exposed to the Python runtime as a module so that the on_fatal callback
+// can report fatal errors.
+class WorkerFatalReporter: public jsg::Object {
+ public:
+  WorkerFatalReporter() {}
+
+  void reportFatal(jsg::Lock& js, kj::String error);
+
+  JSG_RESOURCE_TYPE(WorkerFatalReporter) {
+    JSG_METHOD(reportFatal);
+  }
+};
+
 // A limiter which will throw if the startup is found to exceed limits. The script will still be
 // able to run for longer than the limit, but an error will be thrown as soon as the startup
 // finishes. This way we can enforce a Python-specific startup limit.
@@ -527,7 +541,8 @@ kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr fi
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
       api::pyodide::DisabledInternalJaeger, api::pyodide::SimplePythonLimiter,                     \
-      api::pyodide::MemorySnapshotResult, api::pyodide::SetupEmscripten
+      api::pyodide::WorkerFatalReporter, api::pyodide::MemorySnapshotResult,                       \
+      api::pyodide::SetupEmscripten
 
 }  // namespace workerd::api::pyodide
 

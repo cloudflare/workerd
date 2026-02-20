@@ -21,6 +21,7 @@ import {
   LEGACY_VENDOR_PATH,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
+import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
 
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
@@ -292,6 +293,13 @@ export function loadPyodide(
     );
     setupPythonSearchPath(pyodide);
     setupRuntimeSignalHandling(Module);
+    Module.API.on_fatal = (error: unknown): void => {
+      try {
+        FatalReporter.reportFatal(String(error));
+      } catch (_e) {
+        FatalReporter.reportFatal('Internal error reporting fatal error');
+      }
+    };
     return pyodide;
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception

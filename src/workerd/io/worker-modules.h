@@ -512,6 +512,10 @@ void registerPythonCommonModules(jsg::Lock& lock,
         DisabledInternalJaeger::create(lock), jsg::ModuleRegistry::Type::INTERNAL);
   }
 
+  // Inject a WorkerFatalReporter for reporting fatal errors to Runtime Analytics.
+  modules.addBuiltinModule("pyodide-internal:fatal-reporter",
+      lock.alloc<api::pyodide::WorkerFatalReporter>(), jsg::ModuleRegistry::Type::INTERNAL);
+
   // Inject a SimplePythonLimiter
   KJ_IF_SOME(limiter, maybeLimiter) {
     modules.addBuiltinModule(
