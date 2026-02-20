@@ -38,7 +38,7 @@
       "repo": "capnproto",
       "branch": "v2",
       "extra_strip_prefix": "/c++",
-      "freeze_commit": "79b317039adad92da1204929f4047f84dfd17350"
+      "freeze_commit": "ac662d78ab5322ae48ed8f0f538f550681ddd79a"
     },
     // We want to avoid version skew with v8, so we use identical versions.
     {
