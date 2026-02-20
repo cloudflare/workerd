@@ -455,9 +455,17 @@ jsg::Ref<TextDecoder> TextDecoder::constructor(jsg::Lock& js,
     case Encoding::Gb18030:
     case Encoding::Gbk:
     case Encoding::Iso2022_Jp:
-    case Encoding::Shift_Jis:
-    case Encoding::Windows_1252:
+    case Encoding::Shift_Jis: {
+      // If the feature flag is disabled, we use the ICU decoder.
+      if (!FeatureFlags::get(js).getTextDecoderCjkDecoder()) {
+        break;
+      }
+
+      // We fallthrough to LegacyDecoder in order to avoid breaking changes.
+      [[fallthrough]];
+    }
     case Encoding::X_User_Defined:
+    case Encoding::Windows_1252:
       return js.alloc<TextDecoder>(LegacyDecoder(encoding, DecoderFatal(options.fatal)), options);
     default:
       break;
