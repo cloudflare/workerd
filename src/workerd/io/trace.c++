@@ -1529,15 +1529,8 @@ void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
   builder.setParentSpanId(parentSpanId);
 }
 
-SpanEndData::SpanEndData(CompleteSpan&& span)
-    : spanId(span.spanId),
-      startTime(span.startTime),
-      endTime(span.endTime),
-      tags(kj::mv(span.tags)) {}
-
 SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
     : spanId(reader.getSpanId()),
-      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
       endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
   auto tagsParam = reader.getTags();
   tags.reserve(tagsParam.size());
@@ -1548,7 +1541,6 @@ SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
 }
 
 void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
-  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSpanId(spanId);
 

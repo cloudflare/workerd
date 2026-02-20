@@ -39,7 +39,7 @@ class BaseTracer: public kj::Refcounted {
       kj::ConstString operationName,
       kj::Date startTime) = 0;
   // Add span events when the span is complete (Attributes and SpanClose).
-  virtual void addSpanEnd(tracing::SpanEndData&& span) = 0;
+  virtual void addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -97,7 +97,7 @@ class BaseTracer: public kj::Refcounted {
 
   // helper method for addSpan() implementations
   void adjustSpanTime(tracing::CompleteSpan& span);
-  void adjustSpanTime(tracing::SpanEndData& span);
+  void adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> maybeStartTime);
 
   // Function to create the root span for the new tracing format.
   kj::Maybe<MakeUserRequestSpanFunc> makeUserRequestSpanFunc;
@@ -138,7 +138,7 @@ class WorkerTracer final: public BaseTracer {
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override;
-  void addSpanEnd(tracing::SpanEndData&& span) override;
+  void addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
