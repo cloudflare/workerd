@@ -168,6 +168,9 @@ build:benchmark --config=profile
 
 # Define a debug config which is primarily intended for local development.
 build:debug -c dbg
+build:debug --copt=-DDEBUG --copt=-UNDEBUG
+# Set rust-debug to limit excessive debug info for Rust
+build:debug --config=rust-debug
 
 # Using simple template names saves around 5% of binary size of workerd.
 build:unix --cxxopt='-gsimple-template-names' --host_cxxopt='-gsimple-template-names'
@@ -216,6 +219,8 @@ build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 build:sanitizer-common --@workerd//src/workerd/server:use_tcmalloc=False
 build:sanitizer-common --copt="-fsanitize-link-c++-runtime" --linkopt="-fsanitize-link-c++-runtime"
 build:sanitizer-common --copt="-Og"
+build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Copt-level=1
+build:sanitizer-common --config=rust-debug
 build:sanitizer-common --copt="-g" --strip=never
 build:sanitizer-common --copt="-fno-optimize-sibling-calls"
 build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
