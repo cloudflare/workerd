@@ -271,7 +271,10 @@ wd_cc_library(
 
 wd_cc_library(
     name = "limit-enforcer",
-    hdrs = ["limit-enforcer.h"],
+    hdrs = [
+        "limit-enforcer.h",
+        "wasm-shutdown-signal.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":outcome_capnp",

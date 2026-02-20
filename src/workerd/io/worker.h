@@ -376,10 +376,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Returns a reference to cpuLimitNearlyExceededCallback. Can't outlive the Isolate.
   kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
 
-  // Registers a WASM module's linear memory and offset for receiving the "shut down" signal.
+  // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
   // See IsolateLimitEnforcer::registerWasmShutdownSignal() for details.
-  void registerWasmShutdownSignal(
-      std::shared_ptr<v8::BackingStore> backingStore, uint32_t offset) const;
+  void registerWasmShutdownSignal(std::shared_ptr<v8::BackingStore> backingStore,
+      uint32_t signalOffset,
+      uint32_t terminatedOffset) const;
 
   inline IsolateObserver& getMetrics() {
     return *metrics;

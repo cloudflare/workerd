@@ -1604,11 +1604,12 @@ void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)>
       FAILED, "Python Workers Internal Error: CpuLimitNearlyExceededCallback already set"));
 }
 
-void Worker::Isolate::registerWasmShutdownSignal(
-    std::shared_ptr<v8::BackingStore> backingStore, uint32_t offset) const {
+void Worker::Isolate::registerWasmShutdownSignal(std::shared_ptr<v8::BackingStore> backingStore,
+    uint32_t signalOffset,
+    uint32_t terminatedOffset) const {
   // Register the WASM module for receiving shutdown signals. The signal handler will
   // iterate the list unconditionally when CPU time is nearly exhausted.
-  limitEnforcer->registerWasmShutdownSignal(kj::mv(backingStore), offset);
+  limitEnforcer->registerWasmShutdownSignal(kj::mv(backingStore), signalOffset, terminatedOffset);
 }
 
 // EW-1319: Set WebAssembly.Module @@HasInstance
@@ -1645,22 +1646,26 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       jsg::check(context->Global()->Get(context, jsg::v8StrIntern(isolate, "WebAssembly")))
           .As<v8::Object>();
 
-  // Create a C++ callback that the JS shims call to register a {memory, offset} pair.
-  // __registerWasmShutdownSignal(memory: WebAssembly.Memory, offset: number)
+  // Create a C++ callback that the JS shims call to register a {memory, signalOffset,
+  // terminatedOffset} tuple.
+  // __registerWasmShutdownSignal(memory: WebAssembly.Memory, signalOffset: number,
+  //                              terminatedOffset: number)
   auto registerCb = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
     jsg::Lock::from(info.GetIsolate()).withinHandleScope([&] {
       auto isolate = info.GetIsolate();
-      if (info.Length() < 2 || !info[0]->IsWasmMemoryObject() || !info[1]->IsUint32()) {
-        isolate->ThrowException(jsg::v8Str(
-            isolate, "registerWasmShutdownSignal: expected (WebAssembly.Memory, uint32)"_kj));
+      if (info.Length() < 3 || !info[0]->IsWasmMemoryObject() || !info[1]->IsUint32() ||
+          !info[2]->IsUint32()) {
+        isolate->ThrowException(jsg::v8Str(isolate,
+            "registerWasmShutdownSignal: expected (WebAssembly.Memory, uint32, uint32)"_kj));
         return;
       }
       auto memory = info[0].As<v8::WasmMemoryObject>();
-      auto offset = info[1].As<v8::Uint32>()->Value();
+      auto signalOffset = info[1].As<v8::Uint32>()->Value();
+      auto terminatedOffset = info[2].As<v8::Uint32>()->Value();
       auto backingStore = memory->Buffer()->GetBackingStore();
       KJ_IF_SOME(e, kj::runCatchingExceptions([&] {
         Worker::Isolate::from(jsg::Lock::from(isolate))
-            .registerWasmShutdownSignal(kj::mv(backingStore), offset);
+            .registerWasmShutdownSignal(kj::mv(backingStore), signalOffset, terminatedOffset);
       })) {
         // Convert KJ exception to a JavaScript Error object
         auto message = jsg::v8Str(isolate, e.getDescription());
@@ -1672,7 +1677,7 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
 
   // Build the shim in JavaScript. It wraps both WebAssembly.instantiate (async) and
   // WebAssembly.Instance (sync constructor). A shared helper inspects exports for the
-  // "signal_address_v1" convention.
+  // "__signal_address" / "__terminated_address" convention.
   //
   // The factory receives:
   //   originalInstantiate  - the original WebAssembly.instantiate function
@@ -1702,11 +1707,13 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       "\n"
       "  function checkExports(instance, imports) {\n"
       "    var exports = instance.exports;\n"
-      "    var shutdownGlobal = exports['signal_address_v1'];\n"
-      "    if (shutdownGlobal instanceof wa.Global) {\n"
+      "    var signalGlobal = exports['__signal_address'];\n"
+      "    var terminatedGlobal = exports['__terminated_address'];\n"
+      "    if (signalGlobal instanceof wa.Global &&\n"
+      "        terminatedGlobal instanceof wa.Global) {\n"
       "      var memory = findMemory(instance, imports);\n"
       "      if (memory) {\n"
-      "        registerShutdown(memory, shutdownGlobal.value);\n"
+      "        registerShutdown(memory, signalGlobal.value, terminatedGlobal.value);\n"
       "      }\n"
       "    }\n"
       "  }\n"
@@ -1751,7 +1758,7 @@ void Worker::setupContext(
   // Set WebAssembly.Module @@HasInstance
   setWebAssemblyModuleHasInstance(lock, context);
 
-  // Shim WebAssembly.instantiate to detect modules exporting "signal_address_v1".
+  // Shim WebAssembly.instantiate to detect modules exporting "__signal_address".
   shimWebAssemblyInstantiate(lock, context);
 
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
