@@ -4929,14 +4929,17 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
         httpOverCapnpFactory(httpOverCapnpFactory) {}
 
   kj::Promise<void> startEvent(StartEventContext context) override {
-    // TODO(someday): Use cfBlobJson from the connection if there is one, or from RPC params
-    //   if we add that? (Note that if a connection-level cf blob exists, it should take
-    //   priority; we should only accept a cf blob from the client if we have a cfBlobHeader
-    //   configured, which hints that this service trusts the client to provide the cf blob.)
-
+    // Extract the optional cf blob from the RPC params and pass it along with the
+    // service channel to EventDispatcherImpl. The cf blob will be included in
+    // SubrequestMetadata when creating the WorkerInterface for HTTP events.
+    kj::Maybe<kj::String> cfBlobJson;
+    auto params = context.getParams();
+    if (params.hasCfBlobJson()) {
+      cfBlobJson = kj::str(params.getCfBlobJson());
+    }
     context.initResults(capnp::MessageSize{4, 1})
-        .setDispatcher(
-            kj::heap<EventDispatcherImpl>(httpOverCapnpFactory, service->startRequest({})));
+        .setDispatcher(kj::heap<EventDispatcherImpl>(
+            httpOverCapnpFactory, kj::addRef(*service), kj::mv(cfBlobJson)));
     return kj::READY_NOW;
   }
 
@@ -4946,14 +4949,22 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
 
   class EventDispatcherImpl final: public rpc::EventDispatcher::Server {
    public:
-    EventDispatcherImpl(
-        capnp::HttpOverCapnpFactory& httpOverCapnpFactory, kj::Own<WorkerInterface> worker)
+    EventDispatcherImpl(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+        kj::Own<IoChannelFactory::SubrequestChannel> service,
+        kj::Maybe<kj::String> cfBlobJson)
         : httpOverCapnpFactory(httpOverCapnpFactory),
-          worker(kj::mv(worker)) {}
+          service(kj::mv(service)),
+          cfBlobJson(kj::mv(cfBlobJson)) {}
 
     kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
+      // Create WorkerInterface with cf blob metadata (if provided via startEvent).
+      IoChannelFactory::SubrequestMetadata metadata;
+      KJ_IF_SOME(cf, cfBlobJson) {
+        metadata.cfBlobJson = kj::str(cf);
+      }
+      auto worker = getService()->startRequest(kj::mv(metadata));
       context.initResults(capnp::MessageSize{4, 1})
-          .setHttp(httpOverCapnpFactory.kjToCapnp(getWorker()));
+          .setHttp(httpOverCapnpFactory.kjToCapnp(kj::mv(worker)));
       return kj::READY_NOW;
     }
 
@@ -5013,13 +5024,20 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
 
    private:
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-    kj::Maybe<kj::Own<WorkerInterface>> worker;
+    kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> service;
+    kj::Maybe<kj::String> cfBlobJson;
+
+    kj::Own<IoChannelFactory::SubrequestChannel> getService() {
+      auto result =
+          kj::mv(KJ_ASSERT_NONNULL(service, "EventDispatcher can only be used for one request"));
+      service = kj::none;
+      return result;
+    }
 
     kj::Own<WorkerInterface> getWorker() {
-      auto result =
-          kj::mv(KJ_ASSERT_NONNULL(worker, "EventDispatcher can only be used for one request"));
-      worker = kj::none;
-      return result;
+      // For non-HTTP events (RPC, traces, etc.), create WorkerInterface with
+      // empty metadata since there's no HTTP request to extract cf from.
+      return getService()->startRequest({});
     }
 
     [[noreturn]] void throwUnsupported() {
