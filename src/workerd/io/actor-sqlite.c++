@@ -883,18 +883,12 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
       return exception;
     }();
 
-    // Any scheduled flushes will fail once `flushImpl()` is invoked and notices that
-    // `maybeTerminalException` has a value. Any in-flight flushes will continue to run in the
-    // background. Remember that these in-flight flushes may or may not be awaited by the worker,
-    // but they still hold the output lock as long as `allowUnconfirmed` wasn't used.
+    // Store the reason, if there's any, why the actor was shutdown. If we're already shutdown we
+    // cannot do any new storage operations. Any attempt to do a storage operation to this already
+    // broken actor, will fail the requireNotBroken() and throw a fatal exception.
     broken.emplace(kj::mv(exception));
-
-    // We explicitly do not schedule a flush to break the output gate. This means that if a request
-    // is ongoing after the actor cache is shutting down, the output gate is only broken if they
-    // had to send a flush after shutdown, either from a scheduled flush or a retry after failure.
   } else {
-    // We've already experienced a terminal exception either from shutdown or OOM, there should
-    // already be a flush scheduled that will break the output gate.
+    // We've already experienced a terminal exception either from shutdown or OOM
   }
 }
 
