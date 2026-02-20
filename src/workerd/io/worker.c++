@@ -1583,7 +1583,8 @@ bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isol
 }
 
 kj::Maybe<kj::Function<void(void)>> Worker::Isolate::getCpuLimitNearlyExceededCallback() const {
-  KJ_IF_SOME(cb, *cpuLimitNearlyExceededCallback.lockExclusive()) {
+  auto lock = cpuLimitNearlyExceededCallback.lockExclusive();
+  KJ_IF_SOME(cb, *lock) {
     return cb.reference();
   }
   return kj::none;
