@@ -25,52 +25,6 @@ bazel_dep(name = "bazel_lib", version = "3.2.2")
 # bazel_skylib
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 
-# cargo_bazel_linux_arm64
-http.file(
-    name = "cargo_bazel_linux_arm64",
-    executable = True,
-    sha256 = "2a293b1fbffff0e56780f9cabbc32cb6b2519d036ead614d3251e4c79135df7e",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-aarch64-unknown-linux-gnu",
-)
-use_repo(http, "cargo_bazel_linux_arm64")
-
-# cargo_bazel_linux_x64
-http.file(
-    name = "cargo_bazel_linux_x64",
-    executable = True,
-    sha256 = "2727d6a1be44b6bf4935f09bc54ba3fd04ed602e012c51aafd1ba036580b229e",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-unknown-linux-gnu",
-)
-use_repo(http, "cargo_bazel_linux_x64")
-
-# cargo_bazel_macos_arm64
-http.file(
-    name = "cargo_bazel_macos_arm64",
-    executable = True,
-    sha256 = "9b41cac2040b3f4a1fdad34cb1e9a31afccaa56c60d156c163ded56eb23c0579",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-aarch64-apple-darwin",
-)
-use_repo(http, "cargo_bazel_macos_arm64")
-
-# cargo_bazel_macos_x64
-http.file(
-    name = "cargo_bazel_macos_x64",
-    executable = True,
-    sha256 = "56b2f7306e2c5c3c3dca5579cb0a97e360fe0c6731f1698dc9a41864a3dc1842",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-apple-darwin",
-)
-use_repo(http, "cargo_bazel_macos_x64")
-
-# cargo_bazel_win_x64
-http.file(
-    name = "cargo_bazel_win_x64",
-    downloaded_file_path = "downloaded.exe",
-    executable = True,
-    sha256 = "1695baf5ac5d9f4c5328455e1e7e70c17745466e5f7b4ecdea7510d82d525865",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
-)
-use_repo(http, "cargo_bazel_win_x64")
-
 # clang_tidy_darwin_arm64
 http.file(
     name = "clang_tidy_darwin_arm64",
@@ -117,7 +71,7 @@ bazel_dep(name = "rules_oci", version = "2.3.0")
 bazel_dep(name = "rules_python", version = "1.9.0")
 
 # rules_rust
-bazel_dep(name = "rules_rust", version = "0.69.0")
+bazel_dep(name = "rules_rust", version = "0.70.0")
 
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.8.0")

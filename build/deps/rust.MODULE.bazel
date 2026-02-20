@@ -2,12 +2,12 @@ RUST_STABLE_VERSION = "1.91.0"  # LLVM 21
 
 RUST_NIGHTLY_VERSION = "nightly/2025-10-30"
 
-# List of additional triples to be configured on top of the local platform triple
 RUST_TARGET_TRIPLES = [
-    # Add support for macOS cross-compilation
     "x86_64-apple-darwin",
-    # Add support for macOS rosetta
     "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
 ]
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
@@ -34,9 +34,6 @@ use_repo(rust, "rust_toolchains")
 
 register_toolchains("@rust_toolchains//:all")
 
-crate_repositories = use_extension("//deps/rust:extension.bzl", "crate_repositories")
-use_repo(crate_repositories, "crates_vendor")
-
 # rust-based lolhtml dependency, including the API header.
 # Presented as a separate repository to allow overrides.
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
@@ -53,4 +50,26 @@ http = use_extension("@//:build/exts/http.bzl", "http")
 inject_repo(
     http,
     **{"crates.io": "crates_vendor"}
+)
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.annotation(
+    crate = "lol_html_c_api",
+    extra_aliased_targets = {"lol_html_c_api_include_lol_html_h": "include/lol_html.h"},
+)
+crate.annotation(
+    crate = "capnpc",
+    gen_binaries = ["capnpc-rust"],
+)
+crate.from_cargo(
+    # TODO(cleanup): This name is a bit misleading now that we don't vendor. We can clean it up as a
+    # followup.
+    name = "crates_vendor",
+    cargo_lockfile = "//deps/rust:Cargo.lock",
+    manifests = ["//deps/rust:Cargo.toml"],
+    supported_platform_triples = RUST_TARGET_TRIPLES,
+)
+use_repo(
+    crate,
+    "crates_vendor",
 )
