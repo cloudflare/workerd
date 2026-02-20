@@ -11321,11 +11321,13 @@ export interface ImageUploadOptions {
   filename?: string;
   requireSignedURLs?: boolean;
   metadata?: Record<string, unknown>;
+  creator?: string;
   encoding?: "base64";
 }
 export interface ImageUpdateOptions {
   requireSignedURLs?: boolean;
   metadata?: Record<string, unknown>;
+  creator?: string;
 }
 export interface ImageListOptions {
   limit?: number;
@@ -11338,37 +11340,19 @@ export interface ImageList {
   cursor?: string;
   listComplete: boolean;
 }
-export interface ImagesBinding {
+export interface HostedImagesBinding {
   /**
-   * Get image metadata (type, width and height)
-   * @throws {@link ImagesError} with code 9412 if input is not an image
-   * @param stream The image bytes
-   */
-  info(
-    stream: ReadableStream<Uint8Array>,
-    options?: ImageInputOptions,
-  ): Promise<ImageInfoResponse>;
-  /**
-   * Begin applying a series of transformations to an image
-   * @param stream The image bytes
-   * @returns A transform handle
-   */
-  input(
-    stream: ReadableStream<Uint8Array>,
-    options?: ImageInputOptions,
-  ): ImageTransformer;
-  /**
-   * Get metadata for a hosted image
+   * Get detailed metadata for a hosted image
    * @param imageId The ID of the image (UUID or custom ID)
    * @returns Image metadata, or null if not found
    */
-  get(imageId: string): Promise<ImageMetadata | null>;
+  details(imageId: string): Promise<ImageMetadata | null>;
   /**
    * Get the raw image data for a hosted image
    * @param imageId The ID of the image (UUID or custom ID)
    * @returns ReadableStream of image bytes, or null if not found
    */
-  getImage(imageId: string): Promise<ReadableStream<Uint8Array> | null>;
+  image(imageId: string): Promise<ReadableStream<Uint8Array> | null>;
   /**
    * Upload a new hosted image
    * @param image The image file to upload
@@ -11401,6 +11385,30 @@ export interface ImagesBinding {
    * @throws {@link ImagesError} if list fails
    */
   list(options?: ImageListOptions): Promise<ImageList>;
+}
+export interface ImagesBinding {
+  /**
+   * Get image metadata (type, width and height)
+   * @throws {@link ImagesError} with code 9412 if input is not an image
+   * @param stream The image bytes
+   */
+  info(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): Promise<ImageInfoResponse>;
+  /**
+   * Begin applying a series of transformations to an image
+   * @param stream The image bytes
+   * @returns A transform handle
+   */
+  input(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): ImageTransformer;
+  /**
+   * Access hosted images CRUD operations
+   */
+  readonly hosted: HostedImagesBinding;
 }
 export interface ImageTransformer {
   /**
