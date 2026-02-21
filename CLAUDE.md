@@ -1,13 +1,18 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) or Opencode (opencode.ai) when working with code in this repository.
 
-## Instructions for Claude Code
+## Instructions for AI Code Assistants
 
 - Look for high-level overview in `docs/` directory
 - Check README.md files for package/directory level information
 - Check source file comments for more detailed info
 - Suggest updates to CLAUDE.md when you find new high-level information
+- You should always determine if the current repository was checked out standalone or as a submodule
+  of the larger workers project.
+- If checked out as a submodule, be aware that there is additional documentation and context in the
+  root of that repository that is not present here. Look for the `../../README.md`, `../../CLAUDE.md`,
+  and other markdown files in the root of the parent repository.
 
 ## Project Overview
 
@@ -42,12 +47,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Web Platform Tests**: `just wpt-test <test_name>`
 - **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`)
 
-
 ## Architecture
+
+### Dependencies
 
 - **Cap'n Proto source code** available in `external/capnp-cpp` - contains KJ C++ base library and
 capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/` includes and
 `kj::` and `capnp::` namespaces.
+
+The other core runtime dependencies include:
+
+| Dependency                          | Description                                                         |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| V8                                  | JavaScript engine                                                   |
+| Cap'n Proto (capnp-cpp)             | Serialization/RPC framework and KJ base library                     |
+| BoringSSL                           | TLS/crypto (Google's OpenSSL fork, patched for ncrypto/libdecrepit) |
+| SQLite3                             | Embedded database                                                   |
+| ICU (com_googlesource_chromium_icu) | Internationalization (Chromium fork)                                |
+| zlib                                | Compression (Chromium fork, patched)                                |
+| zstd                                | Zstandard compression                                               |
+| brotli                              | Brotli compression                                                  |
+| tcmalloc                            | Memory allocator                                                    |
+| ada-url                             | URL parser                                                          |
+| simdutf                             | Unicode transcoding (SIMD-accelerated)                              |
+| nbytes                              | Node.js byte utilities                                              |
+| ncrypto                             | Node.js crypto utilities                                            |
+| perfetto                            | Tracing/profiling framework (patched)                               |
+| fast_float                          | Fast float parsing                                                  |
+| fp16                                | Half-precision float support                                        |
+| highway                             | SIMD abstraction library                                            |
+| dragonbox                           | Float-to-string conversion
+
+These dependencies are vendored via bazel into the `external/` directory. See `WORKSPACE` and `BUILD.bazel` files for details on how they are integrated into the build system.
+
+For several of these dependencies (notably V8, boringssl, sqlite, perfetto, and zlib), we maintain sets of patches that are applied on top of the upstream code. These patches are stored in the `patches/` directory and are applied during the build process. When updating these dependencies, it's important to review and update the corresponding patches as needed. The patches may introduce workerd-specific customizations and new APIs.
+
+Be aware that workerd uses tcmalloc for memory allocation in the typical case. When analyzing memory usage or debugging memory issues, be aware that tcmalloc's behavior may differ from the standard allocator. Any memory usage analysis that you perform should take this into account.
 
 ### Core Directory Structure (`src/workerd/`)
 - **`api/`** - Runtime APIs (HTTP, crypto, streams, WebSocket, etc.)
@@ -72,7 +107,6 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 - **`src/pyodide/`** - Python runtime support via Pyodide
 - **`src/rust/`** - Rust integration components
 
-
 ### Configuration System
 - Uses **Cap'n Proto** for configuration files (`.capnp` format)
 - Main schema: `src/workerd/server/workerd.capnp`
@@ -92,8 +126,14 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 - Automatic formatting via clang-format (enforced in CI)
 - Run `just format` before committing
 
+If workerd is checked out as a submodule, you are highly advised to read the following documents before doing any work:
+
+* `../capnproto/style-guide.md`: The KJ style guide. The project mostly follows this guide, with the exception of comment placement.
+* `../capnproto/kjdoc/tour.md`: A tour of KJ, the C++ toolkit library on which workerd is built.
+
 ### Contributing
 - High bar for non-standard APIs; prefer implementing web standards
+- Run formatting with `just format` before submitting PRs
 - Run tests with `just test` before submitting PRs
 - See `CONTRIBUTING.md` for more details
 
