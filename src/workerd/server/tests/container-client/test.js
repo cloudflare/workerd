@@ -1,4 +1,4 @@
-import { DurableObject } from 'cloudflare:workers';
+import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import assert from 'node:assert';
 import { scheduler } from 'node:timers/promises';
 
@@ -66,7 +66,7 @@ export class DurableObjectExample extends DurableObject {
     {
       let resp;
       // The retry count here is arbitrary. Can increase it if necessary.
-      const maxRetries = 6;
+      const maxRetries = 15;
       for (let i = 1; i <= maxRetries; i++) {
         try {
           resp = await container
@@ -261,6 +261,42 @@ export class DurableObjectExample extends DurableObject {
     return this.ctx.container.running;
   }
 
+  async ping() {
+    const container = this.ctx.container;
+    {
+      let resp;
+      // The retry count here is arbitrary. Can increase it if necessary.
+      const maxRetries = 15;
+      for (let i = 1; i <= maxRetries; i++) {
+        try {
+          resp = await container
+            .getTcpPort(8080)
+            .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
+          break;
+        } catch (e) {
+          if (!e.message.includes('container port not found')) {
+            throw e;
+          }
+          console.info(
+            `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
+          );
+          console.info(e);
+          if (i === maxRetries) {
+            console.error(
+              `Failed to connect to container ${container.id}. Retried ${i} times`
+            );
+            throw e;
+          }
+          await scheduler.wait(500);
+        }
+      }
+
+      assert.equal(resp.status, 200);
+      assert.equal(resp.statusText, 'OK');
+      assert.strictEqual(await resp.text(), 'Hello World!');
+    }
+  }
+
   async testPidNamespace() {
     const container = this.ctx.container;
     if (container.running) {
@@ -268,6 +304,7 @@ export class DurableObjectExample extends DurableObject {
       await container.destroy();
       await monitor;
     }
+
     assert.strictEqual(container.running, false);
 
     container.start({
@@ -275,7 +312,6 @@ export class DurableObjectExample extends DurableObject {
     });
 
     const monitor = container.monitor().catch((_err) => {});
-
     // Fetch the /pid-namespace endpoint which returns info about the PID namespace
     let resp;
     const maxRetries = 6;
@@ -310,6 +346,195 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
 
     return data;
+  }
+
+  async testSetEgressHttp() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    // Set up egress TCP mapping to route requests to the binding
+    // We can configure this even before the container starts.
+    await container.interceptOutboundHttp(
+      '1.2.3.4',
+      this.ctx.exports.TestService({ props: { id: 1234 } })
+    );
+
+    // Start container
+    container.start();
+
+    // wait for container to be available
+    await this.ping();
+
+    assert.strictEqual(container.running, true);
+
+    // Set up egress TCP mapping to route requests to the binding
+    // This registers the binding's channel token with the container runtime
+    await container.interceptOutboundHttp(
+      '11.0.0.1:9999',
+      this.ctx.exports.TestService({ props: { id: 1 } })
+    );
+
+    await container.interceptOutboundHttp(
+      '11.0.0.2:9999',
+      this.ctx.exports.TestService({ props: { id: 2 } })
+    );
+
+    // we catch all HTTP requests to port 80
+    await container.interceptAllOutboundHttp(
+      this.ctx.exports.TestService({ props: { id: 3 } })
+    );
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '1.2.3.4:80' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 1234');
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.1:9999' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 1');
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.2:9999' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 2');
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '15.0.0.2:80' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 3');
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '[111::]:80' },
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 3');
+    }
+  }
+
+  async testInterceptWebSocket() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    // Start container with WebSocket proxy mode enabled
+    container.start({
+      env: { WS_ENABLED: 'true', WS_PROXY_TARGET: '11.0.0.1:9999' },
+    });
+
+    // Wait for container to be available
+    await this.ping();
+
+    assert.strictEqual(container.running, true);
+
+    // Set up egress mapping to route WebSocket requests to the binding
+    await container.interceptOutboundHttp(
+      '11.0.0.1:9999',
+      this.ctx.exports.TestService({ props: { id: 42 } })
+    );
+
+    // Connect to container's /ws endpoint which proxies to the intercepted address
+    // Flow: DO -> container:8080/ws -> container connects to 11.0.0.1:9999/ws
+    //       -> sidecar intercepts -> workerd -> TestService worker binding
+    const res = await container.getTcpPort(8080).fetch('http://foo/ws', {
+      headers: {
+        Upgrade: 'websocket',
+        Connection: 'Upgrade',
+        'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
+        'Sec-WebSocket-Version': '13',
+      },
+    });
+
+    // Should get WebSocket upgrade response
+    assert.strictEqual(res.status, 101);
+    assert.strictEqual(res.headers.get('upgrade'), 'websocket');
+    assert.strictEqual(!!res.webSocket, true);
+
+    const ws = res.webSocket;
+    ws.accept();
+
+    // Listen for response
+    const messagePromise = new Promise((resolve) => {
+      ws.addEventListener(
+        'message',
+        (event) => {
+          resolve(event.data);
+        },
+        { once: true }
+      );
+    });
+
+    // Send a test message - should go through the whole chain and come back
+    ws.send('Hello through intercept!');
+
+    // Should receive response from TestService binding with id 42
+    const response = new TextDecoder().decode(await messagePromise);
+    assert.strictEqual(response, 'Binding 42: Hello through intercept!');
+
+    ws.close();
+    await container.destroy();
+  }
+}
+
+export class TestService extends WorkerEntrypoint {
+  fetch(request) {
+    // Check if this is a WebSocket upgrade request
+    const upgradeHeader = request.headers.get('Upgrade');
+    if (upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') {
+      // Handle WebSocket upgrade
+      const [client, server] = Object.values(new WebSocketPair());
+
+      server.accept();
+
+      server.addEventListener('message', (event) => {
+        // Echo back with binding id prefix
+        server.send(
+          `Binding ${this.ctx.props.id}: ${new TextDecoder().decode(event.data)}`
+        );
+      });
+
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+      });
+    }
+
+    // Regular HTTP request
+    return new Response('hello binding: ' + this.ctx.props.id);
   }
 }
 
@@ -480,5 +705,23 @@ export const testPidNamespace = {
       /container-client-test/,
       `Expected PID 1 to be the container entrypoint, but got: ${data.init}`
     );
+  },
+};
+
+// Test setEgressHttp functionality - registers a binding's channel token with the container
+export const testSetEgressHttp = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName('testSetEgressHttp');
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testSetEgressHttp();
+  },
+};
+
+// Test WebSocket through interceptOutboundHttp - DO -> container -> worker binding via WebSocket
+export const testInterceptWebSocket = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName('testInterceptWebSocket');
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testInterceptWebSocket();
   },
 };

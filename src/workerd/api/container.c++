@@ -73,6 +73,39 @@ jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durati
   return IoContext::current().awaitIo(js, req.sendIgnoringResult());
 }
 
+jsg::Promise<void> Container::interceptOutboundHttp(
+    jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding) {
+  auto& ioctx = IoContext::current();
+  auto channel = binding->getSubrequestChannel(ioctx);
+
+  // Get a channel token for RPC usage, the container runtime can use this
+  // token later to redeem a Fetcher.
+  auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+
+  auto req = rpcClient->setEgressHttpRequest();
+  req.setHostPort(addr);
+  req.setChannelToken(token);
+  return ioctx.awaitIo(js, req.sendIgnoringResult());
+}
+
+jsg::Promise<void> Container::interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<Fetcher> binding) {
+  auto& ioctx = IoContext::current();
+  auto channel = binding->getSubrequestChannel(ioctx);
+  auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+
+  // Register for all IPv4 and IPv6 addresses (on port 80)
+  auto reqV4 = rpcClient->setEgressHttpRequest();
+  reqV4.setHostPort("0.0.0.0/0"_kj);
+  reqV4.setChannelToken(token);
+
+  auto reqV6 = rpcClient->setEgressHttpRequest();
+  reqV6.setHostPort("::/0"_kj);
+  reqV6.setChannelToken(token);
+
+  return ioctx.awaitIo(js,
+      kj::joinPromisesFailFast(kj::arr(reqV4.sendIgnoringResult(), reqV6.sendIgnoringResult())));
+}
+
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 

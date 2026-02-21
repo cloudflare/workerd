@@ -1896,6 +1896,7 @@ class Server::WorkerService final: public Service,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
       kj::Maybe<kj::String> dockerPathParam,
+      kj::Maybe<kj::String> containerEgressInterceptorImageParam,
       bool isDynamic)
       : channelTokenHandler(channelTokenHandler),
         serviceName(serviceName),
@@ -1909,6 +1910,7 @@ class Server::WorkerService final: public Service,
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
         dockerPath(kj::mv(dockerPathParam)),
+        containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImageParam)),
         isDynamic(isDynamic) {}
 
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
@@ -1929,9 +1931,9 @@ class Server::WorkerService final: public Service,
       }
 
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
-      auto ns =
-          kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value, threadContext.getUnsafeTimer(),
-              threadContext.getByteStreamFactory(), network, dockerPath, waitUntilTasks);
+      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
+          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(), channelTokenHandler,
+          network, dockerPath, containerEgressInterceptorImage, waitUntilTasks);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -2195,15 +2197,19 @@ class Server::WorkerService final: public Service,
         const ActorConfig& config,
         kj::Timer& timer,
         capnp::ByteStreamFactory& byteStreamFactory,
+        ChannelTokenHandler& channelTokenHandler,
         kj::Network& dockerNetwork,
         kj::Maybe<kj::StringPtr> dockerPath,
+        kj::Maybe<kj::StringPtr> containerEgressInterceptorImage,
         kj::TaskSet& waitUntilTasks)
         : actorClass(kj::mv(actorClass)),
           config(config),
           timer(timer),
           byteStreamFactory(byteStreamFactory),
+          channelTokenHandler(channelTokenHandler),
           dockerNetwork(dockerNetwork),
           dockerPath(dockerPath),
+          containerEgressInterceptorImage(containerEgressInterceptorImage),
           waitUntilTasks(waitUntilTasks) {}
 
     // Called at link time to provide needed resources.
@@ -2855,8 +2861,9 @@ class Server::WorkerService final: public Service,
       };
 
       auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
-          kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName), waitUntilTasks,
-          kj::mv(cleanupCallback));
+          kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
+          containerEgressInterceptorImage.map([](kj::StringPtr s) { return kj::str(s); }),
+          waitUntilTasks, kj::mv(cleanupCallback), channelTokenHandler);
 
       // Store raw pointer in map (does not own)
       containerClients.insert(kj::str(containerId), client.get());
@@ -2901,8 +2908,10 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
     capnp::ByteStreamFactory& byteStreamFactory;
+    ChannelTokenHandler& channelTokenHandler;
     kj::Network& dockerNetwork;
     kj::Maybe<kj::StringPtr> dockerPath;
+    kj::Maybe<kj::StringPtr> containerEgressInterceptorImage;
     kj::TaskSet& waitUntilTasks;
     kj::Maybe<AlarmScheduler&> alarmScheduler;
 
@@ -3141,6 +3150,7 @@ class Server::WorkerService final: public Service,
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
   kj::Maybe<kj::String> dockerPath;
+  kj::Maybe<kj::String> containerEgressInterceptorImage;
   bool isDynamic;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
@@ -4721,23 +4731,30 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   };
 
   kj::Maybe<kj::String> dockerPath = kj::none;
+  kj::Maybe<kj::String> containerEgressInterceptorImage = kj::none;
   switch (def.containerEngineConf.which()) {
     case config::Worker::ContainerEngine::NONE:
       // No container engine configured
       break;
-    case config::Worker::ContainerEngine::LOCAL_DOCKER:
-      dockerPath = kj::str(def.containerEngineConf.getLocalDocker().getSocketPath());
+    case config::Worker::ContainerEngine::LOCAL_DOCKER: {
+      auto dockerConf = def.containerEngineConf.getLocalDocker();
+      dockerPath = kj::str(dockerConf.getSocketPath());
+      if (dockerConf.hasContainerEgressInterceptorImage()) {
+        containerEgressInterceptorImage = kj::str(dockerConf.getContainerEgressInterceptorImage());
+      }
       break;
+    }
   }
 
   kj::Maybe<kj::StringPtr> serviceName;
   if (!def.isDynamic) serviceName = name;
 
-  auto result = kj::refcounted<WorkerService>(channelTokenHandler, serviceName,
-      globalContext->threadContext, monotonicClock, kj::mv(worker),
-      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath), def.isDynamic);
+  auto result =
+      kj::refcounted<WorkerService>(channelTokenHandler, serviceName, globalContext->threadContext,
+          monotonicClock, kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
+          kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
+          kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath),
+          kj::mv(containerEgressInterceptorImage), def.isDynamic);
   result->initActorNamespaces(def.localActorConfigs, network);
   co_return result;
 }

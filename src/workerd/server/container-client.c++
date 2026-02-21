@@ -5,6 +5,7 @@
 #include "container-client.h"
 
 #include <workerd/io/container.capnp.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/docker-api.capnp.h>
 
@@ -12,6 +13,7 @@
 #include <capnp/message.h>
 #include <kj/async-io.h>
 #include <kj/async.h>
+#include <kj/cidr.h>
 #include <kj/compat/http.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
@@ -21,6 +23,74 @@
 namespace workerd::server {
 
 namespace {
+
+struct ParsedAddress {
+  kj::CidrRange cidr;
+  kj::Maybe<uint16_t> port;
+};
+
+struct HostAndPort {
+  kj::String host;
+  kj::Maybe<uint16_t> port;
+};
+
+// Strips a port suffix from a string, returning the host and port separately.
+// For IPv6, expects brackets: "[::1]:8080" -> ("::1", 8080)
+// For IPv4: "10.0.0.1:8080" -> ("10.0.0.1", 8080)
+// If no port, returns the host as-is with no port.
+HostAndPort stripPort(kj::StringPtr str) {
+  if (str.startsWith("[")) {
+    // Bracketed IPv6: "[ipv6]" or "[ipv6]:port"
+    size_t closeBracket =
+        KJ_REQUIRE_NONNULL(str.findLast(']'), "Unclosed '[' in address string.", str);
+
+    auto host = str.slice(1, closeBracket);
+
+    if (str.size() > closeBracket + 1) {
+      KJ_REQUIRE(
+          str.slice(closeBracket + 1).startsWith(":"), "Expected port suffix after ']'.", str);
+      auto port = KJ_REQUIRE_NONNULL(
+          str.slice(closeBracket + 2).tryParseAs<uint16_t>(), "Invalid port number.", str);
+      return {kj::str(host), port};
+    }
+    return {kj::str(host), kj::none};
+  }
+
+  // No brackets - check if there's exactly one colon (IPv4 with port)
+  // IPv6 without brackets has 2+ colons and no port suffix supported
+  KJ_IF_SOME(colonPos, str.findLast(':')) {
+    auto afterColon = str.slice(colonPos + 1);
+    KJ_IF_SOME(port, afterColon.tryParseAs<uint16_t>()) {
+      // Valid port - but only treat as port for IPv4 (check no other colons before)
+      auto beforeColon = str.first(colonPos);
+      if (beforeColon.findFirst(':') == kj::none) {
+        return {kj::str(beforeColon), port};
+      }
+    }
+  }
+
+  return {kj::str(str), kj::none};
+}
+
+// Build a CidrRange from a host string, adding /32 or /128 prefix if not present.
+kj::CidrRange makeCidr(kj::StringPtr host) {
+  if (host.findFirst('/') != kj::none) {
+    return kj::CidrRange(host);
+  }
+  // No CIDR prefix - add /32 for IPv4, /128 for IPv6
+  bool isIpv6 = host.findFirst(':') != kj::none;
+  return kj::CidrRange(kj::str(host, isIpv6 ? "/128" : "/32"));
+}
+
+// Parses "host[:port]" strings. Handles:
+// - IPv4: "10.0.0.1", "10.0.0.1:8080", "10.0.0.0/8", "10.0.0.0/8:8080"
+// - IPv6 with brackets: "[::1]", "[::1]:8080", "[fe80::1]", "[fe80::/10]:8080"
+// - IPv6 without brackets: "::1", "fe80::1", "fe80::/10"
+ParsedAddress parseHostPort(kj::StringPtr str) {
+  auto hostAndPort = stripPort(str);
+  return {makeCidr(hostAndPort.host), hostAndPort.port};
+}
+
 kj::StringPtr signalToString(uint32_t signal) {
   switch (signal) {
     case 1:
@@ -107,22 +177,33 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String dockerPath,
     kj::String containerName,
     kj::String imageName,
+    kj::Maybe<kj::String> containerEgressInterceptorImage,
     kj::TaskSet& waitUntilTasks,
-    kj::Function<void()> cleanupCallback)
+    kj::Function<void()> cleanupCallback,
+    ChannelTokenHandler& channelTokenHandler)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
       network(network),
       dockerPath(kj::mv(dockerPath)),
-      containerName(kj::encodeUriComponent(kj::mv(containerName))),
+      containerName(kj::encodeUriComponent(kj::str(containerName))),
+      sidecarContainerName(kj::encodeUriComponent(kj::str(containerName, "-proxy"))),
       imageName(kj::mv(imageName)),
+      containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImage)),
       waitUntilTasks(waitUntilTasks),
-      cleanupCallback(kj::mv(cleanupCallback)) {}
+      cleanupCallback(kj::mv(cleanupCallback)),
+      channelTokenHandler(channelTokenHandler) {}
 
 ContainerClient::~ContainerClient() noexcept(false) {
+  stopEgressListener();
+
   // Call the cleanup callback to remove this client from the ActorNamespace map
   cleanupCallback();
 
-  // Destroy the Docker container
+  // Sidecar shares main container's network namespace, so must be destroyed first
+  waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+      kj::str("/containers/", sidecarContainerName, "?force=true"))
+                         .ignoreResult());
+
   waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", containerName, "?force=true"))
                          .ignoreResult());
@@ -175,6 +256,179 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
   kj::Maybe<kj::Promise<void>> pumpTask;
 };
 
+// HTTP service that handles HTTP CONNECT requests from the container sidecar (proxy-everything).
+// When the sidecar intercepts container egress traffic, it sends HTTP CONNECT to this service.
+// After accepting the CONNECT, the tunnel carries the actual HTTP request from the container,
+// which we parse and forward to the appropriate SubrequestChannel based on egressMappings.
+// Inner HTTP service that handles requests inside the CONNECT tunnel.
+// Forwards requests to the worker binding via SubrequestChannel.
+class InnerEgressService final: public kj::HttpService {
+ public:
+  InnerEgressService(IoChannelFactory::SubrequestChannel& channel): channel(channel) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    IoChannelFactory::SubrequestMetadata metadata;
+    auto worker = channel.startRequest(kj::mv(metadata));
+    co_await worker->request(method, url, headers, requestBody, response);
+  }
+
+ private:
+  IoChannelFactory::SubrequestChannel& channel;
+};
+
+// Outer HTTP service that handles CONNECT requests from the sidecar.
+class EgressHttpService final: public kj::HttpService {
+ public:
+  EgressHttpService(ContainerClient& containerClient, kj::HttpHeaderTable& headerTable)
+      : containerClient(containerClient),
+        headerTable(headerTable) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    // Regular HTTP requests are not expected - we only handle CONNECT
+    co_return co_await response.sendError(405, "Method Not Allowed", headerTable);
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    auto destAddr = kj::str(host);
+
+    kj::HttpHeaders responseHeaders(headerTable);
+    response.accept(200, "OK", responseHeaders);
+
+    auto mapping = containerClient.findEgressMapping(destAddr, /*defaultPort=*/80);
+
+    KJ_IF_SOME(channel, mapping) {
+      // Layer an HttpServer on top of the tunnel to handle HTTP parsing/serialization
+      auto innerService = kj::heap<InnerEgressService>(*channel);
+      auto innerServer =
+          kj::heap<kj::HttpServer>(containerClient.timer, headerTable, *innerService);
+
+      co_await innerServer->listenHttpCleanDrain(connection);
+
+      co_return;
+    }
+
+    if (!containerClient.internetEnabled) {
+      connection.shutdownWrite();
+      co_return;
+    }
+
+    // No egress mapping and internet enabled, so forward via raw TCP
+    auto addr = co_await containerClient.network.parseAddress(destAddr);
+    auto destConn = co_await addr->connect();
+
+    auto connToDestination = connection.pumpTo(*destConn).then(
+        [&destConn = *destConn](uint64_t) { destConn.shutdownWrite(); });
+
+    auto destinationToConn =
+        destConn->pumpTo(connection).then([&connection](uint64_t) { connection.shutdownWrite(); });
+
+    co_await kj::joinPromisesFailFast(
+        kj::arr(kj::mv(connToDestination), kj::mv(destinationToConn)));
+    co_return;
+  }
+
+ private:
+  ContainerClient& containerClient;
+  kj::HttpHeaderTable& headerTable;
+};
+
+// The name of the docker workerd network. All containers spawned by Workerd
+// will be attached to this network.
+constexpr kj::StringPtr WORKERD_NETWORK_NAME = "workerd-network"_kj;
+
+kj::Promise<ContainerClient::IPAMConfigResult> ContainerClient::getDockerBridgeIPAMConfig() {
+  // First, try to find or create the workerd-network
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
+      kj::str("/networks/", WORKERD_NETWORK_NAME));
+
+  if (response.statusCode == 404) {
+    // Network doesn't exist, create it
+    // Equivalent to: docker network create -d bridge --ipv6 workerd-network
+    co_await createWorkerdNetwork();
+    // Re-fetch the network to get the gateway
+    response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
+        kj::str("/networks/", WORKERD_NETWORK_NAME));
+  }
+
+  if (response.statusCode == 200) {
+    auto jsonRoot = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
+    auto ipamConfig = jsonRoot.getIpam().getConfig();
+    if (ipamConfig.size() > 0) {
+      auto config = ipamConfig[0];
+      co_return IPAMConfigResult{
+        .gateway = kj::str(config.getGateway()),
+        .subnet = kj::str(config.getSubnet()),
+      };
+    }
+  }
+
+  JSG_FAIL_REQUIRE(Error,
+      "Failed to get workerd-network. "
+      "Status: ",
+      response.statusCode, ", Body: ", response.body);
+}
+
+kj::Promise<void> ContainerClient::createWorkerdNetwork() {
+  // Equivalent to: docker network create -d bridge --ipv6 workerd-network
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::NetworkCreateRequest>();
+  capnp::MallocMessageBuilder message;
+  auto jsonRoot = message.initRoot<docker_api::Docker::NetworkCreateRequest>();
+  jsonRoot.setName(WORKERD_NETWORK_NAME);
+  jsonRoot.setDriver("bridge");
+  jsonRoot.setEnableIpv6(true);
+
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/networks/create"), codec.encode(jsonRoot));
+
+  if (response.statusCode != 201 && response.statusCode != 409) {
+    JSG_FAIL_REQUIRE(Error,
+        "Failed to create workerd-network."
+        "Status: ",
+        response.statusCode, ", Body: ", response.body);
+  }
+}
+
+kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::StringPtr listenAddress) {
+  auto service = kj::heap<EgressHttpService>(*this, headerTable);
+  auto httpServer = kj::heap<kj::HttpServer>(timer, headerTable, *service);
+  auto& httpServerRef = *httpServer;
+
+  egressHttpServer = httpServer.attach(kj::mv(service));
+
+  // Listen on the Docker bridge gateway IP with port 0 to let the OS pick a free port
+  auto addr = co_await network.parseAddress(kj::str(listenAddress, ":0"));
+  auto listener = addr->listen();
+
+  uint16_t chosenPort = listener->getPort();
+
+  egressListenerTask = httpServerRef.listenHttp(*listener)
+                           .attach(kj::mv(listener))
+                           .eagerlyEvaluate([](kj::Exception&& e) {
+    LOG_EXCEPTION(
+        "Workerd could not listen in the TCP port to proxy traffic off the docker container", e);
+  });
+
+  co_return chosenPort;
+}
+
+void ContainerClient::stopEgressListener() {
+  egressListenerTask = kj::none;
+  egressHttpServer = kj::none;
+}
+
 kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Network& network,
     kj::String dockerPath,
     kj::HttpMethod method,
@@ -209,7 +463,6 @@ kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Net
 }
 
 kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer() {
-  // Docker API: GET /containers/{id}/json
   auto endpoint = kj::str("/containers/", containerName, "/json");
 
   auto response = co_await dockerApiRequest(
@@ -219,6 +472,7 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   if (response.statusCode == 404) {
     co_return InspectResponse{.isRunning = false, .ports = {}};
   }
+
   JSG_REQUIRE(response.statusCode == 200, Error, "Container inspect failed");
   // Parse JSON response
   auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(response.body);
@@ -268,7 +522,6 @@ kj::Promise<void> ContainerClient::createContainer(
     kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
     kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
     rpc::Container::StartParams::Reader params) {
-  // Docker API: POST /containers/create
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
@@ -284,6 +537,8 @@ kj::Promise<void> ContainerClient::createContainer(
 
   auto envSize = environment.map([](auto& env) { return env.size(); }).orDefault(0);
   auto jsonEnv = jsonRoot.initEnv(envSize + kj::size(defaultEnv));
+
+  co_await createWorkerdNetwork();
 
   KJ_IF_SOME(env, environment) {
     for (uint32_t i: kj::zeroTo(env.size())) {
@@ -301,6 +556,13 @@ kj::Promise<void> ContainerClient::createContainer(
   // We need to set a restart policy to avoid having ambiguous states
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
+  // Add host.docker.internal mapping so containers can reach the host
+  // This is equivalent to --add-host=host.docker.internal:host-gateway
+  auto extraHosts = hostConfig.initExtraHosts(1);
+  auto ipamConfigForHost = co_await getDockerBridgeIPAMConfig();
+  extraHosts.set(0, kj::str("host.docker.internal:", ipamConfigForHost.gateway));
+  // Connect the container to the workerd-network for IPv6 support and container isolation
+  hostConfig.setNetworkMode(WORKERD_NETWORK_NAME);
 
   // When containersPidNamespace is NOT enabled, use host PID namespace for backwards compatibility.
   // This allows the container to see processes on the host.
@@ -334,7 +596,6 @@ kj::Promise<void> ContainerClient::createContainer(
 }
 
 kj::Promise<void> ContainerClient::startContainer() {
-  // Docker API: POST /containers/{id}/start
   auto endpoint = kj::str("/containers/", containerName, "/start");
   // We have to send an empty body since docker API will throw an error if we don't.
   auto response = co_await dockerApiRequest(
@@ -346,7 +607,6 @@ kj::Promise<void> ContainerClient::startContainer() {
 }
 
 kj::Promise<void> ContainerClient::stopContainer() {
-  // Docker API: POST /containers/{id}/stop
   auto endpoint = kj::str("/containers/", containerName, "/stop");
   auto response = co_await dockerApiRequest(
       network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
@@ -358,7 +618,6 @@ kj::Promise<void> ContainerClient::stopContainer() {
 }
 
 kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
-  // Docker API: POST /containers/{id}/kill
   auto endpoint = kj::str("/containers/", containerName, "/kill?signal=", signalToString(signal));
   auto response = co_await dockerApiRequest(
       network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
@@ -392,8 +651,72 @@ kj::Promise<void> ContainerClient::destroyContainer() {
   }
 }
 
+// Creates the sidecar container for egress proxy.
+// The sidecar shares the network namespace with the main container and runs
+// proxy-everything to intercept and proxy egress traffic.
+kj::Promise<void> ContainerClient::createSidecarContainer(
+    uint16_t egressPort, kj::String networkCidr) {
+  // Equivalent to: docker run --cap-add=NET_ADMIN --network container:$(CONTAINER) ...
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
+  capnp::MallocMessageBuilder message;
+  auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
+  auto& image = KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
+      "containerEgressInterceptorImage must be configured to use egress interception. "
+      "Set it in the localDocker configuration.");
+  jsonRoot.setImage(image);
+
+  auto cmd = jsonRoot.initCmd(4);
+  cmd.set(0, "--http-egress-port");
+  cmd.set(1, kj::str(egressPort));
+  cmd.set(2, "--docker-gateway-cidr");
+  cmd.set(3, networkCidr);
+
+  auto hostConfig = jsonRoot.initHostConfig();
+  // Share network namespace with the main container
+  hostConfig.setNetworkMode(kj::str("container:", containerName));
+
+  // Sidecar needs NET_ADMIN capability for iptables/TPROXY
+  auto capAdd = hostConfig.initCapAdd(1);
+  capAdd.set(0, "NET_ADMIN");
+  hostConfig.setAutoRemove(true);
+
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/containers/create?name=", sidecarContainerName), codec.encode(jsonRoot));
+
+  if (response.statusCode == 409) {
+    // Already created, nothing to do
+    co_return;
+  }
+
+  if (response.statusCode != 201) {
+    JSG_REQUIRE(response.statusCode != 404, Error, "No such image available named ", image,
+        ". Please ensure the container egress interceptor image is built and available.");
+    JSG_FAIL_REQUIRE(Error, "Failed to create the networking sidecar [", response.statusCode, "] ",
+        response.body);
+  }
+}
+
+kj::Promise<void> ContainerClient::startSidecarContainer() {
+  auto endpoint = kj::str("/containers/", sidecarContainerName, "/start");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint), kj::str(""));
+  JSG_REQUIRE(response.statusCode == 204, Error,
+      "Starting network sidecar container failed with: ", response.body);
+}
+
+kj::Promise<void> ContainerClient::destroySidecarContainer() {
+  auto endpoint = kj::str("/containers/", sidecarContainerName, "?force=true");
+  co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/containers/", sidecarContainerName, "/wait?condition=removed"));
+  JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
+      "Destroying docker network sidecar container failed: ", response.statusCode, response.body);
+}
+
 kj::Promise<void> ContainerClient::status(StatusContext context) {
   const auto [isRunning, _ports] = co_await inspectContainer();
+  containerStarted.store(isRunning, std::memory_order_release);
   context.getResults().setRunning(isRunning);
 }
 
@@ -407,12 +730,26 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   if (params.hasEntrypoint()) {
     entrypoint = params.getEntrypoint();
   }
+
   if (params.hasEnvironmentVariables()) {
     environment = params.getEnvironmentVariables();
   }
 
+  internetEnabled = params.getEnableInternet();
+
   co_await createContainer(entrypoint, environment, params);
   co_await startContainer();
+
+  // Opt in to the proxy sidecar container only if the user has configured egressMappings
+  // for now. In the future, it will always run when a user container is running
+  if (!egressMappings.empty()) {
+    // The user container will be blocked on network connectivity until this finishes.
+    // When workerd-network is more battle-tested and goes out of experimental so it's non-optional,
+    // we should make the sidecar start first and _then_ make the user container join the sidecar network.
+    co_await ensureSidecarStarted();
+  }
+
+  containerStarted.store(true, std::memory_order_release);
 }
 
 kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
@@ -421,7 +758,6 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   // If it hasn't, we'll give it 3 tries before failing.
   auto results = context.getResults();
   for (int i = 0; i < 3; i++) {
-    // Docker API: POST /containers/{id}/wait - wait for container to exit
     auto endpoint = kj::str("/containers/", containerName, "/wait");
 
     auto response = co_await dockerApiRequest(
@@ -430,6 +766,8 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
       co_await timer.afterDelay(1 * kj::SECONDS);
       continue;
     }
+
+    containerStarted.store(false, std::memory_order_release);
     JSG_REQUIRE(response.statusCode == 200, Error,
         "Monitoring container failed with: ", response.statusCode, response.body);
     // Parse JSON response
@@ -438,10 +776,13 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
     results.setExitCode(statusCode);
     co_return;
   }
+
   JSG_FAIL_REQUIRE(Error, "Monitor failed to find container");
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
+  // Sidecar shares main container's network namespace, so must be destroyed first
+  co_await destroySidecarContainer();
   co_await destroyContainer();
 }
 
@@ -478,6 +819,75 @@ kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
 
 kj::Promise<void> ContainerClient::listenTcp(ListenTcpContext context) {
   KJ_UNIMPLEMENTED("listenTcp not implemented for Docker containers - use port mapping instead");
+}
+
+kj::Maybe<workerd::IoChannelFactory::SubrequestChannel*> ContainerClient::findEgressMapping(
+    kj::StringPtr destAddr, uint16_t defaultPort) {
+  auto hostAndPort = stripPort(destAddr);
+  uint16_t port = hostAndPort.port.orDefault(defaultPort);
+
+  for (auto& mapping: egressMappings) {
+    if (mapping.cidr.matches(hostAndPort.host)) {
+      // CIDR matches, now check port.
+      // If the port is 0, we match anything.
+      if (mapping.port == 0 || mapping.port == port) {
+        return mapping.channel.get();
+      }
+    }
+  }
+
+  return kj::none;
+}
+
+kj::Promise<void> ContainerClient::ensureSidecarStarted() {
+  if (containerSidecarStarted.exchange(true, std::memory_order_acquire)) {
+    co_return;
+  }
+
+  KJ_ON_SCOPE_FAILURE(containerSidecarStarted.store(false, std::memory_order_release));
+
+  // Get the Docker bridge gateway IP to listen on (only accessible from containers)
+  auto ipamConfig = co_await getDockerBridgeIPAMConfig();
+  // Create and start the sidecar container that shares the network namespace
+  // with the main container and intercepts egress traffic.
+  co_await createSidecarContainer(egressListenerPort, kj::mv(ipamConfig.subnet));
+  co_await startSidecarContainer();
+}
+
+kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
+  auto params = context.getParams();
+  auto hostPortStr = kj::str(params.getHostPort());
+  auto tokenBytes = params.getChannelToken();
+
+  auto parsed = parseHostPort(hostPortStr);
+  uint16_t port = parsed.port.orDefault(80);
+  auto cidr = kj::mv(parsed.cidr);
+
+  if (egressListenerTask == kj::none) {
+    // Get the Docker bridge gateway IP to listen on (only accessible from containers)
+    auto ipamConfig = co_await getDockerBridgeIPAMConfig();
+
+    // Start the egress listener first so it's ready when the sidecar starts.
+    // Use port 0 to let the OS pick a free port dynamically.
+    egressListenerPort = co_await startEgressListener(ipamConfig.gateway);
+  }
+
+  if (containerStarted.load(std::memory_order_acquire)) {
+    // Only try to create and start a sidecar container
+    // if the user container is running.
+    co_await ensureSidecarStarted();
+  }
+
+  auto subrequestChannel = channelTokenHandler.decodeSubrequestChannelToken(
+      workerd::IoChannelFactory::ChannelTokenUsage::RPC, tokenBytes);
+
+  egressMappings.add(EgressMapping{
+    .cidr = kj::mv(cidr),
+    .port = port,
+    .channel = kj::mv(subrequestChannel),
+  });
+
+  co_return;
 }
 
 kj::Own<ContainerClient> ContainerClient::addRef() {

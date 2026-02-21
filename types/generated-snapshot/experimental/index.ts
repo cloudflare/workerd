@@ -3850,6 +3850,8 @@ export interface Container {
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
+  interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
+  interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
 }
 export interface ContainerStartupOptions {
   entrypoint?: string[];
