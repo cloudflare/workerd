@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor-cache.h"
+#include "workerd/io/io-gate.h"
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
@@ -3518,15 +3519,25 @@ struct Worker::Actor::Impl {
 
     void inputGateLocked() override {
       metrics.inputGateLocked();
+      if (IoContext::hasCurrent()) {
+        auto& ioContext = IoContext::current();
+        inputGateHoldSpan = ioContext.makeTraceSpan("actor_input_gate_hold"_kjc);
+      }
     }
     void inputGateReleased() override {
       metrics.inputGateReleased();
+      inputGateHoldSpan = kj::none;
     }
     void inputGateWaiterAdded() override {
       metrics.inputGateWaiterAdded();
+      if (IoContext::hasCurrent()) {
+        auto& ioContext = IoContext::current();
+        inputGateWaitSpan = ioContext.makeTraceSpan("actor_input_gate_wait"_kjc);
+      }
     }
     void inputGateWaiterRemoved() override {
       metrics.inputGateWaiterRemoved();
+      inputGateWaitSpan = kj::none;
     }
     // Implements InputGate::Hooks.
 
@@ -3546,15 +3557,25 @@ struct Worker::Actor::Impl {
 
     void outputGateLocked() override {
       metrics.outputGateLocked();
+      if (IoContext::hasCurrent()) {
+        auto& ioContext = IoContext::current();
+        outputGateHoldSpan = ioContext.makeTraceSpan("actor_output_gate_hold"_kjc);
+      }
     }
     void outputGateReleased() override {
       metrics.outputGateReleased();
+      outputGateHoldSpan = kj::none;
     }
     void outputGateWaiterAdded() override {
       metrics.outputGateWaiterAdded();
+      if (IoContext::hasCurrent()) {
+        auto& ioContext = IoContext::current();
+        outputGateWaitSpan = ioContext.makeTraceSpan("actor_output_gate_wait"_kjc);
+      }
     }
     void outputGateWaiterRemoved() override {
       metrics.outputGateWaiterRemoved();
+      outputGateWaitSpan = kj::none;
     }
 
     // Implements ActorCache::Hooks
