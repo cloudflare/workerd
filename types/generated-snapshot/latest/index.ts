@@ -4765,6 +4765,12 @@ export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | null;
 export type StreamOptions = {
   include_obfuscation?: boolean;
 };
+/** Marks keys from T that aren't in U as optional never */
+export type Without<T, U> = {
+  [P in Exclude<keyof T, keyof U>]?: never;
+};
+/** Either T or U, but not both (mutually exclusive) */
+export type XOR<T, U> = (T & Without<U, T>) | (U & Without<T, U>);
 export type Ai_Cf_Baai_Bge_Base_En_V1_5_Input =
   | {
       text: string | string[];
@@ -8399,12 +8405,12 @@ export declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: ResponsesInput;
-  postProcessedOutputs: ResponsesOutput;
+  inputs: XOR<ResponsesInput, AiTextGenerationInput>;
+  postProcessedOutputs: XOR<ResponsesOutput, AiTextGenerationOutput>;
 }
 export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: ResponsesInput;
-  postProcessedOutputs: ResponsesOutput;
+  inputs: XOR<ResponsesInput, AiTextGenerationInput>;
+  postProcessedOutputs: XOR<ResponsesOutput, AiTextGenerationOutput>;
 }
 export interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
   /**
