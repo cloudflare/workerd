@@ -426,7 +426,7 @@ class Fetcher: public JsRpcClientProvider {
     // conflicts with JS RPC methods (implemented via the wildcard property). Ideally, we do not
     // add any new methods here, and instead rely on RPC for all future needs.
     //
-    // Similarly, subclasses of `Fetcher` (notably, `DurableObject`) must follow the same rule,
+    // Similarly, subclasses of `Fetcher` (notably, `DurableObjectStub`) must follow the same rule,
     // as any methods added to them will shadow RPC methods of the same name.
 
     JSG_METHOD(fetch);
