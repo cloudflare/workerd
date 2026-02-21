@@ -255,10 +255,13 @@ Do suggest reviewers who have made material comments or suggestions on the assoc
 
 ### Test Commands
 
-- `just test` - Run all tests
+- `just test` - Run all tests (uses caching, good for verifying nothing is broken)
+- `just stream-test //path/to:target@` - Run a specific test with live output (disables caching, useful for debugging failures)
 - `just node-test <name>` - Run Node.js compatibility tests
 - `just wpt-test <name>` - Run Web Platform Tests
 - `bazel test //path/to:target@` - Run specific test target (note: `@` suffix required)
+
+Use `just test` for full-suite verification. Use `just stream-test` when running individual tests where you need to see the output.
 
 ### Build Commands
 
