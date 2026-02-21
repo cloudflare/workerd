@@ -126,10 +126,6 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - Automatic formatting via clang-format (enforced in CI)
 - Run `just format` before committing
 
-If workerd is checked out as a submodule, you are highly advised to read the following documents before doing any work:
-
-* `../capnproto/style-guide.md`: The KJ style guide. The project mostly follows this guide, with the exception of comment placement.
-* `../capnproto/kjdoc/tour.md`: A tour of KJ, the C++ toolkit library on which workerd is built.
 
 ### Contributing
 - High bar for non-standard APIs; prefer implementing web standards
