@@ -39,7 +39,7 @@ type ArrayLike = cryptoImpl.ArrayLike;
 
 export const kHandle = Symbol('kHandle');
 export const kFinalized = Symbol('kFinalized');
-export const kState = Symbol('kFinalized');
+export const kState = Symbol('kState');
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getStringOption(options: any, key: string): string | undefined {

@@ -401,6 +401,40 @@ export const timingSafeEqualTest = {
   },
 };
 
+export const randomIntTest = {
+  async test() {
+    const { randomInt } = await import('node:crypto');
+
+    // min === max should throw, not infinite-loop
+    throws(() => randomInt(5, 5), { code: 'ERR_OUT_OF_RANGE' });
+
+    // min > max should throw
+    throws(() => randomInt(10, 5), { code: 'ERR_OUT_OF_RANGE' });
+
+    // Valid range returns value in [min, max)
+    const val = randomInt(0, 10);
+    ok(val >= 0 && val < 10);
+
+    // Single-arg form: randomInt(max) means [0, max)
+    strictEqual(randomInt(1), 0);
+  },
+};
+
+export const randomFillSyncTest = {
+  async test() {
+    const { randomFillSync } = await import('node:crypto');
+
+    // With offset but no size, should fill only buf.length - offset bytes
+    const buf = Buffer.alloc(10, 0);
+    randomFillSync(buf, 4);
+
+    // First 4 bytes must be untouched (all zero)
+    for (let i = 0; i < 4; i++) {
+      strictEqual(buf[i], 0, `byte ${i} should be untouched`);
+    }
+  },
+};
+
 // Ref: https://github.com/cloudflare/workerd/issues/2716
 export const getRandomValuesIllegalInvocation = {
   async test() {

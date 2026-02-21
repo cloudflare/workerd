@@ -87,7 +87,7 @@ export function randomFillSync(
   } else offset = 0;
   if (size !== undefined) {
     validateInteger(size, 'size', 0, maxLength - offset);
-  } else size = maxLength;
+  } else size = maxLength - offset;
   if (isAnyArrayBuffer(buffer)) {
     buffer = Buffer.from(buffer);
   }
@@ -243,8 +243,8 @@ export function randomInt(
     max = minOrMax;
   }
 
-  if (min > max) {
-    throw new ERR_OUT_OF_RANGE('min', 'min <= max', min);
+  if (min >= max) {
+    throw new ERR_OUT_OF_RANGE('min', 'min < max', min);
   }
 
   if (callback != null) {
