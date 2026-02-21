@@ -1,13 +1,15 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) or Opencode (opencode.ai) when working with code in this repository.
 
-## Instructions for Claude Code
+## Instructions for AI Code Assistants
 
-- Look for high-level overview in `docs/` directory
-- Check README.md files for package/directory level information
-- Check source file comments for more detailed info
 - Suggest updates to CLAUDE.md when you find new high-level information
+- You should always determine if the current repository was checked out standalone or as a submodule
+  of the larger workers project.
+- If checked out as a submodule, be aware that there is additional documentation and context in the
+  root of that repository that is not present here. Look for the `../../README.md`, `../../CLAUDE.md`,
+  and other markdown files in the root of the parent repository.
 
 ## Project Overview
 
@@ -16,10 +18,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build System & Commands
 
 ### Primary Build System: Bazel
+
 - Main build command: `bazel build //src/workerd/server:workerd`
 - Binary output: `bazel-bin/src/workerd/server/workerd`
 
 ### Just Commands (recommended for development)
+
 - `just build` or `just b` - Build the project
 - `just test` or `just t` - Run all tests
 - `just format` or `just f` - Format code (uses clang-format + Python formatter)
@@ -32,26 +36,116 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `just compile-commands` - Generate compile_commands.json for clangd support
 - `just build-asan` - Build with AddressSanitizer
 - `just test-asan` - Run tests with AddressSanitizer
+- `just new-test <target>` - Scaffold a new test (e.g., `just new-test //src/workerd/api/tests:my-test`)
+- `just new-wpt-test <name>` - Scaffold a new WPT test
+- `just lint` or `just eslint` - Run ESLint on TypeScript sources
+- `just coverage <path>` - Generate code coverage report (Linux only, defaults to `//...`)
+- `just watch <args>` - Watch `src/` and `build/` dirs, re-run a just command on changes
 
 ## Testing
 
-### Test Types & Commands
-- **Unit Tests**: `.wd-test` files use Cap'n Proto config format
-- **C++ Tests**: Traditional C++ unit tests
-- **Node.js Compatibility**: `just node-test <test_name>`
+### Test Types
+
+- **`.wd-test` tests**: Cap'n Proto config files that define a `Workerd.Config` with embedded JS/TS modules. Bazel macro: `wd_test()`. See format details below.
+- **C++ tests**: KJ-based unit tests (`.c++` files). Bazel macro: `kj_test()`.
+- **Node.js compatibility tests**: `just node-test <test_name>`
 - **Web Platform Tests**: `just wpt-test <test_name>`
 - **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`)
 
+### Running a Single Test
+
+Both `just test` and `just build` accept specific Bazel targets (they default to `//...`):
+
+```
+just test //src/workerd/api/tests:encoding-test@
+just test //src/workerd/io:io-gate-test@
+just stream-test //src/workerd/api/tests:encoding-test@    # streams output for debugging
+```
+
+Or use Bazel directly:
+
+```
+bazel test //src/workerd/api/tests:encoding-test@
+```
+
+### Test Variants
+
+Every test automatically generates multiple variants via the build macros:
+
+- **`name@`** — default variant (oldest compat date, 2000-01-01)
+- **`name@all-compat-flags`** — newest compat date (2999-12-31), tests with all flags enabled
+- **`name@all-autogates`** — all autogates enabled + oldest compat date
+
+The `@` suffix is required in target names. For example: `//src/workerd/io:io-gate-test@`, not `//src/workerd/io:io-gate-test`.
+
+To find the right target name for a file, check the `BUILD.bazel` file in the same directory for `wd_test()` or `kj_test()` rules. You can also use Bazel query:
+
+```
+bazel query //src/workerd/api/tests:all    # list all targets in a package
+```
+
+### `.wd-test` File Format
+
+`.wd-test` files are Cap'n Proto configs that define test workers:
+
+```capnp
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "my-test",
+    worker = (
+      modules = [(name = "worker", esModule = embed "my-test.js")],
+      compatibilityDate = "2024-01-01",
+      compatibilityFlags = ["nodejs_compat"],
+    ),
+  )],
+);
+```
+
+Key elements: `modules` (embed JS/TS files), `compatibilityFlags`, `bindings` (service bindings, JSON, KV, etc.), `durableObjectNamespaces`.
 
 ## Architecture
 
+### Dependencies
+
 - **Cap'n Proto source code** available in `external/capnp-cpp` - contains KJ C++ base library and
-capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/` includes and
-`kj::` and `capnp::` namespaces.
+  capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/` includes and
+  `kj::` and `capnp::` namespaces.
+
+The other core runtime dependencies include:
+
+| Dependency                          | Description                                                         |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| V8                                  | JavaScript engine                                                   |
+| Cap'n Proto (capnp-cpp)             | Serialization/RPC framework and KJ base library                     |
+| BoringSSL                           | TLS/crypto (Google's OpenSSL fork, patched for ncrypto/libdecrepit) |
+| SQLite3                             | Embedded database                                                   |
+| ICU (com_googlesource_chromium_icu) | Internationalization (Chromium fork)                                |
+| zlib                                | Compression (Chromium fork, patched)                                |
+| zstd                                | Zstandard compression                                               |
+| brotli                              | Brotli compression                                                  |
+| tcmalloc                            | Memory allocator                                                    |
+| ada-url                             | URL parser                                                          |
+| simdutf                             | Unicode transcoding (SIMD-accelerated)                              |
+| nbytes                              | Node.js byte utilities                                              |
+| ncrypto                             | Node.js crypto utilities                                            |
+| perfetto                            | Tracing/profiling framework (patched)                               |
+| fast_float                          | Fast float parsing                                                  |
+| fp16                                | Half-precision float support                                        |
+| highway                             | SIMD abstraction library                                            |
+| dragonbox                           | Float-to-string conversion                                          |
+
+These dependencies are vendored via bazel into the `external/` directory. See `WORKSPACE` and `BUILD.bazel` files for details on how they are integrated into the build system.
+
+For several of these dependencies (notably V8, boringssl, sqlite, perfetto, and zlib), we maintain sets of patches that are applied on top of the upstream code. These patches are stored in the `patches/` directory and are applied during the build process. When updating these dependencies, it's important to review and update the corresponding patches as needed. The patches may introduce workerd-specific customizations and new APIs.
+
+Be aware that workerd uses tcmalloc for memory allocation in the typical case. When analyzing memory usage or debugging memory issues, be aware that tcmalloc's behavior may differ from the standard allocator. Any memory usage analysis that you perform should take this into account.
 
 ### Core Directory Structure (`src/workerd/`)
+
 - **`api/`** - Runtime APIs (HTTP, crypto, streams, WebSocket, etc.)
-  - Contains both C++ implementations
+  - Contains C++ implementations of the core APIs exposed to JavaScript, as well as the Node.js compatibility layer
   - C++ portions of the Node.js compatibility layer are in `api/node/`, while the JavaScript and TypeScript implementations live in `src/node/`
   - Tests in `api/tests/` and `api/node/tests/`
   - TypeScript definitions are derived from C++ (which can have some annotations). This generation is handled by code in `types/` directory.
@@ -67,37 +161,65 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 - **`util/`** - Utility libraries (SQLite, UUID, threading, etc.)
 
 ### Multi-Language Support
+
 - **`src/cloudflare/`** - Cloudflare-specific APIs (TypeScript)
 - **`src/node/`** - Node.js compatibility layer (TypeScript)
 - **`src/pyodide/`** - Python runtime support via Pyodide
 - **`src/rust/`** - Rust integration components
 
-
 ### Configuration System
+
 - Uses **Cap'n Proto** for configuration files (`.capnp` format)
 - Main schema: `src/workerd/server/workerd.capnp`
 - Sample configurations in `samples/` directory
 - Configuration uses capability-based security model
 
+## Coding Conventions
+
+This project generally follows the [KJ Style Guide](https://github.com/capnproto/capnproto/blob/v2/kjdoc/style-guide.md) and [KJ Tour](https://github.com/capnproto/capnproto/blob/v2/kjdoc/tour.md), with one exception: comment style follows the more common idiomatic C++ patterns (e.g., `//` line comments) rather than KJ's comment conventions.
+
+### Use KJ types, not STL
+
+This project uses the KJ library instead of the C++ standard library for most types:
+
+| Instead of              | Use                                                 |
+| ----------------------- | --------------------------------------------------- |
+| `std::string`           | `kj::String` (owned) / `kj::StringPtr` (view)       |
+| `std::vector`           | `kj::Array<T>` (fixed) / `kj::Vector<T>` (growable) |
+| `std::unique_ptr`       | `kj::Own<T>`                                        |
+| `std::shared_ptr`       | `kj::Rc<T>` / `kj::Arc<T>` (thread-safe)            |
+| `std::optional`         | `kj::Maybe<T>`                                      |
+| `std::function`         | `kj::Function<T>`                                   |
+| `std::variant`          | `kj::OneOf<T...>`                                   |
+| `std::span` / array ref | `kj::ArrayPtr<T>`                                   |
+| `std::exception`        | `kj::Exception`                                     |
+| `std::promise`/`future` | `kj::Promise<T>` / `kj::ForkedPromise<T>`           |
+
+### JSG (JavaScript Glue)
+
+C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See the comprehensive guide at `src/workerd/jsg/README.md` for details. When adding or modifying JavaScript APIs, find a similar existing API and follow its pattern.
+
+### Feature Management
+
+- **Compatibility dates** (`src/workerd/io/compatibility-date.capnp`) - For behavioral changes. Flags MUST be documented before their enable date.
+- **Autogates** (`src/workerd/util/autogate.*`) - For risky rollouts with conditional activation.
+
 ## Backward Compatibility
+
 - Strong backwards compatibility commitment - features cannot be removed or changed once deployed
 - We use compatibility-date.capnp to introduce feature flags when we need to change the behavior
 
-## Risky Changes
-- We use autogates (defined in `src/workerd/util/autogate.*`) flags to make risky changes conditional for testing/slow rollout.
-
 ## Development Workflow
 
-### Code Style & Formatting
-- Automatic formatting via clang-format (enforced in CI)
-- Run `just format` before committing
-
 ### Contributing
+
 - High bar for non-standard APIs; prefer implementing web standards
+- Run formatting with `just format` before submitting PRs
 - Run tests with `just test` before submitting PRs
 - See `CONTRIBUTING.md` for more details
 
 ### Rust Development
+
 - `just update-rust <package>` - Update Rust dependencies (equivalent to `cargo update`)
 - `just clippy <package>` - Run clippy linting on Rust code
 
@@ -114,16 +236,12 @@ When updating V8, ensure that all tests pass. Look for new deprecations when bui
 
 If asked to help with a V8 update, ask for the specific target V8 version to update to and ask clarifying questions about any specific patches or customizations that need to be preserved before proceeding. Merge conflicts are common during V8 updates, so be prepared to resolve those carefully. These almost always require human judgment to ensure that workerd-specific changes are preserved while still applying the upstream V8 changes correctly. Do not attempt to resolve merge conflicts automatically without human review.
 
-## Visual Studio Code Setup
-
-See [docs/vscode.md](docs/vscode.md) for instructions on setting up Visual Studio Code for workerd development, including build tasks, debugging configurations, and clangd integration for code completion and navigation.
-
 ## Other Documentation
 
 See the markdown files in the `docs/` directory for additional information on specific topics:
+
 - [development.md](docs/development.md) - Development environment setup and tools
 - [api-updates.md](docs/api-updates.md) - Guidelines for adding new JavaScript APIs
 - [pyodide.md](docs/pyodide.md) - Pyodide package management and updates
 
 Some source directories also contain README.md files with more specific information about that component. Proactively look for these when working in unfamiliar areas of the codebase. Proactively suggest updates to the documentation when it is missing or out of date, but do not make edits without confirming accuracy.
-
