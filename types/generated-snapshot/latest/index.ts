@@ -485,54 +485,60 @@ export interface ExecutionContext<Props = unknown> {
 export type ExportedHandlerFetchHandler<
   Env = unknown,
   CfHostMetadata = unknown,
+  Props = unknown,
 > = (
   request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => Response | Promise<Response>;
-export type ExportedHandlerTailHandler<Env = unknown> = (
+export type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (
   events: TraceItem[],
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
-export type ExportedHandlerTraceHandler<Env = unknown> = (
+export type ExportedHandlerTraceHandler<Env = unknown, Props = unknown> = (
   traces: TraceItem[],
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
-export type ExportedHandlerTailStreamHandler<Env = unknown> = (
+export type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (
   event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
-export type ExportedHandlerScheduledHandler<Env = unknown> = (
+export type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (
   controller: ScheduledController,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
-export type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (
+export type ExportedHandlerQueueHandler<
+  Env = unknown,
+  Message = unknown,
+  Props = unknown,
+> = (
   batch: MessageBatch<Message>,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
-export type ExportedHandlerTestHandler<Env = unknown> = (
+export type ExportedHandlerTestHandler<Env = unknown, Props = unknown> = (
   controller: TestController,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext<Props>,
 ) => void | Promise<void>;
 export interface ExportedHandler<
   Env = unknown,
   QueueHandlerMessage = unknown,
   CfHostMetadata = unknown,
+  Props = unknown,
 > {
-  fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
-  tail?: ExportedHandlerTailHandler<Env>;
-  trace?: ExportedHandlerTraceHandler<Env>;
-  tailStream?: ExportedHandlerTailStreamHandler<Env>;
-  scheduled?: ExportedHandlerScheduledHandler<Env>;
-  test?: ExportedHandlerTestHandler<Env>;
+  fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
+  tail?: ExportedHandlerTailHandler<Env, Props>;
+  trace?: ExportedHandlerTraceHandler<Env, Props>;
+  tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
+  scheduled?: ExportedHandlerScheduledHandler<Env, Props>;
+  test?: ExportedHandlerTestHandler<Env, Props>;
   email?: EmailExportedHandler<Env>;
-  queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage>;
+  queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
 }
 export interface StructuredSerializeOptions {
   transfer?: any[];
