@@ -1,0 +1,69 @@
+name: Daily Compatibility Date Check
+
+on:
+  schedule:
+    # Run at 8 AM UTC daily
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      min_days:
+        description: 'Minimum days in the future for new flag dates'
+        required: false
+        default: 7
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: write
+
+jobs:
+  check-open-prs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - name: Find and check open PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MIN_DAYS: ${{ inputs.min_days || '7' }}
+        run: |
+          echo "Checking open PRs that modify compatibility-date.capnp..."
+
+          # Get all open PRs
+          PRS=$(gh pr list --state open --json number,headRefName,labels --jq '.')
+
+          echo "Found $(echo "$PRS" | jq 'length') open PRs"
+
+          # Track PRs to check
+          PRS_TO_CHECK=""
+
+          echo "$PRS" | jq -c '.[]' | while read -r pr; do
+            PR_NUM=$(echo "$pr" | jq -r '.number')
+            LABELS=$(echo "$pr" | jq -r '[.labels[].name] | join(",")')
+
+            # Skip if PR has bypass label
+            if echo "$LABELS" | grep -q "urgent-compat-flag"; then
+              echo "PR #$PR_NUM: Skipping (has urgent-compat-flag label)"
+              continue
+            fi
+
+            # Check if PR modifies the capnp file
+            FILES_CHANGED=$(gh pr diff "$PR_NUM" --name-only 2>/dev/null || echo "")
+
+            if echo "$FILES_CHANGED" | grep -q "src/workerd/io/compatibility-date.capnp"; then
+              echo "PR #$PR_NUM: Modifies compatibility-date.capnp - triggering check"
+
+              # Trigger the compat-date-check workflow for this PR
+              # Note: This will re-run the check with current date
+              gh workflow run compat-date-check.yml \
+                --ref "refs/pull/$PR_NUM/merge" \
+                -f min_days="$MIN_DAYS" || echo "Failed to trigger workflow for PR #$PR_NUM"
+            else
+              echo "PR #$PR_NUM: Does not modify compatibility-date.capnp - skipping"
+            fi
+          done
+
+          echo "Daily check completed."
