@@ -154,10 +154,10 @@ export function lookup(
             address: answer.data,
             family: 4,
           })) ?? [];
-        const ipv6Addresses: { address: string; family: 4 }[] =
+        const ipv6Addresses: { address: string; family: 6 }[] =
           ipv6Response.Answer?.map((answer) => ({
             address: answer.data,
-            family: 4,
+            family: 6,
           })) ?? [];
 
         // No addresses found
@@ -178,10 +178,43 @@ export function lookup(
       .catch((error: unknown): void => {
         process.nextTick(callback, error);
       });
+  } else if (family === 0) {
+    // family=0, all=false: query both A and AAAA, return first result based on dnsOrder
+    Promise.all([
+      sendDnsRequest(hostname, 'A').catch(() => ({ Answer: [] })),
+      sendDnsRequest(hostname, 'AAAA').catch(() => ({ Answer: [] })),
+    ])
+      .then(([ipv4Response, ipv6Response]): void => {
+        const ipv4 = ipv4Response.Answer?.at(0)?.data;
+        const ipv6 = ipv6Response.Answer?.at(0)?.data;
+
+        if (ipv4 == null && ipv6 == null) {
+          callback(new DnsError(hostname, errorCodes.NOTFOUND, 'queryA'));
+          return;
+        }
+
+        // Return the preferred address based on dnsOrder
+        if (dnsOrder === 'ipv6first') {
+          if (ipv6 != null) {
+            callback(null, ipv6, 6);
+          } else {
+            callback(null, ipv4 as string, 4);
+          }
+        } else {
+          if (ipv4 != null) {
+            callback(null, ipv4, 4);
+          } else {
+            callback(null, ipv6 as string, 6);
+          }
+        }
+      })
+      .catch((error: unknown): void => {
+        process.nextTick(callback, error);
+      });
   } else {
     const requestType = family === 4 ? 'A' : 'AAAA';
 
-    // Single request for all other cases (including when all=true but family is specified)
+    // Single request when family is specified (with or without all=true)
     sendDnsRequest(hostname, requestType)
       .then((json): void => {
         validateAnswer(json.Answer, hostname, `query${requestType}`);
