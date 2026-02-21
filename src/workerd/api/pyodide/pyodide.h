@@ -30,8 +30,7 @@ WD_STRONG_BOOL(IsValidating);
 WD_STRONG_BOOL(IsWorkerd);
 WD_STRONG_BOOL(SnapshotToDisk);
 
-const auto PYTHON_PACKAGES_URL =
-    "https://storage.googleapis.com/cloudflare-edgeworker-python-packages/";
+const auto PYTHON_PACKAGES_URL = "https://python-packages.edgeworker.net/";
 class PyodideBundleManager {
  public:
   void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;

@@ -109,9 +109,9 @@ export let pythonBasics = {
   async test(ctrl, env, ctx) {
     let worker = env.loader.get('pythonBasics', () => {
       return {
-        compatibilityDate: '2025-01-01',
+        compatibilityDate: '2025-12-01',
         mainModule: 'foo.py',
-        compatibilityFlags: ['python_workers', 'python_no_global_handlers'],
+        compatibilityFlags: ['python_workers'],
         modules: {
           'foo.py': `
 from workers import WorkerEntrypoint
