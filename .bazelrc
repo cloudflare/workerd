@@ -99,6 +99,12 @@ build:v8-codegen-opt-windows --per_file_copt=external/+http+simdutf@/O2,/clang:-
 build:v8-codegen-opt-windows --per_file_copt=external/.*com_googlesource_chromium_icu@/O2,/clang:-O3
 build:v8-codegen-opt-windows --per_file_copt=external/perfetto@/O2,/clang:-O3
 
+# hack: Unconditionally optimize sql.c++ as a regression test for a bug where we received "HashIndex
+# detected hash table inconsistency" errors for SQL operations based on not consistently enabling
+# hardware-based CRC hash computation. See #6078 for details.
+build:unix --per_file_copt=src/workerd/api/sql.c++@-O3
+build:windows --per_file_copt=src/workerd/api/sql.c++@/O2,/clang:-O3
+
 build:unix --config=v8-codegen-opt
 build:windows  --config=v8-codegen-opt-windows
 
