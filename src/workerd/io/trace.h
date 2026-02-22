@@ -632,7 +632,6 @@ struct CompleteSpan {
 
   CompleteSpan(rpc::UserSpanData::Reader reader);
   void copyTo(rpc::UserSpanData::Builder builder) const;
-  CompleteSpan clone() const;
   explicit CompleteSpan(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
@@ -646,7 +645,45 @@ struct CompleteSpan {
         startTime(startTime),
         endTime(endTime),
         tags(kj::mv(tags)) {}
-  kj::String toString() const;
+};
+
+struct SpanOpenData {
+  // Represents the data needed for a SpanOpen event
+  tracing::SpanId spanId;
+  tracing::SpanId parentSpanId;
+
+  kj::ConstString operationName;
+  kj::Date startTime;
+
+  SpanOpenData(rpc::SpanOpenData::Reader reader);
+  void copyTo(rpc::SpanOpenData::Builder builder) const;
+  explicit SpanOpenData(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime)
+      : spanId(spanId),
+        parentSpanId(parentSpanId),
+        operationName(kj::mv(operationName)),
+        startTime(startTime) {}
+};
+
+struct SpanEndData {
+  // Represents the data needed when closing a span, including the Attributes and SpanClose events.
+  tracing::SpanId spanId;
+
+  kj::Date endTime;
+  // Should be Span::TagMap, but we can't forward-declare that.
+  kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
+
+  SpanEndData(rpc::SpanEndData::Reader reader);
+  void copyTo(rpc::SpanEndData::Builder builder) const;
+  explicit SpanEndData(tracing::SpanId spanId,
+      kj::Date endTime,
+      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
+          kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
+      : spanId(spanId),
+        endTime(endTime),
+        tags(kj::mv(tags)) {}
 };
 
 // A Return mark is used to mark the point at which a span operation returned
@@ -1112,8 +1149,10 @@ class SpanObserver: public kj::Refcounted {
 
   // Report the span data. Called at the end of the span.
   //
-  // This should always be called exactly once per observer.
+  // This should always be called exactly once per observer at span completion time.
   virtual void report(const Span& span) = 0;
+  // Report information about the span onset.
+  virtual void reportStart(kj::ConstString operationName, kj::Date startTime) = 0;
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available
