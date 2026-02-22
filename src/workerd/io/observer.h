@@ -141,6 +141,11 @@ class RequestObserver: public kj::Refcounted {
 
   virtual void setFailedOpen(bool value) {}
 
+  // Called when the language runtime for this worker encounters a fatal error during this
+  // invocation. Currently used for Pyodide fatal errors, but is language-agnostic and can be used
+  // for other language runtimes in the future.
+  virtual void setWorkerFatal() {}
+
   virtual uint64_t clockRead() {
     return 0;
   }
