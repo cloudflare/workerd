@@ -122,9 +122,7 @@ def clang_format(files: list[Path], check: bool = False) -> bool:
 
 def prettier(files: list[Path], check: bool = False) -> bool:
     PRETTIER = BAZEL_BIN / "node_modules/prettier/bin/prettier.cjs"
-
-    if not PRETTIER.exists():
-        subprocess.run(["bazel", "build", "//:node_modules/prettier"])
+    subprocess.run(["bazel", "build", "//:node_modules/prettier"])
     cmd = [PRETTIER, "--log-level=warn", "--check" if check else "--write"]
     result = subprocess.run(cmd + files, cwd=ROOT)
     return result.returncode == 0
