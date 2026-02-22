@@ -32,6 +32,7 @@
 namespace workerd {
 class WorkerTracer;
 class BaseTracer;
+class Worker;
 }  // namespace workerd
 
 namespace workerd {
@@ -128,6 +129,10 @@ class IoContext_IncomingRequest final {
 
   SpanParent getCurrentUserTraceSpan();
 
+  void startInputGateHoldSpan();
+
+  void stopInputGateHoldSpan();
+
   // The invocation span context is a unique identifier for a specific
   // worker invocation.
   tracing::InvocationSpanContext& getInvocationSpanContext();
@@ -162,6 +167,8 @@ class IoContext_IncomingRequest final {
 
   // Tracks the location where delivered() was called for debugging.
   kj::Maybe<kj::SourceLocation> deliveredLocation;
+
+  kj::Maybe<SpanBuilder> inputGateHoldSpan;
 
   friend class IoContext;
 };
@@ -1082,6 +1089,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   friend class Finalizeable;
   friend class DeleteQueue;
+  friend class Worker;
   template <typename T>
   friend kj::Promise<ExceptionOr<T>> promiseForExceptionOrT(kj::Promise<T> promise);
   template <typename Result>
