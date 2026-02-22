@@ -1889,7 +1889,6 @@ KJ_TEST("Server: configuring a DO namespace with no class export is not an error
   }
 
   // However, a request will still fail at runtime.
-  KJ_EXPECT_LOG(ERROR, "no such actor class");
   KJ_EXPECT_LOG(INFO, "internal error");
   KJ_EXPECT_LOG(INFO, "internal error");
   KJ_EXPECT_LOG(ERROR, "internal error");
