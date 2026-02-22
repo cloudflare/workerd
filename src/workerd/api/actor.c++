@@ -50,13 +50,13 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
     if (actorChannel == kj::none) {
       KJ_SWITCH_ONEOF(channelIdOrFactory) {
         KJ_CASE_ONEOF(channelId, uint) {
-          actorChannel =
-              context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint), mode,
-                  enableReplicaRouting, routingMode, tracing.getInternalSpanParent());
+          actorChannel = context.getGlobalActorChannel(channelId, id->getInner(),
+              kj::mv(locationHint), mode, enableReplicaRouting, routingMode,
+              tracing.getInternalSpanParent(), kj::mv(version));
         }
         KJ_CASE_ONEOF(factory, kj::Own<DurableObjectNamespace::ActorChannelFactory>) {
           actorChannel = factory->getGlobalActor(id->getInner(), kj::mv(locationHint), mode,
-              enableReplicaRouting, routingMode, tracing.getInternalSpanParent());
+              enableReplicaRouting, routingMode, tracing.getInternalSpanParent(), kj::mv(version));
         }
       }
     }
@@ -155,8 +155,14 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
 
   auto& context = IoContext::current();
   kj::Maybe<kj::String> locationHint;
+  kj::Maybe<ActorVersion> version;
   KJ_IF_SOME(o, options) {
     locationHint = kj::mv(o.locationHint);
+    if (FeatureFlags::get(js).getWorkerdExperimental()) {
+      KJ_IF_SOME(v, o.version) {
+        version = ActorVersion{.cohort = kj::mv(v.cohort)};
+      }
+    }
   }
 
   bool enableReplicaRouting = FeatureFlags::get(js).getReplicaRouting();
@@ -164,12 +170,13 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   kj::Own<Fetcher::OutgoingFactory> outgoingFactory;
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
-      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(
-          channelId, id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting, routingMode);
+      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(channelId, id.addRef(),
+          kj::mv(locationHint), mode, enableReplicaRouting, routingMode, kj::mv(version));
     }
     KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
-      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(kj::addRef(*channelFactory),
-          id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting, routingMode);
+      outgoingFactory =
+          kj::heap<GlobalActorOutgoingFactory>(kj::addRef(*channelFactory), id.addRef(),
+              kj::mv(locationHint), mode, enableReplicaRouting, routingMode, kj::mv(version));
     }
   }
 

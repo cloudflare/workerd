@@ -1064,7 +1064,8 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
     kj::Maybe<rpc::Container::Client> container,
     bool containerRunning,
-    kj::Maybe<Worker::Actor::FacetManager&> facetManager)
+    kj::Maybe<Worker::Actor::FacetManager&> facetManager,
+    kj::Maybe<ActorVersion> version)
     : id(kj::mv(actorId)),
       exports(js, exports),
       props(js, props),
@@ -1073,7 +1074,8 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
         return js.alloc<Container>(kj::mv(cap), containerRunning);
       })),
       facetManager(facetManager.map(
-          [&](Worker::Actor::FacetManager& ref) { return IoContext::current().addObject(ref); })) {}
+          [&](Worker::Actor::FacetManager& ref) { return IoContext::current().addObject(ref); })),
+      version(kj::mv(version)) {}
 
 void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));

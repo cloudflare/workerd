@@ -224,7 +224,8 @@ class IoChannelFactory {
       ActorGetMode mode,
       bool enableReplicaRouting,
       ActorRoutingMode routingMode,
-      SpanParent parentSpan) = 0;
+      SpanParent parentSpan,
+      kj::Maybe<ActorVersion> version) = 0;
 
   // Get an actor stub from the given namespace for the actor with the given name.
   virtual kj::Own<ActorChannel> getColoLocalActor(

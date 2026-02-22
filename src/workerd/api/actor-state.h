@@ -568,7 +568,8 @@ class DurableObjectState: public jsg::Object {
       kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
       kj::Maybe<rpc::Container::Client> container,
       bool containerRunning,
-      kj::Maybe<Worker::Actor::FacetManager&> facetManager);
+      kj::Maybe<Worker::Actor::FacetManager&> facetManager,
+      kj::Maybe<ActorVersion> version = kj::none);
 
   void waitUntil(kj::Promise<void> promise);
 
@@ -586,6 +587,15 @@ class DurableObjectState: public jsg::Object {
     return storage.map([&](jsg::Ref<DurableObjectStorage>& p) { return p.addRef(); });
   }
 
+  struct Version {
+    jsg::Optional<kj::StringPtr> cohort;
+    JSG_STRUCT(cohort);
+  };
+  jsg::Optional<Version> getVersion() {
+    return version.map([](ActorVersion& v) -> Version {
+      return Version{.cohort = v.cohort.map([](kj::String& s) -> kj::StringPtr { return s; })};
+    });
+  }
   jsg::Optional<jsg::Ref<Container>> getContainer() {
     return container.map([](jsg::Ref<Container>& c) { return c.addRef(); });
   }
@@ -666,6 +676,7 @@ class DurableObjectState: public jsg::Object {
     if (flags.getWorkerdExperimental()) {
       // Experimental new API, details may change!
       JSG_LAZY_INSTANCE_PROPERTY(facets, getFacets);
+      JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
     JSG_METHOD(blockConcurrencyWhile);
     JSG_METHOD(acceptWebSocket);
@@ -726,6 +737,7 @@ class DurableObjectState: public jsg::Object {
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
   kj::Maybe<jsg::Ref<Container>> container;
   kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager;
+  kj::Maybe<ActorVersion> version;
 
   // Limits for Hibernatable WebSocket tags.
 
@@ -741,6 +753,7 @@ class DurableObjectState: public jsg::Object {
       api::DurableObjectStorageOperations::GetAlarmOptions,                                        \
       api::DurableObjectStorageOperations::PutOptions,                                             \
       api::DurableObjectStorageOperations::SetAlarmOptions, api::WebSocketRequestResponsePair,     \
-      api::DurableObjectFacets, api::DurableObjectFacets::StartupOptions
+      api::DurableObjectFacets, api::DurableObjectFacets::StartupOptions,                          \
+      api::DurableObjectState::Version
 
 }  // namespace workerd::api

@@ -844,9 +844,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       ActorGetMode mode,
       bool enableReplicaRouting,
       ActorRoutingMode routingMode,
-      SpanParent parentSpan) {
+      SpanParent parentSpan,
+      kj::Maybe<ActorVersion> version) {
     return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint), mode,
-        enableReplicaRouting, routingMode, kj::mv(parentSpan));
+        enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
   }
   kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(
       uint channel, kj::StringPtr id, SpanParent parentSpan) {
