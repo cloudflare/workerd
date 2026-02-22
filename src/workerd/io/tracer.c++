@@ -509,6 +509,24 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
   }
 }
 
+void WorkerTracer::setWorkflowInfo(const tracing::InvocationSpanContext& context,
+    kj::Date timestamp,
+    kj::String instanceId,
+    kj::String workflowName) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    auto sizeHint = instanceId.size() + workflowName.size();
+    writer->report(context,
+        kj::arr(
+            tracing::Attribute("workflow.instance_id"_kjc, kj::ConstString(kj::mv(instanceId))),
+            tracing::Attribute("workflow.name"_kjc, kj::ConstString(kj::mv(workflowName)))),
+        timestamp, sizeHint);
+  }
+}
+
 kj::Own<SpanObserver> UserSpanObserver::newChild() {
   return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId);
 }

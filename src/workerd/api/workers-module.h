@@ -67,7 +67,18 @@ class WorkflowEntrypoint: public jsg::Object {
       jsg::Ref<ExecutionContext> ctx,
       jsg::JsObject env);
 
-  JSG_RESOURCE_TYPE(WorkflowEntrypoint) {}
+  // Called by the Workflows engine instead of run(). Extracts workflow metadata
+  // (instanceId, workflowName) from the event for streaming tail attributes, then
+  // monkey-patches step.do to wrap user callbacks with tracing spans, and delegates
+  // to this.run(event, step).
+  jsg::Promise<jsg::Value> runStep(
+      jsg::Lock& js,
+      jsg::Value event,
+      jsg::Value step);
+
+  JSG_RESOURCE_TYPE(WorkflowEntrypoint) {
+    JSG_METHOD_NAMED(_run_step, runStep);
+  }
 };
 
 // The "cloudflare:workers" module, which exposes the WorkerEntrypoint, WorkflowEntrypoint and DurableObject types

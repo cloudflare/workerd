@@ -1055,6 +1055,10 @@ class SpanBuilder {
     return observer;
   }
 
+  // Returns the span ID assigned by the underlying observer, if any.
+  // Defined out-of-line below SpanObserver (which is forward-declared at this point).
+  kj::Maybe<tracing::SpanId> getSpanId();
+
   // Create a new child span.
   //
   // `operationName` should be a string literal with infinite lifetime.
@@ -1123,7 +1127,21 @@ class SpanObserver: public kj::Refcounted {
   virtual kj::Date getTime() {
     return kj::systemPreciseCalendarClock().now();
   }
+
+  // Returns the span ID assigned by the observer, if any. This is used to allow callers
+  // to attribute events (e.g. logs) to a specific span without going through the span's
+  // internal log buffer.
+  virtual kj::Maybe<tracing::SpanId> getSpanId() {
+    return kj::none;
+  }
 };
+
+inline kj::Maybe<tracing::SpanId> SpanBuilder::getSpanId() {
+  KJ_IF_SOME(obs, observer) {
+    return obs->getSpanId();
+  }
+  return kj::none;
+}
 
 inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}
 
@@ -1156,11 +1174,20 @@ class TraceContext {
 
   // Set a tag on both the internal span and user span.
   void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
+
+  // Add a timestamped log entry to both the internal span and user span.
+  void addLog(kj::Date timestamp, kj::ConstString key, SpanBuilder::TagValue value);
+
   bool isObserved() {
     return span.isObserved() || userSpan.isObserved();
   }
   SpanParent getInternalSpanParent() {
     return SpanParent(span);
+  }
+
+  // Returns the SpanId assigned to the user-facing span, if any.
+  kj::Maybe<tracing::SpanId> getUserSpanId() {
+    return userSpan.getSpanId();
   }
 
  private:

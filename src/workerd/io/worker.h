@@ -178,6 +178,10 @@ class Worker: public kj::AtomicRefcounted {
 
   inline const Isolate& getIsolate() const;
 
+  // Get the opaque storage key used to store the active workflow step span in async contexts.
+  // Safe to call from any thread that holds the isolate lock (the key is immutable after init).
+  jsg::AsyncContextFrame::StorageKey& getWorkflowStepSpanKey() const;
+
   inline const WorkerObserver& getMetrics() const {
     return *metrics;
   }
@@ -566,6 +570,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   size_t nextRequestId = 0;
   kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
+  kj::Own<jsg::AsyncContextFrame::StorageKey> workflowStepSpanKey;
 
   friend class Worker;
 };
@@ -758,6 +763,11 @@ class Worker::Lock {
 
   // Get the opaque storage key to use for recording trace information in async contexts.
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
+
+  // Get the opaque storage key used to store the active workflow step span in async contexts.
+  // When a workflow step callback is executing, the child InvocationSpanContext is stored
+  // under this key so that console.log calls are attributed to the step's span.
+  jsg::AsyncContextFrame::StorageKey& getWorkflowStepSpanKey();
 
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);

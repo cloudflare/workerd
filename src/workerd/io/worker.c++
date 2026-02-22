@@ -1080,7 +1080,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
       impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
-      traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
+      traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()),
+      workflowStepSpanKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
@@ -1549,6 +1550,7 @@ Worker::Isolate::~Isolate() noexcept(false) {
     metrics->teardownLockAcquired();
     auto inspector = kj::mv(impl->inspector);
     auto dropTraceAsyncContextKey = kj::mv(traceAsyncContextKey);
+    auto dropWorkflowStepSpanKey = kj::mv(workflowStepSpanKey);
     // The Rust Realm must be dropped under lock since Realm::drop() accesses V8 globals
     // and calls drop functions that may interact with V8.
     auto dropRealm = kj::mv(impl->realm);
@@ -2085,7 +2087,35 @@ void Worker::handleLog(jsg::Lock& js,
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
-      tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, level, message());
+
+      // Determine which span context to attribute this log to. If inside a workflow
+      // step callback, the step's SpanId is stored in the AsyncContextFrame as a BigInt.
+      // We use it to construct an InvocationSpanContext that targets the step span, so
+      // the log is attributed to the step in both streaming and buffered tail workers.
+      auto& invCtx = ioContext.getInvocationSpanContext();
+      kj::Maybe<tracing::InvocationSpanContext> maybeStepCtx;
+      KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+        auto& key = ioContext.getWorker().getWorkflowStepSpanKey();
+        KJ_IF_SOME(val, frame.get(key)) {
+          auto handle = val.getHandle(js);
+          if (handle->IsBigInt()) {
+            bool lossless = true;
+            uint64_t rawId = handle.As<v8::BigInt>()->Uint64Value(&lossless);
+            if (lossless) {
+              maybeStepCtx = tracing::InvocationSpanContext(
+                  invCtx.getTraceId(), invCtx.getInvocationId(), tracing::SpanId(rawId));
+            }
+            // If !lossless the BigInt exceeds uint64 range — ignore and fall through
+            // to the root invocation span context.
+          }
+        }
+      }
+
+      KJ_IF_SOME(stepCtx, maybeStepCtx) {
+        tracer.addLog(stepCtx, timestamp, level, message());
+      } else {
+        tracer.addLog(invCtx, timestamp, level, message());
+      }
     }
   }
 
@@ -2271,6 +2301,18 @@ jsg::AsyncContextFrame::StorageKey& Worker::Lock::getTraceAsyncContextKey() {
   // const_cast OK because we are a lock on this isolate.
   auto& isolate = const_cast<Isolate&>(worker.getIsolate());
   return *(isolate.traceAsyncContextKey);
+}
+
+jsg::AsyncContextFrame::StorageKey& Worker::Lock::getWorkflowStepSpanKey() {
+  // const_cast OK because we are a lock on this isolate.
+  auto& isolate = const_cast<Isolate&>(worker.getIsolate());
+  return *(isolate.workflowStepSpanKey);
+}
+
+jsg::AsyncContextFrame::StorageKey& Worker::getWorkflowStepSpanKey() const {
+  // Safe: the key is immutable after isolate construction, and we require the caller
+  // to hold the isolate lock (jsg::Lock implies this).
+  return *(const_cast<Isolate&>(getIsolate()).workflowStepSpanKey);
 }
 
 bool Worker::Lock::isInspectorEnabled() {
