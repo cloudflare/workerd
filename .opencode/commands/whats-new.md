@@ -18,25 +18,34 @@ Show what's new: $ARGUMENTS
 
 Steps:
 
-1. **Fetch the commits.** Run `git log` with the parsed range, using format:
+1. **Target the main branch at origin.** Always show what's new on the remote `main` branch,
+   regardless of which branch is currently checked out. First, fetch the latest:
 
    ```
-   git log <range> --format='%h|%aN|%as|%s' --no-merges
+   git fetch origin main
+   ```
+
+   Then use `origin/main` as the ref for all subsequent git commands (instead of `HEAD`).
+
+2. **Fetch the commits.** Run `git log` with the parsed range against `origin/main`:
+
+   ```
+   git log <range> origin/main --format='%h|%aN|%as|%s' --no-merges
    ```
 
    Also include merge commits separately if relevant:
 
    ```
-   git log <range> --format='%h|%aN|%as|%s' --merges
+   git log <range> origin/main --format='%h|%aN|%as|%s' --merges
    ```
 
-2. **Get the diff stats** for scope:
+3. **Get the diff stats** for scope:
 
    ```
-   git diff --stat <oldest_commit>^..HEAD
+   git diff --stat <oldest_commit>^..origin/main
    ```
 
-3. **Categorize each commit** by the files it touches:
+4. **Categorize each commit** by the files it touches:
    - **API** — `src/workerd/api/` (excluding `node/`)
    - **Node.js compat** — `src/workerd/api/node/` or `src/node/`
    - **I/O** — `src/workerd/io/`
@@ -52,7 +61,7 @@ Steps:
 
    For commits touching multiple areas, list under the primary area.
 
-4. **Highlight notable changes.** Scan commit messages and diffs for:
+5. **Highlight notable changes.** Scan commit messages and diffs for:
    - New compatibility flags (additions to `compatibility-date.capnp`)
    - New autogates (additions to `autogate.h`)
    - Breaking changes or behavioral changes
@@ -60,7 +69,7 @@ Steps:
    - Security fixes
    - Dependency updates
 
-5. **Output:**
+6. **Output:**
 
    ```
    ## What's New (<range description>)
