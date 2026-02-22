@@ -1,5 +1,6 @@
 {
   "extends": "../../tools/base.tsconfig.json",
+  "types": ["@types/node"],
   "compilerOptions": {
     "declaration": true,
     "paths": {
@@ -13,7 +14,6 @@
       "internal:*": ["./types/*"],
       "cloudflare-internal:*": ["./types/cloudflare-internal/*"]
     },
-    "typeRoots": ["./types"],
     "noEmit": false,
     "noEmitOnError": false,
     "allowArbitraryExtensions": true
