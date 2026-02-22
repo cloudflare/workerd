@@ -325,6 +325,8 @@ promise = doWork().then([]() {
 });
 ```
 
+When using coroutines, `eagerlyEvaluate()` is implied and not needed to be called explicitly.
+
 Use `kj::TaskSet` to manage many background tasks with a shared error handler.
 
 **Cancellation** — destroying a `kj::Promise` cancels it immediately. No continuations
@@ -345,11 +347,19 @@ return kj::evalNow([&]() {
 `kj::MutexGuarded<T>` ties locking to access — you can't touch the data without a lock:
 
 ```cpp
-auto lock = guarded.lockExclusive();  // returns T&
-lock->modify();
+// Exclusive access for modification
+{
+  auto lock = guarded.lockExclusive();
+  lock->modify();
+  // lock is released at end of scope
+}
 
-auto shared = guarded.lockShared();   // returns const T& (multiple readers OK)
-shared->read();
+// Multiple readers ok
+{
+  auto shared = guarded.lockShared();
+  shared->read();
+  // shared lock is released at end of scope
+}
 ```
 
 `.wait(cond)` on a lock replaces condition variables:
