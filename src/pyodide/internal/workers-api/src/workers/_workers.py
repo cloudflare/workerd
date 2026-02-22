@@ -1366,6 +1366,105 @@ def _wrap_workflow_step(cls):
     cls.run = wrapped_run
 
 
+_ELEMENT_HANDLER_METHODS = ("element", "comments", "text")
+_DOCUMENT_HANDLER_METHODS = ("doctype", "comments", "text", "end")
+
+
+def _make_js_handler(handler, method_names, proxies):
+    js_obj = Object.new()
+    for name in method_names:
+        method = getattr(handler, name, None)
+        if method is not None:
+            proxy = _pyodide_entrypoint_helper.createHandlerGuard(create_proxy(method))
+            proxies.append(proxy)
+            setattr(js_obj, name, proxy)
+    return js_obj
+
+
+class HTMLRewriter:
+    def __init__(self):
+        self._handlers: list[tuple] = []
+        # Testing only, stores the proxies created for handlers
+        self._last_handler_proxies: list[JsProxy] | None = None
+
+    def on(self, selector: str, handlers: object) -> "HTMLRewriter":
+        self._handlers.append(("element", selector, handlers))
+        return self
+
+    def onDocument(self, handlers: object) -> "HTMLRewriter":
+        self._handlers.append(("document", handlers))
+        return self
+
+    def transform(self, response: Response) -> "Response":
+        js_rewriter = js.HTMLRewriter.new()
+        handler_proxies: list[JsProxy] = []
+
+        for handler_info in self._handlers:
+            if handler_info[0] == "element":
+                _, selector, handler = handler_info
+                js_handler = _make_js_handler(
+                    handler, _ELEMENT_HANDLER_METHODS, handler_proxies
+                )
+                js_rewriter.on(selector, js_handler)
+            else:
+                _, handler = handler_info
+                js_handler = _make_js_handler(
+                    handler, _DOCUMENT_HANDLER_METHODS, handler_proxies
+                )
+                js_rewriter.onDocument(js_handler)
+
+        self._last_handler_proxies = handler_proxies
+        transformed = js_rewriter.transform(response.js_object)
+
+        if transformed.body is None:
+            return Response(transformed)
+
+        reader = transformed.body.getReader()
+
+        def cleanup():
+            for proxy in handler_proxies:
+                proxy.destroy()
+
+        async def start(controller):
+            try:
+                while True:
+                    result = await reader.read()
+                    if result.done:
+                        controller.close()
+                        break
+                    controller.enqueue(result.value)
+            except Exception as e:
+                controller.error(e)
+            finally:
+                cleanup()
+
+        async def cancel(reason):
+            try:
+                if reader:
+                    await reader.cancel(reason)
+            finally:
+                cleanup()
+
+        start_proxy = create_proxy(start)
+        cancel_proxy = create_proxy(cancel)
+        handler_proxies.append(start_proxy)
+        handler_proxies.append(cancel_proxy)
+
+        wrapped_body = js.ReadableStream.new(
+            start=start_proxy,
+            cancel=cancel_proxy,
+        )
+
+        return Response(
+            js.Response.new(
+                wrapped_body,
+                status=transformed.status,
+                statusText=transformed.statusText,
+                headers=transformed.headers,
+            )
+        )
+
+
 class DurableObject:
     """
     Base class used to define a Durable Object.

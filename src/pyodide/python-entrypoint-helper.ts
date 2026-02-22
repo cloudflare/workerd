@@ -69,6 +69,94 @@ function patchWaitUntil(ctx: {
   waitUntilPatched.add(ctx);
 }
 
+/**
+ * Represents a Python proxy object that can be called and has a destroy method.
+ */
+interface PythonHandlerProxy {
+  (...args: unknown[]): unknown;
+  destroy(): void;
+  [key: string | symbol]: unknown;
+}
+
+/**
+ * Creates a guard wrapper around a Python handler proxy.
+ *
+ * The guard forwards all calls to the underlying Python proxy while it's active.
+ * Once destroy() is called, the guard becomes inert - any subsequent calls
+ * return undefined instead of throwing "Object has already been destroyed" errors.
+ *
+ * This is added to prevent Python handlers being used after Python has destroyed the proxy.
+ * TODO(later): Ideally, we should control the lifetime of the proxy and destroy it when we are certain that
+ * it is no longer needed.
+ *
+ */
+export function createHandlerGuard(pythonProxy: PythonHandlerProxy): any {
+  let active = true;
+
+  return new Proxy(function () {}, {
+    get(_target, prop): unknown {
+      if (prop === 'destroy') {
+        return () => {
+          if (active) {
+            active = false;
+            try {
+              pythonProxy.destroy();
+            } catch (_e) {
+              // Ignore errors during destroy
+            }
+          }
+        };
+      }
+
+      if (prop === '_active') {
+        return active;
+      }
+
+      // After destruction, return no-op for any method call
+      if (!active) {
+        return () => undefined;
+      }
+
+      // Forward property access to the Python proxy
+      const value = pythonProxy[prop];
+
+      // If it's a function, wrap it to handle potential async calls
+      if (typeof value === 'function') {
+        return (...args: unknown[]) => {
+          return (value as (...args: unknown[]) => unknown).apply(
+            pythonProxy,
+            args
+          );
+        };
+      }
+
+      return value;
+    },
+
+    apply(_target, _thisArg, args): unknown {
+      if (!active) {
+        return undefined;
+      }
+      return pythonProxy(...args);
+    },
+
+    has(_target, prop): boolean {
+      if (prop === 'destroy') {
+        return true;
+      }
+
+      if (prop === '_active') {
+        return true;
+      }
+
+      if (!active) {
+        return false;
+      }
+      return prop in pythonProxy;
+    },
+  });
+}
+
 export type PyodideEntrypointHelper = {
   doAnImport: (mod: string) => Promise<any>;
   cloudflareWorkersModule: { env: any };
@@ -76,6 +164,7 @@ export type PyodideEntrypointHelper = {
   workerEntrypoint: any;
   patchWaitUntil: typeof patchWaitUntil;
   patch_env_helper: (patch: unknown) => Generator<void>;
+  createHandlerGuard: typeof createHandlerGuard;
 };
 
 // Function to import JavaScript modules from Python
@@ -101,6 +190,7 @@ export async function setDoAnImport(
     workerEntrypoint,
     patchWaitUntil,
     patch_env_helper,
+    createHandlerGuard,
   };
 }
 
