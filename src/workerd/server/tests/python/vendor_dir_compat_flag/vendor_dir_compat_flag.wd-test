@@ -6,8 +6,7 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [
           (name = "worker.py", pythonModule = embed "worker.py"),
-          (name = "vendor/a.py", pythonModule = embed "vendor/a.py"),
-          (name = "numpy", pythonRequirement = "")
+          (name = "vendor/a.py", pythonModule = embed "vendor/a.py")
         ],
         compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workers_force_new_vendor_path", "disable_python_no_global_handlers"],
       )

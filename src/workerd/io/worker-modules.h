@@ -201,7 +201,7 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // bundleBuilder.addEsmModule(def.name, entry);
           // break;
         }
-        KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+        KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
           // Handled separately
           break;
         }
@@ -349,7 +349,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
       // Nothing to do. Handled elsewhere.
       return kj::none;
     }
-    KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+    KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
       // Nothing to do. Handled elsewhere.
       return kj::none;
     }
@@ -403,7 +403,7 @@ kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock&
         KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
           KJ_FAIL_REQUIRE("modules not supported with mainScript");
         }
-        KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+        KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
           KJ_FAIL_REQUIRE("modules not supported with mainScript");
         }
         KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {

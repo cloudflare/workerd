@@ -5563,11 +5563,10 @@ kj::Promise<void> Server::preloadPython(
       // Preload Python packages.
       KJ_IF_SOME(modulesSource, workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {
         if (modulesSource.isPython) {
-          auto pythonRequirements = getPythonRequirements(modulesSource);
 
           // Store the packages in the package manager that is stored in the pythonConfig
-          co_await server::fetchPyodidePackages(pythonConfig, pythonConfig.pyodidePackageManager,
-              pythonRequirements, release, network, timer);
+          co_await server::fetchPyodidePackages(
+              pythonConfig, pythonConfig.pyodidePackageManager, {}, release, network, timer);
         }
       }
     }

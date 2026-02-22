@@ -68,7 +68,7 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
               .data = pythonModule.body.asBytes(),
             });
           }
-          KJ_CASE_ONEOF(pythonRequirement, WorkerSource::PythonRequirement) {
+          KJ_CASE_ONEOF(pythonRequirement, WorkerSource::ObsoletePythonRequirement) {
             // Just ignore it.
           }
           KJ_CASE_ONEOF(capnpModule, WorkerSource::CapnpModule) {

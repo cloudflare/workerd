@@ -216,27 +216,6 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
 
 }  // namespace
 
-/**
- * This function matches the implementation of `getPythonRequirements` in the internal repo. But it
- * works on the workerd ModulesSource definition rather than the WorkerBundle.
- */
-kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source) {
-  kj::Vector<kj::String> requirements;
-
-  for (auto& def: source.modules) {
-    KJ_SWITCH_ONEOF(def.content) {
-      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
-        requirements.add(api::pyodide::canonicalizePythonPackageName(def.name));
-      }
-      KJ_CASE_ONEOF_DEFAULT {
-        break;
-      }
-    }
-  }
-
-  return requirements.releaseAsArray();
-}
-
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
   capnp::List<config::Extension>::Reader extensions;
@@ -508,8 +487,9 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       }
       case config::Worker::Module::PYTHON_MODULE:
         return Worker::Script::PythonModule{conf.getPythonModule()};
-      case config::Worker::Module::PYTHON_REQUIREMENT:
-        return Worker::Script::PythonRequirement{};
+      case config::Worker::Module::OBSOLETE_PYTHON_REQUIREMENT:
+        KJ_FAIL_REQUIRE(
+            "NOSENTRY Worker bundle specified Python requirement which is no longer supported");
       case config::Worker::Module::OBSOLETE: {
         // A non-supported or obsolete module type was configured
         KJ_FAIL_REQUIRE("Worker bundle specified an unsupported module type");
@@ -1125,7 +1105,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     KJ_LOG(WARNING, "Fallback service returned a Python module");
                     return kj::none;
                   }
-                  KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+                  KJ_CASE_ONEOF(content, Worker::Script::ObsoletePythonRequirement) {
                     // Python requirement modules are not supported.in fallback
                     KJ_LOG(WARNING, "Fallback service returned a Python requirement");
                     return kj::none;

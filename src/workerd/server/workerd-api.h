@@ -355,8 +355,6 @@ class WorkerdApi final: public Worker::Api {
   kj::Own<Impl> impl;
 };
 
-kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
-
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
 // and will fail any writes. Defined here to be used by test-fixture and server.
 kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
