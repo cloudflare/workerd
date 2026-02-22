@@ -136,7 +136,7 @@ The other core runtime dependencies include:
 | highway                             | SIMD abstraction library                                            |
 | dragonbox                           | Float-to-string conversion                                          |
 
-These dependencies are vendored via bazel into the `external/` directory. See `WORKSPACE` and `BUILD.bazel` files for details on how they are integrated into the build system.
+These dependencies are vendored via Bazel into the `external/` directory. See `MODULE.bazel` and the `build/deps/` directory for how they are integrated into the build system. (The project uses bzlmod; the legacy `WORKSPACE` file may still exist but is no longer the primary mechanism.)
 
 For several of these dependencies (notably V8, boringssl, sqlite, perfetto, and zlib), we maintain sets of patches that are applied on top of the upstream code. These patches are stored in the `patches/` directory and are applied during the build process. When updating these dependencies, it's important to review and update the corresponding patches as needed. The patches may introduce workerd-specific customizations and new APIs.
 

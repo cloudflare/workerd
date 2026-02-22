@@ -225,7 +225,12 @@ KJ_IF_SOME(value, maybeValue) {
   use(value);  // value is a reference to the contained T
 }
 
-// Wrong — no safe way to "just get" the value:
+// Correct:
+auto& value = KJ_ASSERT_NONNULL(maybeValue);  // asserts if maybeValue is none, otherwise gives T&
+auto& value = KJ_REQUIRE_NONNULL(maybeValue);  // same but for preconditions
+auto& value = JSG_REQUIRE_NONNULL(maybeValue, ErrorType, "message");  // same but with JavaScript exception type/message
+
+// Wrong
 auto& value = *maybeValue;      // doesn't exist
 auto& value = maybeValue.value(); // not how KJ works
 ```
@@ -388,3 +393,11 @@ When reviewing workerd C++ code, check for:
 16. **`/* */` block comments**: Use `//` line comments
 17. **Naming**: TitleCase types, camelCase functions/variables, CAPS constants
 18. **Missing braces**: Required unless entire statement is on one line
+19. **`bool` function parameter**: Prefer `enum class` or `WD_STRONG_BOOL` for clarity at call sites. E.g., `void connect(bool secure)` should be `void connect(SecureMode mode)`.
+20. **Missing `[[nodiscard]]`**: Functions returning error codes, `kj::Maybe`, or success booleans that callers must check should be `[[nodiscard]]`.
+21. **Promise chain where coroutine would be clearer**: Nested `.then()` chains with complex error handling that would be more readable as a coroutine with `co_await`. But avoid suggesting sweeping rewrites.
+22. **Missing `constexpr` / `consteval`**: Compile-time evaluable functions or constants not marked accordingly.
+23. **Reinvented utility**: Custom code duplicating functionality already in `src/workerd/util/` (e.g., custom ring buffer, small set, state machine, weak reference pattern). Check the util directory before suggesting a new abstraction.
+24. **Missing `override`**: Virtual method overrides missing the `override` specifier.
+25. **Direct `new`/`delete` (via `new` expression)**: Should use `kj::heap<T>()`, `kj::heapArray<T>()`, or other KJ memory utilities.
+26. **Explicit `throw` statement**: Should use `KJ_ASSERT`, `KJ_REQUIRE`, `KJ_FAIL_ASSERT`, or `KJ_EXCEPTION` instead of bare `throw`.
