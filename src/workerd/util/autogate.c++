@@ -25,8 +25,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "streaming-tail-worker"_kj;
     case AutogateKey::TAIL_STREAM_REFACTOR:
       return "tail-stream-refactor"_kj;
-    case AutogateKey::FETCH_REQUEST_MEMORY_ADJUSTMENT:
-      return "fetch-request-memory-adjustment"_kj;
+    case AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH:
+      return "increase-external-memory-adjustment-for-fetch"_kj;
     case AutogateKey::RUST_BACKED_NODE_DNS:
       return "rust-backed-node-dns"_kj;
     case AutogateKey::RPC_USE_EXTERNAL_PUSHER:

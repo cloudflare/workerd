@@ -9,6 +9,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
@@ -940,6 +941,18 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     ret = ret.attach(kj::mv(ioOwnedSpan));
   }
 
+  // Subrequests use a lot of unaccounted C++ memory, so we adjust V8's external memory counter to
+  // pressure the GC and protect against OOMs. When the autogate is enabled, we apply this
+  // adjustment to ALL subrequests (not just fetch). We only apply this when the JS lock is held
+  // (i.e., when JS code initiated the subrequest); infrastructure paths that bypass JS don't need
+  // it.
+  if (util::Autogate::isEnabled(util::AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH)) {
+    KJ_IF_SOME(lock, currentLock) {
+      jsg::Lock& js = lock;
+      ret = ret.attach(js.getExternalMemoryAdjustment(8 * 1024));
+    }
+  }
+
   return kj::mv(ret);
 }
 
@@ -1027,7 +1040,18 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   //   subrequest limit still applied. Since I can't currently think of a use case for more than 50
   //   cache API requests per request, I'm leaving it as-is for now.
   limitEnforcer->newSubrequest(false);
-  return getIoChannelFactory().getCache();
+  auto ret = getIoChannelFactory().getCache();
+
+  // Apply external memory adjustment for Cache API subrequests when autogate is enabled (same as
+  // other subrequests in getSubrequestNoChecks).
+  if (util::Autogate::isEnabled(util::AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH)) {
+    KJ_IF_SOME(lock, currentLock) {
+      jsg::Lock& js = lock;
+      ret = ret.attach(js.getExternalMemoryAdjustment(8 * 1024));
+    }
+  }
+
+  return kj::mv(ret);
 }
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
