@@ -537,3 +537,25 @@ export async function testD1ApiQueriesHappyPath(DB) {
     ]
   );
 }
+
+// Regression test for https://github.com/cloudflare/workerd/pull/5218.
+// exec() with invalid SQL should throw a proper D1 error, not a TypeError
+// from accessing properties on undefined meta during span aggregation.
+export async function testD1Exec(DB) {
+  await itShould('run a simple exec', () => DB.exec('select 1'), {
+    count: 1,
+    duration: anything,
+  });
+
+  await assert.rejects(
+    () => DB.exec('INVALID SQL'),
+    (e) => {
+      assert.notEqual(e.constructor, TypeError);
+      assert.ok(
+        e.message.includes('D1_EXEC_ERROR'),
+        `Expected D1 error, got: ${e.message}`
+      );
+      return true;
+    }
+  );
+}
