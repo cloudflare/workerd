@@ -6103,6 +6103,50 @@ export const transcodeTest = {
   },
 };
 
+// TranscodeFromUTF16 should not over-allocate the output buffer.
+// Regression test for a bug where `limit * sizeof(char16_t)` doubled the
+// allocation and `destPtr.size()` passed char16_t element count instead of
+// byte count to ucnv_fromUChars.
+export const transcodeFromUTF16BufferSizeTest = {
+  test() {
+    const utf16 = Buffer.from('Hello', 'utf16le');
+    const latin1 = transcode(utf16, 'utf16le', 'latin1');
+    strictEqual(latin1.length, 5);
+    strictEqual(latin1.buffer.byteLength, latin1.length);
+  },
+};
+
+// Invalid UTF-8 input to transcode('utf8', 'utf16le') should produce
+// "Unable to transcode buffer", not an internal assertion mismatch.
+// Regression test for a bug where JSG_REQUIRE(actual == expected) threw
+// before the `if (actual == 0) return kj::none` path could be reached.
+export const transcodeUTF8ToUTF16InvalidInputTest = {
+  test() {
+    throws(
+      () =>
+        transcode(
+          Buffer.from([0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x80]),
+          'utf8',
+          'utf16le'
+        ),
+      { message: /Unable to transcode buffer/ }
+    );
+  },
+};
+
+// TranscodeFromUTF16 should reject odd-byte UTF-16LE input, matching
+// the guard that TranscodeUTF8FromUTF16 already has.
+// Regression test for a bug where `source.size() / sizeof(char16_t)`
+// silently dropped the trailing byte.
+export const transcodeFromUTF16OddByteInputTest = {
+  test() {
+    const oddInput = Buffer.from([0x41, 0x00, 0x42]);
+    throws(() => transcode(oddInput, 'utf16le', 'utf8'));
+    throws(() => transcode(oddInput, 'utf16le', 'latin1'));
+    throws(() => transcode(oddInput, 'utf16le', 'ascii'));
+  },
+};
+
 // Tests are taken from Node.js
 // https://github.com/nodejs/node/blob/a4f609fa/test/parallel/test-file.js
 export const fileTest = {

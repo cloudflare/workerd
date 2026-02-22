@@ -105,6 +105,8 @@ kj::Maybe<jsg::BufferSource> TranscodeFromUTF16(
   auto substitute = kj::str(kj::repeat('?', to.minCharSize()));
   to.setSubstituteChars(substitute);
 
+  JSG_REQUIRE(
+      source.size() % sizeof(char16_t) == 0, Error, "UTF-16le input size should be multiple of 2");
   auto utf16_input = kj::arrayPtr<char16_t>(
       reinterpret_cast<char16_t*>(source.begin()), source.size() / sizeof(char16_t));
 
@@ -113,17 +115,16 @@ kj::Maybe<jsg::BufferSource> TranscodeFromUTF16(
   // Workers are limited to 128MB so this isn't actually a realistic concern, but sanity check.
   JSG_REQUIRE(limit <= ISOLATE_LIMIT, Error, "Buffer is too large to transcode");
 
-  auto length_in_chars = limit * sizeof(char16_t);
-  if (length_in_chars == 0) {
+  if (limit == 0) {
     auto empty = jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
     return jsg::BufferSource(js, kj::mv(empty));
   }
 
-  auto destBuf = jsg::BackingStore::alloc<v8::Uint8Array>(js, length_in_chars);
-  auto destPtr = destBuf.asArrayPtr<char16_t>();
+  auto destBuf = jsg::BackingStore::alloc<v8::Uint8Array>(js, limit);
+  auto destPtr = destBuf.asArrayPtr().asChars();
   UErrorCode status{};
-  auto len = ucnv_fromUChars(to.conv(), destPtr.asChars().begin(), destPtr.size(),
-      utf16_input.begin(), utf16_input.size(), &status);
+  auto len = ucnv_fromUChars(
+      to.conv(), destPtr.begin(), destPtr.size(), utf16_input.begin(), utf16_input.size(), &status);
 
   if (U_SUCCESS(status)) {
     destBuf.limit(len);
@@ -152,12 +153,13 @@ kj::Maybe<jsg::BufferSource> TranscodeUTF16FromUTF8(
 
   size_t actual_length =
       simdutf::convert_utf8_to_utf16le(source.asChars().begin(), source.size(), destPtr.begin());
-  JSG_REQUIRE(actual_length == expected_utf16_length, Error, "Expected UTF16 length mismatch");
 
   // simdutf returns 0 for invalid UTF-8 value.
   if (actual_length == 0) {
     return kj::none;
   }
+
+  JSG_REQUIRE(actual_length == expected_utf16_length, Error, "Expected UTF16 length mismatch");
 
   return jsg::BufferSource(js, kj::mv(destBuf));
 }
