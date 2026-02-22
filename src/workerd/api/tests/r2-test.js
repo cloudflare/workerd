@@ -391,6 +391,56 @@ export default {
         const rawHeader = request.headers.get('cf-r2-request');
         const jsonRequest = JSON.parse(rawHeader);
         assert((jsonRequest.version = 1));
+        if (jsonRequest.method === 'listMultipartUploads') {
+          return buildGetResponse({
+            head: {
+              uploads: [
+                {
+                  uploadId: 'upload1',
+                  object: 'key1',
+                  initiated: '1724767257918',
+                  storageClass: 'Standard',
+                },
+                {
+                  uploadId: 'upload2',
+                  object: 'key2',
+                  initiated: '1724767257919',
+                  storageClass: 'InfrequentAccess',
+                },
+              ],
+              truncated: true,
+              cursor: 'nextCursor',
+              delimitedPrefixes: ['prefix1/', 'prefix2/'],
+            },
+            isList: true,
+          });
+        }
+        if (jsonRequest.method === 'listParts') {
+          assert.strictEqual(jsonRequest.uploadId, 'multipartId');
+          return buildGetResponse({
+            head: {
+              uploadId: 'multipartId',
+              object: key,
+              parts: [
+                {
+                  partNumber: 1,
+                  etag: 'partEtag1',
+                  size: '100',
+                  uploaded: '1724767257918',
+                },
+                {
+                  partNumber: 2,
+                  etag: 'partEtag2',
+                  size: '200',
+                  uploaded: '1724767257919',
+                },
+              ],
+              truncated: false,
+              partNumberMarker: 0,
+            },
+            isList: true,
+          });
+        }
         if (jsonRequest.method === 'list') {
           switch (jsonRequest.prefix) {
             case 'basic': {
@@ -618,6 +668,25 @@ export default {
         // UploadPart
         const part = await multi.uploadPart(1, body);
         assert.equal(part.etag, 'partEtag');
+        // ListParts
+        const partsResult = await multi.listParts();
+        assert.deepEqual(partsResult, {
+          parts: [
+            {
+              partNumber: 1,
+              etag: 'partEtag1',
+              size: 100,
+              uploaded: new Date(1724767257918),
+            },
+            {
+              partNumber: 2,
+              etag: 'partEtag2',
+              size: 200,
+              uploaded: new Date(1724767257919),
+            },
+          ],
+          truncated: false,
+        });
         // Abort(doesn't quite make sense to abort **and** complete, but shouldn't matter)
         await multi.abort();
         // CompleteMultipartUpload
@@ -629,6 +698,32 @@ export default {
             },
           ])
         );
+      }
+      // ListMultipartUploads
+      {
+        const uploads = await env.BUCKET.listMultipartUploads({
+          prefix: 'test',
+          delimiter: '/',
+        });
+        assert.deepEqual(uploads, {
+          uploads: [
+            {
+              key: 'key1',
+              uploadId: 'upload1',
+              initiated: new Date(1724767257918),
+              storageClass: 'Standard',
+            },
+            {
+              key: 'key2',
+              uploadId: 'upload2',
+              initiated: new Date(1724767257919),
+              storageClass: 'InfrequentAccess',
+            },
+          ],
+          truncated: true,
+          cursor: 'nextCursor',
+          delimitedPrefixes: ['prefix1/', 'prefix2/'],
+        });
       }
       // ListObjects
       {

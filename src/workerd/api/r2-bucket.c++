@@ -1177,6 +1177,112 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
   });
 }
 
+jsg::Promise<R2Bucket::ListMultipartUploadsResult> R2Bucket::listMultipartUploads(jsg::Lock& js,
+    jsg::Optional<ListMultipartUploadsOptions> options,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
+
+    auto traceSpan = context.makeTraceSpan("r2_listMultipartUploads"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_listMultipartUploads"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, "ListMultipartUploads"_kjc);
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+
+    capnp::JsonCodec json;
+    json.handleByAnnotation<R2BindingRequest>();
+    json.setHasMode(capnp::HasMode::NON_DEFAULT);
+    capnp::MallocMessageBuilder requestMessage;
+
+    auto requestBuilder = requestMessage.initRoot<R2BindingRequest>();
+    requestBuilder.setVersion(VERSION_PUBLIC_BETA);
+    auto listBuilder = requestBuilder.initPayload().initListMultipartUploads();
+
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(l, o.limit) {
+        listBuilder.setLimit(l);
+        traceContext.userSpan.setTag("cloudflare.r2.request.limit"_kjc, static_cast<int64_t>(l));
+      }
+      KJ_IF_SOME(p, o.prefix) {
+        listBuilder.setPrefix(p.value);
+        traceContext.userSpan.setTag("cloudflare.r2.request.prefix"_kjc, p.value.asPtr());
+      }
+      KJ_IF_SOME(c, o.cursor) {
+        listBuilder.setCursor(c.value);
+        traceContext.userSpan.setTag("cloudflare.r2.request.cursor"_kjc, c.value.asPtr());
+      }
+      KJ_IF_SOME(d, o.delimiter) {
+        listBuilder.setDelimiter(d.value);
+        traceContext.userSpan.setTag("cloudflare.r2.request.delimiter"_kjc, d.value.asPtr());
+      }
+      KJ_IF_SOME(s, o.startAfter) {
+        listBuilder.setStartAfter(s.value);
+        traceContext.userSpan.setTag("cloudflare.r2.request.start_after"_kjc, s.value.asPtr());
+      }
+    }
+
+    auto requestJson = json.encode(requestBuilder);
+
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, adminBucket);
+    CompatibilityFlags::Reader flags = {};
+    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
+
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
+      r2Result.throwIfError("listMultipartUploads", errorType);
+
+      ListMultipartUploadsResult result;
+      capnp::MallocMessageBuilder responseMessage;
+      capnp::JsonCodec json;
+      json.handleByAnnotation<R2ListMultipartUploadsResponse>();
+      auto responseBuilder = responseMessage.initRoot<R2ListMultipartUploadsResponse>();
+
+      json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
+
+      result.uploads = KJ_MAP(u, responseBuilder.getUploads()) {
+        jsg::Optional<kj::String> storageClass;
+        if (u.hasStorageClass()) {
+          storageClass = kj::str(u.getStorageClass());
+        }
+        return MultipartUploadInfo{
+          .key = kj::str(u.getObject()),
+          .uploadId = kj::str(u.getUploadId()),
+          .initiated = kj::UNIX_EPOCH + u.getInitiatedMillisecondsSinceEpoch() * kj::MILLISECONDS,
+          .storageClass = kj::mv(storageClass),
+        };
+      };
+      result.truncated = responseBuilder.getTruncated();
+      if (responseBuilder.hasCursor()) {
+        result.cursor = kj::str(responseBuilder.getCursor());
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.response.cursor"_kjc, KJ_ASSERT_NONNULL(result.cursor).asPtr());
+      }
+      if (responseBuilder.hasDelimitedPrefixes()) {
+        result.delimitedPrefixes =
+          KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
+      }
+
+      traceContext.userSpan.setTag("cloudflare.r2.response.returned_uploads"_kjc,
+          static_cast<int64_t>(result.uploads.size()));
+      traceContext.userSpan.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
+          static_cast<int64_t>(result.delimitedPrefixes.size()));
+      traceContext.userSpan.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
+      return kj::mv(result);
+    });
+  });
+}
+
 namespace {
 kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(kj::StringPtr condHeader,
     kj::Vector<R2Bucket::Etag> etagAccumulator = kj::Vector<R2Bucket::Etag>(),
