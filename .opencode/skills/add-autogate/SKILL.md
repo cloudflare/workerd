@@ -15,7 +15,7 @@ Autogates enable gradual rollout of risky code changes independent of binary rel
 | You need a kill switch during rollout         | The change is tied to a compatibility date |
 | The gate will be removed once stable          | Users need to opt in or out explicitly     |
 
-An autogate may later become a compat flag once the rollout is complete and the behavior should become permanent.
+Autogates and compat flags are separate mechanisms — an autogate does not become a compat flag. If a change needs to be user-visible and date-gated, it should be a compat flag from the start. A change can be guarded by _both_ an autogate (for safe internal rollout) and a compat flag (for user-facing control) simultaneously.
 
 ### Step 1: Add the enum value
 
@@ -111,7 +111,6 @@ Once the feature is stable and fully rolled out:
 1. Remove the `AutogateKey` enum value from `autogate.h`
 2. Remove the `case` from `KJ_STRINGIFY` in `autogate.c++`
 3. Remove all `Autogate::isEnabled()` checks, keeping only the new code path
-4. If the behavior should become a permanent compat flag, migrate it to `compatibility-date.capnp` instead (load the `add-compat-flag` skill for that process)
 
 ### Checklist
 
