@@ -8,7 +8,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 
 | Class                                       | File                   | Role                                                                                        |
 | ------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------- |
-| `IoContext`                                 | `io-context.{h,c++}`   | Per-request god object; thread-local via `IoContext::current()` (291+ call sites in `api/`) |
+| `IoContext`                                 | `io-context.{h,c++}`   | Per-request god object; thread-local via `IoContext::current()`                             |
 | `IoContext::IncomingRequest`                | `io-context.h`         | Tracks one inbound request for metrics/tracing; actors have many per IoContext              |
 | `Worker`                                    | `worker.{h,c++}`       | Ref-counted worker instance; owns Script + Isolate refs                                     |
 | `Worker::Isolate`                           | `worker.h:337`         | V8 isolate wrapper; shared across workers with same config                                  |
@@ -19,14 +19,13 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 | `ActorCache`                                | `actor-cache.{h,c++}`  | LRU write-back cache over RPC storage; `ActorCacheOps` base                                 |
 | `ActorSqlite`                               | `actor-sqlite.{h,c++}` | SQLite-backed `ActorCacheOps` implementation                                                |
 | `InputGate` / `OutputGate`                  | `io-gate.{h,c++}`      | Consistency primitives for DO concurrent request handling                                   |
-| `IoOwn<T>` / `IoPtr<T>` / `ReverseIoOwn<T>` | `io-own.{h,c++}`       | Cross-heap smart pointers preventing KJ↔JS ref leaks                                        |
+| `IoOwn<T>` / `IoPtr<T>` / `ReverseIoOwn<T>` | `io-own.{h,c++}`       | Cross-heap smart pointers preventing KJ↔JS ref leaks                                       |
 
 ## WHERE TO LOOK
 
 | Task                            | File(s)                                                                           |
 | ------------------------------- | --------------------------------------------------------------------------------- |
-| Add/modify compat flag          | `compatibility-date.capnp` (annotations define name + enable date)                |
-| Promise bridging KJ↔JS          | `io-context.h` — `awaitIo()`, `awaitJs()`                                         |
+| Promise bridging KJ↔JS         | `io-context.h` — `awaitIo()`, `awaitJs()`                                         |
 | Request lifecycle / subrequests | `io-context.{h,c++}`, `worker-entrypoint.{h,c++}`                                 |
 | Actor storage ops               | `actor-cache.h` (`ActorCacheOps`), `actor-sqlite.h`, `actor-storage.capnp`        |
 | DO gate semantics               | `io-gate.{h,c++}` — `InputGate::CriticalSection`, `OutputGate::lockWhile()`       |
@@ -52,9 +51,6 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 
 ## ANTI-PATTERNS
 
-- **NEVER** hold JS heap refs to KJ I/O objects without `IoOwn`; enforced by `DISALLOW_KJ_IO_DESTRUCTORS_SCOPE`
-- **NEVER** evaluate modules inside an IoContext; async I/O is **forbidden** in global scope
-- **NEVER** use `getWaitUntilTasks()` — use `addWaitUntil()`
 - **NEVER** use `awaitIoLegacy()` in new code — use `awaitIo()` with continuation
 - `awaitIoImpl` parameter ordering (promise by-value, func by-ref) is **critical** for exception safety
 - `abortWhen()` promises must **never** enter the V8 isolate

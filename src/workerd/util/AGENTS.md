@@ -25,6 +25,13 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 | `mimetype.h`      | MIME type parser/serializer                              | `MimeType::extract()` from content-type header                                         |
 | `wait-list.h`     | Cross-request event subscription                         | Shared fulfiller list for signaling waiters                                            |
 
+## Guidelines
+
+- **No bool arguments**: use `WD_STRONG_BOOL` for type safety and readability
+- **Use `kj::Maybe` for optional values**: avoid null pointers and sentinel values
+- **Prefer composition over inheritance**: utilities should be standalone and reusable without complex class hierarchies
+- **Use `StateMachine` for state management**: original pattern has been to use `kj::OneOf` directly, and that's still acceptable for simple cases, but `StateMachine` provides additional safety guarantees and should be preferred for more complex state management
+
 ## ANTI-PATTERNS
 
 - **StateMachine `forceTransitionTo()`**: bypasses terminal state protection — use only for error recovery
@@ -32,5 +39,5 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 - **StateMachine + `KJ_SWITCH_ONEOF`**: does NOT acquire transition lock — UAF risk; use `whenState<T>(fn)` instead
 - **StateMachine `deferTransitionTo()`**: first-wins semantics; second call silently ignored
 - **SQLite**: `SQLITE_MISUSE` always throws; virtual tables disallowed (except FTS5); `ATTACH`/`DETACH` forbidden; callbacks must not write
-- **Autogate**: enum in `.h` and string map in `.c++` MUST stay in sync — add to both or get silent mismatch
 - **ThreadScopes**: thread-local state crossing module boundaries — acknowledged hack, do not proliferate
+- **RingBuffer**: moves on grow invalidating references; iterators invalidated on push/pop; intentionally not thread-safe.

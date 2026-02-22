@@ -314,46 +314,6 @@ Concrete patterns to watch for during analysis. When you encounter these, flag t
 
 ---
 
-## Project Context: workerd
-
-This codebase is Cloudflare's JavaScript/WebAssembly server runtime. Key technologies:
-
-### KJ Library (Cap'n Proto)
-
-KJ replaces the C++ standard library with its own types and conventions. Key types include `kj::Own<T>`, `kj::Maybe<T>`, `kj::Promise<T>`, `kj::Array<T>`, `kj::String`, `kj::OneOf<T...>`, and `kj::Exception`. The library provides event-loop-based async I/O.
-
-For the full STL-to-KJ type mapping, naming conventions, ownership model, error handling rules, and other C++ style conventions, load the **kj-style** skill.
-
-### Cap'n Proto
-
-- Schema-based serialization (`.capnp` files)
-- RPC system with capability-based security
-- Main config schema: `src/workerd/server/workerd.capnp`
-
-### V8 Integration (JSG)
-
-- JSG (JavaScript Glue) in `src/workerd/jsg/`
-- Type wrappers between C++ and JavaScript
-- Memory management across GC boundary
-- Pay particular attention to V8 object lifetimes, GC interactions, and thread safety.
-- Pay particular attention to use of JSG utilities and APIs in `jsg/jsg.h`, etc
-
-### Feature Management
-
-- **Compatibility dates** (`compatibility-date.capnp`) - For behavioral changes
-- **Autogates** (`src/workerd/util/autogate.*`) - For risky rollouts
-
-### Key Directories
-
-- `src/workerd/api/` - Runtime APIs (HTTP, crypto, streams, etc.)
-- `src/workerd/io/` - I/O subsystem, actor storage, threading
-- `src/workerd/jsg/` - V8 JavaScript bindings
-- `src/workerd/server/` - Main server implementation
-- `src/workerd/util/` - Utility libraries
-- `src/node` - Node.js integration layer (JavaScript and TypeScript portion... the C++ portion is in `src/workerd/api/node/`)
-
----
-
 ## Providing Pull Request Code Review Feedback
 
 When asked to review a pull request, you may use the the github CLI tool to post inline comments on the PR with specific feedback for each issue you identify. Do not make code changes yourself, but you can suggest specific code changes in your comments. Be sure to reference specific lines of code in your comments for clarity.

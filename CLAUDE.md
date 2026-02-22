@@ -174,9 +174,34 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - Sample configurations in `samples/` directory
 - Configuration uses capability-based security model
 
+### Where to Look
+
+| Task                   | Location                                                      | Notes                                                          |
+| ---------------------- | ------------------------------------------------------------- | -------------------------------------------------------------- |
+| Add/modify JS API      | `src/workerd/api/`                                            | C++ with JSG macros; see `jsg/jsg.h` for binding system        |
+| Add Node.js compat     | `src/workerd/api/node/` (C++) + `src/node/` (TS)              | Dual-layer; register in `api/node/node.h` NODEJS_MODULES macro |
+| Add Cloudflare API     | `src/cloudflare/`                                             | TypeScript; mock in `internal/test/<product>/`                 |
+| Modify compat flags    | `src/workerd/io/compatibility-date.capnp`                     | ~1400 lines; annotations define flag names + enable dates      |
+| Add autogate           | `src/workerd/util/autogate.h` + `.c++`                        | Enum + string map; both must stay in sync                      |
+| Config schema          | `src/workerd/server/workerd.capnp`                            | Cap'n Proto; capability-based security                         |
+| Worker lifecycle       | `src/workerd/io/worker.{h,c++}`                               | Isolate, Script, Worker, Actor classes                         |
+| Request lifecycle      | `src/workerd/io/io-context.{h,c++}`                           | IoContext: the per-request god object                          |
+| Durable Object storage | `src/workerd/io/actor-cache.{h,c++}` + `actor-sqlite.{h,c++}` | LRU cache over RPC / SQLite-backed                             |
+| Streams implementation | `src/workerd/api/streams/`                                    | Has 842-line README; dual internal/standard impl               |
+| Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants  |
+| TypeScript types       | `types/`                                                      | Extracted from C++ RTTI + hand-written `defines/*.d.ts`        |
+| V8 patches             | `patches/v8/`                                                 | 33 patches; see `docs/v8-updates.md`                           |
+
 ## Coding Conventions
 
 This project generally follows the [KJ Style Guide](https://github.com/capnproto/capnproto/blob/v2/kjdoc/style-guide.md) and [KJ Tour](https://github.com/capnproto/capnproto/blob/v2/kjdoc/tour.md), with one exception: comment style follows the more common idiomatic C++ patterns (e.g., `//` line comments) rather than KJ's comment conventions.
+
+- **C++ standard**: C++23 (`-std=c++23`)
+- **C++ file extensions**: `.c++` / `.h` (not `.cpp`); test suffix `-test` (hyphenated)
+- **Formatting**: `just format` runs clang-format + prettier + ruff + buildifier + rustfmt
+- **Pre-commit hook**: Blocks `KJ_DBG` in staged code; runs format check
+- **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
+- **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
 
 ### Use KJ types, not STL
 
@@ -195,14 +220,38 @@ This project uses the KJ library instead of the C++ standard library for most ty
 | `std::exception`        | `kj::Exception`                                     |
 | `std::promise`/`future` | `kj::Promise<T>` / `kj::ForkedPromise<T>`           |
 
+### Error Handling
+
+- `KJ_IF_SOME` for unwrapping `kj::Maybe` (1400+ uses across the codebase)
+- `JSG_REQUIRE` / `JSG_FAIL_REQUIRE` for JS-facing errors with DOM exception types
+- `KJ_ASSERT` / `KJ_REQUIRE` / `KJ_FAIL_ASSERT` for C++ assertions and preconditions
+
 ### JSG (JavaScript Glue)
 
 C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See the comprehensive guide at `src/workerd/jsg/README.md` for details. When adding or modifying JavaScript APIs, find a similar existing API and follow its pattern.
 
+- `JSG_RESOURCE_TYPE` for reference types, `JSG_STRUCT` for value types
+- `js.alloc<T>()` for resource allocation
+
 ### Feature Management
 
-- **Compatibility dates** (`src/workerd/io/compatibility-date.capnp`) - For behavioral changes. Flags MUST be documented before their enable date.
-- **Autogates** (`src/workerd/util/autogate.*`) - For risky rollouts with conditional activation.
+- **Compatibility flags** (`src/workerd/io/compatibility-date.capnp`) — per-worker, date-driven, permanent. Flags MUST be documented before their enable date.
+- **Autogates** (`src/workerd/util/autogate.*`) — per-process, config-driven, temporary. For risky rollouts with conditional activation.
+
+## Anti-Patterns
+
+- **NEVER** put `v8::Local`/`v8::Global`/`JsValue` in `JSG_STRUCT` fields (use `jsg::V8Ref`/`jsg::JsRef`)
+- **NEVER** put `v8::Global<T>` or `v8::Local<T>` in `kj::Promise` (compile-time deleted)
+- **NEVER** pass `jsg::Lock` into KJ promise coroutines
+- **NEVER** hold JS heap refs to KJ I/O objects without `IoOwn`; enforced by `DISALLOW_KJ_IO_DESTRUCTORS_SCOPE`
+- **NEVER** use `JSG_INSTANCE_PROPERTY` without good reason (breaks GC optimization); prefer `JSG_PROTOTYPE_PROPERTY`
+- **NEVER** call `recursivelyFreeze()` on user-provided content (unsafe for cyclic values)
+- **NEVER** add new `Fetcher` methods without compat flag (conflicts with JS RPC wildcard)
+- **NEVER** change `Headers::Guard` enum values (serialized)
+- **NEVER** use `getWaitUntilTasks()` (use `addWaitUntil()`)
+- `Ref<T>` stored in C++ objects visible from JS heap **MUST** implement `visitForGc()`; C++ reference cycles are **NEVER** collected
+- SQLite `SQLITE_MISUSE` errors always throw (never suppressed); transactions disallowed in DO SQLite
+- Module evaluation **MUST NOT** be in an IoContext; async I/O is **FORBIDDEN** in global scope
 
 ## Backward Compatibility
 

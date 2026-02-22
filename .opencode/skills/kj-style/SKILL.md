@@ -68,7 +68,7 @@ and delete the copy constructor instead.
 - Avoid cycles (memory leaks)
 - Prefer non-atomic refcounting; atomic refcounting (`kj::AtomicRefcounted`) is extremely slow
 - `kj::AtomicRefcounted` is only appropriate for objects that whose refcounting needs to occur across threads.
-- Prefer using `kj::Rc<T>`/`kj::rc<T>(...)` and `kj::Arc<T>`/`kj::arc<T>(...)` instead of using `k::refcounted<T>`, `kj::atomicRefcounted<T>`, and `kj::addRef()` directly.
+- Prefer using `kj::Rc<T>`/`kj::rc<T>(...)` and `kj::Arc<T>`/`kj::arc<T>(...)` instead of using `kj::refcounted<T>`, `kj::atomicRefcounted<T>`, and `kj::addRef()` directly.
 
 ### Error Handling
 
@@ -232,7 +232,7 @@ auto& value = maybeValue.value(); // not how KJ works
 
 `maybe.map(fn)` and `maybe.orDefault(val)` are useful for simple transforms/fallbacks.
 
-When moving a value out of a `kj::Maybe`, use `kj::mv()` and remember to set the `k::Maybe` to `kj::none` to avoid dangling references:
+When moving a value out of a `kj::Maybe`, use `kj::mv()` and remember to set the `kj::Maybe` to `kj::none` to avoid dangling references:
 
 ```cpp
 KJ_IF_SOME(value, maybeValue) {

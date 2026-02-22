@@ -6,20 +6,20 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 
 ## KEY RULES
 
-| Rule                                       | Purpose                                                                                                                                             |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wd_cc_library.bzl`                        | Wraps `cc_library`; `strip_include_prefix="/src"`, arch-specific CPU flags (CRC32C)                                                                 |
-| `wd_cc_binary.bzl`                         | Wraps `cc_binary`; macOS dead-strip linkopts; creates `_cross` alias for prebuilt arm64 binaries                                                    |
-| `wd_cc_embed.bzl`                          | Binary/text data -> C++ via C23 `#embed`; auto-detects text vs binary by extension                                                                  |
-| `wd_cc_benchmark.bzl`                      | Google Benchmark wrapper; generates CSV report genrule                                                                                              |
-| `wd_test.bzl`                              | `.wd-test` config test runner; generates up to 3 variants per test: `name@` (oldest compat), `name@all-compat-flags` (newest), `name@all-autogates` |
-| `kj_test.bzl`                              | C++ unit test wrapper; also generates compat/autogate variants                                                                                      |
-| `wpt_test.bzl`                             | Web Platform Tests; generates JS runner + `.wd-test` config from WPT tree; delegates to `wd_test`                                                   |
-| `wd_ts_bundle.bzl`                         | TypeScript compilation + JS bundle generation                                                                                                       |
-| `wd_js_bundle.bzl`                         | JS bundle -> Cap'n Proto `Modules.Bundle` embedding via generated `.capnp`                                                                          |
-| `wd_capnp_library.bzl`                     | Cap'n Proto schema compilation                                                                                                                      |
-| `wd_rust_crate.bzl` / `wd_rust_binary.bzl` | Rust build rules                                                                                                                                    |
-| `lint_test.bzl`                            | ESLint integration                                                                                                                                  |
+| Rule                                       | Purpose                                                                                           |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `wd_cc_library.bzl`                        | Wraps `cc_library`; `strip_include_prefix="/src"`, arch-specific CPU flags (CRC32C)               |
+| `wd_cc_binary.bzl`                         | Wraps `cc_binary`; macOS dead-strip linkopts; creates `_cross` alias for prebuilt arm64 binaries  |
+| `wd_cc_embed.bzl`                          | Binary/text data -> C++ via C23 `#embed`; auto-detects text vs binary by extension                |
+| `wd_cc_benchmark.bzl`                      | Google Benchmark wrapper; generates CSV report genrule                                            |
+| `wd_test.bzl`                              | `.wd-test` config test runner; generates up to 3 variants per test                                |
+| `kj_test.bzl`                              | C++ unit test wrapper; also generates test variants                                               |
+| `wpt_test.bzl`                             | Web Platform Tests; generates JS runner + `.wd-test` config from WPT tree; delegates to `wd_test` |
+| `wd_ts_bundle.bzl`                         | TypeScript compilation + JS bundle generation                                                     |
+| `wd_js_bundle.bzl`                         | JS bundle -> Cap'n Proto `Modules.Bundle` embedding via generated `.capnp`                        |
+| `wd_capnp_library.bzl`                     | Cap'n Proto schema compilation                                                                    |
+| `wd_rust_crate.bzl` / `wd_rust_binary.bzl` | Rust build rules                                                                                  |
+| `lint_test.bzl`                            | ESLint integration                                                                                |
 
 **Conventions:**
 

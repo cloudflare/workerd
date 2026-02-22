@@ -243,33 +243,6 @@ Do suggest reviewers who have made material comments or suggestions on the assoc
 
 ---
 
-## Project-Specific Context
-
-### workerd Conventions
-
-- Use KJ library idioms (`kj::Own`, `kj::Maybe`, `kj::Promise`, etc.)
-- Follow Cap'n Proto conventions for schemas
-- V8/JSG integration follows patterns in `src/workerd/jsg/`
-- Compatibility flags go in `compatibility-date.capnp`
-- Risky changes use autogates (`src/workerd/util/autogate.*`)
-
-### Test Commands
-
-- `just test` - Run all tests (uses caching, good for verifying nothing is broken)
-- `just stream-test //path/to:target@` - Run a specific test with live output (disables caching, useful for debugging failures)
-- `just node-test <name>` - Run Node.js compatibility tests
-- `just wpt-test <name>` - Run Web Platform Tests
-- `bazel test //path/to:target@` - Run specific test target (note: `@` suffix required)
-
-Use `just test` for full-suite verification. Use `just stream-test` when running individual tests where you need to see the output.
-
-### Build Commands
-
-- `just build` or `bazel build //src/workerd/server:workerd`
-- `just build-asan` - Build with AddressSanitizer
-
----
-
 ## Output Format
 
 When reviewing changes, provide:

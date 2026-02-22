@@ -12,16 +12,16 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `resource.h`     | Template metaprogramming: V8 callback generation, `FunctionCallbackInfo` dispatch, prototype/constructor wiring             |
 | `struct.h`       | `JSG_STRUCT` value-type mapping: deep-copies C++ structs to/from JS objects                                                 |
 | `wrappable.h`    | GC integration: `Wrappable` base class, CppGC visitor hooks, ref marking, weak pointers                                     |
-| `promise.h`      | `jsg::Promise<T>` wrapping KJ promises ↔ JS promises; resolver pairs, coroutine integration                                 |
+| `promise.h`      | `jsg::Promise<T>` wrapping KJ promises ↔ JS promises; resolver pairs, coroutine integration                                |
 | `modules.h`      | `ModuleRegistry`: ESM/CJS module resolution, evaluation, top-level await handling                                           |
 | `modules-new.h`  | Replacement module system (new design)                                                                                      |
 | `setup.h`        | `V8System`, `IsolateBase`, `JsgConfig`; process-level V8 init; `JSG_DECLARE_ISOLATE_TYPE`                                   |
-| `function.h`     | `jsg::Function<Sig>` wrapping C++ callables ↔ JS functions                                                                  |
+| `function.h`     | `jsg::Function<Sig>` wrapping C++ callables ↔ JS functions                                                                 |
 | `memory.h`       | `MemoryTracker`, `JSG_MEMORY_INFO` macro; heap snapshot support                                                             |
 | `rtti.capnp`     | Cap'n Proto schema for type introspection; consumed by `types/` for TS generation                                           |
 | `rtti.h`         | C++ RTTI builder: walks JSG type graph → `rtti.capnp` structures                                                            |
 | `jsvalue.h`      | `JsValue`, `JsObject`, `JsString`, etc. — typed wrappers over `v8::Value`                                                   |
-| `type-wrapper.h` | `TypeWrapper` template: compile-time dispatch for C++ ↔ V8 conversions                                                      |
+| `type-wrapper.h` | `TypeWrapper` template: compile-time dispatch for C++ ↔ V8 conversions                                                     |
 | `meta.h`         | Argument unwrapping, `ArgumentContext`, parameter pack metaprogramming                                                      |
 | `fast-api.h`     | V8 Fast API call optimizations                                                                                              |
 | `ser.h`          | Structured clone: `Serializer`/`Deserializer`                                                                               |
@@ -60,13 +60,11 @@ class MyType: public jsg::Object {
 
 ## ANTI-PATTERNS
 
-- **NEVER** put `v8::Local`/`v8::Global`/`JsValue` in `JSG_STRUCT` fields — use `V8Ref<T>`/`JsRef<T>`
 - **NEVER** opaque-wrap `V8Ref<T>` — use handle directly
 - **NEVER** use v8::Context embedder data slot 0 (`ContextPointerSlot::RESERVED`)
 - **NEVER** hold traced handles (`Ref<T>`/`V8Ref<T>`) without marking in `visitForGc` — causes GC corruption
 - **NEVER** use `FastOneByteString` in Fast API calls (GC corruption risk)
 - **NEVER** unwrap `Ref<Object>` — use `V8Ref<v8::Object>` instead
 - `JSG_CATCH` is NOT a true catch — cannot rethrow with `throw`
-- Prefer `JSG_PROTOTYPE_PROPERTY` over `JSG_INSTANCE_PROPERTY` (GC optimization)
 - `NonCoercible<T>` runs counter to Web IDL best practices; avoid in new APIs
 - Rust JSG bindings: see `src/rust/jsg/` and `src/rust/jsg-macros/`
