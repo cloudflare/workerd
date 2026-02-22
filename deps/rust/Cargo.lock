@@ -451,6 +451,7 @@ dependencies = [
  "clang-ast",
  "clap",
  "codespan-reporting",
+ "encoding_rs",
  "flate2",
  "foldhash",
  "futures",

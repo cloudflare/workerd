@@ -152,6 +152,18 @@ alias(
 )
 
 alias(
+    name = "encoding_rs-0.8.35",
+    actual = "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
+    tags = ["manual"],
+)
+
+alias(
+    name = "encoding_rs",
+    actual = "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
+    tags = ["manual"],
+)
+
+alias(
     name = "flate2-1.1.9",
     actual = "@crates_vendor__flate2-1.1.9//:flate2",
     tags = ["manual"],

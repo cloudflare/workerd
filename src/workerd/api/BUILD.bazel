@@ -430,8 +430,15 @@ wd_cc_library(
 
 wd_cc_library(
     name = "encoding",
-    srcs = ["encoding.c++"],
-    hdrs = ["encoding.h"],
+    srcs = [
+        "encoding.c++",
+        "encoding-legacy.c++",
+    ],
+    hdrs = [
+        "encoding.h",
+        "encoding-legacy.h",
+        "encoding-shared.h",
+    ],
     implementation_deps = [
         "//src/workerd/io:features",
         "//src/workerd/util:strings",
@@ -439,10 +446,12 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":util",
+        "//src/rust/encoding",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
         "@simdutf",
+        "@workerd-cxx//kj-rs",
     ],
 )
 

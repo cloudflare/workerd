@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "encoding-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat"]
+        compatibilityFlags = ["nodejs_compat", "text_decoder_cjk_decoder"]
       )
     ),
   ],

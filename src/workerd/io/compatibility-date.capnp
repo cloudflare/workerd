@@ -1403,4 +1403,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableDate("2026-03-03");
   # When enabled, unhandledrejection processing is deferred until the microtask
   # checkpoint completes, avoiding misfires on multi-tick promise chains.
+
+  textDecoderCjkDecoder @163 :Bool
+    $compatEnableFlag("text_decoder_cjk_decoder")
+    $compatDisableFlag("disable_text_decoder_cjk_decoder")
+    $compatEnableDate("2026-03-03");
+  # Enables the dedicated CJK TextDecoder implementation for overrides and
+  # Big5 lead-byte handling instead of the legacy ICU-only path.
 }
