@@ -618,7 +618,7 @@ export function publicEncrypt(
 ): Buffer {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (key === undefined) {
-    throw new ERR_MISSING_ARGS('privateKey');
+    throw new ERR_MISSING_ARGS('key');
   }
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (buffer === undefined) {
@@ -660,7 +660,7 @@ export function publicDecrypt(
 ): Buffer {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (key === undefined) {
-    throw new ERR_MISSING_ARGS('privateKey');
+    throw new ERR_MISSING_ARGS('key');
   }
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (buffer === undefined) {
