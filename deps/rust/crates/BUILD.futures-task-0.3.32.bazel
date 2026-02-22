@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "futures_sink",
+    name = "futures_task",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -39,10 +39,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=futures-sink",
+        "crate-name=futures-task",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.31",
+    version = "0.3.32",
 )
