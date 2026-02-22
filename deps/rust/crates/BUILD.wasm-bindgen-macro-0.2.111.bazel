@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 package(default_visibility = ["//visibility:public"])
 
 rust_proc_macro(
-    name = "futures_macro",
+    name = "wasm_bindgen_macro",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,21 +29,20 @@ rust_proc_macro(
         ],
     ),
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=futures-macro",
+        "crate-name=wasm-bindgen-macro",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.31",
+    version = "0.2.111",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.106//:proc_macro2",
         "@crates_vendor__quote-1.0.44//:quote",
-        "@crates_vendor__syn-2.0.115//:syn",
+        "@crates_vendor__wasm-bindgen-macro-support-0.2.111//:wasm_bindgen_macro_support",
     ],
 )

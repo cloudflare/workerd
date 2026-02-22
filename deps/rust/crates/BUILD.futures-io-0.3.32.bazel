@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "futures",
+    name = "futures_io",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,11 +29,6 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
-        "async-await",
-        "default",
-        "executor",
-        "futures-executor",
         "std",
     ],
     crate_root = "src/lib.rs",
@@ -43,19 +38,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=futures",
+        "crate-name=futures-io",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.31",
-    deps = [
-        "@crates_vendor__futures-channel-0.3.31//:futures_channel",
-        "@crates_vendor__futures-core-0.3.31//:futures_core",
-        "@crates_vendor__futures-executor-0.3.31//:futures_executor",
-        "@crates_vendor__futures-io-0.3.31//:futures_io",
-        "@crates_vendor__futures-sink-0.3.31//:futures_sink",
-        "@crates_vendor__futures-task-0.3.31//:futures_task",
-        "@crates_vendor__futures-util-0.3.31//:futures_util",
-    ],
+    version = "0.3.32",
 )

@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "pin_utils",
+    name = "futures_core",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "alloc",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = [
@@ -35,10 +39,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=pin-utils",
+        "crate-name=futures-core",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.0",
+    version = "0.3.32",
 )

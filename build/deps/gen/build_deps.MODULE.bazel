@@ -17,13 +17,13 @@ bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")
 bazel_dep(name = "aspect_rules_js", version = "2.9.2")
 
 # aspect_rules_lint
-bazel_dep(name = "aspect_rules_lint", version = "2.1.0")
+bazel_dep(name = "aspect_rules_lint", version = "2.2.0")
 
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.8.4")
 
 # bazel_lib
-bazel_dep(name = "bazel_lib", version = "3.2.0")
+bazel_dep(name = "bazel_lib", version = "3.2.1")
 
 # bazel_skylib
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
@@ -105,7 +105,7 @@ use_repo(http, "clang_tidy_linux_arm64")
 bazel_dep(name = "platforms", version = "1.0.0")
 
 # rules_cc
-bazel_dep(name = "rules_cc", version = "0.2.16")
+bazel_dep(name = "rules_cc", version = "0.2.17")
 
 # rules_multirun
 bazel_dep(name = "rules_multirun", version = "0.13.0")
