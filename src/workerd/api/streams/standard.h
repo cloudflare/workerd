@@ -753,6 +753,11 @@ class TransformStreamDefaultController: public jsg::Object {
     kj::Maybe<jsg::Function<Transformer::CancelAlgorithm>> cancel;
 
     kj::Maybe<jsg::Promise<void>> maybeFinish = kj::none;
+    // This flag is set to true at the start of a finish operation (close/cancel/abort)
+    // before the algorithm runs. This is needed because emplace() evaluates its argument
+    // before setting maybeFinish, so if the algorithm calls another finish operation
+    // synchronously, maybeFinish wouldn't be set yet.
+    bool finishStarted = false;
 
     Algorithms() {};
     Algorithms(Algorithms&& other) = default;
@@ -778,6 +783,8 @@ class TransformStreamDefaultController: public jsg::Object {
 
   kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();
   kj::Maybe<WritableStreamJsController&> tryGetWritableController();
+
+  kj::Maybe<jsg::Value> getReadableErrorState(jsg::Lock& js);
 
   // Currently, JS-backed transform streams only support value-oriented streams.
   // In the future, that may change and this will need to become a kj::OneOf
