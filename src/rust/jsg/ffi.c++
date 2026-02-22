@@ -4,9 +4,12 @@
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 #include <workerd/rust/jsg/ffi-inl.h>
+#include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
 #include <kj/common.h>
+
+#include <memory>
 
 using namespace kj_rs;
 
@@ -45,6 +48,20 @@ namespace workerd::rust::jsg {
   }
 
 // =============================================================================
+
+// RustResource implementation - calls into Rust via CXX bridge
+RustResource::~RustResource() {
+  cppgc_invoke_drop(this);
+}
+
+void RustResource::Trace(cppgc::Visitor* visitor) const {
+  auto ffi_visitor = to_ffi(visitor);
+  cppgc_invoke_trace(this, &ffi_visitor);
+}
+
+const char* RustResource::GetHumanReadableName() const {
+  return cppgc_invoke_get_name(this);
+}
 
 // Local<T>
 void local_drop(Local value) {
@@ -254,7 +271,7 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback) {
+Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl) {
   auto self = reinterpret_cast<void*>(resource);
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
   auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
@@ -364,8 +381,9 @@ DEFINE_TYPED_ARRAY_GET(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_GET(biguint64_array, BigUint64Array, uint64_t)
 
 // Global<T>
-void global_drop(Global value) {
-  global_from_ffi<v8::Value>(kj::mv(value));
+void global_reset(Global* value) {
+  auto* glbl = global_as_ref_from_ffi<v8::Value>(*value);
+  glbl->Reset();
 }
 
 Global global_clone(const Global& value) {
@@ -378,13 +396,25 @@ Local global_to_local(Isolate* isolate, const Global& value) {
   return to_ffi(kj::mv(local));
 }
 
-void global_make_weak(Isolate* isolate, Global* value, size_t data, WeakCallback callback) {
-  // callback is unused; GC-based cleanup not yet implemented.
-  // Cleanup happens in Realm::drop() during context disposal.
-  auto glbl = global_as_ref_from_ffi<v8::Object>(*value);
-  glbl->SetWeak(reinterpret_cast<void*>(data), [](const v8::WeakCallbackInfo<void>& info) {
-    KJ_UNIMPLEMENTED("global_make_weak");
-  }, v8::WeakCallbackType::kParameter);
+// TracedReference
+TracedReference traced_reference_from_local(Isolate* isolate, Local value) {
+  v8::TracedReference<v8::Object> traced(isolate, local_from_ffi<v8::Object>(kj::mv(value)));
+  return to_ffi(kj::mv(traced));
+}
+
+Local traced_reference_to_local(Isolate* isolate, const TracedReference& value) {
+  auto& traced = traced_reference_as_ref_from_ffi<v8::Object>(value);
+  return to_ffi(traced.Get(isolate));
+}
+
+void traced_reference_reset(TracedReference* value) {
+  auto* traced = traced_reference_as_ref_from_ffi<v8::Object>(*value);
+  traced->Reset();
+}
+
+bool traced_reference_is_empty(const TracedReference& value) {
+  auto& traced = traced_reference_as_ref_from_ffi<v8::Object>(value);
+  return traced.IsEmpty();
 }
 
 // FunctionCallbackInfo
@@ -525,6 +555,141 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
 
 bool isolate_is_locked(Isolate* isolate) {
   return v8::Locker::IsLocked(isolate);
+}
+
+// cppgc - Allocate Rust objects directly on the GC heap
+size_t cppgc_rust_resource_size() {
+  return sizeof(RustResource);
+}
+
+RustResource* cppgc_make_garbage_collected(Isolate* isolate, size_t size, size_t alignment) {
+  auto* heap = isolate->GetCppHeap();
+  KJ_ASSERT(heap != nullptr, "CppHeap not available on isolate");
+  KJ_ASSERT(alignment <= 16, "Alignment {} exceeds maximum of 16", alignment);
+
+  // Allocate RustResource with additional bytes for the Rust object.
+  // The Rust object will be written into the space after the RustResource header.
+  if (alignment <= 8) {
+    return cppgc::MakeGarbageCollected<RustResource>(
+        heap->GetAllocationHandle(), cppgc::AdditionalBytes(size));
+  }
+
+  return cppgc::MakeGarbageCollected<RustResourceAlign16>(
+      heap->GetAllocationHandle(), cppgc::AdditionalBytes(size));
+}
+
+uintptr_t* cppgc_rust_resource_data(RustResource* resource) {
+  return resource->data;
+}
+
+const uintptr_t* cppgc_rust_resource_data_const(const RustResource* resource) {
+  return resource->data;
+}
+
+void cppgc_visitor_trace(CppgcVisitor* visitor, const TracedReference& handle) {
+  auto* v8_visitor = cppgc_visitor_from_ffi(visitor);
+  auto& traced = traced_reference_as_ref_from_ffi<v8::Object>(handle);
+  v8_visitor->Trace(traced);
+}
+
+// Persistent inline storage functions
+// Note: cppgc::Persistent stores an internal pointer to a PersistentNode, so it can be
+// stored inline without issues. The internal node is heap-allocated by cppgc.
+
+size_t cppgc_persistent_size() {
+  return sizeof(CppgcPersistent);
+}
+
+void cppgc_persistent_construct(size_t storage, RustResource* resource) {
+  new (reinterpret_cast<void*>(storage)) CppgcPersistent(resource);
+}
+
+void cppgc_persistent_destruct(size_t storage) {
+  std::destroy_at(reinterpret_cast<CppgcPersistent*>(storage));
+}
+
+RustResource* cppgc_persistent_get(size_t storage) {
+  return reinterpret_cast<const CppgcPersistent*>(storage)->Get();
+}
+
+void cppgc_persistent_assign(size_t storage, RustResource* resource) {
+  *reinterpret_cast<CppgcPersistent*>(storage) = resource;
+}
+
+// WeakPersistent inline storage functions
+
+size_t cppgc_weak_persistent_size() {
+  return sizeof(CppgcWeakPersistent);
+}
+
+void cppgc_weak_persistent_construct(size_t storage, RustResource* resource) {
+  new (reinterpret_cast<void*>(storage)) CppgcWeakPersistent(resource);
+}
+
+void cppgc_weak_persistent_destruct(size_t storage) {
+  std::destroy_at(reinterpret_cast<CppgcWeakPersistent*>(storage));
+}
+
+RustResource* cppgc_weak_persistent_get(size_t storage) {
+  return reinterpret_cast<const CppgcWeakPersistent*>(storage)->Get();
+}
+
+void cppgc_weak_persistent_assign(size_t storage, RustResource* resource) {
+  *reinterpret_cast<CppgcWeakPersistent*>(storage) = resource;
+}
+
+// Member inline storage functions
+
+size_t cppgc_member_size() {
+  return sizeof(CppgcMember);
+}
+
+void cppgc_member_construct(size_t storage, RustResource* resource) {
+  new (reinterpret_cast<void*>(storage)) CppgcMember(resource);
+}
+
+void cppgc_member_destruct(size_t storage) {
+  std::destroy_at(reinterpret_cast<CppgcMember*>(storage));
+}
+
+RustResource* cppgc_member_get(size_t storage) {
+  return reinterpret_cast<const CppgcMember*>(storage)->Get();
+}
+
+void cppgc_member_assign(size_t storage, RustResource* resource) {
+  *reinterpret_cast<CppgcMember*>(storage) = resource;
+}
+
+void cppgc_visitor_trace_member(CppgcVisitor* visitor, size_t storage) {
+  auto* v8_visitor = cppgc_visitor_from_ffi(visitor);
+  v8_visitor->Trace(*reinterpret_cast<const CppgcMember*>(storage));
+}
+
+// WeakMember inline storage functions
+
+size_t cppgc_weak_member_size() {
+  return sizeof(CppgcWeakMember);
+}
+
+void cppgc_weak_member_construct(size_t storage, RustResource* resource) {
+  new (reinterpret_cast<void*>(storage)) CppgcWeakMember(resource);
+}
+
+void cppgc_weak_member_destruct(size_t storage) {
+  std::destroy_at(reinterpret_cast<CppgcWeakMember*>(storage));
+}
+
+RustResource* cppgc_weak_member_get(size_t storage) {
+  return reinterpret_cast<const CppgcWeakMember*>(storage)->Get();
+}
+
+void cppgc_weak_member_assign(size_t storage, RustResource* resource) {
+  *reinterpret_cast<CppgcWeakMember*>(storage) = resource;
+}
+
+void cppgc_visitor_trace_weak_member(CppgcVisitor* visitor, size_t storage) {
+  auto* v8_visitor = cppgc_visitor_from_ffi(visitor);
+  v8_visitor->Trace(*reinterpret_cast<const CppgcWeakMember*>(storage));
 }
 
 }  // namespace workerd::rust::jsg

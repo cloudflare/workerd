@@ -53,17 +53,15 @@ impl DnsUtil {
 
 Generates boilerplate for JSG resources. Applied to both struct definitions and impl blocks. Automatically implements `jsg::Type::class_name()` using the struct name, or a custom name if provided via the `name` parameter.
 
-**Important:** Resource structs must include a `_state: jsg::ResourceState` field for internal JSG state management.
-
 ```rust
 #[jsg_resource]
 pub struct DnsUtil {
-    pub _state: jsg::ResourceState,
+    pub _unused: u8,
 }
 
 #[jsg_resource(name = "CustomUtil")]
 pub struct MyUtil {
-    pub _state: jsg::ResourceState,
+    pub value: u32,
 }
 
 #[jsg_resource]
@@ -75,7 +73,12 @@ impl DnsUtil {
 }
 ```
 
-On struct definitions, generates `jsg::Type`, wrapper struct, and `ResourceTemplate` implementations. On impl blocks, scans for `#[jsg_method]` attributes and generates the `Resource` trait implementation.
+On struct definitions, generates:
+- `jsg::Type` implementation
+- `jsg::GarbageCollected` implementation (default, no-op trace)
+- Wrapper struct and `ResourceTemplate` implementations
+
+On impl blocks, scans for `#[jsg_method]` attributes and generates the `Resource` trait implementation.
 
 ## `#[jsg_oneof]`
 
@@ -105,3 +108,45 @@ impl MyResource {
 ```
 
 The macro generates type-checking code that matches JavaScript values to enum variants without coercion. If no variant matches, a `TypeError` is thrown listing all expected types.
+
+### Garbage Collection
+
+Resources are automatically integrated with V8's cppgc garbage collector. The macro automatically generates a `GarbageCollected` implementation that traces fields requiring GC integration:
+
+- `Ref<T>` fields - traces the underlying resource
+- `TracedReference<T>` fields - traces the JavaScript handle
+- `Option<Ref<T>>` and `Option<TracedReference<T>>` - conditionally traces
+- `RefCell<Option<Ref<T>>>` - supports cyclic references through interior mutability
+
+```rust
+#[jsg_resource]
+pub struct MyResource {
+    // Automatically traced
+    js_callback: Option<TracedReference<Object>>,
+    child_resource: Option<Ref<ChildResource>>,
+
+    // Not traced (plain data)
+    name: String,
+}
+
+// Cyclic references using RefCell
+#[jsg_resource]
+pub struct Node {
+    name: String,
+    next: RefCell<Option<Ref<Node>>>,
+}
+```
+
+For complex cases or custom tracing logic, you can manually implement `GarbageCollected` without using the jsg_resource macro:
+
+```rust
+pub struct CustomResource {
+    data: String,
+}
+
+impl jsg::GarbageCollected for CustomResource {
+    fn trace(&self, visitor: &mut jsg::GcVisitor) {
+        // Custom tracing logic
+    }
+}
+```
