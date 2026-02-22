@@ -1,0 +1,73 @@
+diff --git a/MODULE.bazel b/MODULE.bazel
+index 537ed4a..fe96862 100644
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -2,6 +2,7 @@
+ 
+ module(
+     name = "rules_rs",
++    version = "0.0.30",
+ )
+ 
+ bazel_dep(name = "rules_rust", version = "0.66.0")
+diff --git a/rs/private/rust_deps.bzl b/rs/private/rust_deps.bzl
+index 5986f71..08e4ff4 100644
+--- a/rs/private/rust_deps.bzl
++++ b/rs/private/rust_deps.bzl
+@@ -1,3 +1,4 @@
++load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+ load("@rules_rust//rust:rust_common.bzl", "CrateInfo", "CrateGroupInfo", "BuildInfo", "DepInfo", "DepVariantInfo")
+ 
+@@ -8,6 +9,7 @@ def _rust_deps_impl(ctx):
+     dep_variant_infos = []
+     runfiles = []
+     deps = []
++    cc_infos = []
+ 
+     for dep in ctx.attr.deps:
+         if CrateInfo in dep:
+@@ -22,6 +24,8 @@ def _rust_deps_impl(ctx):
+                 crate_group_info = None,
+             ))
+             deps.append(dep)
++            if not ctx.attr.proc_macros and CcInfo in dep:
++                cc_infos.append(dep[CcInfo])
+         elif BuildInfo in dep:
+             # Build scripts are always normal deps.
+             if ctx.attr.proc_macros:
+@@ -34,6 +38,8 @@ def _rust_deps_impl(ctx):
+                 crate_group_info = None,
+             ))
+             deps.append(dep)
++            if CcInfo in dep:
++                cc_infos.append(dep[CcInfo])
+         elif CcInfo in dep:
+             if ctx.attr.proc_macros:
+                 continue
+@@ -44,6 +50,7 @@ def _rust_deps_impl(ctx):
+                 cc_info = dep[CcInfo],
+                 crate_group_info = None,
+             ))
++            cc_infos.append(dep[CcInfo])
+ 
+         if dep[DefaultInfo].default_runfiles != None:
+             runfiles.append(dep[DefaultInfo].default_runfiles)
+@@ -58,13 +65,16 @@ def _rust_deps_impl(ctx):
+             dependency_attributes = ["deps"],
+         ),
+     ]
++    providers.append(
++        cc_common.merge_cc_infos(cc_infos = cc_infos) if cc_infos else CcInfo()
++    )
+     if len(deps) == 1 and ctx.attr.proc_macros:
+         providers.append(deps[0][CrateInfo])
+     return providers
+ 
+ rust_deps = rule(
+     implementation = _rust_deps_impl,
+-    provides = [CrateGroupInfo],
++    provides = [CrateGroupInfo, CcInfo],
+     attrs = {
+         "deps": attr.label_list(
+             doc = "Other dependencies to forward through this crate group.",
