@@ -4450,6 +4450,48 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
       "{}, {\"foo\":123,\"bar\":\"abc\"}, false");
 }
 
+KJ_TEST("Server: loopback binding calls accept version property") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["enable_ctx_exports", "enable_version_api"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const serviceVersions = await Promise.all([
+                `      ctx.exports.default({ version: {} }),
+                `      ctx.exports.default({ version: { cohort: null } }),
+                `      ctx.exports.default({ version: { cohort: "test" } }),
+                `      ctx.exports.default({ props: {}, version: { cohort: "test" } }),
+                `    ].map(service => service.version));
+                `    if (serviceVersions.every(version => version === this.version)) {
+                `      return new Response(serviceVersions[0]);
+                `    }
+                `    return new Response(null, { status: 500 });
+                `  },
+                `  get version() { return "constant"; },
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "constant");
+}
+
 // =======================================================================================
 
 // TODO(beta): Test TLS (send and receive)

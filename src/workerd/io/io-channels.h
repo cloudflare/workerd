@@ -116,6 +116,18 @@ class IoChannelFactory {
     double startTime = dateNow();
   };
 
+  // Parameters that can influence the version of a worker that is used to serve a subrequest.
+  struct VersionRequest {
+    // Request a version within the given cohort.
+    kj::Maybe<kj::String> cohort;
+
+    VersionRequest clone() const {
+      return {
+        .cohort = cohort.map([](const kj::String& s) { return kj::str(s); }),
+      };
+    }
+  };
+
   virtual kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) = 0;
 
   // Get a Cap'n Proto RPC capability. Various binding types are backed by capabilities.
@@ -194,12 +206,13 @@ class IoChannelFactory {
   // The reason to use this instead is when the channel is not necessarily going to be used to
   // start a subrequest immediately, but instead is going to be passed around as a capability.
   //
-  // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
-  // other channel, it will throw.
+  // `props` and `versionRequest` can only be specified if this is a loopback channel (i.e. from
+  // ctx.exports). For any other channel, they will throw.
   //
   // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
-  virtual kj::Own<SubrequestChannel> getSubrequestChannel(
-      uint channel, kj::Maybe<Frankenvalue> props = kj::none) = 0;
+  virtual kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
+      kj::Maybe<Frankenvalue> props = kj::none,
+      kj::Maybe<VersionRequest> versionRequest = kj::none) = 0;
 
   // Stub for a remote actor. Allows sending requests to the actor.
   class ActorChannel: public SubrequestChannel {

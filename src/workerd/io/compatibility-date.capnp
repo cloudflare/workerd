@@ -1403,4 +1403,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableDate("2026-03-03");
   # When enabled, unhandledrejection processing is deferred until the microtask
   # checkpoint completes, avoiding misfires on multi-tick promise chains.
+
+  enableVersionApi @163 :Bool
+    $compatEnableFlag("enable_version_api")
+    $experimental;
+  # Enables version-related APIs. This currently only enables the `version` option in loopback
+  # bindings to specify a requested version. The behaviour of this flag will change in the future.
 }

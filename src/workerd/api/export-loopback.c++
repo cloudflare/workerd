@@ -4,18 +4,28 @@
 
 #include "export-loopback.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/frankenvalue.h>
 
 namespace workerd::api {
 
-jsg::Ref<Fetcher> LoopbackServiceStub::call(jsg::Lock& js, Options options) {
+jsg::Ref<Fetcher> LoopbackServiceStub::handleCall(jsg::Lock& js,
+    jsg::Optional<jsg::JsRef<jsg::JsObject>> propsMaybe,
+    jsg::Optional<OptionsWithVersion::Version> versionMaybe) {
   Frankenvalue props;
-  KJ_IF_SOME(p, options.props) {
+  KJ_IF_SOME(p, propsMaybe) {
     props = Frankenvalue::fromJs(js, p.getHandle(js));
+  }
+  kj::Maybe<IoChannelFactory::VersionRequest> versionRequest;
+  KJ_IF_SOME(version, kj::mv(versionMaybe)) {
+    versionRequest = IoChannelFactory::VersionRequest{
+      .cohort = kj::mv(version.cohort).orDefault(kj::none),
+    };
   }
 
   IoContext& ioctx = IoContext::current();
-  auto channelObj = ioctx.getIoChannelFactory().getSubrequestChannel(channel, kj::mv(props));
+  auto channelObj = ioctx.getIoChannelFactory().getSubrequestChannel(
+      channel, kj::mv(props), kj::mv(versionRequest));
   return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channelObj)));
 }
 

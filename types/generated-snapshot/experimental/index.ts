@@ -4098,8 +4098,18 @@ export type LoopbackServiceStub<
   T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
 > = Fetcher<T> &
   (T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props>
-    ? (opts: { props?: Props }) => Fetcher<T>
-    : (opts: { props?: any }) => Fetcher<T>);
+    ? (opts: {
+        props?: Props;
+        version?: {
+          cohort?: string | null;
+        };
+      }) => Fetcher<T>
+    : (opts: {
+        props?: any;
+        version?: {
+          cohort?: string | null;
+        };
+      }) => Fetcher<T>);
 export type LoopbackDurableObjectClass<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > = DurableObjectClass<T> &
