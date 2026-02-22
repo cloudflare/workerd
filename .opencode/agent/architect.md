@@ -257,23 +257,18 @@ When analyzing code, be deliberate about how you gather context to avoid wasting
 
 ### 11. Coding patterns & Best Practices
 
+For detailed C++ style conventions (naming, types, ownership, error handling, formatting), load the **kj-style** skill. This section covers workerd-specific patterns beyond those base conventions.
+
 - Identify anti-patterns and suggest modern C++ practices baselined on C++20/23
-- Review consistency with project coding standards
-- Suggest improvements for readability and maintainability
+- Review consistency with project coding standards (see kj-style skill for specifics)
 - Analyze use of language features for appropriateness
-- Suggest improvements for better use of KJ library features
-- Review naming conventions and code organization
-- Identify places where raw pointers and raw references are used and recommend safer
-  alternatives.
-- Suggest improvements for better use of RAII and smart pointers.
-- Review lambda usage for clarity and efficiency.
-  - Limit captures to only what is necessary.
-  - Favor passing explicit parameters instead of capturing large contexts.
-  - When the lambda is a co-routine, ensure proper use of the kj::coCapture helper to ensure correct lifetime management.
+- Review lambda usage for clarity and safety:
+  - Never allow `[=]` captures. Use `[&]` only for non-escaping lambdas.
+  - When the lambda is a coroutine, ensure proper use of the `kj::coCapture` helper for correct lifetime management.
   - Favor named functions or functor classes for complex logic.
-  - Always carefully consider the lifetime of captured variables, especially when dealing with asynchronous code.
+  - Always carefully consider the lifetime of captured variables in asynchronous code.
 - Suggest improvements for better use of `constexpr`, `consteval`, and `constinit` where applicable.
-- Suggest appropriate annotations like `[[nodiscard]]`, `[[maybe_unused]]`, `noexcept`, and `override` to improve code safety and clarity.
+- Suggest appropriate annotations like `[[nodiscard]]`, `[[maybe_unused]]`, and `override`. Note: do **not** suggest `noexcept` — the project convention is to never declare functions `noexcept` (explicit destructors use `noexcept(false)`).
 - Analyze template and macro usage for appropriateness and clarity.
 - Call out discouraged patterns like:
   - passing bool flags to functions (prefer enum class or `WD_STRONG_BOOL`)
@@ -305,12 +300,17 @@ Concrete patterns to watch for during analysis. When you encounter these, flag t
 - **Missing `[[nodiscard]]` on error/status returns**: Functions returning error codes, `kj::Maybe`, or success booleans that callers must check.
 - **`kj::Promise` chain where coroutine would be clearer**: Nested `.then()` chains with complex error handling that would be more readable as a coroutine with `co_await`. But avoid suggesting sweeping rewrites.
 - **`KJ_DBG` in non-test code**: Debug logging macro that must not appear in committed non-test code.
+- **Direct `new`/`delete`**: Use of `new` or `delete` instead of `kj::heap<T>()`, `kj::heapArray<T>()`, or other KJ memory utilities.
+- **Explicit `throw` statement**: Should use `KJ_ASSERT`, `KJ_REQUIRE`, `KJ_FAIL_ASSERT`, or `KJ_EXCEPTION` instead of bare `throw`.
+- **`[=]` lambda capture**: Never allowed — makes lifetime analysis impossible during review. Use explicit captures; `[&]` only for non-escaping lambdas.
 
 **LOW:**
 
 - **Missing `constexpr` / `consteval`**: Compile-time evaluable functions or constants not marked accordingly.
 - **Reinvented utility**: Custom code duplicating functionality already in `src/workerd/util/` (e.g., custom ring buffer, small set, state machine, weak reference pattern). Check the util directory before suggesting a new abstraction.
-- **Missing `override` or `noexcept` annotations**: Virtual method overrides missing `override`; functions that cannot throw missing `noexcept` (but remember the project convention of `noexcept(false)` destructors).
+- **Missing `override`**: Virtual method overrides missing the `override` specifier.
+- **`noexcept` declaration**: Project convention is to never declare functions `noexcept`. Explicit destructors should use `noexcept(false)`. Flag any `noexcept` that isn't `noexcept(false)` on a destructor.
+- **`/* */` block comments**: Project convention is `//` line comments only.
 
 ---
 
@@ -320,20 +320,9 @@ This codebase is Cloudflare's JavaScript/WebAssembly server runtime. Key technol
 
 ### KJ Library (Cap'n Proto)
 
-- `kj::Own<T>` - Owning pointer (like unique_ptr)
-- `kj::Rc<T>` - Reference counted pointer
-- `kj::Arc<T>` - Thread-safe atomic reference counted pointer
-- `kj::Maybe<T>` - Optional value
-- `kj::Promise<T>` - Async promise
-- `kj::Exception` - Exception type with traces
-- `kj::OneOf<T...>` - Type-safe union
-- `kj::Array<T>` - Array wrapper
-- `kj::ArrayPtr<T>` - Non-owning array view
-- `kj::String` - Immutable string
-- `kj::StringPtr` - Non-owning string view
-- `kj::Vector<T>` - Dynamic array
-- `kj::Function<T>` - Type-erased callable
-- Event loop based async I/O
+KJ replaces the C++ standard library with its own types and conventions. Key types include `kj::Own<T>`, `kj::Maybe<T>`, `kj::Promise<T>`, `kj::Array<T>`, `kj::String`, `kj::OneOf<T...>`, and `kj::Exception`. The library provides event-loop-based async I/O.
+
+For the full STL-to-KJ type mapping, naming conventions, ownership model, error handling rules, and other C++ style conventions, load the **kj-style** skill.
 
 ### Cap'n Proto
 
