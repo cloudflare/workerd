@@ -245,6 +245,10 @@ class PyodideMetadataReader: public jsg::Object {
   void setCpuLimitNearlyExceededCallback(
       jsg::Lock& js, kj::Array<kj::byte> wasm_memory, int sig_clock, int sig_flag);
 
+  // Condemns the isolate by aborting the IoContext and terminating JavaScript execution.
+  // This should be called when Pyodide encounters a fatal error that cannot be recovered from.
+  [[noreturn]] void condemnIsolate(jsg::Lock& js, kj::String reason);
+
   // Similar to Cloudflare::::getCompatibilityFlags in global-scope.c++, but the key difference is
   // that it returns experimental flags even if `experimental` is not enabled. This avoids a gotcha
   // where an experimental compat flag is enabled in our C++ code, but not in our JS code.
@@ -274,6 +278,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
     JSG_METHOD(setCpuLimitNearlyExceededCallback);
+    JSG_METHOD(condemnIsolate);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
