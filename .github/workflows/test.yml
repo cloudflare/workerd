@@ -89,7 +89,7 @@ jobs:
       os_name: linux
       arch_name: 'X64'
       suffix: ''
-      extra_bazel_args: '--config=ci-test --config=ci-linux'
+      extra_bazel_args: '--config=ci-test --config=ci-linux --config=wpt-report'
       upload_test_logs: true
       upload_binary: true
       build_container_images: true
