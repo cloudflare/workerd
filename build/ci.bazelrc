@@ -108,7 +108,6 @@ common:wpt-test --test_env=GEN_TEST_REPORT=1
 common:wpt-test --test_env=GEN_TEST_STATS=1
 
 # Config to produce a full WPT report. Also ensures that test targets are fetched, even under remote_download_minimal.
-common:wpt-report --config=wpt-test
 common:wpt-report --remote_download_regex=".*src/wpt/.*"
 
 # Let tests know they're running in CI

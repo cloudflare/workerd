@@ -110,7 +110,7 @@ jobs:
       image: ${{ matrix.image }}
       os_name: ${{ matrix.os-name }}
       phase: '-release'
-      extra_bazel_args: '--strip=always --config=${{matrix.bazel-config}} --config=ci-release --config=wpt-report'
+      extra_bazel_args: '--strip=always --config=${{matrix.bazel-config}} --config=ci-release --config=wpt-report --config=wpt-test'
       arch_name: ${{ matrix.target-arch }}
       upload_binary: true
       macos_use_lld: true
