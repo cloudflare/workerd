@@ -1062,18 +1062,17 @@ jsg::Promise<void> WritableStreamInternalController::write(
       KJ_IF_SOME(o, observer) {
         o->onChunkEnqueued(byteLength);
       }
-      auto ptr =
-          kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset, byteLength);
-      if (store->IsShared()) {
-        throwTypeErrorAndConsoleWarn(
-            "Cannot construct an array buffer from a shared backing store");
-      }
+
+      auto src = kj::arrayPtr(static_cast<kj::byte*>(store->Data()) + byteOffset, byteLength);
+      auto data = kj::heapArray<kj::byte>(src.size());
+      data.asPtr().copyFrom(src);
+      auto ptr = data.asPtr();
       queue.push_back(
           WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
             .event = kj::heap<Write>({
               .promise = kj::mv(prp.resolver),
               .totalBytes = store->ByteLength(),
-              .ownBytes = js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(store))),
+              .ownBytes = kj::mv(data),
               .bytes = ptr,
             })});
 
@@ -1956,9 +1955,18 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::write(
   // TODO(cleanup): Have this method accept a jsg::Lock& from the caller instead of using
   // v8::Isolate::GetCurrent();
   auto& js = jsg::Lock::current();
+
+  // For resizable ArrayBuffers or shared backing stores, we must eagerly copy
+  // the data. A resizable ArrayBuffer's logical byte length can be changed by user
+  // JS after write() returns but before the sink consumes the data, making the
+  // cached byteLength stale.
+  // But also just beacuse of V8 Sandbox requirements, we really should be copying
+  // the data from the ArrayBuffer anyway... We incur an allocation and copy cost
+  // here but that's to be expected.
+  auto backing = kj::heapArray<kj::byte>(byteLength);
+  backing.asPtr().copyFrom(kj::arrayPtr(data, byteLength));
   return IoContext::current().awaitIo(js,
-      writable->canceler.wrap(writable->sink->write(kj::arrayPtr(data, byteLength)))
-          .attach(js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, store))),
+      writable->canceler.wrap(writable->sink->write(backing)).attach(kj::mv(backing)),
       [](jsg::Lock&) {});
 }
 

@@ -349,7 +349,7 @@ class WritableStreamInternalController: public WritableStreamController {
   struct Write {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
     size_t totalBytes;
-    jsg::V8Ref<v8::ArrayBuffer> ownBytes;
+    kj::Array<kj::byte> ownBytes;
     kj::ArrayPtr<const kj::byte> bytes;
 
     JSG_MEMORY_INFO(Write) {
