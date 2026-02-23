@@ -1150,9 +1150,12 @@ class SpanObserver: public kj::Refcounted {
   // Report the span data. Called at the end of the span.
   //
   // This should always be called exactly once per observer at span completion time.
-  virtual void report(const Span& span) = 0;
+  virtual void onClose(const Span& span) = 0;
   // Report information about the span onset.
-  virtual void reportStart(kj::ConstString operationName, kj::Date startTime) = 0;
+  virtual void onOpen(kj::ConstString operationName, kj::Date startTime) = 0;
+
+  // Report that the span name has changed after the span was opened.
+  virtual void onUpdateName(kj::ConstString newName) = 0;
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available

@@ -583,12 +583,18 @@ kj::Own<SpanObserver> UserSpanObserver::newChild() {
   return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId);
 }
 
-void UserSpanObserver::report(const Span& span) {
+void UserSpanObserver::onClose(const Span& span) {
   submitter->submitSpan(spanId, parentSpanId, span);
 }
 
-void UserSpanObserver::reportStart(kj::ConstString operationName, kj::Date startTime) {
-  submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime) {
+  // We can't call this yet based on the downstream RPC interface backwards compatibility
+  // requirement. To be called in follow-up PR, see felix/102125-stw-cleanup-p2
+  // submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+}
+
+void UserSpanObserver::onUpdateName(kj::ConstString operationName) {
+  // span name updates are not supported in user tracing at this time.
 }
 
 // Provide I/O time to the tracing system for user spans.

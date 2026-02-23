@@ -219,8 +219,10 @@ class UserSpanObserver final: public SpanObserver {
   KJ_DISALLOW_COPY(UserSpanObserver);
 
   kj::Own<SpanObserver> newChild() override;
-  void report(const Span& span) override;
-  void reportStart(kj::ConstString operationName, kj::Date startTime) override;
+  void onOpen(kj::ConstString operationName, kj::Date startTime) override;
+  void onClose(const Span& span) override;
+  void onUpdateName(kj::ConstString newName) override;
+
   kj::Date getTime() override;
 
  private:
