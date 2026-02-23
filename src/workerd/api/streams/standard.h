@@ -550,6 +550,9 @@ class ReadableStreamBYOBRequest: public jsg::Object {
     kj::Rc<WeakRef<ReadableByteStreamController>> controller;
     jsg::V8Ref<v8::Uint8Array> view;
 
+    size_t originalBufferByteLength;
+    size_t originalByteOffsetPlusBytesFilled;
+
     Impl(jsg::Lock& js,
         kj::Own<ByteQueue::ByobRequest> readRequest,
         kj::Rc<WeakRef<ReadableByteStreamController>> controller);

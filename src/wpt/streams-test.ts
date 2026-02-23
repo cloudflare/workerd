@@ -352,26 +352,7 @@ export default {
     ],
   },
 
-  'readable-byte-streams/bad-buffers-and-views.any.js': {
-    comment: 'See individual comments',
-    expectedFailures: [
-      "ReadableStream with byte source: respond() throws if the BYOB request's buffer has been detached (in the closed state)",
-      // TODO(conform): The spec expects us to throw here because the supplied view
-      // has a different offset. Instead, we allow it because the view is zero length
-      // and the controller has been closed (we do the close and zero length check)
-      // first.
-      // assert_throws_js(RangeError, () => c.byobRequest.respondWithNewView(view));
-      'ReadableStream with byte source: respondWithNewView() throws if the supplied view has a different offset (in the closed state)',
-      // TODO(conform): The spec expects this to be a RangeError
-      "ReadableStream with byte source: respondWithNewView() throws if the supplied view's buffer is zero-length (in the closed state)",
-      // TODO(conform): The spec expects this to be a RangeError
-      "ReadableStream with byte source: respondWithNewView() throws if the supplied view's buffer has a different length (in the closed state)",
-      // TODO(conform): We currently do not throw here since reading causes the
-      // view here to be zero length, which is allowed when the stream is closed.
-      //assert_throws_js(TypeError, () => c.byobRequest.respondWithNewView(view));
-      "ReadableStream with byte source: enqueue() throws if the BYOB request's buffer has been detached (in the closed state)",
-    ],
-  },
+  'readable-byte-streams/bad-buffers-and-views.any.js': {},
   'readable-byte-streams/construct-byob-request.any.js': {},
   'readable-byte-streams/crashtests/tee-locked-stream.any.js': {},
   'readable-byte-streams/enqueue-with-detached-buffer.any.js': {},

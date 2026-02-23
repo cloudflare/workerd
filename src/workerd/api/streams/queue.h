@@ -910,6 +910,12 @@ class ByteQueue final {
 
     v8::Local<v8::Uint8Array> getView(jsg::Lock& js);
 
+    // Returns the byte length of the original underlying ArrayBuffer.
+    size_t getOriginalBufferByteLength(jsg::Lock& js) const;
+
+    // Returns the byte offset of the original view plus bytes filled.
+    size_t getOriginalByteOffsetPlusBytesFilled() const;
+
     JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
 
    private:

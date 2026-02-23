@@ -4,6 +4,11 @@
 
 #include "queue.h"
 
+#include <workerd/io/features.h>
+#include <workerd/jsg/jsg.h>
+
+#include <kj/common.h>
+
 #include <algorithm>
 
 namespace workerd::api {
@@ -872,15 +877,38 @@ v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
   return v8::Local<v8::Uint8Array>();
 }
 
+size_t ByteQueue::ByobRequest::getOriginalBufferByteLength(jsg::Lock& js) const {
+  KJ_IF_SOME(req, request) {
+    KJ_IF_SOME(size, req.pullInto.store.underlyingArrayBufferSize(js)) {
+      return size;
+    }
+  }
+  return 0;
+}
+
+size_t ByteQueue::ByobRequest::getOriginalByteOffsetPlusBytesFilled() const {
+  KJ_IF_SOME(req, request) {
+    return req.pullInto.store.getOffset() + req.pullInto.filled;
+  }
+  return 0;
+}
+
 #pragma endregion ByteQueue::ByobRequest
 
 ByteQueue::ByteQueue(size_t highWaterMark): impl(highWaterMark) {}
 
 void ByteQueue::close(jsg::Lock& js) {
-  KJ_IF_SOME(ready, impl.state.tryGetUnsafe<ByteQueue::QueueImpl::Ready>()) {
-    while (!ready.pendingByobReadRequests.empty()) {
-      ready.pendingByobReadRequests.front()->invalidate();
-      ready.pendingByobReadRequests.pop_front();
+  // Note: We intentionally do NOT invalidate pending byob requests here.
+  // According to the spec, the byobRequest should remain accessible after close
+  // so that respondWithNewView() can be called on it (which should throw
+  // appropriate errors for invalid views). The byob request will be invalidated
+  // when respond() or respondWithNewView() is called.
+  if (!FeatureFlags::get(js).getPedanticWpt()) {
+    KJ_IF_SOME(ready, impl.state.tryGetUnsafe<ByteQueue::QueueImpl::Ready>()) {
+      while (!ready.pendingByobReadRequests.empty()) {
+        ready.pendingByobReadRequests.front()->invalidate();
+        ready.pendingByobReadRequests.pop_front();
+      }
     }
   }
   impl.close(js);
