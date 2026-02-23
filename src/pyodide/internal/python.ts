@@ -21,6 +21,7 @@ import {
   LEGACY_VENDOR_PATH,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
+import { getPyodideVersionAdapter } from 'pyodide-internal:compat/index';
 
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
@@ -34,7 +35,6 @@ import {
   PythonUserError,
   PythonWorkersInternalError,
   reportError,
-  unreachable,
 } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
@@ -62,7 +62,7 @@ function prepareWasmLinearMemory(
     // the /session/metadata path is added.
     adjustSysPath(Module);
   }
-  if (Module.API.version !== '0.26.0a2') {
+  if (getPyodideVersionAdapter(Module).earlyFinalizeBootstrap) {
     finalizeBootstrap(Module, customSerializedObjects);
   }
 }
@@ -140,7 +140,7 @@ function makeSetTimeout(Module: Module): typeof setTimeout {
       // In case an Exceeded CPU occurred just as Python was exiting, there may be one waiting that
       // will interrupt the wrong task. Clear signals before entering the task.
       // This is covered by cpu-limit-exceeded.ew-test "async_trip" test.
-      clearSignals(Module);
+      getPyodideVersionAdapter(Module).clearSignals(Module);
       handler();
     }
     if (timeout) {
@@ -151,61 +151,12 @@ function makeSetTimeout(Module: Module): typeof setTimeout {
   } as typeof setTimeout;
 }
 
-function getSignalClockAddr(Module: Module): number {
-  if (Module.API.version !== '0.28.2') {
-    throw new PythonWorkersInternalError(
-      'getSignalClockAddr only supported in 0.28.2'
-    );
-  }
-  // This is the address here:
-  // https://github.com/python/cpython/blob/main/Python/emscripten_signal.c#L42
-  //
-  // Since the symbol isn't exported, we can't access it directly. Instead, we used wasm-objdump and
-  // searched for the call site to _Py_CheckEmscriptenSignals_Helper(), then read the offset out of
-  // the assembly code.
-  //
-  // TODO: Export this symbol in the next Pyodide release so we can stop using the magic number.
-  const emscripten_signal_clock_offset = 3171536;
-  return Module.___memory_base.value + emscripten_signal_clock_offset;
-}
-
 function setupRuntimeSignalHandling(Module: Module): void {
   Module.Py_EmscriptenSignalBuffer = new Uint8Array(1);
-  const version = Module.API.version;
-  if (version === '0.26.0a2') {
-    return;
-  }
-  if (version === '0.28.2') {
-    // The callback sets signal_clock to 0 and signal_handling to 1. It has to be in C++ because we
-    // don't hold the isolate lock when we call it. JS code would be:
-    //
-    // function callback() { Module.HEAP8[getSignalClockAddr(Module)] = 0;
-    //    Module.HEAP8[Module._Py_EMSCRIPTEN_SIGNAL_HANDLING] = 1;
-    // }
-    setCpuLimitNearlyExceededCallback(
-      Module.HEAP8,
-      getSignalClockAddr(Module),
-      Module._Py_EMSCRIPTEN_SIGNAL_HANDLING
-    );
-    return;
-  }
-  unreachable(version);
-}
-
-const SIGXCPU = 24;
-
-export function clearSignals(Module: Module): void {
-  if (Module.API.version === '0.28.2') {
-    // In case the previous request was aborted, make sure that:
-    // 1. a sigint is waiting in the signal buffer
-    // 2. signal handling is off
-    //
-    // We will turn signal handling on as part of triggering the interrupt, having it on otherwise
-    // just wastes cycles.
-    Module.Py_EmscriptenSignalBuffer[0] = SIGXCPU;
-    Module.HEAPU32[getSignalClockAddr(Module) / 4] = 1;
-    Module.HEAPU32[Module._Py_EMSCRIPTEN_SIGNAL_HANDLING / 4] = 0;
-  }
+  getPyodideVersionAdapter(Module).setupSignalHandling(
+    Module,
+    setCpuLimitNearlyExceededCallback
+  );
 }
 
 function compileModuleFromReadOnlyFS(
@@ -239,6 +190,7 @@ export function loadPyodide(
     const Module = enterJaegerSpan('instantiate_emscripten', () =>
       SetupEmscripten.getModule()
     );
+    getPyodideVersionAdapter(Module);
     Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
     Module.API.config.jsglobals = globalThis;
     if (isWorkerd) {
@@ -270,7 +222,7 @@ export function loadPyodide(
     // present in snapshot memory.
     mountWorkerFiles(Module);
 
-    if (Module.API.version === '0.26.0a2') {
+    if (!getPyodideVersionAdapter(Module).earlyFinalizeBootstrap) {
       // Finish setting up Pyodide's ffi so we can use the nice Python interface
       // In newer versions we already did this in prepareWasmLinearMemory.
       finalizeBootstrap(Module, customSerializedObjects);

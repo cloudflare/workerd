@@ -128,6 +128,7 @@ def pyodide_static():
     internal_modules = native.glob(
         [
             "internal/*.ts",
+            "internal/compat/*.ts",
             "internal/topLevelEntropy/*.ts",
             "types/*.ts",
             "types/*/*.ts",
@@ -287,7 +288,9 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
                 _out_path("pyodide.asm.js", version),
                 "internal/util.ts",
-            ],
+            ] + native.glob([
+                "internal/compat/*.ts",
+            ]),
             config = "internal/pool/esbuild.config.mjs",
             entry_point = "internal/pool/emscriptenSetup.ts",
             external = [

@@ -17,11 +17,7 @@ import {
   WORKERD_INDEX_URL,
   WORKFLOWS_ENABLED,
 } from 'pyodide-internal:metadata';
-import {
-  beforeRequest,
-  clearSignals,
-  loadPyodide,
-} from 'pyodide-internal:python';
+import { beforeRequest, loadPyodide } from 'pyodide-internal:python';
 import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
   LOADED_SNAPSHOT_TYPE,
@@ -33,6 +29,7 @@ import {
   reportError,
 } from 'pyodide-internal:util';
 export { createImportProxy } from 'pyodide-internal:serializeJsModule';
+import { getPyodideVersionAdapter } from 'pyodide-internal:compat/index';
 
 type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
 
@@ -132,13 +129,10 @@ async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
     );
   }
   const mainModuleName = MAIN_MODULE_NAME.slice(0, -3);
-  if (pyodide.version === '0.26.0a2') {
-    return pyodide.pyimport(mainModuleName);
-  } else {
-    return await pyodide._module.API.pyodide_base.pyimport_impl.callPromising(
-      mainModuleName
-    );
-  }
+  return await getPyodideVersionAdapter(pyodide._module).pyimportMain(
+    pyodide,
+    mainModuleName
+  );
 }
 
 let pyodidePromise: Promise<Pyodide> | undefined;
@@ -193,20 +187,9 @@ async function applyPatch(pyodide: Pyodide, patchName: string): Promise<void> {
 
 async function injectWorkersApi(pyodide: Pyodide): Promise<void> {
   const sitePackages = pyodide.FS.sitePackages;
-  if (pyodide.version === '0.26.0a2') {
-    // Inject at cloudflare.workers for backwards compatibility
-    pyodide.FS.mkdirTree(`${sitePackages}/cloudflare/workers`);
-    await injectSitePackagesModule(
-      pyodide,
-      'workers-api/src/workers/__init__',
-      'cloudflare/workers/__init__'
-    );
-    await injectSitePackagesModule(
-      pyodide,
-      'workers-api/src/workers/_workers',
-      'cloudflare/workers/_workers'
-    );
-  }
+  await getPyodideVersionAdapter(
+    pyodide._module
+  ).injectLegacyCloudflareNamespace(pyodide, injectSitePackagesModule);
   // The SDK was moved from `cloudflare.workers` to just `workers`.
   // Create workers package structure with workflows submodule
   pyodide.FS.mkdir(`${sitePackages}/workers`);
@@ -246,16 +229,11 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
       await injectWorkersApi(pyodide);
     }
 
-    // Install patches as needed
-    if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
-      await applyPatch(pyodide, 'aiohttp');
-    }
-    // Other than the oldest version of httpx, we apply the patch at the build step.
-    if (
-      pyodide._module.API.version === '0.26.0a2' &&
-      TRANSITIVE_REQUIREMENTS.has('httpx')
-    ) {
-      await applyPatch(pyodide, 'httpx');
+    // Apply version-specific runtime patches
+    for (const patchName of getPyodideVersionAdapter(
+      pyodide._module
+    ).getRequiredRuntimePatches(TRANSITIVE_REQUIREMENTS)) {
+      await applyPatch(pyodide, patchName);
     }
   });
 }
@@ -302,7 +280,7 @@ async function doPyCallHelper(
   args: any[]
 ): Promise<any> {
   const pyodide = await getPyodide();
-  clearSignals(pyodide._module);
+  getPyodideVersionAdapter(pyodide._module).clearSignals(pyodide._module);
   try {
     if (pyfunc.callWithOptions) {
       return await pyfunc.callWithOptions(
