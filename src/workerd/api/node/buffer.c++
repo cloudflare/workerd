@@ -243,11 +243,25 @@ jsg::BufferSource BufferUtil::concat(
   auto view = dest.asArrayPtr();
 
   for (auto& src: list) {
+    // Guard against resizable ArrayBuffers whose underlying buffer may have been
+    // resized by a getter during the array-unwrap phase, making the cached
+    // byteLength stale. Re-read the live ArrayBuffer byte length and clamp.
+    size_t effectiveSize = 0;
+    KJ_IF_SOME(abSize, src.underlyingArrayBufferSize(js)) {
+      auto offset = src.getOffset();
+      effectiveSize = kj::min(src.size(), abSize > offset ? abSize - offset : 0);
+    }
+
+    if (effectiveSize == 0) continue;
+    // NOTE: ptr.size() may exceed effectiveSize because BackingStore caches byteLength
+    // from construction time, not the live ArrayBuffer size. Always use effectiveSize
+    // (which reflects the re-validated live size) for copy bounds.
+
     auto ptr = src.asArrayPtr();
     if (src.size() == 0) continue;
     // The amount to copy is the lesser of the remaining space in the destination or
-    // the size of the chunk we're copying.
-    auto amountToCopy = kj::min(src.size(), view.size());
+    // the effective size of the chunk we're copying.
+    auto amountToCopy = kj::min(effectiveSize, view.size());
     view.first(amountToCopy).copyFrom(ptr.first(amountToCopy));
     view = view.slice(amountToCopy);
     // If there's no more space in the destination, we're done.
