@@ -1705,21 +1705,20 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override {
-    pendingOpen = PendingOpen{spanId, parentSpanId, kj::mv(operationName), startTime};
+    if (isPredictableModeForTest()) {
+      startTime = kj::UNIX_EPOCH;
+    }
+    workerTracer->addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
   }
 
   void submitSpanClose(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::Date endTime,
       Span::TagMap&& tags) override {
-    auto& open = KJ_ASSERT_NONNULL(pendingOpen, "submitSpanClose without prior submitSpanOpen");
-    tracing::CompleteSpan span(open.spanId, open.parentSpanId, kj::mv(open.operationName),
-        open.startTime, endTime, kj::mv(tags));
     if (isPredictableModeForTest()) {
-      span.startTime = span.endTime = kj::UNIX_EPOCH;
+      endTime = kj::UNIX_EPOCH;
     }
-    workerTracer->addSpan(kj::mv(span));
-    pendingOpen = kj::none;
+    workerTracer->addSpanClose(spanId, parentSpanId, endTime, kj::mv(tags));
   }
 
   tracing::SpanId makeSpanId() override {
@@ -1728,13 +1727,6 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
   KJ_DISALLOW_COPY_AND_MOVE(SequentialSpanSubmitter);
 
  private:
-  struct PendingOpen {
-    tracing::SpanId spanId;
-    tracing::SpanId parentSpanId;
-    kj::ConstString operationName;
-    kj::Date startTime;
-  };
-  kj::Maybe<PendingOpen> pendingOpen;
   uint64_t nextSpanId = 1;
   kj::Own<WorkerTracer> workerTracer;
 };

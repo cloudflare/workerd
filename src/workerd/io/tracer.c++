@@ -123,8 +123,10 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   }
 }
 
-void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
-  // This is where we'll actually encode the span.
+void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
+    tracing::SpanId parentSpanId,
+    kj::ConstString operationName,
+    kj::Date startTime) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -133,13 +135,37 @@ void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
   // variable for it and it can't cause truncation.
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
 
-  // Note: adjustSpanTime() is no longer needed here. SpanBuilder::end() now obtains the end time
-  // from obs->getTime() (which returns I/O time for user tracing), so span times are correct at
-  // source.
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  // For SpanOpen, an all-zero spanId is interpreted as having no spans above this one, thus we use
+  // the Onset spanId instead (taken from topLevelContext). We go to great lengths to rule out
+  // getting an all-zero spanId by chance (see SpanId::fromEntropy()), so this should be safe.
+  tracing::SpanId resolvedParent = parentSpanId;
+  if (resolvedParent == tracing::SpanId::nullId) {
+    resolvedParent = topLevelContext.getSpanId();
+  }
+  auto spanOpenContext = tracing::InvocationSpanContext(
+      topLevelContext.getTraceId(), topLevelContext.getInvocationId(), resolvedParent);
 
+  size_t spanNameSize = operationName.size();
+  tailStreamWriter->report(
+      spanOpenContext, tracing::SpanOpen(spanId, kj::mv(operationName)), startTime, spanNameSize);
+}
+
+void WorkerTracer::addSpanClose(
+    tracing::SpanId spanId, tracing::SpanId parentSpanId, kj::Date endTime, Span::TagMap&& tags) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  auto spanComponentContext = tracing::InvocationSpanContext(
+      topLevelContext.getTraceId(), topLevelContext.getInvocationId(), spanId);
+
+  // Calculate tag sizes for size accounting.
   size_t spanTagsSize = 0;
-  size_t spanNameSize = span.operationName.size();
-  for (const Span::TagMap::Entry& tag: span.tags) {
+  for (const Span::TagMap::Entry& tag: tags) {
     spanTagsSize += tag.key.size();
     KJ_SWITCH_ONEOF(tag.value) {
       KJ_CASE_ONEOF(str, kj::ConstString) {
@@ -155,32 +181,14 @@ void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
     }
   }
 
-  // Span events are transmitted together for now.
-  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  // Compose span events. For SpanOpen, an all-zero spanId is interpreted as having no spans above
-  // this one, thus we use the Onset spanId instead (taken from topLevelContext). We go to great
-  // lengths to rule out getting an all-zero spanId by chance (see SpanId::fromEntropy()), so this
-  // should be safe.
-  tracing::SpanId parentSpanId = span.parentSpanId;
-  if (parentSpanId == tracing::SpanId::nullId) {
-    parentSpanId = topLevelContext.getSpanId();
-  }
-  // TODO(o11y): Actually report the spanOpen event at span creation time
-  auto spanOpenContext = tracing::InvocationSpanContext(
-      topLevelContext.getTraceId(), topLevelContext.getInvocationId(), parentSpanId);
-  auto spanComponentContext = tracing::InvocationSpanContext(
-      topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
-
-  tailStreamWriter->report(spanOpenContext,
-      tracing::SpanOpen(span.spanId, span.operationName.clone()), span.startTime, spanNameSize);
   // If a span manages to exceed the size limit, truncate it by not providing span attributes.
-  if (span.tags.size() && spanTagsSize <= MAX_TRACE_BYTES) {
-    tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
+  if (tags.size() && spanTagsSize <= MAX_TRACE_BYTES) {
+    tracing::CustomInfo attr = KJ_MAP(tag, tags) {
       return tracing::Attribute(tag.key.clone(), kj::mv(tag.value));
     };
-    tailStreamWriter->report(spanComponentContext, kj::mv(attr), span.startTime, spanTagsSize);
+    tailStreamWriter->report(spanComponentContext, kj::mv(attr), endTime, spanTagsSize);
   }
-  tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime, 0);
+  tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), endTime, 0);
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
@@ -476,9 +484,17 @@ void UserSpanObserver::onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector
   submitter->submitSpanClose(spanId, parentSpanId, endTime, kj::mv(tags));
 }
 
-// Provide I/O time to the tracing system for user spans.
+// Provide I/O time to the tracing system for user spans. If the IoContext is no longer available
+// (e.g. span destroyed during coroutine cleanup after the IoContext is gone), fall back to system
+// clock. This mirrors the fallback logic that adjustSpanTime() used to provide via weakIoContext.
 kj::Date UserSpanObserver::getTime() {
-  return IoContext::current().now();
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
+    return context.now();
+  }
+  // IoContext is gone — we're in destructor cleanup. System clock is acceptable here since we're
+  // not in user code (Spectre mitigation doesn't apply to cleanup paths).
+  LOG_WARNING_PERIODICALLY("UserSpanObserver::getTime() called without IoContext");
+  return kj::systemPreciseCalendarClock().now();
 }
 
 }  // namespace workerd

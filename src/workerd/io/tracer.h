@@ -31,8 +31,16 @@ class BaseTracer: public kj::Refcounted {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) = 0;
-  // Add a span.
-  virtual void addSpan(tracing::CompleteSpan&& span) = 0;
+  // Add a span open event.
+  virtual void addSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) = 0;
+  // Add a span close event.
+  virtual void addSpanClose(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::Date endTime,
+      Span::TagMap&& tags) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -125,7 +133,14 @@ class WorkerTracer final: public BaseTracer {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) override;
-  void addSpan(tracing::CompleteSpan&& span) override;
+  void addSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) override;
+  void addSpanClose(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::Date endTime,
+      Span::TagMap&& tags) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,

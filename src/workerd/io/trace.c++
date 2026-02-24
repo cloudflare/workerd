@@ -1486,44 +1486,6 @@ TailEvent TailEvent::clone() const {
       sequence, cloneEvent(event));
 }
 
-void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) const {
-  builder.setOperationName(operationName.asPtr());
-  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setSpanId(spanId);
-  builder.setParentSpanId(parentSpanId);
-
-  auto tagsParam = builder.initTags(tags.size());
-  auto i = 0;
-  for (auto& tag: tags) {
-    auto tagParam = tagsParam[i++];
-    tagParam.setKey(tag.key.asPtr());
-    serializeTagValue(tagParam.initValue(), tag.value);
-  }
-}
-
-CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
-    : spanId(reader.getSpanId()),
-      parentSpanId(reader.getParentSpanId()),
-      operationName(kj::str(reader.getOperationName())),
-      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
-      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
-  auto tagsParam = reader.getTags();
-  tags.reserve(tagsParam.size());
-  for (auto tagParam: tagsParam) {
-    tags.insert(kj::ConstString(kj::heapString(tagParam.getKey())),
-        deserializeTagValue(tagParam.getValue()));
-  }
-}
-
-CompleteSpan CompleteSpan::clone() const {
-  CompleteSpan copy(spanId, parentSpanId, operationName.clone(), startTime, endTime);
-  copy.tags.reserve(tags.size());
-  for (auto& tag: tags) {
-    copy.tags.insert(tag.key.clone(), spanTagClone(tag.value));
-  }
-  return copy;
-}
 }  // namespace tracing
 
 // ======================================================================================

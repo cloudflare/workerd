@@ -619,36 +619,6 @@ struct Attribute final {
 using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
 
-struct CompleteSpan {
-  // Represents a completed span within user tracing.
-  tracing::SpanId spanId;
-  tracing::SpanId parentSpanId;
-
-  kj::ConstString operationName;
-  kj::Date startTime;
-  kj::Date endTime;
-  // Should be Span::TagMap, but we can't forward-declare that.
-  kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
-
-  CompleteSpan(rpc::UserSpanData::Reader reader);
-  void copyTo(rpc::UserSpanData::Builder builder) const;
-  CompleteSpan clone() const;
-  explicit CompleteSpan(tracing::SpanId spanId,
-      tracing::SpanId parentSpanId,
-      kj::ConstString operationName,
-      kj::Date startTime,
-      kj::Date endTime,
-      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
-          kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
-      : spanId(spanId),
-        parentSpanId(parentSpanId),
-        operationName(kj::mv(operationName)),
-        startTime(startTime),
-        endTime(endTime),
-        tags(kj::mv(tags)) {}
-  kj::String toString() const;
-};
-
 // A Return mark is used to mark the point at which a span operation returned
 // a value. For instance, when a fetch subrequest response is received, or when
 // the fetch handler returns a Response. Importantly, it does not signal that the
