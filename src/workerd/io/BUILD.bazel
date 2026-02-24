@@ -491,13 +491,13 @@ wd_test(
     data = [
         "wasm-shutdown-signal-test.js",
         "//src/workerd/io/wasm:signal-basic.wasm",
-        "//src/workerd/io/wasm:signal-partial-exports.wasm",
-        "//src/workerd/io/wasm:signal-bounds-check-overflow.wasm",
         "//src/workerd/io/wasm:signal-bounds-check-edge.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-overflow.wasm",
         "//src/workerd/io/wasm:signal-bounds-check-valid.wasm",
         "//src/workerd/io/wasm:signal-decoy-memory.wasm",
         "//src/workerd/io/wasm:signal-imported-memory.wasm",
         "//src/workerd/io/wasm:signal-memory-reclaim.wasm",
+        "//src/workerd/io/wasm:signal-partial-exports.wasm",
         "//src/workerd/io/wasm:signal-preinit.wasm",
     ],
 )

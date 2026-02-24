@@ -69,7 +69,9 @@ export let registrationZerosPreinitMemory = {
   async test() {
     const instance = await WebAssembly.instantiate(preinitModule);
     if (instance.exports.get_signal() !== 0) {
-      throw new Error('Expected signal to be zeroed, got ' + instance.exports.get_signal());
+      throw new Error(
+        'Expected signal to be zeroed, got ' + instance.exports.get_signal()
+      );
     }
   },
 };
@@ -79,7 +81,9 @@ export let syncRegistrationZerosPreinitMemory = {
   test() {
     const instance = new WebAssembly.Instance(preinitModule);
     if (instance.exports.get_signal() !== 0) {
-      throw new Error('Expected signal to be zeroed, got ' + instance.exports.get_signal());
+      throw new Error(
+        'Expected signal to be zeroed, got ' + instance.exports.get_signal()
+      );
     }
   },
 };
@@ -122,7 +126,7 @@ export let importedMemoryDetected = {
   async test() {
     const memory = new WebAssembly.Memory({ initial: 1 });
     const instance = await WebAssembly.instantiate(importedMemoryModule, {
-      env: { memory }
+      env: { memory },
     });
     // If registration threw, we wouldn't get here.
     if (instance.exports.get_signal() !== 0) {
@@ -140,8 +144,8 @@ export let decoyMemoryIgnored = {
     const instance = await WebAssembly.instantiate(decoyModule, {
       env: {
         log: () => {},
-        decoy_memory: decoyMemory
-      }
+        decoy_memory: decoyMemory,
+      },
     });
     // The shim should have found no memory (internal memory is inaccessible).
     // Verify decoy memory is untouched (we can't trigger writeWasmShutdownSignals
@@ -158,7 +162,7 @@ export let syncInstanceImportedMemory = {
   test() {
     const memory = new WebAssembly.Memory({ initial: 1 });
     const instance = new WebAssembly.Instance(importedMemoryModule, {
-      env: { memory }
+      env: { memory },
     });
     if (instance.exports.get_signal() !== 0) {
       throw new Error('Expected signal to be 0 initially');

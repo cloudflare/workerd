@@ -115,8 +115,7 @@ class IsolateLimitEnforcer: public kj::Refcounted {
     // Silently skip registration if either address would fall outside the module's linear memory.
     // This avoids breaking user code that happens to export the conventional globals with
     // addresses that don't fit — the module simply won't receive the shutdown signal.
-    if (static_cast<size_t>(signalOffset) + WASM_SIGNAL_FIELD_BYTES >
-        backingStore->ByteLength()) {
+    if (static_cast<size_t>(signalOffset) + WASM_SIGNAL_FIELD_BYTES > backingStore->ByteLength()) {
       return;
     }
     if (static_cast<size_t>(terminatedOffset) + WASM_SIGNAL_FIELD_BYTES >
