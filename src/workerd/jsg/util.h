@@ -302,7 +302,7 @@ struct RemoveMaybe_<kj::Maybe<T>> {
   using Type = T;
 };
 template <typename T>
-using RemoveMaybe = typename RemoveMaybe_<T>::Type;
+using RemoveMaybe = RemoveMaybe_<T>::Type;
 
 template <typename T>
 struct RemoveRvalueRef_ {
@@ -313,7 +313,7 @@ struct RemoveRvalueRef_<T&&> {
   using Type = T;
 };
 template <typename T>
-using RemoveRvalueRef = typename RemoveRvalueRef_<T>::Type;
+using RemoveRvalueRef = RemoveRvalueRef_<T>::Type;
 
 enum class JsgKind { RESOURCE, STRUCT, EXTENSION };
 
@@ -459,7 +459,7 @@ struct Detector<Default, kj::VoidSfinae<Op<Args...>>, Op, Args...> {
 
 // A typedef for `Op<Args...>` if that template is instantiable, otherwise `Default`.
 template <typename Default, template <typename...> class Op, typename... Args>
-using DetectedOr = typename _::Detector<Default, void, Op, Args...>::Type;
+using DetectedOr = _::Detector<Default, void, Op, Args...>::Type;
 
 // True if Op<Args...> is instantiable, false otherwise. This is basically the same as
 // std::experimental::is_detected from the library fundamentals TS v2.

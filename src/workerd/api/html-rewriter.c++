@@ -293,11 +293,11 @@ class Rewriter final: public WritableStreamSink {
   kj::Vector<kj::Own<RegisteredHandler>> registeredEndTagHandlers;
   // TODO(perf) Don't store Owns, same as `registeredHandlers` above.
 
-  template <typename T, typename CType = typename T::CType>
+  template <typename T, typename CType = T::CType>
   static lol_html_rewriter_directive_t thunk(CType* content, void* userdata);
-  template <typename T, typename CType = typename T::CType>
+  template <typename T, typename CType = T::CType>
   lol_html_rewriter_directive_t thunkImpl(CType* content, RegisteredHandler& registration);
-  template <typename T, typename CType = typename T::CType>
+  template <typename T, typename CType = T::CType>
   kj::Promise<void> thunkPromise(CType* content, RegisteredHandler& registration);
 
   // Eagerly free this handler. Should only be called if we're confident the handler will never be

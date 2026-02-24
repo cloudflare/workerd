@@ -37,7 +37,7 @@ template <typename T>
 concept IsRef = RefTraits_<T>::isRef;
 
 template <IsRef T>
-using RefType = typename RefTraits_<T>::Type;
+using RefType = RefTraits_<T>::Type;
 
 // =======================================================================================
 // Optional type detection

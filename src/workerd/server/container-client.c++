@@ -162,7 +162,7 @@ kj::StringPtr signalToString(uint32_t signal) {
 }  // namespace
 
 template <typename T>
-typename T::Builder decodeJsonResponse(kj::StringPtr response) {
+T::Builder decodeJsonResponse(kj::StringPtr response) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<T>();
   capnp::MallocMessageBuilder message;

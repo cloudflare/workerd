@@ -1075,7 +1075,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
         traceContext.setTag("cloudflare.r2.request.start_after"_kjc, d.value.asPtr());
       }
       KJ_IF_SOME(i, o.include) {
-        using Field = typename jsg::Dict<uint16_t>::Field;
+        using Field = jsg::Dict<uint16_t>::Field;
         static const std::array<Field, 2> fields = {
           Field{
             .name = kj::str("httpMetadata"),

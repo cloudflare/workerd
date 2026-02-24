@@ -400,7 +400,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       ResolveOption option = ResolveOption::DEFAULT,
       ResolveMethod method = ResolveMethod::IMPORT,
       kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) override {
-    using Key = typename Entry::Key;
+    using Key = Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
         return entry->module(js, observer, referrer, method);
@@ -501,7 +501,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     // internal modules. If the worker bundle provided an override for the
     // built-in module, then the built-in was never registered and won't
     // be found.
-    using Key = typename Entry::Key;
+    using Key = Entry::Key;
     auto resolveOption = ModuleRegistry::ResolveOption::DEFAULT;
     if (entries.find(Key(referrer, Type::BUNDLE)) != kj::none) {
       // The referrer is found in the module bundle, so we use the default.
@@ -628,7 +628,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   };
 
   struct SpecifierHashCallbacks {
-    using Key = typename Entry::Key;
+    using Key = Entry::Key;
 
     const Key keyForRow(const kj::Own<Entry>& row) const {
       return Key(row->specifier, row->type);

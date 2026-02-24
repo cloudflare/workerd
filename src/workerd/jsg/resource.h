@@ -1695,8 +1695,8 @@ class ResourceWrapper {
   inline void initTypeWrapper() {
     TypeWrapper& wrapper = static_cast<TypeWrapper&>(*this);
     wrapper.resourceTypeMap.insert(typeid(T),
-        [](TypeWrapper& wrapper, v8::Isolate* isolate) ->
-        typename DynamicResourceTypeMap<TypeWrapper>::DynamicTypeInfo {
+        [](TypeWrapper& wrapper,
+            v8::Isolate* isolate) -> DynamicResourceTypeMap<TypeWrapper>::DynamicTypeInfo {
       kj::Maybe<typename DynamicResourceTypeMap<TypeWrapper>::ReflectionInitializer&> rinit;
       if constexpr (T::jsgHasReflection) {
         rinit = [](jsg::Object& object, TypeWrapper& wrapper) {

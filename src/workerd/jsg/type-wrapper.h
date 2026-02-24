@@ -544,7 +544,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     using V = kj::Decay<U>;
 
     if constexpr (isArguments<V>()) {
-      using E = typename V::ElementType;
+      using E = V::ElementType;
       size_t size = args.Length() >= parameterIndex ? args.Length() - parameterIndex : 0;
       auto builder = kj::heapArrayBuilder<E>(size);
       for (size_t i = parameterIndex; i < args.Length(); i++) {

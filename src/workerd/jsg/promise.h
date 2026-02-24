@@ -466,7 +466,7 @@ class Promise<kj::Promise<T>> {
 template <typename T>
 struct PromiseResolverPair {
   Promise<T> promise;
-  typename Promise<T>::Resolver resolver;
+  Promise<T>::Resolver resolver;
 
   JSG_MEMORY_INFO(PromiseResolverPair) {
     tracker.trackField("promise", promise);

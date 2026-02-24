@@ -58,8 +58,8 @@ struct TestFixture {
   // For void callbacks run waits for their completion, for promises waits for their resolution
   // and returns the result.
   template <typename CallBack>
-  auto runInIoContext(CallBack&& callback) ->
-      typename RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
+  auto runInIoContext(CallBack&& callback)
+      -> RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
     auto request = createIncomingRequest();
     kj::WaitScope* waitScope;
     KJ_IF_SOME(ws, this->waitScope) {

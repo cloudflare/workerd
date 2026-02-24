@@ -15,6 +15,8 @@
 -Iexternal/+http+ncrypto/include
 -isystembazel-bin/external/sqlite3+
 -Isrc
+-isystem/usr/lib/llvm-22/include/c++/v1
+-isystem/usr/lib/llvm-22/lib/clang/22/include
 -isystem/usr/lib/llvm-21/include/c++/v1
 -isystem/usr/lib/llvm-21/lib/clang/21/include
 -isystem/usr/lib/llvm-20/include/c++/v1

@@ -921,7 +921,7 @@ void maybeResolvePromise(
 }
 
 inline void maybeResolvePromise(
-    jsg::Lock& js, kj::Maybe<typename jsg::Promise<void>::Resolver>& maybeResolver) {
+    jsg::Lock& js, kj::Maybe<jsg::Promise<void>::Resolver>& maybeResolver) {
   KJ_IF_SOME(resolver, maybeResolver) {
     resolver.resolve(js);
     maybeResolver = kj::none;

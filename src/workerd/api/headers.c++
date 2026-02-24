@@ -602,7 +602,7 @@ void Headers::setUnguarded(jsg::Lock& js, kj::String name, kj::String value) {
       return;
     }
     KJ_CASE_ONEOF(n, kj::String) {
-      using Ret = typename decltype(uncommonHeaders)::Entry;
+      using Ret = decltype(uncommonHeaders)::Entry;
       auto& header = uncommonHeaders.findOrCreate(n, [&] -> Ret {
         kj::Maybe<kj::String> maybeName;
         if (name != n) {
@@ -659,7 +659,7 @@ void Headers::appendUnguarded(jsg::Lock& js, kj::String name, kj::String value) 
       KJ_IF_SOME(existing, uncommonHeaders.find(n)) {
         existing->values.add(kj::mv(value));
       } else {
-        using Ret = typename decltype(uncommonHeaders)::Entry;
+        using Ret = decltype(uncommonHeaders)::Entry;
         auto& header = uncommonHeaders.findOrCreate(n, [&] -> Ret {
           kj::Maybe<kj::String> maybeName;
           if (name != n) {

@@ -31,7 +31,6 @@ Checks: >
   misc-throw-by-value-catch-by-reference,
   misc-unused-alias-decls,
   misc-unused-using-decls,
-  modernize-avoid-variadic-functions,
   modernize-loop-convert,
   modernize-macro-to-enum,
   modernize-redundant-void-arg,
@@ -42,6 +41,7 @@ Checks: >
   modernize-use-emplace,
   modernize-use-equals-delete,
   modernize-use-nullptr,
+  modernize-use-string-view,
   modernize-use-transparent-functors,
   modernize-use-using,
   performance-*,
@@ -58,14 +58,15 @@ Checks: >
   readability-enum-initial-value,
   readability-redundant-*,
   -readability-redundant-inline-specifier,
+  -readability-redundant-parentheses,
   -readability-redundant-smartptr-get,
   readability-reference-to-constructed-temporary,
   readability-static-accessed-through-instance,
   readability-use-concise-preprocessor-directives
 
 # TODO: Fix and enable
+# bugprone-derived-method-shadowing-base-method
 # bugprone-parent-virtual-call
-# bugprone-return-const-ref-from-parameter
 # cppcoreguidelines-interfaces-global-init
 # cppcoreguidelines-missing-std-forward
 # cppcoreguidelines-pro-type-member-init
@@ -73,6 +74,7 @@ Checks: >
 # modernize-use-override
 # modernize-use-ranges
 # readability-avoid-return-with-void-value
+# modernize-avoid-variadic-functions
 # readability-convert-member-functions-to-static
 # readability-redundant-smartptr-get
 # readability-use-anyofallof

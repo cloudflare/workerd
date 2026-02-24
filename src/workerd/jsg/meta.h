@@ -52,7 +52,7 @@ struct ArgumentIndexes_<Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...)
   using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
 };
 template <typename T>
-using ArgumentIndexes = typename ArgumentIndexes_<T>::Indexes;
+using ArgumentIndexes = ArgumentIndexes_<T>::Indexes;
 // ArgumentIndexes<SomeMethodType> expands to kj::_::Indexes<0, 1, 2, 3, ..., n-1>, where n is the
 // number of arguments to the method, not counting the magic Lock or FunctionCallbackInfo parameter
 // (if any).

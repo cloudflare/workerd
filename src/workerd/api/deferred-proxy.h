@@ -117,7 +117,7 @@ template <typename T, typename... Args>
 class DeferredProxyCoroutine: public kj::_::PromiseNode,
                               public kj::_::CoroutineMixin<DeferredProxyCoroutine<T, Args...>, T> {
   using InnerCoroutineAdapter =
-      typename kj::_::stdcoro::coroutine_traits<kj::Promise<T>, Args...>::promise_type;
+      kj::_::stdcoro::coroutine_traits<kj::Promise<T>, Args...>::promise_type;
 
  public:
   using Handle = kj::_::stdcoro::coroutine_handle<DeferredProxyCoroutine>;

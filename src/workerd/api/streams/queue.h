@@ -152,8 +152,8 @@ template <typename Self>
 class QueueImpl final {
  public:
   using ConsumerImpl = ConsumerImpl<Self>;
-  using Entry = typename Self::Entry;
-  using State = typename Self::State;
+  using Entry = Self::Entry;
+  using State = Self::State;
 
   explicit QueueImpl(size_t highWaterMark)
       : highWaterMark(highWaterMark),
@@ -362,9 +362,9 @@ class ConsumerImpl final {
     KJ_DISALLOW_COPY_AND_MOVE(UpdateBackpressureScope);
   };
 
-  using ReadRequest = typename Self::ReadRequest;
-  using Entry = typename Self::Entry;
-  using QueueEntry = typename Self::QueueEntry;
+  using ReadRequest = Self::ReadRequest;
+  using Entry = Self::Entry;
+  using QueueEntry = Self::QueueEntry;
 
   ConsumerImpl(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none)
       : queue(queue),
@@ -666,7 +666,7 @@ class ConsumerImpl final {
     }
   }
 
-  friend typename Self::Consumer;
+  friend Self::Consumer;
   friend Self;
 };
 

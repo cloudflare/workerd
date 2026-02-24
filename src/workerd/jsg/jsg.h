@@ -1634,7 +1634,7 @@ struct RemovePromise_<Promise<T>> {
   using Type = T;
 };
 template <typename T>
-using RemovePromise = typename RemovePromise_<T>::Type;
+using RemovePromise = RemovePromise_<T>::Type;
 
 // Convenience template to add `jsg::Promise` if it is not present.
 template <typename T>
@@ -1646,7 +1646,7 @@ struct MaintainPromise_<Promise<T>> {
   using Type = Promise<T>;
 };
 template <typename T>
-using MaintainPromise = typename MaintainPromise_<T>::Type;
+using MaintainPromise = MaintainPromise_<T>::Type;
 
 // Convenience template to calculate the return type of a function when passed parameter type T.
 // `T = void` is understood to mean no parameters.
@@ -1669,7 +1669,7 @@ struct ReturnType_<Func, void, true> {
   using Type = decltype(kj::instance<Func>()(kj::instance<Lock&>()));
 };
 template <typename Func, typename T, bool passLock = false>
-using ReturnType = typename ReturnType_<Func, T, passLock>::Type;
+using ReturnType = ReturnType_<Func, T, passLock>::Type;
 
 // Convenience template to produce a promise for the result of calling a function with the given
 // parameter type. This wraps the function's result type in `jsg::Promise` UNLESS the function

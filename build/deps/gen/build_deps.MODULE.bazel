@@ -78,8 +78,8 @@ use_repo(http, "cargo_bazel_win_x64")
 http.file(
     name = "clang_tidy_darwin_arm64",
     executable = True,
-    sha256 = "bf353b27df707fa6bf0ccb0b27bfeae5fdc97245348b791b340b5c937bcee680",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-darwin-arm64-clang-tidy",
+    sha256 = "baffb5f39282537369b93165af2b13e3e70747567cdcaebd162cbd74daf3c5e7",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.0/llvm-22.1.0-darwin-arm64-clang-tidy",
 )
 use_repo(http, "clang_tidy_darwin_arm64")
 
@@ -87,8 +87,8 @@ use_repo(http, "clang_tidy_darwin_arm64")
 http.file(
     name = "clang_tidy_linux_amd64",
     executable = True,
-    sha256 = "e81faa22326109726944fa7d9d24319dc844cee1c7ed42f999636b70653fdf3f",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-linux-amd64-clang-tidy",
+    sha256 = "eb82eaa5b28c2a0c0b29bd1e6f10ec28fe6c41c8ef22150ef3ca58b627eb4e94",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.0/llvm-22.1.0-linux-amd64-clang-tidy",
 )
 use_repo(http, "clang_tidy_linux_amd64")
 
@@ -96,8 +96,8 @@ use_repo(http, "clang_tidy_linux_amd64")
 http.file(
     name = "clang_tidy_linux_arm64",
     executable = True,
-    sha256 = "a3882b3300699f132ffb6f756f865b347be682dcd486324be8a94610dbaaff91",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-21.1.4/llvm-21.1.4-linux-arm64-clang-tidy",
+    sha256 = "f85d96e7e29e549d69e364f153b7205f499859e76568a39668a6ad7d3f392e1a",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.0/llvm-22.1.0-linux-arm64-clang-tidy",
 )
 use_repo(http, "clang_tidy_linux_arm64")
 

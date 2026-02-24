@@ -1417,7 +1417,7 @@ void WritableImpl<Self>::dealWithRejection(
 }
 
 template <typename Self>
-typename WritableImpl<Self>::WriteRequest WritableImpl<Self>::dequeueWriteRequest() {
+WritableImpl<Self>::WriteRequest WritableImpl<Self>::dequeueWriteRequest() {
   auto write = kj::mv(writeRequests.front());
   writeRequests.pop_front();
   return kj::mv(write);
@@ -1734,12 +1734,12 @@ struct ReadableState {
         owner(owner) {}
 
   ReadableState(Controller controller,
-      typename Queue::ConsumerImpl::StateListener& listener,
+      Queue::ConsumerImpl::StateListener& listener,
       ReadableStreamJsController& owner)
       : ReadableState(controller.addRef(), controller->getConsumer(listener), owner) {}
 
   ReadableState clone(jsg::Lock& js,
-      typename Queue::ConsumerImpl::StateListener& listener,
+      Queue::ConsumerImpl::StateListener& listener,
       ReadableStreamJsController& owner) {
     return ReadableState(controller.addRef(), consumer->clone(js, listener), owner);
   }

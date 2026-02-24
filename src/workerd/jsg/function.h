@@ -301,7 +301,7 @@ struct MethodSignature_<Ret (T::*)(Lock&, Args...) const> {
 
 // Extracts a function signature from a method type.
 template <typename Method>
-using MethodSignature = typename MethodSignature_<Method>::Type;
+using MethodSignature = MethodSignature_<Method>::Type;
 
 // TypeWrapper mixin for functions / lambdas.
 template <typename TypeWrapper>

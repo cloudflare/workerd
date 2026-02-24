@@ -1044,7 +1044,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     using Type = kj::Maybe<kj::Exception>;
   };
   template <typename T>
-  using ExceptionOr = typename ExceptionOr_<T>::Type;
+  using ExceptionOr = ExceptionOr_<T>::Type;
 
   template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIoImpl(

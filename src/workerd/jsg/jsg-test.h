@@ -43,7 +43,7 @@ class Evaluator {
 
   void expectEvalModule(
       kj::StringPtr code, kj::StringPtr expectedType, kj::StringPtr expectedValue) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) {
       JSG_WITHIN_CONTEXT_SCOPE(lock,
           lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
         // Compile code as "main" module
@@ -88,7 +88,7 @@ class Evaluator {
   }
 
   void expectEval(kj::StringPtr code, kj::StringPtr expectedType, kj::StringPtr expectedValue) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) {
       JSG_WITHIN_CONTEXT_SCOPE(lock,
           lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
         // Create a string containing the JavaScript source code.
@@ -124,26 +124,26 @@ class Evaluator {
   }
 
   void setAllowEval(bool b) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) { lock.setAllowEval(b); });
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) { lock.setAllowEval(b); });
   }
 
   void setCaptureThrowsAsRejections(bool b) {
     getIsolate().runInLockScope(
-        [&](typename IsolateType::Lock& lock) { lock.setCaptureThrowsAsRejections(b); });
+        [&](IsolateType::Lock& lock) { lock.setCaptureThrowsAsRejections(b); });
   }
 
   void runMicrotasks() {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) { lock.runMicrotasks(); });
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) { lock.runMicrotasks(); });
   }
 
-  void runMicrotasks(typename IsolateType::Lock& lock) {
+  void runMicrotasks(IsolateType::Lock& lock) {
     lock.runMicrotasks();
   }
 
   // Run some C++ code in a new lock and context.
   template <typename Func>
   void run(Func&& func) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) {
       JSG_WITHIN_CONTEXT_SCOPE(lock,
           lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
         v8::TryCatch tryCatch(js.v8Isolate);

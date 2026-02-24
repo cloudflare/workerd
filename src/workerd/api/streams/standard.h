@@ -133,9 +133,9 @@ class WritableStreamJsController;
 template <class Self>
 class ReadableImpl {
  public:
-  using Consumer = typename Self::QueueType::Consumer;
-  using Entry = typename Self::QueueType::Entry;
-  using StateListener = typename Self::QueueType::ConsumerImpl::StateListener;
+  using Consumer = Self::QueueType::Consumer;
+  using Entry = Self::QueueType::Entry;
+  using StateListener = Self::QueueType::ConsumerImpl::StateListener;
 
   ReadableImpl(UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
 
@@ -227,7 +227,7 @@ class ReadableImpl {
     }
   };
 
-  using Queue = typename Self::QueueType;
+  using Queue = Self::QueueType;
 
   // State machine for ReadableImpl:
   // Queue is the active state where the stream can accept data

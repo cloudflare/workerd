@@ -188,7 +188,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
   }
 
   v8::Local<v8::FunctionTemplate> getCapnpTemplate(jsg::Lock& js, capnp::Schema schema) {
-    using Ret = typename decltype(typeConstructors)::Entry;
+    using Ret = decltype(typeConstructors)::Entry;
     return typeConstructors
         .findOrCreate(schema, [&]() -> Ret {
       return js.withinHandleScope([&]() -> Ret {
@@ -315,7 +315,7 @@ class CapnpTypeWrapper: private CapnpTypeWrapperBase {
     }
 
     kj::ArrayPtr<capnp::InterfaceSchema::Method> methods =
-        methodSchemas.findOrCreate(schema, [&]() -> typename decltype(methodSchemas)::Entry {
+        methodSchemas.findOrCreate(schema, [&]() -> decltype(methodSchemas)::Entry {
       return {schema, KJ_MAP(m, schema.getMethods()) { return m; }};
     });
 
