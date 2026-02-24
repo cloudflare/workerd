@@ -39,7 +39,7 @@ import { type Test } from './test';
 import { sanitize_unpaired_surrogates } from './common';
 
 declare global {
-  var AssertionError: unknown;
+  var AssertionError: new (message: string) => Error;
 
   function assert_equals(a: unknown, b: unknown, message?: string): void;
   function assert_not_equals(a: unknown, b: unknown, message?: string): void;
@@ -303,6 +303,186 @@ globalThis.assert_throws_exactly = (exception, fn, description): void => {
   fail(description ?? 'No exception was thrown');
 };
 
+// Maps legacy DOMException code names (e.g. "INVALID_ACCESS_ERR") to modern names
+// (e.g. "InvalidAccessError"). Matches the upstream WPT testharness.js.
+const codename_name_map: Record<string, string> = {
+  INDEX_SIZE_ERR: 'IndexSizeError',
+  HIERARCHY_REQUEST_ERR: 'HierarchyRequestError',
+  WRONG_DOCUMENT_ERR: 'WrongDocumentError',
+  INVALID_CHARACTER_ERR: 'InvalidCharacterError',
+  NO_MODIFICATION_ALLOWED_ERR: 'NoModificationAllowedError',
+  NOT_FOUND_ERR: 'NotFoundError',
+  NOT_SUPPORTED_ERR: 'NotSupportedError',
+  INUSE_ATTRIBUTE_ERR: 'InUseAttributeError',
+  INVALID_STATE_ERR: 'InvalidStateError',
+  SYNTAX_ERR: 'SyntaxError',
+  INVALID_MODIFICATION_ERR: 'InvalidModificationError',
+  NAMESPACE_ERR: 'NamespaceError',
+  INVALID_ACCESS_ERR: 'InvalidAccessError',
+  TYPE_MISMATCH_ERR: 'TypeMismatchError',
+  SECURITY_ERR: 'SecurityError',
+  NETWORK_ERR: 'NetworkError',
+  ABORT_ERR: 'AbortError',
+  URL_MISMATCH_ERR: 'URLMismatchError',
+  QUOTA_EXCEEDED_ERR: 'QuotaExceededError',
+  TIMEOUT_ERR: 'TimeoutError',
+  INVALID_NODE_TYPE_ERR: 'InvalidNodeTypeError',
+  DATA_CLONE_ERR: 'DataCloneError',
+};
+
+// Maps modern DOMException names to their legacy numeric codes.
+const name_code_map: Record<string, number> = {
+  IndexSizeError: 1,
+  HierarchyRequestError: 3,
+  WrongDocumentError: 4,
+  InvalidCharacterError: 5,
+  NoModificationAllowedError: 7,
+  NotFoundError: 8,
+  NotSupportedError: 9,
+  InUseAttributeError: 10,
+  InvalidStateError: 11,
+  SyntaxError: 12,
+  InvalidModificationError: 13,
+  NamespaceError: 14,
+  InvalidAccessError: 15,
+  TypeMismatchError: 17,
+  SecurityError: 18,
+  NetworkError: 19,
+  AbortError: 20,
+  URLMismatchError: 21,
+  QuotaExceededError: 22,
+  TimeoutError: 23,
+  InvalidNodeTypeError: 24,
+  DataCloneError: 25,
+  // Modern exceptions with code 0
+  EncodingError: 0,
+  NotReadableError: 0,
+  UnknownError: 0,
+  ConstraintError: 0,
+  DataError: 0,
+  TransactionInactiveError: 0,
+  ReadOnlyError: 0,
+  VersionError: 0,
+  OperationError: 0,
+  NotAllowedError: 0,
+  OptOutError: 0,
+};
+
+const code_name_map: Record<number, string> = {};
+for (const key in name_code_map) {
+  if ((name_code_map[key] as number) > 0) {
+    code_name_map[name_code_map[key] as number] = key;
+  }
+}
+
+// Helper for assert_throws_dom_impl assertions. Throws a WPT AssertionError
+// (not node:assert's AssertionError) so instanceof checks work correctly.
+function assert_dom(
+  condition: boolean,
+  assertion_type: string,
+  description: string | undefined,
+  message: string
+): void {
+  if (condition) return;
+  const prefix = description ? `${description}: ` : '';
+  throw new AssertionError(`${assertion_type}: ${prefix}${message}`);
+}
+
+/**
+ * Internal implementation of assert_throws_dom, matching the upstream WPT
+ * testharness.js assert_throws_dom_impl. Uses its own try/catch rather than
+ * node:assert.throws() so that legacy DOMException code names are mapped to
+ * modern names and error properties are checked individually with clear
+ * messages.
+ */
+function assert_throws_dom_impl(
+  type: number | string,
+  func: ThrowingFn,
+  description: string,
+  assertion_type: string,
+  constructor: typeof DOMException
+): void {
+  try {
+    func();
+    assert_dom(false, assertion_type, description, 'function did not throw');
+  } catch (e) {
+    if (e instanceof AssertionError) {
+      throw e;
+    }
+
+    // Basic sanity-checks on the thrown exception.
+    assert_dom(
+      typeof e === 'object',
+      assertion_type,
+      description,
+      `thrown value is not an object (got ${typeof e})`
+    );
+    assert_dom(e !== null, assertion_type, description, 'thrown value is null');
+    assert_dom(
+      typeof type === 'number' || typeof type === 'string',
+      assertion_type,
+      description,
+      'type is not a number or string'
+    );
+
+    const required_props: Record<string, unknown> = {};
+    let name: string;
+
+    if (typeof type === 'number') {
+      assert_dom(
+        type in code_name_map,
+        assertion_type,
+        description,
+        `Test bug: unrecognized DOMException code "${type}" passed to ${assertion_type}()`
+      );
+      name = code_name_map[type] as string;
+      required_props['code'] = type;
+    } else {
+      // Map legacy code names (e.g. "INVALID_ACCESS_ERR") to modern names
+      name =
+        type in codename_name_map ? (codename_name_map[type] as string) : type;
+      assert_dom(
+        name in name_code_map,
+        assertion_type,
+        description,
+        `Test bug: unrecognized DOMException code name or name "${type}" passed to ${assertion_type}()`
+      );
+      required_props['code'] = name_code_map[name];
+    }
+
+    if (
+      required_props['code'] === 0 ||
+      ('name' in (e as object) &&
+        (e as { name: string }).name !==
+          (e as { name: string }).name.toUpperCase() &&
+        (e as { name: string }).name !== 'DOMException')
+    ) {
+      // New style exception: also test the name property.
+      required_props['name'] = name;
+    }
+
+    for (const prop in required_props) {
+      assert_dom(
+        prop in (e as object) &&
+          (e as Record<string, unknown>)[prop] == required_props[prop],
+        assertion_type,
+        description,
+        `thrown exception is not a DOMException ${type}: property ${prop} is equal to ${(e as Record<string, unknown>)[prop]}, expected ${required_props[prop]}`
+      );
+    }
+
+    // Check that the exception is from the right global. This check is last
+    // so more specific, and more informative, checks on the properties can
+    // happen in case a totally incorrect exception is thrown.
+    assert_dom(
+      (e as object).constructor === constructor,
+      assertion_type,
+      description,
+      'thrown exception from the wrong global'
+    );
+  }
+}
+
 /**
  * Assert a DOMException with the expected type is thrown.
  *
@@ -357,22 +537,12 @@ globalThis.assert_throws_dom = (
     );
   }
 
-  throws(
-    () => {
-      func.call(this);
-    },
-    (err: DOMException) => {
-      strictEqual(err.constructor, constructor);
-      if (typeof type === 'string') {
-        strictEqual(err.name, type, description);
-      } else {
-        // eslint-disable-next-line @typescript-eslint/no-deprecated -- WPT allows tests to check the deprecated 'code' property so we must support this
-        strictEqual(err.code, type, description);
-      }
-
-      return true;
-    },
-    `Failed to throw: ${description}`
+  assert_throws_dom_impl(
+    type,
+    func,
+    description,
+    'assert_throws_dom',
+    constructor
   );
 };
 

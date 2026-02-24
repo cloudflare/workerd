@@ -25,9 +25,18 @@ export default {
     replace: removeUseCapture,
   },
   'Close-1005.any.js': {
-    comment:
-      'workerd throws TypeError instead of InvalidAccessError for close(1005), test hangs',
-    disabledTests: true,
+    replace: (code: string): string => {
+      code = removeUseCapture(code);
+      // The test expects close(1005) to throw, leaving the WebSocket open.
+      // In workerd, the open connection's read loop is registered as a
+      // waitUntil task that keeps the IoContext alive indefinitely.
+      // Add a cleanup to close the WebSocket when the test completes so the
+      // connection is properly shut down.
+      return code.replace(
+        'var isOpenCalled = false;',
+        'var isOpenCalled = false;\ntest.add_cleanup(function() { wsocket.close(); });'
+      );
+    },
   },
   'Close-2999-reason.any.js': {
     comment: 'workerd does not throw INVALID_ACCESS_ERR for close(2999)',
@@ -84,12 +93,7 @@ export default {
   'Close-undefined.any.js': {
     replace: removeUseCapture,
   },
-  'Create-asciiSep-protocol-string.any.js': {
-    comment: 'Error name is SyntaxError instead of SYNTAX_ERR',
-    expectedFailures: [
-      'Create WebSocket - Pass a valid URL and a protocol string with an ascii separator character - SYNTAX_ERR is thrown',
-    ],
-  },
+  'Create-asciiSep-protocol-string.any.js': {},
   'Create-blocked-port.any.js': {
     comment: 'Port blocking works differently in workerd',
     disabledTests: true,
@@ -115,22 +119,12 @@ export default {
       'Create WebSocket - Pass a non absolute URL: 123',
     ],
   },
-  'Create-nonAscii-protocol-string.any.js': {
-    comment: 'Error name is SyntaxError instead of SYNTAX_ERR',
-    expectedFailures: [
-      'Create WebSocket - Pass a valid URL and a protocol string with non-ascii values - SYNTAX_ERR is thrown',
-    ],
-  },
+  'Create-nonAscii-protocol-string.any.js': {},
   'Create-on-worker-shutdown.any.js': {
     comment: 'Worker shutdown behavior is different in workerd',
     disabledTests: true,
   },
-  'Create-protocol-with-space.any.js': {
-    comment: 'Error name is SyntaxError instead of SYNTAX_ERR',
-    expectedFailures: [
-      'Create WebSocket - Pass a valid URL and a protocol string with a space in it - SYNTAX_ERR is thrown',
-    ],
-  },
+  'Create-protocol-with-space.any.js': {},
   'Create-protocols-repeated-case-insensitive.any.js': {
     comment:
       'workerd does not throw for case-insensitive duplicate protocols (allows "Echo" and "echo")',
@@ -138,18 +132,8 @@ export default {
       'Create WebSocket - Pass a valid URL and an array of protocol strings with repeated values but different case - SYNTAX_ERR is thrown',
     ],
   },
-  'Create-protocols-repeated.any.js': {
-    comment: 'Error name is SyntaxError instead of SYNTAX_ERR',
-    expectedFailures: [
-      'Create WebSocket - Pass a valid URL and an array of protocol strings with repeated values - SYNTAX_ERR is thrown',
-    ],
-  },
-  'Create-url-with-space.any.js': {
-    comment: 'Error name is SyntaxError instead of SYNTAX_ERR',
-    expectedFailures: [
-      'Create WebSocket - Pass a URL with a space - SYNTAX_ERR should be thrown',
-    ],
-  },
+  'Create-protocols-repeated.any.js': {},
+  'Create-url-with-space.any.js': {},
   'Create-valid-url-array-protocols.any.js': {
     replace: removeUseCapture,
   },
@@ -184,7 +168,8 @@ export default {
     disabledTests: true,
   },
   'Send-before-open.any.js': {
-    comment: 'Error name is InvalidStateError instead of INVALID_STATE_ERR',
+    comment:
+      'workerd throws TypeError instead of InvalidStateError DOMException for send() before open',
     expectedFailures: [
       'Send data on a WebSocket before connection is opened - INVALID_STATE_ERR is returned',
     ],
