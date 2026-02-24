@@ -701,8 +701,8 @@ kj::Promise<void> ContainerClient::startSidecarContainer() {
   auto endpoint = kj::str("/containers/", sidecarContainerName, "/start");
   auto response = co_await dockerApiRequest(
       network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint), kj::str(""));
-  JSG_REQUIRE(response.statusCode == 204, Error,
-      "Starting network sidecar container failed with: ", response.body);
+  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 304 || response.statusCode == 409, Error,
+      "Starting network sidecar container failed with: ", response.statusCode);
 }
 
 kj::Promise<void> ContainerClient::destroySidecarContainer() {
@@ -843,6 +843,10 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
   if (containerSidecarStarted.exchange(true, std::memory_order_acquire)) {
     co_return;
   }
+
+  // We need to call destroy here, it's mandatory that this is a fresh sidecar
+  // start. Maybe we lost track of it on a previous workerd restart.
+  co_await destroySidecarContainer();
 
   KJ_ON_SCOPE_FAILURE(containerSidecarStarted.store(false, std::memory_order_release));
 
