@@ -312,15 +312,6 @@ export default {
     omittedTests: true,
   },
   'close-invalid.any.js': {
-    comment: 'workerd does not throw errors for invalid close codes',
-    expectedFailures: [
-      '0 on a websocket',
-      '500 on a websocket',
-      'NaN on a websocket',
-      'String on a websocket',
-      'null on a websocket',
-      '2**16+1000 on a websocket',
-    ],
     replace: removeUseCapture,
   },
   'constants.sub.js': {},

@@ -610,6 +610,27 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
 void WebSocket::close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<kj::String> reason) {
   auto& native = *farNative;
 
+  // Per the spec, close code and reason validation must happen before any readyState checks.
+  // See https://websockets.spec.whatwg.org/#dom-websocket-close step 1.
+  //
+  // The spec allows only 1000 (Normal Closure) or the range 3000-4999 (reserved for
+  // libraries/frameworks and private use, per RFC 6455 Section 7.4.2). We are more permissive
+  // here, accepting the full 1000-4999 range, but explicitly rejecting four codes that RFC 6455
+  // Section 7.4.1 reserves and forbids endpoints from sending in a Close frame:
+  //   1004 - Reserved (no defined meaning)
+  //   1005 - No Status Rcvd (only used internally to indicate no code was present)
+  //   1006 - Abnormal Closure (only used internally when connection drops without a Close frame)
+  //   1015 - TLS Handshake failure (only used internally, never sent over the wire)
+  KJ_IF_SOME(c, code) {
+    JSG_REQUIRE(c >= 1000 && c < 5000 && c != 1004 && c != 1005 && c != 1006 && c != 1015,
+        DOMInvalidAccessError, "Invalid WebSocket close code: ", c, ".");
+  }
+
+  // The default code of 1005 cannot have a reason, per the standard, so if a reason is specified
+  // then there must be a code, too.
+  JSG_REQUIRE(reason == kj::none || code != kj::none, DOMInvalidAccessError,
+      "If you specify a WebSocket close reason, you must also specify a code.");
+
   // Handle close before connection is established for websockets obtained through `new WebSocket()`.
   KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
     pending.canceler.cancel(kj::str("Called close before connection was established."));
@@ -636,17 +657,6 @@ void WebSocket::close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<kj::
       "messages.");
 
   assertNoError(js);
-
-  KJ_IF_SOME(c, code) {
-    JSG_REQUIRE(c >= 1000 && c < 5000 && c != 1004 && c != 1005 && c != 1006 && c != 1015,
-        TypeError, "Invalid WebSocket close code: ", c, ".");
-  }
-  if (reason != kj::none) {
-    // The default code of 1005 cannot have a reason, per the standard, so if a reason is specified
-    // then there must be a code, too.
-    JSG_REQUIRE(code != kj::none, TypeError,
-        "If you specify a WebSocket close reason, you must also specify a code.");
-  }
 
   // pendingAutoResponses stores the number of queuedAutoResponses that will be pumped before sending
   // the current GatedMessage, guaranteeing order.
