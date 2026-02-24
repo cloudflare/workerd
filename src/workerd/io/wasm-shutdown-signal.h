@@ -19,8 +19,8 @@ constexpr size_t WASM_SIGNAL_FIELD_BYTES = sizeof(uint32_t);
 // Represents a single WASM module that has opted into receiving the "shut down" signal when CPU
 // time is nearly exhausted. The module exports two i32 globals:
 //
-//   "__signal_address"     — address of a uint32 in linear memory. The runtime writes 1 here
-//                            when CPU time is nearly exhausted.
+//   "__signal_address"     — address of a uint32 in linear memory. The runtime writes SIGXCPU
+//                            (24) here when CPU time is nearly exhausted.
 //   "__terminated_address" — address of a uint32 in linear memory. The WASM module writes a
 //                            non-zero value here when it has exited and is no longer listening.
 //                            The runtime checks this in a GC prologue hook and removes entries
@@ -33,7 +33,7 @@ struct WasmShutdownSignal {
   // freeing the memory.
   std::shared_ptr<v8::BackingStore> backingStore;
 
-  // Offset into `backingStore` of the uint32 the runtime writes 1 to (__signal_address).
+  // Offset into `backingStore` of the uint32 the runtime writes SIGXCPU (24) to (__signal_address).
   uint32_t signalByteOffset;
 
   // Offset into `backingStore` of the uint32 the module writes to (__terminated_address).
@@ -126,15 +126,42 @@ class AtomicList {
   KJ_DISALLOW_COPY_AND_MOVE(AtomicList);
 };
 
-// Iterates a WasmShutdownSignal list and writes the shutdown signal (value 1) to each
-// registered memory location. This function is signal-safe.
+// The value written to the signal address when CPU time is nearly exhausted.
+// This is the UNIX signal number for SIGXCPU (24).
+constexpr uint32_t WASM_SIGNAL_SIGXCPU = 24;
+
+// Iterates a WasmShutdownSignal list and writes SIGXCPU (24) to the signal address of each
+// registered module. This function is signal-safe.
 inline void writeWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signals) {
   signals.iterate([](const WasmShutdownSignal& signal) {
     // Signal-safe: BackingStore::Data() is a trivial getter; memcpy into mapped WASM memory
     // is a plain store.
-    uint32_t value = 1;
+    uint32_t value = WASM_SIGNAL_SIGXCPU;
     memcpy(static_cast<kj::byte*>(signal.backingStore->Data()) + signal.signalByteOffset, &value,
         sizeof(value));
+  });
+}
+
+// Iterates a WasmShutdownSignal list and zeros the signal address of each registered module.
+// Call this at the start of each request to clear stale "nearly out of time" signals from a
+// previous request. This function is signal-safe.
+inline void clearWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signals) {
+  signals.iterate([](const WasmShutdownSignal& signal) {
+    uint32_t value = 0;
+    memcpy(static_cast<kj::byte*>(signal.backingStore->Data()) + signal.signalByteOffset, &value,
+        sizeof(value));
+  });
+}
+
+// Iterates a WasmShutdownSignal list and writes 1 to the terminated address of each registered
+// module. Call this when the isolate is killed after exhausting its CPU limit, so that WASM
+// modules can detect on the next request that they were forcefully terminated.
+// This function is signal-safe.
+inline void writeWasmTerminatedSignals(const AtomicList<WasmShutdownSignal>& signals) {
+  signals.iterate([](const WasmShutdownSignal& signal) {
+    uint32_t value = 1;
+    memcpy(static_cast<kj::byte*>(signal.backingStore->Data()) + signal.terminatedByteOffset,
+        &value, sizeof(value));
   });
 }
 

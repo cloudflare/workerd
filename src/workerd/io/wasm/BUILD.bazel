@@ -1,0 +1,10 @@
+load("//:build/wat2wasm.bzl", "wat2wasm")
+
+[
+    wat2wasm(
+        name = name.removesuffix(".wat") + ".wasm",
+        src = name,
+        visibility = ["//visibility:public"],
+    )
+    for name in glob(["*.wat"])
+]

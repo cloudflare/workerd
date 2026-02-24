@@ -479,6 +479,30 @@ wd_test(
 )
 
 kj_test(
+    src = "wasm-shutdown-signal-test.c++",
+    deps = [
+        ":limit-enforcer",
+    ],
+)
+
+wd_test(
+    src = "wasm-shutdown-signal-js-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "wasm-shutdown-signal-test.js",
+        "//src/workerd/io/wasm:signal-basic.wasm",
+        "//src/workerd/io/wasm:signal-partial-exports.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-overflow.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-edge.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-valid.wasm",
+        "//src/workerd/io/wasm:signal-decoy-memory.wasm",
+        "//src/workerd/io/wasm:signal-imported-memory.wasm",
+        "//src/workerd/io/wasm:signal-memory-reclaim.wasm",
+        "//src/workerd/io/wasm:signal-preinit.wasm",
+    ],
+)
+
+kj_test(
     src = "bundle-fs-test.c++",
     deps = [
         ":bundle-fs",

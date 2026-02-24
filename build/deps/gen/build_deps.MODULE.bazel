@@ -121,3 +121,14 @@ bazel_dep(name = "rules_python", version = "1.8.5")
 
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.6.1")
+
+# deps_wabt
+http.archive(
+    name = "deps_wabt",
+    build_file = "//:build/BUILD.wabt",
+    sha256 = "cfc675dc9b663d9adc8c75d982c1ba29f661448a2e026a67e71fe3f76a3e09f3",
+    strip_prefix = "wabt-1.0.37",
+    type = "tgz",
+    url = "https://github.com/WebAssembly/wabt/releases/download/1.0.37/wabt-1.0.37-ubuntu-20.04.tar.gz",
+)
+use_repo(http, "deps_wabt")
