@@ -1703,17 +1703,66 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
     // This code path is workerd-only, we can safely utilize submitSpanOpen here.
     submitSpanOpen(spanId, parentSpanId, span.operationName.clone(), span.startTime);
-    kj::Date startTime = span.startTime;
     tracing::SpanEndData span2(spanId, span.endTime);
     span2.tags.reserve(span.tags.size());
     for (auto& tag: span.tags) {
       span2.tags.insert(tag.key.clone(), spanTagClone(tag.value));
     }
-    if (isPredictableModeForTest()) {
-      startTime = span2.endTime = kj::UNIX_EPOCH;
-    }
 
-    workerTracer->addSpanEnd(kj::mv(span2), startTime);
+    workerTracer->addSpanEnd(kj::mv(span2));
+  }
+
+  kj::Maybe<kj::Date> getTime() override {
+    // To report I/O time, we need the IOContext to still be alive.
+    // weakIoContext is only none if we are tracing via RPC (in this case the span observer on the
+    // client side should be unused) or if we failed to transmit an Onset event (in that case we'll
+    // get an error based on missing topLevelInvocationSpanContext right after).
+    auto& weakIoContext = workerTracer->getWeakIoContext();
+    if (weakIoContext != kj::none) {
+      auto& weakIoCtx = KJ_ASSERT_NONNULL(weakIoContext);
+      kj::Maybe<kj::Date> time;
+      weakIoCtx->runIfAlive([this, &time](IoContext& context) {
+        if (context.hasCurrentIncomingRequest()) {
+          time = context.now();
+        } else {
+          // We have an IOContext, but there's no current IncomingRequest. Always log a warning here,
+          // this should not be happening. Still report completeTime as a useful timestamp if
+          // available.
+          bool hasCompleteTime = false;
+          auto completeTime = workerTracer->getCompleteTime();
+          if (completeTime != kj::UNIX_EPOCH) {
+            time = completeTime;
+            hasCompleteTime = true;
+          }
+          if (isPredictableModeForTest()) {
+            KJ_FAIL_ASSERT("reported span without current request", hasCompleteTime);
+          } else {
+            LOG_WARNING_PERIODICALLY("reported span without current request", hasCompleteTime);
+          }
+        }
+      });
+      if (!weakIoCtx->isValid()) {
+        // This can happen if we start a customEvent from this event and cancel it after this IoContext
+        // gets destroyed. In that case we no longer have an IoContext available and can't get the
+        // current time, but the outcome timestamp will have already been set. Since the outcome
+        // timestamp is "late enough", simply use that.
+        // TODO(o11y): fix this – spans should not be outliving the IoContext.
+        auto completeTime = workerTracer->getCompleteTime();
+        if (completeTime != kj::UNIX_EPOCH) {
+          time = completeTime;
+        } else {
+          // Otherwise, we can't actually get an end timestamp that makes sense. Report a zero-duration
+          // span and log a warning (or fail assert in test mode).
+          if (isPredictableModeForTest()) {
+            KJ_FAIL_ASSERT("reported span after IoContext was deallocated");
+          } else {
+            KJ_LOG(WARNING, "reported span after IoContext was deallocated");
+          }
+        }
+      }
+      return time;
+    }
+    return kj::none;
   }
 
   void submitSpanOpen(tracing::SpanId spanId,

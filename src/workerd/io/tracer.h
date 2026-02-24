@@ -39,7 +39,7 @@ class BaseTracer: public kj::Refcounted {
       kj::ConstString operationName,
       kj::Date startTime) = 0;
   // Add span events when the span is complete (Attributes and SpanClose).
-  virtual void addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
+  virtual void addSpanEnd(tracing::SpanEndData&& span) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -89,15 +89,14 @@ class BaseTracer: public kj::Refcounted {
     markedUnused = true;
   }
 
+  kj::Maybe<kj::Own<IoContext::WeakRef>>& getWeakIoContext();
+  kj::Date getCompleteTime();
+
  protected:
   // Retrieves the current timestamp. If the IoContext is no longer available, we assume that the
   // worker must have wrapped up and reported its outcome event, we report completeTime in that case
   // acordingly.
   kj::Date getTime();
-
-  // helper method for addSpan() implementations
-  void adjustSpanTime(tracing::CompleteSpan& span);
-  void adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> maybeStartTime);
 
   // Function to create the root span for the new tracing format.
   kj::Maybe<MakeUserRequestSpanFunc> makeUserRequestSpanFunc;
@@ -138,7 +137,7 @@ class WorkerTracer final: public BaseTracer {
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override;
-  void addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
+  void addSpanEnd(tracing::SpanEndData&& span) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
@@ -201,6 +200,7 @@ class SpanSubmitter: public kj::Refcounted {
   virtual void submitSpan(tracing::SpanId context, tracing::SpanId spanId, const Span& span) = 0;
 
   virtual tracing::SpanId makeSpanId() = 0;
+  virtual kj::Maybe<kj::Date> getTime() = 0;
 };
 
 // The user tracing observer
@@ -221,7 +221,7 @@ class UserSpanObserver final: public SpanObserver {
   kj::Own<SpanObserver> newChild() override;
   void report(const Span& span) override;
   void reportStart(kj::ConstString operationName, kj::Date startTime) override;
-  kj::Date getTime() override;
+  kj::Maybe<kj::Date> getTime() override;
 
  private:
   kj::Own<SpanSubmitter> submitter;

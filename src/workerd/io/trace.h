@@ -1159,7 +1159,7 @@ class SpanObserver: public kj::Refcounted {
   // (usually it is difficult to violate this assumption, but care must be taken that the observer
   // isn't used directly to create a span before the IoContext has been constructed (previously this
   // was a case with a top-level span owned by the WorkerTracer itself).
-  virtual kj::Date getTime() {
+  virtual kj::Maybe<kj::Date> getTime() {
     return kj::systemPreciseCalendarClock().now();
   }
 };

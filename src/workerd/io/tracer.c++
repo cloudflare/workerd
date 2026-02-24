@@ -128,7 +128,7 @@ void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
   // spanOpen/spanEnd.
   addSpanOpen(span.spanId, span.parentSpanId, kj::mv(span.operationName), span.startTime);
   tracing::SpanEndData spanEnd(span.spanId, span.endTime, kj::mv(span.tags));
-  addSpanEnd(kj::mv(spanEnd), span.startTime);
+  addSpanEnd(kj::mv(spanEnd));
 }
 
 void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
@@ -154,7 +154,7 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
       spanOpenContext, tracing::SpanOpen(spanId, kj::mv(operationName)), startTime, spanNameSize);
 }
 
-void WorkerTracer::addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) {
+void WorkerTracer::addSpanEnd(tracing::SpanEndData&& span) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -162,8 +162,6 @@ void WorkerTracer::addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> m
   // Note: spans are not available in the buffered tail worker, so we don't need an exceededSpanLimit
   // variable for it and it can't cause truncation.
   auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
-
-  adjustSpanTime(span, maybeStartTime);
 
   size_t spanTagsSize = 0;
   for (const Span::TagMap::Entry& tag: span.tags) {
@@ -407,110 +405,11 @@ kj::Date BaseTracer::getTime() {
   return timestamp;
 }
 
-void BaseTracer::adjustSpanTime(tracing::CompleteSpan& span) {
-  // To report I/O time, we need the IOContext to still be alive.
-  // weakIoContext is only none if we are tracing via RPC (in this case span times have already been
-  // adjusted) or if we failed to transmit an Onset event (in that case we'll get an error based on
-  // missing topLevelInvocationSpanContext right after).
-  if (weakIoContext != kj::none) {
-    auto& weakIoCtx = KJ_ASSERT_NONNULL(weakIoContext);
-    weakIoCtx->runIfAlive([this, &span](IoContext& context) {
-      if (context.hasCurrentIncomingRequest()) {
-        span.endTime = context.now();
-      } else {
-        // We have an IOContext, but there's no current IncomingRequest. Always log a warning here,
-        // this should not be happening. Still report completeTime as a useful timestamp if
-        // available.
-        bool hasCompleteTime = false;
-        if (completeTime != kj::UNIX_EPOCH) {
-          span.endTime = completeTime;
-          hasCompleteTime = true;
-        } else {
-          span.endTime = span.startTime;
-        }
-        if (isPredictableModeForTest()) {
-          KJ_FAIL_ASSERT(
-              "reported span without current request", span.operationName, hasCompleteTime);
-        } else {
-          LOG_WARNING_PERIODICALLY(
-              "reported span without current request", span.operationName, hasCompleteTime);
-        }
-      }
-    });
-    if (!weakIoCtx->isValid()) {
-      // This can happen if we start a customEvent from this event and cancel it after this IoContext
-      // gets destroyed. In that case we no longer have an IoContext available and can't get the
-      // current time, but the outcome timestamp will have already been set. Since the outcome
-      // timestamp is "late enough", simply use that.
-      // TODO(o11y): fix this – spans should not be outliving the IoContext.
-      if (completeTime != kj::UNIX_EPOCH) {
-        span.endTime = completeTime;
-      } else {
-        // Otherwise, we can't actually get an end timestamp that makes sense. Report a zero-duration
-        // span and log a warning (or fail assert in test mode).
-        span.endTime = span.startTime;
-        if (isPredictableModeForTest()) {
-          KJ_FAIL_ASSERT("reported span after IoContext was deallocated", span.operationName);
-        } else {
-          KJ_LOG(WARNING, "reported span after IoContext was deallocated", span.operationName);
-        }
-      }
-    }
-  }
+kj::Maybe<kj::Own<IoContext::WeakRef>>& BaseTracer::getWeakIoContext() {
+  return weakIoContext;
 }
-
-void BaseTracer::adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> maybeStartTime) {
-  // To report I/O time, we need the IOContext to still be alive.
-  // weakIoContext is only none if we are tracing via RPC (in this case span times have already been
-  // adjusted) or if we failed to transmit an Onset event (in that case we'll get an error based on
-  // missing topLevelInvocationSpanContext right after).
-  if (weakIoContext != kj::none) {
-    auto& weakIoCtx = KJ_ASSERT_NONNULL(weakIoContext);
-    // startTime is generally available when we are not tracing via RPC, so we can assert that it is
-    // present. For the RPC case, the adjustment will already have been done earlier and it's ok
-    // for maybeStartTime to be none as this code won't run based on weakIoContext being none.
-    kj::Date startTime = KJ_ASSERT_NONNULL(maybeStartTime);
-    weakIoCtx->runIfAlive([this, &span, &startTime](IoContext& context) {
-      if (context.hasCurrentIncomingRequest()) {
-        span.endTime = context.now();
-      } else {
-        // We have an IOContext, but there's no current IncomingRequest. Always log a warning here,
-        // this should not be happening. Still report completeTime as a useful timestamp if
-        // available.
-        bool hasCompleteTime = false;
-        if (completeTime != kj::UNIX_EPOCH) {
-          span.endTime = completeTime;
-          hasCompleteTime = true;
-        } else {
-          span.endTime = startTime;
-        }
-        if (isPredictableModeForTest()) {
-          KJ_FAIL_ASSERT("reported span without current request", hasCompleteTime);
-        } else {
-          LOG_WARNING_PERIODICALLY("reported span without current request");
-        }
-      }
-    });
-    if (!weakIoCtx->isValid()) {
-      // This can happen if we start a customEvent from this event and cancel it after this IoContext
-      // gets destroyed. In that case we no longer have an IoContext available and can't get the
-      // current time, but the outcome timestamp will have already been set. Since the outcome
-      // timestamp is "late enough", simply use that.
-      // TODO(o11y): fix this – spans should not be outliving the IoContext.
-      if (completeTime != kj::UNIX_EPOCH) {
-        span.endTime = completeTime;
-      } else {
-        // Otherwise, we can't actually get an end timestamp that makes sense. Report a zero-duration
-        // span and log a warning (or fail assert in test mode).
-        span.endTime = startTime;
-        if (isPredictableModeForTest()) {
-          KJ_FAIL_ASSERT("reported span after IoContext was deallocated");
-        } else {
-          KJ_LOG(WARNING, "reported span after IoContext was deallocated");
-        }
-      }
-    }
-  }
+kj::Date BaseTracer::getCompleteTime() {
+  return completeTime;
 }
 
 void WorkerTracer::setReturn(
@@ -592,8 +491,12 @@ void UserSpanObserver::reportStart(kj::ConstString operationName, kj::Date start
 }
 
 // Provide I/O time to the tracing system for user spans.
-kj::Date UserSpanObserver::getTime() {
-  return IoContext::current().now();
+kj::Maybe<kj::Date> UserSpanObserver::getTime() {
+  if (isPredictableModeForTest()) {
+    return kj::UNIX_EPOCH;
+  }
+
+  return submitter->getTime();
 }
 
 }  // namespace workerd
