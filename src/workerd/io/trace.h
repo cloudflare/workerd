@@ -1101,8 +1101,9 @@ class SpanBuilder {
 // implementations might support different tracing back-ends, e.g. Trace Workers, Jaeger, or
 // whatever infrastructure you prefer to use for this.
 //
-// A new SpanObserver is created at the start of each Span. The observer is used to report the
-// span data at the end of the span, as well as to construct child observers.
+// A new SpanObserver is created at the start of each Span. The SpanBuilder drives the observer
+// through its lifecycle: onOpen() is called when the span is created, onClose() when the span
+// ends, and onUpdateName() if the operation name changes between open and close.
 class SpanObserver: public kj::Refcounted {
  public:
   // Allocate a new child span.
@@ -1110,10 +1111,19 @@ class SpanObserver: public kj::Refcounted {
   // Note that children can be created long after a span has completed.
   [[nodiscard]] virtual kj::Own<SpanObserver> newChild() = 0;
 
-  // Report the span data. Called at the end of the span.
-  //
-  // This should always be called exactly once per observer.
-  virtual void report(const Span& span) = 0;
+  // Called when the span is opened. Delivers the initial operation name and start time.
+  // Called exactly once, before any other lifecycle method.
+  virtual void onOpen(kj::ConstString operationName, kj::Date startTime) = 0;
+
+  // Called when the span is closed. Delivers the end time, tags, and logs.
+  // Called exactly once per observer, after onOpen(). Tags and logs are moved from the span;
+  // the observer takes ownership.
+  virtual void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) = 0;
+
+  // Called when the operation name is changed after the span was opened (via
+  // SpanBuilder::setOperationName()). Observers that eagerly stream the open event should handle
+  // this; others may simply update their buffered state. Default implementation is a no-op.
+  virtual void onUpdateName(kj::ConstString operationName) {}
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available

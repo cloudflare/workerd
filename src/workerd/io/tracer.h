@@ -88,8 +88,8 @@ class BaseTracer: public kj::Refcounted {
   // acordingly.
   kj::Date getTime();
 
-  // helper method for addSpan() implementations
-  void adjustSpanTime(tracing::CompleteSpan& span);
+  // adjustSpanTime() has been removed. SpanBuilder::end() now obtains the end time from
+  // obs->getTime() which returns I/O time for user tracing spans, so times are correct at source.
 
   // Function to create the root span for the new tracing format.
   kj::Maybe<MakeUserRequestSpanFunc> makeUserRequestSpanFunc;
@@ -181,7 +181,17 @@ class WorkerTracer final: public BaseTracer {
 
 class SpanSubmitter: public kj::Refcounted {
  public:
-  virtual void submitSpan(tracing::SpanId context, tracing::SpanId spanId, const Span& span) = 0;
+  // Called when a span is opened. Submitters may buffer this for later assembly or stream it
+  // immediately.
+  virtual void submitSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) = 0;
+  // Called when a span is closed. Together with the open data, provides all span information.
+  virtual void submitSpanClose(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::Date endTime,
+      Span::TagMap&& tags) = 0;
   virtual tracing::SpanId makeSpanId() = 0;
 };
 
@@ -201,7 +211,8 @@ class UserSpanObserver final: public SpanObserver {
   KJ_DISALLOW_COPY(UserSpanObserver);
 
   kj::Own<SpanObserver> newChild() override;
-  void report(const Span& span) override;
+  void onOpen(kj::ConstString operationName, kj::Date startTime) override;
+  void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   kj::Date getTime() override;
 
  private:

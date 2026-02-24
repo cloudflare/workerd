@@ -1700,20 +1700,26 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
   SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
-  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
-    // We largely recreate the span here which feels inefficient, but is hard to avoid given the
-    // mismatch between the Span type and the full span information required for OTel.
-    tracing::CompleteSpan span2(
-        spanId, parentSpanId, span.operationName.clone(), span.startTime, span.endTime);
-    span2.tags.reserve(span.tags.size());
-    for (auto& tag: span.tags) {
-      span2.tags.insert(tag.key.clone(), spanTagClone(tag.value));
-    }
-    if (isPredictableModeForTest()) {
-      span2.startTime = span2.endTime = kj::UNIX_EPOCH;
-    }
 
-    workerTracer->addSpan(kj::mv(span2));
+  void submitSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) override {
+    pendingOpen = PendingOpen{spanId, parentSpanId, kj::mv(operationName), startTime};
+  }
+
+  void submitSpanClose(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::Date endTime,
+      Span::TagMap&& tags) override {
+    auto& open = KJ_ASSERT_NONNULL(pendingOpen, "submitSpanClose without prior submitSpanOpen");
+    tracing::CompleteSpan span(open.spanId, open.parentSpanId, kj::mv(open.operationName),
+        open.startTime, endTime, kj::mv(tags));
+    if (isPredictableModeForTest()) {
+      span.startTime = span.endTime = kj::UNIX_EPOCH;
+    }
+    workerTracer->addSpan(kj::mv(span));
+    pendingOpen = kj::none;
   }
 
   tracing::SpanId makeSpanId() override {
@@ -1722,6 +1728,13 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
   KJ_DISALLOW_COPY_AND_MOVE(SequentialSpanSubmitter);
 
  private:
+  struct PendingOpen {
+    tracing::SpanId spanId;
+    tracing::SpanId parentSpanId;
+    kj::ConstString operationName;
+    kj::Date startTime;
+  };
+  kj::Maybe<PendingOpen> pendingOpen;
   uint64_t nextSpanId = 1;
   kj::Own<WorkerTracer> workerTracer;
 };
