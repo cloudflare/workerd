@@ -26,7 +26,7 @@ wat2wasm = rule(
             executable = True,
             allow_files = True,
             cfg = "exec",
-            default = Label("@deps_wabt//:bin/wat2wasm"),
+            default = Label("//tools:wat2wasm"),
         ),
     },
 )

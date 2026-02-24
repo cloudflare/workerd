@@ -35,6 +35,20 @@ ts_config(
 )
 
 native_binary(
+    name = "wat2wasm",
+    src = select(
+        {
+            "@bazel_tools//src/conditions:linux_x86_64": "@deps_wabt_linux//:bin/wat2wasm",
+            "@bazel_tools//src/conditions:linux_aarch64": "@deps_wabt_linux//:bin/wat2wasm",
+            "@bazel_tools//src/conditions:darwin_arm64": "@deps_wabt_macos//:bin/wat2wasm",
+            "@bazel_tools//src/conditions:darwin_x86_64": "@deps_wabt_macos//:bin/wat2wasm",
+        },
+    ),
+    out = "wat2wasm",
+    visibility = ["//visibility:public"],
+)
+
+native_binary(
     name = "clang-tidy",
     src = select(
         {

@@ -122,13 +122,24 @@ bazel_dep(name = "rules_python", version = "1.8.5")
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.6.1")
 
-# deps_wabt
+# deps_wabt_linux
 http.archive(
-    name = "deps_wabt",
-    build_file = "//:build/BUILD.wabt",
+    name = "deps_wabt_linux",
+    build_file_content = 'exports_files(["bin/wat2wasm"])',
     sha256 = "cfc675dc9b663d9adc8c75d982c1ba29f661448a2e026a67e71fe3f76a3e09f3",
     strip_prefix = "wabt-1.0.37",
     type = "tgz",
     url = "https://github.com/WebAssembly/wabt/releases/download/1.0.37/wabt-1.0.37-ubuntu-20.04.tar.gz",
 )
-use_repo(http, "deps_wabt")
+use_repo(http, "deps_wabt_linux")
+
+# deps_wabt_macos
+http.archive(
+    name = "deps_wabt_macos",
+    build_file_content = 'exports_files(["bin/wat2wasm"])',
+    sha256 = "a996907cbdf1bdcd56d66d382dd1b031450bb7326bbfd0f43a04486b620bed1c",
+    strip_prefix = "wabt-1.0.37",
+    type = "tgz",
+    url = "https://github.com/WebAssembly/wabt/releases/download/1.0.37/wabt-1.0.37-macos-14.tar.gz",
+)
+use_repo(http, "deps_wabt_macos")
