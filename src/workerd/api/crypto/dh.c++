@@ -150,7 +150,7 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
           }
         }
         KJ_CASE_ONEOF(gen, kj::Array<kj::byte>) {
-          JSG_REQUIRE(gen.size() <= INT32_MAX, RangeError,
+          JSG_REQUIRE(gen.size() <= OPENSSL_DH_MAX_MODULUS_BITS / CHAR_BIT, RangeError,
               "DiffieHellman init failed: generator is too large");
           JSG_REQUIRE(gen.size() > 0, Error, "DiffieHellman init failed: invalid generator");
 
