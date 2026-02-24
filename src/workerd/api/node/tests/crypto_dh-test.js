@@ -493,7 +493,7 @@ export const DhLargeGeneratorParam = {
     const generator = new Uint8Array(100 * 1024 * 1024);
     generator.fill(0x02);
 
-    throws(() => createDiffieHellman(prime, generator), {
+    assert.throws(() => crypto.createDiffieHellman(prime, generator), {
       name: 'RangeError',
       message: /generator is too large/,
     });
