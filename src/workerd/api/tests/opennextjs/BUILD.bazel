@@ -1,12 +1,17 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/wd_test.bzl", "wd_test")
 
+# Skipped under RBE: the upstream opennextjs build targets require no-sandbox execution,
+# which is incompatible with remote containers.
 copy_file(
     name = "opennext-ssr-worker",
     src = "//src/workerd/api/tests/opennextjs/src:dist/worker.js",
     out = "opennext-ssr-worker.js",
     tags = ["no-downstream"],
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = ["@platforms//os:linux"] + select({
+        "@//build/config:is_rbe": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_test(
@@ -17,5 +22,8 @@ wd_test(
         ":opennext-ssr-worker",
     ],
     tags = ["no-downstream"],
-    target_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = ["@platforms//os:linux"] + select({
+        "@//build/config:is_rbe": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )

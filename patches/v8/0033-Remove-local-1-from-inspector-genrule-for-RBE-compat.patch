@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Lapid <dlapid@cloudflare.com>
+Date: Sat, 15 Feb 2026 00:00:00 +0000
+Subject: Remove local=1 from inspector genrule for RBE compatibility
+
+The generated_inspector_files genrule has local=1 which forces local
+execution. In cross-platform RBE (macOS host -> Linux target), all tool
+binaries and Python interpreters are for Linux, so local execution fails
+with "Exec format error". Removing local=1 allows the genrule to run
+remotely on Linux containers where the tools can actually execute.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -4411,7 +4411,6 @@ genrule(
+            --config $(location :src/inspector/inspector_protocol_config.json) \
+            --config_value protocol.path=$(location :include/js_protocol.pdl) \
+            --output_base $(@D)/src/inspector",
+-    local = 1,
+     message = "Generating inspector files",
+     tools = [
+         ":code_generator",
