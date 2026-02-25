@@ -18,7 +18,7 @@ def _impl(ctx):
 
     return [DefaultInfo(files = depset([out_file]))]
 
-wat2wasm = rule(
+wasm_tools_parse = rule(
     implementation = _impl,
     attrs = {
         "src": attr.label(mandatory = True, allow_single_file = True),
