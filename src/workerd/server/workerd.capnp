@@ -147,7 +147,7 @@ struct Socket {
       tlsOptions @6 :TlsOptions;
     }
 
-    # TODO(someday): TCP, TCP proxy, SMTP, Cap'n Proto, ...
+    # TODO(someday): TCP proxy, SMTP, Cap'n Proto, ...
   }
 
   service @5 :ServiceDesignator;

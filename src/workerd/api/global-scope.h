@@ -9,6 +9,7 @@
 #include "http.h"
 #include "messagechannel.h"
 #include "performance.h"
+#include "sockets.h"
 
 #include <workerd/api/hibernation-event-params.h>
 #ifdef WORKERD_FUZZILLI
@@ -286,13 +287,13 @@ class ConnectEvent final: public Event {
  public:
   static jsg::Ref<ConnectEvent> constructor() = delete;
 
-  ConnectEvent(jsg::Ref<ReadableStream> inbound, CfProperty&& cf)
+  ConnectEvent(jsg::Ref<Socket> socket, CfProperty&& cf)
       : Event("connect"),
-        inbound(kj::mv(inbound)),
+        socket(kj::mv(socket)),
         cf(kj::mv(cf)) {}
 
-  jsg::Ref<ReadableStream> getInbound() {
-    return inbound.addRef();
+  jsg::Ref<Socket> getSocket() {
+    return socket.addRef();
   }
 
   // Returns the `cf` field containing Cloudflare feature flags.
@@ -301,12 +302,12 @@ class ConnectEvent final: public Event {
   }
 
   JSG_RESOURCE_TYPE(ConnectEvent) {
-    JSG_READONLY_PROTOTYPE_PROPERTY(inbound, getInbound);
+    JSG_READONLY_PROTOTYPE_PROPERTY(socket, getSocket);
     JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
   }
 
  private:
-  jsg::Ref<ReadableStream> inbound;
+  jsg::Ref<Socket> socket;
   CfProperty cf;
 };
 
@@ -321,14 +322,14 @@ struct ExportedHandler {
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
-  using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
-      jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
-  using ConnectHandler = jsg::Promise<jsg::Ref<api::ReadableStream>>(jsg::Ref<ConnectEvent> connect,
+  using ConnectHandler = jsg::Promise<void>(jsg::Ref<ConnectEvent> connect,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
+  using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
+      jsg::Value env,
+      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
@@ -383,7 +384,7 @@ struct ExportedHandler {
 
   JSG_STRUCT_TS_DEFINE(
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
-    type ExportedHandlerConnectHandler<Env = unknown> = (readable: ReadableStream, env: Env, ctx: ExecutionContext) => ReadableStream | Promise<ReadableStream>;
+    type ExportedHandlerConnectHandler<Env = unknown> = (socket: Socket, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTailStreamHandler<Env = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -495,7 +496,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   //   exports and move that code somewhere more appropriate.
 
   // Received TCP/socket ingress (called from C++, not JS).
-  kj::Promise<DeferredProxy<void>> connect(kj::AsyncIoStream& connection,
+  kj::Promise<void> connect(kj::String host,
+      kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& response,
       kj::Maybe<kj::StringPtr> cfBlobJson,
       Worker::Lock& lock,

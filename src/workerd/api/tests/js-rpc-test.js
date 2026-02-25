@@ -194,9 +194,9 @@ export class MyService extends WorkerEntrypoint {
     return new Response('method = ' + req.method + ', url = ' + req.url);
   }
 
-  async connect(arg) {
+  connect({ socket, cf }) {
     const enc = new TextEncoder();
-    return ReadableStream.from([enc.encode('hello')]);
+    socket.writable.getWriter().write(enc.encode('hello'));
   }
 
   // Define a property to test behavior of property accessors.

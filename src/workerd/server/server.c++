@@ -1528,15 +1528,6 @@ class Server::InspectorService final: public kj::HttpService, public kj::HttpSer
     co_return co_await response.sendError(500, "Not yet implemented", responseHeaders);
   }
 
-  // TODO(now): This is not needed for connect handler support right
-  kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
-      kj::AsyncIoStream& connection,
-      ConnectResponse& response,
-      kj::HttpConnectSettings settings) override {
-    KJ_UNIMPLEMENTED("CONNECT is not implemented by InspectorService");
-  }
-
   kj::Promise<void> listen(kj::Own<kj::ConnectionReceiver> listener) {
     // Note that we intentionally do not make inspector connections be part of the usual drain()
     // procedure. Inspector connections are always long-lived WebSockets, and we do not want the
@@ -5366,12 +5357,14 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,
       kj::HttpHeaderTable& headerTable,
-      kj::Own<HttpRewriter> rewriter)
+      kj::Own<HttpRewriter> rewriter,
+      kj::StringPtr addrStr)
       : owner(owner),
         listener(kj::mv(listener)),
         service(kj::mv(service)),
         headerTable(headerTable),
-        rewriter(kj::mv(rewriter)) {}
+        rewriter(kj::mv(rewriter)),
+        addrStr(addrStr) {}
 
   kj::Promise<void> run() {
     TRACE_EVENT("workerd", "TcpListener::run");
@@ -5389,9 +5382,7 @@ class Server::TcpListener final: public kj::Refcounted {
       auto req = service->startRequest(kj::mv(metadata));
       auto response = kj::heap<ResponseWrapper>();
       kj::HttpHeaders headers(headerTable);
-      // TODO(now): The empty string here is the host parameter that is required by the API but is
-      // not actually used in the implementation at this point.
-      owner.tasks.add(req->connect(""_kj, headers, *stream.stream, *response, {})
+      owner.tasks.add(req->connect(addrStr, headers, *stream.stream, *response, {})
                           .attach(kj::mv(stream.stream), kj::mv(response))
                           .attach(kj::mv(req)));
     }
@@ -5403,6 +5394,7 @@ class Server::TcpListener final: public kj::Refcounted {
   kj::Own<Service> service;
   kj::HttpHeaderTable& headerTable;
   kj::Own<HttpRewriter> rewriter;
+  kj::StringPtr addrStr;
 
   // TODO: Would using a plain ConnectResponse work here too?
   struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
@@ -5434,9 +5426,10 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
 
 kj::Promise<void> Server::listenTcp(kj::Own<kj::ConnectionReceiver> listener,
     kj::Own<Service> service,
-    kj::Own<HttpRewriter> rewriter) {
-  auto obj = kj::refcounted<TcpListener>(
-      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, kj::mv(rewriter));
+    kj::Own<HttpRewriter> rewriter,
+    kj::StringPtr addrStr) {
+  auto obj = kj::refcounted<TcpListener>(*this, kj::mv(listener), kj::mv(service),
+      globalContext->headerTable, kj::mv(rewriter), addrStr);
   co_return co_await obj->run();
 }
 
@@ -5953,7 +5946,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
     auto handle = kj::coCapture(
         [this, service = kj::mv(service), rewriter = kj::mv(rewriter), physicalProtocol, name,
-            isHttp](
+            isHttp, addrStr](
             kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
       if (isHttp) {
         TRACE_EVENT("workerd", "setup listenHttp");
@@ -5975,7 +5968,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       if (isHttp) {
         co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
       } else {
-        co_await listenTcp(kj::mv(listener), kj::mv(service), kj::mv(rewriter));
+        co_await listenTcp(kj::mv(listener), kj::mv(service), kj::mv(rewriter), addrStr);
       }
     });
     tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
