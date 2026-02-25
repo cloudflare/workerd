@@ -1,4 +1,4 @@
-load("//build:wasm_tools_parse.bzl", "wasm_tools_parse")
+load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
 
 [
     wasm_tools_parse(
