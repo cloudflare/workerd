@@ -35,16 +35,17 @@ ts_config(
 )
 
 native_binary(
-    name = "wat2wasm",
+    name = "wasm-tools",
     src = select(
         {
-            "@bazel_tools//src/conditions:linux_x86_64": "@deps_wabt_linux//:bin/wat2wasm",
-            "@bazel_tools//src/conditions:linux_aarch64": "@deps_wabt_linux//:bin/wat2wasm",
-            "@bazel_tools//src/conditions:darwin_arm64": "@deps_wabt_macos//:bin/wat2wasm",
-            "@bazel_tools//src/conditions:darwin_x86_64": "@deps_wabt_macos//:bin/wat2wasm",
+            "@bazel_tools//src/conditions:linux_x86_64": "@wasm_tools_linux_x64//:wasm-tools",
+            "@bazel_tools//src/conditions:linux_aarch64": "@wasm_tools_linux_arm64//:wasm-tools",
+            "@bazel_tools//src/conditions:darwin_arm64": "@wasm_tools_macos_arm64//:wasm-tools",
+            "@bazel_tools//src/conditions:darwin_x86_64": "@wasm_tools_macos_x64//:wasm-tools",
+            "@bazel_tools//src/conditions:windows_x64": "@wasm_tools_windows_x64//:wasm-tools.exe",
         },
     ),
-    out = "wat2wasm",
+    out = "wasm-tools",
     visibility = ["//visibility:public"],
 )
 
