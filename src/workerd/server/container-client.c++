@@ -380,15 +380,48 @@ kj::Promise<ContainerClient::IPAMConfigResult> ContainerClient::getDockerBridgeI
       response.statusCode, ", Body: ", response.body);
 }
 
+kj::Promise<bool> ContainerClient::isDaemonIpv6Enabled() {
+  // Inspect the default bridge network. When the Docker daemon has "ipv6": true in
+  // daemon.json, the default bridge gets an IPv6 IPAM subnet entry (e.g. "fd00::/80").
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str("/networks/bridge"));
+
+  if (response.statusCode != 200) {
+    co_return false;
+  }
+
+  auto jsonRoot = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
+  for (auto config: jsonRoot.getIpam().getConfig()) {
+    // IPv6 subnets contain ':' (e.g. "fd00::/80", "2001:db8::/64")
+    if (kj::StringPtr(config.getSubnet()).findFirst(':') != kj::none) {
+      co_return true;
+    }
+  }
+
+  co_return false;
+}
+
 kj::Promise<void> ContainerClient::createWorkerdNetwork() {
-  // Equivalent to: docker network create -d bridge --ipv6 workerd-network
+  if (workerdNetworkCreated.exchange(true, std::memory_order_acquire)) {
+    co_return;
+  }
+
+  KJ_ON_SCOPE_FAILURE(workerdNetworkCreated.store(false, std::memory_order_release));
+
+  auto ipv6Enabled = co_await isDaemonIpv6Enabled();
+
+  // Equivalent to: docker network create -d bridge [--ipv6] workerd-network
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::NetworkCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::NetworkCreateRequest>();
   jsonRoot.setName(WORKERD_NETWORK_NAME);
   jsonRoot.setDriver("bridge");
-  jsonRoot.setEnableIpv6(true);
+  jsonRoot.setEnableIpv6(ipv6Enabled);
+  if (!ipv6Enabled) {
+    KJ_LOG(WARNING,
+        "Docker has IPv6 disabled. Connections to Workers via IPv6 won't work. If you want to enable IPv6, remove the workerd-network after re-enabling.");
+  }
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/networks/create"), codec.encode(jsonRoot));
