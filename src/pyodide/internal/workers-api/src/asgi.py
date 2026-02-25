@@ -6,7 +6,7 @@ from inspect import isawaitable
 from typing import Any
 
 import js
-from workers import Context, Request
+from workers import Context, Request, wait_until
 
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 logger = logging.getLogger("asgi")
@@ -115,7 +115,12 @@ async def start_application(app):
 
 
 async def process_request(
-    app: Any, req: "Request | js.Request", env: Any, ctx: Context | None
+    app: Any,
+    req: "Request | js.Request",
+    env: Any,
+    # added for waitUntil, but not used anymore
+    # TODO(later): remove this parameter after unvendoring Python SDK from workerd
+    ctx: Context | None,
 ) -> js.Response:
     from js import Object, Response, TransformStream
 
@@ -124,9 +129,10 @@ async def process_request(
     status = None
     headers = None
     result = Future()
-    is_sse = False
     finished_response = Event()
-    use_streaming = ctx is not None
+
+    # Streaming state — initialized lazily on first body chunk with more_body=True.
+    writer = None
 
     receive_queue = Queue()
     if req.body:
@@ -149,73 +155,50 @@ async def process_request(
             message = {"type": "http.disconnect"}
         return message
 
-    # When ctx is available we can stream via a TransformStream: the Response
-    # wraps the readable side and ctx.waitUntil keeps the worker alive while
-    # chunks are written.  Without ctx we buffer all chunks in Python and
-    # build the Response from the complete body after the app finishes.
-    if use_streaming:
-        transform_stream = TransformStream.new()
-        readable = transform_stream.readable
-        writer = transform_stream.writable.getWriter()
-
-    # Buffered body chunks when not streaming
-    body_chunks: list[bytes] = []
-
     async def send(got):
         nonlocal status
         nonlocal headers
-        nonlocal is_sse
+        nonlocal writer
 
         if got["type"] == "http.response.start":
             status = got["status"]
             # Like above, we need to convert byte-pairs into string explicitly.
             headers = [(k.decode(), v.decode()) for k, v in got["headers"]]
-            # Track SSE for backwards-compatible error when ctx is missing
-            for k, v in headers:
-                if k.lower() == "content-type" and v.lower().startswith(
-                    "text/event-stream"
-                ):
-                    is_sse = True
-                    break
-            if use_streaming:
-                # Return the response immediately so the runtime can start
-                # consuming body chunks as they are written.
-                resp = Response.new(
-                    readable, headers=Object.fromEntries(headers), status=status
-                )
-                result.set_result(resp)
 
         elif got["type"] == "http.response.body":
             body = got["body"]
             more_body = got.get("more_body", False)
 
-            if use_streaming:
-                # Convert body to JS buffer and write to the stream
-                px = create_proxy(body)
-                buf = px.getBuffer()
-                px.destroy()
-
-                await writer.write(buf.data)
+            if writer is not None:
+                # Already in streaming mode — write chunk to the stream.
+                with acquire_js_buffer(body) as jsbytes:
+                    await writer.write(jsbytes)
                 if not more_body:
                     await writer.close()
                     finished_response.set()
+            elif more_body:
+                # First body chunk with more data coming — switch to streaming.
+                # Create a TransformStream so the runtime can start consuming
+                # body chunks as they are written.
+                transform_stream = TransformStream.new()
+                readable = transform_stream.readable
+                writer = transform_stream.writable.getWriter()
+                resp = Response.new(
+                    readable, headers=Object.fromEntries(headers), status=status
+                )
+                result.set_result(resp)
+                with acquire_js_buffer(body) as jsbytes:
+                    await writer.write(jsbytes)
             else:
-                # Buffer chunks in Python to avoid TransformStream deadlock
-                # TODO(soon): This is inefficident, make `ctx` mandatory and let
-                # the runtime handle the streaming.
-                body_chunks.append(body)
-                if not more_body:
-                    full_body = b"".join(body_chunks)
-                    px = create_proxy(full_body)
-                    buf = px.getBuffer()
-                    px.destroy()
-                    resp = Response.new(
-                        buf.data,
-                        headers=Object.fromEntries(headers),
-                        status=status,
-                    )
-                    result.set_result(resp)
-                    finished_response.set()
+                # Complete body in a single chunk
+                px = create_proxy(body)
+                buf = px.getBuffer()
+                px.destroy()
+                resp = Response.new(
+                    buf.data, headers=Object.fromEntries(headers), status=status
+                )
+                result.set_result(resp)
+                finished_response.set()
 
     # Run the application in the background
     async def run_app():
@@ -228,7 +211,7 @@ async def process_request(
         except Exception as e:
             if not result.done():
                 result.set_exception(e)
-                if use_streaming:
+                if writer is not None:
                     await writer.close()
                 finished_response.set()
             else:
@@ -237,24 +220,10 @@ async def process_request(
                 logger.exception("Exception in ASGI application after response started")
 
     # Create task to run the application in the background
-    app_task = create_task(run_app())
-
-    # Wait for the result (the response)
-    response = await result
-
-    if use_streaming:
-        # Let the application continue running in the background to stream
-        # the response body via the TransformStream.
-        if is_sse and ctx is None:
-            raise RuntimeError(
-                "Server-Side-Events require ctx to be passed to asgi.fetch"
-            )
-        ctx.waitUntil(create_proxy(app_task))
-    else:
-        # Without ctx the response was built from buffered bytes, so the
-        # app task has already completed or will complete momentarily.
-        await app_task
-    return response
+    app_task = create_proxy(create_task(run_app()))
+    wait_until(app_task)
+    app_task.destroy()
+    return await result
 
 
 async def process_websocket(app: Any, req: "Request | js.Request") -> js.Response:

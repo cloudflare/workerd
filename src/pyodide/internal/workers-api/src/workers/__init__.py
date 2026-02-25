@@ -52,6 +52,7 @@ __all__ = [
     "python_from_rpc",
     "python_to_rpc",
     "waitUntil",
+    "wait_until",
 ]
 
 
@@ -59,7 +60,7 @@ def __getattr__(key):
     if key == "env":
         cloudflare_workers = import_from_javascript("cloudflare:workers")
         return cloudflare_workers.env
-    if key == "waitUntil":
+    if key in ("wait_until", "waitUntil"):
         cloudflare_workers = import_from_javascript("cloudflare:workers")
         return cloudflare_workers.waitUntil
     raise AttributeError(f"module {__name__!r} has no attribute {key!r}")
