@@ -115,7 +115,7 @@ async def start_application(app):
 
 
 async def process_request(
-    app: Any, req: "Request | js.Request", env: Any, ctx: Context
+    app: Any, req: "Request | js.Request", env: Any, ctx: Context | None
 ) -> js.Response:
     from js import Object, Response, TransformStream
 
@@ -126,6 +126,7 @@ async def process_request(
     result = Future()
     is_sse = False
     finished_response = Event()
+    use_streaming = ctx is not None
 
     receive_queue = Queue()
     if req.body:
@@ -148,11 +149,17 @@ async def process_request(
             message = {"type": "http.disconnect"}
         return message
 
-    # Create a transform stream for handling streaming responses
-    transform_stream = TransformStream.new()
-    readable = transform_stream.readable
-    writable = transform_stream.writable
-    writer = writable.getWriter()
+    # When ctx is available we can stream via a TransformStream: the Response
+    # wraps the readable side and ctx.waitUntil keeps the worker alive while
+    # chunks are written.  Without ctx we buffer all chunks in Python and
+    # build the Response from the complete body after the app finishes.
+    if use_streaming:
+        transform_stream = TransformStream.new()
+        readable = transform_stream.readable
+        writer = transform_stream.writable.getWriter()
+
+    # Buffered body chunks when not streaming
+    body_chunks: list[bytes] = []
 
     async def send(got):
         nonlocal status
@@ -163,15 +170,16 @@ async def process_request(
             status = got["status"]
             # Like above, we need to convert byte-pairs into string explicitly.
             headers = [(k.decode(), v.decode()) for k, v in got["headers"]]
-            # Check if this is a server-sent events response
+            # Track SSE for backwards-compatible error when ctx is missing
             for k, v in headers:
                 if k.lower() == "content-type" and v.lower().startswith(
                     "text/event-stream"
                 ):
                     is_sse = True
                     break
-            if is_sse:
-                # For SSE, create and return the response immediately after http.response.start
+            if use_streaming:
+                # Return the response immediately so the runtime can start
+                # consuming body chunks as they are written.
                 resp = Response.new(
                     readable, headers=Object.fromEntries(headers), status=status
                 )
@@ -181,27 +189,35 @@ async def process_request(
             body = got["body"]
             more_body = got.get("more_body", False)
 
-            # Convert body to JS buffer
-            px = create_proxy(body)
-            buf = px.getBuffer()
-            px.destroy()
+            if use_streaming:
+                # Convert body to JS buffer and write to the stream
+                px = create_proxy(body)
+                buf = px.getBuffer()
+                px.destroy()
 
-            if is_sse:
-                # For SSE, write chunk to the stream
                 await writer.write(buf.data)
-                # If this is the last chunk, close the writer
                 if not more_body:
                     await writer.close()
                     finished_response.set()
             else:
-                resp = Response.new(
-                    buf.data, headers=Object.fromEntries(headers), status=status
-                )
-                result.set_result(resp)
-                await writer.close()
-                finished_response.set()
+                # Buffer chunks in Python to avoid TransformStream deadlock
+                # TODO(soon): This is inefficident, make `ctx` mandatory and let
+                # the runtime handle the streaming.
+                body_chunks.append(body)
+                if not more_body:
+                    full_body = b"".join(body_chunks)
+                    px = create_proxy(full_body)
+                    buf = px.getBuffer()
+                    px.destroy()
+                    resp = Response.new(
+                        buf.data,
+                        headers=Object.fromEntries(headers),
+                        status=status,
+                    )
+                    result.set_result(resp)
+                    finished_response.set()
 
-    # Run the application in the background to handle SSE
+    # Run the application in the background
     async def run_app():
         try:
             await app(request_to_scope(req, env), receive, send)
@@ -212,7 +228,8 @@ async def process_request(
         except Exception as e:
             if not result.done():
                 result.set_exception(e)
-                await writer.close()  # Close the writer
+                if use_streaming:
+                    await writer.close()
                 finished_response.set()
             else:
                 # Response already sent — exception can't be propagated to the
@@ -225,16 +242,18 @@ async def process_request(
     # Wait for the result (the response)
     response = await result
 
-    # For non-SSE responses, we need to wait for the application to complete
-    if not is_sse:
-        await app_task
-    else:  # noqa: PLR5501
-        if ctx is not None:
-            ctx.waitUntil(create_proxy(app_task))
-        else:
+    if use_streaming:
+        # Let the application continue running in the background to stream
+        # the response body via the TransformStream.
+        if is_sse and ctx is None:
             raise RuntimeError(
                 "Server-Side-Events require ctx to be passed to asgi.fetch"
             )
+        ctx.waitUntil(create_proxy(app_task))
+    else:
+        # Without ctx the response was built from buffered bytes, so the
+        # app task has already completed or will complete momentarily.
+        await app_task
     return response
 
 
