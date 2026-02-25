@@ -55,7 +55,6 @@ PATCHES = [
     "0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch",
     "0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch",
     "0032-Change-lamba-signature-to-get-around-windows-build-f.patch",
-    "0033-Return-false-from-on-interceptor-hasOwnProperty.patch",
 ]
 
 http_archive(

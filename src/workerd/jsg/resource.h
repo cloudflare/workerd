@@ -29,6 +29,10 @@
 #include <type_traits>
 #include <typeindex>
 
+// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {
   // Make std::type_index (which points to std::type_info) usable as a kj::HashMap key.
@@ -87,9 +91,6 @@ void scheduleUnimplementedMethodError(const v8::FunctionCallbackInfo<v8::Value>&
 // directly from the V8 trampoline without liftKj, so they don't throw JsExceptionThrown.
 void scheduleUnimplementedPropertyError(
     v8::Isolate* isolate, const std::type_info& type, const char* propertyName);
-
-template <typename TypeWrapper, typename T>
-class ResourceWrapper;
 
 // Implements the V8 callback function for calling the static `constructor()` method of the C++
 // class.
@@ -1179,7 +1180,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
   WildcardPropertyCallbacks()
       : v8::NamedPropertyHandlerConfiguration(getter,
             nullptr,
-            query,
+            nullptr,
             nullptr,
             nullptr,
             nullptr,
@@ -1190,36 +1191,13 @@ struct WildcardPropertyCallbacks<TypeWrapper,
                 static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
                 static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))) {}
 
-  // Query callback is needed for V8 to properly handle property creation with correct
-  // enumerable attributes when the interceptor is on the instance template.
-  static v8::Intercepted query(
-      v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info) {
-    v8::Intercepted result = v8::Intercepted::kNo;
-    liftKj(info, [&]() -> v8::Local<v8::Integer> {
-      auto isolate = info.GetIsolate();
-      auto context = isolate->GetCurrentContext();
-      auto obj = info.HolderV2();
-      auto& wrapper = TypeWrapper::from(isolate);
-      if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
-        throwTypeError(isolate, kIllegalInvocation);
-      }
-      auto& self = extractInternalPointer<T, false>(context, obj);
-      auto& lock = Lock::from(isolate);
-      if ((self.*getNamedMethod)(lock, kj::str(name.As<v8::String>())) != kj::none) {
-        result = v8::Intercepted::kYes;
-      }
-      return {};
-    });
-    return result;
-  }
-
   static v8::Intercepted getter(
       v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
     v8::Intercepted result = v8::Intercepted::kNo;
     liftKj(info, [&]() -> v8::Local<v8::Value> {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
-      auto obj = info.HolderV2();
+      auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
@@ -1269,25 +1247,14 @@ struct ResourceTypeBuilder {
 
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() {
-    auto& resourceWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
-    KJ_ASSERT(
-        resourceWrapper.wildcardHandler == kj::none, "only one wildcard per instance supported");
-    resourceWrapper.wildcardHandler =
-        WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod>{};
+    prototype->SetHandler(
+        WildcardPropertyCallbacks<TypeWrapper, Type, GetNamedMethod, getNamedMethod>{});
   }
 
   template <typename Type>
   inline void registerInherit() {
     constructor->Inherit(
         typeWrapper.template getTemplate<isContext>(isolate, static_cast<Type*>(nullptr)));
-    // Propagate wildcard proxy to children. It's a data property, so it should be propagated, but v8 only handles normal data properties.
-    auto& parentWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
-    if (parentWrapper.wildcardHandler != kj::none) {
-      auto& selfWrapper = static_cast<ResourceWrapper<TypeWrapper, Self>&>(typeWrapper);
-      KJ_ASSERT(
-          selfWrapper.wildcardHandler == kj::none, "only one wildcard per instance supported");
-      selfWrapper.wildcardHandler = parentWrapper.wildcardHandler;
-    }
   }
 
   template <const char* name>
@@ -1962,10 +1929,6 @@ class ResourceWrapper {
         T::template registerMembers<decltype(builder), T>(builder);
       }
 
-      KJ_IF_SOME(handler, wildcardHandler) {
-        instance->SetHandler(handler);
-      }
-
       auto result = scope.Escape(constructor);
       slot.Reset(isolate, result);
       return result;
@@ -1973,8 +1936,6 @@ class ResourceWrapper {
       return slot.Get(isolate);
     }
   }
-
-  kj::Maybe<v8::NamedPropertyHandlerConfiguration> wildcardHandler;
 
  private:
   Configuration configuration;
@@ -2041,5 +2002,8 @@ class ObjectWrapper {
       Ref<Object>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
 };
+
+// TODO(soon): Resolve .This() -> .HolderV2() deprecation warnings, then remove this pragma.
+#pragma clang diagnostic pop
 
 }  // namespace workerd::jsg
