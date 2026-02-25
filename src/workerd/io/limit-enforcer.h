@@ -7,7 +7,6 @@
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/wasm-shutdown-signal.h>
 
-#include <v8-array-buffer.h>
 #include <v8-isolate.h>
 
 #include <kj/async.h>   // For Promise
@@ -15,8 +14,6 @@
 #include <kj/memory.h>  // for Own
 #include <kj/one-of.h>  // for OneOf
 #include <kj/time.h>    // for Duration
-
-#include <memory>  // for std::shared_ptr
 
 namespace workerd {
 class IsolateObserver;
@@ -105,31 +102,31 @@ class IsolateLimitEnforcer: public kj::Refcounted {
 
   // Registers a WASM module for receiving the "shut down" signal when CPU time is nearly
   // exhausted. The signal handler will write SIGXCPU (24) (as a uint32) into the module's
-  // linear memory at `signalOffset` bytes from the start of `backingStore`. The runtime reads
+  // linear memory at `signalOffset` bytes from the start of `memory`. The runtime reads
   // `terminatedOffset` in a GC prologue to detect when the module has exited.
   //
+  // `memory` is a kj::Array<kj::byte> that keeps the underlying v8::BackingStore alive via
+  // kj::Array's attach() mechanism.
+  //
   // Must be called with the isolate lock held.
-  void registerWasmShutdownSignal(std::shared_ptr<v8::BackingStore> backingStore,
-      uint32_t signalOffset,
-      uint32_t terminatedOffset) const {
+  void registerWasmShutdownSignal(
+      kj::Array<kj::byte> memory, uint32_t signalOffset, uint32_t terminatedOffset) const {
     // Silently skip registration if either address would fall outside the module's linear memory.
     // This avoids breaking user code that happens to export the conventional globals with
     // addresses that don't fit — the module simply won't receive the shutdown signal.
-    if (static_cast<size_t>(signalOffset) + WASM_SIGNAL_FIELD_BYTES > backingStore->ByteLength()) {
+    if (static_cast<size_t>(signalOffset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
       return;
     }
-    if (static_cast<size_t>(terminatedOffset) + WASM_SIGNAL_FIELD_BYTES >
-        backingStore->ByteLength()) {
+    if (static_cast<size_t>(terminatedOffset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
       return;
     }
     // Zero the signal address to clear any stale signals
-    auto* base = static_cast<kj::byte*>(backingStore->Data());
-    uint32_t zero = 0;
-    // The address may not be aligned, so use memcpy instead of writing directly
-    memcpy(base + signalOffset, &zero, sizeof(zero));
+    for (auto& b: memory.slice(signalOffset, signalOffset + WASM_SIGNAL_FIELD_BYTES)) {
+      b = 0;
+    }
 
     wasmShutdownSignals.pushFront(
-        WasmShutdownSignal{kj::mv(backingStore), signalOffset, terminatedOffset});
+        WasmShutdownSignal{kj::mv(memory), signalOffset, terminatedOffset});
   }
 
   // Filters out WASM shutdown signal entries where the module has exited (indicated by a

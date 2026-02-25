@@ -129,10 +129,95 @@ KJ_TEST("AtomicList filter removes tail only") {
 }
 
 // ---------------------------------------------------------------------------
+// WasmShutdownSignal memory-lifetime tests
+// ---------------------------------------------------------------------------
+
+// Simulates a WASM module's backing store (e.g. a v8::BackingStore). Sets a flag on destruction so
+// tests can observe exactly when the memory is reclaimed.
+struct FakeBackingStore {
+  FakeBackingStore(bool& destroyed, size_t size)
+      : destroyed(destroyed),
+        data(kj::heapArray<kj::byte>(size)) {
+    memset(data.begin(), 0, data.size());
+  }
+  ~FakeBackingStore() noexcept(false) {
+    destroyed = true;
+  }
+
+  bool& destroyed;
+  kj::Array<kj::byte> data;
+};
+
+KJ_TEST("kj::Array attach keeps memory alive after module instance is dropped") {
+  // This test proves that the kj::Array<kj::byte> in WasmShutdownSignal, created via attach(),
+  // keeps the underlying linear memory alive even after the original owner (simulating a WASM
+  // module instance) is dropped.
+
+  bool backingStoreDestroyed = false;
+  AtomicList<WasmShutdownSignal> signals;
+
+  // Allocate enough room for both signal fields (signalByteOffset=0, terminatedByteOffset=4).
+  constexpr size_t kMemorySize = 64;
+  constexpr uint32_t kSignalOffset = 0;
+  constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
+
+  {
+    // Create the backing store — this simulates the WASM module instance owning linear memory.
+    auto backingStore = kj::heap<FakeBackingStore>(backingStoreDestroyed, kMemorySize);
+
+    // Build a kj::Array that points into the backing store's data and keeps it alive via attach().
+    // This mirrors what the runtime does: take an ArrayPtr into the v8::BackingStore, then attach
+    // the BackingStore so the array owns a reference.
+    kj::Array<kj::byte> memory = backingStore->data.asPtr().attach(kj::mv(backingStore));
+
+    // Register in the signal list.
+    signals.pushFront(WasmShutdownSignal{
+      .memory = kj::mv(memory),
+      .signalByteOffset = kSignalOffset,
+      .terminatedByteOffset = kTerminatedOffset,
+    });
+
+    // `backingStore` has been moved away — the only reference keeping the memory alive is the
+    // kj::Array inside the AtomicList.
+  }
+
+  // The backing store must still be alive — the AtomicList's kj::Array owns it.
+  KJ_EXPECT(!backingStoreDestroyed);
+
+  // Prove the memory is accessible: write the shutdown signal through the list.
+  writeWasmShutdownSignals(signals);
+
+  // Read back the signal value to confirm the write landed in live memory.
+  signals.iterate([&](WasmShutdownSignal& signal) {
+    uint32_t value = 0;
+    memcpy(&value, signal.memory.begin() + kSignalOffset, sizeof(value));
+    KJ_EXPECT(value == WASM_SIGNAL_SIGXCPU, value);
+  });
+
+  // Clear the signals (writes zero), then verify the clear also works on the still-live memory.
+  clearWasmShutdownSignals(signals);
+  signals.iterate([&](WasmShutdownSignal& signal) {
+    uint32_t value = 0xff;
+    memcpy(&value, signal.memory.begin() + kSignalOffset, sizeof(value));
+    KJ_EXPECT(value == 0, value);
+  });
+
+  // Memory is still alive after all those read/write operations.
+  KJ_EXPECT(!backingStoreDestroyed);
+
+  // Now remove the entry from the list — this destroys the kj::Array, which in turn destroys
+  // the attached FakeBackingStore.
+  signals.filter([](WasmShutdownSignal&) { return false; });
+
+  KJ_EXPECT(backingStoreDestroyed);
+  KJ_EXPECT(signals.isEmpty());
+}
+
+// ---------------------------------------------------------------------------
 // writeWasmShutdownSignals and WasmShutdownSignal tests are covered by the
 // JS-level wasm-shutdown-signal-js-test.wd-test, which runs inside a real
-// workerd instance with V8 initialized. V8's BackingStore API requires the
-// V8 sandbox to be set up, so we cannot test it in a plain kj_test.
+// workerd instance with V8 initialized. Registration requires the
+// WebAssembly.instantiate shim, so we test via JS rather than a plain kj_test.
 // ---------------------------------------------------------------------------
 
 }  // namespace

@@ -13,6 +13,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/wasm-instantiate-shim.embed.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/inspector.h>
@@ -1612,12 +1613,11 @@ void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)>
       FAILED, "Python Workers Internal Error: CpuLimitNearlyExceededCallback already set"));
 }
 
-void Worker::Isolate::registerWasmShutdownSignal(std::shared_ptr<v8::BackingStore> backingStore,
-    uint32_t signalOffset,
-    uint32_t terminatedOffset) const {
+void Worker::Isolate::registerWasmShutdownSignal(
+    kj::Array<kj::byte> memory, uint32_t signalOffset, uint32_t terminatedOffset) const {
   // Register the WASM module for receiving shutdown signals. The signal handler will
   // iterate the list unconditionally when CPU time is nearly exhausted.
-  limitEnforcer->registerWasmShutdownSignal(kj::mv(backingStore), signalOffset, terminatedOffset);
+  limitEnforcer->registerWasmShutdownSignal(kj::mv(memory), signalOffset, terminatedOffset);
 }
 
 // EW-1319: Set WebAssembly.Module @@HasInstance
@@ -1625,6 +1625,9 @@ void Worker::Isolate::registerWasmShutdownSignal(std::shared_ptr<v8::BackingStor
 // The instanceof operator can be changed by setting the @@HasInstance method
 // on the object, https://tc39.es/ecma262/#sec-instanceofoperator.
 void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context) {
+  // setupContext() is called before JSG_WITHIN_CONTEXT_SCOPE, so we need to enter the context.
+  v8::Context::Scope contextScope(context);
+
   auto instanceof = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
     jsg::Lock::from(info.GetIsolate()).withinHandleScope([&] {
       info.GetReturnValue().Set(info[0]->IsWasmModuleObject());
@@ -1632,13 +1635,12 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
   };
   v8::Local<v8::Function> function = jsg::check(v8::Function::New(context, instanceof));
 
-  v8::Object* webAssembly = v8::Object::Cast(*jsg::check(
-      context->Global()->Get(context, jsg::v8StrIntern(lock.v8Isolate, "WebAssembly"))));
-  v8::Object* module = v8::Object::Cast(
-      *jsg::check(webAssembly->Get(context, jsg::v8StrIntern(lock.v8Isolate, "Module"))));
+  auto webAssembly =
+      KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
+  auto module = KJ_ASSERT_NONNULL(webAssembly.get(lock, "Module").tryCast<jsg::JsObject>());
 
-  jsg::check(
-      module->DefineOwnProperty(context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
+  jsg::check(v8::Local<v8::Object>(module)->DefineOwnProperty(
+      context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
 }
 
 // Installs a shim around WebAssembly.instantiate and WebAssembly.Instance that hooks into the
@@ -1648,22 +1650,20 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   // v8::Script::Compile/Run. setupContext() is called before JSG_WITHIN_CONTEXT_SCOPE, so the
   // context is not yet entered at this point.
   v8::Context::Scope contextScope(context);
-  auto isolate = lock.v8Isolate;
 
   auto webAssembly =
-      jsg::check(context->Global()->Get(context, jsg::v8StrIntern(isolate, "WebAssembly")))
-          .As<v8::Object>();
+      KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
 
   // Create a C++ callback that the JS shims call to register a {memory, signalOffset,
   // terminatedOffset} tuple.
   // __registerWasmShutdownSignal(memory: WebAssembly.Memory, signalOffset: number,
   //                              terminatedOffset: number)
   auto registerCb = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
-    jsg::Lock::from(info.GetIsolate()).withinHandleScope([&] {
-      auto isolate = info.GetIsolate();
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    js.withinHandleScope([&] {
       if (info.Length() < 3 || !info[0]->IsWasmMemoryObject() || !info[1]->IsUint32() ||
           !info[2]->IsUint32()) {
-        isolate->ThrowException(jsg::v8Str(isolate,
+        js.v8Isolate->ThrowException(jsg::v8Str(js.v8Isolate,
             "registerWasmShutdownSignal: expected (WebAssembly.Memory, uint32, uint32)"_kj));
         return;
       }
@@ -1671,99 +1671,32 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       auto signalOffset = info[1].As<v8::Uint32>()->Value();
       auto terminatedOffset = info[2].As<v8::Uint32>()->Value();
       auto backingStore = memory->Buffer()->GetBackingStore();
+      auto wasmMemory =
+          kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), backingStore->ByteLength())
+              .attach(kj::mv(backingStore));
       KJ_IF_SOME(e, kj::runCatchingExceptions([&] {
-        Worker::Isolate::from(jsg::Lock::from(isolate))
-            .registerWasmShutdownSignal(kj::mv(backingStore), signalOffset, terminatedOffset);
+        Worker::Isolate::from(js).registerWasmShutdownSignal(
+            kj::mv(wasmMemory), signalOffset, terminatedOffset);
       })) {
-        // Convert KJ exception to a JavaScript Error object
-        auto message = jsg::v8Str(isolate, e.getDescription());
-        isolate->ThrowException(v8::Exception::Error(message));
+        js.v8Isolate->ThrowException(js.exceptionToJs(kj::mv(e)).getHandle(js));
       }
     });
   };
   auto registerFn = jsg::check(v8::Function::New(context, registerCb));
 
   // Build the shim in JavaScript. It wraps both WebAssembly.instantiate (async) and
-  // WebAssembly.Instance (sync constructor). A shared helper inspects exports for the
-  // "__signal_address" / "__terminated_address" convention.
-  //
-  // The factory receives:
-  //   originalInstantiate  - the original WebAssembly.instantiate function
-  //   originalInstance     - the original WebAssembly.Instance constructor
-  //   registerShutdown     - the C++ registration callback
-  //   wa                   - the WebAssembly object
-  auto shimSource = jsg::v8Str(isolate,
-      "(function(originalInstantiate, originalInstance, registerShutdown, wa) {\n"
-      "  // Find memory from exports or imports. Returns Memory instance or undefined.\n"
-      "  // When searching imports, only considers entries whose declared import kind is\n"
-      "  // 'memory' (via WebAssembly.Module.imports), so that a Memory passed as an\n"
-      "  // externref is not mistaken for the module's linear memory.\n"
-      "  function findMemory(instance, imports, module) {\n"
-      "    // First, check if memory is exported\n"
-      "    var memory = instance.exports['memory'];\n"
-      "    if (memory instanceof wa.Memory) return memory;\n"
-      "    // Otherwise, check the module's declared memory imports\n"
-      "    if (imports && module) {\n"
-      "      var descs = wa.Module.imports(module);\n"
-      "      for (var i = 0; i < descs.length; i++) {\n"
-      "        if (descs[i].kind === 'memory') {\n"
-      "          var ns = imports[descs[i].module];\n"
-      "          if (ns) {\n"
-      "            var mem = ns[descs[i].name];\n"
-      "            if (mem instanceof wa.Memory) return mem;\n"
-      "          }\n"
-      "        }\n"
-      "      }\n"
-      "    }\n"
-      "    return undefined;\n"
-      "  }\n"
-      "\n"
-      "  function checkExports(instance, imports, module) {\n"
-      "    var exports = instance.exports;\n"
-      "    var signalGlobal = exports['__signal_address'];\n"
-      "    var terminatedGlobal = exports['__terminated_address'];\n"
-      "    if (signalGlobal instanceof wa.Global &&\n"
-      "        terminatedGlobal instanceof wa.Global) {\n"
-      "      var memory = findMemory(instance, imports, module);\n"
-      "      if (memory) {\n"
-      "        registerShutdown(memory, signalGlobal.value, terminatedGlobal.value);\n"
-      "      }\n"
-      "    }\n"
-      "  }\n"
-      "\n"
-      "  wa.instantiate = function instantiate(moduleOrBytes, imports) {\n"
-      "    return originalInstantiate.call(wa, moduleOrBytes, imports).then(function(result) {\n"
-      "      var instance = result.instance || result;\n"
-      "      var module = result.module || moduleOrBytes;\n"
-      "      checkExports(instance, imports, module);\n"
-      "      return result;\n"
-      "    });\n"
-      "  };\n"
-      "\n"
-      "  wa.Instance = function Instance(module, imports) {\n"
-      "    var instance = new originalInstance(module, imports);\n"
-      "    checkExports(instance, imports, module);\n"
-      "    return instance;\n"
-      "  };\n"
-      "  wa.Instance.prototype = originalInstance.prototype;\n"
-      "  Object.defineProperty(wa.Instance.prototype, 'constructor',\n"
-      "    { value: wa.Instance, writable: true, configurable: true });\n"
-      "})\n"_kj);
-
-  auto shimFactory = jsg::check(v8::Script::Compile(context, shimSource));
-  auto shimFactoryResult = jsg::check(shimFactory->Run(context));
-  auto shimFactoryFn = shimFactoryResult.As<v8::Function>();
+  // WebAssembly.Instance (sync constructor).
+  auto shimScript =
+      jsg::NonModuleScript::compile(lock, WASM_INSTANTIATE_SHIM, "wasm-instantiate-shim.js"_kj);
+  auto shimFn = KJ_ASSERT_NONNULL(shimScript.runAndReturn(lock).tryCast<jsg::JsFunction>());
 
   // Grab the originals before they are replaced.
-  auto instantiateKey = jsg::v8StrIntern(isolate, "instantiate");
-  auto instanceKey = jsg::v8StrIntern(isolate, "Instance");
-  auto originalInstantiate =
-      jsg::check(webAssembly->Get(context, instantiateKey)).As<v8::Function>();
-  auto originalInstance = jsg::check(webAssembly->Get(context, instanceKey)).As<v8::Function>();
+  auto originalInstantiate = webAssembly.get(lock, "instantiate");
+  auto originalInstance = webAssembly.get(lock, "Instance");
 
   // Call the factory — it mutates `wa` in place.
-  v8::Local<v8::Value> args[] = {originalInstantiate, originalInstance, registerFn, webAssembly};
-  jsg::check(shimFactoryFn->Call(context, context->Global(), 4, args));
+  shimFn.call(lock, lock.global(), originalInstantiate, originalInstance,
+      jsg::JsFunction(registerFn), jsg::JsObject(webAssembly));
 }
 
 void Worker::setupContext(

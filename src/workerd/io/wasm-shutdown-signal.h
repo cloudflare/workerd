@@ -4,12 +4,10 @@
 
 #pragma once
 
-#include <v8-array-buffer.h>
-
+#include <kj/array.h>
 #include <kj/common.h>
 
-#include <atomic>
-#include <memory>
+#include <cstdint>
 
 namespace workerd {
 
@@ -27,24 +25,25 @@ constexpr size_t WASM_SIGNAL_FIELD_BYTES = sizeof(uint32_t);
 //                            where terminated is non-zero, allowing the linear memory to be
 //                            reclaimed.
 struct WasmShutdownSignal {
-  // This reference is shared rather than weak so that we can be sure it is not being
-  // garbage collected when the signal handler runs. This memory gets cleaned up in a
-  // V8 GC prelude hook where we can atomically remove it from the signal list before
-  // freeing the memory.
-  std::shared_ptr<v8::BackingStore> backingStore;
+  // Owns a reference to the WASM module's linear memory. The underlying v8::BackingStore is kept
+  // alive via kj::Array's attach() mechanism, preventing V8 from garbage-collecting the memory
+  // while we still need to read/write signal addresses. This gets cleaned up in a V8 GC prologue
+  // hook where we atomically remove the entry from the signal list before releasing the memory.
+  kj::Array<kj::byte> memory;
 
-  // Offset into `backingStore` of the uint32 the runtime writes SIGXCPU (24) to (__signal_address).
+  // Offset into `memory` of the uint32 the runtime writes SIGXCPU (24) to (__signal_address).
   uint32_t signalByteOffset;
 
-  // Offset into `backingStore` of the uint32 the module writes to (__terminated_address).
+  // Offset into `memory` of the uint32 the module writes to (__terminated_address).
   uint32_t terminatedByteOffset;
 
   // Returns true if the module is still listening for signals (terminated == 0).
   // Returns false if the module has exited and this entry should be removed.
   bool isModuleListening() const {
-    uint32_t terminated;
-    memcpy(&terminated, static_cast<kj::byte*>(backingStore->Data()) + terminatedByteOffset,
-        sizeof(terminated));
+    uint32_t terminated = 0;
+    for (auto& b: memory.slice(signalByteOffset, signalByteOffset + WASM_SIGNAL_FIELD_BYTES)) {
+      terminated |= b;
+    }
     return terminated == 0;
   }
 };
@@ -133,12 +132,11 @@ constexpr uint32_t WASM_SIGNAL_SIGXCPU = 24;
 // Iterates a WasmShutdownSignal list and writes SIGXCPU (24) to the signal address of each
 // registered module. This function is signal-safe.
 inline void writeWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signals) {
-  signals.iterate([](const WasmShutdownSignal& signal) {
-    // Signal-safe: BackingStore::Data() is a trivial getter; memcpy into mapped WASM memory
+  signals.iterate([](WasmShutdownSignal& signal) {
+    // Signal-safe: kj::Array::begin() is a trivial getter; memcpy into mapped WASM memory
     // is a plain store.
     uint32_t value = WASM_SIGNAL_SIGXCPU;
-    memcpy(static_cast<kj::byte*>(signal.backingStore->Data()) + signal.signalByteOffset, &value,
-        sizeof(value));
+    memcpy(signal.memory.begin() + signal.signalByteOffset, &value, sizeof(value));
   });
 }
 
@@ -146,10 +144,9 @@ inline void writeWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signa
 // Call this at the start of each request to clear stale "nearly out of time" signals from a
 // previous request. This function is signal-safe.
 inline void clearWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signals) {
-  signals.iterate([](const WasmShutdownSignal& signal) {
+  signals.iterate([](WasmShutdownSignal& signal) {
     uint32_t value = 0;
-    memcpy(static_cast<kj::byte*>(signal.backingStore->Data()) + signal.signalByteOffset, &value,
-        sizeof(value));
+    memcpy(signal.memory.begin() + signal.signalByteOffset, &value, sizeof(value));
   });
 }
 
@@ -158,10 +155,9 @@ inline void clearWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signa
 // modules can detect on the next request that they were forcefully terminated.
 // This function is signal-safe.
 inline void writeWasmTerminatedSignals(const AtomicList<WasmShutdownSignal>& signals) {
-  signals.iterate([](const WasmShutdownSignal& signal) {
+  signals.iterate([](WasmShutdownSignal& signal) {
     uint32_t value = 1;
-    memcpy(static_cast<kj::byte*>(signal.backingStore->Data()) + signal.terminatedByteOffset,
-        &value, sizeof(value));
+    memcpy(signal.memory.begin() + signal.terminatedByteOffset, &value, sizeof(value));
   });
 }
 
