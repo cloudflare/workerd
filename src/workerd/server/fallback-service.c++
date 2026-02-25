@@ -315,8 +315,7 @@ void FallbackServiceClient::threadMain() {
     }
   }
   KJ_CATCH(exception) {
-    KJ_LOG(ERROR, "Fallback service background thread exiting permanently; "
-        "module resolution via fallback will no longer work", exception);
+    KJ_LOG(ERROR, "Fallback service thread exiting; module resolution disabled", exception);
     // Signal any waiting caller and prevent future requests.
     auto lock = state.lockExclusive();
     lock->response = kj::none;
