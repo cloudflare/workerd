@@ -380,15 +380,48 @@ kj::Promise<ContainerClient::IPAMConfigResult> ContainerClient::getDockerBridgeI
       response.statusCode, ", Body: ", response.body);
 }
 
+kj::Promise<bool> ContainerClient::isDaemonIpv6Enabled() {
+  // Inspect the default bridge network. When the Docker daemon has "ipv6": true in
+  // daemon.json, the default bridge gets an IPv6 IPAM subnet entry (e.g. "fd00::/80").
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str("/networks/bridge"));
+
+  if (response.statusCode != 200) {
+    co_return false;
+  }
+
+  auto jsonRoot = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
+  for (auto config: jsonRoot.getIpam().getConfig()) {
+    // IPv6 subnets contain ':' (e.g. "fd00::/80", "2001:db8::/64")
+    if (kj::StringPtr(config.getSubnet()).findFirst(':') != kj::none) {
+      co_return true;
+    }
+  }
+
+  co_return false;
+}
+
 kj::Promise<void> ContainerClient::createWorkerdNetwork() {
-  // Equivalent to: docker network create -d bridge --ipv6 workerd-network
+  if (workerdNetworkCreated.exchange(true, std::memory_order_acquire)) {
+    co_return;
+  }
+
+  KJ_ON_SCOPE_FAILURE(workerdNetworkCreated.store(false, std::memory_order_release));
+
+  auto ipv6Enabled = co_await isDaemonIpv6Enabled();
+
+  // Equivalent to: docker network create -d bridge [--ipv6] workerd-network
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::NetworkCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::NetworkCreateRequest>();
   jsonRoot.setName(WORKERD_NETWORK_NAME);
   jsonRoot.setDriver("bridge");
-  jsonRoot.setEnableIpv6(true);
+  jsonRoot.setEnableIpv6(ipv6Enabled);
+  if (!ipv6Enabled) {
+    KJ_LOG(WARNING,
+        "Docker has IPv6 disabled. Connections to Workers via IPv6 won't work. If you want to enable IPv6, remove the workerd-network after re-enabling.");
+  }
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/networks/create"), codec.encode(jsonRoot));
@@ -408,9 +441,19 @@ kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::StringPtr listenA
 
   egressHttpServer = httpServer.attach(kj::mv(service));
 
-  // Listen on the Docker bridge gateway IP with port 0 to let the OS pick a free port
+  // Listen on the Docker bridge gateway IP with port 0 to let the OS pick a free port.
+  // On macOS with Docker Desktop, the bridge gateway IP exists inside the Docker VM and is not
+  // bindable on the host. In that case, fall back to listening on loopback (127.0.0.1).
+  // The sidecar will use host-gateway to reach the host instead.
   auto addr = co_await network.parseAddress(kj::str(listenAddress, ":0"));
-  auto listener = addr->listen();
+  kj::Own<kj::ConnectionReceiver> listener;
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { listener = addr->listen(); })) {
+    (void)e;  // compiler warning silence
+    auto fallbackAddr = co_await network.parseAddress("127.0.0.1:0");
+    listener = fallbackAddr->listen();
+  } else {
+    egressGatewayIp = kj::str(listenAddress);
+  }
 
   uint16_t chosenPort = listener->getPort();
 
@@ -556,11 +599,12 @@ kj::Promise<void> ContainerClient::createContainer(
   // We need to set a restart policy to avoid having ambiguous states
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
-  // Add host.docker.internal mapping so containers can reach the host
-  // This is equivalent to --add-host=host.docker.internal:host-gateway
+  // Add host.docker.internal mapping so containers can reach the host.
+  // We will use this in cases like MacOS where host-gateway can reach host loopback.
+  // For Linux, we use --gateway-ip to reach the gateway (workerd).
   auto extraHosts = hostConfig.initExtraHosts(1);
-  auto ipamConfigForHost = co_await getDockerBridgeIPAMConfig();
-  extraHosts.set(0, kj::str("host.docker.internal:", ipamConfigForHost.gateway));
+  extraHosts.set(0, "host.docker.internal:host-gateway"_kj);
+
   // Connect the container to the workerd-network for IPv6 support and container isolation
   hostConfig.setNetworkMode(WORKERD_NETWORK_NAME);
 
@@ -666,11 +710,27 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
       "Set it in the localDocker configuration.");
   jsonRoot.setImage(image);
 
-  auto cmd = jsonRoot.initCmd(4);
-  cmd.set(0, "--http-egress-port");
-  cmd.set(1, kj::str(egressPort));
-  cmd.set(2, "--docker-gateway-cidr");
-  cmd.set(3, networkCidr);
+  auto ipv6Enabled = co_await isDaemonIpv6Enabled();
+
+  uint32_t cmdSize = 4;  // --http-egress-port <port> --docker-gateway-cidr <cidr>
+  bool hasGatewayIp = egressGatewayIp != kj::none;
+  if (hasGatewayIp) cmdSize += 2;   // --gateway-ip <ip>
+  if (!ipv6Enabled) cmdSize += 1;   // --disable-ipv6
+
+  auto cmd = jsonRoot.initCmd(cmdSize);
+  uint32_t idx = 0;
+  cmd.set(idx++, "--http-egress-port");
+  cmd.set(idx++, kj::str(egressPort));
+  cmd.set(idx++, "--docker-gateway-cidr");
+  cmd.set(idx++, networkCidr);
+  KJ_IF_SOME(gatewayIp, egressGatewayIp) {
+    // We were able to bind to the gateway IP directly. Tell the sidecar the exact IP.
+    cmd.set(idx++, "--gateway-ip");
+    cmd.set(idx++, gatewayIp);
+  }
+  if (!ipv6Enabled) {
+    cmd.set(idx++, "--disable-ipv6");
+  }
 
   auto hostConfig = jsonRoot.initHostConfig();
   // Share network namespace with the main container
@@ -701,7 +761,8 @@ kj::Promise<void> ContainerClient::startSidecarContainer() {
   auto endpoint = kj::str("/containers/", sidecarContainerName, "/start");
   auto response = co_await dockerApiRequest(
       network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint), kj::str(""));
-  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 304 || response.statusCode == 409, Error,
+  JSG_REQUIRE(
+      response.statusCode == 204 || response.statusCode == 304 || response.statusCode == 409, Error,
       "Starting network sidecar container failed with: ", response.statusCode);
 }
 
