@@ -501,6 +501,7 @@ export class TestService extends WorkerEntrypoint {
       const [client, server] = Object.values(new WebSocketPair());
 
       server.accept();
+      server.binaryType = 'arraybuffer';
 
       server.addEventListener('message', (event) => {
         // Echo back with binding id prefix

@@ -156,9 +156,7 @@ export default {
     replace: removeUseCapture,
   },
   'Create-valid-url-binaryType-blob.any.js': {
-    comment:
-      'workerd WebSocket binaryType defaults to "arraybuffer", not "blob"; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'Create-valid-url-protocol-empty.any.js': {
     replace: removeUseCapture,
@@ -307,8 +305,7 @@ export default {
     disabledTests: true,
   },
   'binaryType-wrong-value.any.js': {
-    comment: 'binaryType is undefined instead of blob in workerd; test hangs',
-    disabledTests: true,
+    replace: removeUseCapture,
   },
   'bufferedAmount-unchanged-by-sync-xhr.any.js': {
     comment: 'Synchronous XHR is not supported in Workers',

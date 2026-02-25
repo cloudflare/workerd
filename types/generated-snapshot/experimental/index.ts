@@ -3726,6 +3726,12 @@ export interface WebSocket extends EventTarget<WebSocketEventMap> {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/extensions)
    */
   extensions: string | null;
+  /**
+   * The **`WebSocket.binaryType`** property controls the type of binary data being received over the WebSocket connection.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/binaryType)
+   */
+  binaryType: "blob" | "arraybuffer";
 }
 export declare const WebSocketPair: {
   new (): {

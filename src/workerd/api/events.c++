@@ -1,5 +1,6 @@
 #include "events.h"
 
+#include "blob.h"
 #include "messagechannel.h"
 
 namespace workerd::api {
@@ -37,7 +38,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
       maybeOrigin(urlForOrigin.map([](auto& url) { return url.getOrigin(); })) {}
 MessageEvent::MessageEvent(jsg::Lock& js,
     kj::String type,
-    jsg::JsRef<jsg::JsValue> data,
+    kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
     kj::Maybe<jsg::Url&> urlForOrigin)
@@ -52,8 +53,16 @@ jsg::Ref<MessageEvent> MessageEvent::constructor(
   return js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
 }
 
-jsg::JsValue MessageEvent::getData(jsg::Lock& js) {
-  return data.getHandle(js);
+kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(data) {
+    KJ_CASE_ONEOF(jsValue, jsg::JsRef<jsg::JsValue>) {
+      return jsValue.getHandle(js);
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      return blob.addRef();
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::Maybe<kj::ArrayPtr<const char>> MessageEvent::getOrigin() {
@@ -78,12 +87,26 @@ kj::ArrayPtr<jsg::Ref<MessagePort>> MessageEvent::getPorts() {
 }
 
 void MessageEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackField("data", data);
+  KJ_SWITCH_ONEOF(data) {
+    KJ_CASE_ONEOF(jsValue, jsg::JsRef<jsg::JsValue>) {
+      tracker.trackField("data", jsValue);
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      tracker.trackField("data", blob);
+    }
+  }
   tracker.trackField("source", maybeSource);
 }
 
 void MessageEvent::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(data);
+  KJ_SWITCH_ONEOF(data) {
+    KJ_CASE_ONEOF(jsValue, jsg::JsRef<jsg::JsValue>) {
+      visitor.visit(jsValue);
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      visitor.visit(blob);
+    }
+  }
   visitor.visit(maybeSource);
 }
 

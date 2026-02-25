@@ -4,6 +4,7 @@
 
 #include "web-socket.h"
 
+#include "blob.h"
 #include "events.h"
 #include "messagechannel.h"
 #include "util.h"
@@ -53,6 +54,8 @@ WebSocket::WebSocket(
       url(kj::mv(package.url)),
       protocol(kj::mv(package.protocol)),
       extensions(kj::mv(package.extensions)),
+      binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
+                                                                        : BinaryType::ARRAYBUFFER),
       serializedAttachment(kj::mv(package.serializedAttachment)),
       farNative(initNative(ioContext,
           ws,
@@ -68,9 +71,11 @@ jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
   return js.alloc<WebSocket>(js, IoContext::current(), ws, kj::mv(package));
 }
 
-WebSocket::WebSocket(kj::Own<kj::WebSocket> native)
+WebSocket::WebSocket(jsg::Lock& js, kj::Own<kj::WebSocket> native)
     : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
       url(kj::none),
+      binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
+                                                                        : BinaryType::ARRAYBUFFER),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
   auto nativeObj = kj::heap<Native>();
@@ -78,9 +83,11 @@ WebSocket::WebSocket(kj::Own<kj::WebSocket> native)
   farNative = IoContext::current().addObject(kj::mv(nativeObj));
 }
 
-WebSocket::WebSocket(kj::String url)
+WebSocket::WebSocket(jsg::Lock& js, kj::String url)
     : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
       url(kj::mv(url)),
+      binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
+                                                                        : BinaryType::ARRAYBUFFER),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
   auto nativeObj = kj::heap<Native>();
@@ -252,7 +259,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   // Users should use Authorization header for this purpose.
   kj::String connUrl =
       uriEncodeControlChars(urlRecord.toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
-  auto ws = js.alloc<WebSocket>(kj::mv(url));
+  auto ws = js.alloc<WebSocket>(js, kj::mv(url));
 
   headers.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, kj::str("permessage-deflate"));
   // By default, browsers set the compression extension header for `new WebSocket()`.
@@ -1038,9 +1045,15 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
             dispatchEventImpl(js, js.alloc<MessageEvent>(js, js.str(text)));
           }
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
-            dispatchEventImpl(js,
-                js.alloc<MessageEvent>(
-                    js, jsg::JsValue(js.arrayBuffer(kj::mv(data)).getHandle(js))));
+            if (binaryType_ == BinaryType::BLOB) {
+              // Per the WHATWG spec, deliver binary messages as Blob when binaryType is "blob".
+              auto bufferSource = jsg::BufferSource(js, jsg::BackingStore::from(js, kj::mv(data)));
+              auto blob = js.alloc<Blob>(js, kj::mv(bufferSource), kj::str());
+              dispatchEventImpl(js, js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob)));
+            } else {
+              auto ab = js.arrayBuffer(kj::mv(data)).getHandle(js);
+              dispatchEventImpl(js, js.alloc<MessageEvent>(js, jsg::JsValue(ab)));
+            }
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
             native.closedIncoming = true;
@@ -1065,7 +1078,7 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
 jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock& js) {
   auto pipe = kj::newWebSocketPipe();
   auto pair = js.alloc<WebSocketPair>(
-      js.alloc<WebSocket>(kj::mv(pipe.ends[0])), js.alloc<WebSocket>(kj::mv(pipe.ends[1])));
+      js.alloc<WebSocket>(js, kj::mv(pipe.ends[0])), js.alloc<WebSocket>(js, kj::mv(pipe.ends[1])));
   auto first = pair->getFirst();
   auto second = pair->getSecond();
 
@@ -1286,6 +1299,19 @@ bool WebSocket::Accepted::isHibernatable() {
 void WebSocketPair::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField(nullptr, sockets[0]);
   tracker.trackField(nullptr, sockets[1]);
+}
+
+kj::StringPtr WebSocket::getBinaryType() {
+  return binaryType_ == BinaryType::BLOB ? "blob"_kj : "arraybuffer"_kj;
+}
+
+void WebSocket::setBinaryType(kj::String value) {
+  if (value == "blob") {
+    binaryType_ = BinaryType::BLOB;
+  } else if (value == "arraybuffer") {
+    binaryType_ = BinaryType::ARRAYBUFFER;
+  }
+  // Per the spec, invalid values are silently ignored — the existing binaryType is retained.
 }
 
 void WebSocket::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

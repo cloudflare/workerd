@@ -24,6 +24,8 @@ class ActorObserver;
 
 namespace workerd::api {
 
+class Blob;
+
 template <typename T>
 struct DeferredProxy;
 
@@ -224,12 +226,12 @@ class WebSocket: public EventTarget {
   // The JS WebSocket constructor needs to initiate a connection, but we need to return the
   // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
   // to the `initConnection` method.
-  WebSocket(kj::Own<kj::WebSocket> native);
+  WebSocket(jsg::Lock& js, kj::Own<kj::WebSocket> native);
 
   // The JS WebSocket constructor needs to initiate a connection, but we need to return the
   // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
   // to the `initConnection` method.
-  WebSocket(kj::String url);
+  WebSocket(jsg::Lock& js, kj::String url);
 
   // We initiate a `new WebSocket()` connection and set up a continuation that handles the
   // response once it's available. This includes assigning the native websocket and dispatching the
@@ -338,6 +340,9 @@ class WebSocket: public EventTarget {
   kj::Maybe<kj::StringPtr> getProtocol();
   kj::Maybe<kj::StringPtr> getExtensions();
 
+  kj::StringPtr getBinaryType();
+  void setBinaryType(kj::String value);
+
   JSG_RESOURCE_TYPE(WebSocket, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
     JSG_METHOD(accept);
@@ -367,11 +372,13 @@ class WebSocket: public EventTarget {
       JSG_READONLY_PROTOTYPE_PROPERTY(url, getUrl);
       JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_PROTOTYPE_PROPERTY(extensions, getExtensions);
+      JSG_PROTOTYPE_PROPERTY(binaryType, getBinaryType, setBinaryType);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(readyState, getReadyState);
       JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
       JSG_READONLY_INSTANCE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_INSTANCE_PROPERTY(extensions, getExtensions);
+      JSG_INSTANCE_PROPERTY(binaryType, getBinaryType, setBinaryType);
     }
 
     JSG_TS_DEFINE(type WebSocketEventMap = {
@@ -380,7 +387,10 @@ class WebSocket: public EventTarget {
       open: Event;
       error: ErrorEvent;
     });
-    JSG_TS_OVERRIDE(extends EventTarget<WebSocketEventMap>);
+    JSG_TS_OVERRIDE(extends EventTarget<WebSocketEventMap> {
+      get binaryType(): "blob" | "arraybuffer";
+      set binaryType(value: "blob" | "arraybuffer");
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -394,6 +404,11 @@ class WebSocket: public EventTarget {
   kj::Maybe<kj::String> url;
   kj::Maybe<kj::String> protocol = kj::String();
   kj::Maybe<kj::String> extensions = kj::String();
+  // The binaryType attribute per the WHATWG WebSocket spec. Defaults to "blob" when the
+  // websocket_standard_binary_type compat flag is enabled, "arraybuffer" otherwise.
+  enum class BinaryType { BLOB, ARRAYBUFFER };
+  BinaryType binaryType_ = BinaryType::ARRAYBUFFER;
+
   kj::Maybe<kj::Date> autoResponseTimestamp;
   // All WebSockets have this property. It starts out null but can
   // be assigned to any serializable value. The property will survive hibernation.
