@@ -556,11 +556,11 @@ kj::Promise<void> ContainerClient::createContainer(
   // We need to set a restart policy to avoid having ambiguous states
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
-  // Add host.docker.internal mapping so containers can reach the host
-  // This is equivalent to --add-host=host.docker.internal:host-gateway
+  // Add host.docker.internal mapping so containers can reach the host.
+  // We will use this in cases like MacOS where host-gateway can reach host loopback.
+  // For Linux, we use --gateway-ip to reach the gateway (workerd).
   auto extraHosts = hostConfig.initExtraHosts(1);
-  auto ipamConfigForHost = co_await getDockerBridgeIPAMConfig();
-  extraHosts.set(0, kj::str("host.docker.internal:", ipamConfigForHost.gateway));
+  extraHosts.set(0, "host.docker.internal:host-gateway"_kj);
   // Connect the container to the workerd-network for IPv6 support and container isolation
   hostConfig.setNetworkMode(WORKERD_NETWORK_NAME);
 
