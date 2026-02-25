@@ -709,11 +709,27 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
       "Set it in the localDocker configuration.");
   jsonRoot.setImage(image);
 
-  auto cmd = jsonRoot.initCmd(4);
-  cmd.set(0, "--http-egress-port");
-  cmd.set(1, kj::str(egressPort));
-  cmd.set(2, "--docker-gateway-cidr");
-  cmd.set(3, networkCidr);
+  auto ipv6Enabled = co_await isDaemonIpv6Enabled();
+
+  uint32_t cmdSize = 4;  // --http-egress-port <port> --docker-gateway-cidr <cidr>
+  bool hasGatewayIp = egressGatewayIp != kj::none;
+  if (hasGatewayIp) cmdSize += 2;   // --gateway-ip <ip>
+  if (!ipv6Enabled) cmdSize += 1;   // --disable-ipv6
+
+  auto cmd = jsonRoot.initCmd(cmdSize);
+  uint32_t idx = 0;
+  cmd.set(idx++, "--http-egress-port");
+  cmd.set(idx++, kj::str(egressPort));
+  cmd.set(idx++, "--docker-gateway-cidr");
+  cmd.set(idx++, networkCidr);
+  KJ_IF_SOME(gatewayIp, egressGatewayIp) {
+    // We were able to bind to the gateway IP directly. Tell the sidecar the exact IP.
+    cmd.set(idx++, "--gateway-ip");
+    cmd.set(idx++, gatewayIp);
+  }
+  if (!ipv6Enabled) {
+    cmd.set(idx++, "--disable-ipv6");
+  }
 
   auto hostConfig = jsonRoot.initHostConfig();
   // Share network namespace with the main container
