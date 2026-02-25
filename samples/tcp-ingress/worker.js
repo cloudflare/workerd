@@ -4,8 +4,9 @@ export default {
     return new Response("ok");
   },
 
-  connect({inbound, cf}) {
+  async connect({socket, cf}) {
     console.log(cf);
-    return inbound.pipeThrough(new IdentityTransformStream());
+    // pipe the input stream to the output
+    socket.readable.pipeTo(socket.writable);
   }
 };

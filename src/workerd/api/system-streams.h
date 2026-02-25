@@ -12,10 +12,6 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>
 
-namespace workerd {
-class NeuterableIoStream;
-};
-
 namespace workerd::api {
 
 // A ReadableStreamSource which automatically decodes its underlying stream. It does so lazily -- if
@@ -45,7 +41,6 @@ struct SystemMultiStream {
 // A combo ReadableStreamSource and WritableStreamSink.
 SystemMultiStream newSystemMultiStream(kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>& stream,
     IoContext& context = IoContext::current());
-SystemMultiStream newSystemMultiStream(kj::Own<NeuterableIoStream>& stream, IoContext& context);
 
 struct ContentEncodingOptions {
   bool brotliEnabled = false;

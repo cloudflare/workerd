@@ -293,10 +293,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const HibernatableWebSocketEventInfo& info, Str
   return obj;
 }
 
-// TODO
 jsg::JsValue ToJs(jsg::Lock& js, const ConnectEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, CONNECT_STR));
+  // TODO(now): Provide cfJson? clientIp port would have to be fixed value for tests for determinism
+  /*if (info.cfJson.size() > 0) {
+    obj.set(js, CFJSON_STR, jsg::JsValue(js.parseJson(info.cfJson).getHandle(js)));
+  }*/
   return obj;
 }
 

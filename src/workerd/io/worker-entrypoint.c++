@@ -533,11 +533,9 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "connect() can only be called once"));
   this->incomingRequest = kj::none;
   auto& context = incomingRequest->getContext();
+  auto featureFlags = context.getWorker().getIsolate().getApi().getFeatureFlags();
 
-  // Capture workerTracer, see request() for rationale.
-  kj::Maybe<BaseTracer&> workerTracer;
-
-  if (context.getWorker().getIsolate().getApi().getFeatureFlags().getConnectPassThrough()) {
+  if (featureFlags.getConnectPassThrough()) {
     incomingRequest->delivered();
 
     KJ_DEFER({
@@ -554,18 +552,12 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // Note: Intentionally return without co_await so that the `incomingRequest` is destroyed,
     //   because we don't have any need to keep the context around.
     return next->connect(host, headers, connection, response, settings);
-  }
-
-  if (!context.getWorker().getIsolate().getApi().getFeatureFlags().getWorkerdExperimental()) {
-    incomingRequest->delivered();
-
-    KJ_DEFER({
-      // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
-      auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
-      waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
-    });
+  } else if (!featureFlags.getWorkerdExperimental()) {
     JSG_FAIL_REQUIRE(TypeError, "Incoming CONNECT on a worker not supported");
   }
+
+  // Capture workerTracer, see request() for rationale.
+  kj::Maybe<BaseTracer&> workerTracer;
 
   bool isActor = context.getActor() != kj::none;
 
@@ -581,18 +573,16 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   incomingRequest->delivered();
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
-  auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
 
   return context
-      .run([this, &context, &connection, &response, entrypointName = entrypointName](
-               Worker::Lock& lock) mutable {
+      .run([this, &context, &connection, &response, entrypointName = entrypointName,
+               host = kj::str(host)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
-    return lock.getGlobalScope().connect(connection, response, cfBlobJson, lock,
+    return lock.getGlobalScope().connect(kj::mv(host), connection, response, cfBlobJson, lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
   })
-      .then([this, &context, workerTracer](api::DeferredProxy<void> deferredProxy) {
-    proxyTask = kj::mv(deferredProxy.proxyTask);
+      .then([&context, workerTracer]() {
     KJ_IF_SOME(t, workerTracer) {
       t.setReturn(context.now());
     }
@@ -614,22 +604,6 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // The request has been canceled, but allow it to continue executing in the background.
     auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
     waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
-  }))
-      .then([this, metrics = kj::mv(metricsForProxyTask)]() mutable -> kj::Promise<void> {
-    // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
-    // without pinning it or the isolate into memory.
-    KJ_IF_SOME(p, proxyTask) {
-      return p.catch_([metrics = kj::mv(metrics)](kj::Exception&& e) mutable -> kj::Promise<void> {
-        metrics->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
-        return kj::mv(e);
-      });
-    } else {
-      return kj::READY_NOW;
-    }
-  })
-      .attach(kj::defer([this]() mutable {
-    // If we're being cancelled, we need to make sure `proxyTask` gets canceled.
-    proxyTask = kj::none;
   }))
       .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
                   kj::Exception&& exception) mutable -> kj::Promise<void> {

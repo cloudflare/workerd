@@ -37,8 +37,24 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental", "streams_enable_constructors"],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
         streamingTails = ["log"],
+      )
+    ),
+    ( name = "connect-handler-test-proxy",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+      )
+    ),
+    ( name = "connect-handler-test-endpoint",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
       )
     ),
     ( name = "internet", network = ( allow = ["private"] ) ),
@@ -61,7 +77,9 @@ const unitTests :Workerd.Config = (
     )
   ],
   sockets = [
-    (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test")
+    (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test"),
+    (name = "tcp", address = "*:8082", tcp = (), service = (name = "connect-handler-test-proxy", entrypoint = "ConnectProxy")),
+    (name = "tcp", address = "*:8083", tcp = (), service = (name = "connect-handler-test-endpoint", entrypoint = "ConnectEndpoint"))
   ]
 );
 

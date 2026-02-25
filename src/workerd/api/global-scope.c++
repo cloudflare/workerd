@@ -119,7 +119,10 @@ void ServiceWorkerGlobalScope::clear() {
   unhandledRejections.clear();
 }
 
-kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoStream& connection,
+// TODO: We should pass through the headers as we do in request() instead of defining new ones,
+// right?
+kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
+    kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
     kj::Maybe<kj::StringPtr> cfBlobJson,
     Worker::Lock& lock,
@@ -127,7 +130,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoSt
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
       "Connect ingress is not currently supported with Service Workers syntax.");
   KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
-      "TCP ingress requires the experimental flag.");
+      "connect handling requires the experimental flag.");
 
   KJ_IF_SOME(handler, eh.connect) {
     // Has a connect handler!
@@ -135,69 +138,41 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::connect(kj::AsyncIoSt
     kj::HttpHeaders headers(table);
     response.accept(200, "OK", headers);
 
-    // TODO(cleanup): There's a fair amount of duplication between this and
-    // the request() method, and much of this could likely be cleaned up to
-    // use co_awaits rather than the promise syntax.
+    // TODO(cleanup): There's some amount of duplication between this and request(), some of this
+    // could likely be cleaned up to use co_awaits rather than the promise syntax.
     auto ownConnection = newNeuterableIoStream(connection);
-    auto deferredNeuter = kj::defer([ownConnection = kj::addRef(*ownConnection)]() mutable {
+    // TODO: Not needed right? If we just uncomment these RPC tests will crash, would need to be
+    // attached somewhere.
+    /*auto deferredNeuter = kj::defer([ownConnection = kj::addRef(*ownConnection)]() mutable {
       ownConnection->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
     });
-    KJ_ON_SCOPE_FAILURE(ownConnection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
-    auto conn2 = kj::addRef(*ownConnection);
+    KJ_ON_SCOPE_FAILURE(ownConnection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));*/
 
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
     CfProperty cf(cfBlobJson);
 
-    auto ownConn2 = kj::addRef(*ownConnection);
-    auto conn = newSystemMultiStream(ownConn2, ioContext);
-    auto jsInbound = js.alloc<ReadableStream>(ioContext, kj::mv(conn.readable));
+    // TODO: connection needs to be owned, current approach is not good.
+    auto input = kj::str("fake://", host);
+    auto url = JSG_REQUIRE_NONNULL(
+        jsg::Url::tryParse(input.asPtr()), TypeError, "Specified address could not be parsed.");
+    auto hostName = url.getHostname();
+    auto port = url.getPort();
+    JSG_REQUIRE(hostName != ""_kj, TypeError, "Specified address is missing hostname.");
+    JSG_REQUIRE(port != ""_kj, TypeError, "Specified address is missing port.");
 
+    // TODO(later): Is TLS support needed here?
+    auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
+    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::addRef(*ownConnection), kj::str(host), kj::none,
+        kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::str(hostName),
+        port == "443"_kj || port == "80"_kj, kj::none);
+
+    // TODO: Should this be a user span?
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
-    auto event = js.alloc<ConnectEvent>(kj::mv(jsInbound), kj::mv(cf));
+    auto event = js.alloc<ConnectEvent>(kj::mv(jsSocket), kj::mv(cf));
     auto promise = handler(js, kj::mv(event), eh.env.addRef(js), eh.getCtx());
-
-    auto canceled = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
-
-    return ioContext
-        .awaitJs(js,
-            promise.then(js,
-                ioContext.addFunctor([canceled = canceled->addWrappedRef(),
-                                         outbound = kj::mv(conn.writable), span = kj::mv(span)](
-                                         jsg::Lock& js, jsg::Ref<ReadableStream> jsOutbound) mutable
-                    -> IoOwn<kj::Promise<DeferredProxy<void>>> {
-      auto& context = IoContext::current();
-      span = kj::none;
-      if (*canceled) {
-        // The client disconnected before the response was ready. The outbound is a dangling
-        // reference, let's not use it.
-        return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
-      } else {
-        return context.addObject(kj::heap(jsOutbound->pumpTo(js, kj::mv(outbound), true)));
-      }
-    })))
-        .attach(
-            kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->getWrapped() = true; }))
-        .then(
-            [ownConnection = kj::mv(ownConnection), deferredNeuter = kj::mv(deferredNeuter)](
-                DeferredProxy<void> deferredProxy) mutable {
-      deferredProxy.proxyTask = deferredProxy.proxyTask
-                                    .then([connection = kj::addRef(*ownConnection)]() mutable {
-        connection->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
-      }, [connection = kj::addRef(*ownConnection)](kj::Exception&& e) mutable {
-        connection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
-        kj::throwFatalException(kj::mv(e));
-      }).attach(kj::mv(deferredNeuter));
-
-      return deferredProxy;
-    },
-            [connection = kj::mv(conn2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
-      // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
-      //   so `deferredNeuter` hasn't been destroyed yet.
-      connection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
-      kj::throwFatalException(kj::mv(e));
-    });
+    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
                       "Did you remember to export a connect() function?");

@@ -22,7 +22,13 @@ wd_test(
 wd_test(
     src = "connect-handler-test.wd-test",
     args = ["--experimental"],
-    data = ["connect-handler-test.js"],
+    data = [
+        "connect-handler-test.js",
+        "connect-handler-test-proxy.js",
+    ],
+    # Test uses TCP sockets for ports 8081-8083 and may fail when running concurrently with other
+    # tests that do so.
+    tags = ["exclusive"],
 )
 
 wd_test(
@@ -49,7 +55,9 @@ wd_test(
         "tail-worker-test-jsrpc.js",
         "websocket-hibernation.js",
         "connect-handler-test.js",
+        "connect-handler-test-proxy.js",
     ],
+    tags = ["exclusive"],
 )
 
 # Test to validate timing semantics for JSRPC streaming responses.
@@ -334,6 +342,7 @@ wd_test(
     src = "js-rpc-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-test.js"],
+    tags = ["exclusive"],
 )
 
 wd_test(
@@ -578,6 +587,7 @@ wd_test(
         "--no-verbose",
     ],
     data = ["js-rpc-test.js"],
+    tags = ["exclusive"],
 )
 
 wd_test(
