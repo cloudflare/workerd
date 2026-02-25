@@ -441,9 +441,19 @@ kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::StringPtr listenA
 
   egressHttpServer = httpServer.attach(kj::mv(service));
 
-  // Listen on the Docker bridge gateway IP with port 0 to let the OS pick a free port
+  // Listen on the Docker bridge gateway IP with port 0 to let the OS pick a free port.
+  // On macOS with Docker Desktop, the bridge gateway IP exists inside the Docker VM and is not
+  // bindable on the host. In that case, fall back to listening on loopback (127.0.0.1).
+  // The sidecar will use host-gateway to reach the host instead.
   auto addr = co_await network.parseAddress(kj::str(listenAddress, ":0"));
-  auto listener = addr->listen();
+  kj::Own<kj::ConnectionReceiver> listener;
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { listener = addr->listen(); })) {
+    (void)e;  // compiler warning silence
+    auto fallbackAddr = co_await network.parseAddress("127.0.0.1:0");
+    listener = fallbackAddr->listen();
+  } else {
+    egressGatewayIp = kj::str(listenAddress);
+  }
 
   uint16_t chosenPort = listener->getPort();
 

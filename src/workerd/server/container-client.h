@@ -152,6 +152,9 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Maybe<kj::Promise<void>> egressListenerTask;
 
   uint16_t egressListenerPort = 0;
+  // Set to the gateway IP when the egress listener successfully binds to it.
+  // When none, the listener fell back to 127.0.0.1 and the sidecar must use host-gateway.
+  kj::Maybe<kj::String> egressGatewayIp;
 
   // Get the Docker bridge network gateway IP and subnet.
   // Prefers the "workerd-network" bridge, creating it if needed
