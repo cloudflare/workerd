@@ -1,9 +1,9 @@
-load("//:build/wat2wasm.bzl", "wat2wasm")
-
+# Pre-compiled WASM binaries from the corresponding .wat source files.
+# Compiled using: wasm-tools parse <file>.wat -o <file>.wasm
+# If you modify a .wat file, recompile it with the command above.
 [
-    wat2wasm(
-        name = name.removesuffix(".wat") + ".wasm",
-        src = name,
+    exports_files(
+        [name.removesuffix(".wat") + ".wasm"],
         visibility = ["//visibility:public"],
     )
     for name in glob(["*.wat"])

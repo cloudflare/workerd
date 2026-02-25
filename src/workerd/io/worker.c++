@@ -24,6 +24,7 @@
 #include <workerd/jsg/util.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
@@ -1705,7 +1706,9 @@ void Worker::setupContext(
   setWebAssemblyModuleHasInstance(lock, context);
 
   // Shim WebAssembly.instantiate to detect modules exporting "__signal_address".
-  shimWebAssemblyInstantiate(lock, context);
+  if (util::Autogate::isEnabled(util::AutogateKey::WASM_SHUTDOWN_SIGNAL_SHIM)) {
+    shimWebAssemblyInstantiate(lock, context);
+  }
 
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
   // logged content, and log formatted values to stdout/stderr locally.

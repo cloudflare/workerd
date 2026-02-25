@@ -507,6 +507,10 @@ wd_test(
         "//src/workerd/io/wasm:signal-partial-exports.wasm",
         "//src/workerd/io/wasm:signal-preinit.wasm",
     ],
+    # The WebAssembly.instantiate shim is behind the WASM_SHUTDOWN_SIGNAL_SHIM autogate,
+    # so this test only works when all autogates are enabled.
+    generate_all_compat_flags_variant = False,
+    generate_default_variant = False,
 )
 
 kj_test(

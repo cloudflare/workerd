@@ -41,7 +41,8 @@ struct WasmShutdownSignal {
   // Returns false if the module has exited and this entry should be removed.
   bool isModuleListening() const {
     uint32_t terminated = 0;
-    for (auto& b: memory.slice(signalByteOffset, signalByteOffset + WASM_SIGNAL_FIELD_BYTES)) {
+    for (auto& b:
+        memory.slice(terminatedByteOffset, terminatedByteOffset + WASM_SIGNAL_FIELD_BYTES)) {
       terminated |= b;
     }
     return terminated == 0;
