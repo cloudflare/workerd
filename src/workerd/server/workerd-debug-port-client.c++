@@ -68,7 +68,7 @@ jsg::Ref<api::Fetcher> wrapBootstrapAsFetcher(jsg::Lock& js,
 }
 }  // namespace
 
-jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getEntrypoint(jsg::Lock& js,
+jsg::Ref<api::Fetcher> WorkerdDebugPortClient::getEntrypoint(jsg::Lock& js,
     kj::String service,
     jsg::Optional<kj::String> entrypoint,
     jsg::Optional<jsg::JsRef<jsg::JsObject>> props) {
@@ -83,14 +83,14 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getEntrypoint(jsg::
     Frankenvalue::fromJs(js, p.getHandle(js)).toCapnp(req.initProps());
   }
 
-  return context.awaitIo(js, req.send(),
-      [&context, stateRef = state->addRef()](
-          jsg::Lock& js, auto result) mutable -> jsg::Ref<api::Fetcher> {
-    return wrapBootstrapAsFetcher(js, context, result.getEntrypoint(), kj::mv(stateRef));
-  });
+  // Use Cap'n Proto pipelining: extract the entrypoint capability from the in-flight
+  // RPC response without waiting for it to resolve. The capability is a lazy proxy that
+  // only triggers the actual network round-trip when first used (e.g. fetch()).
+  auto bootstrap = req.send().getEntrypoint();
+  return wrapBootstrapAsFetcher(js, context, kj::mv(bootstrap), state->addRef());
 }
 
-jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getActor(
+jsg::Ref<api::Fetcher> WorkerdDebugPortClient::getActor(
     jsg::Lock& js, kj::String service, kj::String entrypoint, kj::String actorId) {
   auto& context = IoContext::current();
 
@@ -99,29 +99,27 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getActor(
   req.setEntrypoint(entrypoint);
   req.setActorId(actorId);
 
-  return context.awaitIo(js, req.send(),
-      [&context, stateRef = state->addRef()](
-          jsg::Lock& js, auto result) mutable -> jsg::Ref<api::Fetcher> {
-    return wrapBootstrapAsFetcher(js, context, result.getActor(), kj::mv(stateRef));
-  });
+  // Use Cap'n Proto pipelining: extract the actor capability from the in-flight
+  // RPC response without waiting for it to resolve.
+  auto bootstrap = req.send().getActor();
+  return wrapBootstrapAsFetcher(js, context, kj::mv(bootstrap), state->addRef());
 }
 
-jsg::Promise<jsg::Ref<WorkerdDebugPortClient>> WorkerdDebugPortConnector::connect(
+jsg::Ref<WorkerdDebugPortClient> WorkerdDebugPortConnector::connect(
     jsg::Lock& js, kj::String address) {
   auto& context = IoContext::current();
   auto connectPromise =
       context.getIoChannelFactory().getWorkerdDebugPortNetwork().parseAddress(address).then(
           [](kj::Own<kj::NetworkAddress> addr) { return addr->connect(); });
 
-  return context.awaitIo(js, kj::mv(connectPromise),
-      [&context](jsg::Lock& js,
-          kj::Own<kj::AsyncIoStream> connection) -> jsg::Ref<WorkerdDebugPortClient> {
-    auto rpcClient = kj::heap<capnp::TwoPartyClient>(*connection);
-    auto debugPort = rpcClient->bootstrap().castAs<rpc::WorkerdDebugPort>();
-    auto state = kj::refcounted<DebugPortConnectionState>(
-        kj::mv(connection), kj::mv(rpcClient), kj::mv(debugPort));
-    return js.alloc<WorkerdDebugPortClient>(context.addObject(kj::mv(state)));
-  });
+  // Use kj::newPromisedStream() to get an AsyncIoStream immediately. The actual TCP
+  // connection is deferred — Cap'n Proto pipelining queues all RPC calls until connected.
+  auto stream = kj::newPromisedStream(kj::mv(connectPromise));
+  auto rpcClient = kj::heap<capnp::TwoPartyClient>(*stream);
+  auto debugPort = rpcClient->bootstrap().castAs<rpc::WorkerdDebugPort>();
+  auto state = kj::refcounted<DebugPortConnectionState>(
+      kj::mv(stream), kj::mv(rpcClient), kj::mv(debugPort));
+  return js.alloc<WorkerdDebugPortClient>(context.addObject(kj::mv(state)));
 }
 
 }  // namespace workerd::server
