@@ -146,6 +146,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   std::atomic_bool containerStarted = false;
   std::atomic_bool containerSidecarStarted = false;
+  std::atomic_bool workerdNetworkCreated = false;
 
   kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
   kj::Maybe<kj::Promise<void>> egressListenerTask;
@@ -153,12 +154,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   uint16_t egressListenerPort = 0;
 
   // Get the Docker bridge network gateway IP and subnet.
-  // Prefers the "workerd-network" bridge, creating it if needed
   kj::Promise<IPAMConfigResult> getDockerBridgeIPAMConfig();
-  // Create the workerd-network Docker bridge network with IPv6 support
-  kj::Promise<void> createWorkerdNetwork();
-  // Start the egress listener on the specified address, returns the chosen port
-  kj::Promise<uint16_t> startEgressListener(kj::StringPtr listenAddress);
+  // Check if the Docker daemon has IPv6 enabled by inspecting the default bridge network's
+  // IPAM config for IPv6 subnets.
+  kj::Promise<bool> isDaemonIpv6Enabled();
+  // Start the egress listener on the given address with an OS-chosen port.
+  kj::Promise<uint16_t> startEgressListener(kj::String listenAddress);
   void stopEgressListener();
   // Ensure the egress listener and sidecar container are started exactly once.
   // Uses containerSidecarStarted as a guard. Called from both start() and setEgressHttp().

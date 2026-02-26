@@ -350,13 +350,9 @@ export class DurableObjectExample extends DurableObject {
 
   async testSetEgressHttp() {
     const container = this.ctx.container;
-    if (container.running) {
-      let monitor = container.monitor().catch((_err) => {});
-      await container.destroy();
-      await monitor;
-    }
 
-    assert.strictEqual(container.running, false);
+    // We do not assert the container is running or not, this method
+    // should work as-is
 
     // Set up egress TCP mapping to route requests to the binding
     // We can configure this even before the container starts.
@@ -365,8 +361,9 @@ export class DurableObjectExample extends DurableObject {
       this.ctx.exports.TestService({ props: { id: 1234 } })
     );
 
-    // Start container
-    container.start();
+    if (!container.running) {
+      container.start();
+    }
 
     // wait for container to be available
     await this.ping();
@@ -712,7 +709,15 @@ export const testPidNamespace = {
 export const testSetEgressHttp = {
   async test(_ctrl, env) {
     const id = env.MY_CONTAINER.idFromName('testSetEgressHttp');
-    const stub = env.MY_CONTAINER.get(id);
+    let stub = env.MY_CONTAINER.get(id);
+    await stub.testSetEgressHttp();
+    try {
+      // test we recover from aborts
+      await stub.abort();
+    } catch {}
+
+    stub = env.MY_CONTAINER.get(id);
+    // should work idempotent
     await stub.testSetEgressHttp();
   },
 };
