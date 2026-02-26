@@ -33,8 +33,8 @@ jobs:
       - id: echo
         run: |
           echo "date=$(cat src/workerd/io/release-version.txt)" >> $GITHUB_OUTPUT;
-          echo "version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '1'}}.$(cat src/workerd/io/release-version.txt | tr -d '-').${{ github.event_name == 'push' && '0' || inputs.patch }}" >> $GITHUB_OUTPUT;
-          echo "types_version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '4'}}.$(cat src/workerd/io/release-version.txt | tr -d '-').${{ github.event_name == 'push' && '0' || inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '1'}}.$(cat src/workerd/io/release-version.txt | tr -d '-').${{ github.event_name == 'push' && '1' || inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "types_version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '4'}}.$(cat src/workerd/io/release-version.txt | tr -d '-').${{ github.event_name == 'push' && '1' || inputs.patch }}" >> $GITHUB_OUTPUT;
   check-tag:
     name: Check tag is new
     outputs:
