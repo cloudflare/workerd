@@ -62,7 +62,11 @@
     checkAndRegisterShutdown(instance, imports, module);
     return instance;
   };
-  wa.Instance.prototype = originalInstance.prototype;
+  wa.Instance = function Instance(module) {
+    const instance = Reflect.construct(originalInstance, arguments);
+    checkAndRegisterShutdown(instance, arguments[1], module);
+    return instance;
+  };
   Object.defineProperty(wa.Instance.prototype, 'constructor', {
     value: wa.Instance,
     writable: true,
