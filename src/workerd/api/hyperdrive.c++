@@ -80,14 +80,22 @@ kj::StringPtr Hyperdrive::getHost() {
   return randomHost;
 }
 
-// Always returns the default postgres port
+// We currently only support Postgres and MySQL
 uint16_t Hyperdrive::getPort() {
+  if (scheme == "mysql") {
+    return 3306;
+  }
+
+  // We default to postgres if the scheme is not mysql
   return 5432;
 }
 
 kj::String Hyperdrive::getConnectionString() {
+  // MySQL: `?ssl-mode=disabled`
+  // PostgreSQL: `?sslmode=disable`
+  auto sslParameter = scheme == "mysql" ? "?ssl-mode=disabled" : "?sslmode=disable";
   return kj::str(getScheme(), "://", getUser(), ":", getPassword(), "@", getHost(), ":", getPort(),
-      "/", getDatabase(), "?sslmode=disable");
+      "/", getDatabase(), sslParameter);
 }
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
