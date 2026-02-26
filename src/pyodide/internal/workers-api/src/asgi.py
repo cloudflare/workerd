@@ -1,3 +1,4 @@
+import logging
 from asyncio import Event, Future, Queue, create_task, ensure_future, sleep
 from collections.abc import Awaitable
 from contextlib import contextmanager
@@ -8,15 +9,21 @@ import js
 from workers import Context, Request
 
 ASGI = {"spec_version": "2.0", "version": "3.0"}
-
-
+logger = logging.getLogger("asgi")
 background_tasks = set()
 
 
 def run_in_background(coro: Awaitable[Any]) -> None:
     fut = ensure_future(coro)
     background_tasks.add(fut)
-    fut.add_done_callback(background_tasks.discard)
+
+    def _on_done(f):
+        background_tasks.discard(f)
+        exc = f.exception() if not f.cancelled() else None
+        if exc is not None:
+            logger.error("Unhandled exception in background task", exc_info=exc)
+
+    fut.add_done_callback(_on_done)
 
 
 @contextmanager
@@ -203,11 +210,14 @@ async def process_request(
             if not result.done():
                 raise RuntimeError("The application did not generate a response")  # noqa: TRY301
         except Exception as e:
-            # Handle any errors in the application
             if not result.done():
                 result.set_exception(e)
                 await writer.close()  # Close the writer
                 finished_response.set()
+            else:
+                # Response already sent — exception can't be propagated to the
+                # client, so log it to avoid silently swallowing errors.
+                logger.exception("Exception in ASGI application after response started")
 
     # Create task to run the application in the background
     app_task = create_task(run_app())
@@ -268,7 +278,7 @@ async def process_websocket(app: Any, req: "Request | js.Request") -> js.Respons
                 server.send(s)
 
         else:
-            print(" == Not implemented", got["type"])
+            logger.warning(" == Not implemented %s", got["type"])
 
     async def ws_receive():
         received = await queue.get()
@@ -283,8 +293,13 @@ async def process_websocket(app: Any, req: "Request | js.Request") -> js.Respons
 async def fetch(
     app: Any, req: "Request | js.Request", env: Any, ctx: Context | None = None
 ) -> js.Response:
+    logger.debug("ASGI request: %s %s", req.method, req.url)
     shutdown = await start_application(app)
-    result = await process_request(app, req, env, ctx)
+    try:
+        result = await process_request(app, req, env, ctx)
+    except Exception:
+        logger.exception("ASGI request failed")
+        raise
     await shutdown()
     return result
 
