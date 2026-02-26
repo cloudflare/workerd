@@ -4,8 +4,8 @@
 (module
   (memory (export "memory") 256)
 
-  (global (export "__signal_address") i32 (i32.const 0))
-  (global (export "__terminated_address") i32 (i32.const 4))
+  (global (export "__instance_signal") i32 (i32.const 0))
+  (global (export "__instance_terminated") i32 (i32.const 4))
 
   ;; Write non-zero to terminated address, signaling the module has exited.
   (func (export "mark_exited")

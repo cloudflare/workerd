@@ -4,8 +4,8 @@
 (module
   (import "env" "memory" (memory 1))
 
-  (global (export "__signal_address") i32 (i32.const 0))
-  (global (export "__terminated_address") i32 (i32.const 4))
+  (global (export "__instance_signal") i32 (i32.const 0))
+  (global (export "__instance_terminated") i32 (i32.const 4))
 
   (func (export "get_signal") (result i32)
     (i32.load (global.get 0))

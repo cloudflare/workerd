@@ -17,9 +17,9 @@ constexpr size_t WASM_SIGNAL_FIELD_BYTES = sizeof(uint32_t);
 // Represents a single WASM module that has opted into receiving the "shut down" signal when CPU
 // time is nearly exhausted. The module exports two i32 globals:
 //
-//   "__signal_address"     — address of a uint32 in linear memory. The runtime writes SIGXCPU
+//   "__instance_signal"     — address of a uint32 in linear memory. The runtime writes SIGXCPU
 //                            (24) here when CPU time is nearly exhausted.
-//   "__terminated_address" — address of a uint32 in linear memory. The WASM module writes a
+//   "__instance_terminated" — address of a uint32 in linear memory. The WASM module writes a
 //                            non-zero value here when it has exited and is no longer listening.
 //                            The runtime checks this in a GC prologue hook and removes entries
 //                            where terminated is non-zero, allowing the linear memory to be
@@ -29,12 +29,19 @@ struct WasmShutdownSignal {
   // alive via kj::Array's attach() mechanism, preventing V8 from garbage-collecting the memory
   // while we still need to read/write signal addresses. This gets cleaned up in a V8 GC prologue
   // hook where we atomically remove the entry from the signal list before releasing the memory.
+  //
+  // TODO: If a user were to grow a 64 bit linear memory >16GB, relocation will happen and this
+  // array will point to stale (but not free'd) memory. The impact is that the user will see a
+  // spike in memory usage and no longer receive the signal in that module instance. In practice this
+  // should almost never happen since they would hit a memory limit well before 16GB,
+  // and 64 bit WASM is currently used very infrequently anyways. Regardless, we should address this
+  // soon.
   kj::Array<kj::byte> memory;
 
-  // Offset into `memory` of the uint32 the runtime writes SIGXCPU (24) to (__signal_address).
+  // Offset into `memory` of the uint32 the runtime writes SIGXCPU (24) to (__instance_signal).
   uint32_t signalByteOffset;
 
-  // Offset into `memory` of the uint32 the module writes to (__terminated_address).
+  // Offset into `memory` of the uint32 the module writes to (__instance_terminated).
   uint32_t terminatedByteOffset;
 
   // Returns true if the module is still listening for signals (terminated == 0).
@@ -50,9 +57,8 @@ struct WasmShutdownSignal {
 };
 
 // A linked list type which is signal-safe (for reading), but not thread safe - it can handle
-// same-thread concurrency ONLY. Mutations (pushFront, filter) are not signal safe, but are
-// implemented such that they can be interrupted at any point by a signal handler, and the list will
-// still be in a valid state. This means that reading the list (iterate) IS signal safe.
+// same-thread concurrency and pre-emptive reads ONLY.
+// SAFETY: All mutations are must happen with the isolate lock held!
 template <typename T>
 class AtomicList {
  public:
@@ -134,10 +140,12 @@ constexpr uint32_t WASM_SIGNAL_SIGXCPU = 24;
 // registered module. This function is signal-safe.
 inline void writeWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signals) {
   signals.iterate([](WasmShutdownSignal& signal) {
-    // Signal-safe: kj::Array::begin() is a trivial getter; memcpy into mapped WASM memory
-    // is a plain store.
+    // Signal-safe: kj::Array::asPtr() and slice() are trivial getters; copyFrom into
+    // mapped WASM memory is a plain store.
     uint32_t value = WASM_SIGNAL_SIGXCPU;
-    memcpy(signal.memory.begin() + signal.signalByteOffset, &value, sizeof(value));
+    signal.memory.asPtr()
+        .slice(signal.signalByteOffset, signal.signalByteOffset + sizeof(value))
+        .copyFrom(kj::asBytes(&value, 1));
   });
 }
 
@@ -147,7 +155,9 @@ inline void writeWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signa
 inline void clearWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signals) {
   signals.iterate([](WasmShutdownSignal& signal) {
     uint32_t value = 0;
-    memcpy(signal.memory.begin() + signal.signalByteOffset, &value, sizeof(value));
+    signal.memory.asPtr()
+        .slice(signal.signalByteOffset, signal.signalByteOffset + sizeof(value))
+        .copyFrom(kj::asBytes(&value, 1));
   });
 }
 
@@ -158,7 +168,9 @@ inline void clearWasmShutdownSignals(const AtomicList<WasmShutdownSignal>& signa
 inline void writeWasmTerminatedSignals(const AtomicList<WasmShutdownSignal>& signals) {
   signals.iterate([](WasmShutdownSignal& signal) {
     uint32_t value = 1;
-    memcpy(signal.memory.begin() + signal.terminatedByteOffset, &value, sizeof(value));
+    signal.memory.asPtr()
+        .slice(signal.terminatedByteOffset, signal.terminatedByteOffset + sizeof(value))
+        .copyFrom(kj::asBytes(&value, 1));
   });
 }
 

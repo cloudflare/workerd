@@ -1626,22 +1626,21 @@ void Worker::Isolate::registerWasmShutdownSignal(
 // The instanceof operator can be changed by setting the @@HasInstance method
 // on the object, https://tc39.es/ecma262/#sec-instanceofoperator.
 void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context) {
-  // setupContext() is called before JSG_WITHIN_CONTEXT_SCOPE, so we need to enter the context.
-  v8::Context::Scope contextScope(context);
+  JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& lock) {
+    auto instanceof = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::Lock::from(info.GetIsolate()).withinHandleScope([&] {
+        info.GetReturnValue().Set(info[0]->IsWasmModuleObject());
+      });
+    };
+    v8::Local<v8::Function> function = jsg::check(v8::Function::New(context, instanceof));
 
-  auto instanceof = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
-    jsg::Lock::from(info.GetIsolate()).withinHandleScope([&] {
-      info.GetReturnValue().Set(info[0]->IsWasmModuleObject());
-    });
-  };
-  v8::Local<v8::Function> function = jsg::check(v8::Function::New(context, instanceof));
+    auto webAssembly =
+        KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
+    auto module = KJ_ASSERT_NONNULL(webAssembly.get(lock, "Module").tryCast<jsg::JsObject>());
 
-  auto webAssembly =
-      KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
-  auto module = KJ_ASSERT_NONNULL(webAssembly.get(lock, "Module").tryCast<jsg::JsObject>());
-
-  jsg::check(v8::Local<v8::Object>(module)->DefineOwnProperty(
-      context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
+    jsg::check(v8::Local<v8::Object>(module)->DefineOwnProperty(
+        context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
+  });
 }
 
 // Installs a shim around WebAssembly.instantiate and WebAssembly.Instance that hooks into the
@@ -1705,7 +1704,7 @@ void Worker::setupContext(
   // Set WebAssembly.Module @@HasInstance
   setWebAssemblyModuleHasInstance(lock, context);
 
-  // Shim WebAssembly.instantiate to detect modules exporting "__signal_address".
+  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
   if (util::Autogate::isEnabled(util::AutogateKey::WASM_SHUTDOWN_SIGNAL_SHIM)) {
     shimWebAssemblyInstantiate(lock, context);
   }

@@ -27,8 +27,6 @@
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 
-#include <memory>  // for std::shared_ptr
-
 namespace v8 {
 class BackingStore;
 class Isolate;

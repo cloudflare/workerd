@@ -1,3 +1,9 @@
+// This file contains a shim for WebAssembly.Instance and WebAssembly.instantiate. Currently, the
+// runtime does not support instantiateStreaming, but if this ever changes, we will need to add a
+// shim for that too. V8's `SetWasmInstanceCallback` was considered as an alternative, but does
+// not quite work since it runs BEFORE instantiation, when the operations we want to do must happen
+// after.
+
 (function (originalInstantiate, originalInstance, registerShutdown, wa) {
   // Find memory from exports or imports. Returns Memory instance or undefined.
   // When searching imports, only considers entries whose declared import kind is
@@ -5,16 +11,16 @@
   // externref is not mistaken for the module's linear memory.
   function findMemory(instance, imports, module) {
     // First, check if memory is exported
-    var memory = instance.exports['memory'];
+    const memory = instance.exports['memory'];
     if (memory instanceof wa.Memory) return memory;
     // Otherwise, check the module's declared memory imports
     if (imports && module) {
-      var descs = wa.Module.imports(module);
-      for (var i = 0; i < descs.length; i++) {
+      const descs = wa.Module.imports(module);
+      for (let i = 0; i < descs.length; i++) {
         if (descs[i].kind === 'memory') {
-          var ns = imports[descs[i].module];
+          const ns = imports[descs[i].module];
           if (ns) {
-            var mem = ns[descs[i].name];
+            const mem = ns[descs[i].name];
             if (mem instanceof wa.Memory) return mem;
           }
         }
@@ -23,15 +29,15 @@
     return undefined;
   }
 
-  function checkExports(instance, imports, module) {
-    var exports = instance.exports;
-    var signalGlobal = exports['__signal_address'];
-    var terminatedGlobal = exports['__terminated_address'];
+  function registerExports(instance, imports, module) {
+    const exports = instance.exports;
+    const signalGlobal = exports['__instance_signal'];
+    const terminatedGlobal = exports['__instance_terminated'];
     if (
       signalGlobal instanceof wa.Global &&
       terminatedGlobal instanceof wa.Global
     ) {
-      var memory = findMemory(instance, imports, module);
+      const memory = findMemory(instance, imports, module);
       if (memory) {
         registerShutdown(memory, signalGlobal.value, terminatedGlobal.value);
       }
@@ -42,16 +48,16 @@
     return originalInstantiate
       .call(wa, moduleOrBytes, imports)
       .then(function (result) {
-        var instance = result.instance || result;
-        var module = result.module || moduleOrBytes;
-        checkExports(instance, imports, module);
+        const instance = result.instance || result;
+        const module = result.module || moduleOrBytes;
+        registerExports(instance, imports, module);
         return result;
       });
   };
 
   wa.Instance = function Instance(module, imports) {
-    var instance = new originalInstance(module, imports);
-    checkExports(instance, imports, module);
+    const instance = new originalInstance(module, imports);
+    registerExports(instance, imports, module);
     return instance;
   };
   wa.Instance.prototype = originalInstance.prototype;

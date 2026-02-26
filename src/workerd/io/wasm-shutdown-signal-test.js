@@ -1,7 +1,7 @@
 // Tests for the WASM shutdown signal registration shim.
 //
 // These tests verify that the shimWebAssemblyInstantiate() code in worker.c++ correctly
-// detects __signal_address / __terminated_address exports, handles various memory
+// detects __instance_signal / __instance_terminated exports, handles various memory
 // configurations, and rejects out-of-bounds addresses.
 
 import basicModule from 'signal-basic.wasm';
@@ -10,6 +10,7 @@ import overflowModule from 'signal-bounds-check-overflow.wasm';
 import edgeModule from 'signal-bounds-check-edge.wasm';
 import validModule from 'signal-bounds-check-valid.wasm';
 import decoyModule from 'signal-decoy-memory.wasm';
+import externrefMemoryModule from 'signal-externref-memory.wasm';
 import importedMemoryModule from 'signal-imported-memory.wasm';
 import reclaimModule from 'signal-memory-reclaim.wasm';
 import preinitModule from 'signal-preinit.wasm';
@@ -39,7 +40,7 @@ export let syncInstanceRegisters = {
   },
 };
 
-// Module with only __signal_address (no __terminated_address) should NOT register.
+// Module with only __instance_signal (no __instance_terminated) should NOT register.
 // It should instantiate without error — the shim silently skips it.
 export let partialExportsSkipped = {
   async test() {
@@ -92,7 +93,7 @@ export let syncRegistrationZerosPreinitMemory = {
 // Bounds checking tests
 // ---------------------------------------------------------------------------
 
-// __signal_address beyond memory bounds — registration is silently skipped.
+// __instance_signal beyond memory bounds — registration is silently skipped.
 export let boundsCheckOverflow = {
   async test() {
     // Should instantiate without error; the module simply won't receive shutdown signals.
@@ -100,7 +101,7 @@ export let boundsCheckOverflow = {
   },
 };
 
-// __signal_address at 65533 leaves only 3 bytes but needs 4 — silently skipped.
+// __instance_signal at 65533 leaves only 3 bytes but needs 4 — silently skipped.
 export let boundsCheckEdge = {
   async test() {
     await WebAssembly.instantiate(edgeModule);
@@ -153,6 +154,21 @@ export let decoyMemoryIgnored = {
     const view = new Uint32Array(decoyMemory.buffer);
     if (view[0] !== 0) {
       throw new Error('Decoy memory was modified during instantiation');
+    }
+  },
+};
+
+// A module that imports a global named "memory" as externref must not be
+// confused for a linear memory import.  The shim checks Module.imports() kind
+// and should skip registration because the import's kind is 'global', not 'memory'.
+export let externrefMemoryIgnored = {
+  async test() {
+    const instance = await WebAssembly.instantiate(externrefMemoryModule, {
+      env: { memory: null },
+    });
+    // Should instantiate fine — shim just doesn't register it.
+    if (instance.exports.get_value() !== 42) {
+      throw new Error('Expected get_value() to return 42');
     }
   },
 };

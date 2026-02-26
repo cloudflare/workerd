@@ -6,8 +6,8 @@
   (memory (export "memory") 1)
 
   ;; Signal at byte 0, terminated at byte 4.
-  (global (export "__signal_address") i32 (i32.const 0))
-  (global (export "__terminated_address") i32 (i32.const 4))
+  (global (export "__instance_signal") i32 (i32.const 0))
+  (global (export "__instance_terminated") i32 (i32.const 4))
 
   ;; Pre-fill signal (bytes 0-3) with 0xDEADBEEF.
   (data (i32.const 0) "\EF\BE\AD\DE")

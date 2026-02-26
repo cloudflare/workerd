@@ -102,8 +102,9 @@ class IsolateLimitEnforcer: public kj::Refcounted {
 
   // Registers a WASM module for receiving the "shut down" signal when CPU time is nearly
   // exhausted. The signal handler will write SIGXCPU (24) (as a uint32) into the module's
-  // linear memory at `signalOffset` bytes from the start of `memory`. The runtime reads
-  // `terminatedOffset` in a GC prologue to detect when the module has exited.
+  // linear memory at `signalOffset` bytes from the start of `memory`. The list of registered
+  // modules is periodically filtered in the GC prologue to remove memories where the terminated
+  // signal is set.
   //
   // `memory` is a kj::Array<kj::byte> that keeps the underlying v8::BackingStore alive via
   // kj::Array's attach() mechanism.
@@ -121,9 +122,10 @@ class IsolateLimitEnforcer: public kj::Refcounted {
       return;
     }
     // Zero the signal address to clear any stale signals
-    for (auto& b: memory.slice(signalOffset, signalOffset + WASM_SIGNAL_FIELD_BYTES)) {
-      b = 0;
-    }
+    uint32_t value = 0;
+    memory.asPtr()
+        .slice(signalOffset, signalOffset + WASM_SIGNAL_FIELD_BYTES)
+        .copyFrom(kj::asBytes(&value, 1));
 
     wasmShutdownSignals.pushFront(
         WasmShutdownSignal{kj::mv(memory), signalOffset, terminatedOffset});
@@ -157,7 +159,7 @@ class IsolateLimitEnforcer: public kj::Refcounted {
 
  private:
   // WASM modules that have opted into receiving the "shut down" signal by exporting i32 globals
-  // named "__signal_address" and "__terminated_address". When the CPU time limiter fires
+  // named "__instance_signal" and "__instance_terminated". When the CPU time limiter fires
   // NEARLY_OUT_OF_TIME, it writes SIGXCPU (24) into each module's linear memory at the signal
   // address.
   //
