@@ -29,7 +29,7 @@
     return undefined;
   }
 
-  function registerExports(instance, imports, module) {
+  function checkAndRegisterShutdown(instance, imports, module) {
     const exports = instance.exports;
     const signalGlobal = exports['__instance_signal'];
     const terminatedGlobal = exports['__instance_terminated'];
@@ -48,16 +48,18 @@
     return originalInstantiate
       .call(wa, moduleOrBytes, imports)
       .then(function (result) {
+        // WebAssembly.instantiate has two overloads: called with bytes it resolves to
+        // { module, instance }, called with a Module it resolves to just the Instance.
         const instance = result.instance || result;
         const module = result.module || moduleOrBytes;
-        registerExports(instance, imports, module);
+        checkAndRegisterShutdown(instance, imports, module);
         return result;
       });
   };
 
   wa.Instance = function Instance(module, imports) {
     const instance = new originalInstance(module, imports);
-    registerExports(instance, imports, module);
+    checkAndRegisterShutdown(instance, imports, module);
     return instance;
   };
   wa.Instance.prototype = originalInstance.prototype;
