@@ -265,6 +265,10 @@ class Element::AttributesIterator final: public HTMLRewriter::Token {
 
   Next next();
 
+  // Called by Element when its attributes are mutated (setAttribute/removeAttribute),
+  // which invalidates the underlying lol-html iterator's pointers.
+  void invalidate();
+
   jsg::Ref<AttributesIterator> self();
 
   JSG_RESOURCE_TYPE(AttributesIterator) {
@@ -275,6 +279,7 @@ class Element::AttributesIterator final: public HTMLRewriter::Token {
 
  private:
   kj::Maybe<kj::Own<CType>> impl;
+  bool mutatedDuringIteration = false;
 
   void htmlContentScopeEnd() override;
 };
