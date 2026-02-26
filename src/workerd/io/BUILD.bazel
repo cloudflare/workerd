@@ -340,7 +340,6 @@ wd_cc_embed(
     name = "release-version",
     src = ":trimmed-release-version.txt",
     base_name = "release-version",
-    visibility = ["//visibility:public"],
 )
 
 # Maximum compatibility date that can safely be set using code compiled from this repo. Set to
