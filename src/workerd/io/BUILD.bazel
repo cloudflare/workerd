@@ -87,7 +87,8 @@ wd_cc_library(
         ":io-helpers",
         ":limit-enforcer",
         ":observer",
-        ":supported-compatibility-date",
+        ":maximum-compatibility-date",
+        ":release-version",
         ":trace",
         ":worker-interface",
         ":worker-source",
@@ -317,29 +318,42 @@ wd_cc_library(
 )
 
 genrule(
-    name = "trimmed-supported-compatibility-date-gen",
-    srcs = ["supported-compatibility-date.txt"],
-    outs = ["trimmed-supported-compatibility-date.txt"],
-    cmd = "tr -d '\n' < $(location supported-compatibility-date.txt) > $(location trimmed-supported-compatibility-date.txt)",
-    cmd_ps = "(Get-Content $(location supported-compatibility-date.txt) -Raw -Encoding Ascii).TrimEnd() | Set-Content $(location trimmed-supported-compatibility-date.txt) -NoNewLine -Encoding Ascii",
+    name = "trimmed-release-version-gen",
+    srcs = ["release-version.txt"],
+    outs = ["trimmed-release-version.txt"],
+    cmd = "tr -d '\n' < $(location release-version.txt) > $(location trimmed-release-version.txt)",
+    cmd_ps = "(Get-Content $(location release-version.txt) -Raw -Encoding Ascii).TrimEnd() | Set-Content $(location trimmed-release-version.txt) -NoNewLine -Encoding Ascii",
     visibility = ["//visibility:public"],
 )
 
-# Newest compatibility date that can safely be set using code compiled from this repo. Trying to
-# run a Worker with a newer compatibility date than this will fail.
-#
-# This should be updated to the current date on a regular basis. The reason this exists is so that
-# if you build an old version of the code and try to run a new Worker with it, you get an
-# appropriate error, rather than have the code run with the wrong compatibility mode.
+genrule(
+    name = "trimmed-maximum-compatibility-date-gen",
+    srcs = ["maximum-compatibility-date.txt"],
+    outs = ["trimmed-maximum-compatibility-date.txt"],
+    cmd = "tr -d '\n' < $(location maximum-compatibility-date.txt) > $(location trimmed-maximum-compatibility-date.txt)",
+    cmd_ps = "(Get-Content $(location maximum-compatibility-date.txt) -Raw -Encoding Ascii).TrimEnd() | Set-Content $(location trimmed-maximum-compatibility-date.txt) -NoNewLine -Encoding Ascii",
+    visibility = ["//visibility:public"],
+)
+
+# The date of this release. Used for the version string and the npm compatibilityDate export.
+wd_cc_embed(
+    name = "release-version",
+    src = ":trimmed-release-version.txt",
+    base_name = "release-version",
+)
+
+# Maximum compatibility date that can safely be set using code compiled from this repo. Set to
+# 7 days beyond the release date so that users can set their compat date to today even if
+# they're running a workerd release from a few days ago.
 #
 # Note that the production Cloudflare Workers upload API always accepts any date up to the current
 # date regardless of this constant, on the assumption that Cloudflare is always running the latest
 # version of the code. This constant is more to protect users who are self-hosting the runtime and
 # could be running an older version.
 wd_cc_embed(
-    name = "supported-compatibility-date",
-    src = ":trimmed-supported-compatibility-date.txt",
-    base_name = "supported-compatibility-date",
+    name = "maximum-compatibility-date",
+    src = ":trimmed-maximum-compatibility-date.txt",
+    base_name = "maximum-compatibility-date",
 )
 
 wd_capnp_library(src = "cdp.capnp")

@@ -22,16 +22,19 @@ jobs:
 
       - name: Get current date
         id: date
-        run: echo "date=$(date -d '+7 days' +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
-      - name: Update compatibility date
         run: |
-          echo "${{ steps.date.outputs.date }}" > src/workerd/io/supported-compatibility-date.txt
+          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+          echo "max_date=$(date -d '+7 days' +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Update compatibility dates
+        run: |
+          echo "${{ steps.date.outputs.date }}" > src/workerd/io/release-version.txt
+          echo "${{ steps.date.outputs.max_date }}" > src/workerd/io/maximum-compatibility-date.txt
 
       - name: Check for changes
         id: git-check
         run: |
-          if [[ $(git status --porcelain src/workerd/io/supported-compatibility-date.txt) ]]; then
+          if [[ $(git status --porcelain src/workerd/io/release-version.txt src/workerd/io/maximum-compatibility-date.txt) ]]; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
@@ -45,6 +48,6 @@ jobs:
         run: |
           git config user.email "workers-devprod@cloudflare.com"
           git config user.name "Workers DevProd"
-          git add src/workerd/io/supported-compatibility-date.txt
+          git add src/workerd/io/release-version.txt src/workerd/io/maximum-compatibility-date.txt
           git commit -m "Release ${{ steps.date.outputs.date }}"
           git push

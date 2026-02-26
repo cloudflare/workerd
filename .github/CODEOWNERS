@@ -8,6 +8,7 @@ pnpm-lock.yaml @cloudflare/wrangler @cloudflare/workers-runtime-1
 /types/ @cloudflare/wrangler
 /types/generated-snapshot/experimental/ @cloudflare/workers-runtime-1 @cloudflare/workers-durable-objects
 src/workerd/tools/ @cloudflare/wrangler @cloudflare/workers-runtime-1 @cloudflare/workers-durable-objects
-src/workerd/io/supported-compatibility-date.txt @cloudflare/wrangler @cloudflare/workers-runtime-1
+src/workerd/io/release-version.txt @cloudflare/wrangler @cloudflare/workers-runtime-1
+src/workerd/io/maximum-compatibility-date.txt @cloudflare/wrangler @cloudflare/workers-runtime-1
 src/node/ @cloudflare/workers-runtime-1 @cloudflare/workers-durable-objects @cloudflare/workers-frameworks @cloudflare/workers-runtime-nodejs
 src/workerd/api/node/ @cloudflare/workers-runtime-1 @cloudflare/workers-durable-objects @cloudflare/workers-frameworks @cloudflare/workers-runtime-nodejs

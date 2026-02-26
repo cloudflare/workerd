@@ -3,7 +3,7 @@ name: Build & Release
 on:
   push:
     branches:
-    - main
+      - main
   workflow_dispatch:
     inputs:
       patch:
@@ -32,9 +32,9 @@ jobs:
       - uses: actions/checkout@v4
       - id: echo
         run: |
-          echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
-          echo "version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '1'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ github.event_name == 'push' && '0' || inputs.patch }}" >> $GITHUB_OUTPUT;
-          echo "types_version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '4'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ github.event_name == 'push' && '0' || inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "date=$(cat src/workerd/io/release-version.txt)" >> $GITHUB_OUTPUT;
+          echo "version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '1'}}.$(cat src/workerd/io/release-version.txt | tr -d '-').${{ github.event_name == 'push' && '0' || inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "types_version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '4'}}.$(cat src/workerd/io/release-version.txt | tr -d '-').${{ github.event_name == 'push' && '0' || inputs.patch }}" >> $GITHUB_OUTPUT;
   check-tag:
     name: Check tag is new
     outputs:
@@ -122,8 +122,6 @@ jobs:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
 
-
-
   upload-artifacts:
     name: Upload Artifacts
     needs: [version, tag-and-release, build]
@@ -133,7 +131,7 @@ jobs:
         arch: [linux-64, darwin-64, windows-64]
         # This variable itself is unused, but allows us to set up two macOS builds. arm64 builds for
         # other platforms will be supported later, then we'll list both architectures here.
-        cpu: [ X64 ]
+        cpu: [X64]
         include:
           - arch: linux-64
             name: Linux-X64
@@ -163,10 +161,10 @@ jobs:
         run: chmod +x /tmp/workerd
       - name: Compress release binary
         run: |
-            # As of release v1.20230404.0 the Linux x64 binary after debug_strip is 65.8 MB,
-            # 21.0 MB with gzip and 17.3 MB with brotli -9. Use gzip as a widely supported format
-            # which still produces an acceptable compressed size.
-            gzip -9N -k /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
+          # As of release v1.20230404.0 the Linux x64 binary after debug_strip is 65.8 MB,
+          # 21.0 MB with gzip and 17.3 MB with brotli -9. Use gzip as a widely supported format
+          # which still produces an acceptable compressed size.
+          gzip -9N -k /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
       - run: mv /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}.gz /tmp/workerd-${{ matrix.arch }}.gz
       # Upload compressed release binaries – one set of artifacts is sufficient with gzip being
       # widely supported
@@ -214,7 +212,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
-          cache: "pnpm"
+          cache: 'pnpm'
       - name: Install workers-sdk dependencies
         run: pnpm install
 
@@ -316,7 +314,7 @@ jobs:
         uses: ./.github/actions/setup-runner
       - name: build types
         run: |
-            bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
+          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
       - name: Build package
         run: node npm/scripts/build-types-package.mjs
         env:
