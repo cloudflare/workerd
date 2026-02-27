@@ -147,6 +147,16 @@ class IsolateLimitEnforcer: public kj::Refcounted {
     return wasmShutdownSignals;
   }
 
+  // Releases all WASM shutdown signal entries unconditionally. This must be called before the
+  // V8 isolate is disposed, because each entry holds a shared_ptr<v8::BackingStore> whose
+  // destructor may access V8 isolate state. If those shared_ptrs are dropped after V8 disposal,
+  // the BackingStore destructor will read freed memory.
+  //
+  // Must be called with the isolate lock held.
+  void clearAllWasmShutdownSignals() const {
+    wasmShutdownSignals.clear();
+  }
+
   // Inserts a custom mark event named `name` into this isolate's perf event data stream. At
   // present, this is only implemented internally. Call this function from various APIs to be able
   // to correlate perf event data with usage of those APIs.

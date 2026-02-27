@@ -1565,6 +1565,13 @@ Worker::Isolate::~Isolate() noexcept(false) {
     // The Rust Realm must be dropped under lock since Realm::drop() accesses V8 globals
     // and calls drop functions that may interact with V8.
     auto dropRealm = kj::mv(impl->realm);
+
+    // Release all WASM shutdown signal entries while V8 is still alive. Each entry holds a
+    // shared_ptr<v8::BackingStore> whose destructor may access V8 isolate-internal state;
+    // if those shared_ptrs outlive the V8 isolate (which is destroyed when `api` is destroyed
+    // later in the member-destruction sequence), the BackingStore destructor will
+    // use-after-free.
+    limitEnforcer->clearAllWasmShutdownSignals();
   });
 }
 

@@ -111,6 +111,17 @@ class AtomicList {
     }
   }
 
+  // Removes all nodes from the list, destroying each one.
+  void clear() {
+    Node* current = __atomic_load_n(&head, __ATOMIC_RELAXED);
+    __atomic_store_n(&head, static_cast<Node*>(nullptr), __ATOMIC_RELEASE);
+    while (current != nullptr) {
+      Node* next = __atomic_load_n(&current->next, __ATOMIC_RELAXED);
+      delete current;
+      current = next;
+    }
+  }
+
   // Returns true if the list is empty. Signal safe.
   bool isEmpty() const {
     return __atomic_load_n(&head, __ATOMIC_ACQUIRE) == nullptr;

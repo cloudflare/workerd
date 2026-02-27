@@ -92,6 +92,35 @@ KJ_TEST("AtomicList single element filter remove") {
   KJ_EXPECT(list.isEmpty());
 }
 
+KJ_TEST("AtomicList clear removes all nodes") {
+  AtomicList<int> list;
+
+  list.pushFront(3);
+  list.pushFront(2);
+  list.pushFront(1);
+
+  KJ_EXPECT(!list.isEmpty());
+
+  list.clear();
+
+  KJ_EXPECT(list.isEmpty());
+
+  // List should be reusable after clear.
+  list.pushFront(42);
+  KJ_EXPECT(!list.isEmpty());
+  int value = 0;
+  list.iterate([&](int v) { value = v; });
+  KJ_EXPECT(value == 42);
+}
+
+KJ_TEST("AtomicList clear on empty list is a no-op") {
+  AtomicList<int> list;
+
+  KJ_EXPECT(list.isEmpty());
+  list.clear();
+  KJ_EXPECT(list.isEmpty());
+}
+
 KJ_TEST("AtomicList filter removes head only") {
   AtomicList<int> list;
 
