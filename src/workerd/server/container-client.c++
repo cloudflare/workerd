@@ -25,6 +25,10 @@ namespace workerd::server {
 
 namespace {
 
+// The name of the docker network managed by workerd. Containers spawned by workerd are
+// attached to this network to avoid joining Docker's shared default bridge.
+constexpr kj::StringPtr WORKERD_NETWORK_NAME = "workerd-network"_kj;
+
 struct ParsedAddress {
   kj::CidrRange cidr;
   kj::Maybe<uint16_t> port;
@@ -366,8 +370,16 @@ class EgressHttpService final: public kj::HttpService {
 };
 
 kj::Promise<ContainerClient::IPAMConfigResult> ContainerClient::getDockerBridgeIPAMConfig() {
-  auto response = co_await dockerApiRequest(
-      network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str("/networks/bridge"));
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
+      kj::str("/networks/", WORKERD_NETWORK_NAME));
+
+  if (response.statusCode == 404) {
+    // Network doesn't exist, create it and fetch it again.
+    co_await createWorkerdNetwork();
+    response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
+        kj::str("/networks/", WORKERD_NETWORK_NAME));
+  }
+
   if (response.statusCode == 200) {
     auto jsonRoot = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
     auto ipamConfig = jsonRoot.getIpam().getConfig();
@@ -381,7 +393,7 @@ kj::Promise<ContainerClient::IPAMConfigResult> ContainerClient::getDockerBridgeI
   }
 
   JSG_FAIL_REQUIRE(Error,
-      "Failed to get bridge. "
+      "Failed to get workerd-network. "
       "Status: ",
       response.statusCode, ", Body: ", response.body);
 }
@@ -405,6 +417,39 @@ kj::Promise<bool> ContainerClient::isDaemonIpv6Enabled() {
   }
 
   co_return false;
+}
+
+kj::Promise<void> ContainerClient::createWorkerdNetwork() {
+  if (workerdNetworkCreated.exchange(true, std::memory_order_acquire)) {
+    co_return;
+  }
+
+  KJ_ON_SCOPE_FAILURE(workerdNetworkCreated.store(false, std::memory_order_release));
+
+  auto ipv6Enabled = co_await isDaemonIpv6Enabled();
+
+  // Equivalent to: docker network create -d bridge [--ipv6] workerd-network
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::NetworkCreateRequest>();
+  capnp::MallocMessageBuilder message;
+  auto jsonRoot = message.initRoot<docker_api::Docker::NetworkCreateRequest>();
+  jsonRoot.setName(WORKERD_NETWORK_NAME);
+  jsonRoot.setDriver("bridge");
+  jsonRoot.setEnableIpv6(ipv6Enabled);
+  if (!ipv6Enabled) {
+    KJ_LOG(WARNING,
+        "Docker has IPv6 disabled. Connections to Workers via IPv6 won't work. If you want to enable IPv6, remove the workerd-network after re-enabling.");
+  }
+
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/networks/create"), codec.encode(jsonRoot));
+
+  if (response.statusCode != 201 && response.statusCode != 409) {
+    JSG_FAIL_REQUIRE(Error,
+        "Failed to create workerd-network."
+        "Status: ",
+        response.statusCode, ", Body: ", response.body);
+  }
 }
 
 // Returns the gateway IP on Linux for direct container access.
@@ -564,6 +609,8 @@ kj::Promise<void> ContainerClient::createContainer(
     jsonEnv.set(envSize + i, defaultEnv[i]);
   }
 
+  co_await createWorkerdNetwork();
+
   auto hostConfig = jsonRoot.initHostConfig();
   // We need to publish all ports to properly get the mapped port number locally
   hostConfig.setPublishAllPorts(true);
@@ -575,7 +622,7 @@ kj::Promise<void> ContainerClient::createContainer(
   auto extraHosts = hostConfig.initExtraHosts(1);
   extraHosts.set(0, "host.docker.internal:host-gateway"_kj);
 
-  hostConfig.setNetworkMode("bridge");
+  hostConfig.setNetworkMode(WORKERD_NETWORK_NAME);
 
   // When containersPidNamespace is NOT enabled, use host PID namespace for backwards compatibility.
   // This allows the container to see processes on the host.

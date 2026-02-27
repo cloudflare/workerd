@@ -146,6 +146,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   std::atomic_bool containerStarted = false;
   std::atomic_bool containerSidecarStarted = false;
+  std::atomic_bool workerdNetworkCreated = false;
   std::atomic_bool egressListenerStarted = false;
 
   kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
@@ -169,6 +170,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Get the Docker bridge network gateway IP and subnet.
   kj::Promise<IPAMConfigResult> getDockerBridgeIPAMConfig();
+  // Create the dedicated workerd Docker bridge network when missing.
+  kj::Promise<void> createWorkerdNetwork();
   // Check if the Docker daemon has IPv6 enabled by inspecting the default bridge network's
   // IPAM config for IPv6 subnets.
   kj::Promise<bool> isDaemonIpv6Enabled();
