@@ -577,11 +577,8 @@ kj::Promise<void> ContainerClient::createContainer(
 
   hostConfig.setNetworkMode("bridge");
 
-  // When containersPidNamespace is NOT enabled, use host PID namespace for backwards compatibility.
-  // This allows the container to see processes on the host.
-  if (!params.getCompatibilityFlags().getContainersPidNamespace()) {
-    hostConfig.setPidMode("host");
-  }
+  // Do not set pidMode. Docker defaults to an isolated PID namespace, which prevents
+  // containers from enumerating or signaling host processes.
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
