@@ -782,16 +782,16 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   internetEnabled = params.getEnableInternet();
 
   co_await createContainer(entrypoint, environment, params);
-  co_await startContainer();
 
   // Opt in to the proxy sidecar container only if the user has configured egressMappings
   // for now. In the future, it will always run when a user container is running
   if (!egressMappings.empty()) {
-    // The user container will be blocked on network connectivity until this finishes.
-    // When workerd-network is more battle-tested and goes out of experimental so it's non-optional,
-    // we should make the sidecar start first and _then_ make the user container join the sidecar network.
+    // Start the sidecar before the user container starts, so interception is active before any
+    // workload code can issue outbound traffic.
     co_await ensureSidecarStarted();
   }
+
+  co_await startContainer();
 
   containerStarted.store(true, std::memory_order_release);
 }
