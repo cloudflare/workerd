@@ -158,7 +158,7 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   kj::Maybe<ActorVersion> version;
   KJ_IF_SOME(o, options) {
     locationHint = kj::mv(o.locationHint);
-    if (FeatureFlags::get(js).getWorkerdExperimental()) {
+    if (FeatureFlags::get(js).getEnableVersionApi()) {
       KJ_IF_SOME(v, o.version) {
         version = ActorVersion{.cohort = kj::mv(v.cohort)};
       }

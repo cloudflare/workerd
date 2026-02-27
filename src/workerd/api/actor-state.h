@@ -676,6 +676,8 @@ class DurableObjectState: public jsg::Object {
     if (flags.getWorkerdExperimental()) {
       // Experimental new API, details may change!
       JSG_LAZY_INSTANCE_PROPERTY(facets, getFacets);
+    }
+    if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
     JSG_METHOD(blockConcurrencyWhile);

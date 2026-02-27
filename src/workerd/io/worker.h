@@ -915,7 +915,8 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t> hibernationEventType,
       kj::Maybe<rpc::Container::Client> container = kj::none,
-      kj::Maybe<FacetManager&> facetManager = kj::none);
+      kj::Maybe<FacetManager&> facetManager = kj::none,
+      kj::Maybe<ActorVersion> version = kj::none);
 
   ~Actor() noexcept(false);
 

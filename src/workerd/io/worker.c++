@@ -3599,6 +3599,7 @@ struct Worker::Actor::Impl {
 
   kj::Maybe<rpc::Container::Client> container;
   kj::Maybe<FacetManager&> facetManager;
+  kj::Maybe<ActorVersion> version;
 
   struct NoClass {};
   struct Initializing {};
@@ -3813,12 +3814,14 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<kj::Own<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
     kj::Maybe<rpc::Container::Client> container,
-    kj::Maybe<FacetManager&> facetManager)
+    kj::Maybe<FacetManager&> facetManager,
+    kj::Maybe<ActorVersion> version)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container), facetManager);
+  impl->version = kj::mv(version);
 
   KJ_IF_SOME(c, className) {
     KJ_IF_SOME(cls, worker.impl->actorClasses.find(c)) {
@@ -3878,7 +3881,9 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
           jsg::JsValue(KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).getHandle(js)),
           impl->props.toJs(js), kj::mv(storage), kj::mv(impl->container), containerRunning,
-          impl->facetManager);
+          impl->facetManager, impl->version.map([](ActorVersion& v) {
+        return ActorVersion{.cohort = v.cohort.map([](kj::String& s) { return kj::str(s); })};
+      }));
 
       auto handler =
           info.cls(lock, ctx.addRef(), KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
