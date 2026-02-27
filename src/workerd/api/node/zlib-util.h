@@ -292,6 +292,10 @@ class ZstdContext {
   explicit ZstdContext(ZlibMode _mode): mode(_mode) {}
   KJ_DISALLOW_COPY(ZstdContext);
 
+  void setAllocator(CompressionAllocator* allocator) {
+    allocator_ = allocator;
+  }
+
   void setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
   void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
   void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
@@ -313,6 +317,7 @@ class ZstdContext {
   };
 
  protected:
+  CompressionAllocator* allocator_ = nullptr;
   ZlibMode mode;
   ZSTD_inBuffer input_{nullptr, 0, 0};
   ZSTD_outBuffer output_{nullptr, 0, 0};

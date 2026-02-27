@@ -812,10 +812,19 @@ void zstdFreeDCtx(ZSTD_DCtx* dctx) {
 }  // namespace
 
 ZstdEncoderContext::ZstdEncoderContext(ZlibMode _mode)
-    : ZstdContext(_mode),
-      cctx_(kj::disposeWith<zstdFreeCCtx>(ZSTD_createCCtx())) {}
+    : ZstdContext(_mode) {}
 
 kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSize) {
+  KJ_DASSERT(allocator_ != nullptr, "Zstd encoder allocator should not be null");
+  if (cctx_.get() == nullptr) {
+    ZSTD_customMem customMem = {
+      .customAlloc = CompressionAllocator::AllocForBrotli,
+      .customFree = CompressionAllocator::FreeForZlib,
+      .opaque = allocator_,
+    };
+    cctx_ = kj::disposeWith<zstdFreeCCtx>(ZSTD_createCCtx_advanced(customMem));
+  }
+
   if (cctx_.get() == nullptr) {
     return CompressionError(
         "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
@@ -878,12 +887,19 @@ kj::Maybe<CompressionError> ZstdEncoderContext::getError() const {
 }
 
 ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode)
-    : ZstdContext(_mode),
-      dctx_(kj::disposeWith<zstdFreeDCtx>(ZSTD_createDCtx())) {}
+    : ZstdContext(_mode) {}
 
 kj::Maybe<CompressionError> ZstdDecoderContext::initialize() {
-  // dctx_ is created in the constructor. It can only be nullptr if ZSTD_createDCtx()
-  // failed due to memory allocation failure.
+  KJ_DASSERT(allocator_ != nullptr, "Zstd decoder allocator should not be null");
+  if (dctx_.get() == nullptr) {
+    ZSTD_customMem customMem = {
+      .customAlloc = CompressionAllocator::AllocForBrotli,
+      .customFree = CompressionAllocator::FreeForZlib,
+      .opaque = allocator_,
+    };
+    dctx_ = kj::disposeWith<zstdFreeDCtx>(ZSTD_createDCtx_advanced(customMem));
+  }
+
   if (dctx_.get() == nullptr) {
     return CompressionError(
         "Could not initialize Zstd instance"_kj, "ERR_ZLIB_INITIALIZATION_FAILED"_kj, -1);
@@ -957,6 +973,7 @@ bool ZlibUtil::ZstdCompressionStream<CompressionContext>::initialize(jsg::Lock& 
     jsg::Function<void()> writeCallback,
     jsg::Optional<uint64_t> pledgedSrcSize) {
   this->initializeStream(kj::mv(writeResult), kj::mv(writeCallback));
+  this->context()->setAllocator(&this->allocator);
 
   uint64_t srcSize = pledgedSrcSize.orDefault(ZSTD_CONTENTSIZE_UNKNOWN);
 
@@ -1168,7 +1185,9 @@ void ZlibUtil::brotliWithCallback(
 
 template <typename Context>
 kj::Array<kj::byte> ZlibUtil::zstdSync(jsg::Lock& js, InputSource data, ZstdContext::Options opts) {
+  CompressionAllocator allocator(js.getExternalMemoryTarget());
   Context ctx(Context::Mode);
+  ctx.setAllocator(&allocator);
 
   auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
