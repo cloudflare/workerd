@@ -303,11 +303,6 @@ export class DurableObjectExample extends DurableObject {
   async testSetEgressHttp() {
     const container = this.ctx.container;
 
-    if (container.running) {
-      await this.ctx.container.destroy();
-      await this.ctx.container.monitor().catch(() => {});
-    }
-
     // Set up egress TCP mapping to route requests to the binding
     // We can configure this even before the container starts.
     await container.interceptOutboundHttp(
@@ -315,7 +310,11 @@ export class DurableObjectExample extends DurableObject {
       this.ctx.exports.TestService({ props: { id: 1234 } })
     );
 
-    container.start();
+    if (!container.running) container.start();
+
+    // Keep container alive after abort();
+    await container.setInactivityTimeout(60_000 + Date.now());
+
     container.monitor().catch((err) => {
       console.error('Container exited with an error:', err.message);
     });
@@ -429,10 +428,17 @@ export class DurableObjectExample extends DurableObject {
 
     assert.strictEqual(container.running, false);
 
+    // Set up egress mapping to route WebSocket requests to the binding
+    await container.interceptOutboundHttp(
+      '11.0.0.1:9999',
+      this.ctx.exports.TestService({ props: { id: 42 } })
+    );
+
     // Start container with WebSocket proxy mode enabled
     container.start({
       env: { WS_ENABLED: 'true', WS_PROXY_TARGET: '11.0.0.1:9999' },
     });
+
     container.monitor().finally(() => {
       console.log('Container exited');
     });
@@ -441,12 +447,6 @@ export class DurableObjectExample extends DurableObject {
     await this.waitUntilContainerIsHealthy();
 
     assert.strictEqual(container.running, true);
-
-    // Set up egress mapping to route WebSocket requests to the binding
-    await container.interceptOutboundHttp(
-      '11.0.0.1:9999',
-      this.ctx.exports.TestService({ props: { id: 42 } })
-    );
 
     // Connect to container's /ws endpoint which proxies to the intercepted address
     // Flow: DO -> container:8080/ws -> container connects to 11.0.0.1:9999/ws
