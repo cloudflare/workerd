@@ -94,11 +94,14 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   struct InspectResponse {
     bool isRunning;
     kj::HashMap<uint16_t, uint16_t> ports;
+    kj::Maybe<kj::String> hostsPath;
   };
 
   struct IPAMConfigResult {
-    kj::String gateway;
-    kj::String subnet;
+    kj::String v4Gateway;
+    kj::String v4Subnet;
+    kj::Maybe<kj::String> v6Gateway;
+    kj::Maybe<kj::String> v6Subnet;
   };
 
   // Docker API v1.50 helper methods
@@ -117,9 +120,14 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> destroyContainer();
 
   // Sidecar container management (for egress proxy)
-  kj::Promise<void> createSidecarContainer(uint16_t egressPort, kj::String networkCidr);
-  kj::Promise<void> startSidecarContainer();
-  kj::Promise<void> destroySidecarContainer();
+  kj::Promise<void> createSidecarContainer(uint16_t egressPort,
+      kj::String networkCidr,
+      kj::Maybe<kj::String> hostsPath,
+      kj::String sidecarName,
+      kj::String address,
+      kj::String addressV6);
+  kj::Promise<void> startSidecarContainer(kj::StringPtr sidecarName);
+  kj::Promise<void> destroySidecarContainer(kj::StringPtr sidecarName);
   kj::Promise<void> monitorSidecarContainer();
 
   // Cleanup callback to remove from ActorNamespace map when destroyed
@@ -167,11 +175,10 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // when they finish through a KJ defer.
   RpcTurn getRpcTurn();
 
-  // Get the Docker bridge network gateway IP and subnet.
-  kj::Promise<IPAMConfigResult> getDockerBridgeIPAMConfig();
-  // Check if the Docker daemon has IPv6 enabled by inspecting the default bridge network's
-  // IPAM config for IPv6 subnets.
-  kj::Promise<bool> isDaemonIpv6Enabled();
+  // Ensure the egress bridge network exists (IPv6-enabled).
+  kj::Promise<void> ensureEgressNetworkExists();
+  // Get the Docker network gateway IP and subnet.
+  kj::Promise<IPAMConfigResult> getDockerNetworkIPAMConfig(kj::StringPtr networkName);
   // Start the egress listener on the given address with an OS-chosen port.
   kj::Promise<uint16_t> startEgressListener(kj::String listenAddress);
   void stopEgressListener();

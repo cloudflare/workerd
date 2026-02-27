@@ -85,6 +85,7 @@ class Container: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("destroyReason", destroyReason);
+    tracker.trackField("monitorJsPromise", monitorJsPromise);
   }
 
  private:
@@ -119,15 +120,10 @@ class Container: public jsg::Object {
     //
     // Set to the exit code on success, or to an exception on failure.
     mutable bool finished = false;
-    mutable uint8_t exitCode = 0;
+    mutable int32_t exitCode = 0;
     mutable kj::Maybe<kj::Exception> exception;
   };
   IoOwn<MonitorState> monitorState;
-
-  // The forked KJ promise from the monitor RPC call. Both the background monitor and
-  // the JS monitor() method share the same underlying RPC request via addBranch().
-  // Wrapped in IoOwn because it is a KJ I/O-layer promise.
-  kj::Maybe<IoOwn<kj::ForkedPromise<uint8_t>>> monitorKjPromise;
 
   // The memoized JS promise returned by monitor(). Allows multiple calls to monitor()
   // to return the same promise.
@@ -137,6 +133,12 @@ class Container: public jsg::Object {
   // to ensure it runs to completion. Held here (rather than via addTask()) to avoid
   // preventing DO hibernation.
   kj::Maybe<IoOwn<kj::Promise<void>>> backgroundMonitor;
+
+  // Promise that resolves when the current start() RPC completes. The background
+  // monitor chains after this to avoid racing with the start RPC (which creates/
+  // starts the container). Without this, the monitor RPC's Docker /wait could see
+  // a stale container from a previous run and return its old exit code.
+  kj::Maybe<IoOwn<kj::ForkedPromise<void>>> startPromise;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(destroyReason);

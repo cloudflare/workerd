@@ -113,13 +113,15 @@ KJ_TEST("Container: start without monitor auto-aborts on error") {
     KJ_ASSERT(container->getRunning());
 
     auto abortPromise = context.onAbort();
-    co_await yieldEventLoop(1);
+    // The monitor RPC is chained after the start RPC completes, so we need
+    // enough event-loop turns for both to resolve.
+    co_await yieldEventLoop(3);
 
     KJ_ASSERT(mock.startCount == 1);
     KJ_ASSERT(mock.monitorCount == 1);
 
     mock.rejectMonitor(0, KJ_EXCEPTION(FAILED, "container crashed unexpectedly"));
-    co_await yieldEventLoop(2);
+    co_await yieldEventLoop(3);
 
     co_await abortPromise.then(
         []() { KJ_FAIL_ASSERT("abort promise should have been rejected"); }, [](kj::Exception&& e) {
@@ -154,7 +156,7 @@ KJ_TEST("Container: clean exit without monitor does not abort") {
     container->start(js, kj::none);
     KJ_ASSERT(container->getRunning());
 
-    co_await yieldEventLoop(1);
+    co_await yieldEventLoop(3);
     KJ_ASSERT(mock.monitorCount == 1);
 
     mock.fulfillMonitor(0, 0);
@@ -192,7 +194,9 @@ KJ_TEST("Container: constructor with running=true sets up background monitoring"
     KJ_ASSERT(container->getRunning());
 
     auto abortPromise = context.onAbort();
-    co_await yieldEventLoop(1);
+    // The monitor RPC is issued via a .then() chain (even with READY_NOW
+    // prerequisite), so we need extra event-loop turns for it to arrive.
+    co_await yieldEventLoop(3);
 
     KJ_ASSERT(mock.startCount == 0);
     KJ_ASSERT(mock.monitorCount == 1);
@@ -216,16 +220,19 @@ KJ_TEST("Container: constructor with running=true sets up background monitoring"
 //
 // Sequence:
 //   1. start() → background monitor set up
-//   2. monitor() → sets monitoringExplicitly=true, creates awaitIo promise
-//   3. Container crashes (mock rejects monitor RPC)
-//   4. Background error handler sees monitoringExplicitly=true → no abort
-//   5. The awaitIo branch delivers the error to handleError → running=false
+//   2. monitor() → sets monitoringExplicitly=true, sends its own independent
+//      monitor RPC via awaitIo (because background hasn't finished yet)
+//   3. Both RPCs arrive at the mock (monitorCount == 2): index 0 is the
+//      background monitor, index 1 is the explicit monitor
+//   4. Both are rejected with the same error
+//   5. Background error handler sees monitoringExplicitly=true → no abort
+//   6. The awaitIo branch delivers the error to handleError → running=false
 //
 // The test passes without errorsToIgnore, proving the IoContext was NOT
 // aborted. running=false proves handleError fired correctly.
 //
 // Covers: monitoringExplicitly flag, background error handler skip path,
-//         handleError lambda through awaitIo
+//         handleError lambda through awaitIo, two independent monitor RPCs
 // ===========================================================================
 KJ_TEST("Container: explicit monitor prevents auto-abort on error") {
   TestFixture fixture;
@@ -243,10 +250,12 @@ KJ_TEST("Container: explicit monitor prevents auto-abort on error") {
     container->start(js, kj::none);
     static_cast<void>(container->monitor(js));
 
-    co_await yieldEventLoop(1);
-    KJ_ASSERT(mock.monitorCount == 1);
+    co_await yieldEventLoop(3);
+    // Two independent monitor RPCs: background (index 0) + explicit (index 1).
+    KJ_ASSERT(mock.monitorCount == 2);
 
     mock.rejectMonitor(0, KJ_EXCEPTION(FAILED, "container crashed"));
+    mock.rejectMonitor(1, KJ_EXCEPTION(FAILED, "container crashed"));
     co_await yieldEventLoop(5);
 
     co_await context.run([&](Worker::Lock& lock) { KJ_ASSERT(!container->getRunning()); });
@@ -288,7 +297,7 @@ KJ_TEST("Container: monitor after clean exit returns immediate result") {
     auto container = js.alloc<Container>(kj::mv(client), false);
     container->start(js, kj::none);
 
-    co_await yieldEventLoop(1);
+    co_await yieldEventLoop(3);
     KJ_ASSERT(mock.monitorCount == 1);
 
     mock.fulfillMonitor(0, 0);
@@ -343,7 +352,7 @@ KJ_TEST("Container: monitor after error returns immediate result") {
     auto container = js.alloc<Container>(kj::mv(client), false);
     container->start(js, kj::none);
 
-    co_await yieldEventLoop(1);
+    co_await yieldEventLoop(3);
     KJ_ASSERT(mock.monitorCount == 1);
 
     mock.rejectMonitor(0, KJ_EXCEPTION(FAILED, "container exploded"));
@@ -369,17 +378,18 @@ KJ_TEST("Container: monitor after error returns immediate result") {
 // the monitor() promise.
 //
 // Sequence:
-//   1. start() → background monitor
-//   2. monitor() → monitoringExplicitly=true, awaitIo branch
-//   3. Container exits with exit code 42
-//   4. handleExitCode fires with exitCode=42 → running=false, throws
-//   5. Monitor promise rejects with the error
+//   1. start() → background monitor set up
+//   2. monitor() → monitoringExplicitly=true, sends its own independent
+//      monitor RPC via awaitIo (because background hasn't finished yet)
+//   3. Both RPCs arrive (monitorCount == 2): background (0) + explicit (1)
+//   4. Both are fulfilled with exit code 42
+//   5. Background success handler stores exitCode=42 in MonitorState
+//   6. Explicit monitor's handleExitCode fires with 42 → running=false
 //
 // The test verifies running=false (handler fired) and that no auto-abort
 // occurs (monitoringExplicitly was true).
 //
-// Covers: handleExitCode with exitCode != 0, JS Error creation with
-//         exitCode property
+// Covers: handleExitCode with exitCode != 0, two independent monitor RPCs
 // ===========================================================================
 KJ_TEST("Container: non-zero exit code through monitor rejects promise") {
   TestFixture fixture;
@@ -396,10 +406,12 @@ KJ_TEST("Container: non-zero exit code through monitor rejects promise") {
     container->start(js, kj::none);
     static_cast<void>(container->monitor(js));
 
-    co_await yieldEventLoop(1);
-    KJ_ASSERT(mock.monitorCount == 1);
+    co_await yieldEventLoop(3);
+    // Two independent monitor RPCs: background (index 0) + explicit (index 1).
+    KJ_ASSERT(mock.monitorCount == 2);
 
     mock.fulfillMonitor(0, 42);
+    mock.fulfillMonitor(1, 42);
     co_await yieldEventLoop(5);
 
     co_await context.run([&](Worker::Lock& lock) { KJ_ASSERT(!container->getRunning()); });
@@ -411,18 +423,22 @@ KJ_TEST("Container: non-zero exit code through monitor rejects promise") {
 // → exit) and then be restarted for a second identical cycle. This is the
 // critical test for the state reset logic in start().
 //
-// When start() is called for the second time, it must reset ALL monitoring
-// state: monitorKjPromise, monitorJsPromise, backgroundMonitor, and all
-// MonitorState fields (monitoringExplicitly, finished, exitCode, exception).
-// If any of these are stale from the first cycle, the second monitor() call
-// would return stale results or fail to issue a new RPC.
+// When start() is called for the second time, it discards stale promises
+// (monitorJsPromise, backgroundMonitor) and creates a
+// fresh MonitorState. The old MonitorState is intentionally orphaned so
+// that any in-flight background continuation from the first cycle writes
+// to a dead object rather than corrupting the new run's state.
+//
+// Each cycle issues two independent monitor RPCs (background + explicit),
+// so monitorCount increments by 2 per cycle.
 //
 // Assertions per cycle:
-//   - startCount and monitorCount increment correctly (fresh RPCs)
+//   - startCount increments by 1 (fresh start RPC)
+//   - monitorCount increments by 2 (background + explicit RPCs)
 //   - running transitions true → false after exit
 //   - Second cycle works identically to the first
 //
-// Covers: start() state reset (lines 71-77), monitorOnBackgroundIfNeeded()
+// Covers: start() fresh MonitorState allocation, monitorOnBackgroundIfNeeded()
 //         re-invocation, full two-cycle lifecycle
 // ===========================================================================
 KJ_TEST("Container: start-monitor-exit-restart-monitor lifecycle") {
@@ -442,11 +458,14 @@ KJ_TEST("Container: start-monitor-exit-restart-monitor lifecycle") {
     KJ_ASSERT(container->getRunning());
     static_cast<void>(container->monitor(js));
 
-    co_await yieldEventLoop(1);
+    co_await yieldEventLoop(3);
     KJ_ASSERT(mock.startCount == 1);
-    KJ_ASSERT(mock.monitorCount == 1);
+    // Two independent monitor RPCs: background (index 0) + explicit (index 1).
+    KJ_ASSERT(mock.monitorCount == 2);
 
+    // Fulfill both RPCs for cycle 1.
     mock.fulfillMonitor(0, 0);
+    mock.fulfillMonitor(1, 0);
     co_await yieldEventLoop(5);
 
     co_await context.run([&](Worker::Lock& lock) {
@@ -458,14 +477,64 @@ KJ_TEST("Container: start-monitor-exit-restart-monitor lifecycle") {
       static_cast<void>(container->monitor(js2));
     });
 
-    co_await yieldEventLoop(1);
+    co_await yieldEventLoop(3);
     KJ_ASSERT(mock.startCount == 2);
-    KJ_ASSERT(mock.monitorCount == 2);
+    // Two more RPCs for cycle 2: background (index 2) + explicit (index 3).
+    KJ_ASSERT(mock.monitorCount == 4);
 
-    mock.fulfillMonitor(1, 0);
+    mock.fulfillMonitor(2, 0);
+    mock.fulfillMonitor(3, 0);
     co_await yieldEventLoop(5);
 
     co_await context.run([&](Worker::Lock& lock) { KJ_ASSERT(!container->getRunning()); });
+  });
+}
+
+// ===========================================================================
+// Verifies that calling destroy() while the background monitor is actively
+// running does not abort the IoContext and correctly cancels the background
+// monitor. Per the capnp schema: "If a call to monitor() is waiting when
+// destroy() is invoked, monitor() will also return (with no error)."
+//
+// Sequence:
+//   1. start() → background monitor set up (monitor RPC in flight)
+//   2. destroy() → running=false, backgroundMonitor canceled, destroy RPC
+//   3. The background monitor branch is dropped (no abort)
+//   4. The container is cleanly destroyed
+//
+// The test passes without errorsToIgnore, proving no abort occurred.
+//
+// Covers: destroy() canceling backgroundMonitor, no spurious auto-abort
+// ===========================================================================
+KJ_TEST("Container: destroy while background monitor is active does not abort") {
+  TestFixture fixture;
+
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto& context = env.context;
+
+    auto mockServer = kj::heap<MockContainerServer>();
+    auto& mock = *mockServer;
+    rpc::Container::Client client = kj::mv(mockServer);
+
+    auto container = js.alloc<Container>(kj::mv(client), false);
+    container->start(js, kj::none);
+    KJ_ASSERT(container->getRunning());
+
+    co_await yieldEventLoop(3);
+    KJ_ASSERT(mock.startCount == 1);
+    KJ_ASSERT(mock.monitorCount == 1);
+
+    // Destroy while the background monitor's monitor RPC is pending.
+    co_await context.run([&](Worker::Lock& lock) {
+      auto& js2 = jsg::Lock::from(lock.getIsolate());
+      static_cast<void>(container->destroy(js2, kj::none));
+    });
+
+    co_await yieldEventLoop(3);
+
+    KJ_ASSERT(mock.destroyCount == 1);
+    KJ_ASSERT(!container->getRunning());
   });
 }
 

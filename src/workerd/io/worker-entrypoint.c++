@@ -327,7 +327,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
                 api::DeferredProxy<void> deferredProxy) {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
         PERFETTO_FLOW_FROM_POINTER(this));
-    proxyTask = kj::mv(deferredProxy.proxyTask);
+    proxyTask = kj::mv(deferredProxy.proxyTask).attach(context.registerPendingEvent());
     KJ_IF_SOME(t, workerTracer) {
       auto httpResponseStatus = wrappedResponse.getHttpResponseStatus();
       if (httpResponseStatus != 0) {
