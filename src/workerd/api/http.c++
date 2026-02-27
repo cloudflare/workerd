@@ -1458,7 +1458,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   }
 
   // Get client and trace context (if needed) in one clean call
-  auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
+  auto clientWithTracing =
+      fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
+  bool hasSubrequestAdjustment = clientWithTracing.traceContext != kj::none;
   auto traceContext = kj::mv(clientWithTracing.traceContext);
 
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
@@ -1466,10 +1468,16 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   kj::Own<kj::HttpClient> client = asHttpClient(kj::mv(clientWithTracing.client));
 
   // fetch() requests use a lot of unaccounted C++ memory, so we adjust memory usage to pressure
-  // the GC and protect against OOMs. When the autogate is enabled, this adjustment is applied
-  // centrally to all subrequests in IoContext::getSubrequestNoChecks() instead.
+  // the GC and protect against OOMs.
+  //
+  // With the autogate disabled, keep the legacy fetch-specific 3 KiB adjustment.
+  // With the autogate enabled, subrequest-based fetchers are adjusted centrally in
+  // IoContext::getSubrequestNoChecks(), but fetchers backed by OutgoingFactory bypass that path,
+  // so we apply the centralized 8 KiB adjustment here for those fetchers.
   if (!util::Autogate::isEnabled(util::AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH)) {
     client = client.attach(js.getExternalMemoryAdjustment(3 * 1024));
+  } else if (!hasSubrequestAdjustment) {
+    client = client.attach(js.getExternalMemoryAdjustment(8 * 1024));
   }
 
   kj::HttpHeaders headers(ioContext.getHeaderTable());
