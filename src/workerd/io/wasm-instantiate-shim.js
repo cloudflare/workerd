@@ -11,21 +11,13 @@
   // externref is not mistaken for the module's linear memory.
   function findMemory(instance, imports, module) {
     // First, check if memory is exported
-    const memory = instance.exports['memory'];
-    if (memory instanceof wa.Memory) return memory;
-    // Otherwise, check the module's declared memory imports
-    if (imports && module) {
-      const descs = wa.Module.imports(module);
-      for (let i = 0; i < descs.length; i++) {
-        if (descs[i].kind === 'memory') {
-          const ns = imports[descs[i].module];
-          if (ns) {
-            const mem = ns[descs[i].name];
-            if (mem instanceof wa.Memory) return mem;
-          }
-        }
-      }
+    const importedMemory = wa.Module.imports(module).find(({ kind }) => kind === 'memory');
+    if (importedMemory) {
+      const value = imports[importedMemory.module][importedMemory.name]
+      return value instanceof wa.Memory && value;
     }
+    const exportedMemory = wa.Module.exports(module).find(({ kind }) => kind === 'memory');
+    if (exportedMemory) return instance.exports[memory.name];
     return undefined;
   }
 
