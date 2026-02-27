@@ -8,26 +8,28 @@ namespace workerd {
 
 void WasmShutdownSignalList::registerSignal(jsg::Lock&,
     kj::Array<kj::byte> memory,
-    uint32_t signalOffset,
+    kj::Maybe<uint32_t> signalOffset,
     uint32_t terminatedOffset) const {
-  // Silently skip registration if either address would fall outside the module's linear memory.
-  // This avoids breaking user code that happens to export the conventional globals with
-  // addresses that don't fit — the module simply won't receive the shutdown signal.
-  if (static_cast<size_t>(signalOffset) + WASM_SIGNAL_FIELD_BYTES > memory.size() ||
-      static_cast<size_t>(terminatedOffset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
+  // Silently skip registration if the terminated address would fall outside the module's linear
+  // memory. The terminated field is always required.
+  if (static_cast<size_t>(terminatedOffset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
     return;
   }
-  // Zero the signal address to clear any stale signals.
-  uint32_t value = 0;
-  memory.asPtr()
-      .slice(signalOffset, signalOffset + WASM_SIGNAL_FIELD_BYTES)
-      .copyFrom(kj::asBytes(&value, 1));
+  // If a signal offset was provided, validate it fits in memory too.
+  KJ_IF_SOME(offset, signalOffset) {
+    if (static_cast<size_t>(offset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
+      return;
+    }
+    // Zero the signal address to clear any stale signals.
+    uint32_t value = 0;
+    memory.asPtr().slice(offset, offset + WASM_SIGNAL_FIELD_BYTES).copyFrom(kj::asBytes(&value, 1));
+  }
 
   // Safe to const_cast: the jsg::Lock& parameter proves we hold the isolate lock, which is the
   // synchronization required by the signal-safe list for mutations.
   const_cast<SignalSafeList<WasmShutdownSignal>&>(list).pushFront(
       WasmShutdownSignal{.memory = kj::mv(memory),
-        .signalByteOffset = signalOffset,
+        .signalByteOffset = kj::mv(signalOffset),
         .terminatedByteOffset = terminatedOffset});
 }
 

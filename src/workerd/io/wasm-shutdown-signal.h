@@ -19,15 +19,18 @@ class Lock;
 constexpr size_t WASM_SIGNAL_FIELD_BYTES = sizeof(uint32_t);
 
 // Represents a single WASM module that has opted into receiving the "shut down" signal when CPU
-// time is nearly exhausted. The module exports two i32 globals:
+// time is nearly exhausted. The module must export at least "__instance_terminated"; the
+// "__instance_signal" export is optional:
 //
-//   "__instance_signal"     — address of a uint32 in linear memory. The runtime writes SIGXCPU
-//                            (24) here when CPU time is nearly exhausted.
-//   "__instance_terminated" — address of a uint32 in linear memory. The WASM module writes a
+//   "__instance_signal"     — (optional) address of a uint32 in linear memory. When present,
+//                            the runtime writes SIGXCPU (24) here when CPU time is nearly
+//                            exhausted.
+//   "__instance_terminated" �� address of a uint32 in linear memory. The WASM module writes a
 //                            non-zero value here when it has exited and is no longer listening.
 //                            The runtime checks this in a GC prologue hook and removes entries
 //                            where terminated is non-zero, allowing the linear memory to be
-//                            reclaimed.
+//                            reclaimed. The runtime also writes 1 here when the isolate is
+//                            killed after exceeding its CPU limit.
 struct WasmShutdownSignal {
   // Owns a reference to the WASM module's linear memory. The underlying v8::BackingStore is kept
   // alive via kj::Array's attach() mechanism, preventing V8 from garbage-collecting the memory
@@ -43,7 +46,9 @@ struct WasmShutdownSignal {
   kj::Array<kj::byte> memory;
 
   // Offset into `memory` of the uint32 the runtime writes SIGXCPU (24) to (__instance_signal).
-  uint32_t signalByteOffset;
+  // When kj::none, the module did not export __instance_signal and will not receive the
+  // SIGXCPU shutdown warning, but will still receive the terminated flag.
+  kj::Maybe<uint32_t> signalByteOffset;
 
   // Offset into `memory` of the uint32 the module writes to (__instance_terminated).
   uint32_t terminatedByteOffset;
@@ -158,11 +163,12 @@ class SignalSafeList {
 // does not hold the lock.
 class WasmShutdownSignalList {
  public:
-  // Registers a WASM module for receiving the "shut down" signal. Silently skips registration
-  // if either offset falls outside the module's linear memory.
+  // Registers a WASM module for receiving the "shut down" signal. The signal offset is optional:
+  // when kj::none, the module will still receive the terminated flag but will not get SIGXCPU.
+  // Silently skips registration if any provided offset falls outside the module's linear memory.
   void registerSignal(jsg::Lock&,
       kj::Array<kj::byte> memory,
-      uint32_t signalOffset,
+      kj::Maybe<uint32_t> signalOffset,
       uint32_t terminatedOffset) const;
 
   // Filters out entries where the module has exited (terminated != 0). Call from a GC prologue
@@ -190,28 +196,30 @@ class WasmShutdownSignalList {
 constexpr uint32_t WASM_SIGNAL_SIGXCPU = 24;
 
 // Iterates a WasmShutdownSignal list and writes SIGXCPU (24) to the signal address of each
-// registered module. This function is signal-safe.
+// registered module that has a signal address. Entries without a signal address are skipped.
+// This function is signal-safe.
 inline void writeWasmShutdownSignals(const SignalSafeList<WasmShutdownSignal>& signals) {
   // Safe to const_cast: this is called from a signal handler on the same thread that holds the
   // isolate lock, so there is no concurrent mutation of the list structure.
   const_cast<SignalSafeList<WasmShutdownSignal>&>(signals).iterate([](WasmShutdownSignal& signal) {
-    uint32_t value = WASM_SIGNAL_SIGXCPU;
-    signal.memory.asPtr()
-        .slice(signal.signalByteOffset, signal.signalByteOffset + sizeof(value))
-        .copyFrom(kj::asBytes(&value, 1));
+    KJ_IF_SOME(offset, signal.signalByteOffset) {
+      uint32_t value = WASM_SIGNAL_SIGXCPU;
+      signal.memory.asPtr().slice(offset, offset + sizeof(value)).copyFrom(kj::asBytes(&value, 1));
+    }
   });
 }
 
-// Iterates a WasmShutdownSignal list and zeros the signal address of each registered module.
+// Iterates a WasmShutdownSignal list and zeros the signal address of each registered module
+// that has a signal address. Entries without a signal address are skipped.
 // Call this at the start of each request to clear stale "nearly out of time" signals from a
 // previous request. This function is signal-safe.
 inline void clearWasmShutdownSignals(const SignalSafeList<WasmShutdownSignal>& signals) {
   // Safe to const_cast: same-thread signal-handler context, no concurrent list mutation.
   const_cast<SignalSafeList<WasmShutdownSignal>&>(signals).iterate([](WasmShutdownSignal& signal) {
-    uint32_t value = 0;
-    signal.memory.asPtr()
-        .slice(signal.signalByteOffset, signal.signalByteOffset + sizeof(value))
-        .copyFrom(kj::asBytes(&value, 1));
+    KJ_IF_SOME(offset, signal.signalByteOffset) {
+      uint32_t value = 0;
+      signal.memory.asPtr().slice(offset, offset + sizeof(value)).copyFrom(kj::asBytes(&value, 1));
+    }
   });
 }
 

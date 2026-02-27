@@ -1,5 +1,5 @@
 ;; Module that exports only __instance_signal but NOT __instance_terminated.
-;; The shim should NOT register this module because both globals are required.
+;; The shim should NOT register this module because __instance_terminated is required.
 
 (module
   (memory (export "memory") 1)

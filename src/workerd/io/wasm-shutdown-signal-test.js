@@ -6,6 +6,8 @@
 
 import basicModule from 'signal-basic.wasm';
 import partialModule from 'signal-partial-exports.wasm';
+import terminatedOnlyModule from 'signal-terminated-only.wasm';
+import noGlobalsModule from 'signal-no-globals.wasm';
 import overflowModule from 'signal-bounds-check-overflow.wasm';
 import edgeModule from 'signal-bounds-check-edge.wasm';
 import validModule from 'signal-bounds-check-valid.wasm';
@@ -16,22 +18,30 @@ import reclaimModule from 'signal-memory-reclaim.wasm';
 import preinitModule from 'signal-preinit.wasm';
 
 // ---------------------------------------------------------------------------
-// Shim detection tests
+// Export permutation tests
+//
+// __instance_terminated is REQUIRED for registration; __instance_signal is OPTIONAL.
+// The four permutations:
+//   1. Both present          → registers (signal + terminated)
+//   2. Only terminated       → registers (terminated only)
+//   3. Only signal           → NOT registered
+//   4. Neither               → NOT registered
 // ---------------------------------------------------------------------------
 
-// Verify that a module exporting both globals and memory registers without error.
+// Permutation 1: both __instance_signal and __instance_terminated present.
+// The module should be registered and both addresses are functional.
 export let bothGlobalsRegisters = {
   async test() {
     const instance = await WebAssembly.instantiate(basicModule);
-    // If registration threw, we wouldn't get here. Verify the instance works.
+    // Registration should zero the signal field.
     if (instance.exports.get_signal() !== 0) {
       throw new Error('Expected signal to be 0 initially');
     }
   },
 };
 
-// Verify the sync WebAssembly.Instance constructor also goes through the shim.
-export let syncInstanceRegisters = {
+// Permutation 1 (sync): same test via the sync WebAssembly.Instance constructor.
+export let syncBothGlobalsRegisters = {
   test() {
     const instance = new WebAssembly.Instance(basicModule);
     if (instance.exports.get_signal() !== 0) {
@@ -40,9 +50,30 @@ export let syncInstanceRegisters = {
   },
 };
 
-// Module with only __instance_signal (no __instance_terminated) should NOT register.
-// It should instantiate without error — the shim silently skips it.
-export let partialExportsSkipped = {
+// Permutation 2: only __instance_terminated present (no __instance_signal).
+// The module should be registered — __instance_signal is optional.
+export let terminatedOnlyRegisters = {
+  async test() {
+    const instance = await WebAssembly.instantiate(terminatedOnlyModule);
+    if (instance.exports.get_terminated() !== 0) {
+      throw new Error('Expected terminated to be 0 initially');
+    }
+  },
+};
+
+// Permutation 2 (sync): same test via the sync WebAssembly.Instance constructor.
+export let syncTerminatedOnlyRegisters = {
+  test() {
+    const instance = new WebAssembly.Instance(terminatedOnlyModule);
+    if (instance.exports.get_terminated() !== 0) {
+      throw new Error('Expected terminated to be 0 initially');
+    }
+  },
+};
+
+// Permutation 3: only __instance_signal present (no __instance_terminated).
+// The module should NOT be registered — __instance_terminated is required.
+export let signalOnlySkipped = {
   async test() {
     const instance = await WebAssembly.instantiate(partialModule);
     // Should succeed — the shim just doesn't register it.
@@ -52,14 +83,34 @@ export let partialExportsSkipped = {
   },
 };
 
-// A plain module with no signal globals should instantiate without issues.
-export let noGlobalsSkipped = {
-  async test() {
-    // Use the valid bounds-check module but only check it instantiates fine.
-    // The key is that the shim doesn't blow up on arbitrary modules.
-    const instance = await WebAssembly.instantiate(validModule);
+// Permutation 3 (sync): same test via the sync WebAssembly.Instance constructor.
+export let syncSignalOnlySkipped = {
+  test() {
+    const instance = new WebAssembly.Instance(partialModule);
     if (instance.exports.get_signal() !== 0) {
       throw new Error('Expected signal to be 0 initially');
+    }
+  },
+};
+
+// Permutation 4: neither __instance_signal nor __instance_terminated present.
+// The module should NOT be registered and should instantiate without error.
+export let noGlobalsSkipped = {
+  async test() {
+    const instance = await WebAssembly.instantiate(noGlobalsModule);
+    // Module has a simple add function — verify it works.
+    if (instance.exports.add(2, 3) !== 5) {
+      throw new Error('Expected add(2, 3) to return 5');
+    }
+  },
+};
+
+// Permutation 4 (sync): same test via the sync WebAssembly.Instance constructor.
+export let syncNoGlobalsSkipped = {
+  test() {
+    const instance = new WebAssembly.Instance(noGlobalsModule);
+    if (instance.exports.add(2, 3) !== 5) {
+      throw new Error('Expected add(2, 3) to return 5');
     }
   },
 };

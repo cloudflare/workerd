@@ -375,10 +375,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
 
   // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
-  // See IsolateLimitEnforcer::registerWasmShutdownSignal() for details.
+  // The signal offset is optional: when kj::none, the module will only receive the terminated
+  // flag but will not get the SIGXCPU warning. See WasmShutdownSignalList::registerSignal().
   void registerWasmShutdownSignal(jsg::Lock& js,
       kj::Array<kj::byte> memory,
-      uint32_t signalOffset,
+      kj::Maybe<uint32_t> signalOffset,
       uint32_t terminatedOffset) const;
 
   inline IsolateObserver& getMetrics() {

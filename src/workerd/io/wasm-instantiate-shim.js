@@ -32,16 +32,20 @@
   function checkAndRegisterShutdown(instance, imports, module) {
     const exports = instance.exports;
     if (!exports) return;
-    const signalGlobal = exports['__instance_signal'];
     const terminatedGlobal = exports['__instance_terminated'];
-    if (
-      signalGlobal instanceof wa.Global &&
-      terminatedGlobal instanceof wa.Global
-    ) {
-      const memory = findMemory(instance, imports, module);
-      if (memory) {
-        registerShutdown(memory, signalGlobal.value, terminatedGlobal.value);
-      }
+    // __instance_terminated is required; __instance_signal is optional.
+    if (!(terminatedGlobal instanceof wa.Global)) return;
+    const signalGlobal = exports['__instance_signal'];
+    const hasSignal = signalGlobal instanceof wa.Global;
+    const memory = findMemory(instance, imports, module);
+    if (memory) {
+      // Pass -1 as the signal offset when __instance_signal is not exported.
+      // The C++ side interprets -1 as "no signal address".
+      registerShutdown(
+        memory,
+        hasSignal ? signalGlobal.value : -1,
+        terminatedGlobal.value
+      );
     }
   }
 

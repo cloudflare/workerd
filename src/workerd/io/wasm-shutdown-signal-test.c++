@@ -294,7 +294,7 @@ void pushV8Signal(SignalSafeList<WasmShutdownSignal>& list,
   auto memory = store->data.asPtr().attach(kj::mv(store));
   list.pushFront(WasmShutdownSignal{
     .memory = kj::mv(memory),
-    .signalByteOffset = 0,
+    .signalByteOffset = static_cast<uint32_t>(0),
     .terminatedByteOffset = sizeof(uint32_t),
   });
 }
@@ -381,7 +381,232 @@ KJ_TEST("backing stores freed after V8 disposal WITHOUT clear() — the bug") {
 }
 
 // ---------------------------------------------------------------------------
-// writeWasmShutdownSignals and WasmShutdownSignal tests are covered by the
+// Signal offset permutation tests
+//
+// __instance_terminated is REQUIRED for registration; __instance_signal is OPTIONAL.
+// The two permutations that reach the C++ signal list are:
+//   1. Both signal + terminated offsets present
+//   2. Only terminated offset (signal = kj::none)
+//
+// (Permutations 3 and 4 — signal-only or neither — are rejected by the JS
+// shim before reaching C++, so they are only tested in the JS test file.)
+//
+// For each permutation we verify the full operation set:
+//   - writeWasmShutdownSignals  (writes SIGXCPU to signal address)
+//   - clearWasmShutdownSignals  (zeros the signal address)
+//   - writeWasmTerminatedSignals (writes 1 to terminated address)
+//   - isModuleListening          (returns true when terminated == 0)
+//   - filter via isModuleListening (removes entries where terminated != 0)
+// ---------------------------------------------------------------------------
+
+// Helper: construct a WasmShutdownSignal backed by a FakeBackingStore.
+void pushSignal(SignalSafeList<WasmShutdownSignal>& list,
+    bool& destroyed,
+    kj::Maybe<uint32_t> signalOffset,
+    uint32_t terminatedOffset,
+    size_t memorySize = 64) {
+  auto store = kj::heap<FakeBackingStore>(destroyed, memorySize);
+  auto memory = store->data.asPtr().attach(kj::mv(store));
+  list.pushFront(WasmShutdownSignal{
+    .memory = kj::mv(memory),
+    .signalByteOffset = signalOffset,
+    .terminatedByteOffset = terminatedOffset,
+  });
+}
+
+// Helper: read a uint32 at `offset` from the first entry in the list.
+uint32_t readU32(SignalSafeList<WasmShutdownSignal>& list, uint32_t offset) {
+  uint32_t value = 0xDEADBEEF;
+  list.iterate([&](WasmShutdownSignal& signal) {
+    memcpy(&value, signal.memory.begin() + offset, sizeof(value));
+  });
+  return value;
+}
+
+// Permutation 1: both signal and terminated offsets present.
+KJ_TEST("permutation: both offsets — writeWasmShutdownSignals writes SIGXCPU") {
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr uint32_t kSignalOffset = 0;
+  constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
+  bool destroyed = false;
+
+  pushSignal(signals, destroyed, kSignalOffset, kTerminatedOffset);
+  writeWasmShutdownSignals(signals);
+  KJ_EXPECT(readU32(signals, kSignalOffset) == WASM_SIGNAL_SIGXCPU);
+}
+
+KJ_TEST("permutation: both offsets — clearWasmShutdownSignals zeros signal") {
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr uint32_t kSignalOffset = 0;
+  constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
+  bool destroyed = false;
+
+  pushSignal(signals, destroyed, kSignalOffset, kTerminatedOffset);
+  writeWasmShutdownSignals(signals);
+  KJ_EXPECT(readU32(signals, kSignalOffset) == WASM_SIGNAL_SIGXCPU);
+  clearWasmShutdownSignals(signals);
+  KJ_EXPECT(readU32(signals, kSignalOffset) == 0);
+}
+
+KJ_TEST("permutation: both offsets — writeWasmTerminatedSignals writes 1") {
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr uint32_t kSignalOffset = 0;
+  constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
+  bool destroyed = false;
+
+  pushSignal(signals, destroyed, kSignalOffset, kTerminatedOffset);
+  writeWasmTerminatedSignals(signals);
+  KJ_EXPECT(readU32(signals, kTerminatedOffset) == 1);
+}
+
+KJ_TEST("permutation: both offsets — isModuleListening and filter") {
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr uint32_t kSignalOffset = 0;
+  constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
+  bool destroyed = false;
+
+  pushSignal(signals, destroyed, kSignalOffset, kTerminatedOffset);
+
+  signals.iterate([](WasmShutdownSignal& s) { KJ_EXPECT(s.isModuleListening()); });
+
+  writeWasmTerminatedSignals(signals);
+  signals.iterate([](WasmShutdownSignal& s) { KJ_EXPECT(!s.isModuleListening()); });
+
+  signals.filter([](const WasmShutdownSignal& s) { return s.isModuleListening(); });
+  KJ_EXPECT(signals.isEmpty());
+  KJ_EXPECT(destroyed);
+}
+
+// Permutation 2: only terminated offset (signal = kj::none).
+KJ_TEST("permutation: terminated only — writeWasmShutdownSignals is a no-op") {
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr size_t kMemorySize = 64;
+  constexpr uint32_t kTerminatedOffset = 0;
+  bool destroyed = false;
+
+  pushSignal(signals, destroyed, kj::none, kTerminatedOffset, kMemorySize);
+  writeWasmShutdownSignals(signals);
+
+  // Entire memory should still be zeroed — nothing was written.
+  signals.iterate([&](WasmShutdownSignal& signal) {
+    for (size_t i = 0; i < kMemorySize; ++i) {
+      KJ_EXPECT(signal.memory[i] == 0, "unexpected non-zero byte at offset", i);
+    }
+  });
+}
+
+KJ_TEST("permutation: terminated only — clearWasmShutdownSignals is a no-op") {
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr size_t kMemorySize = 64;
+  constexpr uint32_t kTerminatedOffset = 0;
+  bool destroyed = false;
+
+  pushSignal(signals, destroyed, kj::none, kTerminatedOffset, kMemorySize);
+  clearWasmShutdownSignals(signals);
+
+  signals.iterate([&](WasmShutdownSignal& signal) {
+    for (size_t i = 0; i < kMemorySize; ++i) {
+      KJ_EXPECT(signal.memory[i] == 0, "unexpected non-zero byte at offset", i);
+    }
+  });
+}
+
+KJ_TEST("permutation: terminated only — writeWasmTerminatedSignals writes 1") {
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr uint32_t kTerminatedOffset = 0;
+  bool destroyed = false;
+
+  pushSignal(signals, destroyed, kj::none, kTerminatedOffset);
+  writeWasmTerminatedSignals(signals);
+  KJ_EXPECT(readU32(signals, kTerminatedOffset) == 1);
+}
+
+KJ_TEST("permutation: terminated only — isModuleListening and filter") {
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr uint32_t kTerminatedOffset = 0;
+  bool destroyed = false;
+
+  pushSignal(signals, destroyed, kj::none, kTerminatedOffset);
+
+  signals.iterate([](WasmShutdownSignal& s) { KJ_EXPECT(s.isModuleListening()); });
+
+  writeWasmTerminatedSignals(signals);
+  signals.iterate([](WasmShutdownSignal& s) { KJ_EXPECT(!s.isModuleListening()); });
+
+  signals.filter([](const WasmShutdownSignal& s) { return s.isModuleListening(); });
+  KJ_EXPECT(signals.isEmpty());
+  KJ_EXPECT(destroyed);
+}
+
+// Mixed list: both permutations in a single list.
+// Verifies that operations correctly target each entry based on its signal offset.
+KJ_TEST("permutation: mixed list — both-offsets and terminated-only entries coexist") {
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr size_t kMemorySize = 64;
+
+  bool destroyedBoth = false;
+  bool destroyedTermOnly = false;
+
+  // Push the both-offsets entry first (signal=0, terminated=4).
+  pushSignal(signals, destroyedBoth, static_cast<uint32_t>(0), sizeof(uint32_t), kMemorySize);
+  // Push the terminated-only entry second (it becomes the head).
+  pushSignal(signals, destroyedTermOnly, kj::none, 0, kMemorySize);
+
+  // --- writeWasmShutdownSignals: only the both-offsets entry gets SIGXCPU ---
+  writeWasmShutdownSignals(signals);
+
+  int index = 0;
+  signals.iterate([&](WasmShutdownSignal& signal) {
+    if (index == 0) {
+      // Head = terminated-only entry. Entire memory should be untouched.
+      for (size_t i = 0; i < kMemorySize; ++i) {
+        KJ_EXPECT(signal.memory[i] == 0, "terminated-only entry modified at offset", i);
+      }
+    } else {
+      // Both-offsets entry. Signal at offset 0 should be SIGXCPU.
+      uint32_t value = 0;
+      memcpy(&value, signal.memory.begin(), sizeof(value));
+      KJ_EXPECT(value == WASM_SIGNAL_SIGXCPU, value);
+    }
+    ++index;
+  });
+
+  // --- clearWasmShutdownSignals: zeros the both-offsets entry's signal ---
+  clearWasmShutdownSignals(signals);
+
+  index = 0;
+  signals.iterate([&](WasmShutdownSignal& signal) {
+    if (index == 1) {
+      uint32_t value = 0xff;
+      memcpy(&value, signal.memory.begin(), sizeof(value));
+      KJ_EXPECT(value == 0, "clear did not zero signal on both-offsets entry");
+    }
+    ++index;
+  });
+
+  // --- writeWasmTerminatedSignals: both entries get terminated=1 ---
+  writeWasmTerminatedSignals(signals);
+
+  index = 0;
+  signals.iterate([&](WasmShutdownSignal& signal) {
+    uint32_t terminated = 0;
+    memcpy(&terminated, signal.memory.begin() + signal.terminatedByteOffset, sizeof(terminated));
+    KJ_EXPECT(terminated == 1, "entry", index, "terminated", terminated);
+    ++index;
+  });
+
+  // --- isModuleListening: both should report not listening ---
+  signals.iterate([](WasmShutdownSignal& s) { KJ_EXPECT(!s.isModuleListening()); });
+
+  // --- filter: both entries removed, memory reclaimed ---
+  signals.filter([](const WasmShutdownSignal& s) { return s.isModuleListening(); });
+  KJ_EXPECT(signals.isEmpty());
+  KJ_EXPECT(destroyedBoth);
+  KJ_EXPECT(destroyedTermOnly);
+}
+
+// ---------------------------------------------------------------------------
+// writeWasmShutdownSignals and WasmShutdownSignal tests are also covered by the
 // JS-level wasm-shutdown-signal-js-test.wd-test, which runs inside a real
 // workerd instance with V8 initialized. Registration requires the
 // WebAssembly.instantiate shim, so we test via JS rather than a plain kj_test.

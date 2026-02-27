@@ -1621,12 +1621,12 @@ void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)>
 
 void Worker::Isolate::registerWasmShutdownSignal(jsg::Lock& js,
     kj::Array<kj::byte> memory,
-    uint32_t signalOffset,
+    kj::Maybe<uint32_t> signalOffset,
     uint32_t terminatedOffset) const {
   // Register the WASM module for receiving shutdown signals. The signal handler will
   // iterate the list unconditionally when CPU time is nearly exhausted.
   limitEnforcer->getWasmShutdownSignals().registerSignal(
-      js, kj::mv(memory), signalOffset, terminatedOffset);
+      js, kj::mv(memory), kj::mv(signalOffset), terminatedOffset);
 }
 
 // EW-1319: Set WebAssembly.Module @@HasInstance
@@ -1666,17 +1666,23 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   // terminatedOffset} tuple.
   // __registerWasmShutdownSignal(memory: WebAssembly.Memory, signalOffset: number,
   //                              terminatedOffset: number)
+  // signalOffset may be -1, indicating the module did not export __instance_signal.
   auto registerCb = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
     auto& js = jsg::Lock::from(info.GetIsolate());
     js.withinHandleScope([&] {
-      if (info.Length() < 3 || !info[0]->IsWasmMemoryObject() || !info[1]->IsUint32() ||
+      if (info.Length() < 3 || !info[0]->IsWasmMemoryObject() || !info[1]->IsNumber() ||
           !info[2]->IsUint32()) {
         js.v8Isolate->ThrowException(
-            js.str("registerWasmShutdownSignal: expected (WebAssembly.Memory, uint32, uint32)"_kj));
+            js.str("registerWasmShutdownSignal: expected (WebAssembly.Memory, number, uint32)"_kj));
         return;
       }
       auto memory = info[0].As<v8::WasmMemoryObject>();
-      auto signalOffset = info[1].As<v8::Uint32>()->Value();
+      // signalOffset is -1 when __instance_signal was not exported.
+      auto signalRaw = info[1].As<v8::Number>()->Value();
+      kj::Maybe<uint32_t> signalOffset;
+      if (signalRaw >= 0) {
+        signalOffset = static_cast<uint32_t>(signalRaw);
+      }
       auto terminatedOffset = info[2].As<v8::Uint32>()->Value();
       auto backingStore = memory->Buffer()->GetBackingStore();
       auto wasmMemory =
