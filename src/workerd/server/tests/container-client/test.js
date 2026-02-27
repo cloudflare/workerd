@@ -313,8 +313,6 @@ export class DurableObjectExample extends DurableObject {
     if (!container.running) container.start();
 
     // Keep container alive after abort();
-    await container.setInactivityTimeout(60_000 + Date.now());
-
     container.monitor().catch((err) => {
       console.error('Container exited with an error:', err.message);
     });
@@ -584,8 +582,7 @@ export const testAlarm = {
       retries++;
     }
 
-    // Wait for container to start
-    await scheduler.wait(500);
+    await scheduler.wait(50);
 
     // Set alarm for future and abort
     await stub.startAlarm(false, 1000);
@@ -596,14 +593,9 @@ export const testAlarm = {
       // Expected to throw
     }
 
-    // Poll for the alarm to run after abort. The DO must be re-created and the
-    // alarm handler must fire, which can take variable time on CI.
-    // 50 iterations * 200ms = 10s max wait, which gives plenty of headroom for
-    // slow CI environments where Docker and DO reconstruction add latency.
     stub = env.MY_CONTAINER.get(id);
     let confirmed = false;
     for (let i = 0; i < 50 && !confirmed; i++) {
-      await scheduler.wait(200);
       try {
         await stub.checkAlarmAbortConfirmation();
         confirmed = true;
@@ -613,6 +605,8 @@ export const testAlarm = {
           /Abort confirmation did not get inserted/,
           `Unexpected error while polling for alarm: ${e.message}`
         );
+
+        await scheduler.wait(100);
       }
     }
     if (!confirmed) {

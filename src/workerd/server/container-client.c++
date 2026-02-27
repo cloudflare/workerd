@@ -180,7 +180,8 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String imageName,
     kj::Maybe<kj::String> containerEgressInterceptorImage,
     kj::TaskSet& waitUntilTasks,
-    kj::Function<void()> cleanupCallback,
+    kj::Promise<void> pendingCleanup,
+    kj::Function<void(kj::Promise<void>)> cleanupCallback,
     ChannelTokenHandler& channelTokenHandler)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
@@ -191,23 +192,29 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       imageName(kj::mv(imageName)),
       containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImage)),
       waitUntilTasks(waitUntilTasks),
+      pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
       channelTokenHandler(channelTokenHandler) {}
 
 ContainerClient::~ContainerClient() noexcept(false) {
   stopEgressListener();
 
-  // Call the cleanup callback to remove this client from the ActorNamespace map
-  cleanupCallback();
-
-  // Sidecar shares main container's network namespace, so must be destroyed first
-  waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+  // Sidecar shares main container's network namespace, so must be destroyed first.
+  auto sidecarCleanup = dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", sidecarContainerName, "?force=true"))
-                         .ignoreResult());
+                            .ignoreResult()
+                            .catch_([](kj::Exception&&) {});
 
-  waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+  auto mainCleanup = dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", containerName, "?force=true"))
-                         .ignoreResult());
+                         .ignoreResult()
+                         .catch_([](kj::Exception&&) {});
+
+  // Pass the joined cleanup promise to the callback. The callback wraps it with the
+  // canceler (so a future client creation can cancel it), stores it so the next
+  // ContainerClient can await it, and adds a branch to waitUntilTasks to keep the
+  // underlying I/O alive.
+  cleanupCallback(kj::joinPromises(kj::arr(kj::mv(sidecarCleanup), kj::mv(mainCleanup))));
 }
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
@@ -739,7 +746,6 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   // Sidecar needs NET_ADMIN capability for iptables/TPROXY
   auto capAdd = hostConfig.initCapAdd(1);
   capAdd.set(0, "NET_ADMIN");
-  hostConfig.setAutoRemove(true);
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", sidecarContainerName), codec.encode(jsonRoot));
@@ -793,6 +799,15 @@ ContainerClient::RpcTurn ContainerClient::getRpcTurn() {
 }
 
 kj::Promise<void> ContainerClient::status(StatusContext context) {
+  // Wait for any pending cleanup from a previous ContainerClient (Docker DELETE).
+  // If the cleanup was already cancelled via containerCleanupCanceler the .catch_()
+  // in the destructor resolves it immediately, so this is a no-op in that case.
+  co_await pendingCleanup.addBranch();
+
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
   const auto [isRunning, _ports] = co_await inspectContainer();
   containerStarted.store(isRunning, std::memory_order_release);
 
@@ -804,11 +819,6 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
     KJ_IF_SOME(port, co_await inspectSidecarEgressPort()) {
       containerSidecarStarted.store(true, std::memory_order_release);
       co_await ensureEgressListenerStarted(port);
-    } else {
-      // We could not really recover, set it to false and ensure it's up and running
-      containerSidecarStarted.store(false, std::memory_order_release);
-      co_await ensureEgressListenerStarted();
-      co_await ensureSidecarStarted();
     }
   }
 

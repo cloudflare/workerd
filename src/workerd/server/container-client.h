@@ -23,6 +23,19 @@
 
 namespace workerd::server {
 
+// Tracks the canceler and cleanup promise for a Docker container's lifecycle cleanup.
+// Useful to await on async calls of a ContainerClient destructor when the new
+// one appears before they've been resolved.
+struct ContainerCleanupState {
+  // Canceler that wraps the promise fired in ~ContainerClient. Replacing
+  // it cancels any pending cleanup, which resolves the promise immediately.
+  kj::Own<kj::Canceler> canceler;
+
+  // Forked cleanup promise. A branch is added to waitUntilTasks to keep the I/O alive,
+  // and another branch is passed to the next ContainerClient so its status() can await.
+  kj::ForkedPromise<void> promise = kj::Promise<void>(kj::READY_NOW).fork();
+};
+
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
@@ -41,7 +54,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::String imageName,
       kj::Maybe<kj::String> containerEgressInterceptorImage,
       kj::TaskSet& waitUntilTasks,
-      kj::Function<void()> cleanupCallback,
+      kj::Promise<void> pendingCleanup,
+      kj::Function<void(kj::Promise<void>)> cleanupCallback,
       ChannelTokenHandler& channelTokenHandler);
 
   ~ContainerClient() noexcept(false);
@@ -73,6 +87,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Maybe<kj::String> containerEgressInterceptorImage;
 
   kj::TaskSet& waitUntilTasks;
+
+  // Forked promise representing pending cleanup from a previous ContainerClient for the same
+  // container ID. status() co_awaits a branch so that Docker inspect only runs after any
+  // in-flight DELETE from the previous client has settled (either completed or been cancelled
+  // via containerCleanupCanceler, in which case the .catch_() resolves it immediately).
+  kj::ForkedPromise<void> pendingCleanup;
 
   static constexpr kj::StringPtr defaultEnv[] = {"CLOUDFLARE_COUNTRY_A2=XX"_kj,
     "CLOUDFLARE_DEPLOYMENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"_kj,
@@ -125,8 +145,10 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> destroySidecarContainer();
   kj::Promise<void> monitorSidecarContainer();
 
-  // Cleanup callback to remove from ActorNamespace map when destroyed
-  kj::Function<void()> cleanupCallback;
+  // Cleanup callback invoked from the destructor. Receives the joined cleanup promise so
+  // ActorNamespace can wrap it with the canceler, store it for the next ContainerClient
+  // to await, and add a branch to waitUntilTasks to keep the cleanup tasks alive.
+  kj::Function<void(kj::Promise<void>)> cleanupCallback;
 
   // For redeeming channel tokens received via setEgressHttp
   ChannelTokenHandler& channelTokenHandler;
