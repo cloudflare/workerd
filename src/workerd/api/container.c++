@@ -15,7 +15,12 @@ namespace workerd::api {
 
 Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
-      running(running) {}
+      running(running),
+      monitorState(IoContext::current().addObject(kj::refcounted<MonitorState>())) {
+  // If the container is already running (e.g. pre-existing container at DO startup),
+  // immediately set up background monitoring.
+  monitorOnBackgroundIfNeeded();
+}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
@@ -60,32 +65,61 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
 
   IoContext::current().addTask(req.sendIgnoringResult());
   running = true;
+
+  // Reset monitoring state for the new run. Any stale promises from the previous
+  // run are discarded so that a subsequent monitor() call gets fresh results.
+  monitorKjPromise = kj::none;
+  monitorJsPromise = kj::none;
+  backgroundMonitor = kj::none;
+  monitorState->monitoringExplicitly = false;
+  monitorState->finished = false;
+  monitorState->exitCode = 0;
+  monitorState->exception = kj::none;
+
   monitorOnBackgroundIfNeeded();
 }
 
 void Container::monitorOnBackgroundIfNeeded() {
-  if (monitoring || !running) {
-    return;
-  }
-  monitoring = true;
+  if (backgroundMonitor != kj::none || !running) return;
 
-  auto req = rpcClient->monitorRequest(capnp::MessageSize{4, 0})
-                 .sendIgnoringResult()
-                 .then([this, self = JSG_THIS]() {
-    running = false;
-    monitoring = false;
-  }, [this, self = JSG_THIS](kj::Exception&& error) {
-    running = false;
-    monitoring = false;
+  auto& ioContext = IoContext::current();
 
-    // Check if there is an existing monitor request made by the user.
-    // If not, we can abort the current context and error.
-    if (!monitoringExplicitly) {
-      IoContext::current().abort(kj::mv(error));
+  // Create the shared forked monitor promise. Both the background monitor and the
+  // JS monitor() method will get branches from this single RPC request.
+  auto forked = rpcClient->monitorRequest(capnp::MessageSize{4, 0})
+                    .send()
+                    .then([](auto&& results) -> uint8_t {
+    return results.getExitCode();
+  }).fork();
+  monitorKjPromise = ioContext.addObject(kj::heap(kj::mv(forked)));
+
+  // Set up the background monitoring task. We capture a weak reference to the
+  // IoContext and a refcounted reference to the MonitorState, both of which are
+  // safe to access from KJ promise continuations (which run without the isolate
+  // lock held).
+  auto bgPromise =
+      KJ_ASSERT_NONNULL(monitorKjPromise)
+          ->addBranch()
+          .then(
+              [state = kj::addRef(*monitorState)](uint8_t exitCode) {
+    // Store the exit code so monitor() can return immediately without awaitIo().
+    state->finished = true;
+    state->exitCode = exitCode;
+  },
+              [state = kj::addRef(*monitorState), weakIoContext = ioContext.getWeakRef()](
+                  kj::Exception&& error) mutable {
+    // Store the error so monitor() can return immediately without awaitIo().
+    state->finished = true;
+    state->exception = kj::cp(error);
+
+    // The container exited with an error. If the user hasn't called monitor()
+    // explicitly, abort the IoContext so the DO is notified of the failure.
+    if (!state->monitoringExplicitly) {
+      weakIoContext->runIfAlive([&error](IoContext& ctx) { ctx.abort(kj::mv(error)); });
     }
-  });
+  }).eagerlyEvaluate(nullptr);
 
-  IoContext::current().addTask(kj::mv(req));
+  backgroundMonitor = ioContext.addObject(kj::heap(kj::mv(bgPromise)));
 }
 
 jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {
@@ -131,17 +165,24 @@ jsg::Promise<void> Container::interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<F
       kj::joinPromisesFailFast(kj::arr(reqV4.sendIgnoringResult(), reqV6.sendIgnoringResult())));
 }
 
-jsg::Promise<void> Container::monitor(jsg::Lock& js) {
+jsg::MemoizedIdentity<jsg::Promise<void>>& Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 
-  monitoringExplicitly = true;
+  monitorState->monitoringExplicitly = true;
 
-  return IoContext::current()
-      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
-      .then(js, [this](jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
+  KJ_IF_SOME(memoized, monitorJsPromise) {
+    return memoized;
+  }
+
+  // Lambda that handles the monitor result (either exit code or error), shared by
+  // both the awaitIo path and the immediate-result path below.
+  auto handleExitCode = [this](jsg::Lock& js, uint8_t exitCode) {
     running = false;
-    monitoringExplicitly = false;
-    auto exitCode = results.getExitCode();
+    monitorState->monitoringExplicitly = false;
+    // Clean up stale promise state so a subsequent start()/monitor() cycle works.
+    monitorKjPromise = kj::none;
+    backgroundMonitor = kj::none;
+
     KJ_IF_SOME(d, destroyReason) {
       jsg::Value error = kj::mv(d);
       destroyReason = kj::none;
@@ -153,12 +194,43 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       KJ_ASSERT_NONNULL(err.tryCast<jsg::JsObject>()).set(js, "exitCode", js.num(exitCode));
       js.throwException(err);
     }
-  }, [this](jsg::Lock& js, jsg::Value&& error) {
+  };
+
+  auto handleError = [this](jsg::Lock& js, jsg::Value&& error) {
     running = false;
-    monitoringExplicitly = false;
+    monitorState->monitoringExplicitly = false;
+    // Clean up stale promise state.
+    monitorKjPromise = kj::none;
+    backgroundMonitor = kj::none;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
-  });
+  };
+
+  jsg::Promise<void> jsPromise = ([&]() -> jsg::Promise<void> {
+    if (monitorState->finished) {
+      // The background monitor has already completed. Return an immediately-resolved
+      // or immediately-rejected promise without calling awaitIo(). This avoids
+      // registering a pending event, which would block DO hibernation.
+      KJ_IF_SOME(error, monitorState->exception) {
+        return js.rejectedPromise<void>(kj::cp(error)).catch_(js, kj::mv(handleError));
+      }
+      return js.resolvedPromise().then(js,
+          [exitCode = monitorState->exitCode, handleExitCode = kj::mv(handleExitCode)](
+              jsg::Lock& js) mutable { handleExitCode(js, exitCode); });
+    }
+
+    // Container is still running. Ensure the background monitor and shared forked promise
+    // exist, then use awaitIo() to wait for the result. This is acceptable because the
+    // container is actively running, so the DO wouldn't hibernate anyway.
+    monitorOnBackgroundIfNeeded();
+    return IoContext::current()
+        .awaitIo(js, KJ_ASSERT_NONNULL(monitorKjPromise)->addBranch())
+        .then(js, kj::mv(handleExitCode), kj::mv(handleError));
+  })();
+
+  monitorJsPromise = jsg::MemoizedIdentity<jsg::Promise<void>>(kj::mv(jsPromise));
+
+  return KJ_ASSERT_NONNULL(monitorJsPromise);
 }
 
 jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error) {

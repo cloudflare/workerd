@@ -678,6 +678,14 @@ kj_test(
     ],
 )
 
+kj_test(
+    src = "container-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
 wd_test(
     src = "streams/identitytransformstream-backpressure-test.wd-test",
     args = ["--experimental"],
