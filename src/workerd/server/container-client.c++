@@ -200,11 +200,8 @@ ContainerClient::~ContainerClient() noexcept(false) {
   // Call the cleanup callback to remove this client from the ActorNamespace map
   cleanupCallback();
 
-  // Sidecar shares main container's network namespace, so must be destroyed first
-  waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
-      kj::str("/containers/", sidecarContainerName, "?force=true"))
-                         .ignoreResult());
-
+  // Only destroy the main container. The sidecar is the source of truth for the
+  // network and persists independently.
   waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", containerName, "?force=true"))
                          .ignoreResult());
@@ -565,17 +562,20 @@ kj::Promise<void> ContainerClient::createContainer(
   }
 
   auto hostConfig = jsonRoot.initHostConfig();
-  // We need to publish all ports to properly get the mapped port number locally
-  hostConfig.setPublishAllPorts(true);
   // We need to set a restart policy to avoid having ambiguous states
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
-  // Add host.docker.internal mapping so containers can reach the host.
-  // The sidecar uses host-gateway to reach the egress listener on the host.
-  auto extraHosts = hostConfig.initExtraHosts(1);
-  extraHosts.set(0, "host.docker.internal:host-gateway"_kj);
-
-  hostConfig.setNetworkMode("bridge");
+  if (containerSidecarStarted.load(std::memory_order_acquire)) {
+    // Sidecar is running and owns the network - join it.
+    hostConfig.setNetworkMode(kj::str("container:", sidecarContainerName));
+  } else {
+    hostConfig.setPublishAllPorts(true);
+    // No sidecar configured, container owns the network.
+    hostConfig.setNetworkMode("bridge");
+    // Add host.docker.internal mapping so containers can reach the host.
+    auto extraHosts = hostConfig.initExtraHosts(1);
+    extraHosts.set(0, "host.docker.internal:host-gateway"_kj);
+  }
 
   // When containersPidNamespace is NOT enabled, use host PID namespace for backwards compatibility.
   // This allows the container to see processes on the host.
@@ -695,8 +695,13 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   }
 
   auto hostConfig = jsonRoot.initHostConfig();
-  // Share network namespace with the main container
-  hostConfig.setNetworkMode(kj::str("container:", containerName));
+  // Sidecar owns the network - use bridge mode so the main container can join it.
+  hostConfig.setNetworkMode("bridge");
+  hostConfig.setPublishAllPorts(true);
+
+  // Add host.docker.internal mapping so the sidecar can reach the egress listener on the host.
+  auto extraHosts = hostConfig.initExtraHosts(1);
+  extraHosts.set(0, "host.docker.internal:host-gateway"_kj);
 
   // Sidecar needs NET_ADMIN capability for iptables/TPROXY
   auto capAdd = hostConfig.initCapAdd(1);
@@ -781,17 +786,15 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 
   internetEnabled = params.getEnableInternet();
 
-  co_await createContainer(entrypoint, environment, params);
-  co_await startContainer();
-
-  // Opt in to the proxy sidecar container only if the user has configured egressMappings
-  // for now. In the future, it will always run when a user container is running
-  if (!egressMappings.empty()) {
-    // The user container will be blocked on network connectivity until this finishes.
-    // When workerd-network is more battle-tested and goes out of experimental so it's non-optional,
-    // we should make the sidecar start first and _then_ make the user container join the sidecar network.
+  // If a sidecar image is configured, start it first so the container can join its network.
+  // The sidecar is the source of truth for the network namespace.
+  if (containerEgressInterceptorImage != kj::none) {
+    co_await ensureEgressListenerStarted();
     co_await ensureSidecarStarted();
   }
+
+  co_await createContainer(entrypoint, environment, params);
+  co_await startContainer();
 
   containerStarted.store(true, std::memory_order_release);
 }
@@ -821,8 +824,8 @@ kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
   co_await ready;
   KJ_DEFER(done->fulfill());
 
-  // Sidecar shares main container's network namespace, so must be destroyed first
-  co_await destroySidecarContainer();
+  // Only destroy the main container. The sidecar is the source of truth for the
+  // network and persists independently.
   co_await destroyContainer();
 }
 
@@ -926,14 +929,6 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
   auto parsed = parseHostPort(hostPortStr);
   uint16_t port = parsed.port.orDefault(80);
   auto cidr = kj::mv(parsed.cidr);
-
-  co_await ensureEgressListenerStarted();
-
-  if (containerStarted.load(std::memory_order_acquire)) {
-    // Only try to create and start a sidecar container
-    // if the user container is running.
-    co_await ensureSidecarStarted();
-  }
 
   auto subrequestChannel = channelTokenHandler.decodeSubrequestChannelToken(
       workerd::IoChannelFactory::ChannelTokenUsage::RPC, tokenBytes);
