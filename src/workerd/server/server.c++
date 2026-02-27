@@ -1933,8 +1933,8 @@ class Server::WorkerService final: public Service,
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
       auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
           kj::systemPreciseCalendarClock(), threadContext.getUnsafeTimer(),
-          threadContext.getByteStreamFactory(), channelTokenHandler,
-          network, dockerPath, containerEgressInterceptorImage, waitUntilTasks);
+          threadContext.getByteStreamFactory(), channelTokenHandler, network, dockerPath,
+          containerEgressInterceptorImage, waitUntilTasks);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -2220,39 +2220,34 @@ class Server::WorkerService final: public Service,
         KJ_IF_SOME(d, config.tryGet<Durable>()) {
           this->actorStorage.emplace(dir.openSubdir(
               kj::Path({d.uniqueKey}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY));
-
-          // Create per-namespace alarm scheduler backed by on-disk storage in the
-          // namespace directory, alongside the per-actor .sqlite files.
-          auto& as = KJ_ASSERT_NONNULL(this->actorStorage);
-          this->ownAlarmScheduler =
-              kj::heap<AlarmScheduler>(clock, timer, as.vfs, kj::Path({"metadata.sqlite"}));
         }
       }
 
-      if (ownAlarmScheduler == kj::none) {
-        if (config.tryGet<Durable>() != kj::none) {
+      KJ_IF_SOME(d, config.tryGet<Durable>()) {
+        auto idFactory = kj::heap<ActorIdFactoryImpl>(d.uniqueKey);
+        AlarmScheduler::GetActorFn getActor =
+            [this, idFactory = kj::mv(idFactory)](
+                kj::String idStr) mutable -> kj::Own<WorkerInterface> {
+          Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
+          auto actorContainer = this->getActorContainer(kj::mv(id));
+          return newPromisedWorkerInterface(actorContainer->startRequest({}));
+        };
+
+        KJ_IF_SOME(as, this->actorStorage) {
+          // Create per-namespace alarm scheduler backed by on-disk storage in the
+          // namespace directory, alongside the per-actor .sqlite files.
+          this->ownAlarmScheduler = kj::heap<AlarmScheduler>(
+              clock, timer, as.vfs, kj::Path({"metadata.sqlite"}), kj::mv(getActor));
+        } else {
           // No on-disk storage -- create an in-memory alarm scheduler.
           auto memDir = kj::newInMemoryDirectory(clock);
           auto vfs = kj::heap<SqliteDatabase::Vfs>(*memDir);
-          this->ownAlarmScheduler =
-              kj::heap<AlarmScheduler>(clock, timer, *vfs, kj::Path({"metadata.sqlite"}))
-                  .attach(kj::mv(vfs), kj::mv(memDir));
+          this->ownAlarmScheduler = kj::heap<AlarmScheduler>(
+              clock, timer, *vfs, kj::Path({"metadata.sqlite"}), kj::mv(getActor))
+                                        .attach(kj::mv(vfs), kj::mv(memDir));
         }
-      }
 
-      KJ_IF_SOME(sched, ownAlarmScheduler) {
-        this->alarmScheduler = *sched;
-
-        KJ_IF_SOME(d, config.tryGet<Durable>()) {
-          auto idFactory = kj::heap<ActorIdFactoryImpl>(d.uniqueKey);
-          sched->registerNamespace(d.uniqueKey,
-              [this, idFactory = kj::mv(idFactory)](
-                  kj::String idStr) mutable -> kj::Own<WorkerInterface> {
-            Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
-            auto actorContainer = this->getActorContainer(kj::mv(id));
-            return newPromisedWorkerInterface(actorContainer->startRequest({}));
-          });
-        }
+        this->alarmScheduler = *KJ_ASSERT_NONNULL(ownAlarmScheduler);
       }
     }
 
@@ -2747,8 +2742,7 @@ class Server::WorkerService final: public Service,
               kj::Own<ActorSqlite::Hooks> sqliteHooks;
               if (parent == kj::none) {
                 KJ_IF_SOME(a, ns.alarmScheduler) {
-                  sqliteHooks = kj::heap<ActorSqliteHooks>(
-                      a, ActorKey{.uniqueKey = d.uniqueKey, .actorId = key});
+                  sqliteHooks = kj::heap<ActorSqliteHooks>(a, ActorKey{.actorId = key});
                 } else {
                   // No alarm scheduler available, use default hooks instance.
                   sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
