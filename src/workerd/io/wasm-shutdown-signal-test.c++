@@ -425,10 +425,13 @@ uint32_t readU32(SignalSafeList<WasmShutdownSignal>& list, uint32_t offset) {
 
 // Permutation 1: both signal and terminated offsets present.
 KJ_TEST("permutation: both offsets — writeWasmShutdownSignals writes SIGXCPU") {
+  // `destroyed` must be declared before `signals` so that `signals` is destroyed first
+  // (reverse declaration order), preventing a stack-use-after-scope when FakeBackingStore's
+  // destructor writes to `destroyed`.
+  bool destroyed = false;
   SignalSafeList<WasmShutdownSignal> signals;
   constexpr uint32_t kSignalOffset = 0;
   constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
-  bool destroyed = false;
 
   pushSignal(signals, destroyed, kSignalOffset, kTerminatedOffset);
   writeWasmShutdownSignals(signals);
@@ -436,10 +439,10 @@ KJ_TEST("permutation: both offsets — writeWasmShutdownSignals writes SIGXCPU")
 }
 
 KJ_TEST("permutation: both offsets — clearWasmShutdownSignals zeros signal") {
+  bool destroyed = false;
   SignalSafeList<WasmShutdownSignal> signals;
   constexpr uint32_t kSignalOffset = 0;
   constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
-  bool destroyed = false;
 
   pushSignal(signals, destroyed, kSignalOffset, kTerminatedOffset);
   writeWasmShutdownSignals(signals);
@@ -448,11 +451,11 @@ KJ_TEST("permutation: both offsets — clearWasmShutdownSignals zeros signal") {
   KJ_EXPECT(readU32(signals, kSignalOffset) == 0);
 }
 
-KJ_TEST("permutation: both offsets — writeWasmTerminatedSignals writes 1") {
+KJ_TEST("permutation: both offsets �� writeWasmTerminatedSignals writes 1") {
+  bool destroyed = false;
   SignalSafeList<WasmShutdownSignal> signals;
   constexpr uint32_t kSignalOffset = 0;
   constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
-  bool destroyed = false;
 
   pushSignal(signals, destroyed, kSignalOffset, kTerminatedOffset);
   writeWasmTerminatedSignals(signals);
@@ -460,10 +463,10 @@ KJ_TEST("permutation: both offsets — writeWasmTerminatedSignals writes 1") {
 }
 
 KJ_TEST("permutation: both offsets — isModuleListening and filter") {
+  bool destroyed = false;
   SignalSafeList<WasmShutdownSignal> signals;
   constexpr uint32_t kSignalOffset = 0;
   constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
-  bool destroyed = false;
 
   pushSignal(signals, destroyed, kSignalOffset, kTerminatedOffset);
 
@@ -479,10 +482,10 @@ KJ_TEST("permutation: both offsets — isModuleListening and filter") {
 
 // Permutation 2: only terminated offset (signal = kj::none).
 KJ_TEST("permutation: terminated only — writeWasmShutdownSignals is a no-op") {
+  bool destroyed = false;
   SignalSafeList<WasmShutdownSignal> signals;
   constexpr size_t kMemorySize = 64;
   constexpr uint32_t kTerminatedOffset = 0;
-  bool destroyed = false;
 
   pushSignal(signals, destroyed, kj::none, kTerminatedOffset, kMemorySize);
   writeWasmShutdownSignals(signals);
@@ -496,10 +499,10 @@ KJ_TEST("permutation: terminated only — writeWasmShutdownSignals is a no-op") 
 }
 
 KJ_TEST("permutation: terminated only — clearWasmShutdownSignals is a no-op") {
+  bool destroyed = false;
   SignalSafeList<WasmShutdownSignal> signals;
   constexpr size_t kMemorySize = 64;
   constexpr uint32_t kTerminatedOffset = 0;
-  bool destroyed = false;
 
   pushSignal(signals, destroyed, kj::none, kTerminatedOffset, kMemorySize);
   clearWasmShutdownSignals(signals);
@@ -512,9 +515,9 @@ KJ_TEST("permutation: terminated only — clearWasmShutdownSignals is a no-op") 
 }
 
 KJ_TEST("permutation: terminated only — writeWasmTerminatedSignals writes 1") {
+  bool destroyed = false;
   SignalSafeList<WasmShutdownSignal> signals;
   constexpr uint32_t kTerminatedOffset = 0;
-  bool destroyed = false;
 
   pushSignal(signals, destroyed, kj::none, kTerminatedOffset);
   writeWasmTerminatedSignals(signals);
@@ -522,9 +525,9 @@ KJ_TEST("permutation: terminated only — writeWasmTerminatedSignals writes 1") 
 }
 
 KJ_TEST("permutation: terminated only — isModuleListening and filter") {
+  bool destroyed = false;
   SignalSafeList<WasmShutdownSignal> signals;
   constexpr uint32_t kTerminatedOffset = 0;
-  bool destroyed = false;
 
   pushSignal(signals, destroyed, kj::none, kTerminatedOffset);
 
@@ -541,11 +544,10 @@ KJ_TEST("permutation: terminated only — isModuleListening and filter") {
 // Mixed list: both permutations in a single list.
 // Verifies that operations correctly target each entry based on its signal offset.
 KJ_TEST("permutation: mixed list — both-offsets and terminated-only entries coexist") {
-  SignalSafeList<WasmShutdownSignal> signals;
-  constexpr size_t kMemorySize = 64;
-
   bool destroyedBoth = false;
   bool destroyedTermOnly = false;
+  SignalSafeList<WasmShutdownSignal> signals;
+  constexpr size_t kMemorySize = 64;
 
   // Push the both-offsets entry first (signal=0, terminated=4).
   pushSignal(signals, destroyedBoth, static_cast<uint32_t>(0), sizeof(uint32_t), kMemorySize);
