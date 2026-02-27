@@ -94,6 +94,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   struct InspectResponse {
     bool isRunning;
     kj::HashMap<uint16_t, uint16_t> ports;
+    kj::Maybe<kj::String> ipAddress;
   };
 
   struct IPAMConfigResult {
@@ -140,6 +141,9 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // Find a matching egress mapping for the given destination address (host:port format)
   kj::Maybe<workerd::IoChannelFactory::SubrequestChannel*> findEgressMapping(
       kj::StringPtr destAddr, uint16_t defaultPort);
+
+  // Validates that an incoming egress proxy connection comes from the managed container.
+  kj::Promise<bool> isEgressPeerAuthorized(kj::AsyncIoStream& connection);
 
   // Whether general internet access is enabled for this container
   bool internetEnabled = false;
