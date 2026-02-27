@@ -153,6 +153,20 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   uint16_t egressListenerPort = 0;
 
+  // All mutating RPCs need to ask and wait on an RpcTurn before doing any mutations.
+  // monitor() is an exception. It waits for all pending mutating RPCs without joining
+  // the queue itself.
+  kj::ForkedPromise<void> mutationQueue = kj::Promise<void>(kj::READY_NOW).fork();
+
+  struct RpcTurn {
+    kj::Promise<void> ready;
+    kj::Own<kj::PromiseFulfiller<void>> done;
+  };
+  // Get a turn to run mutating RPC.
+  // Callers will receive a RpcTurn where they can wait and then resolve
+  // when they finish through a KJ defer.
+  RpcTurn getRpcTurn();
+
   // Get the Docker bridge network gateway IP and subnet.
   kj::Promise<IPAMConfigResult> getDockerBridgeIPAMConfig();
   // Check if the Docker daemon has IPv6 enabled by inspecting the default bridge network's

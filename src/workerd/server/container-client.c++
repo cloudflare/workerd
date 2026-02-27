@@ -747,6 +747,13 @@ kj::Promise<void> ContainerClient::destroySidecarContainer() {
       "Destroying docker network sidecar container failed: ", response.statusCode, response.body);
 }
 
+ContainerClient::RpcTurn ContainerClient::getRpcTurn() {
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  auto prev = mutationQueue.addBranch();
+  mutationQueue = paf.promise.fork();
+  return {kj::mv(prev), kj::mv(paf.fulfiller)};
+}
+
 kj::Promise<void> ContainerClient::status(StatusContext context) {
   const auto [isRunning, _ports] = co_await inspectContainer();
   containerStarted.store(isRunning, std::memory_order_release);
@@ -754,6 +761,10 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
 }
 
 kj::Promise<void> ContainerClient::start(StartContext context) {
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
   const auto params = context.getParams();
 
   // Get the lists directly from Cap'n Proto
@@ -786,40 +797,40 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 }
 
 kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
-  // Monitor is often called right after start but the api layer's start does not await the RPC's
-  // start response. That means that the createContainer call might not have even started yet.
-  // If it hasn't, we'll give it 3 tries before failing.
+  // Wait for any in-progress mutating RPCs (e.g. start()) to complete
+  // before issuing the Docker wait request. This replaces the old retry loop:
+  // monitor() used to poll with 1s delays hoping start() would finish in time.
+  co_await mutationQueue.addBranch();
+
   auto results = context.getResults();
   KJ_DEFER(containerStarted.store(false, std::memory_order_release));
-  for (int i = 0; i < 3; i++) {
-    auto endpoint = kj::str("/containers/", containerName, "/wait");
 
-    auto response = co_await dockerApiRequest(
-        network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
-    if (response.statusCode == 404) {
-      co_await timer.afterDelay(1 * kj::SECONDS);
-      continue;
-    }
+  auto endpoint = kj::str("/containers/", containerName, "/wait");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
 
-    JSG_REQUIRE(response.statusCode == 200, Error,
-        "Monitoring container failed with: ", response.statusCode, response.body);
-    // Parse JSON response
-    auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
-    auto statusCode = jsonRoot.getStatusCode();
-    results.setExitCode(statusCode);
-    co_return;
-  }
+  JSG_REQUIRE(response.statusCode == 200, Error,
+      "Monitoring container failed with: ", response.statusCode, " ", response.body);
 
-  JSG_FAIL_REQUIRE(Error, "Monitor failed to find container");
+  auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
+  results.setExitCode(jsonRoot.getStatusCode());
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
   // Sidecar shares main container's network namespace, so must be destroyed first
   co_await destroySidecarContainer();
   co_await destroyContainer();
 }
 
 kj::Promise<void> ContainerClient::signal(SignalContext context) {
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
   const auto params = context.getParams();
   co_await killContainer(params.getSigno());
 }
@@ -904,6 +915,10 @@ kj::Promise<void> ContainerClient::ensureEgressListenerStarted() {
 }
 
 kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
   auto params = context.getParams();
   auto hostPortStr = kj::str(params.getHostPort());
   auto tokenBytes = params.getChannelToken();
