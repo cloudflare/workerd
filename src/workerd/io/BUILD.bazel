@@ -273,6 +273,7 @@ wd_cc_library(
 
 wd_cc_library(
     name = "limit-enforcer",
+    srcs = ["wasm-shutdown-signal.c++"],
     hdrs = [
         "limit-enforcer.h",
         "wasm-shutdown-signal.h",

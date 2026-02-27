@@ -376,8 +376,10 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
   // See IsolateLimitEnforcer::registerWasmShutdownSignal() for details.
-  void registerWasmShutdownSignal(
-      kj::Array<kj::byte> memory, uint32_t signalOffset, uint32_t terminatedOffset) const;
+  void registerWasmShutdownSignal(jsg::Lock& js,
+      kj::Array<kj::byte> memory,
+      uint32_t signalOffset,
+      uint32_t terminatedOffset) const;
 
   inline IsolateObserver& getMetrics() {
     return *metrics;

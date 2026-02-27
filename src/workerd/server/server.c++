@@ -1789,6 +1789,13 @@ class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   bool hasExcessivelyExceededHeapLimit() const override {
     return false;
   }
+
+  const WasmShutdownSignalList& getWasmShutdownSignals() const override {
+    return wasmShutdownSignals;
+  }
+
+ private:
+  WasmShutdownSignalList wasmShutdownSignals;
 };
 
 }  // namespace

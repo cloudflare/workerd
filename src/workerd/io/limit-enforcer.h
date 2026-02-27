@@ -100,62 +100,10 @@ class IsolateLimitEnforcer: public kj::Refcounted {
 
   virtual bool hasExcessivelyExceededHeapLimit() const = 0;
 
-  // Registers a WASM module for receiving the "shut down" signal when CPU time is nearly
-  // exhausted. The signal handler will write SIGXCPU (24) (as a uint32) into the module's
-  // linear memory at `signalOffset` bytes from the start of `memory`. The list of registered
-  // modules is periodically filtered in the GC prologue to remove memories where the terminated
-  // signal is set.
-  //
-  // `memory` is a kj::Array<kj::byte> that keeps the underlying v8::BackingStore alive via
-  // kj::Array's attach() mechanism.
-  //
-  // Must be called with the isolate lock held.
-  void registerWasmShutdownSignal(
-      kj::Array<kj::byte> memory, uint32_t signalOffset, uint32_t terminatedOffset) const {
-    // Silently skip registration if either address would fall outside the module's linear memory.
-    // This avoids breaking user code that happens to export the conventional globals with
-    // addresses that don't fit — the module simply won't receive the shutdown signal.
-    if (static_cast<size_t>(signalOffset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
-      return;
-    }
-    if (static_cast<size_t>(terminatedOffset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
-      return;
-    }
-    // Zero the signal address to clear any stale signals
-    uint32_t value = 0;
-    memory.asPtr()
-        .slice(signalOffset, signalOffset + WASM_SIGNAL_FIELD_BYTES)
-        .copyFrom(kj::asBytes(&value, 1));
-
-    wasmShutdownSignals.pushFront(
-        WasmShutdownSignal{kj::mv(memory), signalOffset, terminatedOffset});
-  }
-
-  // Filters out WASM shutdown signal entries where the module has exited (indicated by a
-  // non-zero value at the terminated address). This should be called from a GC prologue
-  // hook to allow linear memory to be reclaimed.
-  //
-  // Must be called with the isolate lock held.
-  void filterWasmShutdownSignals() const {
-    wasmShutdownSignals.filter(
-        [](const WasmShutdownSignal& signal) { return signal.isModuleListening(); });
-  }
-
-  // Returns the list of registered WASM shutdown signals. The list itself is signal-safe for
-  // reading (via iterate()), so a signal handler can safely walk it.
-  const AtomicList<WasmShutdownSignal>& getWasmShutdownSignals() const {
-    return wasmShutdownSignals;
-  }
-
-  // Releases all WASM shutdown signal entries unconditionally. This must be called before the
-  // V8 isolate is disposed, because each entry holds a shared_ptr<v8::BackingStore> whose
-  // destructor may access V8 isolate state. If those shared_ptrs are dropped after V8 disposal,
-  // the BackingStore destructor will read freed memory.
-  //
-  // Must be called with the isolate lock held.
-  void clearAllWasmShutdownSignals() const {
-    wasmShutdownSignals.clear();
-  }
+  // Returns the WasmShutdownSignalList for this isolate. Subclasses own the list and provide
+  // it here. The returned object provides lock-guarded mutation methods and a read-only accessor
+  // for signal-handler use.
+  virtual const WasmShutdownSignalList& getWasmShutdownSignals() const = 0;
 
   // Inserts a custom mark event named `name` into this isolate's perf event data stream. At
   // present, this is only implemented internally. Call this function from various APIs to be able
@@ -166,17 +114,6 @@ class IsolateLimitEnforcer: public kj::Refcounted {
   //  coupled with our CPU time limiting system, so adding this function here is a path of least
   //  resistance.
   virtual void markPerfEvent(kj::LiteralStringConst name) const {};
-
- private:
-  // WASM modules that have opted into receiving the "shut down" signal by exporting i32 globals
-  // named "__instance_signal" and "__instance_terminated". When the CPU time limiter fires
-  // NEARLY_OUT_OF_TIME, it writes SIGXCPU (24) into each module's linear memory at the signal
-  // address.
-  //
-  // Marked mutable because registration happens through `const IsolateLimitEnforcer&` (the
-  // standard access pattern), and the AtomicList itself uses atomic stores for safe concurrent
-  // access from signal handlers on the same thread.
-  mutable AtomicList<WasmShutdownSignal> wasmShutdownSignals;
 };
 
 // Abstract interface that enforces resource limits on a IoContext.

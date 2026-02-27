@@ -31,6 +31,7 @@
 
   function checkAndRegisterShutdown(instance, imports, module) {
     const exports = instance.exports;
+    if (!exports) return;
     const signalGlobal = exports['__instance_signal'];
     const terminatedGlobal = exports['__instance_terminated'];
     if (
@@ -44,29 +45,35 @@
     }
   }
 
-  wa.instantiate = function instantiate(moduleOrBytes, imports) {
-    return originalInstantiate
-      .call(wa, moduleOrBytes, imports)
-      .then(function (result) {
-        // WebAssembly.instantiate has two overloads: called with bytes it resolves to
-        // { module, instance }, called with a Module it resolves to just the Instance.
-        const instance = result.instance || result;
-        const module = result.module || moduleOrBytes;
-        checkAndRegisterShutdown(instance, imports, module);
-        return result;
-      });
+  // WebAssembly.instantiate has two overloads:
+  //   instantiate(bytes, imports?, compileOptions?) -> Promise<{module, instance}>
+  //   instantiate(module, imports?, compileOptions?) -> Promise<Instance>
+  // Use apply to forward all arguments so compileOptions (and any future args) are not dropped.
+  wa.instantiate = function instantiate() {
+    var args = arguments;
+    return originalInstantiate.apply(wa, args).then(function (result) {
+      // Called with bytes: result is {module, instance}.
+      // Called with a Module: result is just the Instance.
+      var instance = result.instance || result;
+      var module = result.module || args[0];
+      checkAndRegisterShutdown(instance, args[1], module);
+      return result;
+    });
   };
 
-  wa.Instance = function Instance(module, imports) {
-    const instance = new originalInstance(module, imports);
-    checkAndRegisterShutdown(instance, imports, module);
+  // new WebAssembly.Instance(module, imports?)
+  // Forward all arguments and new.target so subclassing works correctly.
+  wa.Instance = function Instance() {
+    var instance = Reflect.construct(
+      originalInstance,
+      arguments,
+      new.target || originalInstance
+    );
+    checkAndRegisterShutdown(instance, arguments[1], arguments[0]);
     return instance;
   };
-  wa.Instance = function Instance(module) {
-    const instance = Reflect.construct(originalInstance, arguments);
-    checkAndRegisterShutdown(instance, arguments[1], module);
-    return instance;
-  };
+  // Point the shim's prototype at the original so instanceof checks continue to work.
+  wa.Instance.prototype = originalInstance.prototype;
   Object.defineProperty(wa.Instance.prototype, 'constructor', {
     value: wa.Instance,
     writable: true,

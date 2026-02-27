@@ -669,7 +669,7 @@ struct Worker::Isolate::Impl {
       metrics.gcPrologue();
       // Filter out WASM shutdown signal entries where the module has exited, allowing
       // the linear memory to be reclaimed.
-      limitEnforcer.filterWasmShutdownSignals();
+      limitEnforcer.getWasmShutdownSignals().filter(*lock);
     }
     void gcEpilogue() {
       metrics.gcEpilogue();
@@ -1567,11 +1567,9 @@ Worker::Isolate::~Isolate() noexcept(false) {
     auto dropRealm = kj::mv(impl->realm);
 
     // Release all WASM shutdown signal entries while V8 is still alive. Each entry holds a
-    // shared_ptr<v8::BackingStore> whose destructor may access V8 isolate-internal state;
-    // if those shared_ptrs outlive the V8 isolate (which is destroyed when `api` is destroyed
-    // later in the member-destruction sequence), the BackingStore destructor will
-    // use-after-free.
-    limitEnforcer->clearAllWasmShutdownSignals();
+    // shared_ptr<v8::BackingStore> whose destructor who needs the isolate to still be alive.
+    // This is analogous to the cpuTimeLimitNearlyExceededCallback detaching above ^^^
+    limitEnforcer->getWasmShutdownSignals().clear(*recordedLock.lock);
   });
 }
 
@@ -1621,11 +1619,14 @@ void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)>
       FAILED, "Python Workers Internal Error: CpuLimitNearlyExceededCallback already set"));
 }
 
-void Worker::Isolate::registerWasmShutdownSignal(
-    kj::Array<kj::byte> memory, uint32_t signalOffset, uint32_t terminatedOffset) const {
+void Worker::Isolate::registerWasmShutdownSignal(jsg::Lock& js,
+    kj::Array<kj::byte> memory,
+    uint32_t signalOffset,
+    uint32_t terminatedOffset) const {
   // Register the WASM module for receiving shutdown signals. The signal handler will
   // iterate the list unconditionally when CPU time is nearly exhausted.
-  limitEnforcer->registerWasmShutdownSignal(kj::mv(memory), signalOffset, terminatedOffset);
+  limitEnforcer->getWasmShutdownSignals().registerSignal(
+      js, kj::mv(memory), signalOffset, terminatedOffset);
 }
 
 // EW-1319: Set WebAssembly.Module @@HasInstance
@@ -1670,8 +1671,8 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
     js.withinHandleScope([&] {
       if (info.Length() < 3 || !info[0]->IsWasmMemoryObject() || !info[1]->IsUint32() ||
           !info[2]->IsUint32()) {
-        js.v8Isolate->ThrowException(jsg::v8Str(js.v8Isolate,
-            "registerWasmShutdownSignal: expected (WebAssembly.Memory, uint32, uint32)"_kj));
+        js.v8Isolate->ThrowException(
+            js.str("registerWasmShutdownSignal: expected (WebAssembly.Memory, uint32, uint32)"_kj));
         return;
       }
       auto memory = info[0].As<v8::WasmMemoryObject>();
@@ -1683,7 +1684,7 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
               .attach(kj::mv(backingStore));
       KJ_IF_SOME(e, kj::runCatchingExceptions([&] {
         Worker::Isolate::from(js).registerWasmShutdownSignal(
-            kj::mv(wasmMemory), signalOffset, terminatedOffset);
+            js, kj::mv(wasmMemory), signalOffset, terminatedOffset);
       })) {
         js.v8Isolate->ThrowException(js.exceptionToJs(kj::mv(e)).getHandle(js));
       }
