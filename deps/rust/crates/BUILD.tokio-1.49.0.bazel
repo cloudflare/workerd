@@ -57,7 +57,7 @@ rust_library(
     version = "1.49.0",
     deps = [
         "@crates_vendor__mio-1.1.1//:mio",
-        "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",
+        "@crates_vendor__pin-project-lite-0.2.17//:pin_project_lite",
         "@crates_vendor__socket2-0.6.2//:socket2",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [

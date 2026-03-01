@@ -46,9 +46,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.31",
+    version = "0.3.32",
     deps = [
-        "@crates_vendor__futures-core-0.3.31//:futures_core",
-        "@crates_vendor__futures-sink-0.3.31//:futures_sink",
+        "@crates_vendor__futures-core-0.3.32//:futures_core",
+        "@crates_vendor__futures-sink-0.3.32//:futures_sink",
     ],
 )
