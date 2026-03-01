@@ -51,7 +51,7 @@ rust_library(
     ],
     version = "0.1.44",
     deps = [
-        "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",
+        "@crates_vendor__pin-project-lite-0.2.17//:pin_project_lite",
         "@crates_vendor__tracing-core-0.1.36//:tracing_core",
     ],
 )

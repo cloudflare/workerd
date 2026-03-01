@@ -8,7 +8,7 @@ git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "g
 bazel_dep(name = "abseil-cpp", version = "20260107.1")
 
 # apple_support
-bazel_dep(name = "apple_support", version = "2.2.0")
+bazel_dep(name = "apple_support", version = "2.3.0")
 
 # aspect_rules_esbuild
 bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")
@@ -17,13 +17,13 @@ bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")
 bazel_dep(name = "aspect_rules_js", version = "2.9.2")
 
 # aspect_rules_lint
-bazel_dep(name = "aspect_rules_lint", version = "2.1.0")
+bazel_dep(name = "aspect_rules_lint", version = "2.2.0")
 
 # aspect_rules_ts
-bazel_dep(name = "aspect_rules_ts", version = "3.8.4")
+bazel_dep(name = "aspect_rules_ts", version = "3.8.5")
 
 # bazel_lib
-bazel_dep(name = "bazel_lib", version = "3.2.0")
+bazel_dep(name = "bazel_lib", version = "3.2.1")
 
 # bazel_skylib
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
@@ -32,8 +32,8 @@ bazel_dep(name = "bazel_skylib", version = "1.9.0")
 http.file(
     name = "cargo_bazel_linux_arm64",
     executable = True,
-    sha256 = "dda338d07a427804d052f193c02411cd9ad02815e099191c38dc9b9068002f98",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.68.1/cargo-bazel-aarch64-unknown-linux-gnu",
+    sha256 = "2a293b1fbffff0e56780f9cabbc32cb6b2519d036ead614d3251e4c79135df7e",
+    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-aarch64-unknown-linux-gnu",
 )
 use_repo(http, "cargo_bazel_linux_arm64")
 
@@ -41,8 +41,8 @@ use_repo(http, "cargo_bazel_linux_arm64")
 http.file(
     name = "cargo_bazel_linux_x64",
     executable = True,
-    sha256 = "bdb591a260e552ca6accc34b2073ad503c2d30a634ed2baf5938a1022f9b8cd2",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.68.1/cargo-bazel-x86_64-unknown-linux-gnu",
+    sha256 = "2727d6a1be44b6bf4935f09bc54ba3fd04ed602e012c51aafd1ba036580b229e",
+    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-unknown-linux-gnu",
 )
 use_repo(http, "cargo_bazel_linux_x64")
 
@@ -50,8 +50,8 @@ use_repo(http, "cargo_bazel_linux_x64")
 http.file(
     name = "cargo_bazel_macos_arm64",
     executable = True,
-    sha256 = "792be3e36221303468895ded3afa9bcb5a022c92f2bfbebd3037301112a33f9c",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.68.1/cargo-bazel-aarch64-apple-darwin",
+    sha256 = "9b41cac2040b3f4a1fdad34cb1e9a31afccaa56c60d156c163ded56eb23c0579",
+    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-aarch64-apple-darwin",
 )
 use_repo(http, "cargo_bazel_macos_arm64")
 
@@ -59,8 +59,8 @@ use_repo(http, "cargo_bazel_macos_arm64")
 http.file(
     name = "cargo_bazel_macos_x64",
     executable = True,
-    sha256 = "1c90d132fd2a81e2f6801b22026e7f4f795daaeaada4223b6bae391666a4231c",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.68.1/cargo-bazel-x86_64-apple-darwin",
+    sha256 = "56b2f7306e2c5c3c3dca5579cb0a97e360fe0c6731f1698dc9a41864a3dc1842",
+    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-apple-darwin",
 )
 use_repo(http, "cargo_bazel_macos_x64")
 
@@ -69,8 +69,8 @@ http.file(
     name = "cargo_bazel_win_x64",
     downloaded_file_path = "downloaded.exe",
     executable = True,
-    sha256 = "9a267ac4704122e5eb2ff5130e43f54fcaf6de7a003dabdf951e68f18ec55bdc",
-    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.68.1/cargo-bazel-x86_64-pc-windows-msvc.exe",
+    sha256 = "1695baf5ac5d9f4c5328455e1e7e70c17745466e5f7b4ecdea7510d82d525865",
+    url = "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
 )
 use_repo(http, "cargo_bazel_win_x64")
 
@@ -105,7 +105,7 @@ use_repo(http, "clang_tidy_linux_arm64")
 bazel_dep(name = "platforms", version = "1.0.0")
 
 # rules_cc
-bazel_dep(name = "rules_cc", version = "0.2.16")
+bazel_dep(name = "rules_cc", version = "0.2.17")
 
 # rules_multirun
 bazel_dep(name = "rules_multirun", version = "0.13.0")
@@ -117,7 +117,7 @@ bazel_dep(name = "rules_nodejs", version = "6.7.3")
 bazel_dep(name = "rules_oci", version = "2.2.7")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "1.8.4")
+bazel_dep(name = "rules_python", version = "1.8.5")
 
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.6.1")
