@@ -51,6 +51,11 @@ type WorkflowSleepDuration =
 
 type WorkflowRetentionDuration = WorkflowSleepDuration;
 
+type RollbackConfig = {
+  /** If true, continue executing remaining undos after undo failure. Default: false */
+  continueOnError?: boolean;
+};
+
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
@@ -68,6 +73,11 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
     successRetention?: WorkflowRetentionDuration,
     errorRetention?: WorkflowRetentionDuration,
   };
+  /**
+   * Enable automatic rollback on uncaught workflow errors.
+   * When enabled, registered undo handlers execute in LIFO order when the workflow throws.
+   */
+  rollback?: RollbackConfig;
 }
 
 type InstanceStatus = {
