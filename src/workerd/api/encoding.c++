@@ -16,9 +16,8 @@
 #include <unicode/utf8.h>
 #include <v8.h>
 
-#include <kj/string.h>
-
 #include <kj/array.h>
+#include <kj/string.h>
 
 namespace workerd::api {
 
