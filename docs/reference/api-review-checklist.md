@@ -40,6 +40,9 @@ End-to-end, real-world performance is the priority over micro-optimizations.
   properties like `code` and `name` with specific values that `TypeError` does not. Use judgment:
   if the error type change could plausibly break real user code in a substantial way, treat it as
   breaking and gate it behind a compat flag.
+- **Never** recommend or approve the removal of an existing compatibility flag.
+- **Never** recommend or approve changing/inverting the meaning of an existing compatibility flag.
+- **Never** suggest the compatibility flag checks are "dead code" that can be removed. Compatibility flags are permanent and must be maintained indefinitely, even if there is nothing apparently depending on them.
 - **Always** review consistency with existing API patterns
 
 ### Security Vulnerabilities
