@@ -4040,6 +4040,7 @@ interface Socket {
   get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
+  proxyTo(sock: Socket, options?: StreamPipeOptions): void;
 }
 interface SocketOptions {
   secureTransport?: string;
