@@ -428,8 +428,6 @@ export class DurableObjectExample extends DurableObject {
     // Start container with WebSocket proxy mode enabled
     container.start({
       env: { WS_ENABLED: 'true', WS_PROXY_TARGET: '11.0.0.1:9999' },
-    container.start({
-      env: { WS_ENABLED: 'true', WS_PROXY_TARGET: '11.0.0.1:9999' },
     });
     container.monitor().finally(() => {
       console.log('Container exited');
