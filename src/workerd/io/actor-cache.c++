@@ -2073,12 +2073,6 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(
     evictOrOomIfNeeded(lock);
   }
 
-  KJ_IF_SOME(t, currentAlarmTime.tryGet<KnownAlarmTime>()) {
-    if (t.time != kj::none) {
-      LOG_WARNING_PERIODICALLY("NOSENTRY deleteAll() called on ActorCache with an alarm still set");
-    }
-  }
-
   return DeleteAllResults{.backpressure = getBackpressure(), .count = kj::mv(result)};
 }
 

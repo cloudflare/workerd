@@ -770,9 +770,6 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
   // kv.deleteAll() clears the database, so we need to save and possibly restore alarm state in
   // the metadata table to maintain behavior from before the deleteAllDeletesAlarm compat flag.
   auto localAlarmState = metadata.getAlarm();
-  if (localAlarmState != kj::none) {
-    LOG_WARNING_PERIODICALLY("NOSENTRY deleteAll() called on ActorSqlite with an alarm still set");
-  }
 
   // deleteAll() cannot be part of a transaction because it deletes the database altogether. So,
   // we have to close our transactions or fail.
