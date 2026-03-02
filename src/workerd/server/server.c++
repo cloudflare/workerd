@@ -2864,22 +2864,25 @@ class Server::WorkerService final: public Service,
 
       // Upsert the cleanup state for this container ID. Replacing the
       // canceler auto-cancels any in-flight cleanup tasks from the previous
-      // client's destructor.
+      // client's destructor. The generation counter is bumped on replacement
+      // so the cleanup callback can detect stale ownership without relying
+      // on raw pointer identity (which is vulnerable to address reuse).
       auto canceler = kj::heap<kj::Canceler>();
-      auto* cancelerPtr = canceler.get();
+      uint64_t capturedGeneration = 0;
       containerCleanupState.upsert(kj::str(containerId),
           ContainerCleanupState{.canceler = kj::mv(canceler)},
-          [](ContainerCleanupState& existing, ContainerCleanupState&& incoming) {
+          [&capturedGeneration](ContainerCleanupState& existing, ContainerCleanupState&& incoming) {
         existing.canceler = kj::mv(incoming.canceler);
+        capturedGeneration = ++existing.generation;
       });
 
       // Cleanup callback: invoked from the ContainerClient destructor with the joined
       // with a cleanup promise
       kj::Function<void(kj::Promise<void>)> cleanupCallback =
-          [this, containerId = kj::str(containerId), cancelerPtr](
+          [this, containerId = kj::str(containerId), capturedGeneration](
               kj::Promise<void> cleanupPromise) mutable {
         KJ_IF_SOME(state, containerCleanupState.find(containerId)) {
-          if (state.canceler.get() != cancelerPtr) {
+          if (state.generation != capturedGeneration) {
             // A newer ContainerClient has replaced us already with another destructor.
             // drop the promise.
             return;
@@ -2931,6 +2934,25 @@ class Server::WorkerService final: public Service,
     // Note: The Vfs must not be torn down until all actors have been torn down, so we have to
     //   declare `actorStorage` before `actors`.
     kj::Maybe<ActorStorage> actorStorage;
+
+    // Tracks the canceler and cleanup promise for a Docker container's lifecycle cleanup.
+    // Useful to await on async calls of a ContainerClient destructor when the new
+    // one appears before they've been resolved.
+    struct ContainerCleanupState {
+      // Canceler that wraps the promise fired in ~ContainerClient. Replacing
+      // it cancels any pending cleanup, which resolves the promise immediately.
+      kj::Own<kj::Canceler> canceler;
+
+      // Forked cleanup promise. A branch is added to waitUntilTasks to keep the I/O alive,
+      // and another branch is passed to the next ContainerClient so its status() can await.
+      kj::ForkedPromise<void> promise = kj::Promise<void>(kj::READY_NOW).fork();
+
+      // Monotonically increasing counter, bumped each time the canceler is replaced
+      // via upsert. The cleanup callback captures the generation at creation time and
+      // compares it to detect whether a newer ContainerClient has taken ownership,
+      // avoiding a raw-pointer identity check that is vulnerable to address reuse.
+      uint64_t generation = 0;
+    };
 
     // Per-container cleanup state: canceler + forked cleanup promise.
     kj::HashMap<kj::String, ContainerCleanupState> containerCleanupState;
