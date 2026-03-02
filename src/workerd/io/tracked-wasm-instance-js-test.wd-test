@@ -2,10 +2,10 @@ using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "wasm-shutdown-signal-test",
+    ( name = "tracked-wasm-instance-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "wasm-shutdown-signal-test.js"),
+          (name = "worker", esModule = embed "tracked-wasm-instance-test.js"),
           (name = "signal-basic.wasm", wasm = embed "wasm/signal-basic.wasm"),
           (name = "signal-partial-exports.wasm", wasm = embed "wasm/signal-partial-exports.wasm"),
           (name = "signal-terminated-only.wasm", wasm = embed "wasm/signal-terminated-only.wasm"),

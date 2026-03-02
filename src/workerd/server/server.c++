@@ -1790,12 +1790,12 @@ class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
     return false;
   }
 
-  const WasmShutdownSignalList& getWasmShutdownSignals() const override {
-    return wasmShutdownSignals;
+  const TrackedWasmInstanceList& getTrackedWasmInstances() const override {
+    return trackedWasmInstances;
   }
 
  private:
-  WasmShutdownSignalList wasmShutdownSignals;
+  TrackedWasmInstanceList trackedWasmInstances;
 };
 
 }  // namespace

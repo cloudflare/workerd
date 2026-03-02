@@ -273,10 +273,10 @@ wd_cc_library(
 
 wd_cc_library(
     name = "limit-enforcer",
-    srcs = ["wasm-shutdown-signal.c++"],
+    srcs = ["tracked-wasm-instance.c++"],
     hdrs = [
         "limit-enforcer.h",
-        "wasm-shutdown-signal.h",
+        "tracked-wasm-instance.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -487,17 +487,17 @@ wd_test(
 )
 
 kj_test(
-    src = "wasm-shutdown-signal-test.c++",
+    src = "tracked-wasm-instance-test.c++",
     deps = [
         ":limit-enforcer",
     ],
 )
 
 wd_test(
-    src = "wasm-shutdown-signal-js-test.wd-test",
+    src = "tracked-wasm-instance-js-test.wd-test",
     args = ["--experimental"],
     data = [
-        "wasm-shutdown-signal-test.js",
+        "tracked-wasm-instance-test.js",
         "//src/workerd/io/wasm:signal-basic.wasm",
         "//src/workerd/io/wasm:signal-bounds-check-edge.wasm",
         "//src/workerd/io/wasm:signal-bounds-check-overflow.wasm",

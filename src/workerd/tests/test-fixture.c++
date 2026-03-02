@@ -253,12 +253,12 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   bool hasExcessivelyExceededHeapLimit() const override {
     return false;
   }
-  const WasmShutdownSignalList& getWasmShutdownSignals() const override {
-    return wasmShutdownSignals;
+  const TrackedWasmInstanceList& getTrackedWasmInstances() const override {
+    return trackedWasmInstances;
   }
 
  private:
-  WasmShutdownSignalList wasmShutdownSignals;
+  TrackedWasmInstanceList trackedWasmInstances;
 };
 
 struct MockErrorReporter final: public Worker::ValidationErrorReporter {

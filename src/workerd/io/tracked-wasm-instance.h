@@ -31,7 +31,7 @@ constexpr size_t WASM_SIGNAL_FIELD_BYTES = sizeof(uint32_t);
 //                            where terminated is non-zero, allowing the linear memory to be
 //                            reclaimed. The runtime also writes 1 here when the isolate is
 //                            killed after exceeding its CPU limit.
-struct WasmShutdownSignal {
+struct TrackedWasmInstance {
   // Owns a reference to the WASM module's linear memory. The underlying v8::BackingStore is kept
   // alive via kj::Array's attach() mechanism, preventing V8 from garbage-collecting the memory
   // while we still need to read/write signal addresses. This gets cleaned up in a V8 GC prologue
@@ -153,7 +153,7 @@ class SignalSafeList {
   KJ_DISALLOW_COPY_AND_MOVE(SignalSafeList);
 };
 
-// Encapsulates a SignalSafeList<WasmShutdownSignal> with operations that require the isolate
+// Encapsulates a SignalSafeList<TrackedWasmInstance> with operations that require the isolate
 // lock for mutation, and a read-only accessor for signal-handler use.
 //
 // The mutation methods are const and accept a jsg::Lock& to prove the caller holds the isolate
@@ -161,7 +161,7 @@ class SignalSafeList {
 // required synchronization. This design allows IsolateLimitEnforcer (whose methods are const
 // per KJ convention) to return a const reference without exposing mutable access to code that
 // does not hold the lock.
-class WasmShutdownSignalList {
+class TrackedWasmInstanceList {
  public:
   // Registers a WASM module for receiving the "shut down" signal. The signal offset is optional:
   // when kj::none, the module will still receive the terminated flag but will not get SIGXCPU.
@@ -179,14 +179,20 @@ class WasmShutdownSignalList {
   // entry holds a shared_ptr<v8::BackingStore> whose destructor may access V8 state.
   void clear(jsg::Lock&) const;
 
+  void writeShutdownSignal() const;
+
+  void clearShutdownSignal() const;
+
+  void writeTerminatedSignal() const;
+
   // Returns the underlying signal-safe list for use by signal handlers and the CPU time limiter.
   // The returned reference is const; signal-handler free functions use const_cast internally.
-  const SignalSafeList<WasmShutdownSignal>& signals() const {
+  const SignalSafeList<TrackedWasmInstance>& signals() const {
     return list;
   }
 
  private:
-  SignalSafeList<WasmShutdownSignal> list;
+  SignalSafeList<TrackedWasmInstance> list;
 };
 
 // The value written to the signal address when CPU time is nearly exhausted.
@@ -194,47 +200,5 @@ class WasmShutdownSignalList {
 // is not standardized, but for most architectures it is 24 so that is what we're going with.
 // We're inventing WASM signals from scratch so we can do whatever we want.
 constexpr uint32_t WASM_SIGNAL_SIGXCPU = 24;
-
-// Iterates a WasmShutdownSignal list and writes SIGXCPU (24) to the signal address of each
-// registered module that has a signal address. Entries without a signal address are skipped.
-// This function is signal-safe.
-inline void writeWasmShutdownSignals(const SignalSafeList<WasmShutdownSignal>& signals) {
-  // Safe to const_cast: this is called from a signal handler on the same thread that holds the
-  // isolate lock, so there is no concurrent mutation of the list structure.
-  const_cast<SignalSafeList<WasmShutdownSignal>&>(signals).iterate([](WasmShutdownSignal& signal) {
-    KJ_IF_SOME(offset, signal.signalByteOffset) {
-      uint32_t value = WASM_SIGNAL_SIGXCPU;
-      signal.memory.asPtr().slice(offset, offset + sizeof(value)).copyFrom(kj::asBytes(&value, 1));
-    }
-  });
-}
-
-// Iterates a WasmShutdownSignal list and zeros the signal address of each registered module
-// that has a signal address. Entries without a signal address are skipped.
-// Call this at the start of each request to clear stale "nearly out of time" signals from a
-// previous request. This function is signal-safe.
-inline void clearWasmShutdownSignals(const SignalSafeList<WasmShutdownSignal>& signals) {
-  // Safe to const_cast: same-thread signal-handler context, no concurrent list mutation.
-  const_cast<SignalSafeList<WasmShutdownSignal>&>(signals).iterate([](WasmShutdownSignal& signal) {
-    KJ_IF_SOME(offset, signal.signalByteOffset) {
-      uint32_t value = 0;
-      signal.memory.asPtr().slice(offset, offset + sizeof(value)).copyFrom(kj::asBytes(&value, 1));
-    }
-  });
-}
-
-// Iterates a WasmShutdownSignal list and writes 1 to the terminated address of each registered
-// module. Call this when the isolate is killed after exhausting its CPU limit, so that WASM
-// modules can detect on the next request that they were forcefully terminated.
-// This function is signal-safe.
-inline void writeWasmTerminatedSignals(const SignalSafeList<WasmShutdownSignal>& signals) {
-  // Safe to const_cast: same-thread signal-handler context, no concurrent list mutation.
-  const_cast<SignalSafeList<WasmShutdownSignal>&>(signals).iterate([](WasmShutdownSignal& signal) {
-    uint32_t value = 1;
-    signal.memory.asPtr()
-        .slice(signal.terminatedByteOffset, signal.terminatedByteOffset + sizeof(value))
-        .copyFrom(kj::asBytes(&value, 1));
-  });
-}
 
 }  // namespace workerd

@@ -376,8 +376,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
   // The signal offset is optional: when kj::none, the module will only receive the terminated
-  // flag but will not get the SIGXCPU warning. See WasmShutdownSignalList::registerSignal().
-  void registerWasmShutdownSignal(jsg::Lock& js,
+  // flag but will not get the SIGXCPU warning. See TrackedWasmInstanceList::registerSignal().
+  void registerTrackedWasmInstance(jsg::Lock& js,
       kj::Array<kj::byte> memory,
       kj::Maybe<uint32_t> signalOffset,
       uint32_t terminatedOffset) const;

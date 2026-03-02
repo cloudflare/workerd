@@ -200,7 +200,7 @@ export let decoyMemoryIgnored = {
       },
     });
     // The shim should have found no memory (internal memory is inaccessible).
-    // Verify decoy memory is untouched (we can't trigger writeWasmShutdownSignals
+    // Verify decoy memory is untouched (we can't trigger writeShutdownSignal
     // in workerd, but we can verify instantiation didn't blow up).
     const view = new Uint32Array(decoyMemory.buffer);
     if (view[0] !== 0) {
