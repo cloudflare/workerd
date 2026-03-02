@@ -8,7 +8,7 @@
 -Iexternal/abseil-cpp+/
 -Iexternal/+http+simdutf/
 -Iexternal/+http+nbytes/include/
--Iexternal/google_benchmark++_repo_rules+codspeed/google_benchmark/include/
+-Iexternal/codspeed_google_benchmark_compat+/include/
 -Iexternal/perfetto+/include/
 -Iexternal/perfetto+/include/perfetto/base/build_configs/bazel/
 -Iexternal/boringssl+/include
