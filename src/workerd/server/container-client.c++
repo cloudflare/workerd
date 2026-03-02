@@ -180,7 +180,8 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::String imageName,
     kj::Maybe<kj::String> containerEgressInterceptorImage,
     kj::TaskSet& waitUntilTasks,
-    kj::Function<void()> cleanupCallback,
+    kj::Promise<void> pendingCleanup,
+    kj::Function<void(kj::Promise<void>)> cleanupCallback,
     ChannelTokenHandler& channelTokenHandler)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
@@ -191,23 +192,29 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       imageName(kj::mv(imageName)),
       containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImage)),
       waitUntilTasks(waitUntilTasks),
+      pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
       channelTokenHandler(channelTokenHandler) {}
 
 ContainerClient::~ContainerClient() noexcept(false) {
   stopEgressListener();
 
-  // Call the cleanup callback to remove this client from the ActorNamespace map
-  cleanupCallback();
-
-  // Sidecar shares main container's network namespace, so must be destroyed first
-  waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+  // Sidecar shares main container's network namespace, so must be destroyed first.
+  auto sidecarCleanup = dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", sidecarContainerName, "?force=true"))
-                         .ignoreResult());
+                            .ignoreResult()
+                            .catch_([](kj::Exception&&) {});
 
-  waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+  auto mainCleanup = dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
       kj::str("/containers/", containerName, "?force=true"))
-                         .ignoreResult());
+                         .ignoreResult()
+                         .catch_([](kj::Exception&&) {});
+
+  // Pass the joined cleanup promise to the callback. The callback wraps it with the
+  // canceler (so a future client creation can cancel it), stores it so the next
+  // ContainerClient can await it, and adds a branch to waitUntilTasks to keep the
+  // underlying I/O alive.
+  cleanupCallback(kj::joinPromises(kj::arr(kj::mv(sidecarCleanup), kj::mv(mainCleanup))));
 }
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
@@ -417,14 +424,15 @@ static kj::Maybe<kj::String> gatewayForPlatform(kj::String gateway) {
 #endif
 }
 
-kj::Promise<uint16_t> ContainerClient::startEgressListener(kj::String listenAddress) {
+kj::Promise<uint16_t> ContainerClient::startEgressListener(
+    kj::String listenAddress, uint16_t port) {
   auto service = kj::heap<EgressHttpService>(*this, headerTable);
   auto httpServer = kj::heap<kj::HttpServer>(timer, headerTable, *service);
   auto& httpServerRef = *httpServer;
 
   egressHttpServer = httpServer.attach(kj::mv(service));
 
-  auto addr = co_await network.parseAddress(kj::str(listenAddress, ":0"));
+  auto addr = co_await network.parseAddress(kj::str(listenAddress, ":", port));
   auto listener = addr->listen();
 
   uint16_t chosenPort = listener->getPort();
@@ -532,6 +540,43 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   // so that start() correctly refuses to start a duplicate and destroy() can clean it up.
   bool running = status == "running" || status == "restarting";
   co_return InspectResponse{.isRunning = running, .ports = kj::mv(portMappings)};
+}
+
+kj::Promise<kj::Maybe<uint16_t>> ContainerClient::inspectSidecarEgressPort() {
+  auto endpoint = kj::str("/containers/", sidecarContainerName, "/json");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::GET, kj::mv(endpoint));
+
+  if (response.statusCode == 404) {
+    co_return kj::Maybe<uint16_t>(kj::none);
+  }
+
+  JSG_REQUIRE(response.statusCode == 200, Error, "Sidecar container inspect failed");
+
+  auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(response.body);
+
+  // Check if sidecar is actually running
+  if (jsonRoot.hasState()) {
+    auto state = jsonRoot.getState();
+    if (state.hasStatus()) {
+      auto status = state.getStatus();
+      if (status != "running" && status != "restarting") {
+        co_return kj::Maybe<uint16_t>(kj::none);
+      }
+    }
+  }
+
+  // Parse args to find --http-egress-port value
+  if (jsonRoot.hasArgs()) {
+    auto args = jsonRoot.getArgs();
+    for (auto i = 0u; i < args.size(); i++) {
+      if (args[i] == "--http-egress-port" && i + 1 < args.size()) {
+        co_return kj::str(args[i + 1]).parseAs<uint16_t>();
+      }
+    }
+  }
+
+  co_return kj::Maybe<uint16_t>(kj::none);
 }
 
 kj::Promise<void> ContainerClient::createContainer(
@@ -701,7 +746,6 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   // Sidecar needs NET_ADMIN capability for iptables/TPROXY
   auto capAdd = hostConfig.initCapAdd(1);
   capAdd.set(0, "NET_ADMIN");
-  hostConfig.setAutoRemove(true);
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", sidecarContainerName), codec.encode(jsonRoot));
@@ -755,8 +799,29 @@ ContainerClient::RpcTurn ContainerClient::getRpcTurn() {
 }
 
 kj::Promise<void> ContainerClient::status(StatusContext context) {
+  // Wait for any pending cleanup from a previous ContainerClient (Docker DELETE).
+  // If the cleanup was already cancelled via containerCleanupCanceler the .catch_()
+  // in the destructor resolves it immediately, so this is a no-op in that case.
+  co_await pendingCleanup.addBranch();
+
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
   const auto [isRunning, _ports] = co_await inspectContainer();
   containerStarted.store(isRunning, std::memory_order_release);
+
+  if (isRunning && containerEgressInterceptorImage != kj::none) {
+    // If the sidecar container is already running (e.g. workerd restarted while
+    // containers stayed up), recover the egress port it was started with and
+    // start the host-side egress listener on that same port so the sidecar can
+    // reconnect.
+    KJ_IF_SOME(port, co_await inspectSidecarEgressPort()) {
+      containerSidecarStarted.store(true, std::memory_order_release);
+      co_await ensureEgressListenerStarted(port);
+    }
+  }
+
   context.getResults().setRunning(isRunning);
 }
 
@@ -788,8 +853,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   // for now. In the future, it will always run when a user container is running
   if (!egressMappings.empty()) {
     // The user container will be blocked on network connectivity until this finishes.
-    // When workerd-network is more battle-tested and goes out of experimental so it's non-optional,
-    // we should make the sidecar start first and _then_ make the user container join the sidecar network.
+    containerSidecarStarted = false;
     co_await ensureSidecarStarted();
   }
 
@@ -898,7 +962,7 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
   co_await startSidecarContainer();
 }
 
-kj::Promise<void> ContainerClient::ensureEgressListenerStarted() {
+kj::Promise<void> ContainerClient::ensureEgressListenerStarted(uint16_t port) {
   if (egressListenerStarted.exchange(true, std::memory_order_acquire)) {
     co_return;
   }
@@ -910,7 +974,7 @@ kj::Promise<void> ContainerClient::ensureEgressListenerStarted() {
   // routes host-gateway to host loopback through the VM).
   auto ipamConfig = co_await getDockerBridgeIPAMConfig();
   egressListenerPort = co_await startEgressListener(
-      gatewayForPlatform(kj::mv(ipamConfig.gateway)).orDefault(kj::str("127.0.0.1")));
+      gatewayForPlatform(kj::mv(ipamConfig.gateway)).orDefault(kj::str("127.0.0.1")), port);
 }
 
 kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {

@@ -2855,15 +2855,52 @@ class Server::WorkerService final: public Service,
       auto& dockerPathRef = KJ_ASSERT_NONNULL(
           dockerPath, "dockerPath must be defined to enable containers on this Durable Object.");
 
-      // Remove from the map when the container is destroyed
-      kj::Function<void()> cleanupCallback = [this, containerId = kj::str(containerId)]() {
-        containerClients.erase(containerId);
+      // Grab a branch of any pending cleanup from a previous ContainerClient for this
+      // container. If it exists, pass it to the container client so it knows that it has to sync.
+      kj::Promise<void> previousCleanup = kj::READY_NOW;
+      KJ_IF_SOME(state, containerCleanupState.find(containerId)) {
+        previousCleanup = state.promise.addBranch();
+      }
+
+      // Upsert the cleanup state for this container ID. Replacing the
+      // canceler auto-cancels any in-flight cleanup tasks from the previous
+      // client's destructor.
+      auto canceler = kj::heap<kj::Canceler>();
+      auto* cancelerPtr = canceler.get();
+      containerCleanupState.upsert(kj::str(containerId),
+          ContainerCleanupState{.canceler = kj::mv(canceler)},
+          [](ContainerCleanupState& existing, ContainerCleanupState&& incoming) {
+        existing.canceler = kj::mv(incoming.canceler);
+      });
+
+      // Cleanup callback: invoked from the ContainerClient destructor with the joined
+      // with a cleanup promise
+      kj::Function<void(kj::Promise<void>)> cleanupCallback =
+          [this, containerId = kj::str(containerId), cancelerPtr](
+              kj::Promise<void> cleanupPromise) mutable {
+        KJ_IF_SOME(state, containerCleanupState.find(containerId)) {
+          if (state.canceler.get() != cancelerPtr) {
+            // A newer ContainerClient has replaced us already with another destructor.
+            // drop the promise.
+            return;
+          }
+
+          containerClients.erase(containerId);
+          // Wrap with the canceler so a future client creation can cancel these
+          // tasks
+          auto cancellable =
+              state.canceler->wrap(kj::mv(cleanupPromise)).catch_([](kj::Exception&&) {});
+
+          auto forked = kj::mv(cancellable).fork();
+          waitUntilTasks.add(forked.addBranch());
+          state.promise = kj::mv(forked);
+        }
       };
 
       auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
           kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
           containerEgressInterceptorImage.map([](kj::StringPtr s) { return kj::str(s); }),
-          waitUntilTasks, kj::mv(cleanupCallback), channelTokenHandler);
+          waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler);
 
       // Store raw pointer in map (does not own)
       containerClients.insert(kj::str(containerId), client.get());
@@ -2895,15 +2932,18 @@ class Server::WorkerService final: public Service,
     //   declare `actorStorage` before `actors`.
     kj::Maybe<ActorStorage> actorStorage;
 
-    // If the actor is broken, we remove it from the map. However, if it's just evicted due to
-    // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
-    // request comes in, we recreate the Own<Worker::Actor>.
-    ActorMap actors;
+    // Per-container cleanup state: canceler + forked cleanup promise.
+    kj::HashMap<kj::String, ContainerCleanupState> containerCleanupState;
 
     // Map of container IDs to ContainerClients (for reconnection support with inactivity timeouts).
     // The map holds raw pointers (not ownership) - ContainerClients are owned by actors and timers.
     // When the last reference is dropped, the destructor removes the entry from this map.
     kj::HashMap<kj::String, ContainerClient*> containerClients;
+
+    // If the actor is broken, we remove it from the map. However, if it's just evicted due to
+    // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
+    // request comes in, we recreate the Own<Worker::Actor>.
+    ActorMap actors;
 
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
