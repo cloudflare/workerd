@@ -120,6 +120,12 @@ wd_test(
 )
 
 wd_test(
+    src = "queue-metrics-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-metrics-test.js"],
+)
+
+wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
     data = [
