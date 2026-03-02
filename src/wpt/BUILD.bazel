@@ -76,8 +76,11 @@ wpt_test(
 wpt_test(
     name = "encoding",
     compat_flags = [
+        "encoder_stream_spec_compliant_backpressure",
+        "fixup-transform-stream-backpressure",
         "pedantic_wpt",
         "text_decoder_cjk_decoder",
+        "transformstream_enable_standard_constructor",
     ],
     config = "encoding-test.ts",
     wpt_directory = "@wpt//:encoding@module",

@@ -1448,4 +1448,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2026-03-24");
   # Fixes several WritableStream spec compliance issues around writer
   # lock/release behavior.
+
+  encoderStreamSpecCompliantBackpressure @168 :Bool
+      $compatEnableFlag("encoder_stream_spec_compliant_backpressure")
+      $compatDisableFlag("no_encoder_stream_spec_compliant_backpressure")
+      $compatEnableDate("2026-03-23");
+  # Fixes TextEncoderStream and TextDecoderStream to use the correct readable
+  # side high water mark of 0 (per the WHATWG Encoding spec), instead of 1.
+  # With HWM=0 the readable side starts with backpressure, so writes correctly
+  # block until a reader pulls. Previously HWM defaulted to 1, which caused
+  # pull() to fire at startup, clearing backpressure before any write.
 }

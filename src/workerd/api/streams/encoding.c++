@@ -100,10 +100,20 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
     return js.resolvedPromise();
   };
 
+  // Per the WHATWG Encoding spec, the readable side HWM should be 0, so writes
+  // block until a reader pulls. Previously StreamQueuingStrategy{} was passed,
+  // which bypassed the orDefault() in TransformStream::constructor and caused
+  // the readable HWM to default to 1, clearing backpressure at startup.
+  // Passing kj::none lets TransformStream apply the spec defaults (writable HWM=1,
+  // readable HWM=0).
+  kj::Maybe<StreamQueuingStrategy> readableStrategy;
+  if (!FeatureFlags::get(js).getEncoderStreamSpecCompliantBackpressure()) {
+    readableStrategy = StreamQueuingStrategy{};
+  }
   auto transformer = TransformStream::constructor(js,
       Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>(kj::mv(transform)),
         .flush = jsg::Function<Transformer::FlushAlgorithm>(kj::mv(flush))},
-      StreamQueuingStrategy{}, StreamQueuingStrategy{});
+      StreamQueuingStrategy{}, kj::mv(readableStrategy));
 
   return js.alloc<TextEncoderStream>(transformer->getReadable(), transformer->getWritable());
 }
@@ -129,6 +139,12 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
 
   // The controller will store c++ references to both the readable and writable
   // streams underlying controllers.
+  // See comment in TextEncoderStream::constructor for why we conditionally pass
+  // kj::none for the readable strategy.
+  kj::Maybe<StreamQueuingStrategy> readableStrategy;
+  if (!FeatureFlags::get(js).getEncoderStreamSpecCompliantBackpressure()) {
+    readableStrategy = StreamQueuingStrategy{};
+  }
   auto transformer = TransformStream::constructor(js,
       Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>( JSG_VISITABLE_LAMBDA(
                       (decoder = decoder.addRef()), (decoder),
@@ -159,7 +175,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
                   }
                   return js.resolvedPromise();
                 }))},
-      StreamQueuingStrategy{}, StreamQueuingStrategy{});
+      StreamQueuingStrategy{}, kj::mv(readableStrategy));
 
   return js.alloc<TextDecoderStream>(
       kj::mv(decoder), transformer->getReadable(), transformer->getWritable());
