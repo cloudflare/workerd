@@ -431,7 +431,9 @@ export class DurableObjectExample extends DurableObject {
     container.start({
       env: { WS_ENABLED: 'true', WS_PROXY_TARGET: '11.0.0.1:9999' },
     });
-    container.monitor().catch((_err) => {});
+    container.monitor().finally(() => {
+      console.log('Container exited');
+    });
 
     // Wait for container to be available
     await this.waitUntilContainerIsHealthy();
