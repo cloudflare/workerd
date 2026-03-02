@@ -98,6 +98,12 @@ class IsolateLimitEnforcer: public kj::Refcounted {
 
   virtual bool hasExcessivelyExceededHeapLimit() const = 0;
 
+  // Condemns the isolate due to a fatal error. Requests being handled by condemned isolates
+  // should be able to complete any in-flight requests (within a grace period) but should not
+  // accept any new requests. The default implementation is a no-op; subclasses may override
+  // to implement actual condemnation behavior.
+  virtual void condemn() const {}
+
   // Inserts a custom mark event named `name` into this isolate's perf event data stream. At
   // present, this is only implemented internally. Call this function from various APIs to be able
   // to correlate perf event data with usage of those APIs.

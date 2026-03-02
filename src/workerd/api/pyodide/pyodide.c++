@@ -103,6 +103,23 @@ void PyodideMetadataReader::setCpuLimitNearlyExceededCallback(
   });
 }
 
+[[noreturn]] void PyodideMetadataReader::condemnIsolate(jsg::Lock& js, kj::String reason) {
+  // Condemn the isolate due to a fatal Pyodide error. This marks the isolate as condemned
+  // so that future requests will be routed to a new isolate, aborts the current request context,
+  // and terminates JavaScript execution.
+  auto description = kj::str("Pyodide fatal error: ", reason);
+  kj::Exception error(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(description));
+
+  // Condemn the isolate so future requests get a fresh one
+  Worker::Isolate::from(js).getLimitEnforcer().condemn();
+
+  // Abort the current request context
+  IoContext::current().abort(kj::cp(error));
+
+  // Terminate JavaScript execution immediately
+  js.terminateExecutionNow();
+}
+
 kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {
   auto builder = kj::Vector<kj::String>(names.size());
   for (auto i: kj::zeroTo(names.size())) {

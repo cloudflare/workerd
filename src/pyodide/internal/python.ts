@@ -20,6 +20,7 @@ import {
 import {
   LEGACY_VENDOR_PATH,
   setCpuLimitNearlyExceededCallback,
+  condemnIsolate,
 } from 'pyodide-internal:metadata';
 import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
 
@@ -243,6 +244,12 @@ export function loadPyodide(
     );
     Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
     Module.API.config.jsglobals = globalThis;
+
+    // Set up the fatal error handler to condemn the isolate when Pyodide
+    // encounters an unrecoverable error.
+    Module.API.on_fatal = (error: any): void => {
+      condemnIsolate(`${error}`);
+    };
     if (isWorkerd) {
       Module.API.config.indexURL = indexURL;
       Module.API.config.resolveLockFilePromise!(lockfile);
