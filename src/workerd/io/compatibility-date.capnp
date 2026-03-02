@@ -1452,7 +1452,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   encoderStreamSpecCompliantBackpressure @168 :Bool
       $compatEnableFlag("encoder_stream_spec_compliant_backpressure")
       $compatDisableFlag("no_encoder_stream_spec_compliant_backpressure")
-      $compatEnableDate("2026-03-23");
+      $compatEnableDate("2026-03-24");
   # Fixes TextEncoderStream and TextDecoderStream to use the correct readable
   # side high water mark of 0 (per the WHATWG Encoding spec), instead of 1.
   # With HWM=0 the readable side starts with backpressure, so writes correctly
