@@ -47,10 +47,7 @@ export default {
   },
   'EventTarget-add-remove-listener.any.js': {},
   'EventTarget-addEventListener.any.js': {},
-  'EventTarget-constructible.any.js': {
-    comment: 'Should be null, not EventTarget',
-    expectedFailures: [],
-  },
+  'EventTarget-constructible.any.js': {},
   'EventTarget-removeEventListener.any.js': {
     comment: 'capture is not relevant outside of the DOM',
     expectedFailures: ['removing a null event listener should succeed'],
