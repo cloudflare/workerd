@@ -8,7 +8,6 @@ const unitTests :Workerd.Config = (
         modules = [
           ( name = "worker", esModule = embed "unsafe-module-test.js" ),
         ],
-        compatibilityDate = "2023-12-06",
         compatibilityFlags = ["nodejs_compat", "unsafe_module", "rpc"],
         durableObjectNamespaces = [
           ( className = "TestDurableObject", uniqueKey = "durable" ),

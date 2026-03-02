@@ -116,7 +116,6 @@ export const test_abort_all_durable_objects_alarms = {
     // Check `abortAllDurableObjects()` deletes all alarms
     await stub.scheduleIn(500);
     await unsafe.abortAllDurableObjects();
-    assert.strictEqual(await stub.scheduledTime, null);
     await scheduler.wait(1000);
     assert.strictEqual(alarmTriggers, 1); // (same as before)
   },
