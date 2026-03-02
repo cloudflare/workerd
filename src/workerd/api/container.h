@@ -57,7 +57,7 @@ class Container: public jsg::Object {
 
   // Methods correspond closely to the RPC interface in `container.capnp`.
   void start(jsg::Lock& js, jsg::Optional<StartupOptions> options);
-  jsg::Promise<void> monitor(jsg::Lock& js);
+  jsg::MemoizedIdentity<jsg::Promise<void>>& monitor(jsg::Lock& js);
   jsg::Promise<void> destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error);
   void signal(jsg::Lock& js, int signo);
   jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);
@@ -85,6 +85,7 @@ class Container: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("destroyReason", destroyReason);
+    tracker.trackField("monitorJsPromise", monitorJsPromise);
   }
 
  private:
@@ -93,8 +94,55 @@ class Container: public jsg::Object {
 
   kj::Maybe<jsg::Value> destroyReason;
 
+  // Automatically sets up background monitoring if the container is running and not
+  // already being monitored. Called from the constructor (if already running) and
+  // from start(). This ensures that if the container exits with an error, the
+  // IoContext is aborted even if the user never calls monitor().
+  void monitorOnBackgroundIfNeeded();
+
+  // State shared between the Container and its background KJ promise continuations.
+  // This is a separate refcounted object because KJ promise continuations run without
+  // the isolate lock held, making it unsafe to access JSG objects directly. Capturing
+  // a reference to this object (via kj::addRef) is safe from KJ continuations.
+  struct MonitorState: public kj::Refcounted {
+    // True if the user has explicitly called monitor(). When set, the background
+    // monitor will not auto-abort the IoContext on container error, since the user's
+    // monitor() call will handle the error instead.
+    //
+    // These fields are mutable because kj::addRef() returns kj::Own<const T>, but
+    // the background KJ continuation needs to write the result fields.
+    mutable bool monitoringExplicitly = false;
+
+    // When the background monitor completes, it stores the result here so that a
+    // subsequent call to monitor() can return immediately without awaitIo(). This
+    // avoids registering a pending event (which would block DO hibernation) when the
+    // container has already exited.
+    //
+    // Set to the exit code on success, or to an exception on failure.
+    mutable bool finished = false;
+    mutable int32_t exitCode = 0;
+    mutable kj::Maybe<kj::Exception> exception;
+  };
+  IoOwn<MonitorState> monitorState;
+
+  // The memoized JS promise returned by monitor(). Allows multiple calls to monitor()
+  // to return the same promise.
+  kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> monitorJsPromise;
+
+  // The background monitor promise, held to keep it alive. Uses eagerlyEvaluate()
+  // to ensure it runs to completion. Held here (rather than via addTask()) to avoid
+  // preventing DO hibernation.
+  kj::Maybe<IoOwn<kj::Promise<void>>> backgroundMonitor;
+
+  // Promise that resolves when the current start() RPC completes. The background
+  // monitor chains after this to avoid racing with the start RPC (which creates/
+  // starts the container). Without this, the monitor RPC's Docker /wait could see
+  // a stale container from a previous run and return its old exit code.
+  kj::Maybe<IoOwn<kj::ForkedPromise<void>>> startPromise;
+
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(destroyReason);
+    visitor.visit(monitorJsPromise);
   }
 
   class TcpPortWorkerInterface;
