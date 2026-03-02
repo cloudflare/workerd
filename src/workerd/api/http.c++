@@ -1559,7 +1559,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
           }
           return js.resolvedPromise(makeHttpResponse(js, jsRequest->getMethodEnum(),
               kj::mv(urlList), response.statusCode, response.statusText, *response.headers,
-              newNullInputStream(), js.alloc<WebSocket>(kj::mv(webSocket)),
+              newNullInputStream(), js.alloc<WebSocket>(js, kj::mv(webSocket)),
               jsRequest->getResponseBodyEncoding(), kj::mv(signal)));
         }
       }
