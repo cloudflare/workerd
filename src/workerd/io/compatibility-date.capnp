@@ -1445,7 +1445,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   writableStreamSpecCompliantWriter @167 :Bool
       $compatEnableFlag("writable_stream_spec_compliant_writer")
       $compatDisableFlag("no_writable_stream_spec_compliant_writer")
-      $compatEnableDate("2026-03-23");
+      $compatEnableDate("2026-03-24");
   # Fixes several WritableStream spec compliance issues around writer
   # lock/release behavior.
 }
