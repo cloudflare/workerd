@@ -35,6 +35,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "blob-use-streams-new-memory-source"_kj;
     case AutogateKey::WASM_SHUTDOWN_SIGNAL_SHIM:
       return "wasm-shutdown-signal-shim"_kj;
+    case AutogateKey::ENABLE_FAST_TEXTENCODER:
+      return "enable-fast-textencoder"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

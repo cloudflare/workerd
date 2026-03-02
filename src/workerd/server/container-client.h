@@ -23,19 +23,6 @@
 
 namespace workerd::server {
 
-// Tracks the canceler and cleanup promise for a Docker container's lifecycle cleanup.
-// Useful to await on async calls of a ContainerClient destructor when the new
-// one appears before they've been resolved.
-struct ContainerCleanupState {
-  // Canceler that wraps the promise fired in ~ContainerClient. Replacing
-  // it cancels any pending cleanup, which resolves the promise immediately.
-  kj::Own<kj::Canceler> canceler;
-
-  // Forked cleanup promise. A branch is added to waitUntilTasks to keep the I/O alive,
-  // and another branch is passed to the next ContainerClient so its status() can await.
-  kj::ForkedPromise<void> promise = kj::Promise<void>(kj::READY_NOW).fork();
-};
-
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing

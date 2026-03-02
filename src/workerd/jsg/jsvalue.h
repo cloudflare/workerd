@@ -254,6 +254,12 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
 
 class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
  public:
+  static JsUint8Array create(
+      Lock& js, std::unique_ptr<v8::BackingStore> backingStore, size_t byteOffset, size_t length) {
+    return JsUint8Array(v8::Uint8Array::New(
+        v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), byteOffset, length));
+  }
+
   template <typename T = kj::byte>
   kj::ArrayPtr<T> asArrayPtr() {
     v8::Local<v8::Uint8Array> inner = *this;
@@ -277,6 +283,7 @@ class JsString final: public JsBase<v8::String, JsString> {
   int hashCode() const;
 
   bool isFlat() const;
+  bool isOneByte(Lock& js) const KJ_WARN_UNUSED_RESULT;
   bool containsOnlyOneByte() const;
 
   bool operator==(const JsString& other) const;
@@ -304,6 +311,12 @@ class JsString final: public JsBase<v8::String, JsString> {
     // The number of elements (e.g. char, byte, uint16_t) written to the buffer.
     size_t written;
   };
+
+  // Copy string contents into a provided buffer (off-heap memory).
+  //
+  // IMPORTANT: This method does NOT flatten the V8 string or hold V8 heap locks. It safely
+  // copies data out of V8's heap into your buffer. This makes it safe to use before calling
+  // GC-triggering operations like Lock::allocBackingStore().
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<char> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
@@ -984,6 +997,10 @@ inline void JsObject::delete_(Lock& js, kj::StringPtr name) {
 
 inline int JsString::length(jsg::Lock& js) const {
   return inner->Length();
+}
+
+inline bool JsString::isOneByte(jsg::Lock& js) const {
+  return inner->IsOneByte();
 }
 
 inline size_t JsString::utf8Length(jsg::Lock& js) const {

@@ -32,6 +32,8 @@ enum class AutogateKey {
   // Enable the WebAssembly.instantiate shim that detects modules exporting __instance_signal /
   // __instance_terminated and registers them for receiving the CPU-limit shutdown signal.
   WASM_SHUTDOWN_SIGNAL_SHIM,
+  // Enable fast TextEncoder implementation using simdutf
+  ENABLE_FAST_TEXTENCODER,
   NumOfKeys  // Reserved for iteration.
 };
 
