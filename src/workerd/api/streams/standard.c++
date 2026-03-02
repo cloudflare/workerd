@@ -3169,43 +3169,41 @@ class AllReader {
         // and are passed into to promise returned by this method. It is the responsibility
         // of the caller to ensure that the AllReader instance is kept alive until the
         // promise is settled.
-        auto onSuccess = [this, &readable](
-                             jsg::Lock& js, ReadResult result) -> jsg::Promise<PartList> {
-          if (result.done) {
-            state.template transitionTo<StreamStates::Closed>();
-            return loop(js);
-          }
+        auto onSuccess = JSG_VISITABLE_LAMBDA((this, readable = readable.addRef()), (readable),
+            (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<PartList> {
+              if (result.done) {
+              state.template transitionTo<StreamStates::Closed>();
+              return loop(js);
+              }
 
-          // If we're not done, the result value must be interpretable as
-          // bytes for the read to make any sense.
-          auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
-          if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
-            auto error = js.v8TypeError("This ReadableStream did not return bytes.");
-            auto rs = kj::mv(readable);
-            state.template transitionTo<StreamStates::Errored>(js.v8Ref(error));
-            return rs->getController().cancel(js, error).then(
-                js, [&](jsg::Lock& js) { return loop(js); });
-          }
+              // If we're not done, the result value must be interpretable as
+              // bytes for the read to make any sense.
+              auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
+              if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
+              auto error = js.v8TypeError("This ReadableStream did not return bytes.");
+              state.template transitionTo<StreamStates::Errored>(js.v8Ref(error));
+              return readable->getController().cancel(js, error).then(
+                  js, [&](jsg::Lock& js) { return loop(js); });
+              }
 
-          jsg::BufferSource bufferSource(js, handle);
+              jsg::BufferSource bufferSource(js, handle);
 
-          if (bufferSource.size() == 0) {
-            // Weird but allowed, we'll skip it.
-            return loop(js);
-          }
+              if (bufferSource.size() == 0) {
+              // Weird but allowed, we'll skip it.
+              return loop(js);
+              }
 
-          if ((runningTotal + bufferSource.size()) > limit) {
-            auto error = js.v8TypeError("Memory limit exceeded before EOF.");
-            auto rs = kj::mv(readable);
-            state.template transitionTo<StreamStates::Errored>(js.v8Ref(error));
-            return rs->getController().cancel(js, error).then(
-                js, [&](jsg::Lock& js) { return loop(js); });
-          }
+              if ((runningTotal + bufferSource.size()) > limit) {
+              auto error = js.v8TypeError("Memory limit exceeded before EOF.");
+              state.template transitionTo<StreamStates::Errored>(js.v8Ref(error));
+              return readable->getController().cancel(js, error).then(
+                  js, [&](jsg::Lock& js) { return loop(js); });
+              }
 
-          runningTotal += bufferSource.size();
-          parts.add(bufferSource.copy(js));
-          return loop(js);
-        };
+              runningTotal += bufferSource.size();
+              parts.add(bufferSource.copy(js));
+              return loop(js);
+            });
 
         auto onFailure = [this](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
           // In this case the stream should already be errored.
