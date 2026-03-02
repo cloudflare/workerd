@@ -1458,4 +1458,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # With HWM=0 the readable side starts with backpressure, so writes correctly
   # block until a reader pulls. Previously HWM defaulted to 1, which caused
   # pull() to fire at startup, clearing backpressure before any write.
+
+  queueMetricsApi @169 :Bool
+      $compatEnableFlag("queue_metrics_api")
+      $compatDisableFlag("no_queue_metrics_api");
+  # Enables the `metrics()` method on Queue bindings, which returns
+  # consumer backlog information including message count, bytes, and lag
+  # for each consumer attached to the queue.
 }

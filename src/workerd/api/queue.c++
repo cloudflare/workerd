@@ -362,6 +362,38 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
       .attach(context.registerPendingEvent());
 };
 
+jsg::Promise<WorkerQueue::Metrics> WorkerQueue::metrics(
+    jsg::Lock& js, const jsg::TypeHandler<Metrics>& metricsHandler) {
+  auto& context = IoContext::current();
+
+  auto headers = kj::HttpHeaders(context.getHeaderTable());
+
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_metrics"_kjc);
+  auto req = client->request(kj::HttpMethod::GET, "https://fake-host/metrics"_kjc, headers);
+  const auto& headerIds = context.getHeaderIds();
+
+  static constexpr auto handleMetrics = [](auto req, auto client,
+                                            auto& headerIds) -> kj::Promise<kj::String> {
+    auto response = co_await req.response;
+
+    JSG_REQUIRE(response.statusCode == 200, Error, buildQueueErrorMessage(response, headerIds));
+
+    co_return co_await response.body->readAllText();
+  };
+
+  auto promise = handleMetrics(kj::mv(req), kj::mv(client), headerIds);
+
+  return context.awaitIo(
+      js, kj::mv(promise), [&metricsHandler](jsg::Lock& js, kj::String text) -> Metrics {
+    auto parsed = jsg::JsValue::fromJson(js, text);
+    KJ_IF_SOME(result, metricsHandler.tryUnwrap(js, parsed)) {
+      return kj::mv(result);
+    }
+    _JSG_INTERNAL_FAIL_REQUIRE(
+        JSG_EXCEPTION(Error), "Failed to parse queue metrics response", text);
+  });
+}
+
 QueueMessage::QueueMessage(
     jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result)
     : id(kj::str(message.getId())),
