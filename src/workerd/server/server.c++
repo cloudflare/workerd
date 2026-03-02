@@ -5145,16 +5145,17 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
 };
 
 namespace {
-// Used by both the Server:HttpListener and Server::TcpListener
+// Construct a cf blob describing the client identity. Used by both the Server:HttpListener and
+// Server::TcpListener.
 kj::Maybe<kj::String> processCfBlobHeader(kj::AuthenticatedStream& stream) {
   kj::PeerIdentity* peerId;
 
   KJ_IF_SOME(tlsId, kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
     peerId = &tlsId.getNetworkIdentity();
 
-    // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
-    //   supplies the common name, but that doesn't even seem to be one of the fields that
-    //   Cloudflare-hosted Workers receive. We should probably try to match those.
+    // TODO(someday): Add client certificate info to the cf blob? At present, KJ only supplies the
+    // common name, but that doesn't even seem to be one of the fields that Cloudflare-hosted
+    // Workers receive. We should probably try to match those.
   } else {
     peerId = stream.peerIdentity;
   }
@@ -5344,23 +5345,8 @@ class Server::HttpListener final: public kj::Refcounted {
       IoChannelFactory::SubrequestMetadata metadata;
       metadata.cfBlobJson = mapCopyString(cfBlobJson);
 
-      ConnectResponse* wrappedResponse = &response;
-      /*kj::Own<ResponseWrapper> ownResponse;
-      if (parent.rewriter->needsRewriteResponse()) {
-        wrappedResponse = ownResponse = kj::heap<ResponseWrapper>(response, *parent.rewriter);
-      }
-
-      if (parent.rewriter->needsRewriteRequest() || cfBlobJson != kj::none) {
-        auto rewrite = KJ_UNWRAP_OR(parent.rewriter->rewriteIncomingRequest(
-                                        url, parent.physicalProtocol, headers, metadata.cfBlobJson),
-            { co_return co_await response.sendError(400, "Bad Request", parent.headerTable); });
-        auto worker = parent.service->startRequest(kj::mv(metadata));
-        co_return co_await worker->connect(host, *rewrite.headers, connection, *wrappedResponse, kj::mv(settings)) request(
-            method, url, *rewrite.headers, requestBody, *wrappedResponse);
-      } else {*/
       auto worker = parent.service->startRequest(kj::mv(metadata));
-      co_return co_await worker->connect(
-          host, headers, connection, *wrappedResponse, kj::mv(settings));
+      co_return co_await worker->connect(host, headers, connection, response, kj::mv(settings));
     }
 
     // ---------------------------------------------------------------------------
@@ -5425,7 +5411,6 @@ class Server::TcpListener final: public kj::Refcounted {
   kj::Own<HttpRewriter> rewriter;
   kj::StringPtr addrStr;
 
-  // TODO: Would using a plain ConnectResponse work here too?
   struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
     void accept(
         uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {

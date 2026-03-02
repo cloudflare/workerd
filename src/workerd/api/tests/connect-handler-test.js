@@ -21,7 +21,8 @@ export const connectHandler = {
 export const connectHandlerProxy = {
   async test() {
     // Check that we can get a message proxied through a connect handler. This call connects us with
-    // an instance of Server, which serves as a proxy for an instance of OtherServer.
+    // an instance of Server, which serves as a proxy for an instance of OtherServer, as defined in
+    // connect-handler-test-proxy.js.
     const socket = connect('localhost:8082');
     await socket.opened;
     const dec = new TextDecoder();
@@ -37,9 +38,9 @@ export const connectHandlerProxy = {
 };
 
 export default {
-  connect({ socket, cf }) {
+  async connect({ socket, cf }) {
     const enc = new TextEncoder();
     strictEqual(typeof cf.clientIp, 'string');
-    socket.writable.getWriter().write(enc.encode('hello'));
+    await socket.writable.getWriter().write(enc.encode('hello'));
   },
 };

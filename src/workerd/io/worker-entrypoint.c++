@@ -639,7 +639,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       } else {
         response.reject(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
       }
-      // TODO(o11y): Should we also indicate a return response code for TCP?
+      // TODO(now): Should we also indicate a return response code for TCP?
       KJ_IF_SOME(t, workerTracer) {
         t.setReturn(kj::none);
       }

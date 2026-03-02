@@ -119,8 +119,6 @@ void ServiceWorkerGlobalScope::clear() {
   unhandledRejections.clear();
 }
 
-// TODO: We should pass through the headers as we do in request() instead of defining new ones,
-// right?
 kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
@@ -134,26 +132,20 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
 
   KJ_IF_SOME(handler, eh.connect) {
     // Has a connect handler!
+    // TODO: We should pass through the headers as we do in request() instead of defining new ones,
+    // right?
     kj::HttpHeaderTable table;
     kj::HttpHeaders headers(table);
     response.accept(200, "OK", headers);
 
-    // TODO(cleanup): There's some amount of duplication between this and request(), some of this
-    // could likely be cleaned up to use co_awaits rather than the promise syntax.
+    // TODO: connection needs to be owned, but doesn't need to be neuterable.
     auto ownConnection = newNeuterableIoStream(connection);
-    // TODO: Not needed right? If we just uncomment these RPC tests will crash, would need to be
-    // attached somewhere.
-    /*auto deferredNeuter = kj::defer([ownConnection = kj::addRef(*ownConnection)]() mutable {
-      ownConnection->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
-    });
-    KJ_ON_SCOPE_FAILURE(ownConnection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));*/
 
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
     CfProperty cf(cfBlobJson);
 
-    // TODO: connection needs to be owned, current approach is not good.
     auto input = kj::str("fake://", host);
     auto url = JSG_REQUIRE_NONNULL(
         jsg::Url::tryParse(input.asPtr()), TypeError, "Specified address could not be parsed.");
@@ -162,13 +154,12 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     JSG_REQUIRE(hostName != ""_kj, TypeError, "Specified address is missing hostname.");
     JSG_REQUIRE(port != ""_kj, TypeError, "Specified address is missing port.");
 
-    // TODO(later): Is TLS support needed here?
+    // TLS support is not implemented so far.
     auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
-    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::addRef(*ownConnection), kj::str(host), kj::none,
+    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::addRef(*ownConnection), kj::mv(host), kj::none,
         kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::str(hostName),
         port == "443"_kj || port == "80"_kj, kj::none);
 
-    // TODO: Should this be a user span?
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto event = js.alloc<ConnectEvent>(kj::mv(jsSocket), kj::mv(cf));
     auto promise = handler(js, kj::mv(event), eh.env.addRef(js), eh.getCtx());

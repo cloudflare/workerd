@@ -13,8 +13,8 @@ export class ConnectProxy extends WorkerEntrypoint {
 }
 
 export class ConnectEndpoint extends WorkerEntrypoint {
-  connect({ socket }) {
+  async connect({ socket }) {
     const enc = new TextEncoder();
-    socket.writable.getWriter().write(enc.encode('hello-from-endpoint'));
+    await socket.writable.getWriter().write(enc.encode('hello-from-endpoint'));
   }
 }

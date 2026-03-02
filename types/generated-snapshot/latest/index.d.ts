@@ -486,10 +486,10 @@ type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
   ctx: ExecutionContext,
 ) => Response | Promise<Response>;
 type ExportedHandlerConnectHandler<Env = unknown> = (
-  readable: ReadableStream,
+  socket: Socket,
   env: Env,
   ctx: ExecutionContext,
-) => ReadableStream | Promise<ReadableStream>;
+) => void | Promise<void>;
 type ExportedHandlerTailHandler<Env = unknown> = (
   events: TraceItem[],
   env: Env,
@@ -550,7 +550,7 @@ interface AlarmInvocationInfo {
   readonly retryCount: number;
 }
 interface ConnectEvent {
-  get inbound(): ReadableStream;
+  get socket(): Socket;
   get cf(): any | undefined;
 }
 interface Cloudflare {
@@ -11953,7 +11953,7 @@ declare namespace CloudflareWorkersModule {
     constructor(ctx: ExecutionContext, env: Env);
     email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
-    connect?(socket: Socket): Socket | Promise<Socket>;
+    connect?(socket: Socket): void | Promise<void>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;

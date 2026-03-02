@@ -261,8 +261,6 @@ declare namespace CloudflareWorkersModule {
 
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
-    // TODO(now): Should connect also be defined here?
-    // connect?(socket: Socket): void | Promise<void>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer
