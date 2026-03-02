@@ -3896,6 +3896,13 @@ void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
       }
     }
   }
+
+  // When using vitest-pool-workers and DOs have alarms, alarms can still attempt to run after the tests
+  // end running that leads to internal reference errors.
+  // On more complex setups with multiple DOs that have alarms and all of them communicate with one another,
+  // there might be cases where there are isolated storage errors when calling DOs wake one another.
+  // Deleting all of them at the same time guarantees that user's implementations don't affect tests runs
+  alarmScheduler->deleteAllAlarms();
 }
 
 // WorkerDef is an intermediate representation of everything from `config::Worker::Reader` that
