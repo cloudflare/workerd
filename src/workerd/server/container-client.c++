@@ -20,6 +20,9 @@
 #include <kj/encoding.h>
 #include <kj/exception.h>
 #include <kj/string.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 namespace workerd::server {
 
@@ -225,7 +228,7 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
     // Port mappings might have outdated mappings, we can't know if a connect request
     // fails because the app hasn't finished starting up or because the mapping is outdated.
     // To be safe we should inspect the container to get up to date mappings.
-    const auto [_running, portMappings] = co_await containerClient.inspectContainer();
+    const auto [_running, portMappings, _ipAddress] = co_await containerClient.inspectContainer();
     auto maybeMappedPort = portMappings.find(containerPort);
     if (maybeMappedPort == kj::none) {
       throw JSG_KJ_EXCEPTION(DISCONNECTED, Error,
@@ -322,6 +325,14 @@ class EgressHttpService final: public kj::HttpService {
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
+    auto isAuthorized = co_await containerClient.isEgressPeerAuthorized(connection);
+    if (!isAuthorized) {
+      kj::HttpHeaders responseHeaders(headerTable);
+      response.accept(403, "Forbidden", responseHeaders);
+      connection.shutdownWrite();
+      co_return;
+    }
+
     auto destAddr = kj::str(host);
 
     kj::HttpHeaders responseHeaders(headerTable);
@@ -486,7 +497,7 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   // We check if the container with the given name exist, and if it's not,
   // we simply return false while avoiding an unnecessary error.
   if (response.statusCode == 404) {
-    co_return InspectResponse{.isRunning = false, .ports = {}};
+    co_return InspectResponse{.isRunning = false, .ports = {}, .ipAddress = kj::none};
   }
 
   JSG_REQUIRE(response.statusCode == 200, Error, "Container inspect failed");
@@ -531,7 +542,22 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   // perspective, a restarting container is still "alive" and should be treated as running
   // so that start() correctly refuses to start a duplicate and destroy() can clean it up.
   bool running = status == "running" || status == "restarting";
-  co_return InspectResponse{.isRunning = running, .ports = kj::mv(portMappings)};
+  auto ipAddress = kj::Maybe<kj::String>(kj::none);
+  if (jsonRoot.hasNetworkSettings()) {
+    auto networkSettings = jsonRoot.getNetworkSettings();
+    if (networkSettings.hasIpAddress()) {
+      auto ip = networkSettings.getIpAddress();
+      if (!ip.isEmpty()) {
+        ipAddress = kj::str(ip);
+      }
+    }
+  }
+
+  co_return InspectResponse{
+    .isRunning = running,
+    .ports = kj::mv(portMappings),
+    .ipAddress = kj::mv(ipAddress),
+  };
 }
 
 kj::Promise<void> ContainerClient::createContainer(
@@ -606,6 +632,46 @@ kj::Promise<void> ContainerClient::createContainer(
     JSG_FAIL_REQUIRE(
         Error, "Create container failed with [", response.statusCode, "] ", response.body);
   }
+}
+
+
+kj::Promise<bool> ContainerClient::isEgressPeerAuthorized(kj::AsyncIoStream& connection) {
+  auto [isRunning, _ports, maybeIpAddress] = co_await inspectContainer();
+  if (!isRunning || maybeIpAddress == kj::none) {
+    co_return false;
+  }
+
+  sockaddr_storage peerAddrStorage;
+  auto peerAddr = reinterpret_cast<sockaddr*>(&peerAddrStorage);
+  kj::uint peerAddrLen = sizeof(peerAddrStorage);
+  connection.getpeername(peerAddr, &peerAddrLen);
+
+  KJ_IF_SOME(containerIp, maybeIpAddress) {
+    switch (peerAddr->sa_family) {
+      case AF_INET: {
+        char addrBuf[INET_ADDRSTRLEN] = {0};
+        auto* sin = reinterpret_cast<sockaddr_in*>(peerAddr);
+        if (inet_ntop(AF_INET, &sin->sin_addr, addrBuf, INET_ADDRSTRLEN) != nullptr &&
+            containerIp == kj::str(addrBuf)) {
+          co_return true;
+        }
+        break;
+      }
+      case AF_INET6: {
+        char addrBuf[INET6_ADDRSTRLEN] = {0};
+        auto* sin6 = reinterpret_cast<sockaddr_in6*>(peerAddr);
+        if (inet_ntop(AF_INET6, &sin6->sin6_addr, addrBuf, INET6_ADDRSTRLEN) != nullptr &&
+            containerIp == kj::str(addrBuf)) {
+          co_return true;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  co_return false;
 }
 
 kj::Promise<void> ContainerClient::startContainer() {
@@ -755,7 +821,7 @@ ContainerClient::RpcTurn ContainerClient::getRpcTurn() {
 }
 
 kj::Promise<void> ContainerClient::status(StatusContext context) {
-  const auto [isRunning, _ports] = co_await inspectContainer();
+  const auto [isRunning, _ports, _ipAddress] = co_await inspectContainer();
   containerStarted.store(isRunning, std::memory_order_release);
   context.getResults().setRunning(isRunning);
 }
