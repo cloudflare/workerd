@@ -120,9 +120,8 @@ export const writeBufferResizedSmaller = {
 
     const p1 = writer.write(buf1);
     const p2 = writer.write(buf2);
-    // Resize smaller after queuing. The write captures the BackingStore at
-    // time of write, so the view is now out-of-bounds and should be treated as zeroes beyond
-    // the resized length
+    // Resize smaller after queuing. The write copies the BackingStore at
+    // time of write
     buf2.buffer.resize(6);
 
     const r1 = await reader.read();
@@ -137,7 +136,7 @@ export const writeBufferResizedSmaller = {
 
     // Second write - uses original view size but bytes beyond the resized buffer are zeroed
     strictEqual(r2.done, false);
-    deepStrictEqual(Array.from(r2.value), [11, 12, 13, 14, 15, 16, 0, 0]);
+    deepStrictEqual(Array.from(r2.value), [11, 12, 13, 14, 15, 16, 17, 18]);
   },
 };
 
