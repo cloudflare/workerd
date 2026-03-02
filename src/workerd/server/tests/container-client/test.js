@@ -247,10 +247,6 @@ export class DurableObjectExample extends DurableObject {
             throw e;
           }
 
-          console.info(
-            `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
-          );
-          console.info(e);
           if (i === maxRetries) {
             console.error(
               `Failed to connect to container ${container.id}. Retried ${i} times`
@@ -433,9 +429,6 @@ export class DurableObjectExample extends DurableObject {
     container.start({
       env: { WS_ENABLED: 'true', WS_PROXY_TARGET: '11.0.0.1:9999' },
     });
-    container.monitor().finally(() => {
-      console.log('Container exited');
-    });
 
     // Wait for container to be available
     await this.waitUntilContainerIsHealthy();
@@ -470,21 +463,26 @@ export class DurableObjectExample extends DurableObject {
     ws.accept();
 
     // Listen for response
-    const messagePromise = new Promise((resolve) => {
-      ws.addEventListener(
-        'message',
-        (event) => {
-          resolve(event.data);
-        },
-        { once: true }
-      );
-    });
+    const { promise, resolve, reject } = Promise.withResolvers();
+
+    ws.addEventListener(
+      'message',
+      (event) => {
+        resolve(event.data);
+      },
+      { once: true }
+    );
+
+    const timeout = setTimeout(() => {
+      reject(new Error('Websocket message not received within 5 seconds'));
+    }, 5_000);
 
     // Send a test message - should go through the whole chain and come back
     ws.send('Hello through intercept!');
 
     // Should receive response from TestService binding with id 42
-    const response = new TextDecoder().decode(await messagePromise);
+    const response = new TextDecoder().decode(await promise);
+    clearTimeout(timeout);
     assert.strictEqual(response, 'Binding 42: Hello through intercept!');
 
     ws.close();
