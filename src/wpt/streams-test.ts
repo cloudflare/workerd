@@ -944,8 +944,12 @@ export default {
   },
   'writable-streams/properties.any.js': {},
   'writable-streams/reentrant-strategy.any.js': {
-    comment: 'A hanging Promise was canceled.',
-    disabledTests: true,
+    comment:
+      'controller.error() has incorrect promise ordering; releaseLock() does not abort in-flight write per spec.',
+    expectedFailures: [
+      /controller\.error\(\) should work when called from within strategy\.size\(\)/,
+      /releaseLock\(\) should abort the write\(\) when called within strategy\.size\(\)/,
+    ],
   },
   'writable-streams/start.any.js': {
     comment: 'To be investigated',

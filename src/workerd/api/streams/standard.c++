@@ -414,6 +414,10 @@ void WritableLockImpl<Controller>::releaseWriter(
         }
       }
 
+      // Per spec (WritableStreamDefaultWriterRelease), both the ready and closed
+      // promises must be rejected when the writer is released.
+      maybeRejectPromise<void>(js, locked.getReadyFulfiller(),
+          js.v8TypeError("This WritableStream writer has been released."_kjc));
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(),
           js.v8TypeError("This WritableStream writer has been released."_kjc));
     }
