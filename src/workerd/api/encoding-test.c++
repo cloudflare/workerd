@@ -14,7 +14,7 @@ namespace test {
 // bestFit(input, bufferSize) returns the number of input code units that can be
 // fully converted to UTF-8 and fit within the given output buffer size in bytes.
 //
-// The key insight is that different characters expand to different UTF-8 byte lengths:
+// Different characters expand to different UTF-8 byte lengths:
 //   - ASCII (U+0000-U+007F): 1 byte per code unit
 //   - Latin-1 extended (U+0080-U+00FF): 2 bytes per code unit
 //   - BMP characters (U+0100-U+FFFF): 2-3 bytes per code unit
