@@ -126,6 +126,11 @@ class Socket: public jsg::Object {
   // closing.
   jsg::Promise<void> close(jsg::Lock& js);
 
+  // Proxies to the other socket. Equivalent to:
+  // a.readable.pipeTo(b.writable); b.readable.pipeTo(a.writable);
+  // TODO: May want to add jsg::Optional<PipeToOptions> options?
+  jsg::Promise<void> proxyTo(jsg::Lock& js, jsg::Ref<Socket> sock);
+
   // Flushes write buffers then performs a TLS handshake on the current Socket connection.
   // The current `Socket` instance is closed and its readable/writable instances are also closed.
   // All new operations should be performed on the new `Socket` instance.
@@ -155,6 +160,7 @@ class Socket: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(secureTransport, getSecureTransport);
     JSG_METHOD(close);
     JSG_METHOD(startTls);
+    JSG_METHOD(proxyTo);
 
     JSG_TS_OVERRIDE({
       get secureTransport(): 'on' | 'off' | 'starttls';

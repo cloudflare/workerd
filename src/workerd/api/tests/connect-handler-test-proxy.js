@@ -5,10 +5,7 @@ export class ConnectProxy extends WorkerEntrypoint {
   async connect({ socket }) {
     // proxy for ConnectEndpoint instance on port 8083.
     let upstream = connect('localhost:8083');
-    await Promise.all([
-      socket.readable.pipeTo(upstream.writable),
-      upstream.readable.pipeTo(socket.writable),
-    ]);
+    await socket.proxyTo(upstream);
   }
 }
 

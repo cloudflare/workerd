@@ -318,6 +318,13 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   }).catch_(js, [this](jsg::Lock& js, jsg::Value err) { errorHandler(js, kj::mv(err)); });
 }
 
+jsg::Promise<void> Socket::proxyTo(jsg::Lock& js, jsg::Ref<Socket> sock) {
+  return sock->readable->pipeTo(js, writable.addRef(), {})
+      .then(js, [this, sock = kj::mv(sock)](jsg::Lock& js) mutable {
+    return readable->pipeTo(js, sock->writable.addRef(), {});
+  });
+}
+
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
   JSG_REQUIRE(
       secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
