@@ -1425,4 +1425,20 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables version-related APIs. This currently only enables the `version` option in loopback
   # bindings to specify a requested version. The behaviour of this flag will change in the future.
+
+  websocketBinaryTypeDefault @166 :Bool
+      $compatEnableFlag("websocket_standard_binary_type")
+      $compatDisableFlag("no_websocket_standard_binary_type")
+      $compatEnableDate("2026-03-17");
+  # Per the WHATWG WebSocket spec, the binaryType attribute defaults to "blob"
+  # and binary messages are delivered as Blob objects. Previously, workerd did
+  # not expose the binaryType property at all and always delivered binary
+  # messages as ArrayBuffer. When this flag is enabled, binaryType defaults to
+  # "blob" and binary messages are delivered as Blob. Workers that set
+  # binaryType to "arraybuffer" will continue to receive ArrayBuffer regardless
+  # of this flag.
+  #
+  # Note: This flag has no effect on the Durable Object hibernatable WebSocket
+  # message handler (webSocketMessage). That handler always receives binary data
+  # as ArrayBuffer, since it operates outside the normal WebSocket read loop.
 }

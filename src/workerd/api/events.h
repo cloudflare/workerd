@@ -8,6 +8,8 @@
 
 namespace workerd::api {
 
+class Blob;
+
 class MessageEvent final: public Event {
  public:
   MessageEvent(jsg::Lock& js,
@@ -31,7 +33,7 @@ class MessageEvent final: public Event {
 
   MessageEvent(jsg::Lock& js,
       kj::String type,
-      jsg::JsRef<jsg::JsValue> data,
+      kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
       kj::String lastEventId = kj::String(),
       kj::Maybe<jsg::Ref<MessagePort>> source = kj::none,
       kj::Maybe<jsg::Url&> urlForOrigin = kj::none);
@@ -47,7 +49,7 @@ class MessageEvent final: public Event {
   static jsg::Ref<MessageEvent> constructor(
       jsg::Lock& js, kj::String type, Initializer initializer);
 
-  jsg::JsValue getData(jsg::Lock& js);
+  kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> getData(jsg::Lock& js);
 
   kj::Maybe<kj::ArrayPtr<const char>> getOrigin();
 
@@ -70,12 +72,14 @@ class MessageEvent final: public Event {
     JSG_READONLY_INSTANCE_PROPERTY(ports, getPorts);
 
     JSG_TS_ROOT();
+    JSG_TS_OVERRIDE({ readonly data: any; });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  jsg::JsRef<jsg::JsValue> data;
+  // Blob is used only by web-socket.h/c++
+  kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data;
   kj::String lastEventId;
   kj::Maybe<jsg::Ref<MessagePort>> maybeSource;
   kj::Maybe<kj::Array<const char>> maybeOrigin;

@@ -627,6 +627,12 @@ kj::Promise<void> ServiceWorkerGlobalScope::setHibernatableEventTimeout(
 
 // TODO(cleanup): the hibernatable websocket handler functions here are largely identical – consider
 // folding them.
+//
+// Note: The hibernatable WebSocket message path passes kj::OneOf<kj::String, kj::Array<byte>>
+// directly to the webSocketMessage() handler, so binary data is always delivered as ArrayBuffer.
+// The WebSocket binaryType property (and the websocket_standard_binary_type compat flag) has no
+// effect here — this is by design for the Durable Object handler API, which bypasses the
+// normal WebSocket read loop and its Blob/ArrayBuffer dispatch logic.
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(IoContext& context,
     kj::OneOf<kj::String, kj::Array<byte>> message,
     kj::Maybe<uint32_t> eventTimeoutMs,

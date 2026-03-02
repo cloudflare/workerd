@@ -132,7 +132,10 @@ wpt_test(
 wpt_test(
     name = "websockets",
     size = "large",
-    compat_flags = ["pedantic_wpt"],
+    compat_flags = [
+        "pedantic_wpt",
+        "websocket_standard_binary_type",
+    ],
     config = "websockets-test.ts",
     start_server = True,
     target_compatible_with = select({

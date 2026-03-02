@@ -467,6 +467,7 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(!!res.webSocket, true);
 
     const ws = res.webSocket;
+    ws.binaryType = 'arraybuffer';
     ws.accept();
 
     // Listen for response
@@ -500,6 +501,7 @@ export class TestService extends WorkerEntrypoint {
       // Handle WebSocket upgrade
       const [client, server] = Object.values(new WebSocketPair());
 
+      server.binaryType = 'arraybuffer';
       server.accept();
 
       server.addEventListener('message', (event) => {

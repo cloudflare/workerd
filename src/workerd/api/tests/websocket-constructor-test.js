@@ -2,7 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { doesNotThrow, strictEqual, throws } from 'node:assert';
+import {
+  deepStrictEqual,
+  doesNotThrow,
+  strictEqual,
+  throws,
+} from 'node:assert';
 
 // Test that WebSocket constructor handles empty protocols array correctly.
 // Per the WebSocket spec, an empty protocols array should be valid and equivalent
@@ -154,5 +159,154 @@ export const closeCodeSpecInvalid = {
       );
       ws.close();
     }
+  },
+};
+
+// Test that binaryType defaults to "blob" when websocket_standard_binary_type flag is on.
+export const binaryTypeDefaultsToBlob = {
+  async test() {
+    const ws = new WebSocket('wss://example.com/');
+    strictEqual(ws.binaryType, 'blob');
+    ws.close();
+  },
+};
+
+// Test that binaryType on WebSocketPair also defaults to "blob".
+export const binaryTypeWebSocketPairDefault = {
+  async test() {
+    const pair = new WebSocketPair();
+    strictEqual(pair[0].binaryType, 'blob');
+    strictEqual(pair[1].binaryType, 'blob');
+    // WebSocketPair sockets require accept() before close(), but we only
+    // need to verify the default value so no cleanup is needed.
+  },
+};
+
+// Test that binaryType setter accepts "arraybuffer" and "blob".
+export const binaryTypeSetterValid = {
+  async test() {
+    const ws = new WebSocket('wss://example.com/');
+    strictEqual(ws.binaryType, 'blob');
+
+    ws.binaryType = 'arraybuffer';
+    strictEqual(ws.binaryType, 'arraybuffer');
+
+    ws.binaryType = 'blob';
+    strictEqual(ws.binaryType, 'blob');
+    ws.close();
+  },
+};
+
+// Test that binaryType setter silently ignores invalid values per spec.
+export const binaryTypeSetterInvalid = {
+  async test() {
+    const ws = new WebSocket('wss://example.com/');
+    strictEqual(ws.binaryType, 'blob');
+
+    ws.binaryType = 'notBlobOrArrayBuffer';
+    strictEqual(ws.binaryType, 'blob');
+
+    ws.binaryType = '';
+    strictEqual(ws.binaryType, 'blob');
+
+    ws.binaryType = 'arraybuffer';
+    strictEqual(ws.binaryType, 'arraybuffer');
+
+    ws.binaryType = 'BLOB';
+    strictEqual(ws.binaryType, 'arraybuffer');
+    ws.close();
+  },
+};
+
+// Test that binary messages are delivered as Blob when binaryType is "blob".
+export const binaryMessageDeliveredAsBlob = {
+  async test() {
+    const pair = new WebSocketPair();
+    const [client, server] = pair;
+    server.accept();
+
+    const data = new Uint8Array([1, 2, 3, 4, 5]);
+    const received = new Promise((resolve) => {
+      server.addEventListener('message', (event) => resolve(event.data));
+    });
+
+    client.accept();
+    client.send(data);
+
+    const msg = await received;
+    strictEqual(msg instanceof Blob, true);
+    deepStrictEqual(new Uint8Array(await msg.arrayBuffer()), data);
+
+    client.close();
+    server.close();
+  },
+};
+
+// Test that binary messages are delivered as ArrayBuffer when binaryType is "arraybuffer".
+export const binaryMessageDeliveredAsArrayBuffer = {
+  async test() {
+    const pair = new WebSocketPair();
+    const [client, server] = pair;
+    server.accept();
+    server.binaryType = 'arraybuffer';
+
+    const data = new Uint8Array([10, 20, 30]);
+    const received = new Promise((resolve) => {
+      server.addEventListener('message', (event) => resolve(event.data));
+    });
+
+    client.accept();
+    client.send(data);
+
+    const msg = await received;
+    strictEqual(msg instanceof ArrayBuffer, true);
+    deepStrictEqual(new Uint8Array(msg), data);
+
+    client.close();
+    server.close();
+  },
+};
+
+// Test that switching binaryType mid-stream changes delivery format.
+export const binaryTypeSwitchMidStream = {
+  async test() {
+    const pair = new WebSocketPair();
+    const [client, server] = pair;
+    server.accept();
+    client.accept();
+
+    // Default is "blob" with the compat flag.
+    strictEqual(server.binaryType, 'blob');
+
+    // First message: delivered as Blob.
+    {
+      const received = new Promise((resolve) => {
+        server.addEventListener('message', (event) => resolve(event.data), {
+          once: true,
+        });
+      });
+      client.send(new Uint8Array([1]));
+      const msg = await received;
+      strictEqual(msg instanceof Blob, true);
+    }
+
+    // Switch to arraybuffer.
+    server.binaryType = 'arraybuffer';
+
+    // Second message: delivered as ArrayBuffer.
+    {
+      const received = new Promise((resolve) => {
+        server.addEventListener('message', (event) => resolve(event.data), {
+          once: true,
+        });
+      });
+      client.send(new Uint8Array([2]));
+      const msg = await received;
+      strictEqual(msg instanceof ArrayBuffer, true);
+      deepStrictEqual(new Uint8Array(msg), new Uint8Array([2]));
+    }
+
+    client.close();
+    server.close();
   },
 };
