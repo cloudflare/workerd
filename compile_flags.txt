@@ -44,8 +44,8 @@
 -isystembazel-bin/external/+http+capnp-cpp/src/kj/compat/_virtual_includes/kj-tls
 -isystembazel-bin/external/+http+workerd-cxx/_virtual_includes/core/
 -isystembazel-bin/external/+http+workerd-cxx/kj-rs/_virtual_includes/kj-rs-lib/
--isystemexternal/+_repo_rules2+v8/include
--isystemexternal/+_repo_rules2+v8/include/cppgc
+-isystemexternal/v8/include
+-isystemexternal/v8/include/cppgc
 -isystembazel-bin/src
 -isystemexternal/brotli+/c/include
 -isystembazel-bin/external/+git_repository+com_googlesource_chromium_icu/_virtual_includes/icu/third_party/icu/source/common
