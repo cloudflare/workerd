@@ -388,8 +388,20 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
     maybeRejectPromise<void>(js, lock.getClosedFulfiller(), errored.getHandle(js));
     maybeRejectPromise<void>(js, lock.getReadyFulfiller(), errored.getHandle(js));
   } else {
-    if (self.isStarted()) {
-      maybeResolvePromise(js, lock.getReadyFulfiller());
+    if (FeatureFlags::get(js).getWritableStreamSpecCompliantWriter()) {
+      // Per spec (SetUpWritableStreamDefaultWriter step 4), the ready promise
+      // is resolved when the stream is writable and not experiencing backpressure,
+      // regardless of whether the start algorithm has completed. The backpressure
+      // state is set synchronously during SetUpWritableStreamDefaultController.
+      KJ_IF_SOME(erroring, self.isErroring(js)) {
+        maybeRejectPromise<void>(js, lock.getReadyFulfiller(), erroring);
+      } else if (!self.hasBackpressure()) {
+        maybeResolvePromise(js, lock.getReadyFulfiller());
+      }
+    } else {
+      if (self.isStarted()) {
+        maybeResolvePromise(js, lock.getReadyFulfiller());
+      }
     }
   }
 
@@ -414,8 +426,25 @@ void WritableLockImpl<Controller>::releaseWriter(
         }
       }
 
-      maybeRejectPromise<void>(js, locked.getClosedFulfiller(),
-          js.v8TypeError("This WritableStream writer has been released."_kjc));
+      // Per spec (WritableStreamDefaultWriterRelease), both the ready and closed
+      // promises must be rejected when the writer is released.
+      auto releaseReason = js.v8TypeError("This WritableStream writer has been released."_kjc);
+      if (FeatureFlags::get(js).getWritableStreamSpecCompliantWriter()) {
+        if (locked.getReadyFulfiller() != kj::none) {
+          maybeRejectPromise<void>(js, locked.getReadyFulfiller(), releaseReason);
+        } else {
+          // The ready fulfiller was already consumed (promise was resolved).
+          // Per spec (WritableStreamDefaultWriterEnsureReadyPromiseRejected),
+          // we must replace it with a new rejected promise.
+          auto prp = js.newPromiseAndResolver<void>();
+          prp.promise.markAsHandled(js);
+          prp.resolver.reject(js, releaseReason);
+          locked.setReadyFulfiller(js, prp);
+        }
+      } else {
+        maybeRejectPromise<void>(js, locked.getReadyFulfiller(), releaseReason);
+      }
+      maybeRejectPromise<void>(js, locked.getClosedFulfiller(), releaseReason);
     }
     locked.clear();
 
@@ -884,6 +913,8 @@ class WritableStreamJsController final: public WritableStreamController {
   bool isLockedToWriter() const override;
 
   bool isStarted();
+
+  bool hasBackpressure();
 
   inline bool isWritable() const {
     return state.isActive();
@@ -1377,8 +1408,17 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
         return js.resolvedPromise();
       });
 
-  maybeRunAlgorithm(js, algorithms.write, kj::mv(onSuccess), kj::mv(onFailure), value.getHandle(js),
-      self.addRef());
+  // Per the spec, the write algorithm should always run asynchronously, even if
+  // there's no user-provided write handler. This ensures that backpressure changes
+  // from the write don't resolve the ready promise synchronously, preserving correct
+  // microtask ordering (e.g., ready rejects before closed on releaseLock).
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    maybeRunAlgorithmAsync(js, algorithms.write, kj::mv(onSuccess), kj::mv(onFailure),
+        value.getHandle(js), self.addRef());
+  } else {
+    maybeRunAlgorithm(js, algorithms.write, kj::mv(onSuccess), kj::mv(onFailure),
+        value.getHandle(js), self.addRef());
+  }
 }
 
 template <typename Self>
@@ -1664,6 +1704,20 @@ jsg::Promise<void> WritableImpl<Self>::write(
     }
     KJ_IF_SOME(exception, failure) {
       return js.rejectedPromise<void>(kj::mv(exception));
+    }
+  }
+
+  // Per spec (WritableStreamDefaultWriterWrite step 5), after calling the size
+  // algorithm, re-check that the stream is still locked to a writer. If
+  // releaseLock() was called from within strategy.size(), the write must be
+  // rejected. This check must occur before any state checks, as the stream
+  // state may still appear writable even after the writer was released.
+  if (FeatureFlags::get(js).getWritableStreamSpecCompliantWriter()) {
+    KJ_IF_SOME(owner, tryGetOwner()) {
+      if (!owner.isLockedToWriter()) {
+        return js.rejectedPromise<void>(
+            js.v8TypeError("This WritableStream writer has been released."_kjc));
+      }
     }
   }
 
@@ -3944,6 +3998,13 @@ bool WritableStreamJsController::isStarted() {
     }
   }
   KJ_UNREACHABLE;
+}
+
+bool WritableStreamJsController::hasBackpressure() {
+  KJ_IF_SOME(controller, state.tryGetUnsafe<Controller>()) {
+    return controller->hasBackpressure();
+  }
+  return false;
 }
 
 bool WritableStreamJsController::isLocked() const {

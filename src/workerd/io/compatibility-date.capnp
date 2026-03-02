@@ -1441,4 +1441,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Note: This flag has no effect on the Durable Object hibernatable WebSocket
   # message handler (webSocketMessage). That handler always receives binary data
   # as ArrayBuffer, since it operates outside the normal WebSocket read loop.
+
+  writableStreamSpecCompliantWriter @167 :Bool
+      $compatEnableFlag("writable_stream_spec_compliant_writer")
+      $compatDisableFlag("no_writable_stream_spec_compliant_writer")
+      $compatEnableDate("2026-03-24");
+  # Fixes several WritableStream spec compliance issues around writer
+  # lock/release behavior.
 }
