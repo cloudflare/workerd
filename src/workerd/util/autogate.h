@@ -29,6 +29,8 @@ enum class AutogateKey {
   RPC_USE_EXTERNAL_PUSHER,
   // Switch Blob stream() to use streams::newMemorySource instead of Blob::BlobInputStream
   BLOB_USE_STREAMS_NEW_MEMORY_SOURCE,
+  // Enable fast TextEncoder implementation using simdutf
+  ENABLE_FAST_TEXTENCODER,
   NumOfKeys  // Reserved for iteration.
 };
 

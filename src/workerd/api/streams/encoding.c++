@@ -93,9 +93,7 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
     if (holder->pending != kj::none) {
       auto backingStore = js.allocBackingStore(3, jsg::Lock::AllocOption::UNINITIALIZED);
       memcpy(backingStore->Data(), REPLACEMENT_UTF8, 3);
-      auto array =
-          v8::Uint8Array::New(v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, 3);
-      controller->enqueue(js, jsg::JsUint8Array(array));
+      controller->enqueue(js, jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, 3));
     }
     return js.resolvedPromise();
   };
