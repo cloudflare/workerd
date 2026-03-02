@@ -25,7 +25,7 @@ constexpr size_t WASM_SIGNAL_FIELD_BYTES = sizeof(uint32_t);
 //   "__instance_signal"     — (optional) address of a uint32 in linear memory. When present,
 //                            the runtime writes SIGXCPU (24) here when CPU time is nearly
 //                            exhausted.
-//   "__instance_terminated" �� address of a uint32 in linear memory. The WASM module writes a
+//   "__instance_terminated" - address of a uint32 in linear memory. The WASM module writes a
 //                            non-zero value here when it has exited and is no longer listening.
 //                            The runtime checks this in a GC prologue hook and removes entries
 //                            where terminated is non-zero, allowing the linear memory to be
