@@ -673,6 +673,10 @@ class WritableStreamDefaultController: public jsg::Object {
     return impl.flags.started;
   }
 
+  bool hasBackpressure() {
+    return impl.flags.backpressure;
+  }
+
   void setup(jsg::Lock& js, UnderlyingSink underlyingSink, StreamQueuingStrategy queuingStrategy);
 
   jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> value);

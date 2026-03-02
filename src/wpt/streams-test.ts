@@ -885,7 +885,6 @@ export default {
       'when calling abort() twice on the same stream, both should give the same promise that fulfills with undefined',
       'Aborting a WritableStream causes any outstanding write() promises to be rejected with the reason supplied',
       'Aborting a WritableStream puts it in an errored state with the error passed to abort()',
-      'if a writer is created for a stream with a pending abort, its ready should be rejected with the abort error',
       'sink abort() should not be called if stream was erroring due to bad strategy before abort() was called',
       'writer.abort() while there is an in-flight write, and then finish the write with rejection',
       'writer.abort(), controller.error() while there is an in-flight write, and then finish the write',
@@ -929,28 +928,14 @@ export default {
     comment: 'Seems we should be using a double for queue size',
     expectedFailures: [
       'Floating point arithmetic must manifest near NUMBER.MAX_SAFE_INTEGER (total ends up positive)',
-      'Floating point arithmetic must manifest near 0 (total ends up positive, but clamped)',
       'Floating point arithmetic must manifest near 0 (total ends up positive, and not clamped)',
       'Floating point arithmetic must manifest near 0 (total ends up zero)',
     ],
   },
   'writable-streams/garbage-collection.any.js': {},
-  'writable-streams/general.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'closed and ready on a released writer',
-      'ready promise should fire before closed on releaseLock',
-    ],
-  },
+  'writable-streams/general.any.js': {},
   'writable-streams/properties.any.js': {},
-  'writable-streams/reentrant-strategy.any.js': {
-    comment:
-      'controller.error() has incorrect promise ordering; releaseLock() does not abort in-flight write per spec.',
-    expectedFailures: [
-      /controller\.error\(\) should work when called from within strategy\.size\(\)/,
-      /releaseLock\(\) should abort the write\(\) when called within strategy\.size\(\)/,
-    ],
-  },
+  'writable-streams/reentrant-strategy.any.js': {},
   'writable-streams/start.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
