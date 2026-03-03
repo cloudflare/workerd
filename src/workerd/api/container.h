@@ -65,6 +65,8 @@ class Container: public jsg::Object {
   jsg::Promise<void> interceptOutboundHttp(
       jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding);
   jsg::Promise<void> interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<Fetcher> binding);
+  jsg::Promise<void> interceptOutboundHttps(
+      jsg::Lock& js, kj::String sniGlob, jsg::Ref<Fetcher> binding);
 
   // TODO(containers): listenTcp()
 
@@ -80,6 +82,7 @@ class Container: public jsg::Object {
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(interceptOutboundHttp);
       JSG_METHOD(interceptAllOutboundHttp);
+      JSG_METHOD(interceptOutboundHttps);
     }
   }
 

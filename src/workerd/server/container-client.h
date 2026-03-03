@@ -57,12 +57,20 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
   kj::Promise<void> setEgressHttp(SetEgressHttpContext context) override;
+  kj::Promise<void> setEgressHttps(SetEgressHttpsContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
-  kj::HttpHeaderTable headerTable;
+
+  struct EgressHeaderTable {
+    kj::HttpHeaderTable::Builder builder;
+    kj::HttpHeaderId tlsSniId = builder.add("X-Tls-Sni");
+    kj::Own<kj::HttpHeaderTable> table = builder.build();
+  };
+  EgressHeaderTable egressHeaderTable;
+  kj::HttpHeaderTable& headerTable = *egressHeaderTable.table;
   kj::Timer& timer;
   kj::Network& network;
   kj::String dockerPath;
@@ -158,12 +166,40 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> findEgressMapping(
       kj::StringPtr destAddr, uint16_t defaultPort);
 
+  // Routes on SNI hostname only (no CIDR or port matching unlike HTTP egress).
+  struct EgressHttpsMapping {
+    kj::String sniGlob;
+    kj::Own<workerd::IoChannelFactory::SubrequestChannel> channel;
+  };
+
+  kj::Vector<EgressHttpsMapping> egressHttpsMappings;
+
+  void upsertEgressHttpsMapping(EgressHttpsMapping mapping);
+
+  // Returns addRef'd so the channel outlives mapping replacement.
+  kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> findEgressHttpsMapping(
+      kj::StringPtr sni);
+
+  // Uses Docker exec API (POST /exec).
+  kj::Promise<kj::Maybe<kj::String>> readFileFromContainer(
+      kj::StringPtr container, kj::StringPtr path);
+
+  // Uses Docker archive API (PUT /archive).
+  kj::Promise<void> writeFileToContainer(kj::StringPtr container,
+      kj::StringPtr dir,
+      kj::StringPtr filename,
+      kj::ArrayPtr<const kj::byte> content);
+
+  // Injects sidecar CA cert into the user container's system CA bundle.
+  kj::Promise<void> injectCACert();
+
   // Whether general internet access is enabled for this container
   bool internetEnabled = false;
 
   std::atomic_bool containerStarted = false;
   std::atomic_bool containerSidecarStarted = false;
   std::atomic_bool egressListenerStarted = false;
+  std::atomic_bool caCertInjected = false;
 
   kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
   kj::Maybe<kj::Promise<void>> egressListenerTask;

@@ -318,4 +318,21 @@ struct Docker {
     id @0 :Text $Json.name("Id");
     warning @1 :Text $Json.name("Warning");
   }
+
+  # Docker exec API types (POST /containers/{id}/exec, POST /exec/{id}/start)
+
+  struct ExecCreateRequest {
+    cmd @0 :List(Text) $Json.name("Cmd");
+    attachStdout @1 :Bool $Json.name("AttachStdout");
+    attachStderr @2 :Bool $Json.name("AttachStderr");
+  }
+
+  struct ExecCreateResponse {
+    id @0 :Text $Json.name("Id");
+  }
+
+  struct ExecStartRequest {
+    detach @0 :Bool $Json.name("Detach");
+    tty @1 :Bool $Json.name("Tty");
+  }
 }
