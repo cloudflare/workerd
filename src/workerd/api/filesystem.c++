@@ -6,6 +6,7 @@
 
 #include <workerd/api/node/exceptions.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/io/features.h>
 #include <workerd/jsg/setup.h>
 
 namespace workerd::api {
@@ -2646,11 +2647,15 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
   auto stream =
       js.alloc<FileSystemWritableFileStream>(newWritableStreamJsController(), sharedState.addRef());
 
-  stream->getController().setup(js,
-      UnderlyingSink{.type = kj::str("bytes"),
-        .write =
-            [state = sharedState.addRef(), &deHandler, &dataHandler](
-                jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
+  UnderlyingSink sink;
+  // Per the WHATWG spec, the type property for WritableStream's underlying sink must be undefined.
+  // The "bytes" type is only valid for ReadableStream. When pedantic_wpt is not set, we preserve
+  // the legacy behavior of setting the type to "bytes".
+  if (!FeatureFlags::get(js).getPedanticWpt()) {
+    sink.type = kj::str("bytes");
+  }
+  sink.write = [state = sharedState.addRef(), &deHandler, &dataHandler](
+                   jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
     return js.tryCatch([&] {
       KJ_IF_SOME(unwrapped, dataHandler.tryUnwrap(js, chunk)) {
         return FileSystemWritableFileStream::writeImpl(
@@ -2659,15 +2664,13 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
       return js.rejectedPromise<void>(
           js.typeError("WritableStream received a value that is not writable"));
     }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  },
-        .abort =
-            [state = sharedState.addRef()](jsg::Lock& js, auto reason) mutable {
+  };
+  sink.abort = [state = sharedState.addRef()](jsg::Lock& js, auto reason) mutable {
     // When aborted, we just drop any of the written data on the floor.
     state->clear();
     return js.resolvedPromise();
-  },
-        .close =
-            [state = sharedState.addRef(), &deHandler](jsg::Lock& js) mutable {
+  };
+  sink.close = [state = sharedState.addRef(), &deHandler](jsg::Lock& js) mutable {
     KJ_DEFER(state->clear());
     return js.tryCatch([&] {
       KJ_IF_SOME(temp, state->temp) {
@@ -2708,8 +2711,8 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
       }
       return js.resolvedPromise();
     }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  }},
-      kj::none);
+  };
+  stream->getController().setup(js, kj::mv(sink), kj::none);
 
   return js.resolvedPromise(kj::mv(stream));
 }

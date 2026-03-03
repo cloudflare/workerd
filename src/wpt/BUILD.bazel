@@ -53,7 +53,6 @@ wpt_test(
 
 wpt_test(
     name = "dom/events",
-    compat_flags = ["pedantic_wpt"],
     config = "dom/events-test.ts",
     wpt_directory = "@wpt//:dom/events@module",
 )
@@ -78,7 +77,6 @@ wpt_test(
     compat_flags = [
         "encoder_stream_spec_compliant_backpressure",
         "fixup-transform-stream-backpressure",
-        "pedantic_wpt",
         "text_decoder_cjk_decoder",
         "transformstream_enable_standard_constructor",
     ],
@@ -113,10 +111,7 @@ wpt_test(
 wpt_test(
     name = "streams",
     size = "large",
-    compat_flags = [
-        "pedantic_wpt",
-        "writable_stream_spec_compliant_writer",
-    ],
+    compat_flags = ["writable_stream_spec_compliant_writer"],
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )
@@ -138,10 +133,7 @@ wpt_test(
 wpt_test(
     name = "websockets",
     size = "large",
-    compat_flags = [
-        "pedantic_wpt",
-        "websocket_standard_binary_type",
-    ],
+    compat_flags = ["websocket_standard_binary_type"],
     config = "websockets-test.ts",
     start_server = True,
     target_compatible_with = select({
