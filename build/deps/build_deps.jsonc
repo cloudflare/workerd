@@ -140,6 +140,15 @@
       "file_regex": "llvm-.*-darwin-arm64-clang-tidy",
       "file_type": "executable",
       "freeze_version": "clang-tidy-22.1.0"
+    },
+    {
+      "name": "deps_wabt",
+      "type": "github_release",
+      "owner": "WebAssembly",
+      "repo": "wabt",
+      "file_regex": "wabt-.*-ubuntu-20.04\\.tar\\.gz$",
+      "build_file": "//:build/BUILD.wabt",
+      "freeze_version": "1.0.37" // 1.0.38 doesn't have ubuntu tar.gz, 1.0.39 has a Linux binary but requires glibc 2.38 (will need to update to Trixie for that)
     }
   ]
 }
