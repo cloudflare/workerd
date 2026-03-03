@@ -23,7 +23,7 @@ class SqlStorage;
 class SyncKvStorage;
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
-class DurableObject;
+class DurableObjectStub;
 class DurableObjectId;
 class WebSocket;
 class DurableObjectClass;
@@ -284,7 +284,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // calls are no-ops unless `ensureReplicas` re-enabled the replicas.
   void disableReplicas();
 
-  jsg::Optional<jsg::Ref<DurableObject>> getPrimary(jsg::Lock& js);
+  jsg::Optional<jsg::Ref<DurableObjectStub>> getPrimary(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
@@ -346,7 +346,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   uint transactionSyncDepth = 0;
 
   // Set if this is a replica Durable Object.
-  kj::Maybe<jsg::Ref<DurableObject>> maybePrimary;
+  kj::Maybe<jsg::Ref<DurableObjectStub>> maybePrimary;
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {
@@ -445,8 +445,8 @@ class DurableObjectFacets: public jsg::Object {
   // Get a facet by name, starting it if it isn't already running. `getStartupOptions` is invoked
   // only if the facet wasn't already running, to get information needed to start the facet.
   //
-  // Returns a `Fetcher` instead of a `DurableObject` becasue the returend stub does not have the
-  // `id` or `name` methods that a DO stub normally has.
+  // Returns a `Fetcher` instead of a `DurableObjectStub` becasue the returend stub does not have
+  // the `id` or `name` methods that a DO stub normally has.
   jsg::Ref<Fetcher> get(jsg::Lock& js,
       kj::String name,
       jsg::Function<jsg::Promise<StartupOptions>()> getStartupOptions);
