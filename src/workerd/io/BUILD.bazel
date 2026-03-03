@@ -90,6 +90,7 @@ wd_cc_library(
         ":observer",
         ":release-version",
         ":trace",
+        ":wasm-instantiate-shim",
         ":worker-interface",
         ":worker-source",
         "//src/rust/cxx-integration",
@@ -272,7 +273,11 @@ wd_cc_library(
 
 wd_cc_library(
     name = "limit-enforcer",
-    hdrs = ["limit-enforcer.h"],
+    srcs = ["tracked-wasm-instance.c++"],
+    hdrs = [
+        "limit-enforcer.h",
+        "tracked-wasm-instance.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":outcome_capnp",
@@ -354,6 +359,12 @@ wd_cc_embed(
     name = "maximum-compatibility-date",
     src = ":trimmed-maximum-compatibility-date.txt",
     base_name = "maximum-compatibility-date",
+)
+
+wd_cc_embed(
+    name = "wasm-instantiate-shim",
+    src = "wasm-instantiate-shim.js",
+    base_name = "wasm-instantiate-shim",
 )
 
 wd_capnp_library(src = "cdp.capnp")
@@ -473,6 +484,37 @@ wd_test(
     src = "io-context-test.wd-test",
     args = ["--experimental"],
     data = ["io-context-test.js"],
+)
+
+kj_test(
+    src = "tracked-wasm-instance-test.c++",
+    deps = [
+        ":limit-enforcer",
+    ],
+)
+
+wd_test(
+    src = "tracked-wasm-instance-js-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tracked-wasm-instance-test.js",
+        "//src/workerd/io/wasm:signal-basic.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-edge.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-overflow.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-valid.wasm",
+        "//src/workerd/io/wasm:signal-decoy-memory.wasm",
+        "//src/workerd/io/wasm:signal-externref-memory.wasm",
+        "//src/workerd/io/wasm:signal-imported-memory.wasm",
+        "//src/workerd/io/wasm:signal-memory-reclaim.wasm",
+        "//src/workerd/io/wasm:signal-no-globals.wasm",
+        "//src/workerd/io/wasm:signal-partial-exports.wasm",
+        "//src/workerd/io/wasm:signal-preinit.wasm",
+        "//src/workerd/io/wasm:signal-terminated-only.wasm",
+    ],
+    # The WebAssembly.instantiate shim is behind the WASM_SHUTDOWN_SIGNAL_SHIM autogate,
+    # so this test only works when all autogates are enabled.
+    generate_all_compat_flags_variant = False,
+    generate_default_variant = False,
 )
 
 kj_test(

@@ -28,8 +28,9 @@
 #include <kj/mutex.h>
 
 namespace v8 {
+class BackingStore;
 class Isolate;
-}
+}  // namespace v8
 
 namespace workerd {
 
@@ -372,6 +373,14 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const;
   // Returns a reference to cpuLimitNearlyExceededCallback. Can't outlive the Isolate.
   kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
+
+  // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
+  // The signal offset is optional: when kj::none, the module will only receive the terminated
+  // flag but will not get the SIGXCPU warning. See TrackedWasmInstanceList::registerSignal().
+  void registerTrackedWasmInstance(jsg::Lock& js,
+      kj::Array<kj::byte> memory,
+      kj::Maybe<uint32_t> signalOffset,
+      uint32_t terminatedOffset) const;
 
   inline IsolateObserver& getMetrics() {
     return *metrics;

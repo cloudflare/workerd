@@ -1,0 +1,10 @@
+load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
+
+[
+    wasm_tools_parse(
+        name = name.removesuffix(".wat") + ".wasm",
+        src = name,
+        visibility = ["//visibility:public"],
+    )
+    for name in glob(["*.wat"])
+]

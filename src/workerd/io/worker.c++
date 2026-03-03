@@ -13,6 +13,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/wasm-instantiate-shim.embed.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/inspector.h>
@@ -23,6 +24,7 @@
 #include <workerd/jsg/util.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
@@ -34,6 +36,7 @@
 #include <rust/jsg/ffi.h>
 #include <v8-inspector.h>
 #include <v8-profiler.h>
+#include <v8-wasm.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
@@ -664,6 +667,9 @@ struct Worker::Isolate::Impl {
 
     void gcPrologue() {
       metrics.gcPrologue();
+      // Filter out tracked WASM instance entries where the module has exited, allowing
+      // the linear memory to be reclaimed.
+      limitEnforcer.getTrackedWasmInstances().filter(*lock);
     }
     void gcEpilogue() {
       metrics.gcEpilogue();
@@ -1559,6 +1565,11 @@ Worker::Isolate::~Isolate() noexcept(false) {
     // The Rust Realm must be dropped under lock since Realm::drop() accesses V8 globals
     // and calls drop functions that may interact with V8.
     auto dropRealm = kj::mv(impl->realm);
+
+    // Release all tracked WASM instance entries while V8 is still alive. Each entry holds a
+    // shared_ptr<v8::BackingStore> whose destructor who needs the isolate to still be alive.
+    // This is analogous to the cpuTimeLimitNearlyExceededCallback detaching above ^^^
+    limitEnforcer->getTrackedWasmInstances().clear(*recordedLock.lock);
   });
 }
 
@@ -1608,31 +1619,109 @@ void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)>
       FAILED, "Python Workers Internal Error: CpuLimitNearlyExceededCallback already set"));
 }
 
+void Worker::Isolate::registerTrackedWasmInstance(jsg::Lock& js,
+    kj::Array<kj::byte> memory,
+    kj::Maybe<uint32_t> signalOffset,
+    uint32_t terminatedOffset) const {
+  // Register the WASM module for receiving shutdown signals. The signal handler will
+  // iterate the list unconditionally when CPU time is nearly exhausted.
+  limitEnforcer->getTrackedWasmInstances().registerSignal(
+      js, kj::mv(memory), kj::mv(signalOffset), terminatedOffset);
+}
+
 // EW-1319: Set WebAssembly.Module @@HasInstance
 //
 // The instanceof operator can be changed by setting the @@HasInstance method
 // on the object, https://tc39.es/ecma262/#sec-instanceofoperator.
 void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context) {
-  auto instanceof = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
-    jsg::Lock::from(info.GetIsolate()).withinHandleScope([&] {
-      info.GetReturnValue().Set(info[0]->IsWasmModuleObject());
+  JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& lock) {
+    auto instanceof = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+      jsg::Lock::from(info.GetIsolate()).withinHandleScope([&] {
+        info.GetReturnValue().Set(info[0]->IsWasmModuleObject());
+      });
+    };
+    v8::Local<v8::Function> function = jsg::check(v8::Function::New(context, instanceof));
+
+    auto webAssembly =
+        KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
+    auto module = KJ_ASSERT_NONNULL(webAssembly.get(lock, "Module").tryCast<jsg::JsObject>());
+
+    jsg::check(v8::Local<v8::Object>(module)->DefineOwnProperty(
+        context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
+  });
+}
+
+// Installs a shim around WebAssembly.instantiate and WebAssembly.Instance that hooks into the
+// shutdown signal if it exists
+void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context) {
+  // We need to enter the context because this function compiles and executes JavaScript via
+  // v8::Script::Compile/Run. setupContext() is called before JSG_WITHIN_CONTEXT_SCOPE, so the
+  // context is not yet entered at this point.
+  v8::Context::Scope contextScope(context);
+
+  auto webAssembly =
+      KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
+
+  // Create a C++ callback that the JS shims call to register a {memory, signalOffset,
+  // terminatedOffset} tuple.
+  // __registerTrackedWasmInstance(memory: WebAssembly.Memory, signalOffset: number,
+  //                              terminatedOffset: number)
+  // signalOffset may be -1, indicating the module did not export __instance_signal.
+  auto registerCb = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    js.withinHandleScope([&] {
+      if (info.Length() < 3 || !info[0]->IsWasmMemoryObject() || !info[1]->IsNumber() ||
+          !info[2]->IsUint32()) {
+        js.v8Isolate->ThrowException(js.str(
+            "registerTrackedWasmInstance: expected (WebAssembly.Memory, number, uint32)"_kj));
+        return;
+      }
+      auto memory = info[0].As<v8::WasmMemoryObject>();
+      // signalOffset is -1 when __instance_signal was not exported.
+      auto signalRaw = info[1].As<v8::Number>()->Value();
+      kj::Maybe<uint32_t> signalOffset;
+      if (signalRaw >= 0) {
+        signalOffset = static_cast<uint32_t>(signalRaw);
+      }
+      auto terminatedOffset = info[2].As<v8::Uint32>()->Value();
+      auto backingStore = memory->Buffer()->GetBackingStore();
+      auto wasmMemory =
+          kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), backingStore->ByteLength())
+              .attach(kj::mv(backingStore));
+      KJ_IF_SOME(e, kj::runCatchingExceptions([&] {
+        Worker::Isolate::from(js).registerTrackedWasmInstance(
+            js, kj::mv(wasmMemory), signalOffset, terminatedOffset);
+      })) {
+        js.v8Isolate->ThrowException(js.exceptionToJs(kj::mv(e)).getHandle(js));
+      }
     });
   };
-  v8::Local<v8::Function> function = jsg::check(v8::Function::New(context, instanceof));
+  auto registerFn = jsg::check(v8::Function::New(context, registerCb));
 
-  v8::Object* webAssembly = v8::Object::Cast(*jsg::check(
-      context->Global()->Get(context, jsg::v8StrIntern(lock.v8Isolate, "WebAssembly"))));
-  v8::Object* module = v8::Object::Cast(
-      *jsg::check(webAssembly->Get(context, jsg::v8StrIntern(lock.v8Isolate, "Module"))));
+  // Build the shim in JavaScript. It wraps both WebAssembly.instantiate (async) and
+  // WebAssembly.Instance (sync constructor).
+  auto shimScript =
+      jsg::NonModuleScript::compile(lock, WASM_INSTANTIATE_SHIM, "wasm-instantiate-shim.js"_kj);
+  auto shimFn = KJ_ASSERT_NONNULL(shimScript.runAndReturn(lock).tryCast<jsg::JsFunction>());
 
-  jsg::check(
-      module->DefineOwnProperty(context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
+  // Grab the originals before they are replaced.
+  auto originalInstantiate = webAssembly.get(lock, "instantiate");
+  auto originalInstance = webAssembly.get(lock, "Instance");
+
+  // Call the factory — it mutates `wa` in place.
+  shimFn.call(lock, lock.global(), originalInstantiate, originalInstance,
+      jsg::JsFunction(registerFn), jsg::JsObject(webAssembly));
 }
 
 void Worker::setupContext(
     jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
   // Set WebAssembly.Module @@HasInstance
   setWebAssemblyModuleHasInstance(lock, context);
+
+  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
+  if (util::Autogate::isEnabled(util::AutogateKey::WASM_SHUTDOWN_SIGNAL_SHIM)) {
+    shimWebAssemblyInstantiate(lock, context);
+  }
 
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
   // logged content, and log formatted values to stdout/stderr locally.

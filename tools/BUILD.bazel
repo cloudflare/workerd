@@ -35,6 +35,21 @@ ts_config(
 )
 
 native_binary(
+    name = "wasm-tools",
+    src = select(
+        {
+            "@bazel_tools//src/conditions:linux_x86_64": "@wasm_tools_linux_x64//:wasm-tools",
+            "@bazel_tools//src/conditions:linux_aarch64": "@wasm_tools_linux_arm64//:wasm-tools",
+            "@bazel_tools//src/conditions:darwin_arm64": "@wasm_tools_macos_arm64//:wasm-tools",
+            "@bazel_tools//src/conditions:darwin_x86_64": "@wasm_tools_macos_x64//:wasm-tools",
+            "@bazel_tools//src/conditions:windows_x64": "@wasm_tools_windows_x64//:wasm-tools.exe",
+        },
+    ),
+    out = "wasm-tools",
+    visibility = ["//visibility:public"],
+)
+
+native_binary(
     name = "clang-tidy",
     src = select(
         {
