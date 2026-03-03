@@ -1133,16 +1133,32 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
     if (inputLock == kj::none) {
+      // When there is no current IncomingRequest (e.g. startDeleteQueueSignalTask firing
+      // between events in an actor), we can't get request-scoped trace info — use a null span.
+      auto traceSpan = incomingRequests.empty() ? SpanParent(nullptr) : getCurrentTraceSpan();
       return a.getInputGate()
-          .wait(getCurrentTraceSpan())
+          .wait(kj::mv(traceSpan))
           .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
         return run(kj::fwd<Func>(func), kj::mv(inputLock));
       });
     }
 
-    asyncLockPromise = worker->takeAsyncLockWhenActorCacheReady(now(), a, getMetrics());
+    if (incomingRequests.empty()) {
+      // No current IncomingRequest — can't access request-scoped metrics, timers, or tracing.
+      // This happens in actor contexts when background tasks (e.g. startDeleteQueueSignalTask
+      // processing cross-context promise resolutions) call run() between events, after the
+      // previous IncomingRequest has drained. Fall back to acquiring the lock without request
+      // attribution. See STOR-5008.
+      asyncLockPromise = worker->takeAsyncLockWithoutRequest(nullptr);
+    } else {
+      asyncLockPromise = worker->takeAsyncLockWhenActorCacheReady(now(), a, getMetrics());
+    }
   } else {
-    asyncLockPromise = worker->takeAsyncLock(getMetrics());
+    if (incomingRequests.empty()) {
+      asyncLockPromise = worker->takeAsyncLockWithoutRequest(nullptr);
+    } else {
+      asyncLockPromise = worker->takeAsyncLock(getMetrics());
+    }
   }
 
   return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](

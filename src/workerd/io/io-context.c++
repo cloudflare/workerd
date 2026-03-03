@@ -496,11 +496,10 @@ void IoContext::addTask(kj::Promise<void> promise) {
     return;
   }
 
-  if (actor == kj::none) {
-    // This metric won't work correctly in actors since it's being tracked per-request, but tasks
-    // are not tied to requests in actors. So we just skip it in actors. (Actually this code path
-    // is not even executed in the actor case but I'm leaving the check in just in case that ever
-    // changes.)
+  if (actor == kj::none && !incomingRequests.empty()) {
+    // Non-actor task metrics are tracked per-request, so we can only attach them when a current
+    // IncomingRequest exists. Skip attribution when there is no current request to avoid calling
+    // getMetrics() without request state. See STOR-5008.
     auto& metrics = getMetrics();
     if (metrics.getSpan().isObserved()) {
       promise = promise.attach(metrics.addedContextTask());
@@ -512,18 +511,23 @@ void IoContext::addTask(kj::Promise<void> promise) {
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
   if (actor == kj::none) {
-    // This metric won't work correctly in actors since it's being tracked per-request, but tasks
-    // are not tied to requests in actors. So we just skip it in actors.
-    auto& metrics = getMetrics();
-    if (metrics.getSpan().isObserved()) {
-      promise = promise.attach(metrics.addedWaitUntilTask());
+    if (incomingRequests.empty()) {
+      // Non-actor contexts should always have an IncomingRequest when adding waitUntil tasks.
+      DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
+          lastDeliveredLocation, kj::getStackTrace());
+    } else {
+      // Non-actor waitUntil metrics are tracked per-request, so attach only when a current
+      // IncomingRequest exists.
+      auto& metrics = getMetrics();
+      if (metrics.getSpan().isObserved()) {
+        promise = promise.attach(metrics.addedWaitUntilTask());
+      }
     }
   }
-
-  if (incomingRequests.empty()) {
-    DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
-        lastDeliveredLocation, kj::getStackTrace());
-  }
+  // In actor contexts, incomingRequests can legitimately be empty between events (e.g., when
+  // orphaned timers or background tasks like startDeleteQueueSignalTask fire after the previous
+  // IncomingRequest has drained). This is harmless: the promise will be cancelled when the
+  // IoContext is destroyed. See STOR-5008.
 
   waitUntilTasks.add(kj::mv(promise));
 }
@@ -1204,7 +1208,13 @@ void IoContext::runImpl(Runnable& runnable,
     KJ_REQUIRE(l.isFor(KJ_ASSERT_NONNULL(actor).getInputGate()));
   }
 
-  getIoChannelFactory().getTimer().syncTime();
+  // syncTime() requires the IoChannelFactory from the current IncomingRequest. When there is
+  // no current request (e.g. background tasks in actor contexts between events — see STOR-5008),
+  // we skip timer sync. This is safe: syncTime() updates request-scoped time for Spectre
+  // mitigations, which is irrelevant for non-request background work.
+  if (!incomingRequests.empty()) {
+    getIoChannelFactory().getTimer().syncTime();
+  }
 
   runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
     kj::Own<void> event;

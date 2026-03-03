@@ -1,25 +1,17 @@
 // Regression test for STOR-5008: IoContext::run() crash when incomingRequests
 // is empty in an actor context.
 //
-// The bug: startDeleteQueueSignalTask() calls context->run(), which calls
+// The bug: startDeleteQueueSignalTask() calls context->run(), which called
 // getCurrentIncomingRequest() via now()/getMetrics(). In a Durable Object,
 // incomingRequests can be empty between events (after an IncomingRequest
 // drains and before the next arrives). If a cross-context promise resolution
 // fires scheduleAction() in this window, startDeleteQueueSignalTask wakes
-// up and crashes, breaking the actor.
+// up and context->run() would crash.
 //
-// This test triggers the race by:
-// 1. Making a JS-RPC call to a DO that creates a promise and stores the
-//    resolver in globalThis (shared V8 context between worker and DO).
-// 2. The RPC call returns without ctx.waitUntil() or timers, so the
-//    IncomingRequest drains immediately.
-// 3. The test worker resolves the DO's promise from its own IoContext,
-//    triggering cross-context resolution via scheduleAction().
-// 4. startDeleteQueueSignalTask wakes up and calls context->run() with
-//    empty incomingRequests -> crash -> actor breaks.
-//
-// Commit 1: Proves the bug — the actor breaks and subsequent calls fail.
-// Commit 2 (fix): The test will be updated to show the actor survives.
+// The fix: IoContext::run() now handles empty incomingRequests gracefully by
+// falling back to takeAsyncLockWithoutRequest() and skipping request-scoped
+// timer sync, tracing, and metrics attribution. The actor survives and the
+// cross-context promise continuation runs correctly.
 
 import { DurableObject } from 'cloudflare:workers';
 import { strictEqual } from 'node:assert';
@@ -37,7 +29,7 @@ export class TestActor extends DurableObject {
 
     // Chain a .then() — this continuation must run in the actor's IoContext
     // via cross-context promise resolution. Stash the promise so we can
-    // check it later (if the actor survives).
+    // verify the result later.
     this.resultPromise = promise.then((value) => {
       this.resolvedValue = value;
       return value;
@@ -53,10 +45,10 @@ export class TestActor extends DurableObject {
   }
 }
 
-// This test demonstrates the broken behavior (STOR-5008).
-// The actor breaks when startDeleteQueueSignalTask tries to call
-// context->run() with empty incomingRequests.
-export const actorBreaksOnCrossContextResolveWithEmptyRequests = {
+// Verify that cross-context promise resolution works correctly when the
+// actor's incomingRequests list is empty. Before the fix, this would crash
+// the actor. After the fix, the actor survives and the continuation runs.
+export const actorSurvivesCrossContextResolveWithEmptyRequests = {
   async test(ctrl, env) {
     const id = env.ns.idFromName('test-actor');
     const stub = env.ns.get(id);
@@ -78,35 +70,21 @@ export const actorBreaksOnCrossContextResolveWithEmptyRequests = {
     // V8 detects the tag mismatch -> SetPromiseCrossContextResolveCallback
     // -> IoCrossContextExecutor -> scheduleAction() on the DO's DeleteQueue
     // -> fulfills crossThreadFulfiller -> startDeleteQueueSignalTask wakes
-    // -> calls context->run() -> getCurrentIncomingRequest() -> CRASH.
+    // -> calls context->run().
+    //
+    // With the fix, context->run() handles empty incomingRequests by using
+    // takeAsyncLockWithoutRequest and skipping request-scoped operations.
     strictEqual(typeof globalThis.actorResolver, 'function');
     globalThis.actorResolver('cross-context-value');
     globalThis.actorResolver = undefined;
 
-    // Step 4: Yield so the startDeleteQueueSignalTask processes the signal.
-    // The crash in context->run() triggers context->abort(), which breaks
-    // the actor.
+    // Step 4: Yield so the startDeleteQueueSignalTask processes the signal
+    // and the microtask queue drains in the DO's IoContext.
     await scheduler.wait(10);
 
-    // Step 5: The actor is now broken. Attempting another RPC call should
-    // fail. This proves the bug exists.
-    try {
-      await stub.getResult();
-      // If we get here, the bug is fixed (or was not triggered).
-      // For commit 1 (demonstrating the bug), this line should NOT execute.
-      throw new Error(
-        'Expected actor to be broken, but getResult() succeeded. ' +
-          'If the fix has been applied, update this test to expect success.'
-      );
-    } catch (e) {
-      // The actor broke due to the IoContext abort from the crash in
-      // startDeleteQueueSignalTask. The exact error message may vary,
-      // but it should indicate the actor is broken / internal error.
-      // We just verify the call failed and it's not our own throw.
-      if (e.message?.startsWith('Expected actor to be broken')) {
-        throw e;
-      }
-      // Good — the actor is broken as expected. The bug is reproduced.
-    }
+    // Step 5: The actor is alive and the cross-context promise continuation
+    // ran correctly. Verify the result.
+    const result = await stub.getResult();
+    strictEqual(result, 'cross-context-value');
   },
 };
