@@ -17,6 +17,35 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
       running(running) {}
 
+void DirectorySnapshot::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  serializer.writeLengthDelimited(id);
+  serializer.writeRawUint64(size);
+  serializer.writeLengthDelimited(dir);
+
+  KJ_IF_SOME(n, name) {
+    serializer.writeRawUint32(1);
+    serializer.writeLengthDelimited(n);
+  } else {
+    serializer.writeRawUint32(0);
+  }
+}
+
+jsg::Ref<DirectorySnapshot> DirectorySnapshot::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  KJ_REQUIRE(tag == rpc::SerializationTag::DIRECTORY_SNAPSHOT);
+
+  auto id = deserializer.readLengthDelimitedString();
+  auto size = deserializer.readRawUint64();
+  auto dir = deserializer.readLengthDelimitedString();
+
+  kj::Maybe<kj::String> name = kj::none;
+  if (deserializer.readRawUint32() != 0) {
+    name = deserializer.readLengthDelimitedString();
+  }
+
+  return js.alloc<DirectorySnapshot>(kj::mv(id), size, kj::mv(dir), kj::mv(name));
+}
+
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
@@ -56,11 +85,62 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
+  if (!flags.getWorkerdExperimental()) {
+    JSG_REQUIRE(options.snapshots == kj::none, Error,
+        "Container snapshot restore requires the 'experimental' compatibility flag.");
+  } else {
+    KJ_IF_SOME(snapshots, options.snapshots) {
+      auto list = req.initSnapshots(snapshots.size());
+      for (auto i: kj::indices(snapshots)) {
+        auto snapshot = list[i];
+        snapshot.setId(snapshots[i]->getId());
+        snapshot.setSize(snapshots[i]->getSizeRaw());
+        snapshot.setDir(snapshots[i]->getDir());
+        KJ_IF_SOME(name, snapshots[i]->getNameForRpc()) {
+          snapshot.setName(name);
+        }
+      }
+    }
+  }
+
   req.setCompatibilityFlags(flags);
 
   IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
+}
+
+jsg::Promise<jsg::Ref<DirectorySnapshot>> Container::snapshotDirectory(
+    jsg::Lock& js, SnapshotDirectoryOptions options) {
+  auto flags = FeatureFlags::get(js);
+  JSG_REQUIRE(flags.getWorkerdExperimental(), Error,
+      "snapshotDirectory() requires the 'experimental' compatibility flag.");
+  JSG_REQUIRE(
+      running, Error, "snapshotDirectory() cannot be called on a container that is not running.");
+  JSG_REQUIRE(options.dir.size() > 0, TypeError,
+      "snapshotDirectory() requires a non-empty directory path.");
+
+  auto req = rpcClient->snapshotDirectoryRequest();
+  req.setDir(options.dir);
+
+  KJ_IF_SOME(name, options.name) {
+    req.setName(name);
+  }
+
+  return IoContext::current()
+      .awaitIo(js, req.send())
+      .then(
+          js, [](jsg::Lock& js, capnp::Response<rpc::Container::SnapshotDirectoryResults> results) {
+    auto snapshot = results.getSnapshot();
+    kj::Maybe<kj::String> name = kj::none;
+    auto snapshotName = snapshot.getName();
+    if (snapshotName.size() > 0) {
+      name = kj::str(snapshotName);
+    }
+
+    return js.alloc<DirectorySnapshot>(
+        kj::str(snapshot.getId()), snapshot.getSize(), kj::str(snapshot.getDir()), kj::mv(name));
+  });
 }
 
 jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {

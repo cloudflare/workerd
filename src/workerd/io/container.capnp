@@ -44,6 +44,33 @@ interface Container @0x9aaceefc06523bca {
 
     compatibilityFlags @4 :CompatibilityFlags;
     # Compatibility flags for this worker
+
+    snapshots @5 :List(DirectorySnapshot);
+    # Directory snapshots to restore before the container starts.
+  }
+
+  struct DirectorySnapshot {
+    # Opaque handle to a directory snapshot.
+
+    id @0 :Text;
+    # Unique identifier of the snapshot.
+
+    size @1 :UInt64;
+    # Snapshot size, in bytes.
+
+    dir @2 :Text;
+    # Path of the snapshotted directory.
+
+    name @3 :Text;
+    # Optional human-friendly name. Empty string means not set.
+  }
+
+  struct SnapshotDirectoryParams {
+    dir @0 :Text;
+    # Directory path to snapshot.
+
+    name @1 :Text;
+    # Optional human-friendly name. Empty string means not set.
   }
 
   monitor @2 () -> (exitCode: Int32);
@@ -125,4 +152,7 @@ interface Container @0x9aaceefc06523bca {
 
 
   # TODO: setEgressTcp
+
+  snapshotDirectory @9 SnapshotDirectoryParams -> (snapshot :DirectorySnapshot);
+  # Creates a snapshot for a directory in the running container.
 }

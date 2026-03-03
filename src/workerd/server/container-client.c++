@@ -1101,6 +1101,10 @@ kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutCont
   co_return;
 }
 
+kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext context) {
+  KJ_UNIMPLEMENTED("snapshotDirectory not implemented for Docker containers");
+}
+
 kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
   co_await mutationQueue.addBranch();
 

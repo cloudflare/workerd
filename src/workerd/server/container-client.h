@@ -75,6 +75,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
   kj::Promise<void> setEgressHttp(SetEgressHttpContext context) override;
+  kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
