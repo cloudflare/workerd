@@ -113,10 +113,10 @@ archive_override(
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging.patch",
     ],
-    sha256 = "feae4e379ef39e12f6f18b1e62e132ed411b5369750a23e18cae76cb42ef7192",
-    strip_prefix = "google-perfetto-095212b",
+    sha256 = "90aea67f5ac88ae7bb56bc24574beb5cd924a5ae9d861826a6fd151c13b4767b",
+    strip_prefix = "google-perfetto-b34c975",
     type = "tgz",
-    url = "https://api.github.com/repos/google/perfetto/tarball/v53.0",
+    url = "https://api.github.com/repos/google/perfetto/tarball/v54.0",
 )
 
 # simdutf
