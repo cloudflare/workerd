@@ -785,3 +785,8 @@ wd_test(
     src = "pipe-write-special-buffer-test.wd-test",
     data = ["pipe-write-special-buffer-test.js"],
 )
+
+wd_test(
+    src = "htmlrewriter-transform-cancel-test.wd-test",
+    data = ["htmlrewriter-transform-cancel-test.js"],
+)

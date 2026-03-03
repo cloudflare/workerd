@@ -1006,6 +1006,113 @@ export const sameToken = {
   },
 };
 
+// Regression test for VULN-122672: HTMLRewriter AttributesIterator UAF.
+// When element attributes are modified during iteration (adding new attributes
+// that cause the underlying Vec to reallocate), the iterator's stale pointers
+// would read from freed memory. The fix invalidates all live iterators when
+// setAttribute() or removeAttribute() is called.
+export const attributesIteratorInvalidatedOnSetAttribute = {
+  async test() {
+    const html = `<div a="1" b="2" c="3">test</div>`;
+
+    const rewriter = new HTMLRewriter().on('div', {
+      element(el) {
+        const iter = el.attributes[Symbol.iterator]();
+
+        // Read first attribute - valid.
+        const first = iter.next();
+        strictEqual(first.done, false);
+
+        // Mutate attributes — this must invalidate the iterator.
+        el.setAttribute('newattr', 'value');
+
+        // Subsequent next() must throw, not read freed memory.
+        throws(() => iter.next(), {
+          message:
+            'The attributes of this element have been modified during iteration. ' +
+            'You must create a new iterator after modifying attributes.',
+        });
+      },
+    });
+
+    await rewriter.transform(new Response(html)).text();
+  },
+};
+
+export const attributesIteratorInvalidatedOnRemoveAttribute = {
+  async test() {
+    const html = `<div a="1" b="2" c="3">test</div>`;
+
+    const rewriter = new HTMLRewriter().on('div', {
+      element(el) {
+        const iter = el.attributes[Symbol.iterator]();
+        iter.next(); // consume first
+
+        // removeAttribute also must invalidate the iterator.
+        el.removeAttribute('b');
+
+        throws(() => iter.next(), {
+          message:
+            'The attributes of this element have been modified during iteration. ' +
+            'You must create a new iterator after modifying attributes.',
+        });
+      },
+    });
+
+    await rewriter.transform(new Response(html)).text();
+  },
+};
+
+// After mutation, creating a fresh iterator must work normally.
+export const attributesIteratorFreshAfterMutation = {
+  async test() {
+    const html = `<div a="1">test</div>`;
+    let attrs = [];
+
+    const rewriter = new HTMLRewriter().on('div', {
+      element(el) {
+        el.setAttribute('b', '2');
+
+        // A new iterator created after mutation should work fine.
+        for (const [name, value] of el.attributes) {
+          attrs.push([name, value]);
+        }
+      },
+    });
+
+    await rewriter.transform(new Response(html)).text();
+
+    // Should see both original and newly-set attribute.
+    strictEqual(attrs.length, 2);
+    deepStrictEqual(attrs[0], ['a', '1']);
+    deepStrictEqual(attrs[1], ['b', '2']);
+  },
+};
+
+// Iterating without mutation must still work as before.
+export const attributesIteratorNormalIteration = {
+  async test() {
+    const html = `<div x="1" y="2" z="3">test</div>`;
+    let attrs = [];
+
+    const rewriter = new HTMLRewriter().on('div', {
+      element(el) {
+        for (const [name, value] of el.attributes) {
+          attrs.push([name, value]);
+        }
+      },
+    });
+
+    await rewriter.transform(new Response(html)).text();
+
+    deepStrictEqual(attrs, [
+      ['x', '1'],
+      ['y', '2'],
+      ['z', '3'],
+    ]);
+  },
+};
+
 export const svgNamespace = {
   async test() {
     const response = new Response(`

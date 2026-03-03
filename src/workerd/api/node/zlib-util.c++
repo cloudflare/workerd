@@ -486,6 +486,16 @@ void ZlibUtil::CompressionStream<CompressionContext>::writeStream(
       writing = false;
       updateWriteResult();
     }
+    // Clear buffer pointers from the compression context after each write.
+    // The input/output kj::Array parameters are backed by V8 BackingStores
+    // whose lifetimes are tied to their JavaScript ArrayBuffer objects. Once
+    // this method returns, the kj::Array destructor releases its shared_ptr
+    // to the BackingStore. If the JS buffer subsequently becomes unreachable
+    // and is garbage-collected, the BackingStore is freed — leaving any
+    // retained pointers (e.g. z_stream.next_out) dangling. A later call to
+    // deflateParams() (via params()) could then write to freed memory.
+    // Clearing the pointers here prevents that.
+    context()->clearBuffers();
     return;
   }
 
@@ -497,8 +507,13 @@ void ZlibUtil::CompressionStream<CompressionContext>::writeStream(
   // Node.js calls AfterThreadPoolWork().
   // Ref: https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/src/node_zlib.cc#L402
   writing = false;
-  if (!checkError(js)) return;
+  if (!checkError(js)) {
+    context()->clearBuffers();
+    return;
+  }
   updateWriteResult();
+  // Clear buffer pointers — see comment in the sync path above for rationale.
+  context()->clearBuffers();
   KJ_IF_SOME(cb, writeCallback) {
     cb(js);
   }

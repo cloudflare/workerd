@@ -2789,3 +2789,71 @@ export const zlibStreamTest = {
     );
   },
 };
+
+// Regression test: after writeSync() returns, z_stream must not retain stale
+// buffer pointers.  When handle.params() is called directly (bypassing the
+// TypeScript wrapper's flush-before-params protection), deflateParams() may
+// internally call deflate(Z_BLOCK) to flush pending data.  Before the fix,
+// z_stream.next_out still pointed into the kj::Array that backed the output
+// buffer — memory whose BackingStore ref had already been released.  If the
+// JS ArrayBuffer was then garbage-collected, that write went to freed memory.
+// The fix clears z_stream buffer pointers after every write, so
+// deflateParams() sees avail_out=0 and returns Z_BUF_ERROR (non-fatal)
+// instead of writing through a dangling pointer.
+export const zlibParamsAfterWriteNoStalePointers = {
+  test() {
+    // Configuration that leaves data pending in zlib's internal buffers:
+    // level 0 (stored blocks) + minimum memory/window + Z_NO_FLUSH.
+    const deflate = zlib.createDeflateRaw({
+      level: 0,
+      memLevel: 1,
+      windowBits: 9,
+    });
+
+    const handle = deflate._handle;
+    assert.ok(handle, 'native handle should be accessible');
+
+    const input = Buffer.from('A'.repeat(64));
+    const output1 = Buffer.alloc(1024);
+
+    // Step 1: writeSync with Z_NO_FLUSH — data is buffered internally.
+    handle.writeSync(0, input, 0, input.length, output1, 0, output1.length);
+
+    // Capture how many bytes were produced so far.
+    const state = deflate._writeState;
+    const bytesOut1 = output1.length - state[0];
+
+    // Step 2: params() directly on native handle — no preceding flush.
+    // Before the fix this could write to a stale next_out pointer.
+    // After the fix this safely returns Z_BUF_ERROR (handled as non-fatal).
+    handle.params(
+      zlib.constants.Z_DEFAULT_COMPRESSION,
+      zlib.constants.Z_DEFAULT_STRATEGY
+    );
+
+    // Step 3: finish the stream — must still produce a valid deflate stream.
+    const output2 = Buffer.alloc(1024);
+    handle.writeSync(
+      zlib.constants.Z_FINISH,
+      Buffer.alloc(0),
+      0,
+      0,
+      output2,
+      0,
+      output2.length
+    );
+    const bytesOut2 = output2.length - state[0];
+
+    // Step 4: concatenate both output chunks and decompress.
+    const compressed = Buffer.concat([
+      output1.slice(0, bytesOut1),
+      output2.slice(0, bytesOut2),
+    ]);
+    const decompressed = zlib.inflateRawSync(compressed, { windowBits: 9 });
+    assert.strictEqual(
+      decompressed.toString(),
+      input.toString(),
+      'round-trip through write/params/finish must preserve data'
+    );
+  },
+};

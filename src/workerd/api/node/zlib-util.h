@@ -107,6 +107,21 @@ class ZlibContext final {
   void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
   void setOutputBuffer(kj::ArrayPtr<kj::byte> output);
 
+  // Clear all buffer pointers from z_stream to prevent stale pointer access.
+  // Must be called after each write operation completes and results have been
+  // captured, so that subsequent operations (e.g. deflateParams) cannot use
+  // dangling pointers into freed backing stores.
+  //
+  // Note: zlib's deflate() rejects next_out == NULL with Z_STREAM_ERROR even
+  // when avail_out == 0, so we point next_out at a valid dummy byte instead.
+  // With avail_out == 0, no data will actually be written to it.
+  void clearBuffers() {
+    stream.next_in = nullptr;
+    stream.avail_in = 0;
+    stream.next_out = &dummyByte;
+    stream.avail_out = 0;
+  }
+
   int getFlush() const {
     return flush;
   };
@@ -202,6 +217,9 @@ class ZlibContext final {
   int err = Z_OK;
   unsigned int gzip_id_bytes_read = 0;
   z_stream stream{};
+  // Dummy byte target for clearBuffers(). zlib's deflate() rejects
+  // next_out == NULL even when avail_out == 0, so we need a valid address.
+  Bytef dummyByte = 0;
 };
 
 using CompressionStreamErrorHandler = jsg::Function<void(int, kj::StringPtr, kj::StringPtr)>;
@@ -218,6 +236,13 @@ class BrotliContext {
   void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const;
   void setMode(ZlibMode _mode) {
     mode = _mode;
+  }
+
+  void clearBuffers() {
+    nextIn = nullptr;
+    nextOut = nullptr;
+    availIn = 0;
+    availOut = 0;
   }
 
   struct Options {
@@ -300,6 +325,11 @@ class ZstdContext {
   void getAfterWriteResult(uint32_t* availIn, uint32_t* availOut) const;
   void setMode(ZlibMode _mode) {
     mode = _mode;
+  }
+
+  void clearBuffers() {
+    input_ = {nullptr, 0, 0};
+    output_ = {nullptr, 0, 0};
   }
 
   struct Options {
