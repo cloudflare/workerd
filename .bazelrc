@@ -21,6 +21,10 @@ common --incompatible_autoload_externally="+ProtoInfo,+cc_binary,+cc_import,+cc_
 # TODO(cleanup): Bazel 9 sets this by default, which breaks the macOS-cross build. Fix and re-enable.
 common --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=False
 
+# Enable proto toolchain resolution to use prebuilt protoc (starting with protobuf v34.0). Will be
+# the default starting with Bazel 10.
+common --incompatible_enable_proto_toolchain_resolution
+
 # bazel7 enables Build without the Bytes (BwoB) by default. This significantly speeds up builds
 # using the remote cache since less data needs to be fetched.
 # Note that we use remote_download_minimal for test builds, which avoids fetching build outputs
