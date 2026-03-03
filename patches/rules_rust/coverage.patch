@@ -1,0 +1,134 @@
+diff --git a/util/collect_coverage/collect_coverage.rs b/util/collect_coverage/collect_coverage.rs
+index 7aba667885..1208cc7e5e 100644
+--- util/collect_coverage/collect_coverage.rs
++++ util/collect_coverage/collect_coverage.rs
+@@ -46,70 +46,88 @@ fn find_metadata_file(execroot: &Path, runfiles_dir: &Path, path: &str) -> PathB
+     runfiles_dir.join(path)
+ }
+ 
+-fn find_test_binary(execroot: &Path, runfiles_dir: &Path) -> PathBuf {
+-    let test_binary = runfiles_dir
+-        .join(env::var("TEST_WORKSPACE").unwrap())
+-        .join(env::var("TEST_BINARY").unwrap());
+-
+-    if !test_binary.exists() {
+-        let configuration = runfiles_dir
+-            .strip_prefix(execroot)
+-            .expect("RUNFILES_DIR should be relative to ROOT")
+-            .components()
+-            .enumerate()
+-            .filter_map(|(i, part)| {
+-                // Keep only `bazel-out/<configuration>/bin`
+-                if i < 3 {
+-                    Some(PathBuf::from(part.as_os_str()))
+-                } else {
+-                    None
+-                }
+-            })
+-            .fold(PathBuf::new(), |mut path, part| {
+-                path.push(part);
+-                path
+-            });
++/// Derive the bindir (e.g., "bazel-out/k8-fastbuild/bin") from a bazel output path.
++/// Works with paths like "bazel-out/k8-fastbuild/testlogs/..." or runfiles paths.
++fn get_bindir(path: &Path, execroot: &Path) -> Option<PathBuf> {
++    let relative = path.strip_prefix(execroot).unwrap_or(path);
++    let components: Vec<_> = relative.components().take(2).collect();
++    if components.len() >= 2 {
++        let base: PathBuf = components.iter().collect();
++        Some(base.join("bin"))
++    } else {
++        None
++    }
++}
+ 
+-        let test_binary = execroot
+-            .join(configuration)
+-            .join(env::var("TEST_BINARY").unwrap());
++fn find_test_binary(execroot: &Path, runfiles_dir: Option<&Path>, coverage_dir: &Path) -> PathBuf {
++    let test_binary_env = env::var("TEST_BINARY").unwrap();
+ 
+-        debug_log!(
+-            "TEST_BINARY is not found in runfiles. Falling back to: {}",
+-            test_binary.display()
+-        );
++    // Try runfiles first if available
++    if let Some(runfiles) = runfiles_dir {
++        let test_binary = runfiles
++            .join(env::var("TEST_WORKSPACE").unwrap_or_default())
++            .join(&test_binary_env);
++        if test_binary.exists() {
++            return test_binary;
++        }
++        // Try deriving bindir from runfiles path
++        if let Some(bindir) = get_bindir(runfiles, execroot) {
++            let test_binary = execroot.join(bindir).join(&test_binary_env);
++            if test_binary.exists() {
++                return test_binary;
++            }
++        }
++    }
+ 
+-        test_binary
+-    } else {
+-        test_binary
++    // Derive bindir from coverage_dir
++    if let Some(bindir) = get_bindir(coverage_dir, execroot) {
++        let test_binary = execroot.join(&bindir).join(&test_binary_env);
++        debug_log!("Using test binary: {}", test_binary.display());
++        return test_binary;
+     }
++
++    execroot.join(&test_binary_env)
+ }
+ 
+ fn main() {
+     let coverage_dir = PathBuf::from(env::var("COVERAGE_DIR").unwrap());
+     let execroot = PathBuf::from(env::var("ROOT").unwrap());
+-    let mut runfiles_dir = PathBuf::from(env::var("RUNFILES_DIR").unwrap());
+ 
+-    if !runfiles_dir.is_absolute() {
+-        runfiles_dir = execroot.join(runfiles_dir);
+-    }
++    // RUNFILES_DIR may not be set in newer Bazel versions during coverage post-processing.
++    // Try BAZEL_COVERAGE_INTERNAL_RUNFILES_DIR as fallback.
++    let runfiles_dir = env::var("RUNFILES_DIR")
++        .ok()
++        .filter(|s| !s.is_empty())
++        .or_else(|| {
++            env::var("BAZEL_COVERAGE_INTERNAL_RUNFILES_DIR")
++                .ok()
++                .filter(|s| !s.is_empty())
++        })
++        .map(|dir| {
++            let path = PathBuf::from(dir);
++            if path.is_absolute() {
++                path
++            } else {
++                execroot.join(path)
++            }
++        });
+ 
+     debug_log!("ROOT: {}", execroot.display());
+-    debug_log!("RUNFILES_DIR: {}", runfiles_dir.display());
++    debug_log!("RUNFILES_DIR: {:?}", runfiles_dir);
+ 
+     let coverage_output_file = coverage_dir.join("coverage.dat");
+     let profdata_file = coverage_dir.join("coverage.profdata");
+     let llvm_cov = find_metadata_file(
+         &execroot,
+-        &runfiles_dir,
++        runfiles_dir.as_deref().unwrap_or(&execroot),
+         &env::var("RUST_LLVM_COV").unwrap(),
+     );
+     let llvm_profdata = find_metadata_file(
+         &execroot,
+-        &runfiles_dir,
++        runfiles_dir.as_deref().unwrap_or(&execroot),
+         &env::var("RUST_LLVM_PROFDATA").unwrap(),
+     );
+-    let test_binary = find_test_binary(&execroot, &runfiles_dir);
++    let test_binary = find_test_binary(&execroot, runfiles_dir.as_deref(), &coverage_dir);
+     let profraw_files: Vec<PathBuf> = fs::read_dir(coverage_dir)
+         .unwrap()
+         .flatten()
