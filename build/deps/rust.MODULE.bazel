@@ -3,26 +3,31 @@ RUST_STABLE_VERSION = "1.91.0"  # LLVM 21
 RUST_NIGHTLY_VERSION = "nightly/2025-10-30"
 
 RUST_TARGET_TRIPLES = [
+    # Add support for macOS cross-compilation
     "x86_64-apple-darwin",
+    # Add support for macOS rosetta
+    "aarch64-unknown-linux-gnu",
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
     "x86_64-pc-windows-msvc",
 ]
 
 # rules_rust
-bazel_dep(name = "rules_rs", version = "0.0.40")
+# bazel_dep(name = "rules_rust", version = "0.68.1")
+bazel_dep(name = "rules_rust", version = "0.69.0")
 
-rules_rust = use_extension("@rules_rs//rs/experimental:rules_rust.bzl", "rules_rust")
-rules_rust.patch(
-    # Under Bazel 9, Rust coverage is broken when using experimental_split_coverage_postprocessing.
-    # TODO(cleanup): https://github.com/bazelbuild/rules_rust/pull/3812 should fix this, we're using
-    # that commit for now. Switch back to regular release once resolved.
-    patches = ["//:patches/rules_rust/coverage.patch"],
-)
-use_repo(rules_rust, "rules_rust")
+# Under Bazel 9, Rust coverage is broken when using experimental_split_coverage_postprocessing.
+# TODO(cleanup): https://github.com/bazelbuild/rules_rust/pull/3812 should fix this, we're using
+# that commit for now. Switch back to regular release once resolved.
+# archive_override(
+#    module_name = "rules_rust",
+#    integrity = "sha256-dtn87CNPspDl5xEfAGEl0eQ4HBf07vpxIdMNPRHqMqM=",
+#    strip_prefix = "bazelbuild-rules_rust-cb9d412",
+#    type = "tgz",
+#    url = "https://github.com/bazelbuild/rules_rust/tarball/cb9d412afdb95578bd533b60483eecb373119c36",
+#)
 
-rust = use_extension("@rules_rs//rs/experimental:rules_rust_reexported_extensions.bzl", "rust")
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     allocator_library = "@rules_rust//ffi/rs:empty",
     edition = "2024",
@@ -64,23 +69,22 @@ inject_repo(
     **{"crates.io": "crates_vendor"}
 )
 
-crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 crate.annotation(
-    additive_build_file_content = """exports_files(["include/lol_html.h"])""",
     crate = "lol_html_c_api",
-    strip_prefix = "c-api",
+    extra_aliased_targets = {"lol_html_c_api_include_lol_html_h": "include/lol_html.h"},
 )
 crate.from_cargo(
-    # TODO(zbarsky): This name is a bit misleading now that we don't vendor.
-    # We can clean it up as a followup.
+    # TODO(cleanup): This name is a bit misleading now that we don't vendor. We can clean it up as a
+    # followup.
     name = "crates_vendor",
-    cargo_lock = "//deps/rust:Cargo.lock",
-    cargo_toml = "//deps/rust:Cargo.toml",
-    platform_triples = RUST_TARGET_TRIPLES,
+    cargo_lockfile = "//deps/rust:Cargo.lock",
+    manifests = ["//deps/rust:Cargo.toml"],
+    strip_internal_dependencies_from_cargo_lockfile = True,
+    # cargo_config = "//deps/rust:Cargo.toml",
+    supported_platform_triples = RUST_TARGET_TRIPLES,
 )
 use_repo(
     crate,
     "crates_vendor",
-    # Needed to retrieve lol-html header
-    "crates_vendor__lol_html_c_api-1.3.1",
 )

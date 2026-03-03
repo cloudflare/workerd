@@ -20,6 +20,7 @@ cc = "1"
 clang-ast = "0"
 clap = { version = "4", default-features = false, features = ["derive", "std", "help"] }
 codespan-reporting = "0"
+encoding_rs = "0"
 flate2 = "1"
 foldhash = "0"
 futures = "0"
