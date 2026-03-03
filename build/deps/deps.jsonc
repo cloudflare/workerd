@@ -103,7 +103,9 @@
       "patches": [
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging.patch"
-      ]
+      ],
+      // TODO(soon) the patch does not apply
+      "freeze_version": "v53.0"
     },
     {
       "name": "simdutf",
