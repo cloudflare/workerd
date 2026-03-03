@@ -153,7 +153,7 @@ void HibernationManagerImpl::acceptWebSocket(
   // give the task to the HibernationManager so it lives long.
   readLoopTasks.add(handleReadLoop(refToHibernatable).catch_([](kj::Exception&& e) {
     if (isInterestingException(e)) {
-      LOG_EXCEPTION("HibernationManagerImpl::handleReadLoop", e);
+      LOG_EXCEPTION_IF_INTERNAL("HibernationManagerImpl::handleReadLoop", e);
     }
   }));
 }
