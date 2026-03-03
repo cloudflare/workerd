@@ -619,6 +619,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
     JSG_NESTED_TYPE(DOMException);
     JSG_NESTED_TYPE(WorkerGlobalScope);
+    if (flags.getSpecCompliantPropertyAttributes()) {
+      // EventTarget is also declared on WorkerGlobalScope, but V8's
+      // FunctionTemplate::Inherit() does not propagate instance-template
+      // properties.  Redeclare here so it becomes an own property of globalThis.
+      JSG_NESTED_TYPE(EventTarget);
+    }
 
     JSG_METHOD(btoa);
     JSG_METHOD(atob);
