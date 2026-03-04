@@ -2312,8 +2312,8 @@ export const utilInspect = {
       ],
       [
         class // Random { // comments /* */ are part of the toString() result
-        /* eslint-disable-next-line space-before-blocks */
-        äß /**/
+          /* eslint-disable-next-line space-before-blocks */
+          äß /**/
           extends /*{*/ TypeError {},
         '[class äß extends TypeError]',
       ],
