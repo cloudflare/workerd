@@ -238,6 +238,18 @@ class JsArrayBuffer final: public JsBase<v8::ArrayBuffer, JsArrayBuffer> {
   using JsBase<v8::ArrayBuffer, JsArrayBuffer>::JsBase;
 };
 
+class JsSharedArrayBuffer final: public JsBase<v8::SharedArrayBuffer, JsSharedArrayBuffer> {
+ public:
+  kj::ArrayPtr<kj::byte> asArrayPtr() {
+    v8::Local<v8::SharedArrayBuffer> inner = *this;
+    void* data = inner->GetBackingStore()->Data();
+    size_t length = inner->ByteLength();
+    return kj::ArrayPtr(static_cast<kj::byte*>(data), length);
+  }
+
+  using JsBase<v8::SharedArrayBuffer, JsSharedArrayBuffer>::JsBase;
+};
+
 class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferView> {
  public:
   template <typename T = kj::byte>
