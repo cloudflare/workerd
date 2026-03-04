@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "14.5.201.6"
+VERSION = "14.6.202.11"
 
-INTEGRITY = "sha256-IL8zV72yG5TUbY8HHW9fPoaOYNLiY8FtRkPtkJ6SiLo="
+INTEGRITY = "sha256-Ju45oFJMyCWyT/r+d+MDsCbCeoDBisGaj4+KZYIIYSU="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -55,7 +55,9 @@ PATCHES = [
     "0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch",
     "0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch",
     "0032-Change-lamba-signature-to-get-around-windows-build-f.patch",
-    "0033-Return-false-from-on-interceptor-hasOwnProperty.patch",
+    "0033-Return-false-on-Object.hasOwnProperty-with-intercept.patch",
+    "0034-Remove-V8-MODULE.bazel-llvm-toolchain-and-libcxx-rep.patch",
+    "0035-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch",
 ]
 
 http_archive(

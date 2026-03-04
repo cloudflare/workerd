@@ -6,7 +6,7 @@ Subject: Update illegal invocation error message in v8
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/src/common/message-template.h b/src/common/message-template.h
-index 81839a3d8a5141b834185e52b3af800dca4477f6..3933b9ed7aadd5ed406d1be362990989e7aa0ab8 100644
+index 012ae2fecf5c5dc93cf41f5da4ee1f7ac80e710d..6119b7fc47dc614a60a2186f24066e4d447144a8 100644
 --- a/src/common/message-template.h
 +++ b/src/common/message-template.h
 @@ -125,7 +125,11 @@ namespace internal {
@@ -23,7 +23,7 @@ index 81839a3d8a5141b834185e52b3af800dca4477f6..3933b9ed7aadd5ed406d1be362990989
      "Immutable prototype object '%' cannot have their prototype set")          \
    T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \
 diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
-index 122f059b55bb8fe361a6f342b42f44772c71bf9a..4fbb6c95a18bb3a93e2703431666cf6212e602ec 100644
+index 8896acd700f829944ec4c85c51aaca0a3eb28ae9..753fcbe4e876003b7d4e688a25726cacaeab7560 100644
 --- a/test/cctest/test-api.cc
 +++ b/test/cctest/test-api.cc
 @@ -223,6 +223,17 @@ THREADED_TEST(IsolateOfContext) {

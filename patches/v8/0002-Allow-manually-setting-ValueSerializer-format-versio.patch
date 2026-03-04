@@ -23,10 +23,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index a1c286d2c073eb49b06fd58324f9525ea34fea33..4689a9057392f463d50f56db4b559e719b81dda1 100644
+index a66d8d8d975e21c1fc98912e6f21c44437616b3c..54837358abfd6c30ce3298dc809d2d4d355983a6 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3460,6 +3460,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3497,6 +3497,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  
@@ -38,10 +38,10 @@ index a1c286d2c073eb49b06fd58324f9525ea34fea33..4689a9057392f463d50f56db4b559e71
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 128331ee3fd500b3861c8e8d866ca40e5a621c02..6294e46b2a1d7b6b9e9fd57706d5cb4d72295f53 100644
+index def468a7392071fdfc5d2cfcfc9eba35f5e34a7a..4ef0c1e7fd227e8943261b64a97e6d6088928621 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
-@@ -297,6 +297,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
+@@ -299,6 +299,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
      : isolate_(isolate),
        delegate_(delegate),
        zone_(isolate->allocator(), ZONE_NAME),
@@ -49,7 +49,7 @@ index 128331ee3fd500b3861c8e8d866ca40e5a621c02..6294e46b2a1d7b6b9e9fd57706d5cb4d
        id_map_(isolate->heap(), ZoneAllocationPolicy(&zone_)),
        array_buffer_transfer_map_(isolate->heap(),
                                   ZoneAllocationPolicy(&zone_)) {
-@@ -316,9 +317,17 @@ ValueSerializer::~ValueSerializer() {
+@@ -318,9 +319,17 @@ ValueSerializer::~ValueSerializer() {
    }
  }
  
@@ -68,7 +68,7 @@ index 128331ee3fd500b3861c8e8d866ca40e5a621c02..6294e46b2a1d7b6b9e9fd57706d5cb4d
  }
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
-@@ -1102,10 +1111,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
+@@ -1122,10 +1131,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
    WriteVarint(static_cast<uint8_t>(tag));
    WriteVarint(static_cast<uint32_t>(view->byte_offset()));
    WriteVarint(static_cast<uint32_t>(view->byte_length()));
@@ -84,7 +84,7 @@ index 128331ee3fd500b3861c8e8d866ca40e5a621c02..6294e46b2a1d7b6b9e9fd57706d5cb4d
  }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 395f3848f0d0e62c1515a33ab07e7ef46e15d0e6..a463753df6ee29e79768829c7b7d5b3136bd997d 100644
+index b84dcc77d4060d13c389b4afed101847c85998da..06475f7b9c2a797066f5cfd32b232e5aa55f1f75 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -54,6 +54,11 @@ class ValueSerializer {

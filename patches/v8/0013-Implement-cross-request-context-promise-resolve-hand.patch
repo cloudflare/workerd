@@ -6,10 +6,10 @@ Subject: Implement cross-request context promise resolve handling
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 2045cc6152407fd1041760f4388622331d666fee..e88f934eed84a8edf4721f8057c4099e346f2352 100644
+index b9a3b2ed39123725ee88a35a635bdc2a086f67c0..160ba7f567481dd4873df212f262030a4fe1fdb8 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4480,8 +4480,8 @@ v8_header_set("v8_internal_headers") {
+@@ -4579,8 +4579,8 @@ v8_header_set("v8_internal_headers") {
      "src/tasks/operations-barrier.h",
      "src/tasks/task-utils.h",
      "src/torque/runtime-macro-shims.h",
@@ -63,10 +63,10 @@ index 2346df282c5ec8661924b008aefb2f1854e4d54a..33d21ee604b389966aefe3ba3b3eaa5e
    Isolate() = delete;
    ~Isolate() = delete;
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 0f48d812e952a2175ce47f329387bc723d1e9de4..c6fa53f23d5036a328867403dd56fed504189c9b 100644
+index 91d5a9f3655892641d7b9600485c4e19595c096b..9dfad16174088cb5b007ffd6441f3998371d4655 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -12555,7 +12555,13 @@ Isolate::PromiseContextScope::PromiseContextScope(Isolate* isolate,
+@@ -12630,7 +12630,13 @@ Isolate::PromiseContextScope::PromiseContextScope(Isolate* isolate,
    DCHECK(!isolate_->has_promise_context_tag());
    DCHECK(!tag.IsEmpty());
    i::Handle<i::Object> handle = Utils::OpenHandle(*tag);
@@ -167,7 +167,7 @@ index 5e0c1c62b6168e12af1ad067cd57604c17b17ce2..c07ac183137862444753a96a0a80149b
  Tagged<Object> Isolate::VerifyBuiltinsResult(Tagged<Object> result) {
    if (is_execution_terminating() && !v8_flags.strict_termination_checks) {
 diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
-index 5dcd7446bed4fb70d140a9f34cbcbf0a1f630ef3..027698b50113391688e3857ff425145623df38e7 100644
+index b05a58391123bafe9e7d47987fb170c1e73b09f8..ced0868674d5a1e5bf15ce252feee2dd58db50f7 100644
 --- a/src/execution/isolate.cc
 +++ b/src/execution/isolate.cc
 @@ -628,8 +628,6 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
@@ -179,7 +179,7 @@ index 5dcd7446bed4fb70d140a9f34cbcbf0a1f630ef3..027698b50113391688e3857ff4251456
  
    for (v8::TryCatch* block = thread->try_catch_handler_; block != nullptr;
         block = block->next_) {
-@@ -8212,5 +8210,20 @@ MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(
+@@ -8177,5 +8175,20 @@ MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(
    return v8::Utils::OpenHandle(*result);
  }
  
@@ -201,7 +201,7 @@ index 5dcd7446bed4fb70d140a9f34cbcbf0a1f630ef3..027698b50113391688e3857ff4251456
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/execution/isolate.h b/src/execution/isolate.h
-index d5fe657dea5df0237bee28935c230600ab26df4a..da27c91f03092381797b9c046f7f40b929efe0cc 100644
+index 61f25b58bc163d14e16e3ad905507d95aa6c97c1..542862b3f2798690209e278a978e30fbf02a0695 100644
 --- a/src/execution/isolate.h
 +++ b/src/execution/isolate.h
 @@ -45,6 +45,7 @@
@@ -212,7 +212,7 @@ index d5fe657dea5df0237bee28935c230600ab26df4a..da27c91f03092381797b9c046f7f40b9
  #include "src/objects/tagged.h"
  #include "src/runtime/runtime.h"
  #include "src/sandbox/code-pointer-table.h"
-@@ -2414,14 +2415,22 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2431,14 +2432,22 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
                                         v8::ExceptionContext callback_kind);
    void SetExceptionPropagationCallback(ExceptionPropagationCallback callback);
  
@@ -237,7 +237,7 @@ index d5fe657dea5df0237bee28935c230600ab26df4a..da27c91f03092381797b9c046f7f40b9
  
  #ifdef V8_ENABLE_WASM_SIMD256_REVEC
    void set_wasm_revec_verifier_for_test(
-@@ -2950,9 +2959,11 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2967,9 +2976,11 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
  
    bool is_frozen_ = false;
  
@@ -252,10 +252,10 @@ index d5fe657dea5df0237bee28935c230600ab26df4a..da27c91f03092381797b9c046f7f40b9
    class PromiseCrossContextCallbackScope;
  
 diff --git a/src/heap/factory.cc b/src/heap/factory.cc
-index d5df47f98082f74f5709a1b62c856f148540959f..9044c198a3e1692e783198a3f6473f9e3cd41204 100644
+index ada7bd7f163bd3f850f5f8f76206eedffc48a625..d49f486e9606fd92160d5fd6dcb3c1a5a5b8a39e 100644
 --- a/src/heap/factory.cc
 +++ b/src/heap/factory.cc
-@@ -4647,18 +4647,17 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
+@@ -4673,18 +4673,17 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
    Handle<JSPromise> promise =
        Cast<JSPromise>(NewJSObject(isolate()->promise_function()));
    DisallowGarbageCollection no_gc;
@@ -296,10 +296,10 @@ index 056b539ac19ecaa703c6e0bf37937c5bd4546301..8e0ebcf758598933fc98bdb817e92f32
    // ES section #sec-triggerpromisereactions
    static Handle<Object> TriggerPromiseReactions(Isolate* isolate,
 diff --git a/src/objects/objects.cc b/src/objects/objects.cc
-index 4d49c679374bb73db39db710bc8c17bda403cc55..1ac619fb87e8ec00f424019c863e06d014266535 100644
+index a5057ccd637eddfe748fe277074a4c3f1e7229c2..1ef334a6413cbfba59e2a5023ff2c1a25121f398 100644
 --- a/src/objects/objects.cc
 +++ b/src/objects/objects.cc
-@@ -4630,6 +4630,22 @@ Handle<Object> JSPromise::Fulfill(DirectHandle<JSPromise> promise,
+@@ -4640,6 +4640,22 @@ Handle<Object> JSPromise::Fulfill(DirectHandle<JSPromise> promise,
    // 6. Set promise.[[PromiseState]] to "fulfilled".
    promise->set_status(Promise::kFulfilled);
  
@@ -322,7 +322,7 @@ index 4d49c679374bb73db39db710bc8c17bda403cc55..1ac619fb87e8ec00f424019c863e06d0
    // 7. Return TriggerPromiseReactions(reactions, value).
    return TriggerPromiseReactions(isolate, reactions, value,
                                   PromiseReaction::kFulfill);
-@@ -4688,6 +4704,22 @@ Handle<Object> JSPromise::Reject(DirectHandle<JSPromise> promise,
+@@ -4698,6 +4714,22 @@ Handle<Object> JSPromise::Reject(DirectHandle<JSPromise> promise,
      isolate->ReportPromiseReject(promise, reason, kPromiseRejectWithNoHandler);
    }
  
@@ -345,7 +345,7 @@ index 4d49c679374bb73db39db710bc8c17bda403cc55..1ac619fb87e8ec00f424019c863e06d0
    // 8. Return TriggerPromiseReactions(reactions, reason).
    return TriggerPromiseReactions(isolate, reactions, reason,
                                   PromiseReaction::kReject);
-@@ -4796,6 +4828,14 @@ MaybeHandle<Object> JSPromise::Resolve(DirectHandle<JSPromise> promise,
+@@ -4806,6 +4838,14 @@ MaybeHandle<Object> JSPromise::Resolve(DirectHandle<JSPromise> promise,
  }
  
  // static
@@ -361,10 +361,10 @@ index 4d49c679374bb73db39db710bc8c17bda403cc55..1ac619fb87e8ec00f424019c863e06d0
      Isolate* isolate, DirectHandle<Object> reactions,
      DirectHandle<Object> argument, PromiseReaction::Type type) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 2c6ea89361bb9d4709505105abc637976b094dda..48690e7a75653535d6f38a265363d713b10fe0b6 100644
+index 40fe15b9175902d8772e95024739a7efef5918c2..03a67c4b13e11ee6d1013c974175b26ead0e5ef4 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
-@@ -613,11 +613,12 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
+@@ -615,11 +615,12 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
      }
      return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
    } else if (IsSpecialReceiverInstanceType(instance_type) &&
@@ -381,7 +381,7 @@ index 2c6ea89361bb9d4709505105abc637976b094dda..48690e7a75653535d6f38a265363d713
    }
  
 diff --git a/src/roots/roots.h b/src/roots/roots.h
-index 38d6fd82288e549c26f4f6c99562336a779c9329..53ea1a0a742618cc46bc2c14310bb564968f1c34 100644
+index 08e1426adad23342772eba4351be8fdc7aa1db89..7c9738259fe1e83373403e3bd0c91d0695fe3011 100644
 --- a/src/roots/roots.h
 +++ b/src/roots/roots.h
 @@ -418,7 +418,8 @@ class RootVisitor;
@@ -459,10 +459,10 @@ index 9730731cd42c0ea6ce0d96ec250a11fcc434ebf8..7cb9fe57f6afb76c450f3484a1198faa
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
-index ff2adcf6ea58398b21f16672b491f6860eee1ff3..1523d4155955e30c7cf8fab9754a031eb5597505 100644
+index 802970ee0c1546c2f0c649e9a05d08554357389d..ab4f5f85a2b9284e9e1577d06da13a817979dc05 100644
 --- a/src/runtime/runtime.h
 +++ b/src/runtime/runtime.h
-@@ -439,7 +439,8 @@ constexpr bool CanTriggerGC(T... properties) {
+@@ -447,7 +447,8 @@ constexpr bool CanTriggerGC(T... properties) {
    F(ConstructAggregateErrorHelper, 4, 1)                    \
    F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1) \
    F(PromiseContextInit, 1, 1)                               \
