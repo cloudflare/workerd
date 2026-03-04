@@ -112,7 +112,6 @@ class Blob: public jsg::Object {
     }
   }
 
-  class BlobInputStream;
   // this could just be "friend File;", but clang-cl wants to see the qualified name here.
   friend class ::workerd::api::File;
 };
