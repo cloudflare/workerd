@@ -6,7 +6,7 @@ Subject: Remove unneded -latomic linker flag
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index c041e4176b918dd33c7c25579f36dc8c63e2c8c0..b22b7f7520461db8520cfd754ed6082d94544b4a 100644
+index efc01f6bfc1cef24e8554fd710910a5044367cd5..60aa2bcf4dc983265a7b38aa6dcc104fbfda879d 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -212,7 +212,7 @@ def _default_args():

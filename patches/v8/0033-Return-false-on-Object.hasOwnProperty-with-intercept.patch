@@ -3,16 +3,12 @@ From: Dan Carney <dcarney@chromium.org>
 Date: Tue, 17 Feb 2026 08:45:16 +0000
 Subject: Return false on Object.hasOwnProperty with interceptors
 
----
- src/objects/js-objects.cc     | 3 +++
- src/runtime/runtime-object.cc | 3 +++
- 2 files changed, 6 insertions(+)
 
 diff --git a/src/objects/js-objects.cc b/src/objects/js-objects.cc
-index 11dd3a56844..b45357e51af 100644
+index 8e18b4fe6602dbdec9154c166d12e01b09cb0dd6..be5439d1f157ea4cdfc078c639a20ab93d4b16cf 100644
 --- a/src/objects/js-objects.cc
 +++ b/src/objects/js-objects.cc
-@@ -148,6 +148,9 @@ Maybe<bool> JSReceiver::HasOwnProperty(Isolate* isolate,
+@@ -157,6 +157,9 @@ Maybe<bool> JSReceiver::HasOwnProperty(Isolate* isolate,
    if (IsJSObject(*object)) {  // Shortcut.
      PropertyKey key(isolate, name);
      LookupIterator it(isolate, object, key, LookupIterator::OWN);
@@ -23,7 +19,7 @@ index 11dd3a56844..b45357e51af 100644
    }
  
 diff --git a/src/runtime/runtime-object.cc b/src/runtime/runtime-object.cc
-index 9ed26e2b9a3..8ad5b449138 100644
+index 2daf5a3390b2f732eac934c279b3a2ae594058e9..6d8151b813dc9c86e3d00b092f3e912ec1fb7ac9 100644
 --- a/src/runtime/runtime-object.cc
 +++ b/src/runtime/runtime-object.cc
 @@ -203,6 +203,9 @@ RUNTIME_FUNCTION(Runtime_ObjectHasOwnProperty) {
@@ -36,6 +32,3 @@ index 9ed26e2b9a3..8ad5b449138 100644
      Maybe<bool> maybe = JSReceiver::HasProperty(&it);
      if (maybe.IsNothing()) return ReadOnlyRoots(isolate).exception();
      DCHECK(!isolate->has_exception());
--- 
-2.51.2
-

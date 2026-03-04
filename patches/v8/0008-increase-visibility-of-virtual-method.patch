@@ -9,10 +9,10 @@ v8-platform-wrapper.h implementation.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-platform.h b/include/v8-platform.h
-index ee71def69585adb458c7806a4d3f3d72c6763a3e..223ff66b4f6ff40ddedc180bab7f44b141f6a731 100644
+index 3484e988d9fec1a132a435c63d873225ab07b0ec..99ccec9e23c5b860a890b2c52253edb3e2f6ea90 100644
 --- a/include/v8-platform.h
 +++ b/include/v8-platform.h
-@@ -1472,7 +1472,7 @@ class Platform {
+@@ -1516,7 +1516,7 @@ class Platform {
      return &default_observer;
    }
  
