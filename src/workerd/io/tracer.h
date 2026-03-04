@@ -192,12 +192,13 @@ class SpanSubmitter: public kj::Refcounted {
  public:
   // Called when a span is opened. Submitters may buffer this for later assembly or stream it
   // immediately.
-  virtual void submitSpanOpen(tracing::SpanId spanId,
+  virtual bool submitSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) = 0;
   // Called when a span is closed. Together with the open data, provides all span information.
-  virtual void submitSpanClose(tracing::SpanId spanId, kj::Date endTime, Span::TagMap&& tags) = 0;
+  virtual void submitSpanClose(
+      tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) = 0;
 
   virtual tracing::SpanId makeSpanId() = 0;
 };
@@ -226,6 +227,11 @@ class UserSpanObserver final: public SpanObserver {
   kj::Own<SpanSubmitter> submitter;
   tracing::SpanId spanId;
   tracing::SpanId parentSpanId;
+  // Ideally, the span observer wouldn't need to maintain startTime, but we still need it at present
+  // for timestamp adjustments.
+  kj::Date startTime = kj::UNIX_EPOCH;
+  // Allow the submitter to reject spans, causing them to not be reported.
+  bool wasAccepted = true;
 };
 
 }  // namespace workerd

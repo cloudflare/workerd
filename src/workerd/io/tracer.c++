@@ -527,11 +527,14 @@ void UserSpanObserver::onClose(
     kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) {
   // span logs are not supported in user tracing.
   (void)logs;
-  submitter->submitSpanClose(spanId, endTime, kj::mv(tags));
+  if (wasAccepted) {
+    submitter->submitSpanClose(spanId, startTime, endTime, kj::mv(tags));
+  }
 }
 
 void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime) {
-  submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+  this->startTime = startTime;
+  wasAccepted = submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
 }
 
 // Provide I/O time to the tracing system for user spans.
