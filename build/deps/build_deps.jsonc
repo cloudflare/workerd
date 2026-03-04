@@ -114,47 +114,6 @@
       "file_type": "executable",
       "downloaded_file_path": "downloaded.exe"
     },
-    // wasm-tools
-    {
-      "name": "wasm_tools_linux_x64",
-      "type": "github_release",
-      "owner": "bytecodealliance",
-      "repo": "wasm-tools",
-      "file_regex": "^wasm-tools-.*-x86_64-linux\\.tar\\.gz$",
-      "build_file_content": "exports_files([\"wasm-tools\"])"
-    },
-    {
-      "name": "wasm_tools_linux_arm64",
-      "type": "github_release",
-      "owner": "bytecodealliance",
-      "repo": "wasm-tools",
-      "file_regex": "^wasm-tools-.*-aarch64-linux\\.tar\\.gz$",
-      "build_file_content": "exports_files([\"wasm-tools\"])"
-    },
-    {
-      "name": "wasm_tools_macos_x64",
-      "type": "github_release",
-      "owner": "bytecodealliance",
-      "repo": "wasm-tools",
-      "file_regex": "^wasm-tools-.*-x86_64-macos\\.tar\\.gz$",
-      "build_file_content": "exports_files([\"wasm-tools\"])"
-    },
-    {
-      "name": "wasm_tools_macos_arm64",
-      "type": "github_release",
-      "owner": "bytecodealliance",
-      "repo": "wasm-tools",
-      "file_regex": "^wasm-tools-.*-aarch64-macos\\.tar\\.gz$",
-      "build_file_content": "exports_files([\"wasm-tools\"])"
-    },
-    {
-      "name": "wasm_tools_windows_x64",
-      "type": "github_release",
-      "owner": "bytecodealliance",
-      "repo": "wasm-tools",
-      "file_regex": "^wasm-tools-.*-x86_64-windows\\.zip$",
-      "build_file_content": "exports_files([\"wasm-tools.exe\"])"
-    },
     {
       "name": "clang_tidy_linux_amd64",
       "type": "github_release",
