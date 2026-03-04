@@ -1534,7 +1534,7 @@ SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
     // should be able to fold this virtual call and just get the timestamp directly.
     kj::Date time = startTime.orDefault([&]() { return obs->getTime(); });
     // Report spanOpen event for user tracing spans
-    obs->reportStart(operationName.clone(), time);
+    obs->onOpen(operationName.clone(), time);
     span.emplace(kj::mv(operationName), time);
     this->observer = kj::mv(obs);
   }
@@ -1557,7 +1557,7 @@ void SpanBuilder::end() {
       // TODO(performance): Fold this timer call if we are using I/O time, where we will look up
       // I/O time later.
       s.endTime = kj::systemPreciseCalendarClock().now();
-      o->report(s);
+      o->onClose(s.endTime, kj::mv(s.tags), kj::mv(s.logs));
       span = kj::none;
     }
   }
@@ -1565,6 +1565,9 @@ void SpanBuilder::end() {
 
 void SpanBuilder::setOperationName(kj::ConstString operationName) {
   KJ_IF_SOME(s, span) {
+    KJ_IF_SOME(o, observer) {
+      o->onUpdateName(operationName.clone());
+    }
     s.operationName = kj::mv(operationName);
   }
 }
