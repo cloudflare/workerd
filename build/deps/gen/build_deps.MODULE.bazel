@@ -122,21 +122,10 @@ bazel_dep(name = "rules_python", version = "1.8.5")
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.6.1")
 
-# wasm_tools_linux_x64
-http.archive(
-    name = "wasm_tools_linux_x64",
-    build_file_content = 'exports_files(["wasm-tools"])',
-    sha256 = "b171e20fd107e63e89ef6c936b5581597666a086af677d7818de92b7cdd5a86d",
-    strip_prefix = "wasm-tools-1.245.1-x86_64-linux",
-    type = "tgz",
-    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.245.1/wasm-tools-1.245.1-x86_64-linux.tar.gz",
-)
-use_repo(http, "wasm_tools_linux_x64")
-
 # wasm_tools_linux_arm64
 http.archive(
     name = "wasm_tools_linux_arm64",
-    build_file_content = 'exports_files(["wasm-tools"])',
+    build_file_content = "exports_files([\"wasm-tools\"])",
     sha256 = "e01ef74b8e7b4a819d91122fdd87084fb25a938e4bfa4179cc5524b961468c85",
     strip_prefix = "wasm-tools-1.245.1-aarch64-linux",
     type = "tgz",
@@ -144,21 +133,21 @@ http.archive(
 )
 use_repo(http, "wasm_tools_linux_arm64")
 
-# wasm_tools_macos_x64
+# wasm_tools_linux_x64
 http.archive(
-    name = "wasm_tools_macos_x64",
-    build_file_content = 'exports_files(["wasm-tools"])',
-    sha256 = "dd718c5c9c6044f97e2d6ee076e91f6e448c8a3b31d3c5397b16f03c461857b7",
-    strip_prefix = "wasm-tools-1.245.1-x86_64-macos",
+    name = "wasm_tools_linux_x64",
+    build_file_content = "exports_files([\"wasm-tools\"])",
+    sha256 = "b171e20fd107e63e89ef6c936b5581597666a086af677d7818de92b7cdd5a86d",
+    strip_prefix = "wasm-tools-1.245.1-x86_64-linux",
     type = "tgz",
-    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.245.1/wasm-tools-1.245.1-x86_64-macos.tar.gz",
+    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.245.1/wasm-tools-1.245.1-x86_64-linux.tar.gz",
 )
-use_repo(http, "wasm_tools_macos_x64")
+use_repo(http, "wasm_tools_linux_x64")
 
 # wasm_tools_macos_arm64
 http.archive(
     name = "wasm_tools_macos_arm64",
-    build_file_content = 'exports_files(["wasm-tools"])',
+    build_file_content = "exports_files([\"wasm-tools\"])",
     sha256 = "d69043b13f8ad4bc07c993e9630e795a7f2c2af488e5688d15044a1448dfa139",
     strip_prefix = "wasm-tools-1.245.1-aarch64-macos",
     type = "tgz",
@@ -166,12 +155,23 @@ http.archive(
 )
 use_repo(http, "wasm_tools_macos_arm64")
 
+# wasm_tools_macos_x64
+http.archive(
+    name = "wasm_tools_macos_x64",
+    build_file_content = "exports_files([\"wasm-tools\"])",
+    sha256 = "dd718c5c9c6044f97e2d6ee076e91f6e448c8a3b31d3c5397b16f03c461857b7",
+    strip_prefix = "wasm-tools-1.245.1-x86_64-macos",
+    type = "tgz",
+    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.245.1/wasm-tools-1.245.1-x86_64-macos.tar.gz",
+)
+use_repo(http, "wasm_tools_macos_x64")
+
 # wasm_tools_windows_x64
 http.archive(
     name = "wasm_tools_windows_x64",
-    build_file_content = 'exports_files(["wasm-tools.exe"])',
+    build_file_content = "exports_files([\"wasm-tools.exe\"])",
     sha256 = "3d7896b11b419b64a5f1cf81cef92a8da3371babc620eaf75fba4bca4670a75b",
-    strip_prefix = "wasm-tools-1.245.1-x86_64-windows",
+    strip_prefix = "wasm-tools-1.245.1-x86_64-windows/",
     type = "zip",
     url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.245.1/wasm-tools-1.245.1-x86_64-windows.zip",
 )
