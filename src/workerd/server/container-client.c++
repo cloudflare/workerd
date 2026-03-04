@@ -272,21 +272,28 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
 // Forwards requests to the worker binding via SubrequestChannel.
 class InnerEgressService final: public kj::HttpService {
  public:
-  InnerEgressService(IoChannelFactory::SubrequestChannel& channel, kj::StringPtr url)
-      : channel(channel),
-        url(kj::str(url)) {}
+  using ChannelLookup = kj::Function<kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>>()>;
+
+  InnerEgressService(ChannelLookup lookupChannel, kj::StringPtr destAddr)
+      : lookupChannel(kj::mv(lookupChannel)),
+        destAddr(kj::str(destAddr)) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr requestUri,
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
+    // Look up the channel on each request so we always use the latest mapping,
+    // even if it was replaced via interceptOutboundHttp while the tunnel is open.
+    auto channel =
+        KJ_REQUIRE_NONNULL(lookupChannel(), "egress mapping disappeared during active tunnel");
+
     IoChannelFactory::SubrequestMetadata metadata;
-    auto worker = channel.startRequest(kj::mv(metadata));
+    auto worker = channel->startRequest(kj::mv(metadata));
     auto urlForWorker = kj::str(requestUri);
     // Probably only a path, try to get it from Host:
     if (requestUri.startsWith("/")) {
-      auto baseUrl = kj::str(url);
+      auto baseUrl = kj::str("http://", destAddr);
       // Use Host: when possible
       KJ_IF_SOME(host, headers.get(kj::HttpHeaderId::HOST)) {
         baseUrl = kj::str("http://", host);
@@ -304,8 +311,8 @@ class InnerEgressService final: public kj::HttpService {
   }
 
  private:
-  IoChannelFactory::SubrequestChannel& channel;
-  kj::String url;
+  ChannelLookup lookupChannel;
+  kj::String destAddr;
 };
 
 // Outer HTTP service that handles CONNECT requests from the sidecar.
@@ -336,9 +343,16 @@ class EgressHttpService final: public kj::HttpService {
 
     auto mapping = containerClient.findEgressMapping(destAddr, /*defaultPort=*/80);
 
-    KJ_IF_SOME(channel, mapping) {
-      // Layer an HttpServer on top of the tunnel to handle HTTP parsing/serialization
-      auto innerService = kj::heap<InnerEgressService>(*channel, kj::str("http://", destAddr));
+    if (mapping != kj::none) {
+      // Layer an HttpServer on top of the tunnel to handle HTTP parsing/serialization.
+      // InnerEgressService looks up the mapping on each request so channel replacements
+      // via interceptOutboundHttp are picked up on existing tunnels.
+      auto innerService = kj::heap<InnerEgressService>(
+          [&client = containerClient, addr = kj::str(destAddr)]()
+              -> kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> {
+        return client.findEgressMapping(addr, /*defaultPort=*/80);
+      },
+          destAddr);
       auto innerServer =
           kj::heap<kj::HttpServer>(containerClient.timer, headerTable, *innerService);
 
@@ -928,7 +942,19 @@ kj::Promise<void> ContainerClient::listenTcp(ListenTcpContext context) {
   KJ_UNIMPLEMENTED("listenTcp not implemented for Docker containers - use port mapping instead");
 }
 
-kj::Maybe<workerd::IoChannelFactory::SubrequestChannel*> ContainerClient::findEgressMapping(
+void ContainerClient::upsertEgressMapping(EgressMapping mapping) {
+  auto cidrStr = mapping.cidr.toString();
+  for (auto& m: egressMappings) {
+    if (m.port == mapping.port && m.cidr.toString() == cidrStr) {
+      m.channel = kj::mv(mapping.channel);
+      return;
+    }
+  }
+
+  egressMappings.add(kj::mv(mapping));
+}
+
+kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient::findEgressMapping(
     kj::StringPtr destAddr, uint16_t defaultPort) {
   auto hostAndPort = stripPort(destAddr);
   uint16_t port = hostAndPort.port.orDefault(defaultPort);
@@ -938,7 +964,7 @@ kj::Maybe<workerd::IoChannelFactory::SubrequestChannel*> ContainerClient::findEg
       // CIDR matches, now check port.
       // If the port is 0, we match anything.
       if (mapping.port == 0 || mapping.port == port) {
-        return mapping.channel.get();
+        return kj::addRef(*mapping.channel);
       }
     }
   }
@@ -1001,7 +1027,7 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
   auto subrequestChannel = channelTokenHandler.decodeSubrequestChannelToken(
       workerd::IoChannelFactory::ChannelTokenUsage::RPC, tokenBytes);
 
-  egressMappings.add(EgressMapping{
+  upsertEgressMapping(EgressMapping{
     .cidr = kj::mv(cidr),
     .port = port,
     .channel = kj::mv(subrequestChannel),
