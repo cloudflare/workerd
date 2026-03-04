@@ -1700,9 +1700,8 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
   SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
-  void submitSpanClose(tracing::SpanId spanId, kj::Date endTime, Span::TagMap&& tags) override {
-    // TODOTODO
-    kj::Date startTime = kj::UNIX_EPOCH;
+  void submitSpanClose(
+      tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) override {
     tracing::SpanEndData spanEnd(spanId, endTime, kj::mv(tags));
     if (isPredictableModeForTest()) {
       startTime = spanEnd.endTime = kj::UNIX_EPOCH;
@@ -1711,7 +1710,7 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
     workerTracer->addSpanClose(kj::mv(spanEnd), startTime);
   }
 
-  void submitSpanOpen(tracing::SpanId spanId,
+  bool submitSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override {
@@ -1719,6 +1718,7 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
       startTime = kj::UNIX_EPOCH;
     }
     workerTracer->addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+    return true;
   }
 
   tracing::SpanId makeSpanId() override {
