@@ -78,12 +78,12 @@ jobs:
           - title: linux
             os-name: Linux
             image: ubuntu-22.04-16core
-            bazel-config: release_linux
+            bazel-config: release_linux_x64
             target-arch: X64
           - title: linux-arm64
             os-name: Linux
             image: ubuntu-22.04-arm-16core
-            bazel-config: release_linux
+            bazel-config: release_linux_arm64
             target-arch: ARM64
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
           # release binaries on the macos-15-xlarge runner.
@@ -97,7 +97,7 @@ jobs:
           - title: macOS-arm64
             os-name: macOS
             image: macos-15-xlarge
-            bazel-config: release_macos
+            bazel-config: release_macos_arm64
             target-arch: ARM64
           - title: windows
             os-name: Windows
@@ -259,7 +259,7 @@ jobs:
         uses: ./.github/actions/setup-runner
       - name: Build type generating Worker
         run: |
-          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types_worker
+          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux_x64 //types:types_worker
 
       - name: Modify package.json version
         run: node npm/scripts/bump-version.mjs npm/workerd/package.json
@@ -314,7 +314,7 @@ jobs:
         uses: ./.github/actions/setup-runner
       - name: build types
         run: |
-          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
+          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux_x64 //types
       - name: Build package
         run: node npm/scripts/build-types-package.mjs
         env:
