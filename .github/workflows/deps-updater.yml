@@ -2,8 +2,8 @@ name: Dependency updater
 
 on:
   schedule:
-    # Run at 00:00 UTC every Sunday
-    - cron: '0 0 * * 0'
+    # Run at 18:30 UTC every Monday
+    - cron: '30 18 * * 1'
   # Allow manual triggering for testing
   workflow_dispatch:
 
