@@ -308,6 +308,22 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   struct ConfigErrorReporter;
   struct DynamicErrorReporter;
   struct WorkerDef;
+
+  // Creates a new V8 Isolate, compiles a Script, and constructs a Worker. Handles inspector
+  // policy, inspector registration, module fallback setup (both old and new registry paths),
+  // and artifact bundler creation.
+  kj::Own<const Worker> createWorker(kj::StringPtr name,
+      const WorkerSource& source,
+      CompatibilityFlags::Reader featureFlags,
+      capnp::List<config::Extension>::Reader extensions,
+      kj::Maybe<kj::StringPtr> moduleFallback,
+      kj::FunctionParam<void(jsg::Lock& lock,
+          const Worker::Api& api,
+          v8::Local<v8::Object> target,
+          v8::Local<v8::Object> ctxExports)> compileBindings,
+      kj::Maybe<Worker::ValidationErrorReporter&> errorReporter = kj::none,
+      kj::Maybe<kj::Own<void>> vfsAttachment = kj::none);
+
   kj::Promise<kj::Own<WorkerService>> makeWorkerImpl(kj::StringPtr name,
       WorkerDef def,
       capnp::List<config::Extension>::Reader extensions,

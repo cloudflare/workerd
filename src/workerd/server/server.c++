@@ -4427,68 +4427,32 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
 }
 
-kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr name,
-    WorkerDef def,
+kj::Own<const Worker> Server::createWorker(kj::StringPtr name,
+    const WorkerSource& source,
+    CompatibilityFlags::Reader featureFlags,
     capnp::List<config::Extension>::Reader extensions,
-    ErrorReporter& errorReporter) {
-  // Load Python artifacts if this is a Python worker
-  co_await preloadPython(name, def, errorReporter);
-
-  auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
-  auto observer = kj::atomicRefcounted<IsolateObserver>();
-  auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
-
+    kj::Maybe<kj::StringPtr> moduleFallback,
+    kj::FunctionParam<void(jsg::Lock& lock,
+        const Worker::Api& api,
+        v8::Local<v8::Object> target,
+        v8::Local<v8::Object> ctxExports)> compileBindings,
+    kj::Maybe<Worker::ValidationErrorReporter&> errorReporter,
+    kj::Maybe<kj::Own<void>> vfsAttachment) {
   // Create the FsMap that will be used to map known file system
   // roots to configurable locations.
   // TODO(node-fs): This is set up to allow users to configure the "mount"
   // points for known roots but we currently do not expose that in the
   // config. So for now this just uses the defaults.
-  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
-
-  // TODO(soon): Either make python workers support the new module registry before
-  // NMR is defaulted on, or disable NMR by default when python workers are enabled.
-  // While NMR is experimental, we'll just throw an error if both are enabled.
-  if (def.featureFlags.getPythonWorkers()) {
-    KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(),
-        "Python workers do not currently support the new ModuleRegistry implementation. "
-        "Please disable the new ModuleRegistry feature flag to use Python workers.");
+  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(source));
+  KJ_IF_SOME(attachment, vfsAttachment) {
+    workerFs = workerFs.attach(kj::mv(attachment));
   }
 
-  bool usingNewModuleRegistry = def.featureFlags.getNewModuleRegistry();
-  kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
-  // TODO(soon): Python workers do not currently support the new module registry.
-  if (usingNewModuleRegistry) {
-    KJ_REQUIRE(experimental,
-        "The new ModuleRegistry implementation is an experimental feature. "
-        "You must run workerd with `--experimental` to use this feature.");
-
-    // We use the same path for modules that the virtual file system uses.
-    // For instance, if the user specifies a bundle path of "/foo/bar" and
-    // there is a module in the bundle at "/foo/bar/baz.js", then the module's
-    // import specifier url will be "file:///foo/bar/baz.js".
-    const jsg::Url& bundleBase = workerFs->getBundleRoot();
-
-    // In workerd the module registry is always associated with just a single
-    // worker instance, so we initialize it here. In production, however, a
-    // single instance may be shared across multiple replicas.
-    kj::Maybe<kj::String> maybeFallbackService;
-    KJ_IF_SOME(moduleFallback, def.moduleFallback) {
-      maybeFallbackService = kj::str(moduleFallback);
-    }
-
-    using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-    auto isPythonWorker = def.featureFlags.getPythonWorkers();
-    auto artifactBundler = isPythonWorker
-        ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
-        : ArtifactBundler::makeDisabledBundler();
-
-    newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(*jsgobserver,
-        def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags, pythonConfig,
-        bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler));
-  }
-
+  auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
+  auto observer = kj::atomicRefcounted<IsolateObserver>();
+  auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
   auto isolateGroup = v8::IsolateGroup::GetDefault();
-  auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
+  auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags, extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
       pythonConfig);
 
@@ -4498,8 +4462,9 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
   Worker::LoggingOptions isolateLoggingOptions = loggingOptions;
+  bool usingNewModuleRegistry = featureFlags.getNewModuleRegistry();
   isolateLoggingOptions.consoleMode =
-      def.source.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
+      source.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
       ? Worker::ConsoleMode::INSPECTOR_ONLY
       : loggingOptions.consoleMode;
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
@@ -4511,17 +4476,36 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     isolateRegistrar->registerIsolate(name, isolate.get());
   }
 
-  if (!usingNewModuleRegistry) {
-    KJ_IF_SOME(moduleFallback, def.moduleFallback) {
-      KJ_REQUIRE(experimental,
-          "The module fallback service is an experimental feature. "
-          "You must run workerd with `--experimental` to use the module fallback service.");
-      // If the config has the moduleFallback option, then we are going to set up the ability
-      // to load certain modules from a fallback service. This is generally intended for local
-      // dev/testing purposes only.
+  // Set up module fallback / new module registry.
+  kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
+  if (usingNewModuleRegistry) {
+    // We use the same path for modules that the virtual file system uses.
+    // For instance, if the user specifies a bundle path of "/foo/bar" and
+    // there is a module in the bundle at "/foo/bar/baz.js", then the module's
+    // import specifier url will be "file:///foo/bar/baz.js".
+    const jsg::Url& bundleBase = workerFs->getBundleRoot();
+
+    // In workerd the module registry is always associated with just a single
+    // worker instance, so we initialize it here. In production, however, a
+    // single instance may be shared across multiple replicas.
+    kj::Maybe<kj::String> maybeFallbackService;
+    KJ_IF_SOME(fb, moduleFallback) {
+      maybeFallbackService = kj::str(fb);
+    }
+
+    using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+    auto isPythonWorker = featureFlags.getPythonWorkers();
+    auto artifactBundler = isPythonWorker
+        ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
+        : ArtifactBundler::makeDisabledBundler();
+
+    newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(isolate->getApi().getObserver(),
+        source.variant.tryGet<WorkerSource::ModulesSource>(), featureFlags, pythonConfig,
+        bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler));
+  } else {
+    KJ_IF_SOME(fb, moduleFallback) {
       auto& apiIsolate = isolate->getApi();
-      auto fallbackClient =
-          kj::heap<workerd::fallback::FallbackServiceClient>(kj::str(moduleFallback));
+      auto fallbackClient = kj::heap<workerd::fallback::FallbackServiceClient>(kj::str(fb));
       apiIsolate.setModuleFallbackCallback(
           [client = kj::mv(fallbackClient), featureFlags = apiIsolate.getFeatureFlags()](
               jsg::Lock& js, kj::StringPtr specifier, kj::Maybe<kj::String> referrer,
@@ -4558,14 +4542,45 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   }
 
   using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-  auto isPythonWorker = def.featureFlags.getPythonWorkers();
+  auto isPythonWorker = featureFlags.getPythonWorkers();
   auto artifactBundler = isPythonWorker
       ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
       : ArtifactBundler::makeDisabledBundler();
 
-  auto script = isolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
-      SpanParent(nullptr), workerFs.attach(kj::mv(def.maybeOwnedSourceCode)), false, errorReporter,
-      kj::mv(artifactBundler), kj::mv(newModuleRegistry));
+  auto script = isolate->newScript(name, source, IsolateObserver::StartType::COLD,
+      SpanParent(nullptr), kj::mv(workerFs), false, errorReporter, kj::mv(artifactBundler),
+      kj::mv(newModuleRegistry));
+
+  return kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
+      kj::mv(compileBindings), IsolateObserver::StartType::COLD, SpanParent(nullptr),
+      Worker::Lock::TakeSynchronously(kj::none), errorReporter);
+}
+
+kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr name,
+    WorkerDef def,
+    capnp::List<config::Extension>::Reader extensions,
+    ErrorReporter& errorReporter) {
+  // Load Python artifacts if this is a Python worker
+  co_await preloadPython(name, def, errorReporter);
+
+  // Validate experimental feature flags before creating the worker.
+  // TODO(soon): Either make python workers support the new module registry before
+  // NMR is defaulted on, or disable NMR by default when python workers are enabled.
+  if (def.featureFlags.getPythonWorkers()) {
+    KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(),
+        "Python workers do not currently support the new ModuleRegistry implementation. "
+        "Please disable the new ModuleRegistry feature flag to use Python workers.");
+  }
+  if (def.featureFlags.getNewModuleRegistry()) {
+    KJ_REQUIRE(experimental,
+        "The new ModuleRegistry implementation is an experimental feature. "
+        "You must run workerd with `--experimental` to use this feature.");
+  }
+  if (def.moduleFallback != kj::none && !def.featureFlags.getNewModuleRegistry()) {
+    KJ_REQUIRE(experimental,
+        "The module fallback service is an experimental feature. "
+        "You must run workerd with `--experimental` to use the module fallback service.");
+  }
 
   using Global = WorkerdApi::Global;
   jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
@@ -4578,9 +4593,8 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
     return def.compileBindings(lock, api, target);
   };
-  auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
-      kj::mv(compileBindings), IsolateObserver::StartType::COLD, SpanParent(nullptr),
-      Worker::Lock::TakeSynchronously(kj::none), errorReporter);
+  auto worker = createWorker(name, def.source, def.featureFlags, extensions, def.moduleFallback,
+      kj::mv(compileBindings), errorReporter, kj::mv(def.maybeOwnedSourceCode));
 
   uint totalActorChannels = 0;
 
