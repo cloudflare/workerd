@@ -311,7 +311,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   // Creates a new V8 Isolate, compiles a Script, and constructs a Worker. Handles inspector
   // policy, inspector registration, module fallback setup (both old and new registry paths),
-  // and artifact bundler creation.
+  // and artifact bundler creation. Used by both makeWorkerImpl() (initial creation) and the
+  // abortIsolate() factory (recreation).
   kj::Own<const Worker> createWorker(kj::StringPtr name,
       const WorkerSource& source,
       CompatibilityFlags::Reader featureFlags,

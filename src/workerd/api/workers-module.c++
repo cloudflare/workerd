@@ -58,4 +58,15 @@ void EntrypointsModule::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 
+void EntrypointsModule::abortIsolate(jsg::Optional<kj::String> reason) {
+  auto& context = IoContext::current();
+
+  // Signal the runtime to swap the worker for future requests and abort the current IoContext.
+  context.abortIsolate(kj::mv(reason));
+
+  // Immediately terminate V8 execution so no further JS runs in this request.
+  // This raises an uncatchable exception in V8, causing the request to fail immediately.
+  jsg::Lock::from(v8::Isolate::GetCurrent()).terminateExecutionNow();
+}
+
 }  // namespace workerd::api

@@ -478,6 +478,24 @@ void IoContext::abort(kj::Exception&& e) {
   abortFulfiller->reject(kj::mv(e));
 }
 
+void IoContext::abortIsolate(kj::Maybe<kj::String> reason) {
+  // Build the error message, including the reason if provided.
+  auto message = [&]() -> kj::String {
+    KJ_IF_SOME(r, reason) {
+      return kj::str("abortIsolate(): ", r);
+    } else {
+      return kj::str("abortIsolate() was called.");
+    }
+  }();
+
+  // Tell the IoChannelFactory to swap the worker for future requests and abort ALL in-flight
+  // requests on the isolate. Pass the reason so all aborted requests see the same message.
+  getIoChannelFactory().abortIsolate(message.asPtr());
+
+  // Abort the current IoContext so this request fails.
+  abort(JSG_KJ_EXCEPTION(FAILED, Error, message));
+}
+
 void IoContext::abortWhen(kj::Promise<void> promise) {
   // Unlike addTask(), abortWhen() always uses `tasks`, even in actors, because we do not want
   // these tasks to block hibernation.

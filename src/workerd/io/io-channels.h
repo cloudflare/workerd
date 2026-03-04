@@ -276,6 +276,13 @@ class IoChannelFactory {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
 
+  // Signals that the current worker's JS isolate should be thrown away and recreated from scratch.
+  // The current request continues running on the old isolate; subsequent requests will use a fresh
+  // isolate with re-executed top-level module code and fresh global state.
+  virtual void abortIsolate(kj::Maybe<kj::StringPtr> reason) {
+    JSG_FAIL_REQUIRE(Error, "abortIsolate() is not supported by this runtime.");
+  }
+
   // Use a dynamic Worker loader binding to obtain an Worker by name. If name is null, or if the named Worker doesn't already exist, the callback will be called to fetch the source code from which the Worker should be created.
   virtual kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
       kj::Maybe<kj::String> name,

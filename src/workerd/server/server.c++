@@ -1918,7 +1918,9 @@ class Server::WorkerService final: public Service,
         abortActorsCallback(kj::mv(abortActorsCallback)),
         dockerPath(kj::mv(dockerPathParam)),
         containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImageParam)),
-        isDynamic(isDynamic) {}
+        isDynamic(isDynamic) {
+    resetAbortAllPromise();
+  }
 
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
@@ -2073,6 +2075,11 @@ class Server::WorkerService final: public Service,
     return actorNamespaces;
   }
 
+  using WorkerFactory = kj::Function<kj::Own<const Worker>()>;
+  void setWorkerFactory(WorkerFactory factory) {
+    workerFactory = kj::mv(factory);
+  }
+
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     return startRequest(kj::mv(metadata), kj::none, {});
   }
@@ -2091,6 +2098,12 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none,
       bool isTracer = false) {
     TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
+
+    // If abortIsolate() was called, lazily recreate the worker now (outside any isolate lock).
+    if (isolateAbortRequested) {
+      worker = KJ_ASSERT_NONNULL(workerFactory)();
+      isolateAbortRequested = false;
+    }
 
     auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
 
@@ -3222,6 +3235,24 @@ class Server::WorkerService final: public Service,
   kj::Maybe<kj::String> containerEgressInterceptorImage;
   bool isDynamic;
 
+  // Set to true when abortIsolate() is called; checked by startRequest() to lazily recreate.
+  bool isolateAbortRequested = false;
+
+  // Factory function that creates a fresh Worker. Used by abortIsolate().
+  kj::Maybe<WorkerFactory> workerFactory;
+
+  // Abort signal for all in-flight requests. When abortIsolate() is called, the fulfiller is
+  // rejected, which causes all IoContexts listening via onLimitsExceeded() to abort. A new
+  // promise/fulfiller pair is then created for the next generation of requests.
+  kj::ForkedPromise<void> abortAllPromise = nullptr;
+  kj::Own<kj::PromiseFulfiller<void>> abortAllFulfiller;
+
+  void resetAbortAllPromise() {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    abortAllPromise = paf.promise.fork();
+    abortAllFulfiller = kj::mv(paf.fulfiller);
+  }
+
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
     ActorChannelImpl(kj::Own<ActorNamespace::ActorContainer> actorContainer)
@@ -3434,6 +3465,32 @@ class Server::WorkerService final: public Service,
     abortActorsCallback(reason);
   }
 
+  void abortIsolate(kj::Maybe<kj::StringPtr> reason) override {
+    if (workerFactory == kj::none) {
+      JSG_FAIL_REQUIRE(Error, "abortIsolate() is not supported for this worker configuration.");
+    }
+    // Set a flag so that the next call to startRequest() will recreate the worker.
+    // We can't create the new worker right now because we're inside a request that holds the
+    // V8 isolate lock, and creating a new Worker from the same Script requires that same lock.
+    isolateAbortRequested = true;
+
+    // Reject the shared abort promise to terminate ALL in-flight requests on this isolate,
+    // not just the calling request. This mirrors how the production 2x memory limit works:
+    // each IoContext subscribes to onLimitsExceeded() which returns a branch of this promise.
+    // Include the reason so all aborted requests see the same message.
+    auto message = [&]() -> kj::String {
+      KJ_IF_SOME(r, reason) {
+        return kj::str(r);
+      } else {
+        return kj::str("abortIsolate() was called.");
+      }
+    }();
+    abortAllFulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, kj::mv(message)));
+
+    // Create a fresh promise/fulfiller for the next generation of requests (after recreation).
+    resetAbortAllPromise();
+  }
+
   kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
       kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override;
@@ -3510,7 +3567,7 @@ class Server::WorkerService final: public Service,
     return kj::none;
   }
   kj::Promise<void> onLimitsExceeded() override {
-    return kj::NEVER_DONE;
+    return abortAllPromise.addBranch();
   }
   void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
   void requireLimitsNotExceeded() override {}
@@ -4010,6 +4067,10 @@ struct Server::WorkerDef {
   // If the WorkerDef was created from a DymamicWorkerSource and that
   // source contains a clone of the source bundle, this will take ownership.
   kj::Maybe<kj::Own<void>> maybeOwnedSourceCode;
+
+  // Cloned env binding globals for use by abortIsolate() to recreate the worker with the same
+  // bindings. Only populated for static (non-dynamic) workers.
+  kj::Array<WorkerdApi::Global> envGlobalsForFactory;
 };
 
 class Server::WorkerLoaderNamespace: public kj::Refcounted {
@@ -4374,6 +4435,9 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   }
 
   // Construct `WorkerDef` from `conf`.
+  // Clone the env binding globals before they're moved into def.compileBindings, so
+  // we can reuse them for abortIsolate() to recreate the worker with the same bindings.
+  auto envGlobalsForFactory = KJ_MAP(g, globals) { return g.clone(); };
   WorkerDef def{
     .featureFlags = featureFlags.asReader(),
     .source = WorkerdApi::extractSource(name, conf, featureFlags.asReader(), errorReporter),
@@ -4422,10 +4486,117 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
       return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);
     },
     // clang-format on
+
+    .envGlobalsForFactory = kj::mv(envGlobalsForFactory),
   };
 
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
 }
+
+// Owns a deep copy of a WorkerSource so it can outlive the original capnp config message.
+// Used by the abortIsolate() factory to recreate the worker from scratch.
+// Only supports ModulesSource (ES modules) which is the common case for abortIsolate().
+class OwnedWorkerSource {
+ public:
+  explicit OwnedWorkerSource(const WorkerSource& src)
+      : OwnedWorkerSource(src.variant.get<WorkerSource::ModulesSource>()) {}
+
+  const WorkerSource& borrow() const {
+    return source;
+  }
+
+ private:
+  // Per-module owned data. The WorkerSource's Module array borrows StringPtr/ArrayPtr from these.
+  struct ModuleData {
+    kj::String name;
+    kj::OneOf<kj::String, kj::Array<byte>> body;
+    bool treatAsInternalForTest = false;
+    // We temporarily store the ModuleContent in here before moving it into WorkerSource.
+    kj::Maybe<WorkerSource::ModuleContent> content;
+  };
+
+  explicit OwnedWorkerSource(const WorkerSource::ModulesSource& ms)
+      : ownedMainModule(kj::str(ms.mainModule)),
+        isPython(ms.isPython),
+        ownedModuleData(cloneAll(ms.modules)),
+        source(WorkerSource::ModulesSource{
+          .mainModule = ownedMainModule,
+          .modules = buildAll(ownedModuleData),
+          .isPython = isPython,
+        }) {}
+
+  static kj::Array<ModuleData> cloneAll(const kj::Array<WorkerSource::Module>& modules) {
+    return KJ_MAP(m, modules) -> ModuleData {
+      ModuleData d;
+      d.name = kj::str(m.name);
+      d.treatAsInternalForTest = m.treatAsInternalForTest;
+      KJ_SWITCH_ONEOF(m.content) {
+        KJ_CASE_ONEOF(es, WorkerSource::EsModule) {
+          auto body = kj::str(es.body);
+          d.content = WorkerSource::EsModule{.body = body.asArray()};
+          d.body = kj::mv(body);
+        }
+        KJ_CASE_ONEOF(cjs, WorkerSource::CommonJsModule) {
+          auto body = kj::str(cjs.body);
+          d.content = WorkerSource::CommonJsModule{.body = body};
+          d.body = kj::mv(body);
+        }
+        KJ_CASE_ONEOF(text, WorkerSource::TextModule) {
+          auto body = kj::str(text.body);
+          d.content = WorkerSource::TextModule{.body = body};
+          d.body = kj::mv(body);
+        }
+        KJ_CASE_ONEOF(json, WorkerSource::JsonModule) {
+          auto body = kj::str(json.body);
+          d.content = WorkerSource::JsonModule{.body = body};
+          d.body = kj::mv(body);
+        }
+        KJ_CASE_ONEOF(py, WorkerSource::PythonModule) {
+          auto body = kj::str(py.body);
+          d.content = WorkerSource::PythonModule{.body = body};
+          d.body = kj::mv(body);
+        }
+        KJ_CASE_ONEOF(data, WorkerSource::DataModule) {
+          auto body = kj::heapArray<byte>(data.body);
+          d.content = WorkerSource::DataModule{.body = body};
+          d.body = kj::mv(body);
+        }
+        KJ_CASE_ONEOF(wasm, WorkerSource::WasmModule) {
+          auto body = kj::heapArray<byte>(wasm.body);
+          d.content = WorkerSource::WasmModule{.body = body};
+          d.body = kj::mv(body);
+        }
+        KJ_CASE_ONEOF(req, WorkerSource::PythonRequirement) {
+          d.content = WorkerSource::PythonRequirement{};
+        }
+        KJ_CASE_ONEOF(capnp, WorkerSource::CapnpModule) {
+          d.content = WorkerSource::CapnpModule{.typeId = capnp.typeId};
+        }
+      }
+      KJ_ASSERT(KJ_ASSERT_NONNULL(d.content).which() == m.content.which());
+      return d;
+    };
+  }
+
+  static kj::Array<WorkerSource::Module> buildAll(kj::ArrayPtr<ModuleData> data) {
+    return KJ_MAP(d, data) -> WorkerSource::Module {
+      auto content = kj::mv(KJ_ASSERT_NONNULL(d.content));
+      d.content = kj::none;
+      return {
+        .name = d.name,
+        .content = kj::mv(content),
+        .treatAsInternalForTest = d.treatAsInternalForTest,
+      };
+    };
+  }
+
+  // Members in initialization order. `source` MUST be declared last because it borrows
+  // StringPtr/ArrayPtr from ownedMainModule and ownedModuleData.
+  kj::String ownedMainModule;
+  bool isPython;
+  kj::Array<ModuleData> ownedModuleData;
+  WorkerSource source;
+};
 
 kj::Own<const Worker> Server::createWorker(kj::StringPtr name,
     const WorkerSource& source,
@@ -4597,6 +4768,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       kj::mv(compileBindings), errorReporter, kj::mv(def.maybeOwnedSourceCode));
 
   uint totalActorChannels = 0;
+  kj::Array<Global> ctxExportsForFactory;
 
   worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
     lock.validateHandlers(errorReporter);
@@ -4663,6 +4835,9 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
     totalActorChannels = nextActorChannel;
 
+    // Clone the ctx.exports globals so we can reuse them in the worker factory for abortIsolate().
+    ctxExportsForFactory = KJ_MAP(g, ctxExports) { return g.clone(); };
+
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
       WorkerdApi::from(worker->getIsolate().getApi())
           .compileGlobals(lock, ctxExports, ctxExportsHandle.getHandle(js), 1);
@@ -4671,6 +4846,23 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     // As an optimization, drop this now while we have the lock.
     { auto drop = kj::mv(ctxExportsHandle); }
   });
+
+  // Extract pieces needed for the worker factory (abortIsolate()) before they're moved away.
+  auto envGlobalsForFactory = kj::mv(def.envGlobalsForFactory);
+  bool isDynamicForFactory = def.isDynamic;
+  bool isModulesSourceForFactory = def.source.variant.is<WorkerSource::ModulesSource>();
+  kj::Maybe<kj::Own<OwnedWorkerSource>> ownedSourceForFactory;
+  kj::Maybe<kj::Own<capnp::MallocMessageBuilder>> featureFlagsMsgForFactory;
+  kj::Maybe<kj::String> moduleFallbackForFactory;
+  if (!isDynamicForFactory && isModulesSourceForFactory) {
+    auto msg = kj::heap<capnp::MallocMessageBuilder>();
+    msg->setRoot(def.featureFlags);
+    featureFlagsMsgForFactory = kj::mv(msg);
+    ownedSourceForFactory = kj::heap<OwnedWorkerSource>(def.source);
+    KJ_IF_SOME(moduleFallback, def.moduleFallback) {
+      moduleFallbackForFactory = kj::str(moduleFallback);
+    }
+  }
 
   auto linkCallback = [this, def = kj::mv(def), totalActorChannels](WorkerService& workerService,
                           Worker::ValidationErrorReporter& errorReporter) mutable {
@@ -4850,6 +5042,52 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
           kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath),
           kj::mv(containerEgressInterceptorImage), def.isDynamic);
   result->initActorNamespaces(def.localActorConfigs, network);
+
+  // Set up the worker factory for abortIsolate(). The factory creates a completely fresh
+  // Isolate -> Script -> Worker, ensuring all module-level state is re-initialized.
+  // We capture references to Server members needed for Isolate construction and deep copies
+  // of the env/ctx.exports globals for binding compilation.
+  // Note: ownedSourceForFactory and featureFlagsMsgForFactory were extracted above, before
+  // `def` was moved into the linkCallback lambda.
+  if (!isDynamicForFactory && isModulesSourceForFactory) {
+    auto ownedSource = kj::mv(KJ_ASSERT_NONNULL(ownedSourceForFactory));
+    auto featureFlagsMsg = kj::mv(KJ_ASSERT_NONNULL(featureFlagsMsgForFactory));
+
+    result->setWorkerFactory(
+        [this, workerName = kj::str(name), envGlobals = kj::mv(envGlobalsForFactory),
+            ctxExportsGlobals = kj::mv(ctxExportsForFactory),
+            featureFlagsMsg = kj::mv(featureFlagsMsg), ownedSource = kj::mv(ownedSource),
+            extensions,
+            moduleFallback = kj::mv(moduleFallbackForFactory)]() mutable -> kj::Own<const Worker> {
+      auto featureFlags = featureFlagsMsg->getRoot<CompatibilityFlags>();
+      const auto& source = ownedSource->borrow();
+
+      auto moduleFallbackPtr = moduleFallback.map([](auto& fb) { return fb.asPtr(); });
+
+      // Create the Worker with bindings.
+      jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
+      auto compileBindings = [&](jsg::Lock& lock, const Worker::Api& apiRef,
+                                 v8::Local<v8::Object> target, v8::Local<v8::Object> ctxExports) {
+        ctxExportsHandle = lock.v8Ref(ctxExports);
+        return WorkerdApi::from(apiRef).compileGlobals(lock, envGlobals, target, 1);
+      };
+
+      auto newWorker = createWorker(workerName, source, featureFlags.asReader(), extensions,
+          moduleFallbackPtr, kj::mv(compileBindings));
+
+      // Compile ctx.exports bindings.
+      newWorker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
+        JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
+          WorkerdApi::from(newWorker->getIsolate().getApi())
+              .compileGlobals(lock, ctxExportsGlobals, ctxExportsHandle.getHandle(js), 1);
+        });
+        { auto drop = kj::mv(ctxExportsHandle); }
+      });
+
+      return newWorker;
+    });
+  }
+
   co_return result;
 }
 
