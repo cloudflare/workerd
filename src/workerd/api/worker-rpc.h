@@ -372,6 +372,9 @@ class JsRpcStub: public JsRpcClientProvider {
  public:
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient): capnpClient(kj::mv(capnpClient)) {}
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient, RpcStubDisposalGroup& disposalGroup);
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+      RpcStubDisposalGroup& disposalGroup,
+      jsg::ExternalMemoryAdjustment externalMemoryAdjustment);
   ~JsRpcStub() noexcept(false);
 
   rpc::JsRpcTarget::Client getClient();
@@ -414,6 +417,7 @@ class JsRpcStub: public JsRpcClientProvider {
 
   kj::Maybe<RpcStubDisposalGroup&> disposalGroup;
   kj::ListLink<JsRpcStub> disposalGroupLink;
+  kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
 
   friend class RpcStubDisposalGroup;
 };

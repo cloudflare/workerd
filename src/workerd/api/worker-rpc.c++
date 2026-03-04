@@ -738,6 +738,15 @@ JsRpcStub::JsRpcStub(
   disposalGroup.list.add(*this);
 }
 
+JsRpcStub::JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+    RpcStubDisposalGroup& disposalGroup,
+    jsg::ExternalMemoryAdjustment externalMemoryAdjustment)
+    : capnpClient(kj::mv(capnpClient)),
+      disposalGroup(disposalGroup),
+      externalMemoryAdjustment(kj::mv(externalMemoryAdjustment)) {
+  disposalGroup.list.add(*this);
+}
+
 JsRpcStub::~JsRpcStub() noexcept(false) {
   KJ_IF_SOME(d, disposalGroup) {
     d.list.remove(*this);
@@ -834,6 +843,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::dup(jsg::Lock& js) {
 
 void JsRpcStub::dispose() {
   capnpClient = kj::none;
+  externalMemoryAdjustment = kj::none;
   KJ_IF_SOME(d, disposalGroup) {
     d.list.remove(*this);
     disposalGroup = kj::none;
@@ -916,8 +926,13 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
   KJ_REQUIRE(reader.isRpcTarget(), "external table slot type doesn't match serialization tag");
 
   auto& ioctx = IoContext::current();
-  return js.alloc<JsRpcStub>(
-      ioctx.addObject(kj::heap(reader.getRpcTarget())), externalHandler->getDisposalGroup());
+
+  // Account for membrane/promise memory in the KJ heap (~1600 bytes per stub from profiling).
+  static constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_STUB = 1600;
+  auto externalMemory = js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_STUB);
+
+  return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(reader.getRpcTarget())),
+      externalHandler->getDisposalGroup(), kj::mv(externalMemory));
 }
 
 static bool isFunctionForRpc(jsg::Lock& js, v8::Local<v8::Function> func) {
