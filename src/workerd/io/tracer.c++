@@ -146,7 +146,7 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
       spanOpenContext, tracing::SpanOpen(spanId, kj::mv(operationName)), startTime, spanNameSize);
 }
 
-void WorkerTracer::addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) {
+void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -523,11 +523,14 @@ kj::Own<SpanObserver> UserSpanObserver::newChild() {
   return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId);
 }
 
-void UserSpanObserver::report(const Span& span) {
-  submitter->submitSpan(spanId, parentSpanId, span);
+void UserSpanObserver::onClose(
+    kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) {
+  // span logs are not supported in user tracing.
+  (void)logs;
+  submitter->submitSpanClose(spanId, endTime, kj::mv(tags));
 }
 
-void UserSpanObserver::reportStart(kj::ConstString operationName, kj::Date startTime) {
+void UserSpanObserver::onOpen(kj::ConstString operationName, kj::Date startTime) {
   submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
 }
 

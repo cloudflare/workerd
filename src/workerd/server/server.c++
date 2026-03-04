@@ -1700,21 +1700,15 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
   SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
-  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
-    // parentSpanId is unused here – for user tracing, the parentSpanId is submitted separately in
-    // SpanOpen and not when the span is completed.
-    (void)parentSpanId;
-    kj::Date startTime = span.startTime;
-    tracing::SpanEndData spanEnd(spanId, span.endTime);
-    spanEnd.tags.reserve(span.tags.size());
-    for (auto& tag: span.tags) {
-      spanEnd.tags.insert(tag.key.clone(), spanTagClone(tag.value));
-    }
+  void submitSpanClose(tracing::SpanId spanId, kj::Date endTime, Span::TagMap&& tags) override {
+    // TODOTODO
+    kj::Date startTime = kj::UNIX_EPOCH;
+    tracing::SpanEndData spanEnd(spanId, endTime, kj::mv(tags));
     if (isPredictableModeForTest()) {
       startTime = spanEnd.endTime = kj::UNIX_EPOCH;
     }
 
-    workerTracer->addSpanEnd(kj::mv(spanEnd), startTime);
+    workerTracer->addSpanClose(kj::mv(spanEnd), startTime);
   }
 
   void submitSpanOpen(tracing::SpanId spanId,
