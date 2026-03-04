@@ -328,7 +328,7 @@ export class DurableObjectExample extends DurableObject {
       this.ctx.exports.TestService({ props: { id: 2 } })
     );
 
-    // we catch all HTTP requests to port 80
+    // we catch all http requests to port 80
     await container.interceptAllOutboundHttp(
       this.ctx.exports.TestService({ props: { id: 3 } })
     );
@@ -408,6 +408,56 @@ export class DurableObjectExample extends DurableObject {
       assert.equal(
         await response.text(),
         'hello binding: 3 http://google.com/hello/world'
+      );
+    }
+
+    // test we can set another TestService
+    await container.interceptAllOutboundHttp(
+      this.ctx.exports.TestService({ props: { id: 1212 } })
+    );
+
+    {
+      // We preserved the order...
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.2:9999' },
+          abort: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 2 http://11.0.0.2:9999/'
+      );
+    }
+
+    {
+      // and we updated the id, even for existing connections
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '15.0.0.2:80' },
+          abort: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 1212 http://15.0.0.2/'
+      );
+    }
+
+    {
+      // and we updated the id for new connections
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '15.0.0.55:80' },
+          abort: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 1212 http://15.0.0.55/'
       );
     }
   }

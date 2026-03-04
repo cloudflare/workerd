@@ -149,8 +149,13 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   kj::Vector<EgressMapping> egressMappings;
 
-  // Find a matching egress mapping for the given destination address (host:port format)
-  kj::Maybe<workerd::IoChannelFactory::SubrequestChannel*> findEgressMapping(
+  // Insert or replace an egress mapping. If a mapping with the same CIDR and port
+  // already exists, its channel is replaced; otherwise a new mapping is added.
+  void upsertEgressMapping(EgressMapping mapping);
+
+  // Find a matching egress mapping for the given destination address (host:port format).
+  // Returns an addRef'd Own so the channel stays alive even if the mapping is later replaced.
+  kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> findEgressMapping(
       kj::StringPtr destAddr, uint16_t defaultPort);
 
   // Whether general internet access is enabled for this container
