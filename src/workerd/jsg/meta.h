@@ -61,6 +61,19 @@ using ArgumentIndexes = ArgumentIndexes_<T>::Indexes;
 // requiredArgumentCount<T> — counts leading required JS-visible arguments.
 //
 // Used by resource.h to set the Web IDL .length property on functions.
+//
+// Argument filtering is split across two layers for dependency reasons:
+//
+//  1. StripMagicParam_ (here in meta.h) removes the leading Lock& or
+//     FunctionCallbackInfo& parameter.  These are C++/V8 plumbing that always
+//     appear first and are never JS-visible.  meta.h can handle them because
+//     it only needs the v8 forward declarations it already includes.
+//
+//  2. RequiredArgCount_ (in web-idl.h) skips TypeHandler<T> and Arguments<T>
+//     when counting.  These types can appear at any position in the parameter
+//     list and are "invisible" to JS callers, but they are JSG-specific types
+//     that are not available in meta.h's include graph.  web-idl.h has the
+//     full JSG type system visible, so the counting logic lives there.
 
 // Lightweight type list; kj::Tuple is an alias template and cannot be partially specialized.
 template <typename... Ts>
@@ -85,6 +98,7 @@ struct NormalizeFunc_<R(A...)> {
 };
 
 // Phase 2: Strip leading Lock& / FunctionCallbackInfo& and yield the JS-visible args.
+// See the comment above for why this is separate from RequiredArgCount_.
 template <typename T>
 struct StripMagicParam_;
 template <typename R, typename... A>
