@@ -9,6 +9,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
@@ -3322,6 +3323,196 @@ class AllReader {
   }
 };
 
+// PumpToReader implements the original JS promise-loop approach to pumping data from
+// a ReadableStream to a WritableStreamSink. It reads one chunk at a time using the
+// standard read() API, writes each chunk to the sink, and loops until done or errored.
+// This is the fallback path used when the ENABLE_DRAINING_READ_ON_STANDARD_STREAMS
+// autogate is not enabled.
+class PumpToReader {
+ public:
+  PumpToReader(jsg::Ref<ReadableStream> stream, kj::Own<WritableStreamSink> sink, bool end)
+      : ioContext(IoContext::current()),
+        state(State::create<jsg::Ref<ReadableStream>>(kj::mv(stream))),
+        sink(kj::mv(sink)),
+        self(kj::refcounted<WeakRef<PumpToReader>>(kj::Badge<PumpToReader>{}, *this)),
+        end(end) {}
+  KJ_DISALLOW_COPY_AND_MOVE(PumpToReader);
+
+  ~PumpToReader() noexcept(false) {
+    self->invalidate();
+    // Ensure that if a write promise is pending it is proactively canceled.
+    canceler.cancel("PumpToReader was destroyed");
+  }
+
+  kj::Promise<void> pumpTo(jsg::Lock& js) {
+    ioContext.requireCurrentOrThrowJs();
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        auto readable = stream.addRef();
+        state.template transitionTo<Pumping>();
+        return ioContext.awaitJs(
+            js, pumpLoop(js, ioContext, kj::mv(readable), ioContext.addObject(self->addRef())));
+      }
+      KJ_CASE_ONEOF(pumping, Pumping) {
+        return KJ_EXCEPTION(FAILED, "pumping is already in progress");
+      }
+      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+        return KJ_EXCEPTION(FAILED, "stream has already been consumed");
+      }
+      KJ_CASE_ONEOF(errored, kj::Exception) {
+        return kj::cp(errored);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+ private:
+  struct Pumping {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "pumping"_kj;
+  };
+  IoContext& ioContext;
+
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
+      ErrorState<kj::Exception>,
+      Pumping,
+      StreamStates::Closed,
+      kj::Exception,
+      jsg::Ref<ReadableStream>>;
+  State state;
+  kj::Own<WritableStreamSink> sink;
+  kj::Own<WeakRef<PumpToReader>> self;
+  kj::Canceler canceler;
+  bool end;
+
+  bool isErroredOrClosed() {
+    return state.isTerminal();
+  }
+
+  jsg::Promise<void> pumpLoop(jsg::Lock& js,
+      IoContext& ioContext,
+      jsg::Ref<ReadableStream> readable,
+      IoOwn<WeakRef<PumpToReader>> pumpToReader) {
+    ioContext.requireCurrentOrThrowJs();
+
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(ready, jsg::Ref<ReadableStream>) {
+        KJ_UNREACHABLE;
+      }
+      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+        return end ? ioContext.awaitIoLegacy(js, sink->end().attach(kj::mv(sink)))
+                   : js.resolvedPromise();
+      }
+      KJ_CASE_ONEOF(errored, kj::Exception) {
+        if (end) {
+          sink->abort(kj::cp(errored));
+        }
+        return js.rejectedPromise<void>(kj::cp(errored));
+      }
+      KJ_CASE_ONEOF(pumping, Pumping) {
+        using Result = kj::OneOf<Pumping, kj::Array<kj::byte>, StreamStates::Closed, jsg::Value>;
+
+        return KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none))
+            .then(js,
+                ioContext.addFunctor([byteStream = readable->getController().isByteOriented()](
+                                         auto& js, ReadResult result) mutable -> Result {
+          if (result.done) {
+            return StreamStates::Closed();
+          }
+
+          auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
+          if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
+            return js.v8Ref(js.v8TypeError("This ReadableStream did not return bytes."));
+          }
+
+          jsg::BufferSource bufferSource(js, handle);
+          if (bufferSource.size() == 0) {
+            return Pumping{};
+          }
+
+          if (byteStream) {
+            jsg::BackingStore backing = bufferSource.detach(js);
+            return backing.asArrayPtr().attach(kj::mv(backing));
+          }
+          return bufferSource.asArrayPtr().attach(kj::mv(bufferSource));
+        }),
+                [](auto& js, jsg::Value exception) mutable -> Result { return kj::mv(exception); })
+            .then(js, ioContext.addFunctor( JSG_VISITABLE_LAMBDA((readable = kj::mv(readable), pumpToReader = kj::mv(pumpToReader)), (readable), (jsg::Lock & js, Result result) mutable {
+              KJ_IF_SOME(reader, pumpToReader->tryGet()) {
+              reader.ioContext.requireCurrentOrThrowJs();
+              auto& ioContext = IoContext::current();
+              KJ_SWITCH_ONEOF(result) {
+              KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
+              auto promise = reader.sink->write(bytes).attach(kj::mv(bytes));
+              return ioContext.awaitIo(js, reader.canceler.wrap(kj::mv(promise)))
+                  .then(js,
+                      [](jsg::Lock& js) -> kj::Maybe<jsg::Value> {
+                return kj::Maybe<jsg::Value>(kj::none);
+              },
+                      [](jsg::Lock& js, jsg::Value exception) mutable -> kj::Maybe<jsg::Value> {
+                return kj::mv(exception);
+              })
+                  .then(js,
+                      ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
+                          (readable = readable.addRef(), pumpToReader = kj::mv(pumpToReader)),
+                          (readable),
+                          (jsg::Lock & js, kj::Maybe<jsg::Value> maybeException) mutable {
+                            KJ_IF_SOME(reader, pumpToReader->tryGet()) {
+                            auto& ioContext = reader.ioContext;
+                            ioContext.requireCurrentOrThrowJs();
+                            KJ_IF_SOME(exception, maybeException) {
+                            if (!reader.isErroredOrClosed()) {
+                            reader.state.transitionTo<kj::Exception>(
+                                js.exceptionToKj(kj::mv(exception)));
+                            }
+                            } else {
+                            // Else block to avert dangling else compiler warning.
+                            }
+                            return reader.pumpLoop(
+                                js, ioContext, readable.addRef(), kj::mv(pumpToReader));
+                            } else {
+                            return readable->getController().cancel(js,
+                                maybeException.map(
+                                    [&](jsg::Value& ex) { return ex.getHandle(js); }));
+                            }
+                          })));
+              }
+              KJ_CASE_ONEOF(pumping, Pumping) {}
+              KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+              if (!reader.isErroredOrClosed()) {
+              reader.state.transitionTo<StreamStates::Closed>();
+              }
+              }
+              KJ_CASE_ONEOF(exception, jsg::Value) {
+              if (!reader.isErroredOrClosed()) {
+              reader.state.transitionTo<kj::Exception>(js.exceptionToKj(kj::mv(exception)));
+              }
+              }
+              }
+              return reader.pumpLoop(js, ioContext, readable.addRef(), kj::mv(pumpToReader));
+              } else {
+              KJ_SWITCH_ONEOF(result) {
+              KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
+              return readable->getController().cancel(js, kj::none);
+              }
+              KJ_CASE_ONEOF(pumping, Pumping) {
+              return readable->getController().cancel(js, kj::none);
+              }
+              KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+              return js.resolvedPromise();
+              }
+              KJ_CASE_ONEOF(exception, jsg::Value) {
+              return readable->getController().cancel(js, exception.getHandle(js));
+              }
+              }
+              }
+              KJ_UNREACHABLE;
+            })));
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+};
+
 // pumpToCoroutine uses a DrainingReader to efficiently pull all synchronously available
 // data from the stream in each iteration, then writes it to the sink using vectored
 // I/O. This minimizes isolate lock acquisitions by batching: each time the lock is
@@ -3527,15 +3718,24 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
   disturbed = true;
 
   // This operation will leave the ReadableStream locked and disturbed. It will consume
-  // the stream until it either closed or errors. If the returned promise (or its inner
-  // promise) is dropped, the coroutine frame is destroyed, which drops the DrainingReader
-  // (releasing the stream lock) and the sink, canceling any in-flight operations.
+  // the stream until it either closed or errors.
+  //
+  // When the ENABLE_DRAINING_READ_ON_STANDARD_STREAMS autogate is enabled, uses the new
+  // pumpToImpl coroutine with DrainingReader for batched reads and vectored writes.
+  // Otherwise, falls back to the original PumpToReader JS promise loop that reads one
+  // chunk at a time.
 
   const auto handlePump = [&] {
-    auto reader = KJ_ASSERT_NONNULL(DrainingReader::create(js, *this->addRef()),
-        "Failed to create DrainingReader — stream should not be locked");
-    auto& ioContext = IoContext::current();
-    return addNoopDeferredProxy(pumpToImpl(ioContext, kj::mv(reader), kj::mv(sink), end));
+    if (util::Autogate::isEnabled(util::AutogateKey::ENABLE_DRAINING_READ_ON_STANDARD_STREAMS)) {
+      auto reader = KJ_ASSERT_NONNULL(DrainingReader::create(js, *this->addRef()),
+          "Failed to create DrainingReader — stream should not be locked");
+      auto& ioContext = IoContext::current();
+      return addNoopDeferredProxy(pumpToImpl(ioContext, kj::mv(reader), kj::mv(sink), end));
+    } else {
+      KJ_ASSERT(lock.lock());
+      auto reader = kj::heap<PumpToReader>(addRef(), kj::mv(sink), end);
+      return addNoopDeferredProxy(reader->pumpTo(js).attach(kj::mv(reader)));
+    }
   };
 
   KJ_SWITCH_ONEOF(state) {
