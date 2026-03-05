@@ -2652,6 +2652,7 @@ class Lock {
   bool getThrowOnUnrecognizedImportAssertion() const;
   void setToStringTag();
   void setImmutablePrototype();
+  void setSpecCompliantPropertyAttributes();
   void disableTopLevelAwait();
 
   using Logger = void(Lock&, kj::StringPtr);

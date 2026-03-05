@@ -1458,4 +1458,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # With HWM=0 the readable side starts with backpressure, so writes correctly
   # block until a reader pulls. Previously HWM defaulted to 1, which caused
   # pull() to fire at startup, clearing backpressure before any write.
+
+  specCompliantPropertyAttributes @169 :Bool
+      $compatEnableFlag("spec_compliant_property_attributes")
+      $compatDisableFlag("no_spec_compliant_property_attributes")
+      $experimental;
+  # Fixes several Web IDL compliance issues on constructor, method, getter,
+  # setter, and constant property attributes:
+  #  - Constructor .length reflects the number of required arguments instead
+  #    of always being 0.
 }

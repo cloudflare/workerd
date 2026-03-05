@@ -1114,6 +1114,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getShouldSetImmutablePrototype() || features.getPythonWorkers()) {
       lock->setImmutablePrototype();
     }
+    if (features.getSpecCompliantPropertyAttributes()) {
+      lock->setSpecCompliantPropertyAttributes();
+    }
     if (features.getNodeJsCompatV2()) {
       lock->setNodeJsCompatEnabled();
     }

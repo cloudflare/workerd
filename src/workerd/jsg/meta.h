@@ -57,4 +57,62 @@ using ArgumentIndexes = ArgumentIndexes_<T>::Indexes;
 // number of arguments to the method, not counting the magic Lock or FunctionCallbackInfo parameter
 // (if any).
 
+// =======================================================================================
+// requiredArgumentCount<T> — counts leading required JS-visible arguments.
+//
+// Used by resource.h to set the Web IDL .length property on functions.
+
+// Lightweight type list; kj::Tuple is an alias template and cannot be partially specialized.
+template <typename... Ts>
+struct TypeList {};
+
+namespace detail {
+
+// Phase 1: Normalize member-function-pointer or free-function type to Ret(Args...).
+template <typename T>
+struct NormalizeFunc_;
+template <typename C, typename R, typename... A>
+struct NormalizeFunc_<R (C::*)(A...)> {
+  using type = R(A...);
+};
+template <typename C, typename R, typename... A>
+struct NormalizeFunc_<R (C::*)(A...) const> {
+  using type = R(A...);
+};
+template <typename R, typename... A>
+struct NormalizeFunc_<R(A...)> {
+  using type = R(A...);
+};
+
+// Phase 2: Strip leading Lock& / FunctionCallbackInfo& and yield the JS-visible args.
+template <typename T>
+struct StripMagicParam_;
+template <typename R, typename... A>
+struct StripMagicParam_<R(A...)> {
+  using Args = TypeList<A...>;
+};
+template <typename R, typename... A>
+struct StripMagicParam_<R(Lock&, A...)> {
+  using Args = TypeList<A...>;
+};
+template <typename R, typename... A>
+struct StripMagicParam_<R(const v8::FunctionCallbackInfo<v8::Value>&, A...)> {
+  using Args = TypeList<A...>;
+};
+
+template <typename T>
+using MethodArgs = StripMagicParam_<typename NormalizeFunc_<T>::type>;
+
+// Forward declaration — specialized in web-idl.h where the full JSG type system is visible.
+template <typename ArgsList>
+struct RequiredArgCount_;
+
+}  // namespace detail
+
+// Per Web IDL, the .length of a function is the number of leading required arguments.
+// The actual counting logic lives in web-idl.h.
+template <typename T>
+inline constexpr int requiredArgumentCount =
+    detail::RequiredArgCount_<typename detail::MethodArgs<T>::Args>::value;
+
 }  // namespace workerd::jsg

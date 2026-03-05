@@ -13,9 +13,6 @@ export default {
       'IDL tests fail because Workers exposes globals differently than browsers (not as own properties of self)',
     expectedFailures: [
       'URL interface: existence and properties of interface object',
-      'URL interface object length',
-      'URL interface: operation parse(USVString, optional USVString)',
-      'URL interface: operation canParse(USVString, optional USVString)',
       'URL interface: attribute href',
       'URL interface: attribute origin',
       'URL interface: attribute protocol',
