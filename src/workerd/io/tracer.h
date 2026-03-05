@@ -152,6 +152,10 @@ class WorkerTracer final: public BaseTracer {
   // Set a worker-level tag/attribute to be provided in the onset event.
   void setWorkerAttribute(kj::ConstString key, Span::TagValue value);
 
+  // Set additional tags that should be exposed to buffered trace workers, and mirrored as
+  // worker-level attributes for streaming tail workers.
+  void setTailTags(kj::ArrayPtr<const tracing::TailTag> tags);
+
   void setReturn(kj::Maybe<kj::Date> time = kj::none,
       kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) override;
 

@@ -191,6 +191,8 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       scriptVersion(getTraceScriptVersion(trace)),
       dispatchNamespace(mapCopyString(trace.dispatchNamespace)),
       scriptTags(getTraceScriptTags(trace)),
+      tailTags(trace.tailTags.map(
+          [](auto& tags) { return KJ_MAP(tag, tags) { return tag.clone(); }; })),
       durableObjectId(mapCopyString(trace.durableObjectId)),
       executionModel(kj::str(trace.executionModel)),
       outcome(kj::str(trace.outcome)),
@@ -268,6 +270,16 @@ jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
 jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
   return scriptTags.map(
       [](kj::Array<kj::String>& tags) { return KJ_MAP(t, tags) -> kj::StringPtr { return t; }; });
+}
+
+jsg::Optional<jsg::Dict<kj::String>> TraceItem::getTailTags() {
+  return tailTags.map([](kj::Array<tracing::TailTag>& tags) {
+    return jsg::Dict<kj::String>{
+      .fields = KJ_MAP(tag, tags) {
+        return jsg::Dict<kj::String>::Field{.name = kj::str(tag.key), .value = kj::str(tag.value)};
+      },
+    };
+  });
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getDurableObjectId() {
@@ -727,6 +739,12 @@ void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_IF_SOME(tags, scriptTags) {
     for (const auto& tag: tags) {
       tracker.trackField("scriptTag", tag);
+    }
+  }
+  KJ_IF_SOME(tags, tailTags) {
+    for (const auto& tag: tags) {
+      tracker.trackField("tailTagKey", tag.key);
+      tracker.trackField("tailTagValue", tag.value);
     }
   }
   tracker.trackField("outcome", outcome);

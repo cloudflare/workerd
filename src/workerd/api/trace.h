@@ -101,6 +101,7 @@ class TraceItem final: public jsg::Object {
   jsg::Optional<ScriptVersion> getScriptVersion();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
+  jsg::Optional<jsg::Dict<kj::String>> getTailTags();
   jsg::Optional<kj::StringPtr> getDurableObjectId();
   kj::StringPtr getExecutionModel();
   kj::StringPtr getOutcome();
@@ -120,6 +121,7 @@ class TraceItem final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptVersion, getScriptVersion);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(dispatchNamespace, getDispatchNamespace);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(tailTags, getTailTags);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(durableObjectId, getDurableObjectId);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(outcome, getOutcome);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(executionModel, getExecutionModel);
@@ -141,6 +143,7 @@ class TraceItem final: public jsg::Object {
   kj::Maybe<ScriptVersion> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
+  kj::Maybe<kj::Array<tracing::TailTag>> tailTags;
   kj::Maybe<kj::String> durableObjectId;
   kj::String executionModel;
   kj::String outcome;
