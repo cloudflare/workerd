@@ -2202,5 +2202,141 @@ KJ_TEST("DrainingReader: pull enqueues then closes on next pull (value stream)")
   });
 }
 
+// Regression test: DrainingReader with pull that synchronously cancels the controller.
+// When cancel is called on the controller from within the pull callback, the controller's
+// doCancel() transitions its impl state to Closed and destroys the Queue. The QueueImpl
+// destructor detaches consumers (sets queue = kj::none) but does NOT cancel them — the
+// consumer state remains Active. Without the fix, drainingRead falls through to the
+// pending-read path and queues a ReadRequest that will never be fulfilled (promise hangs).
+// The fix detects the detached queue and returns done immediately.
+KJ_TEST("DrainingReader: pull that synchronously cancels does not hang (value stream)") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            // Synchronously cancel without enqueuing any data.
+            auto promise KJ_UNUSED = c->cancel(js, kj::none);
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Stream canceled immediately with no data — should resolve with done=true.
+        KJ_ASSERT(result.done);
+        KJ_ASSERT(result.chunks.size() == 0);
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader: pull that synchronously cancels does not hang (byte stream)") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
+            auto promise KJ_UNUSED = c->cancel(js, kj::none);
+            return js.resolvedPromise();
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readCompleted = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.done);
+        KJ_ASSERT(result.chunks.size() == 0);
+        readCompleted = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readCompleted);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+// Test drainingRead when pull enqueues data then cancels on the next pull.
+// The first read should deliver the enqueued data, and the second read
+// (which triggers the cancel) should resolve with done=true and no data.
+KJ_TEST("DrainingReader: pull enqueues then cancels on next pull (value stream)") {
+  preamble([](jsg::Lock& js) {
+    uint pullCount = 0;
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            pullCount++;
+            if (pullCount == 1) {
+              c->enqueue(js, toBytes(js, kj::str("data")));
+            } else {
+              // Second pull: cancel synchronously without enqueuing.
+              auto promise KJ_UNUSED = c->cancel(js, kj::none);
+            }
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      // First read should get the data.
+      bool firstReadDone = false;
+      auto p1 = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.chunks.size() == 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "data");
+        KJ_ASSERT(!result.done);
+        firstReadDone = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(firstReadDone);
+
+      // Second read triggers the cancel — should resolve with done=true.
+      bool secondReadDone = false;
+      auto p2 = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.done);
+        secondReadDone = true;
+      });
+
+      js.runMicrotasks();
+      KJ_ASSERT(secondReadDone);
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

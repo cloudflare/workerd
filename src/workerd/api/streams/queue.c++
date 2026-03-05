@@ -262,6 +262,20 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     });
   }
 
+  // If the controller was canceled during pumping (e.g., pull callback called
+  // controller.cancel()), the QueueImpl is destroyed and the consumer's queue
+  // reference is detached (set to kj::none). The consumer state is still Active
+  // because cancel on the controller doesn't notify consumers — it only closes
+  // the controller's own state. No more data will ever arrive, so treat this
+  // as done and return whatever we've collected.
+  if (impl.queue == kj::none) {
+    ready.hasPendingDrainingRead = false;
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = chunks.releaseAsArray(),
+      .done = true,
+    });
+  }
+
   // If we collected data, return it immediately.
   if (!chunks.empty() || isClosing) {
     ready.hasPendingDrainingRead = false;
@@ -696,6 +710,20 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
       return js.rejectedPromise<DrainingReadResult>(errored.reason.getHandle(js));
     }
     // Closed — all data was already drained. Return collected chunks.
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = chunks.releaseAsArray(),
+      .done = true,
+    });
+  }
+
+  // If the controller was canceled during pumping (e.g., pull callback called
+  // controller.cancel()), the QueueImpl is destroyed and the consumer's queue
+  // reference is detached (set to kj::none). The consumer state is still Active
+  // because cancel on the controller doesn't notify consumers — it only closes
+  // the controller's own state. No more data will ever arrive, so treat this
+  // as done and return whatever we've collected.
+  if (impl.queue == kj::none) {
+    ready.hasPendingDrainingRead = false;
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
       .done = true,
