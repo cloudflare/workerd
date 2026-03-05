@@ -21,6 +21,17 @@ export interface AutoRAGUnauthorizedError extends Error {}
  */
 export interface AutoRAGNameNotSetError extends Error {}
 
+export type ComparisonFilter = {
+  key: string;
+  type: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte';
+  value: string | number | boolean;
+};
+
+export type CompoundFilter = {
+  type: 'and' | 'or';
+  filters: ComparisonFilter[];
+};
+
 /**
  * @deprecated AutoRAG has been replaced by AI Search.
  * Use AiSearchSearchRequest with the new API instead.
