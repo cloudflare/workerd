@@ -516,12 +516,10 @@ class ReadableStreamController {
   // This is a C++ only API (not exposed to JavaScript) intended for optimized pipe operations.
   // Returns kj::none if the stream is locked in a way that prevents the read.
   //
-  // The maxRead parameter provides a soft limit on how much data to read. It only applies to
-  // subsequent synchronous pump attempts after draining the currently buffered data. That is,
-  // drainingRead will first drain all currently buffered data (potentially exceeding maxRead),
-  // then will only proceed with additional synchronous reads if the total bytes read so far
-  // is less than maxRead. This prevents runaway reads from neverending or slow streams while
-  // still allowing efficient batch reads for normal streams.
+  // The maxRead parameter provides a soft limit on how much data to read. Both the initial
+  // buffer drain and subsequent synchronous pump attempts stop when the total bytes read
+  // reaches maxRead (after finishing the current item). This prevents unbounded memory
+  // accumulation when a fast producer outpaces a slow consumer.
   virtual kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(
       jsg::Lock& js, size_t maxRead = kj::maxValue) = 0;
 

@@ -1678,20 +1678,19 @@ KJ_TEST("ValueQueue draining read errors on number value") {
 
 #pragma region Draining Read maxRead Tests
 
-// Tests for the maxRead soft limit parameter. The maxRead limit only applies to subsequent
-// synchronous pump attempts after draining the initial buffer. The initial buffer is always
-// drained completely even if it exceeds maxRead.
+// Tests for the maxRead soft limit parameter. Both the initial buffer drain and subsequent
+// synchronous pump attempts stop when totalRead reaches maxRead. This prevents unbounded
+// memory accumulation when a fast producer outpaces a slow consumer.
 //
 // Note: Testing the pump loop behavior requires the full controller infrastructure (stateListener).
 // These tests focus on the buffer drain behavior which can be tested without a listener.
-// The pump loop behavior with maxRead is tested in the benchmark (bench-stream-piping.c++).
 
-KJ_TEST("ValueQueue draining read drains entire buffer even with small maxRead") {
+KJ_TEST("ValueQueue draining read respects maxRead during buffer drain") {
   preamble([](jsg::Lock& js) {
     ValueQueue queue(10);
     ValueQueue::Consumer consumer(queue);
 
-    // Buffer 200 bytes of data
+    // Buffer 200 bytes of data (two 100-byte chunks)
     auto store1 = jsg::BackingStore::alloc(js, 100);
     store1.asArrayPtr().fill(0xAA);
     auto ab1 = jsg::BufferSource(js, kj::mv(store1)).getHandle(js);
@@ -1704,18 +1703,16 @@ KJ_TEST("ValueQueue draining read drains entire buffer even with small maxRead")
 
     KJ_ASSERT(consumer.size() == 200);
 
-    // Do a draining read with maxRead=50.
-    // Initial buffer (200 bytes) should be drained completely even though it exceeds maxRead.
-    // maxRead only gates subsequent pump attempts, not the initial buffer drain.
+    // maxRead=50: the first 100-byte chunk is drained (exceeding maxRead after the first item),
+    // then draining stops because totalRead (100) >= maxRead (50). The second chunk stays buffered.
     MustCall<DrainingReadContinuation> readContinuation(
         [&](jsg::Lock& js, DrainingReadResult&& result) {
       KJ_ASSERT(!result.done);
-      // Should have both chunks from the initial buffer
-      KJ_ASSERT(result.chunks.size() == 2);
+      // Should only have the first chunk (maxRead stopped draining before the second)
+      KJ_ASSERT(result.chunks.size() == 1);
       KJ_ASSERT(result.chunks[0].size() == 100);
-      KJ_ASSERT(result.chunks[1].size() == 100);
-      // Buffer should be empty
-      KJ_ASSERT(consumer.size() == 0);
+      // Second chunk should still be buffered
+      KJ_ASSERT(consumer.size() == 100);
       return js.resolvedPromise(kj::mv(result));
     });
 
@@ -1724,12 +1721,12 @@ KJ_TEST("ValueQueue draining read drains entire buffer even with small maxRead")
   });
 }
 
-KJ_TEST("ByteQueue draining read drains entire buffer even with small maxRead") {
+KJ_TEST("ByteQueue draining read respects maxRead during buffer drain") {
   preamble([](jsg::Lock& js) {
     ByteQueue queue(10);
     ByteQueue::Consumer consumer(queue);
 
-    // Buffer 200 bytes of data
+    // Buffer 200 bytes of data (two 100-byte chunks)
     auto store1 = jsg::BackingStore::alloc(js, 100);
     store1.asArrayPtr().fill(0xAA);
     queue.push(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, kj::mv(store1))));
@@ -1740,7 +1737,40 @@ KJ_TEST("ByteQueue draining read drains entire buffer even with small maxRead") 
 
     KJ_ASSERT(consumer.size() == 200);
 
-    // maxRead=50: initial buffer (200 bytes) still drained completely
+    // maxRead=50: first 100-byte chunk is drained, then stops. Second chunk stays buffered.
+    MustCall<DrainingReadContinuation> readContinuation(
+        [&](jsg::Lock& js, DrainingReadResult&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 1);
+      KJ_ASSERT(result.chunks[0].size() == 100);
+      KJ_ASSERT(consumer.size() == 100);
+      return js.resolvedPromise(kj::mv(result));
+    });
+
+    consumer.drainingRead(js, 50).then(js, readContinuation);
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read with large maxRead drains entire buffer") {
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Buffer 200 bytes (two 100-byte chunks)
+    auto store1 = jsg::BackingStore::alloc(js, 100);
+    store1.asArrayPtr().fill(0xAA);
+    auto ab1 = jsg::BufferSource(js, kj::mv(store1)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab1.As<v8::Value>()), 100));
+
+    auto store2 = jsg::BackingStore::alloc(js, 100);
+    store2.asArrayPtr().fill(0xBB);
+    auto ab2 = jsg::BufferSource(js, kj::mv(store2)).getHandle(js);
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab2.As<v8::Value>()), 100));
+
+    KJ_ASSERT(consumer.size() == 200);
+
+    // maxRead=1000: both chunks should be drained since total (200) < maxRead (1000)
     MustCall<DrainingReadContinuation> readContinuation(
         [&](jsg::Lock& js, DrainingReadResult&& result) {
       KJ_ASSERT(!result.done);
@@ -1751,32 +1781,7 @@ KJ_TEST("ByteQueue draining read drains entire buffer even with small maxRead") 
       return js.resolvedPromise(kj::mv(result));
     });
 
-    consumer.drainingRead(js, 50).then(js, readContinuation);
-    js.runMicrotasks();
-  });
-}
-
-KJ_TEST("ValueQueue draining read with maxRead=0 still drains buffer") {
-  preamble([](jsg::Lock& js) {
-    ValueQueue queue(10);
-    ValueQueue::Consumer consumer(queue);
-
-    // Buffer some data
-    auto store = jsg::BackingStore::alloc(js, 100);
-    store.asArrayPtr().fill(0xAA);
-    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 100));
-
-    // With maxRead=0, we should still drain the buffer (maxRead only gates pumping)
-    MustCall<DrainingReadContinuation> readContinuation(
-        [&](jsg::Lock& js, DrainingReadResult&& result) {
-      KJ_ASSERT(!result.done);
-      KJ_ASSERT(result.chunks.size() == 1);
-      KJ_ASSERT(result.chunks[0].size() == 100);
-      return js.resolvedPromise(kj::mv(result));
-    });
-
-    consumer.drainingRead(js, 0).then(js, readContinuation);
+    consumer.drainingRead(js, 1000).then(js, readContinuation);
     js.runMicrotasks();
   });
 }
@@ -1802,6 +1807,45 @@ KJ_TEST("ValueQueue draining read with default maxRead (unlimited)") {
     });
 
     consumer.drainingRead(js).then(js, readContinuation);  // No maxRead argument = default
+    js.runMicrotasks();
+  });
+}
+
+KJ_TEST("ValueQueue draining read maxRead bounds multiple iterations") {
+  // Verify that successive drainingRead calls with maxRead correctly drain
+  // a large buffer incrementally.
+  preamble([](jsg::Lock& js) {
+    ValueQueue queue(10);
+    ValueQueue::Consumer consumer(queue);
+
+    // Buffer 400 bytes: four 100-byte chunks
+    for (int i = 0; i < 4; i++) {
+      auto store = jsg::BackingStore::alloc(js, 100);
+      store.asArrayPtr().fill(0x10 * (i + 1));
+      auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
+      queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 100));
+    }
+    KJ_ASSERT(consumer.size() == 400);
+
+    // First read with maxRead=150: drains first chunk (100 bytes, now totalRead=100 < 150),
+    // then drains second chunk (200 bytes total, now >= 150), stops.
+    MustCall<DrainingReadContinuation> read1([&](jsg::Lock& js, DrainingReadResult&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 2);
+      KJ_ASSERT(consumer.size() == 200);
+      return js.resolvedPromise(kj::mv(result));
+    });
+    consumer.drainingRead(js, 150).then(js, read1);
+    js.runMicrotasks();
+
+    // Second read with maxRead=150: drains next two chunks similarly
+    MustCall<DrainingReadContinuation> read2([&](jsg::Lock& js, DrainingReadResult&& result) {
+      KJ_ASSERT(!result.done);
+      KJ_ASSERT(result.chunks.size() == 2);
+      KJ_ASSERT(consumer.size() == 0);
+      return js.resolvedPromise(kj::mv(result));
+    });
+    consumer.drainingRead(js, 150).then(js, read2);
     js.runMicrotasks();
   });
 }
