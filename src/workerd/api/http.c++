@@ -19,7 +19,6 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -1464,13 +1463,6 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
   //   requires a significant rewrite of the code below. It'll probably get simpler, though?
   kj::Own<kj::HttpClient> client = asHttpClient(kj::mv(clientWithTracing.client));
-
-  // fetch() requests use a lot of unaccounted C++ memory, so we adjust memory usage to pressure
-  // the GC and protect against OOMs. When the autogate is enabled, this adjustment is applied
-  // centrally to all subrequests in IoContext::getSubrequestNoChecks() instead.
-  if (!util::Autogate::isEnabled(util::AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH)) {
-    client = client.attach(js.getExternalMemoryAdjustment(3 * 1024));
-  }
 
   kj::HttpHeaders headers(ioContext.getHeaderTable());
   jsRequest->shallowCopyHeadersTo(headers);
