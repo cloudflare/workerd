@@ -243,6 +243,10 @@ void Lock::setImmutablePrototype() {
   IsolateBase::from(v8Isolate).enableSetImmutablePrototype();
 }
 
+void Lock::setSpecCompliantPropertyAttributes() {
+  IsolateBase::from(v8Isolate).enableSpecCompliantPropertyAttributes();
+}
+
 void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
   IsolateBase::from(v8Isolate).setLoggerCallback({}, kj::mv(logger));
 }
