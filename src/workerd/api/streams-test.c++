@@ -141,16 +141,7 @@ KJ_TEST("PumpToReader regression") {
     }
 
     kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-      events.add(kj::str("got the write"));
-      paf.fulfiller->fulfill();
-      // Concatenate pieces into a single buffer for the pipe write.
-      kj::Vector<byte> data;
-      for (auto& piece: pieces) {
-        data.addAll(piece);
-      }
-      auto arr = data.releaseAsArray();
-      return pipe.ends[0]->write(arr).attach(
-          kj::mv(arr), kj::defer([this] { events.add(kj::str("write promise was dropped")); }));
+      return kj::NEVER_DONE;
     }
 
     kj::Promise<void> end() override {
