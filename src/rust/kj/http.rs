@@ -58,8 +58,17 @@ pub mod ffi {
         type HttpMethod;
     }
 
+    // --- HttpHeaderId
+    // Opaque handle to a kj::HttpHeaderId, which identifies a header by numeric index in an
+    // HttpHeaderTable. This supports both builtin headers and custom headers registered via
+    // HttpHeaderTable::Builder::add(). Pass these by reference from C++ to Rust and back.
+
+    unsafe extern "C++" {
+        type HttpHeaderId;
+    }
+
     // --- HttpHeaders
-    // TODO(when needed): support more than builtin headers
+    // TODO(when needed): support headerId creation from rust.
 
     /// Corresponds to `kj::HttpHeaders::BuiltinIndicesEnum`.
     /// Values are automatically assigned by `cxx` because of extern declaration below.
@@ -93,6 +102,10 @@ pub mod ffi {
         unsafe fn get_header<'a>(
             this_: &'a HttpHeaders,
             id: BuiltinIndicesEnum,
+        ) -> KjMaybe<&'a [u8]>;
+        unsafe fn get_header_by_id<'a>(
+            this_: &'a HttpHeaders,
+            id: &HttpHeaderId,
         ) -> KjMaybe<&'a [u8]>;
     }
 
@@ -166,6 +179,7 @@ assert_eq_size!(ffi::HttpConnectSettings, [u8; 16]);
 assert_eq_align!(ffi::HttpConnectSettings, u64);
 
 pub type HeaderId = ffi::BuiltinIndicesEnum;
+pub type HttpHeaderId = ffi::HttpHeaderId;
 
 /// Non-owning constant reference to `kj::HttpHeaders`
 pub struct HttpHeadersRef<'a>(&'a ffi::HttpHeaders);
@@ -173,6 +187,12 @@ pub struct HttpHeadersRef<'a>(&'a ffi::HttpHeaders);
 impl HttpHeadersRef<'_> {
     pub fn get(&self, id: HeaderId) -> Option<&[u8]> {
         unsafe { ffi::get_header(self.0, id).into() }
+    }
+
+    /// Look up a header by its `kj::HttpHeaderId`. This works for both builtin headers and custom
+    /// headers registered via `HttpHeaderTable::Builder::add()`.
+    pub fn get_by_id(&self, id: &HttpHeaderId) -> Option<&[u8]> {
+        unsafe { ffi::get_header_by_id(self.0, id).into() }
     }
 
     #[must_use]

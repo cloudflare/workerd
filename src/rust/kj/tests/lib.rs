@@ -19,6 +19,8 @@ pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/kj/ffi.h");
         type HttpService = kj::http::ffi::HttpService;
+        type HttpHeaders = kj::http::ffi::HttpHeaders;
+        type HttpHeaderId = kj::http::ffi::HttpHeaderId;
     }
 
     #[namespace = "kj::rust"]
@@ -31,6 +33,13 @@ pub mod ffi {
 
         #[expect(clippy::unnecessary_box_returns)]
         fn new_proxy_http_service(service: KjOwn<HttpService>) -> Box<DynHttpService>;
+
+        /// Look up a header value by HttpHeaderId, returning the value or an empty slice if absent.
+        /// This exercises the C++ -> Rust -> C++ round-trip for HttpHeaderId.
+        unsafe fn get_header_value_via_id(
+            headers: &HttpHeaders,
+            id: &HttpHeaderId,
+        ) -> &'a [u8];
     }
 }
 
@@ -79,4 +88,13 @@ fn new_proxy_http_service(service: KjOwn<ffi::HttpService>) -> Box<DynHttpServic
         target: service.into(),
     }
     .into_ffi()
+}
+
+fn get_header_value_via_id<'a>(
+    headers: &'a ffi::HttpHeaders,
+    id: &ffi::HttpHeaderId,
+) -> &'a [u8] {
+    // Call the FFI shim directly. The returned slice borrows from the C++ HttpHeaders object.
+    let maybe: Option<&'a [u8]> = unsafe { kj::http::ffi::get_header_by_id(headers, id) }.into();
+    maybe.unwrap_or(b"")
 }
