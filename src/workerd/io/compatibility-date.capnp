@@ -1472,4 +1472,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #  - Getter .length is explicitly 0 and setter .length is 1.
   #  - Getter .name is "get <name>" and setter .name is "set <name>" per the
   #    Web IDL spec, instead of empty strings.
+
+  webSocketCloseReadyStateClosed @170 :Bool
+    $compatEnableFlag("no_web_socket_half_open_by_default")
+    $compatDisableFlag("web_socket_half_open_by_default")
+    $compatEnableDate("2026-03-17");
+  # When enabled, a reciprocal Close frame is automatically sent through the
+  # outgoing message pump when a server-initiated close is received, and the
+  # WebSocket readyState is CLOSED (3) when the close event fires. Previously,
+  # no close reply was sent and readyState was CLOSING (2). The WebSocket spec
+  # requires readyState to be CLOSED when the close event is dispatched.
 }
