@@ -26,6 +26,20 @@ class WorkerQueue: public jsg::Object {
   // representing this queue.
   WorkerQueue(uint subrequestChannel): subrequestChannel(subrequestChannel) {}
 
+  struct ConsumerMetrics {
+    double backlogLagMs;
+    JSG_STRUCT(backlogLagMs);
+    JSG_STRUCT_TS_OVERRIDE(QueueConsumerMetrics);
+  };
+
+  struct Metrics {
+    double backlogCount;
+    double backlogBytes;
+    kj::Array<ConsumerMetrics> consumers;
+    JSG_STRUCT(backlogCount, backlogBytes, consumers);
+    JSG_STRUCT_TS_OVERRIDE(QueueMetrics);
+  };
+
   struct SendOptions {
     // TODO(soon): Support metadata.
 
@@ -72,17 +86,32 @@ class WorkerQueue: public jsg::Object {
       jsg::Sequence<MessageSendRequest> batch,
       jsg::Optional<SendBatchOptions> options);
 
-  JSG_RESOURCE_TYPE(WorkerQueue) {
+  jsg::Promise<Metrics> metrics(jsg::Lock& js, const jsg::TypeHandler<Metrics>& metricsHandler);
+
+  JSG_RESOURCE_TYPE(WorkerQueue, CompatibilityFlags::Reader flags) {
     JSG_METHOD(send);
     JSG_METHOD(sendBatch);
+    if (flags.getQueueMetricsApi()) {
+      JSG_METHOD(metrics);
+    }
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE(Queue<Body = unknown> {
-      send(message: Body, options?: QueueSendOptions): Promise<void>;
-      sendBatch(messages
-                : Iterable<MessageSendRequest<Body>>, options ?: QueueSendBatchOptions)
-          : Promise<void>;
-    });
+    if (flags.getQueueMetricsApi()) {
+      JSG_TS_OVERRIDE(Queue<Body = unknown> {
+        send(message: Body, options?: QueueSendOptions): Promise<void>;
+        sendBatch(messages
+                  : Iterable<MessageSendRequest<Body>>, options ?: QueueSendBatchOptions)
+            : Promise<void>;
+        metrics(): Promise<QueueMetrics>;
+      });
+    } else {
+      JSG_TS_OVERRIDE(Queue<Body = unknown> {
+        send(message: Body, options?: QueueSendOptions): Promise<void>;
+        sendBatch(messages
+                  : Iterable<MessageSendRequest<Body>>, options ?: QueueSendBatchOptions)
+            : Promise<void>;
+      });
+    }
     JSG_TS_DEFINE(type QueueContentType = "text" | "bytes" | "json" | "v8");
   }
 
@@ -375,7 +404,8 @@ class QueueCustomEvent final: public WorkerInterface::CustomEvent, public kj::Re
 
 #define EW_QUEUE_ISOLATE_TYPES                                                                     \
   api::WorkerQueue, api::WorkerQueue::SendOptions, api::WorkerQueue::SendBatchOptions,             \
-      api::WorkerQueue::MessageSendRequest, api::IncomingQueueMessage, api::QueueRetryBatch,       \
+      api::WorkerQueue::MessageSendRequest, api::WorkerQueue::ConsumerMetrics,                     \
+      api::WorkerQueue::Metrics, api::IncomingQueueMessage, api::QueueRetryBatch,                  \
       api::QueueRetryMessage, api::QueueResponse, api::QueueRetryOptions, api::QueueMessage,       \
       api::QueueEvent, api::QueueController, api::QueueExportedHandler
 

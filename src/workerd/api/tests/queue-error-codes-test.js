@@ -62,6 +62,17 @@ export default {
       return new Response('');
     }
 
+    if (pathname === '/metrics') {
+      // Return error with headers defined for metrics
+      return new Response('', {
+        status: 503,
+        headers: {
+          'CF-Queues-Error-Code': '10503',
+          'CF-Queues-Error-Cause': 'Service temporarily unavailable',
+        },
+      });
+    }
+
     return new Response('Not Found', { status: 404 });
   },
 
@@ -142,6 +153,17 @@ export default {
           'Queue sendBatch failed: Service Unavailable'
         );
       }
+    }
+
+    // Test metrics with error headers defined
+    try {
+      await env.QUEUE.metrics();
+      assert.fail('Expected metrics() to throw');
+    } catch (error) {
+      assert.strictEqual(
+        error.message,
+        'Service temporarily unavailable (10503)'
+      );
     }
   },
 };
