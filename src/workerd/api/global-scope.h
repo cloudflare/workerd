@@ -11,12 +11,14 @@
 #include "performance.h"
 
 #include <workerd/api/hibernation-event-params.h>
+#include <workerd/io/features.h>
 #ifdef WORKERD_FUZZILLI
 #include "unsafe.h"
 
 #include <workerd/api/fuzzilli.h>
 #endif
 
+#include <workerd/io/io-channels.h>
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
 
@@ -192,12 +194,21 @@ class TestController: public jsg::Object {
 
 class ExecutionContext: public jsg::Object {
  public:
-  ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
+  ExecutionContext(jsg::Lock& js, jsg::JsValue exports, kj::Maybe<jsg::JsValue> version = kj::none)
+      : ExecutionContext(js, kj::mv(exports), /*props=*/js.obj(), kj::mv(version)) {}
+
+  ExecutionContext(jsg::Lock& js,
+      jsg::JsValue exports,
+      jsg::JsValue props,
+      kj::Maybe<jsg::JsValue> version = kj::none)
       : exports(js, exports),
-        props(js, js.obj()) {}
-  ExecutionContext(jsg::Lock& js, jsg::JsValue exports, jsg::JsValue props)
-      : exports(js, exports),
-        props(js, props) {}
+        props(js, props),
+        version(kj::mv(version).map([&js](auto& v) { return jsg::JsRef{js, v}; })) {
+    if (FeatureFlags::get(js).getEnableVersionApi()) {
+      KJ_REQUIRE_NONNULL(this->version,
+          "VersionInfo is required for ExecutionContext when 'enable_version_api' compat flag is enabled.");
+    }
+  }
 
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
@@ -214,6 +225,14 @@ class ExecutionContext: public jsg::Object {
     return props.getHandle(js);
   }
 
+  jsg::JsValue getVersion(jsg::Lock& js) {
+    // This function should only reachable when the `enable_versions_api` flag is enabled, which
+    // already asserts that version is not kj::none elsewhere.
+    auto& someVersion = JSG_REQUIRE_NONNULL(
+        version, DOMInvalidAccessError, "attempt to access non-existent ctx.version object.");
+    return someVersion.getHandle(js);
+  }
+
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
@@ -221,6 +240,9 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
+    if (flags.getEnableVersionApi()) {
+      JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
+    }
 
     if (flags.getWorkerdExperimental()) {
       // TODO(soon): Before making this generally available we need to:
@@ -236,28 +258,57 @@ class ExecutionContext: public jsg::Object {
       JSG_METHOD(abort);
     }
 
+    // TODO(soon): This is getting unwieldy.
     if (flags.getEnableCtxExports()) {
-      JSG_TS_OVERRIDE(<Props = unknown> {
-        readonly props: Props;
-        readonly exports: Cloudflare.Exports;
-      });
+      if (flags.getEnableVersionApi()) {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+          readonly exports: Cloudflare.Exports;
+          readonly version: {
+            id: string;
+            cohort?: string;
+            key?: string;
+            override?: string;
+          };
+        });
+      } else {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+          readonly exports: Cloudflare.Exports;
+        });
+      }
     } else {
-      JSG_TS_OVERRIDE(<Props = unknown> {
-        readonly props: Props;
-      });
+      if (flags.getEnableVersionApi()) {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+          readonly version: {
+            id: string;
+            cohort?: string;
+            key?: string;
+            override?: string;
+          };
+        });
+      } else {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+        });
+      }
     }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("props", props);
+    tracker.trackField("version", version);
   }
 
  private:
   jsg::JsRef<jsg::JsValue> exports;
   jsg::JsRef<jsg::JsValue> props;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> version;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(props);
+    visitor.visit(version);
   }
 };
 

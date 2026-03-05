@@ -2303,7 +2303,10 @@ static inline kj::Own<T> fakeOwn(T& ref) {
 }
 
 kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
-    kj::Maybe<kj::StringPtr> name, Frankenvalue props, kj::Maybe<Worker::Actor&> actor) {
+    kj::Maybe<kj::StringPtr> name,
+    Frankenvalue props,
+    kj::Maybe<Worker::Actor&> actor,
+    kj::Maybe<VersionInfo> versionInfo) {
   KJ_IF_SOME(a, actor) {
     KJ_IF_SOME(h, a.getHandler()) {
       return fakeOwn(h);
@@ -2317,7 +2320,8 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     jsg::Lock& js = *this;
     auto handler = kj::heap(cls(js,
         js.alloc<api::ExecutionContext>(js,
-            jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js)),
+            jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
+            versionInfo.map([&js](const auto& v) { return v.toJs(js); })),
         KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
     // HACK: We set handler.env and handler.ctx to undefined because we already passed the real
@@ -2334,7 +2338,8 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     if (!FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
       api::ExportedHandler constructedHandler = h.clone(js);
       constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
-          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
+          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js),
+          versionInfo.map([&js](const auto& v) { return v.toJs(js); }));
       return kj::heap(kj::mv(constructedHandler));
     }
     return fakeOwn(h);

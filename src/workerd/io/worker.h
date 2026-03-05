@@ -154,6 +154,38 @@ class Worker: public kj::AtomicRefcounted {
     }
   };
 
+  // Version information associated with a worker. These are made available through `ctx.version`.
+  struct VersionInfo {
+    kj::String id;
+    kj::Maybe<kj::String> cohort;
+    kj::Maybe<kj::String> key;
+    kj::Maybe<kj::String> versionOverride;
+
+    VersionInfo clone() const {
+      return {
+        .id = kj::str(id),
+        .cohort = cohort.map([](const kj::String& s) { return kj::str(s); }),
+        .key = key.map([](const kj::String& s) { return kj::str(s); }),
+        .versionOverride = versionOverride.map([](const kj::String& s) { return kj::str(s); }),
+      };
+    }
+
+    jsg::JsValue toJs(jsg::Lock& js) const {
+      auto out = js.obj();
+      out.set(js, "id"_kj, js.str(id));
+      KJ_IF_SOME(someCohort, cohort) {
+        out.set(js, "cohort"_kj, js.str(someCohort));
+      }
+      KJ_IF_SOME(someKey, key) {
+        out.set(js, "key"_kj, js.str(someKey));
+      }
+      KJ_IF_SOME(someVersionOverride, versionOverride) {
+        out.set(js, "override"_kj, js.str(someVersionOverride));
+      }
+      return out;
+    };
+  };
+
   explicit Worker(kj::Own<const Script> script,
       kj::Own<WorkerObserver> metrics,
       kj::FunctionParam<void(jsg::Lock& lock,
@@ -757,7 +789,10 @@ class Worker::Lock {
   // If running in an actor, the name and props are ignored and the entrypoint originally used to
   // construct the actor is returned.
   kj::Maybe<kj::Own<api::ExportedHandler>> getExportedHandler(
-      kj::Maybe<kj::StringPtr> entrypointName, Frankenvalue props, kj::Maybe<Worker::Actor&> actor);
+      kj::Maybe<kj::StringPtr> entrypointName,
+      Frankenvalue props,
+      kj::Maybe<Worker::Actor&> actor,
+      kj::Maybe<VersionInfo> versionInfo = kj::none);
 
   // Get the C++ object representing the global scope.
   api::ServiceWorkerGlobalScope& getGlobalScope();

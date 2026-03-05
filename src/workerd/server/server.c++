@@ -2195,7 +2195,7 @@ class Server::WorkerService final: public Service,
         waitUntilTasks,
         true,                  // tunnelExceptions
         kj::mv(workerTracer),  // workerTracer
-        kj::mv(metadata.cfBlobJson));
+        kj::mv(metadata.cfBlobJson), kj::none);
   }
 
   class ActorNamespace final {
