@@ -41,6 +41,7 @@ export type ConversionOptions = {
   html?: {
     images?: EmbeddedImageConversionOptions & { convertOGImage?: boolean };
     hostname?: string;
+    cssSelector?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;

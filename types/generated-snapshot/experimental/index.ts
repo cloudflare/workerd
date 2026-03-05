@@ -12717,6 +12717,7 @@ export type ConversionOptions = {
       convertOGImage?: boolean;
     };
     hostname?: string;
+    cssSelector?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;
