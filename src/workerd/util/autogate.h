@@ -20,9 +20,6 @@ enum class AutogateKey {
   STREAMING_TAIL_WORKER,
   // Enable refactor used to consolidate the different tail worker stream implementations.
   TAIL_STREAM_REFACTOR,
-  // When enabled, increases the external memory adjustment for fetch() from 3 KiB to 8 KiB. This
-  // brings it closer to the actual C++ memory overhead.
-  INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH,
   // Enable Rust-backed Node.js DNS implementation
   RUST_BACKED_NODE_DNS,
   // Use ExternalPusher instead of StreamSink to handle streams in RPC.
