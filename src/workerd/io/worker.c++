@@ -2353,9 +2353,9 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     return kj::none;
   } else {
     if (worker.impl->actorClasses.find(n) != kj::none) {
-      LOG_ERROR_PERIODICALLY("worker is not an actor but class name was requested", n);
+      LOG_ERROR_PERIODICALLY("NOSENTRY worker is not an actor but class name was requested", n);
     } else {
-      LOG_ERROR_PERIODICALLY("worker has no such named entrypoint", n);
+      LOG_ERROR_PERIODICALLY("NOSENTRY worker has no such named entrypoint", n);
     }
 
     KJ_FAIL_ASSERT("worker_do_not_log; Unable to get exported handler");
