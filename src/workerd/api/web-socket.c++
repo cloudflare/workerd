@@ -57,6 +57,7 @@ WebSocket::WebSocket(
       binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
                                                                         : BinaryType::ARRAYBUFFER),
       serializedAttachment(kj::mv(package.serializedAttachment)),
+      allowHalfOpen(package.allowHalfOpen),
       farNative(initNative(ioContext,
           ws,
           kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
@@ -76,6 +77,7 @@ WebSocket::WebSocket(jsg::Lock& js, kj::Own<kj::WebSocket> native)
       url(kj::none),
       binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
                                                                         : BinaryType::ARRAYBUFFER),
+      allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
   auto nativeObj = kj::heap<Native>();
@@ -88,6 +90,7 @@ WebSocket::WebSocket(jsg::Lock& js, kj::String url)
       url(kj::mv(url)),
       binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
                                                                         : BinaryType::ARRAYBUFFER),
+      allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
   auto nativeObj = kj::heap<Native>();
@@ -398,7 +401,7 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(
   co_return co_await promise;
 }
 
-void WebSocket::accept(jsg::Lock& js) {
+void WebSocket::accept(jsg::Lock& js, jsg::Optional<AcceptOptions> options) {
   auto& native = *farNative;
   JSG_REQUIRE(!native.state.is<AwaitingConnection>(), TypeError,
       "Websockets obtained from the 'new WebSocket()' constructor cannot call accept");
@@ -412,6 +415,12 @@ void WebSocket::accept(jsg::Lock& js) {
     // an established connection. This is probably okay? It might spare the worker devs a class of
     // errors they do not care care about.
     return;
+  }
+
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(value, opts.allowHalfOpen) {
+      allowHalfOpen = AllowHalfOpen(value);
+    }
   }
 
   internalAccept(js, IoContext::current().getCriticalSection());
@@ -605,11 +614,8 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
     KJ_UNREACHABLE;
   }();
 
-  auto pendingAutoResponses =
-      autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
-  autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
   outgoingMessages->insert(
-      GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg), pendingAutoResponses});
+      GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg), getPendingAutoResponseCount()});
 
   ensurePumping(js);
 }
@@ -680,22 +686,13 @@ void WebSocket::close(
 
   assertNoError(js);
 
-  // pendingAutoResponses stores the number of queuedAutoResponses that will be pumped before sending
-  // the current GatedMessage, guaranteeing order.
-  // queuedAutoResponses stores the total number of auto-response messages that are already in accounted
-  // for in previous GatedMessages. This is useful to easily calculate the number of pendingAutoResponses
-  // for each new GateMessage.
-  auto pendingAutoResponses =
-      autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
-  autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
-
   outgoingMessages->insert(GatedMessage{IoContext::current().waitForOutputLocksIfNecessary(),
     kj::WebSocket::Close{
       // Code 1005 actually translates to sending a close message with no body on the wire.
       static_cast<uint16_t>(code.orDefault(1005)),
       kj::mv(reason).orDefault(jsg::USVString(kj::str())),
     },
-    pendingAutoResponses});
+    getPendingAutoResponseCount()});
 
   native.closedOutgoing = true;
   closedOutgoingForHib = true;
@@ -990,6 +987,13 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
   completed = true;
 }
 
+size_t WebSocket::getPendingAutoResponseCount() {
+  auto count =
+      autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
+  autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
+  return count;
+}
+
 void WebSocket::tryReleaseNative(jsg::Lock& js) {
   // If the native WebSocket is no longer needed (the connection closed) and there are no more
   // messages to send, we can discard the underlying connection.
@@ -1057,6 +1061,23 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
             native.closedIncoming = true;
+            if (!allowHalfOpen.toBool() && !native.closedOutgoing && !native.outgoingAborted &&
+                !native.state.is<Released>()) {
+              // When allowHalfOpen is false (the spec-compliant default with the
+              // web_socket_auto_reply_to_close compat flag), automatically send a reciprocal
+              // Close frame through the outgoing message pump so that readyState is CLOSED (3)
+              // when the close event fires. Skip if a close frame was already sent (e.g. the
+              // application called close() before the server sent its Close), or if the outgoing
+              // side is otherwise unusable.
+              outgoingMessages->insert(
+                  GatedMessage{IoContext::current().waitForOutputLocksIfNecessary(),
+                    kj::WebSocket::Close{close.code, kj::str(close.reason)},
+                    getPendingAutoResponseCount()});
+
+              native.closedOutgoing = true;
+              closedOutgoingForHib = true;
+              ensurePumping(js);
+            }
             dispatchEventImpl(js, js.alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
             // Native WebSocket no longer needed; release.
             tryReleaseNative(js);
@@ -1202,6 +1223,7 @@ WebSocket::HibernationPackage WebSocket::buildPackageForHibernation() {
     .serializedAttachment = kj::mv(serializedAttachment),
     .maybeTags = kj::none,
     .closedOutgoingConnection = closedOutgoingForHib,
+    .allowHalfOpen = allowHalfOpen,
   };
 }
 

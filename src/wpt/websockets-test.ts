@@ -96,16 +96,6 @@ export default {
     replace: removeUseCapture,
   },
   'Close-server-initiated-close.any.js': {
-    // If the app is proxying messages to and from some other WebSocket,
-    // then it needs to actually wait for that other WebSocket to deliver the close reply,
-    // before sending the close reply the other way.
-    //
-    // Fixing this bug will break proxying WebSocket connections.
-    comment:
-      'readyState is CLOSING (2) instead of CLOSED (3) when close event fires',
-    expectedFailures: [
-      'Create WebSocket - Server initiated Close - Client sends back a CLOSE - readyState should be in CLOSED state and wasClean is TRUE - Connection should be closed',
-    ],
     replace: removeUseCapture,
   },
   'Close-undefined.any.js': {
