@@ -194,7 +194,7 @@ export class MyService extends WorkerEntrypoint {
     return new Response('method = ' + req.method + ', url = ' + req.url);
   }
 
-  async connect({ socket, cf }) {
+  async connect(socket) {
     const enc = new TextEncoder();
     await socket.writable.getWriter().write(enc.encode('hello'));
   }
@@ -643,7 +643,6 @@ export let connectBinding = {
     const dec = new TextDecoder();
     let result = '';
     for await (const chunk of socket.readable) {
-      dec.decode(chunk, { stream: true });
       result += dec.decode(chunk, { stream: true });
     }
     result += dec.decode();

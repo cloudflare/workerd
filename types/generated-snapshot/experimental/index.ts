@@ -569,10 +569,6 @@ export interface AlarmInvocationInfo {
   readonly isRetry: boolean;
   readonly retryCount: number;
 }
-export interface ConnectEvent {
-  get socket(): Socket;
-  get cf(): any | undefined;
-}
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
 }
@@ -3264,9 +3260,7 @@ export interface TraceItem {
 export interface TraceItemAlarmEventInfo {
   readonly scheduledTime: Date;
 }
-export interface TraceItemConnectEventInfo {
-  readonly cf?: any;
-}
+export interface TraceItemConnectEventInfo {}
 export interface TraceItemCustomEventInfo {}
 export interface TraceItemScheduledEventInfo {
   readonly scheduledTime: number;
@@ -12830,6 +12824,9 @@ export declare namespace TailStream {
     readonly type: "fetch";
     readonly statusCode: number;
   }
+  interface ConnectEventInfo {
+    readonly type: "connect";
+  }
   type EventOutcome =
     | "ok"
     | "canceled"
@@ -12860,6 +12857,7 @@ export declare namespace TailStream {
     readonly scriptVersion?: ScriptVersion;
     readonly info:
       | FetchEventInfo
+      | ConnectEventInfo
       | JsRpcEventInfo
       | ScheduledEventInfo
       | AlarmEventInfo

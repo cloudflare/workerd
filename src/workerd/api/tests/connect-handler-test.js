@@ -28,7 +28,6 @@ export const connectHandlerProxy = {
     const dec = new TextDecoder();
     let result = '';
     for await (const chunk of socket.readable) {
-      dec.decode(chunk, { stream: true });
       result += dec.decode(chunk, { stream: true });
     }
     result += dec.decode();
@@ -38,9 +37,8 @@ export const connectHandlerProxy = {
 };
 
 export default {
-  async connect({ socket, cf }) {
+  async connect(socket) {
     const enc = new TextEncoder();
-    strictEqual(typeof cf.clientIp, 'string');
     await socket.writable.getWriter().write(enc.encode('hello'));
   },
 };

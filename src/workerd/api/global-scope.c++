@@ -122,7 +122,6 @@ void ServiceWorkerGlobalScope::clear() {
 kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
-    kj::Maybe<kj::StringPtr> cfBlobJson,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
@@ -144,8 +143,6 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
-    CfProperty cf(cfBlobJson);
-
     auto input = kj::str("fake://", host);
     auto url = JSG_REQUIRE_NONNULL(
         jsg::Url::tryParse(input.asPtr()), TypeError, "Specified address could not be parsed.");
@@ -161,8 +158,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
         port == "443"_kj || port == "80"_kj, kj::none);
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
-    auto event = js.alloc<ConnectEvent>(kj::mv(jsSocket), kj::mv(cf));
-    auto promise = handler(js, kj::mv(event), eh.env.addRef(js), eh.getCtx());
+    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
     return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "

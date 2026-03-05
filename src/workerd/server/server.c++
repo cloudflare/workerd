@@ -5144,42 +5144,6 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
   };
 };
 
-namespace {
-// Construct a cf blob describing the client identity. Used by both the Server:HttpListener and
-// Server::TcpListener.
-kj::Maybe<kj::String> processCfBlobHeader(kj::AuthenticatedStream& stream) {
-  kj::PeerIdentity* peerId;
-
-  KJ_IF_SOME(tlsId, kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
-    peerId = &tlsId.getNetworkIdentity();
-
-    // TODO(someday): Add client certificate info to the cf blob? At present, KJ only supplies the
-    // common name, but that doesn't even seem to be one of the fields that Cloudflare-hosted
-    // Workers receive. We should probably try to match those.
-  } else {
-    peerId = stream.peerIdentity;
-  }
-
-  KJ_IF_SOME(remote, kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
-    return kj::str("{\"clientIp\": ", escapeJsonString(remote.toString()), "}");
-  } else KJ_IF_SOME(local, kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
-    auto creds = local.getCredentials();
-
-    kj::Vector<kj::String> parts;
-    KJ_IF_SOME(p, creds.pid) {
-      parts.add(kj::str("\"clientPid\":", p));
-    }
-    KJ_IF_SOME(u, creds.uid) {
-      parts.add(kj::str("\"clientUid\":", u));
-    }
-
-    return kj::str("{", kj::strArray(parts, ","), "}");
-  }
-
-  return kj::none;
-}
-}  // namespace
-
 class Server::HttpListener final: public kj::Refcounted {
  public:
   HttpListener(Server& owner,
@@ -5207,7 +5171,36 @@ class Server::HttpListener final: public kj::Refcounted {
 
       kj::Maybe<kj::String> cfBlobJson;
       if (!rewriter->hasCfBlobHeader()) {
-        cfBlobJson = processCfBlobHeader(stream);
+        // Construct a cf blob describing the client identity.
+
+        kj::PeerIdentity* peerId;
+
+        KJ_IF_SOME(tlsId,
+            kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
+          peerId = &tlsId.getNetworkIdentity();
+
+          // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
+          //   supplies the common name, but that doesn't even seem to be one of the fields that
+          //   Cloudflare-hosted Workers receive. We should probably try to match those.
+        } else {
+          peerId = stream.peerIdentity;
+        }
+
+        KJ_IF_SOME(remote, kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
+          cfBlobJson = kj::str("{\"clientIp\": ", escapeJsonString(remote.toString()), "}");
+        } else KJ_IF_SOME(local, kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
+          auto creds = local.getCredentials();
+
+          kj::Vector<kj::String> parts;
+          KJ_IF_SOME(p, creds.pid) {
+            parts.add(kj::str("\"clientPid\":", p));
+          }
+          KJ_IF_SOME(u, creds.uid) {
+            parts.add(kj::str("\"clientUid\":", u));
+          }
+
+          cfBlobJson = kj::str("{", kj::strArray(parts, ","), "}");
+        }
       }
 
       auto conn = kj::heap<Connection>(*this, kj::mv(cfBlobJson));
@@ -5387,13 +5380,7 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
       TRACE_EVENT("workerd", "TcpListener handle connection");
 
-      kj::Maybe<kj::String> cfBlobJson;
-      if (!rewriter->hasCfBlobHeader()) {
-        cfBlobJson = processCfBlobHeader(stream);
-      }
-
       IoChannelFactory::SubrequestMetadata metadata;
-      metadata.cfBlobJson = mapCopyString(cfBlobJson);
       auto req = service->startRequest(kj::mv(metadata));
       auto response = kj::heap<ResponseWrapper>();
       kj::HttpHeaders headers(headerTable);

@@ -562,12 +562,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   bool isActor = context.getActor() != kj::none;
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    kj::String cfJson;
-    KJ_IF_SOME(c, cfBlobJson) {
-      cfJson = kj::str(c);
-    }
-
-    t.setEventInfo(*incomingRequest, tracing::ConnectEventInfo(kj::mv(cfJson)));
+    t.setEventInfo(*incomingRequest, tracing::ConnectEventInfo());
     workerTracer = t;
   }
   incomingRequest->delivered();
@@ -579,7 +574,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
                host = kj::str(host)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
-    return lock.getGlobalScope().connect(kj::mv(host), connection, response, cfBlobJson, lock,
+    return lock.getGlobalScope().connect(kj::mv(host), connection, response, lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
   })
       .then([&context, workerTracer]() {

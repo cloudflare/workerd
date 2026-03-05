@@ -116,7 +116,6 @@ struct Trace @0x8e8d911203762d34 {
   }
 
   struct ConnectEventInfo {
-    cfJson @0 :Text;
   }
 
   struct ScheduledEventInfo {

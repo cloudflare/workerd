@@ -289,14 +289,7 @@ class TraceItem::ConnectEventInfo final: public jsg::Object {
   explicit ConnectEventInfo(
       jsg::Lock& js, const Trace& trace, const tracing::ConnectEventInfo& eventInfo);
 
-  jsg::Optional<jsg::V8Ref<v8::Object>> getCf(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(ConnectEventInfo) {
-    JSG_LAZY_READONLY_INSTANCE_PROPERTY(cf, getCf);
-  }
-
- private:
-  jsg::Optional<jsg::V8Ref<v8::Object>> cf;
+  JSG_RESOURCE_TYPE(ConnectEventInfo) {}
 };
 
 class TraceItem::ScheduledEventInfo final: public jsg::Object {

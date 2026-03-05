@@ -4,8 +4,7 @@ export default {
     return new Response("ok");
   },
 
-  async connect({socket, cf}) {
-    console.log(cf);
+  async connect(socket) {
     // pipe the input stream to the output
     socket.readable.pipeTo(socket.writable);
   }

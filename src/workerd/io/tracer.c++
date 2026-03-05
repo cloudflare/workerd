@@ -303,12 +303,6 @@ void WorkerTracer::setEventInfoInternal(
         info = tracing::FetchEventInfo(fetch.method, {}, {}, {});
       }
     }
-    KJ_CASE_ONEOF(connect, tracing::ConnectEventInfo) {
-      eventSize += connect.cfJson.size();
-      if (eventSize > MAX_TRACE_BYTES) {
-        trace->eventInfo = tracing::ConnectEventInfo(kj::String());
-      }
-    }
     KJ_CASE_ONEOF_DEFAULT {}
   }
 
@@ -343,23 +337,13 @@ void WorkerTracer::setEventInfoInternal(
         timestamp, 0);
   }
 
-  // truncation should only be needed for fetch and connect events since we only set eventSize
-  // there.
+  // truncation should only be needed for fetch events, since we only set eventSize there.
   if (trace->bytesUsed + eventSize > MAX_TRACE_BYTES && eventSize > 0) {
     trace->truncated = true;
     trace->logs.add(timestamp, LogLevel::WARN,
         kj::str("[\"Trace resource limit exceeded; could not capture event info.\"]"));
-    KJ_SWITCH_ONEOF(info) {
-      KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
-        trace->eventInfo =
-            tracing::FetchEventInfo(info.get<tracing::FetchEventInfo>().method, {}, {}, {});
-      }
-      KJ_CASE_ONEOF(connect, tracing::ConnectEventInfo) {
-        trace->eventInfo = tracing::ConnectEventInfo(kj::String());
-      }
-      KJ_CASE_ONEOF_DEFAULT {}
-    }
-
+    trace->eventInfo =
+        tracing::FetchEventInfo(info.get<tracing::FetchEventInfo>().method, {}, {}, {});
   } else {
     trace->bytesUsed += eventSize;
     trace->eventInfo = kj::mv(info);

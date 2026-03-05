@@ -767,23 +767,7 @@ void TraceItem::HibernatableWebSocketEventInfo::visitForMemoryInfo(
   }
 }
 
-namespace {
-jsg::Optional<jsg::V8Ref<v8::Object>> getConnectCf(
-    jsg::Lock& js, const tracing::ConnectEventInfo& eventInfo) {
-  const auto& cfJson = eventInfo.cfJson;
-  if (cfJson.size() > 0) {
-    return js.parseJson(cfJson).cast<v8::Object>(js);
-  }
-  return kj::none;
-};
-}  // namespace
-
 TraceItem::ConnectEventInfo::ConnectEventInfo(
-    jsg::Lock& js, const Trace& trace, const tracing::ConnectEventInfo& eventInfo)
-    : cf(getConnectCf(js, eventInfo)) {}
-
-jsg::Optional<jsg::V8Ref<v8::Object>> TraceItem::ConnectEventInfo::getCf(jsg::Lock& js) {
-  return cf.map([&](jsg::V8Ref<v8::Object>& obj) { return obj.addRef(js); });
-}
+    jsg::Lock& js, const Trace& trace, const tracing::ConnectEventInfo& eventInfo) {}
 
 }  // namespace workerd::api

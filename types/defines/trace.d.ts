@@ -74,6 +74,10 @@ interface FetchResponseInfo {
   readonly statusCode: number;
 }
 
+interface ConnectEventInfo {
+  readonly type: "connect";
+}
+
 type EventOutcome = "ok" | "canceled" | "exception" | "unknown" | "killSwitch" |
                     "daemonDown" | "exceededCpu" | "exceededMemory" | "loadShed" |
                     "responseStreamDisconnected" | "scriptNotFound";
@@ -95,10 +99,10 @@ interface Onset {
   readonly scriptName?: string;
   readonly scriptTags?: string[];
   readonly scriptVersion?: ScriptVersion;
-  readonly info: FetchEventInfo | JsRpcEventInfo | ScheduledEventInfo |
-                 AlarmEventInfo | QueueEventInfo | EmailEventInfo |
-                 TraceEventInfo | HibernatableWebSocketEventInfo |
-                 CustomEventInfo;
+  readonly info: FetchEventInfo | ConnectEventInfo | JsRpcEventInfo |
+                 ScheduledEventInfo | AlarmEventInfo | QueueEventInfo |
+                 EmailEventInfo | TraceEventInfo |
+                 HibernatableWebSocketEventInfo | CustomEventInfo;
 }
 
 interface Outcome {

@@ -364,10 +364,8 @@ struct JsRpcEventInfo final {
 
 class ConnectEventInfo {
  public:
-  explicit ConnectEventInfo(kj::String cfJson);
+  explicit ConnectEventInfo();
   explicit ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader);
-
-  kj::String cfJson;
 
   void copyTo(rpc::Trace::ConnectEventInfo::Builder builder) const;
   ConnectEventInfo clone() const;

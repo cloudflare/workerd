@@ -326,17 +326,14 @@ static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
 
 }  // namespace
 
-ConnectEventInfo::ConnectEventInfo(kj::String cfJson): cfJson(kj::mv(cfJson)) {}
+ConnectEventInfo::ConnectEventInfo() {}
 
-ConnectEventInfo::ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader)
-    : cfJson(kj::str(reader.getCfJson())) {}
+ConnectEventInfo::ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader) {}
 
-void ConnectEventInfo::copyTo(rpc::Trace::ConnectEventInfo::Builder builder) const {
-  builder.setCfJson(cfJson);
-}
+void ConnectEventInfo::copyTo(rpc::Trace::ConnectEventInfo::Builder builder) const {}
 
 ConnectEventInfo ConnectEventInfo::clone() const {
-  return ConnectEventInfo(kj::str(cfJson));
+  return ConnectEventInfo();
 }
 
 FetchEventInfo::FetchEventInfo(

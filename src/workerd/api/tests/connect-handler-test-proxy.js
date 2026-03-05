@@ -2,7 +2,7 @@ import { connect } from 'cloudflare:sockets';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 
 export class ConnectProxy extends WorkerEntrypoint {
-  async connect({ socket }) {
+  async connect(socket) {
     // proxy for ConnectEndpoint instance on port 8083.
     let upstream = connect('localhost:8083');
     await Promise.all([
@@ -13,7 +13,7 @@ export class ConnectProxy extends WorkerEntrypoint {
 }
 
 export class ConnectEndpoint extends WorkerEntrypoint {
-  async connect({ socket }) {
+  async connect(socket) {
     const enc = new TextEncoder();
     await socket.writable.getWriter().write(enc.encode('hello-from-endpoint'));
   }

@@ -283,34 +283,6 @@ class AlarmInvocationInfo: public jsg::Object {
   uint32_t retryCount = 0;
 };
 
-class ConnectEvent final: public Event {
- public:
-  static jsg::Ref<ConnectEvent> constructor() = delete;
-
-  ConnectEvent(jsg::Ref<Socket> socket, CfProperty&& cf)
-      : Event("connect"),
-        socket(kj::mv(socket)),
-        cf(kj::mv(cf)) {}
-
-  jsg::Ref<Socket> getSocket() {
-    return socket.addRef();
-  }
-
-  // Returns the `cf` field containing Cloudflare feature flags.
-  jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js) {
-    return cf.get(js);
-  }
-
-  JSG_RESOURCE_TYPE(ConnectEvent) {
-    JSG_READONLY_PROTOTYPE_PROPERTY(socket, getSocket);
-    JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
-  }
-
- private:
-  jsg::Ref<Socket> socket;
-  CfProperty cf;
-};
-
 // Type signature for handlers exported from the root module.
 //
 // We define each handler method as a LenientOptional rather than as a plain Optional in order to
@@ -322,9 +294,8 @@ struct ExportedHandler {
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
-  using ConnectHandler = jsg::Promise<void>(jsg::Ref<ConnectEvent> connect,
-      jsg::Value env,
-      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  using ConnectHandler = jsg::Promise<void>(
+      jsg::Ref<Socket> connect, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
@@ -499,7 +470,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Promise<void> connect(kj::String host,
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& response,
-      kj::Maybe<kj::StringPtr> cfBlobJson,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
@@ -987,6 +957,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
-      api::AlarmInvocationInfo, api::Immediate, api::ConnectEvent, api::Cloudflare
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
