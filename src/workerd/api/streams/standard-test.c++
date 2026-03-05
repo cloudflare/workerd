@@ -2420,5 +2420,106 @@ KJ_TEST("DrainingReader: pending error in endOperation rejects read (byte stream
   });
 }
 
+// Regression test: After drainingRead returns done=true because the stream was closed,
+// the controller-level close should also be finalized (not deferred until GC).
+//
+// When pull enqueues data AND closes in the same call, the sequence is:
+//   1. c->enqueue() pushes data to consumer buffer
+//   2. c->close() → ConsumerImpl::close() pushes Close marker, calls maybeDrainAndSetState()
+//   3. maybeDrainAndSetState() finds queueTotalSize > 0 (data still in buffer), can't finalize
+//   4. Back in drainingRead, drainBuffer() drains the data and sees the Close marker
+//   5. drainingRead returns done=true, but the consumer is still Active
+//
+// Without the fix, the consumer Close marker is never popped and maybeDrainAndSetState()
+// is never called again, so onConsumerClose never fires and the controller stays open.
+// The fix calls impl.maybeDrainAndSetState(js) after draining when isClosing is true.
+KJ_TEST("DrainingReader: controller closes promptly after drainingRead done (value stream)") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            // Enqueue data and close in the same pull. This causes
+            // ConsumerImpl::close() → maybeDrainAndSetState() to find non-empty
+            // buffer, preventing immediate finalization.
+            c->enqueue(js, toBytes(js, kj::str("hello")));
+            c->close(js);
+            return js.resolvedPromise();
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readDone = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        // Should get data with done=true (data + close in same batch).
+        KJ_ASSERT(result.done);
+        KJ_ASSERT(result.chunks.size() == 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "hello");
+        readDone = true;
+      });
+      js.runMicrotasks();
+      KJ_ASSERT(readDone);
+
+      // The controller should now be in the Closed state — not deferred.
+      KJ_ASSERT(rs->getController().isClosed(),
+          "controller should be closed after drainingRead returns done");
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader: controller closes promptly after drainingRead done (byte stream)") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
+            // Enqueue data and close in the same pull.
+            c->enqueue(js, toBufferSource(js, kj::str("world")));
+            c->close(js);
+            return js.resolvedPromise();
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readDone = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_ASSERT(result.done);
+        KJ_ASSERT(result.chunks.size() == 1);
+        KJ_ASSERT(kj::str(result.chunks[0].asChars()) == "world");
+        readDone = true;
+      });
+      js.runMicrotasks();
+      KJ_ASSERT(readDone);
+
+      // The controller should now be in the Closed state — not deferred.
+      KJ_ASSERT(rs->getController().isClosed(),
+          "controller should be closed after drainingRead returns done");
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api

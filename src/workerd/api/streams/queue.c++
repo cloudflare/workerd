@@ -276,17 +276,26 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       return kj::mv(errorPromise);
     }
     ready.hasPendingDrainingRead = false;
-    // Done when all data is drained. The Close marker stays in the buffer
-    // (drainBuffer doesn't pop it), so check isClosing too.
+    bool done = ready.buffer.empty() || isClosing;
+    // If isClosing, finalize the consumer so onConsumerClose fires promptly.
+    // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
+    if (isClosing) {
+      impl.maybeDrainAndSetState(js);
+    }
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
-      .done = ready.buffer.empty() || isClosing,
+      .done = done,
     });
   }
 
   // If we collected data, return it immediately.
   if (!chunks.empty() || isClosing) {
     ready.hasPendingDrainingRead = false;
+    // If isClosing, finalize the consumer so onConsumerClose fires promptly.
+    // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
+    if (isClosing) {
+      impl.maybeDrainAndSetState(js);
+    }
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
       .done = isClosing,
@@ -734,17 +743,26 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
     // will loop back and we'll drain the rest on subsequent calls.
     drainBuffer(ready, chunks, totalRead, isClosing, maxRead);
     ready.hasPendingDrainingRead = false;
-    // Done when all data is drained. The Close marker stays in the buffer
-    // (drainBuffer doesn't pop it), so check isClosing too.
+    bool done = ready.buffer.empty() || isClosing;
+    // If isClosing, finalize the consumer so onConsumerClose fires promptly.
+    // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
+    if (isClosing) {
+      impl.maybeDrainAndSetState(js);
+    }
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
-      .done = ready.buffer.empty() || isClosing,
+      .done = done,
     });
   }
 
   // If we collected data, return it immediately.
   if (!chunks.empty() || isClosing) {
     ready.hasPendingDrainingRead = false;
+    // If isClosing, finalize the consumer so onConsumerClose fires promptly.
+    // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
+    if (isClosing) {
+      impl.maybeDrainAndSetState(js);
+    }
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
       .done = isClosing,
