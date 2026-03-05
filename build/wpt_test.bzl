@@ -66,7 +66,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_common = wpt_common,
         wpt_resources = wpt_resources,
         wpt_interfaces = wpt_interfaces,
-        compat_flags = compat_flags + ["pedantic_wpt", "experimental", "nodejs_compat", "unsupported_process_actual_platform"],
+        compat_flags = compat_flags + ["immutable_api_prototypes", "pedantic_wpt", "experimental", "nodejs_compat", "unsupported_process_actual_platform"],
     )
 
     data = [

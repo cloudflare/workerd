@@ -13,7 +13,6 @@ export default {
     expectedFailures: [
       'URL interface: existence and properties of interface object',
       'URL interface object length',
-      'URL interface: existence and properties of interface prototype object',
       'URL interface: operation parse(USVString, optional USVString)',
       'URL interface: operation canParse(USVString, optional USVString)',
       'URL interface: attribute href',
