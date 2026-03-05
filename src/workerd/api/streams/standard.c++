@@ -1865,23 +1865,14 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
 
   jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
     KJ_IF_SOME(s, state) {
-      // Hold an operation scope on the owner's state machine so that any
-      // deferred close/error transition (triggered by the pull callback inside
-      // drainingRead) does not destroy this ValueReadable — and thus the
-      // Consumer — while consumer->drainingRead() is on the stack.
-      ReadableStreamJsController& owner = s.owner;
-      owner.state.beginOperation();
-      auto result = s.consumer->drainingRead(js, maxRead);
-      if (owner.state.endOperation()) {
-        if (owner.state.template is<StreamStates::Closed>()) {
-          owner.lock.onClose(js);
-        } else if (owner.state.template is<StreamStates::Errored>()) {
-          KJ_IF_SOME(err, owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
-            owner.lock.onError(js, err.getHandle(js));
-          }
-        }
-      }
-      return kj::mv(result);
+      // Note: We do NOT call beginOperation()/endOperation() here. The caller
+      // (ReadableStreamJsController::drainingRead) manages the operation scope
+      // around both this call and the returned promise's lifetime. If we added
+      // our own beginOperation/endOperation here, the endOperation would fire
+      // before the caller's wrapDrainingRead could set up its .then() callbacks,
+      // potentially destroying the Consumer while the returned promise still has
+      // dangling this-capturing callbacks from consumer->drainingRead().
+      return s.consumer->drainingRead(js, maxRead);
     }
 
     // We are canceled! Return done with empty chunks.
@@ -2120,23 +2111,11 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
 
   jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
     KJ_IF_SOME(s, state) {
-      // Hold an operation scope on the owner's state machine so that any
-      // deferred close/error transition (triggered by the pull callback inside
-      // drainingRead) does not destroy this ByteReadable — and thus the
-      // Consumer — while consumer->drainingRead() is on the stack.
-      ReadableStreamJsController& owner = s.owner;
-      owner.state.beginOperation();
-      auto result = s.consumer->drainingRead(js, maxRead);
-      if (owner.state.endOperation()) {
-        if (owner.state.template is<StreamStates::Closed>()) {
-          owner.lock.onClose(js);
-        } else if (owner.state.template is<StreamStates::Errored>()) {
-          KJ_IF_SOME(err, owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
-            owner.lock.onError(js, err.getHandle(js));
-          }
-        }
-      }
-      return kj::mv(result);
+      // Note: We do NOT call beginOperation()/endOperation() here. The caller
+      // (ReadableStreamJsController::drainingRead) manages the operation scope
+      // around both this call and the returned promise's lifetime. See the
+      // comment in ValueReadable::drainingRead for the detailed explanation.
+      return s.consumer->drainingRead(js, maxRead);
     }
 
     // We are canceled! Return done with empty chunks.
@@ -2867,10 +2846,18 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
   // The drainingRead implementation captures `this` (the Consumer) in promise lambdas to
   // clear hasPendingDrainingRead. If the state is changed (destroying the Consumer) before
   // those callbacks run, we get a use-after-free.
+  //
+  // CRITICAL: state.beginOperation() MUST be called BEFORE consumer->drainingRead(), not
+  // after. The consumer->drainingRead() call may trigger onConsumerWantsData -> forcePull
+  // -> close/error, which calls deferTransitionTo. If no operation is in progress at that
+  // point, the transition fires immediately, destroying the Consumer while we're still
+  // inside its method and before the returned promise's .then() callbacks are set up.
+  // The endOperation() happens in the .then() callbacks below, ensuring the deferred
+  // state change only fires after the promise resolves/rejects and the Consumer's
+  // this-capturing callbacks have already run.
   auto wrapDrainingRead =
       [this](jsg::Lock& js,
           jsg::Promise<DrainingReadResult> promise) -> jsg::Promise<DrainingReadResult> {
-    state.beginOperation();
     return promise.then(js, [this](jsg::Lock& js, DrainingReadResult result) {
       if (state.endOperation()) {
         // A pending state was applied. Call the appropriate callback.
@@ -2908,10 +2895,28 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
       return js.rejectedPromise<DrainingReadResult>(errored.addRef(js));
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
-      return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+      // beginOperation MUST be before consumer->drainingRead() — see comment above.
+      state.beginOperation();
+      return js.tryCatch([&]() {
+        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+      }, [&](jsg::Value exception) -> jsg::Promise<DrainingReadResult> {
+        state.clearPendingState();
+        (void)state.endOperation();
+        doError(js, exception.getHandle(js));
+        return js.rejectedPromise<DrainingReadResult>(kj::mv(exception));
+      });
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+      // beginOperation MUST be before consumer->drainingRead() — see comment above.
+      state.beginOperation();
+      return js.tryCatch([&]() {
+        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+      }, [&](jsg::Value exception) -> jsg::Promise<DrainingReadResult> {
+        state.clearPendingState();
+        (void)state.endOperation();
+        doError(js, exception.getHandle(js));
+        return js.rejectedPromise<DrainingReadResult>(kj::mv(exception));
+      });
     }
   }
   KJ_UNREACHABLE;
