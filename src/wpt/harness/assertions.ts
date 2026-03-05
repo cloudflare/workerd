@@ -142,6 +142,30 @@ declare global {
     expected: unknown[],
     description?: string
   ): void;
+
+  function assert_class_string(
+    object: unknown,
+    class_string: string,
+    description?: string
+  ): void;
+
+  function assert_inherits(
+    object: unknown,
+    property_name: string,
+    description?: string
+  ): void;
+
+  function assert_idl_attribute(
+    object: unknown,
+    property_name: string,
+    description?: string
+  ): void;
+
+  function assert_readonly(
+    object: Record<PropertyKey, unknown>,
+    property_name: string,
+    description?: string
+  ): void;
 }
 
 type ThrowingFn = () => unknown;
@@ -789,4 +813,109 @@ globalThis.assert_in_array = (actual, expected, description): void => {
     -1,
     `assert_in_array ${description}: value ${actual} not in array ${expected}`
   );
+};
+
+/**
+ * Assert that ``object``'s class string (from ``Object.prototype.toString``)
+ * matches the expected value.
+ *
+ * @param object - The object to check.
+ * @param class_string - Expected class string (without the ``[object ...]`` wrapper).
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_class_string = (object, class_string, description): void => {
+  const actual = {}.toString.call(object);
+  const expected = `[object ${class_string}]`;
+  strictEqual(actual, expected, description);
+};
+
+/**
+ * Assert that ``object`` does not have an own property named ``property_name``
+ * but that ``property_name`` is accessible through the prototype chain.
+ *
+ * @param object - Object to test.
+ * @param property_name - Property that should be inherited.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_inherits = (object, property_name, description): void => {
+  ok(
+    (typeof object === 'object' && object !== null) ||
+      typeof object === 'function',
+    `assert_inherits: ${description ?? ''}: provided value is not an object`
+  );
+
+  ok(
+    'hasOwnProperty' in (object as object),
+    `assert_inherits: ${description ?? ''}: provided value has no hasOwnProperty method`
+  );
+
+  ok(
+    !Object.prototype.hasOwnProperty.call(object, property_name),
+    `assert_inherits: ${description ?? ''}: property ${property_name} found on object, expected in prototype chain`
+  );
+
+  ok(
+    property_name in (object as object),
+    `assert_inherits: ${description ?? ''}: property ${property_name} not found in prototype chain`
+  );
+};
+
+/**
+ * Alias for ``assert_inherits``. Asserts that the given property is an IDL
+ * attribute (i.e., is inherited via the prototype chain, not an own property).
+ */
+globalThis.assert_idl_attribute = (
+  object: unknown,
+  property_name: string,
+  description?: string
+): void => {
+  assert_inherits(object, property_name, description);
+};
+
+/**
+ * Assert that ``object`` has a property ``property_name`` that is read-only
+ * according to its property descriptor.  Walks the prototype chain to find
+ * the descriptor, matching upstream WPT testharness.js behaviour.
+ *
+ * @param object - Object to test.
+ * @param property_name - Name of the property that should be read-only.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_readonly = (object, property_name, description): void => {
+  ok(
+    property_name in object,
+    `assert_readonly: ${description ?? ''}: property ${property_name} not found`
+  );
+
+  // Walk the prototype chain, same as upstream testharness.js.
+  let desc: PropertyDescriptor | undefined;
+  let current: object | null = object;
+  while (
+    current !== null &&
+    (desc = Object.getOwnPropertyDescriptor(current, property_name)) ===
+      undefined
+  ) {
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+
+  ok(
+    desc !== undefined,
+    `assert_readonly: ${description ?? ''}: could not find a descriptor for property ${property_name}`
+  );
+  if ('value' in desc) {
+    strictEqual(
+      desc.writable,
+      false,
+      `assert_readonly: ${description ?? ''}: descriptor [[Writable]] expected false got ${desc.writable}`
+    );
+  } else if ('get' in desc || 'set' in desc) {
+    ok(
+      desc.set === undefined,
+      `assert_readonly: ${description ?? ''}: property ${property_name} is an accessor property with a [[Set]] attribute`
+    );
+  } else {
+    fail(
+      `assert_readonly: ${description ?? ''}: Object.getOwnPropertyDescriptor must return a fully populated property descriptor`
+    );
+  }
 };

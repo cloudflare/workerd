@@ -95,7 +95,7 @@ export type TestRunnerConfig = {
 };
 
 type Env = {
-  unsafe: { eval: (code: string) => void };
+  unsafe: { eval: (code: string) => unknown };
   SIDECAR_HOSTNAME: string | null;
   HTTP_PORT: string | null;
   HTTPS_PORT: string | null;
@@ -460,7 +460,22 @@ async function runTest(
     options.after();
   }
 
-  await globalThis.state.validate();
+  // The WPT IDL harness (idlharness.js) uses eval() inside async promise callbacks
+  // (e.g., to create test objects via `eval('new URL("http://foo")')`).  The workerd
+  // runtime only allows eval() while env.unsafe.eval() is on the call stack (the
+  // evalAllowed flag is reset once env.unsafe.eval returns).  Async test callbacks
+  // run when state.validate() awaits their promises, so native eval() would fail.
+  // Install the shim here — after evalAsBlock and options.after have finished — so
+  // it covers exactly the async-callback phase.
+  const originalEval = globalThis.eval;
+  globalThis.eval = ((code: string): unknown =>
+    env.unsafe.eval(code)) as typeof globalThis.eval;
+
+  try {
+    await globalThis.state.validate();
+  } finally {
+    globalThis.eval = originalEval;
+  }
 }
 
 function printResults(
