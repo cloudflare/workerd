@@ -2866,6 +2866,10 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
         } else if (state.template is<StreamStates::Errored>()) {
           KJ_IF_SOME(err, state.template tryGetUnsafe<StreamStates::Errored>()) {
             lock.onError(js, err.getHandle(js));
+            // The error was applied during this operation — the data we collected
+            // may be invalid. Discard it and propagate the error rather than
+            // silently returning possibly-corrupt data.
+            js.throwException(err.addRef(js));
           }
         }
       }

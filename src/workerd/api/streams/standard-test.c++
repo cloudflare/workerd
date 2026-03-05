@@ -2338,5 +2338,87 @@ KJ_TEST("DrainingReader: pull enqueues then cancels on next pull (value stream)"
   });
 }
 
+// Test that a pending error applied during wrapDrainingRead's endOperation() propagates
+// as a rejection rather than silently returning data. This exercises the defense-in-depth
+// fix in wrapDrainingRead where endOperation() applies a deferred Errored state.
+//
+// Scenario: Pull enqueues data synchronously but returns a rejected promise. The rejection
+// handler (which errors the stream) runs as a microtask between drainingRead's resolved
+// promise and wrapDrainingRead's .then() callback. The data collected by drainingRead should
+// be discarded because the error was applied during the operation.
+KJ_TEST("DrainingReader: pending error in endOperation rejects read (value stream)") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
+            // Enqueue data synchronously — drainingRead will collect it.
+            c->enqueue(js, toBytes(js, kj::str("should-be-discarded")));
+            // Return rejected promise — the pull failure handler runs as a microtask
+            // and calls doError(), which defers the error because beginOperation() is
+            // active. When wrapDrainingRead's endOperation() fires, it applies the
+            // pending error and should throw rather than returning the data.
+            return js.rejectedPromise<void>(js.v8TypeError("pull failed"_kj));
+          }
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readRejected = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_FAIL_ASSERT("Should have rejected, not resolved with data");
+      }, [&](jsg::Lock& js, jsg::Value&& err) { readRejected = true; });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readRejected, "Read should have rejected due to pending error");
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
+KJ_TEST("DrainingReader: pending error in endOperation rejects read (byte stream)") {
+  preamble([](jsg::Lock& js) {
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .type = kj::str("bytes"),
+      .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
+        KJ_SWITCH_ONEOF(controller) {
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
+          KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
+            c->enqueue(js, toBufferSource(js, kj::str("should-be-discarded")));
+            return js.rejectedPromise<void>(js.v8TypeError("pull failed"_kj));
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
+      bool readRejected = false;
+      auto promise = reader->read(js).then(js, [&](jsg::Lock& js, DrainingReadResult&& result) {
+        KJ_FAIL_ASSERT("Should have rejected, not resolved with data");
+      }, [&](jsg::Lock& js, jsg::Value&& err) { readRejected = true; });
+
+      js.runMicrotasks();
+      KJ_ASSERT(readRejected, "Read should have rejected due to pending error");
+
+      reader->releaseLock(js);
+    } else {
+      KJ_FAIL_ASSERT("Failed to create DrainingReader");
+    }
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api
