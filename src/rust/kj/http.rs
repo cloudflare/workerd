@@ -58,8 +58,17 @@ pub mod ffi {
         type HttpMethod;
     }
 
+    // --- HttpHeaderId
+    // Opaque handle to a kj::HttpHeaderId, which identifies a header by numeric index in an
+    // HttpHeaderTable. This supports both builtin headers and custom headers registered via
+    // HttpHeaderTable::Builder::add(). Pass these by reference from C++ to Rust and back.
+
+    unsafe extern "C++" {
+        type HttpHeaderId;
+    }
+
     // --- HttpHeaders
-    // TODO(when needed): support more than builtin headers
+    // TODO(when needed): support HttpHeaderId creation from rust.
 
     /// Corresponds to `kj::HttpHeaders::BuiltinIndicesEnum`.
     /// Values are automatically assigned by `cxx` because of extern declaration below.
@@ -93,6 +102,10 @@ pub mod ffi {
         unsafe fn get_header<'a>(
             this_: &'a HttpHeaders,
             id: BuiltinIndicesEnum,
+        ) -> KjMaybe<&'a [u8]>;
+        unsafe fn get_header_by_id<'a>(
+            this_: &'a HttpHeaders,
+            id: &HttpHeaderId,
         ) -> KjMaybe<&'a [u8]>;
     }
 
@@ -166,6 +179,44 @@ assert_eq_size!(ffi::HttpConnectSettings, [u8; 16]);
 assert_eq_align!(ffi::HttpConnectSettings, u64);
 
 pub type HeaderId = ffi::BuiltinIndicesEnum;
+pub type CustomHttpHeader = ffi::HttpHeaderId;
+// TODO(tewaro) soon: replace by enum HeaderId
+
+/// Non-owning reference to a `kj::HttpHeaderId`.
+///
+/// `CustomHttpHeader` is an opaque CXX type representing `HttpHeaderId` and can only be passed by
+/// reference across the FFI boundary. This wrapper makes the borrow lifetime explicit and provides
+/// a safe Rust handle.
+///
+/// `repr(transparent)` guarantees the same layout as `&ffi::HttpHeaderId` (i.e. a single
+/// pointer), which allows safe reinterpretation of `&[*const HttpHeaderId]` slices received
+/// from C++ into `&[CustomHttpHeaderId]` via [`CustomHttpHeaderId::from_ptr_slice`].
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct CustomHttpHeaderId<'a>(&'a CustomHttpHeader);
+
+impl<'a> From<&'a CustomHttpHeader> for CustomHttpHeaderId<'a> {
+    fn from(value: &'a CustomHttpHeader) -> Self {
+        CustomHttpHeaderId(value)
+    }
+}
+
+impl<'a> CustomHttpHeaderId<'a> {
+    /// Reinterpret a slice of `*const CustomHttpHeader` pointers (as received from C++ via CXX) into
+    /// a slice of `HttpHeader`.
+    ///
+    /// This is the canonical way to receive a `kj::ArrayPtr<const kj::HttpHeaderId>` from C++:
+    /// the C++ side converts the array into a `rust::Slice<const HttpHeaderId* const>` and the
+    /// Rust side calls this function to get a safe `&[HttpHeaderIdRef]`.
+    ///
+    /// # Safety
+    /// `CustomHttpHeaderId` is `#[repr(transparent)]` over `&CustomHttpHeader`, which has
+    /// the same layout as `*const kj::HttpHeaderId`. The caller guarantees all pointers are valid.
+    pub unsafe fn from_ptr_slice(ptrs: &'a [*const CustomHttpHeader]) -> &'a [Self] {
+        let ptr = std::ptr::from_ref::<[*const CustomHttpHeader]>(ptrs) as *const [Self];
+        unsafe { &*ptr }
+    }
+}
 
 /// Non-owning constant reference to `kj::HttpHeaders`
 pub struct HttpHeadersRef<'a>(&'a ffi::HttpHeaders);
@@ -173,6 +224,12 @@ pub struct HttpHeadersRef<'a>(&'a ffi::HttpHeaders);
 impl HttpHeadersRef<'_> {
     pub fn get(&self, id: HeaderId) -> Option<&[u8]> {
         unsafe { ffi::get_header(self.0, id).into() }
+    }
+
+    /// Look up a header by its `kj::HttpHeaderId`. This works for both builtin headers and custom
+    /// headers registered via `HttpHeaderTable::Builder::add()`.
+    pub fn get_by_id(&self, id: CustomHttpHeaderId<'_>) -> Option<&[u8]> {
+        unsafe { ffi::get_header_by_id(self.0, id.0).into() }
     }
 
     #[must_use]

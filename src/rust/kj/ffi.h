@@ -23,6 +23,7 @@ using AsyncIoStream = kj::AsyncIoStream;
 
 using BuiltinIndicesEnum = kj::HttpHeaders::BuiltinIndicesEnum;
 using HttpHeaders = kj::HttpHeaders;
+using HttpHeaderId = kj::HttpHeaderId;
 
 inline kj::Own<kj::HttpHeaders> clone_shallow(const HttpHeaders& headers) {
   // there is no c++ stack frame to hold the new instance,
@@ -77,6 +78,12 @@ inline void set_header(HttpHeaders& headers, BuiltinIndicesEnum id, ::rust::Str 
 inline kj::Maybe<::rust::Slice<const kj::byte>> get_header(
     const HttpHeaders& headers, BuiltinIndicesEnum id) {
   auto header = headers.get(toHeaderId(id));
+  return header.map([](auto header) { return header.asBytes().template as<kj_rs::Rust>(); });
+}
+
+inline kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_id(
+    const HttpHeaders& headers, const HttpHeaderId& id) {
+  auto header = headers.get(id);
   return header.map([](auto header) { return header.asBytes().template as<kj_rs::Rust>(); });
 }
 
