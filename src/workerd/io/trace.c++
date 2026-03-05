@@ -753,6 +753,13 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
     }
   }
 
+  KJ_IF_SOME(tags, tailAttributes) {
+    auto list = builder.initTailAttributes(tags.size());
+    for (auto i: kj::indices(tags)) {
+      tags[i].copyTo(list[i]);
+    }
+  }
+
   KJ_IF_SOME(e, entrypoint) {
     builder.setEntrypoint(e);
   }
@@ -857,6 +864,10 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
 
   if (auto tags = reader.getScriptTags(); tags.size() > 0) {
     scriptTags = KJ_MAP(tag, tags) { return kj::str(tag); };
+  }
+
+  if (auto tags = reader.getTailAttributes(); tags.size() > 0) {
+    tailAttributes = KJ_MAP(tag, tags) { return tracing::Attribute(tag); };
   }
 
   if (reader.hasEntrypoint()) {

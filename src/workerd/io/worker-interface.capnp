@@ -168,6 +168,7 @@ struct Trace @0x8e8d911203762d34 {
 
   entrypoint @22 :Text;
   durableObjectId @27 :Text;
+  tailAttributes @28 :List(Attribute);
 
   diagnosticChannelEvents @17 :List(DiagnosticChannelEvent);
   struct DiagnosticChannelEvent {

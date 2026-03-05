@@ -111,6 +111,26 @@ jsg::Optional<kj::Array<kj::String>> getTraceScriptTags(const Trace& trace) {
   }
 }
 
+TraceItem::TailAttributeValue getTraceTailAttributeValue(const tracing::Attribute& tag) {
+  KJ_REQUIRE(tag.value.size() == 1, "tail attributes must contain exactly one value");
+
+  KJ_SWITCH_ONEOF(tag.value[0]) {
+    KJ_CASE_ONEOF(boolean, bool) {
+      return TraceItem::TailAttributeValue(boolean);
+    }
+    KJ_CASE_ONEOF(number, double) {
+      return TraceItem::TailAttributeValue(number);
+    }
+    KJ_CASE_ONEOF(integer, int64_t) {
+      return TraceItem::TailAttributeValue(static_cast<double>(integer));
+    }
+    KJ_CASE_ONEOF(string, kj::ConstString) {
+      return TraceItem::TailAttributeValue(kj::str(string));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
     jsg::Lock& js, const Trace& trace, const tracing::FetchEventInfo& eventInfo) {
   const auto getCf = [&]() -> jsg::Optional<jsg::V8Ref<v8::Object>> {
@@ -191,6 +211,8 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       scriptVersion(getTraceScriptVersion(trace)),
       dispatchNamespace(mapCopyString(trace.dispatchNamespace)),
       scriptTags(getTraceScriptTags(trace)),
+      tailAttributes(trace.tailAttributes.map(
+          [](auto& tags) { return KJ_MAP(tag, tags) { return tag.clone(); }; })),
       durableObjectId(mapCopyString(trace.durableObjectId)),
       executionModel(kj::str(trace.executionModel)),
       outcome(kj::str(trace.outcome)),
@@ -268,6 +290,19 @@ jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
 jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
   return scriptTags.map(
       [](kj::Array<kj::String>& tags) { return KJ_MAP(t, tags) -> kj::StringPtr { return t; }; });
+}
+
+jsg::Optional<jsg::Dict<TraceItem::TailAttributeValue>> TraceItem::getTailAttributes() {
+  return tailAttributes.map([](kj::Array<tracing::Attribute>& tags) {
+    return jsg::Dict<TraceItem::TailAttributeValue>{
+      .fields = KJ_MAP(tag, tags) {
+        return jsg::Dict<TraceItem::TailAttributeValue>::Field{
+          .name = kj::str(tag.name),
+          .value = getTraceTailAttributeValue(tag),
+        };
+      },
+    };
+  });
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getDurableObjectId() {
@@ -730,6 +765,27 @@ void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_IF_SOME(tags, scriptTags) {
     for (const auto& tag: tags) {
       tracker.trackField("scriptTag", tag);
+    }
+  }
+  KJ_IF_SOME(tags, tailAttributes) {
+    for (const auto& tag: tags) {
+      tracker.trackField("tailAttributeName", kj::str(tag.name));
+      for (const auto& value: tag.value) {
+        KJ_SWITCH_ONEOF(value) {
+          KJ_CASE_ONEOF(boolean, bool) {
+            tracker.trackField("tailAttributeValue", kj::str(boolean));
+          }
+          KJ_CASE_ONEOF(number, double) {
+            tracker.trackField("tailAttributeValue", kj::str(number));
+          }
+          KJ_CASE_ONEOF(integer, int64_t) {
+            tracker.trackField("tailAttributeValue", kj::str(integer));
+          }
+          KJ_CASE_ONEOF(string, kj::ConstString) {
+            tracker.trackField("tailAttributeValue", kj::str(string));
+          }
+        }
+      }
     }
   }
   tracker.trackField("outcome", outcome);
