@@ -41,6 +41,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     bool tunnelExceptions,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     // The trigger invocation span may be propagated from other request. If it is provided,
     // the implication is that this worker entrypoint is being created as a subrequest or
     // subtask of another request. If it is kj::none, then this invocation is a top-level

@@ -1424,7 +1424,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatEnableFlag("enable_version_api")
     $experimental;
   # Enables version-related APIs. This currently only enables the `version` option in loopback
-  # bindings to specify a requested version. The behaviour of this flag will change in the future.
+  # bindings to specify a requested version and exposes `ctx.version`. The behaviour of this flag
+  # will change in the future.
 
   websocketBinaryTypeDefault @166 :Bool
       $compatEnableFlag("websocket_standard_binary_type")
@@ -1494,4 +1495,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # WebSocket readyState is CLOSED (3) when the close event fires. Previously,
   # no close reply was sent and readyState was CLOSING (2). The WebSocket spec
   # requires readyState to be CLOSED when the close event is dispatched.
+
+  enableCtxVersionMetadata @172 :Bool
+    $compatEnableFlag("enable_ctx_version_metadata")
+    $experimental;
+  # When paired with `enable_version_api`, also exposes `ctx.version.metadata`. This is a separate
+  # flag as we haven't decided on the exact behaviour of `ctx.version.metadata`, but the rest of
+  # `ctx.version` is much more well defined. The behaviour of this flag will change in the future.
 }

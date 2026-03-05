@@ -492,6 +492,14 @@ interface ExecutionContext<Props = unknown> {
   passThroughOnException(): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  readonly version?: {
+    readonly metadata?: {
+      readonly id: string;
+    };
+    readonly cohort?: string;
+    readonly key?: string;
+    readonly override?: string;
+  };
   abort(reason?: any): void;
 }
 type ExportedHandlerFetchHandler<

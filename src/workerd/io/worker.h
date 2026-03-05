@@ -83,6 +83,8 @@ struct EntrypointClasses {
   jsg::JsObject workflowEntrypoint;
 };
 
+WD_STRONG_BOOL(PopulateVersionInfoMetadata);
+
 // An instance of a Worker.
 //
 // Typically each worker script is loaded into a single Worker instance which is reused by
@@ -152,6 +154,44 @@ class Worker: public kj::AtomicRefcounted {
       stderrPrefix = other.stderrPrefix.clone();
       return *this;
     }
+  };
+
+  // Version information associated with a worker. These are made available through `ctx.version`.
+  struct VersionInfo {
+    kj::String id;
+    kj::Maybe<kj::String> cohort;
+    kj::Maybe<kj::String> key;
+    kj::Maybe<kj::String> versionOverride;
+
+    VersionInfo clone() const {
+      return {
+        .id = kj::str(id),
+        .cohort = cohort.map([](const kj::String& s) { return kj::str(s); }),
+        .key = key.map([](const kj::String& s) { return kj::str(s); }),
+        .versionOverride = versionOverride.map([](const kj::String& s) { return kj::str(s); }),
+      };
+    }
+
+    jsg::JsValue toJs(
+        jsg::Lock& js, PopulateVersionInfoMetadata populateVersionInfoMetadata) const {
+      auto version = js.obj();
+      if (populateVersionInfoMetadata) {
+        auto metadata = js.obj();
+        metadata.set(js, "id"_kj, js.str(id));
+        version.set(js, "metadata"_kj, metadata);
+      }
+      KJ_IF_SOME(someCohort, cohort) {
+        version.set(js, "cohort"_kj, js.str(someCohort));
+      }
+      KJ_IF_SOME(someKey, key) {
+        version.set(js, "key"_kj, js.str(someKey));
+      }
+      KJ_IF_SOME(someVersionOverride, versionOverride) {
+        version.set(js, "override"_kj, js.str(someVersionOverride));
+      }
+      version.recursivelyFreeze(js);
+      return version;
+    };
   };
 
   explicit Worker(kj::Own<const Script> script,
@@ -757,7 +797,10 @@ class Worker::Lock {
   // If running in an actor, the name and props are ignored and the entrypoint originally used to
   // construct the actor is returned.
   kj::Maybe<kj::Own<api::ExportedHandler>> getExportedHandler(
-      kj::Maybe<kj::StringPtr> entrypointName, Frankenvalue props, kj::Maybe<Worker::Actor&> actor);
+      kj::Maybe<kj::StringPtr> entrypointName,
+      Frankenvalue props,
+      kj::Maybe<Worker::Actor&> actor,
+      kj::Maybe<VersionInfo> versionInfo = kj::none);
 
   // Get the C++ object representing the global scope.
   api::ServiceWorkerGlobalScope& getGlobalScope();
