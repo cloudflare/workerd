@@ -1458,4 +1458,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # With HWM=0 the readable side starts with backpressure, so writes correctly
   # block until a reader pulls. Previously HWM defaulted to 1, which caused
   # pull() to fire at startup, clearing backpressure before any write.
+
+  workflowsPreserveNonRetryableErrorMessage @169 :Bool
+      $compatEnableFlag("workflows_preserve_non_retryable_error_message")
+      $experimental;
+  # When enabled, if a Workflow step throws a NonRetryableError, the error message
+  # and name are preserved on the thrown exception instead of being replaced with
+  # a generic "NonRetryableError" string.
 }
