@@ -1445,6 +1445,12 @@ struct ResourceTypeBuilder {
       }
     }
 
+    if (specCompliant) {
+      // Per Web IDL, getter .name = "get <name>", setter .name = "set <name>".
+      getterFn->SetClassName(v8Str(isolate, kj::str("get ", name)));
+      setterFn->SetClassName(v8Str(isolate, kj::str("set ", name)));
+    }
+
     prototype->SetAccessorProperty(v8Name, getterFn, setterFn,
         Gcb::enumerable ? v8::PropertyAttribute::None : v8::PropertyAttribute::DontEnum);
   }
@@ -1481,9 +1487,10 @@ struct ResourceTypeBuilder {
     }
     v8::Local<v8::FunctionTemplate> getterFn;
     if (getSpecCompliantPropertyAttributes(isolate)) {
-      // Per Web IDL, getter .length = 0.
+      // Per Web IDL, getter .name = "get <name>", .length = 0.
       getterFn = v8::FunctionTemplate::New(
           isolate, Gcb::callback, v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0);
+      getterFn->SetClassName(v8Str(isolate, kj::str("get ", name)));
     } else {
       getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
     }
