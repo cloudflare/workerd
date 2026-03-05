@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "websocket-allow-half-open-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "websocket-allow-half-open-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "no_web_socket_half_open_by_default"]
+      )
+    ),
+  ],
+);

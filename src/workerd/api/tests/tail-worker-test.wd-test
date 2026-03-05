@@ -12,7 +12,7 @@ const unitTests :Workerd.Config = (
           ( name = "SERVICE", service = "http-test" ),
           ( name = "CACHE_ENABLED", json = "false" ),
         ],
-        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_disabled", "queues_json_messages", "url_standard", "workers_api_getters_setters_on_prototype", "fetch_legacy_url"],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_disabled", "queues_json_messages", "url_standard", "workers_api_getters_setters_on_prototype", "fetch_legacy_url", "no_web_socket_half_open_by_default"],
         streamingTails = ["log", "log-invalid"],
       ),
     ),

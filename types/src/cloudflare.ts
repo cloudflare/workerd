@@ -77,4 +77,13 @@ export default {
   WorkerGlobalScope: {
     $: undefined,
   },
+  WebSocketAcceptOptions: {
+    allowHalfOpen: `*
+ * When set to \`true\`, receiving a server-initiated WebSocket Close frame will not
+ * automatically send a reciprocal Close frame, leaving the connection in a half-open
+ * state. This is useful for proxying scenarios where you need to coordinate closing
+ * both sides independently. Defaults to \`false\` when the
+ * \`no_web_socket_half_open_by_default\` compatibility flag is enabled.
+ `,
+  },
 } satisfies CommentsData;

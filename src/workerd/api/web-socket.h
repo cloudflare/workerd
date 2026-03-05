@@ -11,6 +11,7 @@
 #include <workerd/io/observer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/checked-queue.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
@@ -87,6 +88,8 @@ class CloseEvent: public Event {
   kj::String reason;
   bool clean;
 };
+
+WD_STRONG_BOOL(AllowHalfOpen);
 
 // The forward declaration is necessary so we can make some
 // WebSocket methods accessible to WebSocketPair via friend declaration.
@@ -207,6 +210,9 @@ class WebSocket: public EventTarget {
 
     // True forever once the JS WebSocket calls `close()`.
     bool closedOutgoingConnection = false;
+
+    // Whether the WebSocket allows half-open close state.
+    AllowHalfOpen allowHalfOpen = AllowHalfOpen::YES;
   };
 
   ~WebSocket() noexcept(false) {
@@ -287,13 +293,19 @@ class WebSocket: public EventTarget {
   // ---------------------------------------------------------------------------
   // JS API.
 
+  struct AcceptOptions {
+    jsg::Optional<bool> allowHalfOpen;
+
+    JSG_STRUCT(allowHalfOpen);
+  };
+
   // Creates a new outbound WebSocket.
   static jsg::Ref<WebSocket> constructor(jsg::Lock& js,
       kj::String url,
       jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols);
 
   // Begin delivering events locally.
-  void accept(jsg::Lock& js);
+  void accept(jsg::Lock& js, jsg::Optional<AcceptOptions> options);
 
   // Same as accept(), but websockets that are created with `new WebSocket()` in JS cannot call
   // accept(). Instead, we only permit the C++ constructor to call this "internal" version of accept()
@@ -420,6 +432,14 @@ class WebSocket: public EventTarget {
   // cannot be `IoOwn`ed as `farNative` is. This informs the HibernatableWebSocket if we called
   // `close()`, thereby preventing calls to `send()` even after we wake from hibernation.
   bool closedOutgoingForHib = false;
+
+  // When YES, a server-initiated close does NOT automatically send a reciprocal close frame,
+  // leaving readyState as CLOSING (2) when the close event fires. The application is then
+  // responsible for calling close() explicitly. When NO (spec-compliant default with the
+  // no_web_socket_half_open_by_default compat flag), a close reply is sent automatically and
+  // readyState is CLOSED (3) when the close event fires.
+  // Default is YES (legacy behavior); overridden from the compat flag at construction time.
+  AllowHalfOpen allowHalfOpen = AllowHalfOpen::YES;
 
   // Maximum allowed size for WebSocket messages
   inline static const size_t SUGGESTED_MAX_MESSAGE_SIZE = 1u << 20;
@@ -615,6 +635,11 @@ class WebSocket: public EventTarget {
 
   void ensurePumping(jsg::Lock& js);
 
+  // Returns the number of pending auto-responses that should be sent before the next outgoing
+  // message, and advances the queuedAutoResponses counter. Called each time a GatedMessage is
+  // inserted into outgoingMessages to guarantee auto-response ordering.
+  size_t getPendingAutoResponseCount();
+
   // Write messages from `outgoingMessages` into `ws`.
   //
   // These are not necessarily called under isolate lock, but they are called on the given
@@ -639,8 +664,8 @@ class WebSocket: public EventTarget {
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \
-  api::CloseEvent, api::CloseEvent::Initializer, api::WebSocket, api::WebSocketPair,               \
-      api::WebSocketPair::PairIterator,                                                            \
+  api::CloseEvent, api::CloseEvent::Initializer, api::WebSocket, api::WebSocket::AcceptOptions,    \
+      api::WebSocketPair, api::WebSocketPair::PairIterator,                                        \
       api::WebSocketPair::PairIterator::                                                           \
           Next  // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
