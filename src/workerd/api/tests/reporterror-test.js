@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { mock } from 'node:test';
 import { strictEqual, throws } from 'node:assert';
 
@@ -7,13 +10,13 @@ const handler = mock.fn((event) => {
   if (event.error instanceof Error) {
     strictEqual(event.message, 'Uncaught Error: boom');
     strictEqual(event.colno, 13);
-    strictEqual(event.lineno, 4);
+    strictEqual(event.lineno, 7);
     strictEqual(event.filename, 'worker');
     strictEqual(event.error, boom);
   } else {
     strictEqual(event.message, 'Uncaught boom');
     strictEqual(event.colno, 0);
-    strictEqual(event.lineno, 25);
+    strictEqual(event.lineno, 28);
     strictEqual(event.filename, 'worker');
     strictEqual(event.error, 'boom');
   }

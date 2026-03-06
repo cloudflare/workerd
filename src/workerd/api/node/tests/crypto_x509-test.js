@@ -111,7 +111,7 @@ const der = Buffer.from(
   'hex'
 );
 
-const key = Buffer.from(`-----BEGIN RSA PRIVATE KEY-----
+const _key = Buffer.from(`-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEA1FYyCvsg04Jwk9wsQoTtBN+6vVbh3a5Snii3kM1CVtsnM0nz
 c1/9M3x6Y2Psylont/c9xwialsbYhtsMYjiPHN1qljr81ZnVgA5YehH5CJYPhO1Q
 uiWigwPs2m5oT757rtyc6IATJ7FpevJQl87j8XXkAJhMDbao64e+A7TPlHdLpW//
@@ -293,6 +293,7 @@ export const test_ok = {
     throws(() => x509.checkIssued(''));
     throws(() => x509.verify({}));
     throws(() => x509.verify(''));
+    // eslint-disable-next-line no-undef
     throws(() => x509.verify(privateKey));
 
     const legacyObject = x509.toLegacyObject();

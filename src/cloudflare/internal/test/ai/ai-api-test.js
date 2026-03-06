@@ -58,6 +58,7 @@ export const tests = {
           }
         );
         // Test request internal status code is present
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
         assert.deepEqual;
         assert.deepStrictEqual(env.ai.lastRequestInternalStatusCode, 1001);
       }
@@ -161,7 +162,7 @@ export const tests = {
         async () => {
           const arr = [1, 2, 3];
           const encoder = new TextEncoder();
-          const resp = await env.ai.run('readableStreamIputs', {
+          const _resp = await env.ai.run('readableStreamIputs', {
             audio: {
               body: new ReadableStream({
                 start(controller) {
@@ -195,7 +196,7 @@ export const tests = {
               controller.close();
             },
           });
-          const resp = await env.ai.run('readableStreamIputs', {
+          const _resp = await env.ai.run('readableStreamIputs', {
             audio: {
               body: stream,
               contentType: 'audio/wav',

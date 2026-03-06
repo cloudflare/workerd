@@ -62,7 +62,7 @@ export const test = {
 
     // Find the StreamingService invocation (the JSRPC call)
     let streamingServiceEvents = null;
-    for (const [invocationId, data] of invocationEvents.entries()) {
+    for (const [_invocationId, data] of invocationEvents.entries()) {
       const onset = data.events[0];
       if (onset.entrypoint === 'StreamingService' && onset.info === 'jsrpc') {
         streamingServiceEvents = data.events;
@@ -72,8 +72,8 @@ export const test = {
 
     if (!streamingServiceEvents) {
       console.log('Captured invocations:');
-      for (const [invocationId, data] of invocationEvents.entries()) {
-        console.log(`  ${invocationId}: ${JSON.stringify(data.events[0])}`);
+      for (const [id, data] of invocationEvents.entries()) {
+        console.log(`  ${id}: ${JSON.stringify(data.events[0])}`);
       }
       throw new Error(
         'Could not find StreamingService JSRPC invocation events'

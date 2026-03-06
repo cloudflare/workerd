@@ -164,7 +164,6 @@ export const utilInspect = {
       '{ a: [Function: a] }'
     );
     assert.strictEqual(util.inspect({ a: () => {} }), '{ a: [Function: a] }');
-    // eslint-disable-next-line func-name-matching
     assert.strictEqual(
       util.inspect({ a: async function abc() {} }),
       '{ a: [AsyncFunction: abc] }'
@@ -412,7 +411,6 @@ export const utilInspect = {
       );
 
       assert.strictEqual(
-        // eslint-disable-next-line accessor-pairs
         util.inspect({ set writeonly(val) {} }),
         '{ writeonly: [Setter] }'
       );
@@ -650,7 +648,6 @@ export const utilInspect = {
       });
       const setter = Object.create(null, {
         b: {
-          // eslint-disable-line accessor-pairs
           set: function () {},
         },
       });
@@ -1465,6 +1462,7 @@ export const utilInspect = {
         writable: true,
       });
       assert.strictEqual(inspect(a, { depth: -1 }), '[Foo]');
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete a[Symbol.toStringTag];
       Object.setPrototypeOf(a, null);
       assert.strictEqual(inspect(a, { depth: -1 }), '[Foo: null prototype]');
@@ -1613,7 +1611,7 @@ export const utilInspect = {
     }
 
     {
-      const x = new (function () {})(); // eslint-disable-line new-parens
+      const x = new (function () {})();
       assert.strictEqual(util.inspect(x), '{}');
     }
 
@@ -2210,7 +2208,6 @@ export const utilInspect = {
     // Do not escape single quotes if no double quote or backtick is present.
     assert.strictEqual(util.inspect("'"), '"\'"');
     assert.strictEqual(util.inspect('"\''), '`"\'`');
-    // eslint-disable-next-line no-template-curly-in-string
     assert.strictEqual(util.inspect('"\'${a}'), "'\"\\'${a}'");
 
     // Errors should visualize as much information as possible.
@@ -2267,6 +2264,7 @@ export const utilInspect = {
         util.inspect(foo)
       );
       foo.bar = true;
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete foo[Symbol.toStringTag];
       assert(
         util
@@ -2290,7 +2288,6 @@ export const utilInspect = {
 
     // Verify that classes are properly inspected.
     [
-      /* eslint-disable spaced-comment, no-multi-spaces, brace-style */
       // The whitespace is intentional.
       [class {}, '[class (anonymous)]'],
       [
@@ -2312,7 +2309,6 @@ export const utilInspect = {
       ],
       [
         class // Random { // comments /* */ are part of the toString() result
-        /* eslint-disable-next-line space-before-blocks */
         äß /**/
           extends /*{*/ TypeError {},
         '[class äß extends TypeError]',
@@ -2325,7 +2321,6 @@ export const utilInspect = {
         },
         '[class X extends Error]',
       ],
-      /* eslint-enable spaced-comment, no-multi-spaces, brace-style */
     ].forEach(([clazz, string]) => {
       const inspected = util.inspect(clazz);
       assert.strictEqual(inspected, string);
@@ -2367,7 +2362,6 @@ export const utilInspect = {
 
     // "class" properties should not be detected as "class".
     {
-      // eslint-disable-next-line space-before-function-paren
       let obj = { class() {} };
       assert.strictEqual(util.inspect(obj), '{ class: [Function: class] }');
       obj = { class: () => {} };
@@ -3407,14 +3401,14 @@ export const utilInspect = {
         '[GeneratorFunction: generator] {\n' +
         '  [length]: 0,\n' +
         "  [name]: 'generator',\n" +
-        "  [prototype]: Object [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" + // eslint-disable-line max-len
+        "  [prototype]: Object [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" +
         "  [Symbol(Symbol.toStringTag)]: 'GeneratorFunction'\n" +
         '}';
       const expected2 = // TODO: Remove this once updated to new V8.
         '[GeneratorFunction: generator] {\n' +
         '  [length]: 0,\n' +
         "  [name]: 'generator',\n" +
-        "  [prototype]: Iterator [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" + // eslint-disable-line max-len
+        "  [prototype]: Iterator [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" +
         "  [Symbol(Symbol.toStringTag)]: 'GeneratorFunction'\n" +
         '}';
       const actual = util.inspect(generator, { showHidden: true });
@@ -4010,9 +4004,10 @@ export const utilFormat = {
 
       assert.strictEqual(
         util.format(
-          // eslint-disable-next-line no-loss-of-precision
           '%d %s %i',
+          // eslint-disable-next-line no-loss-of-precision
           118059162071741130342,
+          // eslint-disable-next-line no-loss-of-precision
           118059162071741130342,
           123_123_123
         ),
@@ -4502,16 +4497,19 @@ export const utilInspectError = {
 
     assert.match(
       util.inspect({ err, nested: { err } }, { compact: true }),
+      // eslint-disable-next-line no-regex-spaces
       /{ err: Error: foo\n   bar\n       at .+,\n  nested: { err: Error: foo\n      bar\n          at .+ } }/s
     );
     assert.match(
       util.inspect({ err, nested: { err } }, { compact: false }),
+      // eslint-disable-next-line no-regex-spaces
       /{\n  err: Error: foo\n  bar\n      at .+,\n  nested: {\n    err: Error: foo\n    bar\n        at .+\n  }\n}/s
     );
 
     err.foo = 'bar';
     assert.match(
       util.inspect(err, { compact: true, breakLength: 5 }),
+      // eslint-disable-next-line no-regex-spaces
       /{ Error: foo\nbar\n    at .+\n  foo: 'bar' }/
     );
   },
@@ -5747,7 +5745,7 @@ export const testStripVtControlCharacters = {
 export const testStyleText = {
   async test() {
     const styled = '\u001b[31mtest\u001b[39m';
-    const noChange = 'test';
+    const _noChange = 'test';
 
     [undefined, null, false, 5n, 5, Symbol(), () => {}, {}].forEach(
       (invalidOption) => {

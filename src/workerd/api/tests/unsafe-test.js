@@ -1,11 +1,14 @@
-import { strictEqual, ok, throws } from 'node:assert';
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+import { strictEqual, throws } from 'node:assert';
 
 export const basics = {
   test(ctx, env) {
     strictEqual(env.unsafe.eval('1'), 1);
 
     // eval does not capture outer scope.
-    let m = 1;
+    let _m = 1;
     throws(() => env.unsafe.eval('m'));
 
     throws(() => env.unsafe.eval(' throw new Error("boom"); ', 'foo'), {

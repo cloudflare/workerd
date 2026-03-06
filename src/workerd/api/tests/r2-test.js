@@ -161,6 +161,7 @@ export default {
 
         // Currently not using the body in these test so I'm going to just discard
         for await (const _ of request.body) {
+          // intentionally empty
         }
 
         // Assert it's the correct version
@@ -254,6 +255,7 @@ export default {
               }
             }
           }
+          // falls through
           case 'customMetadata': {
             if (jsonRequest.method !== 'completeMultipartUpload') {
               assert.deepEqual(jsonRequest.customFields, customFields);
@@ -273,6 +275,7 @@ export default {
                 return Response.json(head);
             }
           }
+          // falls through
           case 'classDefault': {
             if (jsonRequest.method !== 'completeMultipartUpload') {
               assert.strictEqual(jsonRequest.storageClass, undefined);
@@ -289,6 +292,7 @@ export default {
                 return Response.json(head);
             }
           }
+          // falls through
           case 'classStandard': {
             if (jsonRequest.method !== 'completeMultipartUpload') {
               assert.deepEqual(jsonRequest.storageClass, 'Standard');
@@ -308,6 +312,7 @@ export default {
                 return Response.json(head);
             }
           }
+          // falls through
           case 'classInfrequentAccess': {
             if (jsonRequest.method !== 'completeMultipartUpload') {
               assert.deepEqual(jsonRequest.storageClass, 'InfrequentAccess');
@@ -327,6 +332,7 @@ export default {
                 return Response.json(head);
             }
           }
+          // falls through
           case 'ssec': {
             assert.deepStrictEqual(jsonRequest.ssec, {
               key: hexKey,
@@ -370,6 +376,7 @@ export default {
               });
             }
           }
+          // falls through
           case 'multipleChecksums': {
             const toHex = (buffer) =>
               Array.from(buffer, (b) => b.toString(16).padStart(2, '0')).join(
@@ -528,6 +535,7 @@ export default {
                 return buildGetResponse({ head, body });
             }
           }
+          // falls through
           case 'customMetadata': {
             const head = {
               customFields,
@@ -539,7 +547,9 @@ export default {
                 return buildGetResponse({ head, body });
             }
           }
+          // falls through
           case 'classDefault':
+          // falls through
           case 'classStandard': {
             const head = {
               storageClass: 'Standard',
@@ -551,6 +561,7 @@ export default {
                 return buildGetResponse({ head, body });
             }
           }
+          // falls through
           case 'classInfrequentAccess': {
             const head = {
               storageClass: 'InfrequentAccess',
@@ -562,6 +573,7 @@ export default {
                 return buildGetResponse({ head, body });
             }
           }
+          // falls through
           case 'ssec': {
             return buildGetResponse({
               head: {
@@ -699,7 +711,9 @@ export default {
           }),
         });
         throw new Error('This should have thrown');
-      } catch {}
+      } catch {
+        // intentionally empty
+      }
       try {
         await env.BUCKET.put('throwOnInvalidEtag', body, {
           onlyIf: new Headers({
@@ -707,7 +721,9 @@ export default {
           }),
         });
         throw new Error('This should have thrown');
-      } catch {}
+      } catch {
+        // intentionally empty
+      }
       await env.BUCKET.put('onlyIfStrongEtag', body, {
         onlyIf: {
           etagMatches: 'strongEtag',

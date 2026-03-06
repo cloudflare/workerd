@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
 import {
@@ -93,7 +96,6 @@ export const crc32Test = {
       [0x0, ']{.[.+?+[[=;[?}_#&;[=)__$$:+=_', 30, 0xf652deac],
       [0x0, '-%.)=/[@].:.(:,()$;=%@-$?]{%+%', 30, 0xaf39a5a9],
       [0x0, '+]#$(@&.=:,*];/.!]%/{:){:@(;)$', 30, 0x6bebb4cf],
-      // eslint-disable-next-line no-template-curly-in-string
       [0x0, ')-._.:?[&:.=+}(*$/=!.${;(=$@!}', 30, 0x76430bac],
       [0x0, ':(_*&%/[[}+,?#$&*+#[([*-/#;%(]', 30, 0x6c80c388],
       [0x0, '{[#-;:$/{)(+[}#]/{&!%(@)%:@-$:', 30, 0xd54d977d],
@@ -176,7 +178,6 @@ export const crc32Test = {
       [0x8a45a2b8, ']{.[.+?+[[=;[?}_#&;[=)__$$:+=_', 30, 0x78af45de],
       [0xcbe95b78, '-%.)=/[@].:.(:,()$;=%@-$?]{%+%', 30, 0x25b06b59],
       [0x4ef8a54b, '+]#$(@&.=:,*];/.!]%/{:){:@(;)$', 30, 0x4ba0d08f],
-      // eslint-disable-next-line no-template-curly-in-string
       [0x76ad267a, ')-._.:?[&:.=+}(*$/=!.${;(=$@!}', 30, 0xe26b6aac],
       [0x569e613c, ':(_*&%/[[}+,?#$&*+#[([*-/#;%(]', 30, 0x7e2b0a66],
       [0x36aa61da, '{[#-;:$/{)(+[}#]/{&!%(@)%:@-$:', 30, 0xb3430dc7],
@@ -685,7 +686,7 @@ export const zlibDestroyTest = {
     {
       // Ensure 'error' is only emitted once.
       const decompress = zlib.createGunzip(15);
-      const { promise, resolve, reject } = Promise.withResolvers();
+      const { promise, resolve, reject: _reject } = Promise.withResolvers();
       promises.push(promise);
       let errorCount = 0;
       decompress.on('error', (err) => {

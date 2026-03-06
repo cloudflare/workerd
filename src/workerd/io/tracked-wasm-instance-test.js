@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 // Tests for the WASM shutdown signal registration shim.
 //
 // These tests verify that the shimWebAssemblyInstantiate() code in worker.c++ correctly
@@ -193,7 +196,7 @@ export let decoyMemoryIgnored = {
   async test() {
     const decoyMemory = new WebAssembly.Memory({ initial: 1 });
     // The module imports (func "env" "log") only — decoy_memory is extra.
-    const instance = await WebAssembly.instantiate(decoyModule, {
+    const _instance = await WebAssembly.instantiate(decoyModule, {
       env: {
         log: () => {},
         decoy_memory: decoyMemory,

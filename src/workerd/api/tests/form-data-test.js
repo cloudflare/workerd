@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   strictEqual,
   deepStrictEqual,
@@ -706,27 +709,27 @@ export const w3cTestFormDataBlob = {
 export const w3cTestFormDataDelete = {
   test() {
     {
-      var fd = create_formdata(['key', 'value1'], ['key', 'value2']);
+      let fd = create_formdata(['key', 'value1'], ['key', 'value2']);
       fd.delete('key');
       strictEqual(fd.get('key'), null);
     }
 
     {
-      var fd = create_formdata(['key', 'value1'], ['key', 'value2']);
+      let fd = create_formdata(['key', 'value1'], ['key', 'value2']);
       fd.delete('nil');
       strictEqual(fd.get('key'), 'value1');
     }
 
     {
-      var fd = create_formdata(['key1', 'value1'], ['key2', 'value2']);
+      let fd = create_formdata(['key1', 'value1'], ['key2', 'value2']);
       fd.delete('key1');
       strictEqual(fd.get('key1'), null);
       strictEqual(fd.get('key2'), 'value2');
     }
 
     function create_formdata() {
-      var fd = new FormData();
-      for (var i = 0; i < arguments.length; i++) {
+      let fd = new FormData();
+      for (let i = 0; i < arguments.length; i++) {
         fd.append.apply(fd, arguments[i]);
       }
       return fd;
@@ -736,7 +739,7 @@ export const w3cTestFormDataDelete = {
 
 export const w3cTestFormDataForeach = {
   test() {
-    var fd = new FormData();
+    let fd = new FormData();
     fd.append('n1', 'v1');
     fd.append('n2', 'v2');
     fd.append('n3', 'v3');
@@ -744,8 +747,8 @@ export const w3cTestFormDataForeach = {
     fd.append('n2', 'v5');
     fd.append('n3', 'v6');
     fd.delete('n2');
-    var expected_keys = ['n1', 'n3', 'n1', 'n3'];
-    var expected_values = ['v1', 'v3', 'v4', 'v6'];
+    let expected_keys = ['n1', 'n3', 'n1', 'n3'];
+    let expected_values = ['v1', 'v3', 'v4', 'v6'];
     // TODO(soon): Test with this File object.
     //var file = new File(['hello'], "hello.txt");
     //fd.append('f1', file);
@@ -753,9 +756,9 @@ export const w3cTestFormDataForeach = {
     //var expected_values = ['v1', 'v3', 'v4', 'v6', file];
 
     {
-      var mykeys = [],
+      let mykeys = [],
         myvalues = [];
-      for (var entry of fd) {
+      for (let entry of fd) {
         strictEqual(entry.length, 2);
         mykeys.push(entry[0]);
         myvalues.push(entry[1]);
@@ -765,9 +768,9 @@ export const w3cTestFormDataForeach = {
     }
 
     {
-      var mykeys = [],
+      let mykeys = [],
         myvalues = [];
-      for (var entry of fd.entries()) {
+      for (let entry of fd.entries()) {
         strictEqual(
           entry.length,
           2,
@@ -789,14 +792,14 @@ export const w3cTestFormDataForeach = {
     }
 
     {
-      var mykeys = [];
-      for (var entry of fd.keys()) mykeys.push(entry);
+      let mykeys = [];
+      for (let entry of fd.keys()) mykeys.push(entry);
       deepStrictEqual(mykeys, expected_keys);
     }
 
     {
-      var myvalues = [];
-      for (var entry of fd.values()) myvalues.push(entry);
+      let myvalues = [];
+      for (let entry of fd.values()) myvalues.push(entry);
       deepStrictEqual(
         myvalues,
         expected_values,

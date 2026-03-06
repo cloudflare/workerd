@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
+import { strictEqual, deepStrictEqual } from 'node:assert';
 
 // This is testing non-standard behavior that we support for historical reasons. While the spec
 // dictates that BYOB buffers should be detached when passed to a pending read, historically we've

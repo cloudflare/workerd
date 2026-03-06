@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   createSign,
   createVerify,
@@ -103,7 +106,7 @@ export const ed25519SignVerifyObjects = {
         const key = createPrivateKey(env['ed25519_private.pem']);
         const signer = createSign('sha256');
         signer.update('hello world');
-        const signature = signer.sign(key, 'hex');
+        const _signature = signer.sign(key, 'hex');
       },
       {
         message: 'Failed to set signature digest',

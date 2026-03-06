@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
 import { waitUntil } from 'cloudflare:workers';
 import {
@@ -1186,7 +1189,7 @@ export let crossContextSharingDoesntWork = {
     );
 
     // OK, now let's look at cases that do NOT work. These all produce the same error.
-    let expectedError = {
+    let _expectedError = {
       name: 'Error',
       message:
         'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
@@ -1415,8 +1418,7 @@ export let streams = {
       // remote knows the stream failed and can no longer be written to. The call to
       // writeToStreamExpectingError should throw because the error should be propagated
       // through the round trip.
-      const dec = new TextDecoder();
-      let result = '';
+      let _result = '';
       let writeCalled = 0;
       const writable = new WritableStream({
         write(chunk) {
@@ -1443,7 +1445,6 @@ export let streams = {
       // but we currently do not propagate the abort reason through. What ends up
       // happening is that the local stream is dropped with a generic cancelation
       // error.
-      const dec = new TextDecoder();
       const { promise, resolve } = Promise.withResolvers();
       const writable = new WritableStream({
         write(chunk) {},
@@ -2073,10 +2074,10 @@ export let eOrderTest = {
     let abortController = new AbortController();
     let abortSignal = abortController.signal;
 
-    let readableController;
+    let _readableController;
     let readableStream = new ReadableStream({
       start(c) {
-        readableController = c;
+        _readableController = c;
       },
     });
 

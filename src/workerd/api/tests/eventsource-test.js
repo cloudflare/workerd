@@ -556,8 +556,9 @@ async function reconnectFail(request) {
         },
       });
     }
+    // falls through
     case 2:
-    // Fall-through
+    // falls through
     case 3: {
       return new Response(null, {
         headers: {

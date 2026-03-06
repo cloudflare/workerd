@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
 import { WorkerEntrypoint, RpcTarget, RpcStub } from 'cloudflare:workers';
 
@@ -177,7 +180,7 @@ export let rpcReturnsTransferOwnership = {
 
     {
       using stub = new RpcStub(counter);
-      using stub2 = (await ctx.exports.TestService.roundTrip(stub)).stub;
+      using _stub2 = (await ctx.exports.TestService.roundTrip(stub)).stub;
 
       await scheduler.wait(0);
       assert.strictEqual(counter.disposeCount, 0);

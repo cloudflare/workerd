@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// @ts-ignore
+// @ts-expect-error - no type declarations for node:assert in this context
 import * as assert from 'node:assert';
 import { KnownModel, DistanceMetric } from 'cloudflare:vectorize';
 

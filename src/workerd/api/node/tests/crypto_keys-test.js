@@ -1,11 +1,7 @@
-import {
-  notDeepStrictEqual,
-  deepStrictEqual,
-  strictEqual,
-  ok,
-  rejects,
-  throws,
-} from 'node:assert';
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+import { deepStrictEqual, strictEqual, ok, rejects, throws } from 'node:assert';
 import {
   KeyObject,
   SecretKeyObject,
@@ -18,8 +14,6 @@ import {
   generateKeySync,
   generateKeyPair,
   generateKeyPairSync,
-  generatePrimeSync,
-  diffieHellman,
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { promisify } from 'node:util';

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   performance as perfHooksPerformance,
   Performance,
@@ -345,7 +348,7 @@ export const testPerformanceMeasure = {
     perfHooksPerformance.clearMeasures();
 
     const mark1 = perfHooksPerformance.mark('start-mark');
-    const mark2 = perfHooksPerformance.mark('end-mark');
+    const _mark2 = perfHooksPerformance.mark('end-mark');
 
     const measure1 = perfHooksPerformance.measure(
       'test-measure-1',
@@ -730,6 +733,7 @@ export const testEventCounts = {
     ok(!forEachCalled, 'forEach should not call callback when map is empty');
 
     eventCounts.forEach(function () {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
       forEachContext = this;
     }, customThis);
     strictEqual(

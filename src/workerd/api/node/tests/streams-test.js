@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   deepStrictEqual,
   fail,
@@ -23,7 +26,6 @@ import {
   finished,
   isDisturbed,
   isErrored,
-  pipeline,
   promises,
   duplexPair,
 } from 'node:stream';
@@ -97,7 +99,7 @@ export const autoDestroy = {
         },
       });
 
-      let ended = false;
+      let _ended = false;
       r.resume();
       r.on('end', rEnded.resolve);
       r.on('close', rClosed.resolve);
@@ -827,8 +829,8 @@ export const destroyEventOrder = {
       read() {},
     });
 
-    let closed = false;
-    let errored = false;
+    let _closed = false;
+    let _errored = false;
 
     rs.on('close', () => events.push('close'));
 
@@ -1115,7 +1117,7 @@ export const duplexDestroy = {
     }
 
     {
-      const closed = Promise.withResolvers();
+      const _closed = Promise.withResolvers();
       const duplex = new Duplex({
         write(chunk, enc, cb) {
           cb();
@@ -1433,18 +1435,18 @@ export const duplex = {
     ok(stream.allowHalfOpen);
     strictEqual(stream.listenerCount('end'), 0);
 
-    let written;
-    let read;
+    let _written;
+    let _read;
 
     stream._write = (obj, _, cb) => {
-      written = obj;
+      _written = obj;
       cb();
     };
 
     stream._read = () => {};
 
     stream.on('data', (obj) => {
-      read = obj;
+      _read = obj;
     });
 
     stream.push({ val: 1 });
@@ -1689,6 +1691,7 @@ export const finishedTest = {
 
     {
       const finishedCalled = Promise.withResolvers();
+      const enc = new TextEncoder();
       const rs = new Readable({
         read() {
           this.push(enc.encode('a'));
@@ -4327,7 +4330,7 @@ export const stream2_large_read_stall = {
     const r = new Readable({
       highWaterMark: HWM,
     });
-    const rs = r._readableState;
+    const _rs = r._readableState;
     r._read = push;
     r.on('readable', function () {
       let ret;
@@ -9061,8 +9064,10 @@ export const readable_object_multi_push_async = {
         }
       }
       readable.on('readable', () => {
-        let data;
-        while ((data = readable.read()) !== null) {}
+        let _data;
+        while ((_data = readable.read()) !== null) {
+          // intentionally empty
+        }
       });
       readable.on('end', () => {
         strictEqual(i, (Math.floor(MAX / BATCH) + 1) * BATCH);
@@ -9287,9 +9292,9 @@ export const readable_needreadable = {
     await Promise.all([readableCalled1.promise, ended.promise]);
 
     const readableCalled2 = Promise.withResolvers();
-    const ended2 = Promise.withResolvers();
+    const _ended2 = Promise.withResolvers();
     const dataCalled = Promise.withResolvers();
-    let readableCount = 0;
+    let _readableCount = 0;
     let dataCount = 0;
     const asyncReadable = new Readable({
       read: () => {},
@@ -10269,8 +10274,8 @@ export const readable_destroy = {
       });
       const rejected = rejects(
         (async () => {
-          // eslint-disable-next-line no-unused-vars, no-empty
-          for await (const chunk of read) {
+          for await (const _chunk of read) {
+            // intentionally empty
           }
         })(),
         /AbortError/
@@ -10613,10 +10618,10 @@ export const filter = {
       }
       // Concurrency + AbortSignal
       const ac = new AbortController();
-      let calls = 0;
+      let _calls = 0;
       const stream = Readable.from([1, 2, 3, 4]).filter(
         async (_, { signal }) => {
-          calls++;
+          _calls++;
           await once(signal, 'abort');
         },
         {
@@ -10628,7 +10633,7 @@ export const filter = {
       // pump
       await rejects(
         async () => {
-          for await (const item of stream) {
+          for await (const _item of stream) {
             // nope
           }
         },
@@ -11393,7 +11398,8 @@ export const errorHandling = {
     });
     const ns = Readable.fromWeb(rs);
     try {
-      for await (const chunk of ns) {
+      for await (const _chunk of ns) {
+        // intentionally empty
       }
       throw new Error('should have thrown');
     } catch (err) {
@@ -11413,7 +11419,8 @@ export const errorHandling2 = {
     });
     const ns = Readable.fromWeb(rs);
     try {
-      for await (const chunk of ns) {
+      for await (const _chunk of ns) {
+        // intentionally empty
       }
       throw new Error('should have thrown');
     } catch (err) {

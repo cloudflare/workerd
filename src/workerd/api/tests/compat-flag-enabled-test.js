@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 // Test that verifies compat flags are at NEWEST state (all enabled).
 // This test only runs in the @all-compat-flags variant (default variant is disabled).
 
