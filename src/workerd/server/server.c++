@@ -5365,13 +5365,11 @@ class Server::TcpListener final: public kj::Refcounted {
       kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,
       kj::HttpHeaderTable& headerTable,
-      kj::Own<HttpRewriter> rewriter,
       kj::StringPtr addrStr)
       : owner(owner),
         listener(kj::mv(listener)),
         service(kj::mv(service)),
         headerTable(headerTable),
-        rewriter(kj::mv(rewriter)),
         addrStr(addrStr) {}
 
   kj::Promise<void> run() {
@@ -5395,7 +5393,6 @@ class Server::TcpListener final: public kj::Refcounted {
   kj::Own<kj::ConnectionReceiver> listener;
   kj::Own<Service> service;
   kj::HttpHeaderTable& headerTable;
-  kj::Own<HttpRewriter> rewriter;
   kj::StringPtr addrStr;
 
   struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
@@ -5425,12 +5422,10 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
   co_return co_await obj->run();
 }
 
-kj::Promise<void> Server::listenTcp(kj::Own<kj::ConnectionReceiver> listener,
-    kj::Own<Service> service,
-    kj::Own<HttpRewriter> rewriter,
-    kj::StringPtr addrStr) {
-  auto obj = kj::refcounted<TcpListener>(*this, kj::mv(listener), kj::mv(service),
-      globalContext->headerTable, kj::mv(rewriter), addrStr);
+kj::Promise<void> Server::listenTcp(
+    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr) {
+  auto obj = kj::refcounted<TcpListener>(
+      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, addrStr);
   co_return co_await obj->run();
 }
 
@@ -5969,7 +5964,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       if (isHttp) {
         co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
       } else {
-        co_await listenTcp(kj::mv(listener), kj::mv(service), kj::mv(rewriter), addrStr);
+        co_await listenTcp(kj::mv(listener), kj::mv(service), addrStr);
       }
     });
     tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));

@@ -28,7 +28,7 @@ class NeuterableInputStream: public kj::AsyncInputStream, public kj::Refcounted 
   virtual void neuter(kj::Exception ex) = 0;
 };
 
-class NeuterableIoStream: public kj::AsyncIoStream, public kj::Refcounted {
+class NeuterableIoStream: public kj::AsyncIoStream {
  public:
   virtual void neuter(kj::Exception ex) = 0;
 };

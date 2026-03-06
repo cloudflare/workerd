@@ -120,6 +120,7 @@ void ServiceWorkerGlobalScope::clear() {
 }
 
 kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
+    const kj::HttpHeaders& headers,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
     Worker::Lock& lock,
@@ -131,13 +132,9 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
 
   KJ_IF_SOME(handler, eh.connect) {
     // Has a connect handler!
-    // TODO: We should pass through the headers as we do in request() instead of defining new ones,
-    // right?
-    kj::HttpHeaderTable table;
-    kj::HttpHeaders headers(table);
     response.accept(200, "OK", headers);
 
-    // TODO: connection needs to be owned, but doesn't need to be neuterable.
+    // Using neuterable stream to manage lifetime of stream promises
     auto ownConnection = newNeuterableIoStream(connection);
 
     auto& ioContext = IoContext::current();
@@ -153,7 +150,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
 
     // TLS support is not implemented so far.
     auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
-    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::addRef(*ownConnection), kj::mv(host), kj::none,
+    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::mv(ownConnection), kj::mv(host), kj::none,
         kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::str(hostName),
         port == "443"_kj || port == "80"_kj, kj::none);
 

@@ -6,6 +6,6 @@ export default {
 
   async connect(socket) {
     // pipe the input stream to the output
-    socket.readable.pipeTo(socket.writable);
+    await socket.readable.pipeTo(socket.writable);
   }
 };

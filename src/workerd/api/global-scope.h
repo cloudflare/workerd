@@ -295,7 +295,7 @@ struct ExportedHandler {
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
   using ConnectHandler = jsg::Promise<void>(
-      jsg::Ref<Socket> connect, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Ref<Socket> socket, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
@@ -468,6 +468,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
   // Received TCP/socket ingress (called from C++, not JS).
   kj::Promise<void> connect(kj::String host,
+      const kj::HttpHeaders& headers,
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& response,
       Worker::Lock& lock,

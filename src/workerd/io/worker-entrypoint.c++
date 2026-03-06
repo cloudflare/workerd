@@ -264,7 +264,7 @@ kj::Exception exceptionToPropagate(bool isInternalException, kj::Exception&& exc
     }
     return kj::mv(exception);
   }
-};
+}
 
 kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     kj::StringPtr url,
@@ -570,11 +570,11 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
 
   return context
-      .run([this, &context, &connection, &response, entrypointName = entrypointName,
+      .run([this, &headers, &context, &connection, &response, entrypointName = entrypointName,
                host = kj::str(host)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
-    return lock.getGlobalScope().connect(kj::mv(host), connection, response, lock,
+    return lock.getGlobalScope().connect(kj::mv(host), headers, connection, response, lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
   })
       .then([&context, workerTracer]() {
@@ -634,7 +634,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       } else {
         response.reject(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
       }
-      // TODO(now): Should we also indicate a return response code for TCP?
+      // TODO(o11y): Should we also indicate a return response code for TCP?
       KJ_IF_SOME(t, workerTracer) {
         t.setReturn(kj::none);
       }

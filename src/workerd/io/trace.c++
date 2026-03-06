@@ -1146,8 +1146,8 @@ void writeOnsetInfo(const Onset::Info& info, rpc::Trace::Onset::Info::Builder& i
     KJ_CASE_ONEOF(fetch, FetchEventInfo) {
       fetch.copyTo(infoBuilder.initFetch());
     }
-    KJ_CASE_ONEOF(fetch, ConnectEventInfo) {
-      fetch.copyTo(infoBuilder.initConnect());
+    KJ_CASE_ONEOF(connect, ConnectEventInfo) {
+      connect.copyTo(infoBuilder.initConnect());
     }
     KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
       jsrpc.copyTo(infoBuilder.initJsRpc());

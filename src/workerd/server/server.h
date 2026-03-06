@@ -290,10 +290,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::StringPtr physicalProtocol,
       kj::Own<HttpRewriter> rewriter);
 
-  kj::Promise<void> listenTcp(kj::Own<kj::ConnectionReceiver> listener,
-      kj::Own<Service> service,
-      kj::Own<HttpRewriter> rewriter,
-      kj::StringPtr addrStr);
+  kj::Promise<void> listenTcp(
+      kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr);
 
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
 
