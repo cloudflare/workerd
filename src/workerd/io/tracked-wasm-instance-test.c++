@@ -218,9 +218,7 @@ void writeTerminatedFlags(SignalSafeList<TrackedWasmInstance>& signals) {
   signals.iterate([](TrackedWasmInstance& signal) {
     KJ_IF_SOME(offset, signal.terminatedByteOffset) {
       uint32_t value = 1;
-      signal.memory.asPtr()
-          .slice(offset, offset + sizeof(value))
-          .copyFrom(kj::asBytes(&value, 1));
+      signal.memory.asPtr().slice(offset, offset + sizeof(value)).copyFrom(kj::asBytes(&value, 1));
     }
   });
 }
@@ -659,7 +657,8 @@ KJ_TEST("permutation: mixed list — all three entry types coexist") {
   constexpr size_t kMemorySize = 64;
 
   // Push the both-offsets entry first (signal=0, terminated=4).
-  pushSignal(signals, destroyedBoth, static_cast<uint32_t>(0), static_cast<uint32_t>(sizeof(uint32_t)), kMemorySize);
+  pushSignal(signals, destroyedBoth, static_cast<uint32_t>(0),
+      static_cast<uint32_t>(sizeof(uint32_t)), kMemorySize);
   // Push the terminated-only entry second.
   pushSignal(signals, destroyedTermOnly, kj::none, static_cast<uint32_t>(0), kMemorySize);
   // Push the signal-only entry third (it becomes the head).
@@ -851,7 +850,8 @@ KJ_TEST("TrackedWasmInstanceList methods work on a mixed list") {
   constexpr size_t kMemorySize = 64;
 
   // Push a both-offsets entry (signal=0, terminated=4).
-  pushEntry(list, destroyedBoth, static_cast<uint32_t>(0), static_cast<uint32_t>(sizeof(uint32_t)), kMemorySize);
+  pushEntry(list, destroyedBoth, static_cast<uint32_t>(0), static_cast<uint32_t>(sizeof(uint32_t)),
+      kMemorySize);
   // Push a terminated-only entry (it becomes the new head).
   pushEntry(list, destroyedTermOnly, kj::none, static_cast<uint32_t>(0), kMemorySize);
   // Push a signal-only entry (becomes the head).

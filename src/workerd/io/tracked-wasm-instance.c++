@@ -78,9 +78,7 @@ void TrackedWasmInstanceList::writeTerminatedSignal() const {
     // Skip entries that have no terminated address (signal-only modules).
     KJ_IF_SOME(offset, signal.terminatedByteOffset) {
       uint32_t value = 1;
-      signal.memory.asPtr()
-          .slice(offset, offset + sizeof(value))
-          .copyFrom(kj::asBytes(&value, 1));
+      signal.memory.asPtr().slice(offset, offset + sizeof(value)).copyFrom(kj::asBytes(&value, 1));
     }
   });
 }
