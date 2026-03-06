@@ -1,5 +1,7 @@
 ;; Module that exports only __instance_signal but NOT __instance_terminated.
-;; The shim should NOT register this module because __instance_terminated is required.
+;; The shim registers this module — either signal is sufficient for registration.
+;; The module will receive the SIGXCPU shutdown warning signal. Cleanup of the
+;; strong memory reference relies on the weak instanceRef (GC-based).
 
 (module
   (memory (export "memory") 1)

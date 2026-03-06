@@ -6,6 +6,8 @@
 
 #include <kj/array.h>
 #include <kj/common.h>
+#include <v8-forward.h>
+#include <v8-persistent-handle.h>
 
 #include <cstdint>
 
@@ -19,18 +21,23 @@ class Lock;
 constexpr size_t WASM_SIGNAL_FIELD_BYTES = sizeof(uint32_t);
 
 // Represents a single WASM module that has opted into receiving the "shut down" signal when CPU
-// time is nearly exhausted. The module must export at least "__instance_terminated"; the
-// "__instance_signal" export is optional:
+// time is nearly exhausted, or that wants its memory reclaimed when the instance is garbage
+// collected. The module must export at least one of "__instance_terminated" or "__instance_signal":
 //
 //   "__instance_signal"     — (optional) address of a uint32 in linear memory. When present,
 //                            the runtime writes SIGXCPU (24) here when CPU time is nearly
 //                            exhausted.
-//   "__instance_terminated" - address of a uint32 in linear memory. The WASM module writes a
-//                            non-zero value here when it has exited and is no longer listening.
-//                            The runtime checks this in a GC prologue hook and removes entries
-//                            where terminated is non-zero, allowing the linear memory to be
-//                            reclaimed. The runtime also writes 1 here when the isolate is
+//   "__instance_terminated" — (optional) address of a uint32 in linear memory. The WASM module
+//                            writes a non-zero value here when it has exited and is no longer
+//                            listening. The runtime checks this in a GC prologue hook and removes
+//                            entries where terminated is non-zero, allowing the linear memory to
+//                            be reclaimed. The runtime also writes 1 here when the isolate is
 //                            killed after exceeding its CPU limit.
+//
+// When both are present, the terminated flag provides a fast-path for cleanup. When only
+// __instance_signal is present, a weak reference to the WASM instance (instanceRef) is used
+// instead: when V8 garbage-collects the instance, the handle becomes empty and the GC prologue
+// filter removes the entry.
 struct TrackedWasmInstance {
   // Owns a reference to the WASM module's linear memory. The underlying v8::BackingStore is kept
   // alive via kj::Array's attach() mechanism, preventing V8 from garbage-collecting the memory
@@ -51,17 +58,37 @@ struct TrackedWasmInstance {
   kj::Maybe<uint32_t> signalByteOffset;
 
   // Offset into `memory` of the uint32 the module writes to (__instance_terminated).
-  uint32_t terminatedByteOffset;
+  // When kj::none, the module did not export __instance_terminated and relies on
+  // the weak instanceRef for cleanup.
+  kj::Maybe<uint32_t> terminatedByteOffset;
 
-  // Returns true if the module is still listening for signals (terminated == 0).
-  // Returns false if the module has exited and this entry should be removed.
-  bool isModuleListening() const {
-    uint32_t terminated = 0;
-    for (auto& b:
-        memory.slice(terminatedByteOffset, terminatedByteOffset + WASM_SIGNAL_FIELD_BYTES)) {
-      terminated |= b;
+  // Weak handle to the WASM instance. Set to weak via SetWeak() at registration time. When V8
+  // collects the instance, the handle becomes empty (IsEmpty() returns true). Checked in the GC
+  // prologue filter to clean up entries whose instance has been garbage-collected. Always set at
+  // registration time, so IsEmpty() unambiguously means the instance was collected.
+  //
+  // This field is never accessed from signal handlers — signal handlers only touch `memory` and
+  // `signalByteOffset`. The Global's destructor is safe to call during filter() (under isolate
+  // lock) or clear() (during isolate teardown with V8 still alive).
+  v8::Global<v8::Object> instanceRef;
+
+  // Returns true if the entry should be kept in the list, false if it should be removed.
+  //
+  // An entry should be removed when:
+  //   - The module set its terminated flag (fast-path, avoids waiting for GC), or
+  //   - The instance was garbage-collected (instanceRef became empty).
+  bool shouldRetain() const {
+    // Fast-path: if the module set its terminated flag, remove immediately.
+    KJ_IF_SOME(offset, terminatedByteOffset) {
+      uint32_t terminated = 0;
+      for (auto& b:
+          memory.slice(offset, offset + WASM_SIGNAL_FIELD_BYTES)) {
+        terminated |= b;
+      }
+      if (terminated != 0) return false;
     }
-    return terminated == 0;
+    // If the weak reference to the instance is dead, the instance was GC'd.
+    return !instanceRef.IsEmpty();
   }
 };
 
@@ -90,12 +117,15 @@ class SignalSafeList {
     }
   }
 
-  // Prepends a new node constructed from `args` at the front of the list
+  // Prepends a new node constructed from `args` at the front of the list.
+  // Returns a reference to the inserted value. The reference is stable (heap-allocated node)
+  // and valid until the node is removed from the list via filter() or clear().
   template <typename... Args>
-  void pushFront(Args&&... args) {
+  T& pushFront(Args&&... args) {
     Node* node = new Node(kj::fwd<Args>(args)...);
     __atomic_store_n(&node->next, __atomic_load_n(&head, __ATOMIC_RELAXED), __ATOMIC_RELAXED);
     __atomic_store_n(&head, node, __ATOMIC_RELEASE);
+    return node->value;
   }
 
   // Removes all nodes for which `predicate(node.value)` returns false
@@ -163,20 +193,28 @@ class SignalSafeList {
 // does not hold the lock.
 class TrackedWasmInstanceList {
  public:
-  // Registers a WASM module for receiving the "shut down" signal. The signal offset is optional:
-  // when kj::none, the module will still receive the terminated flag but will not get SIGXCPU.
+  // Registers a WASM module for receiving the "shut down" signal and/or GC-based cleanup.
+  // At least one of signalOffset or terminatedOffset must be provided. Both are optional
+  // individually: when signalOffset is kj::none, the module will not receive SIGXCPU; when
+  // terminatedOffset is kj::none, cleanup relies on the weak instanceRef.
+  //
   // Silently skips registration if any provided offset falls outside the module's linear memory.
-  void registerSignal(jsg::Lock&,
+  //
+  // Returns a reference to the registered entry on success, or kj::none if registration was
+  // skipped. The caller uses the returned reference to set up the weak instance handle.
+  kj::Maybe<TrackedWasmInstance&> registerSignal(jsg::Lock&,
       kj::Array<kj::byte> memory,
       kj::Maybe<uint32_t> signalOffset,
-      uint32_t terminatedOffset) const;
+      kj::Maybe<uint32_t> terminatedOffset) const;
 
-  // Filters out entries where the module has exited (terminated != 0). Call from a GC prologue
-  // hook to allow linear memory to be reclaimed.
+  // Filters out entries where the module has exited (terminated != 0) or the instance has been
+  // garbage-collected (instanceRef is empty). Call from a GC prologue hook to allow linear memory
+  // to be reclaimed.
   void filter(jsg::Lock&) const;
 
   // Removes all entries unconditionally. Call before the V8 isolate is disposed, since each
-  // entry holds a shared_ptr<v8::BackingStore> whose destructor may access V8 state.
+  // entry holds a shared_ptr<v8::BackingStore> (via the memory array) and a v8::Global whose
+  // destructors may access V8 state.
   void clear(jsg::Lock&) const;
 
   void writeShutdownSignal() const;

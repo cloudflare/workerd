@@ -29,18 +29,19 @@
     const exports = instance.exports;
     if (!exports) return;
     const terminatedGlobal = exports['__instance_terminated'];
-    // __instance_terminated is required; __instance_signal is optional.
-    if (!(terminatedGlobal instanceof wa.Global)) return;
     const signalGlobal = exports['__instance_signal'];
+    const hasTerminated = terminatedGlobal instanceof wa.Global;
     const hasSignal = signalGlobal instanceof wa.Global;
+    // Register if at least one is present.
+    if (!hasTerminated && !hasSignal) return;
     const memory = findMemory(instance, imports, module);
     if (memory) {
-      // Pass -1 as the signal offset when __instance_signal is not exported.
-      // The C++ side interprets -1 as "no signal address".
+      // Pass -1 for whichever offset is absent. The C++ side interprets -1 as "no address".
       registerShutdown(
+        instance,
         memory,
         hasSignal ? signalGlobal.value : -1,
-        terminatedGlobal.value
+        hasTerminated ? terminatedGlobal.value : -1
       );
     }
   }

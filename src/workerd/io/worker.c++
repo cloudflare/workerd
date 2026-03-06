@@ -1623,13 +1623,19 @@ void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void(void)>
 }
 
 void Worker::Isolate::registerTrackedWasmInstance(jsg::Lock& js,
+    v8::Local<v8::Object> instance,
     kj::Array<kj::byte> memory,
     kj::Maybe<uint32_t> signalOffset,
-    uint32_t terminatedOffset) const {
+    kj::Maybe<uint32_t> terminatedOffset) const {
   // Register the WASM module for receiving shutdown signals. The signal handler will
   // iterate the list unconditionally when CPU time is nearly exhausted.
-  limitEnforcer->getTrackedWasmInstances().registerSignal(
-      js, kj::mv(memory), kj::mv(signalOffset), terminatedOffset);
+  KJ_IF_SOME(entry, limitEnforcer->getTrackedWasmInstances().registerSignal(
+      js, kj::mv(memory), signalOffset, terminatedOffset)) {
+    // Set up a weak reference to the instance. When V8 collects it, the handle becomes
+    // empty and the GC prologue filter removes the entry, releasing the strong memory ref.
+    entry.instanceRef.Reset(js.v8Isolate, instance);
+    entry.instanceRef.SetWeak();
+  }
 }
 
 // EW-1319: Set WebAssembly.Module @@HasInstance
@@ -1665,35 +1671,43 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   auto webAssembly =
       KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
 
-  // Create a C++ callback that the JS shims call to register a {memory, signalOffset,
+  // Create a C++ callback that the JS shims call to register a {instance, memory, signalOffset,
   // terminatedOffset} tuple.
-  // __registerTrackedWasmInstance(memory: WebAssembly.Memory, signalOffset: number,
+  // __registerTrackedWasmInstance(instance: WebAssembly.Instance,
+  //                              memory: WebAssembly.Memory, signalOffset: number,
   //                              terminatedOffset: number)
-  // signalOffset may be -1, indicating the module did not export __instance_signal.
+  // signalOffset or terminatedOffset may be -1, indicating the corresponding export is absent.
   auto registerCb = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
     auto& js = jsg::Lock::from(info.GetIsolate());
     js.withinHandleScope([&] {
-      if (info.Length() < 3 || !info[0]->IsWasmMemoryObject() || !info[1]->IsNumber() ||
-          !info[2]->IsUint32()) {
+      if (info.Length() < 4 || !info[0]->IsObject() || !info[1]->IsWasmMemoryObject() ||
+          !info[2]->IsNumber() || !info[3]->IsNumber()) {
         js.v8Isolate->ThrowException(js.str(
-            "registerTrackedWasmInstance: expected (WebAssembly.Memory, number, uint32)"_kj));
+            "registerTrackedWasmInstance: expected "
+            "(WebAssembly.Instance, WebAssembly.Memory, number, number)"_kj));
         return;
       }
-      auto memory = info[0].As<v8::WasmMemoryObject>();
+      auto instance = info[0].As<v8::Object>();
+      auto memory = info[1].As<v8::WasmMemoryObject>();
       // signalOffset is -1 when __instance_signal was not exported.
-      auto signalRaw = info[1].As<v8::Number>()->Value();
+      auto signalRaw = info[2].As<v8::Number>()->Value();
       kj::Maybe<uint32_t> signalOffset;
       if (signalRaw >= 0) {
         signalOffset = static_cast<uint32_t>(signalRaw);
       }
-      auto terminatedOffset = info[2].As<v8::Uint32>()->Value();
+      // terminatedOffset is -1 when __instance_terminated was not exported.
+      auto terminatedRaw = info[3].As<v8::Number>()->Value();
+      kj::Maybe<uint32_t> terminatedOffset;
+      if (terminatedRaw >= 0) {
+        terminatedOffset = static_cast<uint32_t>(terminatedRaw);
+      }
       auto backingStore = memory->Buffer()->GetBackingStore();
       auto wasmMemory =
           kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), backingStore->ByteLength())
               .attach(kj::mv(backingStore));
       KJ_IF_SOME(e, kj::runCatchingExceptions([&] {
         Worker::Isolate::from(js).registerTrackedWasmInstance(
-            js, kj::mv(wasmMemory), signalOffset, terminatedOffset);
+            js, instance, kj::mv(wasmMemory), signalOffset, terminatedOffset);
       })) {
         js.v8Isolate->ThrowException(js.exceptionToJs(kj::mv(e)).getHandle(js));
       }
