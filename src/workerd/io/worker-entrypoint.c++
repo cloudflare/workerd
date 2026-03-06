@@ -825,6 +825,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
     t.setEventInfo(*incomingRequest, event->getEventInfo());
   }
 
+  // TODO(now): Pass versionInfo. Maybe move entrypointName, props, and versionInfo in to a common struct.
   auto promise = event->run(kj::mv(incomingRequest), entrypointName, kj::mv(props), waitUntilTasks)
                      .attach(kj::mv(event));
 
