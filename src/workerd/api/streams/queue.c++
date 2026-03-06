@@ -188,12 +188,13 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   size_t totalRead = 0;
 
   // Drains buffered data, converting values to bytes. Returns a rejected promise if a value
-  // cannot be converted; otherwise returns kj::none to indicate success.
+  // cannot be converted; otherwise returns kj::none to indicate success. Stops draining
+  // when totalRead reaches or exceeds maxRead (after finishing the current item).
   static const auto drainBuffer =
       [](jsg::Lock& js, ConsumerImpl& impl, ConsumerImpl::Ready& ready,
-          kj::Vector<kj::Array<kj::byte>>& chunks, size_t& totalRead,
-          bool& isClosing) -> kj::Maybe<jsg::Promise<DrainingReadResult>> {
-    while (!ready.buffer.empty() && !isClosing) {
+          kj::Vector<kj::Array<kj::byte>>& chunks, size_t& totalRead, bool& isClosing,
+          size_t maxRead) -> kj::Maybe<jsg::Promise<DrainingReadResult>> {
+    while (!ready.buffer.empty() && !isClosing && totalRead < maxRead) {
       auto& item = ready.buffer.front();
       KJ_SWITCH_ONEOF(item) {
         KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
@@ -219,9 +220,8 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     return kj::none;
   };
 
-  // Drain the buffer. Note: the initial buffer drain ignores maxRead - it always
-  // drains all currently buffered data. maxRead only gates subsequent pump attempts.
-  KJ_IF_SOME(errorPromise, drainBuffer(js, impl, ready, chunks, totalRead, isClosing)) {
+  // Drain the buffer up to maxRead bytes, then pump for more if under the limit.
+  KJ_IF_SOME(errorPromise, drainBuffer(js, impl, ready, chunks, totalRead, isClosing, maxRead)) {
     return kj::mv(errorPromise);
   }
 
@@ -232,8 +232,14 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       size_t prevChunkCount = chunks.size();
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
-      // Drain all buffered data that was added by the pull.
-      KJ_IF_SOME(errorPromise, drainBuffer(js, impl, ready, chunks, totalRead, isClosing)) {
+      // The pull callback may have closed or errored the consumer, which
+      // destroys the Ready state (and its RingBuffer). We must not touch
+      // `ready` after that.
+      if (!impl.state.isActive()) break;
+
+      // Drain buffered data that was added by the pull, respecting maxRead.
+      KJ_IF_SOME(errorPromise,
+          drainBuffer(js, impl, ready, chunks, totalRead, isClosing, maxRead)) {
         return kj::mv(errorPromise);
       }
 
@@ -244,9 +250,52 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     }
   }
 
+  // If the consumer was closed or errored during pumping, the `ready`
+  // reference is dangling. Return what we have or the appropriate error.
+  if (!impl.state.isActive()) {
+    KJ_IF_SOME(errored, impl.state.tryGetErrorUnsafe()) {
+      return js.rejectedPromise<DrainingReadResult>(errored.reason.getHandle(js));
+    }
+    // Closed — all data was already drained. Return collected chunks.
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = chunks.releaseAsArray(),
+      .done = true,
+    });
+  }
+
+  // If the controller was canceled during pumping (e.g., pull callback called
+  // controller.cancel()), the QueueImpl is destroyed and the consumer's queue
+  // reference is detached (set to kj::none). The consumer state is still Active
+  // because cancel on the controller doesn't notify consumers — it only closes
+  // the controller's own state. No more data will ever arrive. Drain remaining
+  // buffer data respecting maxRead, and signal done only when the buffer is empty.
+  if (impl.queue == kj::none) {
+    // Drain remaining buffer up to maxRead. If there's still more, the caller
+    // will loop back and we'll drain the rest on subsequent calls.
+    KJ_IF_SOME(errorPromise, drainBuffer(js, impl, ready, chunks, totalRead, isClosing, maxRead)) {
+      return kj::mv(errorPromise);
+    }
+    ready.hasPendingDrainingRead = false;
+    bool done = ready.buffer.empty() || isClosing;
+    // If isClosing, finalize the consumer so onConsumerClose fires promptly.
+    // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
+    if (isClosing) {
+      impl.maybeDrainAndSetState(js);
+    }
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = chunks.releaseAsArray(),
+      .done = done,
+    });
+  }
+
   // If we collected data, return it immediately.
   if (!chunks.empty() || isClosing) {
     ready.hasPendingDrainingRead = false;
+    // If isClosing, finalize the consumer so onConsumerClose fires promptly.
+    // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
+    if (isClosing) {
+      impl.maybeDrainAndSetState(js);
+    }
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
       .done = isClosing,
@@ -621,11 +670,12 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   bool isClosing = false;
   size_t totalRead = 0;
 
-  // Drains buffered byte data into chunks.
+  // Drains buffered byte data into chunks. Stops draining when totalRead reaches
+  // or exceeds maxRead (after finishing the current item).
   static const auto drainBuffer = [](ConsumerImpl::Ready& ready,
                                       kj::Vector<kj::Array<kj::byte>>& chunks, size_t& totalRead,
-                                      bool& isClosing) {
-    while (!ready.buffer.empty() && !isClosing) {
+                                      bool& isClosing, size_t maxRead) {
+    while (!ready.buffer.empty() && !isClosing && totalRead < maxRead) {
       auto& item = ready.buffer.front();
       KJ_SWITCH_ONEOF(item) {
         KJ_CASE_ONEOF(close, ConsumerImpl::Close) {
@@ -645,9 +695,8 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
     }
   };
 
-  // Drain the buffer. Note: the initial buffer drain ignores maxRead - it always
-  // drains all currently buffered data. maxRead only gates subsequent pump attempts.
-  drainBuffer(ready, chunks, totalRead, isClosing);
+  // Drain the buffer up to maxRead bytes, then pump for more if under the limit.
+  drainBuffer(ready, chunks, totalRead, isClosing, maxRead);
 
   // Pump the controller for more synchronously available data.
   // maxRead is checked here: we only proceed with pumping if we haven't exceeded it.
@@ -656,8 +705,13 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
       size_t prevChunkCount = chunks.size();
       bool pullCompletedSync = listener.onConsumerWantsData(js);
 
-      // Drain all buffered data that was added by the pull.
-      drainBuffer(ready, chunks, totalRead, isClosing);
+      // The pull callback may have closed or errored the consumer, which
+      // destroys the Ready state (and its RingBuffer). We must not touch
+      // `ready` after that.
+      if (!impl.state.isActive()) break;
+
+      // Drain buffered data that was added by the pull, respecting maxRead.
+      drainBuffer(ready, chunks, totalRead, isClosing, maxRead);
 
       // If pull is async or no new data was added, stop pumping.
       if (!pullCompletedSync || chunks.size() == prevChunkCount) {
@@ -666,9 +720,49 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
     }
   }
 
+  // If the consumer was closed or errored during pumping, the `ready`
+  // reference is dangling. Return what we have or the appropriate error.
+  if (!impl.state.isActive()) {
+    KJ_IF_SOME(errored, impl.state.tryGetErrorUnsafe()) {
+      return js.rejectedPromise<DrainingReadResult>(errored.reason.getHandle(js));
+    }
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = chunks.releaseAsArray(),
+      .done = true,
+    });
+  }
+
+  // If the controller was canceled during pumping (e.g., pull callback called
+  // controller.cancel()), the QueueImpl is destroyed and the consumer's queue
+  // reference is detached (set to kj::none). The consumer state is still Active
+  // because cancel on the controller doesn't notify consumers — it only closes
+  // the controller's own state. No more data will ever arrive. Drain remaining
+  // buffer data respecting maxRead, and signal done only when the buffer is empty.
+  if (impl.queue == kj::none) {
+    // Drain remaining buffer up to maxRead. If there's still more, the caller
+    // will loop back and we'll drain the rest on subsequent calls.
+    drainBuffer(ready, chunks, totalRead, isClosing, maxRead);
+    ready.hasPendingDrainingRead = false;
+    bool done = ready.buffer.empty() || isClosing;
+    // If isClosing, finalize the consumer so onConsumerClose fires promptly.
+    // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
+    if (isClosing) {
+      impl.maybeDrainAndSetState(js);
+    }
+    return js.resolvedPromise(DrainingReadResult{
+      .chunks = chunks.releaseAsArray(),
+      .done = done,
+    });
+  }
+
   // If we collected data, return it immediately.
   if (!chunks.empty() || isClosing) {
     ready.hasPendingDrainingRead = false;
+    // If isClosing, finalize the consumer so onConsumerClose fires promptly.
+    // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
+    if (isClosing) {
+      impl.maybeDrainAndSetState(js);
+    }
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
       .done = isClosing,
