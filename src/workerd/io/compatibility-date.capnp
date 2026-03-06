@@ -1382,7 +1382,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   containersPidNamespace @160 :Bool
     $compatEnableFlag("containers_pid_namespace")
     $compatDisableFlag("no_containers_pid_namespace")
-    $experimental;
+    $compatEnableDate("2026-04-01");
   # When enabled, containers attached to Durable Objects do NOT share the host PID namespace
   # (they get their own isolated PID namespace). When disabled (the default), containers share
   # the host PID namespace.
