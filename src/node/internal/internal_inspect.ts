@@ -3023,6 +3023,18 @@ export function formatLog(
 
 function isBuiltinPrototype(proto: unknown) {
   if (proto === null) return true;
+  // JSG resource type prototypes carry the kResourceTypeInspect symbol.
+  // These are not "built-in" in the JS-engine sense even though their
+  // constructors are own properties of globalThis (per Web IDL).  The
+  // prototype walk must continue through them to collect accessor
+  // properties (e.g. Blob.prototype.size).
+  if (
+    typeof proto === 'object' &&
+    proto !== null &&
+    internal.kResourceTypeInspect in (proto as Record<PropertyKey, unknown>)
+  ) {
+    return false;
+  }
   const descriptor = Object.getOwnPropertyDescriptor(proto, 'constructor');
   return (
     descriptor !== undefined &&

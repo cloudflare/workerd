@@ -1542,8 +1542,13 @@ struct ResourceTypeBuilder {
     auto v8Name = v8StrIntern(isolate, name);
     auto v8Value = typeWrapper.wrap(isolate, kj::none, kj::mv(value));
 
-    constructor->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
-    constructor->PrototypeTemplate()->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
+    // Per Web IDL, constants are {writable: false, enumerable: true, configurable: false}.
+    const auto attrs = getSpecCompliantPropertyAttributes(isolate)
+        ? static_cast<v8::PropertyAttribute>(
+              v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontDelete)
+        : v8::PropertyAttribute::ReadOnly;
+    constructor->Set(v8Name, v8Value, attrs);
+    constructor->PrototypeTemplate()->Set(v8Name, v8Value, attrs);
   }
 
   template <const char* name, typename Getter, Getter getter>
@@ -1604,7 +1609,28 @@ struct ResourceTypeBuilder {
     static_assert(
         hasGetTemplate, "Type must be listed in JSG_DECLARE_ISOLATE_TYPE to be declared nested.");
 
-    prototype->Set(isolate, name, typeWrapper.getTemplate(isolate, static_cast<Type*>(nullptr)));
+    auto tmpl = typeWrapper.getTemplate(isolate, static_cast<Type*>(nullptr));
+
+    // Always install on the prototype so that types declared on parent classes are
+    // inherited through FunctionTemplate::Inherit().
+    prototype->Set(isolate, name, tmpl);
+
+    if constexpr (isContext) {
+      if (getSpecCompliantPropertyAttributes(isolate)) {
+        // Per Web IDL, [Exposed] interface objects must be own properties of the global
+        // object with { writable: true, enumerable: false, configurable: true }.  When
+        // building the global scope (isContext == true), also install on the instance
+        // template so that they become own properties of globalThis.
+        //
+        // NOTE: V8's FunctionTemplate::Inherit() does NOT propagate instance-template
+        // properties to child types.  This means nested types declared on a parent
+        // context type (e.g. WorkerGlobalScope) won't automatically appear as own
+        // properties of the child (e.g. ServiceWorkerGlobalScope).  To keep things
+        // simple, the leaf context type must declare all its nested types directly -
+        // don't rely on inheriting nested types from parent context classes.
+        instance->Set(isolate, name, tmpl, v8::PropertyAttribute::DontEnum);
+      }
+    }
   }
 
   inline void registerTypeScriptRoot() { /* only needed for RTTI */ }
