@@ -398,15 +398,16 @@ KJ_TEST("WHATWG tests") {
   KJ_ASSERT(MimeType::isText(svgMimeWithCharset));
 
   KJ_ASSERT(MimeType::isXml(MimeType::XHTML));
-  KJ_ASSERT(MimeType::isXml(
-      KJ_ASSERT_NONNULL(MimeType::tryParse("application/atom+xml"_kj))));
 
-  KJ_ASSERT(MimeType::isXml(
-      KJ_ASSERT_NONNULL(MimeType::tryParse("text/xml"_kj))));
-  KJ_ASSERT(MimeType::isXml(
-      KJ_ASSERT_NONNULL(MimeType::tryParse("application/xml"_kj))));
-  KJ_ASSERT(!MimeType::isXml(
-      KJ_ASSERT_NONNULL(MimeType::tryParse("image/xml"_kj))));
+  auto atomXml = KJ_ASSERT_NONNULL(MimeType::tryParse("application/atom+xml"_kj));
+  KJ_ASSERT(MimeType::isXml(atomXml));
+
+  auto textXml = KJ_ASSERT_NONNULL(MimeType::tryParse("text/xml"_kj));
+  KJ_ASSERT(MimeType::isXml(textXml));
+  auto appXml = KJ_ASSERT_NONNULL(MimeType::tryParse("application/xml"_kj));
+  KJ_ASSERT(MimeType::isXml(appXml));
+  auto imageXml = KJ_ASSERT_NONNULL(MimeType::tryParse("image/xml"_kj));
+  KJ_ASSERT(!MimeType::isXml(imageXml));
 }
 
 KJ_TEST("Extract Mime Type") {
