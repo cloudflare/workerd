@@ -80,6 +80,27 @@ inline kj::Maybe<::rust::Slice<const kj::byte>> get_header(
   return header.map([](auto header) { return header.asBytes().template as<kj_rs::Rust>(); });
 }
 
+// HttpHeaderId is defined as a CXX shared struct (generated into http.rs.h).
+// When ffi.h is included standalone (before http.rs.h), we provide a compatible definition.
+// When included via http.rs.h, the CXX-generated definition takes precedence.
+#ifndef CXXBRIDGE1_STRUCT_kj$rust$HttpHeaderId
+#define CXXBRIDGE1_STRUCT_kj$rust$HttpHeaderId
+struct HttpHeaderId final {
+  const void* table;
+  unsigned int id;
+  unsigned int _pad;
+
+  bool operator==(const HttpHeaderId&) const noexcept;
+  bool operator!=(const HttpHeaderId&) const noexcept;
+};
+#endif
+static_assert(sizeof(HttpHeaderId) == sizeof(kj::HttpHeaderId),
+    "HttpHeaderId layout mismatch with kj::HttpHeaderId");
+static_assert(alignof(HttpHeaderId) == alignof(kj::HttpHeaderId),
+    "HttpHeaderId alignment mismatch with kj::HttpHeaderId");
+kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_id(
+    const HttpHeaders& headers, HttpHeaderId id);
+
 // --- kj::HttpService ffi
 using AsyncInputStream = kj::AsyncInputStream;
 using AsyncIoStream = kj::AsyncIoStream;
