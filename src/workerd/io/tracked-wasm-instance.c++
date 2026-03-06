@@ -6,19 +6,25 @@
 
 namespace workerd {
 
-void TrackedWasmInstanceList::registerSignal(jsg::Lock&,
+kj::Maybe<TrackedWasmInstance&> TrackedWasmInstanceList::registerSignal(jsg::Lock&,
     kj::Array<kj::byte> memory,
     kj::Maybe<uint32_t> signalOffset,
-    uint32_t terminatedOffset) const {
-  // Silently skip registration if the terminated address would fall outside the module's linear
-  // memory. The terminated field is always required.
-  if (static_cast<size_t>(terminatedOffset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
-    return;
+    kj::Maybe<uint32_t> terminatedOffset) const {
+  // At least one offset must be provided — there's nothing to register otherwise.
+  if (signalOffset == kj::none && terminatedOffset == kj::none) {
+    return kj::none;
+  }
+
+  // If a terminated offset was provided, validate it fits in memory.
+  KJ_IF_SOME(offset, terminatedOffset) {
+    if (static_cast<size_t>(offset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
+      return kj::none;
+    }
   }
   // If a signal offset was provided, validate it fits in memory too.
   KJ_IF_SOME(offset, signalOffset) {
     if (static_cast<size_t>(offset) + WASM_SIGNAL_FIELD_BYTES > memory.size()) {
-      return;
+      return kj::none;
     }
     // Zero the signal address to clear any stale signals.
     uint32_t value = 0;
@@ -27,16 +33,17 @@ void TrackedWasmInstanceList::registerSignal(jsg::Lock&,
 
   // Safe to const_cast: the jsg::Lock& parameter proves we hold the isolate lock, which is the
   // synchronization required by the signal-safe list for mutations.
-  const_cast<SignalSafeList<TrackedWasmInstance>&>(list).pushFront(
+  auto& entry = const_cast<SignalSafeList<TrackedWasmInstance>&>(list).pushFront(
       TrackedWasmInstance{.memory = kj::mv(memory),
-        .signalByteOffset = kj::mv(signalOffset),
+        .signalByteOffset = signalOffset,
         .terminatedByteOffset = terminatedOffset});
+  return entry;
 }
 
 void TrackedWasmInstanceList::filter(jsg::Lock&) const {
   // Safe to const_cast: the jsg::Lock& parameter proves we hold the isolate lock.
   const_cast<SignalSafeList<TrackedWasmInstance>&>(list).filter(
-      [](const TrackedWasmInstance& signal) { return signal.isModuleListening(); });
+      [](const TrackedWasmInstance& signal) { return signal.shouldRetain(); });
 }
 
 void TrackedWasmInstanceList::clear(jsg::Lock&) const {
@@ -68,10 +75,13 @@ void TrackedWasmInstanceList::clearShutdownSignal() const {
 void TrackedWasmInstanceList::writeTerminatedSignal() const {
   // Safe to const_cast: same-thread signal-handler context, no concurrent list mutation.
   const_cast<SignalSafeList<TrackedWasmInstance>&>(list).iterate([](TrackedWasmInstance& signal) {
-    uint32_t value = 1;
-    signal.memory.asPtr()
-        .slice(signal.terminatedByteOffset, signal.terminatedByteOffset + sizeof(value))
-        .copyFrom(kj::asBytes(&value, 1));
+    // Skip entries that have no terminated address (signal-only modules).
+    KJ_IF_SOME(offset, signal.terminatedByteOffset) {
+      uint32_t value = 1;
+      signal.memory.asPtr()
+          .slice(offset, offset + sizeof(value))
+          .copyFrom(kj::asBytes(&value, 1));
+    }
   });
 }
 

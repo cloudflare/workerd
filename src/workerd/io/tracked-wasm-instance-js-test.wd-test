@@ -18,6 +18,7 @@ const unitTests :Workerd.Config = (
           (name = "signal-imported-memory.wasm", wasm = embed "wasm/signal-imported-memory.wasm"),
           (name = "signal-memory-reclaim.wasm", wasm = embed "wasm/signal-memory-reclaim.wasm"),
           (name = "signal-preinit.wasm", wasm = embed "wasm/signal-preinit.wasm"),
+          (name = "signal-signal-only-reclaim.wasm", wasm = embed "wasm/signal-signal-only-reclaim.wasm"),
         ],
         compatibilityFlags = ["experimental"],
       )
