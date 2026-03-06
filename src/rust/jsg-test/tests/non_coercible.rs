@@ -1,15 +1,12 @@
 use jsg::ExceptionType;
 use jsg::NonCoercible;
 use jsg::Number;
-use jsg::ResourceState;
-use jsg::ResourceTemplate;
+use jsg::Resource;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
 #[jsg_resource]
-struct MyResource {
-    _state: ResourceState,
-}
+struct MyResource;
 
 #[jsg_resource]
 #[expect(clippy::unnecessary_wraps)]
@@ -126,11 +123,8 @@ fn non_coercible_debug() {
 fn non_coercible_methods_accept_correct_types_and_reject_incorrect_types() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(MyResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = MyResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = MyResource::alloc(lock, MyResource);
+        let wrapped = MyResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         // String method accepts string

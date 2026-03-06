@@ -1,0 +1,934 @@
+//! GC (garbage collection) tests for Rust resources.
+//!
+//! These tests verify that Rust resources are properly cleaned up when:
+//! 1. All Rust `Ref` handles are dropped and no JavaScript wrapper exists (immediate cleanup)
+//! 2. All Rust `Ref` handles are dropped and V8 garbage collects the JS wrapper
+//!
+//! Note: Circular references through `Ref<T>` are NOT collected, matching the behavior
+//! of C++ `jsg::Ref<T>` which uses `kj::Own<T>` cross-references.
+
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+
+use jsg::Resource;
+use jsg_macros::jsg_method;
+use jsg_macros::jsg_resource;
+
+/// Counter to track how many `SimpleResource` instances have been dropped.
+static SIMPLE_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+#[jsg_resource]
+struct SimpleResource {
+    pub name: String,
+}
+
+impl Drop for SimpleResource {
+    fn drop(&mut self) {
+        SIMPLE_RESOURCE_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+#[expect(clippy::unnecessary_wraps)]
+impl SimpleResource {
+    #[jsg_method]
+    fn get_name(&self) -> Result<String, jsg::Error> {
+        Ok(self.name.clone())
+    }
+}
+
+/// Counter to track how many `ParentResource` instances have been dropped.
+static PARENT_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+#[jsg_resource]
+struct ParentResource {
+    pub child: jsg::Ref<SimpleResource>,
+    pub optional_child: Option<jsg::Ref<SimpleResource>>,
+}
+
+impl Drop for ParentResource {
+    fn drop(&mut self) {
+        PARENT_RESOURCE_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl ParentResource {}
+
+/// Tests that resources are dropped immediately when all Rust Refs are dropped
+/// and no JS wrapper exists.
+///
+/// In the Wrappable model, dropping the last Ref decrements the kj refcount to 0,
+/// which immediately destroys the Wrappable (and thus the Rust resource).
+/// No GC is needed.
+#[test]
+fn supports_gc_via_ref_drop() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let resource = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        std::mem::drop(resource);
+        // In the Wrappable model, no wrapper means immediate cleanup when refcount hits 0
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Tests that resources are dropped via V8 GC when JS wrapper is collected.
+///
+/// When a resource is wrapped for JavaScript:
+/// 1. Dropping all Rust `Ref` handles calls `removeStrongRef()` but the `CppgcShim`
+///    still holds a `kj::Own` keeping the object alive
+/// 2. V8 GC collects the wrapper, `CppgcShim` is destroyed, `kj::Own` is dropped
+/// 3. kj refcount reaches 0, Wrappable is destroyed
+#[test]
+fn supports_gc_via_weak_callback() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let resource = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
+        let _wrapped = SimpleResource::wrap(resource.clone(), lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        std::mem::drop(resource);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        crate::Harness::request_gc(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+#[test]
+fn resource_with_traced_ref_field() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+    PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let child = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "child".to_owned(),
+            },
+        );
+        let optional_child = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "optional_child".to_owned(),
+            },
+        );
+
+        let parent = ParentResource::alloc(
+            lock,
+            ParentResource {
+                child: child.clone(),
+                optional_child: Some(optional_child.clone()),
+            },
+        );
+
+        let _wrapped = ParentResource::wrap(parent.clone(), lock);
+
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+
+        std::mem::drop(child);
+        std::mem::drop(optional_child);
+        std::mem::drop(parent);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 2);
+        Ok(())
+    });
+}
+
+#[test]
+fn child_traced_ref_kept_alive_by_parent() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+    PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let child = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "child".to_owned(),
+            },
+        );
+
+        let parent = ParentResource::alloc(
+            lock,
+            ParentResource {
+                child: child.clone(),
+                optional_child: None,
+            },
+        );
+
+        // Wrap the parent so it has a JS object, then let the Local go out of scope
+        // by not storing it. The wrapper is now only held weakly by cppgc.
+        let _ = ParentResource::wrap(parent.clone(), lock);
+
+        // Child not collected because parent still holds a Ref (which holds a kj::Own)
+        std::mem::drop(child);
+        crate::Harness::request_gc(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+
+        // Drop the Rust strong ref. The parent still has a wrapper, but with no
+        // strong refs and no JS references, the wrapper is eligible for GC.
+        std::mem::drop(parent);
+        Ok(())
+    });
+
+    // GC in a separate context so the Local handle from wrap() is gone
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+#[test]
+fn weak_ref_upgrade() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
+        let weak = jsg::WeakRef::from(&strong);
+
+        assert!(weak.is_alive());
+        let upgraded = weak.upgrade();
+        assert!(upgraded.is_some());
+        assert!(weak.is_alive());
+
+        std::mem::drop(upgraded);
+        assert!(weak.is_alive());
+
+        std::mem::drop(strong);
+        // No wrapper, so resource is destroyed immediately when last strong ref drops
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        assert!(!weak.is_alive());
+        assert!(weak.upgrade().is_none());
+        Ok(())
+    });
+}
+
+/// Tests that a wrapped resource stays alive as long as JS wrapper exists.
+#[test]
+fn wrapped_resource_kept_alive_by_js() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
+        let _wrapped = SimpleResource::wrap(strong.clone(), lock);
+        std::mem::drop(strong);
+        // CppgcShim still holds kj::Own, keeping it alive
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Tests weak ref behavior with wrapped resources.
+#[test]
+fn weak_ref_with_wrapped_resource() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "test".to_owned(),
+            },
+        );
+        let _wrapped = SimpleResource::wrap(strong.clone(), lock);
+        let weak = jsg::WeakRef::from(&strong);
+
+        assert!(weak.upgrade().is_some());
+        std::mem::drop(strong);
+        // CppgcShim keeps it alive even after dropping the strong ref
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Tests parent-child GC with traced refs.
+#[test]
+fn traced_ref_in_gc() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+    PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let child = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "child".to_owned(),
+            },
+        );
+        let _child_wrapped = SimpleResource::wrap(child.clone(), lock);
+
+        let parent = ParentResource::alloc(
+            lock,
+            ParentResource {
+                child: child.clone(),
+                optional_child: None,
+            },
+        );
+        let _parent_wrapped = ParentResource::wrap(parent.clone(), lock);
+
+        std::mem::drop(child);
+        std::mem::drop(parent);
+
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        crate::Harness::request_gc(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+// =============================================================================
+// WeakRef tests
+// =============================================================================
+
+/// Tests that `WeakRef::get()` returns the resource data while the resource is alive.
+#[test]
+fn weak_ref_get_returns_resource_data() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "hello".to_owned(),
+            },
+        );
+        let weak = jsg::WeakRef::from(&strong);
+
+        // get() should return a reference to the resource
+        let resource = weak.upgrade().expect("weak ref should be alive");
+        assert_eq!(resource.name, "hello");
+        Ok(())
+    });
+}
+
+/// Tests that `WeakRef::get()` returns `None` after the resource is dropped.
+#[test]
+fn weak_ref_get_returns_none_after_drop() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "ephemeral".to_owned(),
+            },
+        );
+        let weak = jsg::WeakRef::from(&strong);
+        assert!(weak.upgrade().is_some());
+
+        std::mem::drop(strong);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+
+        // get() must return None without touching freed memory
+        assert!(weak.upgrade().is_none());
+        Ok(())
+    });
+}
+
+/// Tests that `WeakRef::default()` creates a dead weak reference.
+///
+/// A default `WeakRef` has `wrappable: None` and an expired `Weak<R>`.
+/// All operations must be safe: `get()` -> `None`, `upgrade()` -> `None`, `is_alive()` -> `false`.
+#[test]
+fn weak_ref_default_is_dead() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|_lock, _ctx| {
+        let weak: jsg::WeakRef<SimpleResource> = jsg::WeakRef::default();
+
+        assert!(!weak.is_alive());
+        assert!(weak.upgrade().is_none());
+        assert!(weak.upgrade().is_none());
+        Ok(())
+    });
+}
+
+/// Tests that cloning a `WeakRef` shares the alive marker.
+///
+/// When the resource dies, ALL clones must see `is_alive() == false` simultaneously.
+#[test]
+fn weak_ref_clone_shares_alive_marker() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "shared".to_owned(),
+            },
+        );
+
+        let weak1 = jsg::WeakRef::from(&strong);
+        let weak2 = weak1.clone();
+        let weak3 = weak2.clone();
+
+        assert!(weak1.is_alive());
+        assert!(weak2.is_alive());
+        assert!(weak3.is_alive());
+
+        std::mem::drop(strong);
+
+        // All clones see death simultaneously
+        assert!(!weak1.is_alive());
+        assert!(!weak2.is_alive());
+        assert!(!weak3.is_alive());
+        assert!(weak1.upgrade().is_none());
+        assert!(weak2.upgrade().is_none());
+        Ok(())
+    });
+}
+
+/// Tests that `WeakRef::upgrade()` with a wrapped resource creates a strong ref
+/// that prevents GC collection.
+#[test]
+fn weak_ref_upgrade_with_wrapped_resource_prevents_gc() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let strong = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "persistent".to_owned(),
+            },
+        );
+        let _wrapped = SimpleResource::wrap(strong.clone(), lock);
+        let weak = jsg::WeakRef::from(&strong);
+
+        // Drop the original strong ref, but upgrade from weak creates a new one
+        std::mem::drop(strong);
+        let upgraded = weak.upgrade().expect("should be alive via wrapper");
+        assert_eq!(upgraded.name, "persistent");
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+
+        // The upgraded Ref keeps the resource alive
+        std::mem::drop(upgraded);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Tests that `WeakRef::trace()` is a no-op and doesn't prevent GC collection.
+///
+/// A resource holding a `WeakRef` to another resource should not keep it alive through tracing.
+#[test]
+fn weak_ref_trace_does_not_prevent_gc() {
+    static HOLDER_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    #[jsg_resource]
+    struct WeakRefHolder {
+        weak: jsg::WeakRef<SimpleResource>,
+    }
+
+    impl Drop for WeakRefHolder {
+        fn drop(&mut self) {
+            HOLDER_DROPS.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[jsg_resource]
+    impl WeakRefHolder {}
+
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+    HOLDER_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let target = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "target".to_owned(),
+            },
+        );
+        let _target_wrapped = SimpleResource::wrap(target.clone(), lock);
+
+        let holder = WeakRefHolder::alloc(
+            lock,
+            WeakRefHolder {
+                weak: jsg::WeakRef::from(&target),
+            },
+        );
+        let _holder_wrapped = WeakRefHolder::wrap(holder.clone(), lock);
+
+        // Drop all Rust refs — both are only held by JS wrappers
+        std::mem::drop(target);
+        std::mem::drop(holder);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    // GC should collect the target — the WeakRef in holder doesn't keep it alive
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        // Both should be collected (holder's WeakRef doesn't prevent target's collection)
+        assert_eq!(HOLDER_DROPS.load(Ordering::SeqCst), 1);
+        crate::Harness::request_gc(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Ref tests
+// =============================================================================
+
+/// Tests that `Ref::clone()` keeps the resource alive after the original is dropped.
+#[test]
+fn ref_clone_keeps_resource_alive() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let original = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "cloned".to_owned(),
+            },
+        );
+        let clone1 = original.clone();
+        let clone2 = original.clone();
+
+        std::mem::drop(original);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(clone1.name, "cloned");
+
+        std::mem::drop(clone1);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(clone2.name, "cloned");
+
+        std::mem::drop(clone2);
+        // Only now all refs are gone — resource is destroyed
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Tests that dropping multiple Refs only triggers destruction on the last one.
+#[test]
+fn multiple_ref_drops_only_last_triggers_destruction() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let original = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "multi".to_owned(),
+            },
+        );
+
+        // Create several clones
+        let clones: Vec<_> = (0..5).map(|_| original.clone()).collect();
+        std::mem::drop(original);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+
+        // Drop one by one
+        for (i, c) in clones.into_iter().enumerate() {
+            std::mem::drop(c);
+            if i < 4 {
+                assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+            }
+        }
+        // Last clone dropped — resource is destroyed
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Tests that `Ref::deref()` returns the correct resource data.
+#[test]
+fn ref_deref_returns_correct_resource_data() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let r = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "deref-test".to_owned(),
+            },
+        );
+
+        // Deref should return the resource with correct data
+        assert_eq!(r.name, "deref-test");
+
+        // Clone should also deref to the same data
+        #[expect(clippy::redundant_clone)]
+        let clone = r.clone();
+        assert_eq!(clone.name, "deref-test");
+        Ok(())
+    });
+}
+
+// =============================================================================
+// unwrap/unwrap_ref tests
+// =============================================================================
+
+/// Tests that `unwrap_ref()` creates a strong reference from a JS wrapper.
+///
+/// The returned `Ref<R>` must keep the resource alive even after dropping the original.
+#[test]
+fn unwrap_ref_creates_strong_reference_from_js_wrapper() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "unwrap-me".to_owned(),
+            },
+        );
+        let wrapped = SimpleResource::wrap(resource.clone(), lock);
+        ctx.set_global("obj", wrapped);
+
+        // Get the JS value back and unwrap_ref to create a new strong Ref
+        let js_val = ctx.eval_raw(lock, "obj").unwrap();
+        let new_ref: jsg::Ref<SimpleResource> = unsafe { jsg::resource::unwrap_ref(lock, js_val) }
+            .expect("unwrap_ref should succeed for a Rust-wrapped resource");
+        assert_eq!(new_ref.name, "unwrap-me");
+
+        // Drop the original Ref — the unwrapped ref should keep it alive
+        std::mem::drop(resource);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+
+        // The unwrapped ref is still valid
+        assert_eq!(new_ref.name, "unwrap-me");
+
+        // Dropping the unwrapped ref (with wrapper still alive) should not destroy
+        std::mem::drop(new_ref);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    // GC the JS wrapper — now the resource can be collected
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Tests that `unwrap()` returns `None` for a plain JS object.
+///
+/// A plain `{}` object has no internal fields and no wrappable tag.
+/// `Resource::unwrap` must return `None` without crashing.
+#[test]
+fn unwrap_returns_none_for_plain_js_object() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let plain_obj = ctx.eval_raw(lock, "({})").unwrap();
+        assert!(
+            SimpleResource::unwrap(lock, plain_obj).is_none(),
+            "unwrap should return None for a plain JS object"
+        );
+        Ok(())
+    });
+}
+
+/// Tests that `unwrap_ref()` returns `None` for a plain JS object.
+#[test]
+fn unwrap_ref_returns_none_for_plain_js_object() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let plain_obj = ctx.eval_raw(lock, "({})").unwrap();
+        let result: Option<jsg::Ref<SimpleResource>> =
+            unsafe { jsg::resource::unwrap_ref(lock, plain_obj) };
+        assert!(
+            result.is_none(),
+            "unwrap_ref should return None for a plain JS object"
+        );
+        Ok(())
+    });
+}
+
+/// Tests that `unwrap()` returns a mutable reference that reflects mutations.
+#[test]
+fn unwrap_resource_returns_mutable_reference() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "original".to_owned(),
+            },
+        );
+        let wrapped = SimpleResource::wrap(resource.clone(), lock);
+        ctx.set_global("obj", wrapped);
+
+        // Unwrap and mutate
+        let js_val = ctx.eval_raw(lock, "obj").unwrap();
+        let r: &mut SimpleResource = SimpleResource::unwrap(lock, js_val)
+            .expect("unwrap should succeed for a Rust-wrapped resource");
+        r.name = "mutated".to_owned();
+
+        // The mutation should be visible through the original Ref
+        assert_eq!(resource.name, "mutated");
+
+        // And through JS
+        let name: String = ctx.eval(lock, "obj.getName()").unwrap();
+        assert_eq!(name, "mutated");
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Wrap/template caching tests
+// =============================================================================
+
+/// Tests that wrapping multiple instances of the same type uses the same template.
+///
+/// Verifies that `ResourceImpl::get_constructor()` caches the template on first use
+/// and returns the same one on subsequent calls.
+#[test]
+fn wrap_multiple_instances_of_same_type() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r1 = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "first".to_owned(),
+            },
+        );
+        let r2 = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "second".to_owned(),
+            },
+        );
+
+        let w1 = SimpleResource::wrap(r1, lock);
+        let w2 = SimpleResource::wrap(r2, lock);
+        ctx.set_global("r1", w1);
+        ctx.set_global("r2", w2);
+
+        // Both should be instances of the same constructor (same prototype chain)
+        let same_proto: bool = ctx
+            .eval(
+                lock,
+                "Object.getPrototypeOf(r1) === Object.getPrototypeOf(r2)",
+            )
+            .unwrap();
+        assert!(same_proto);
+
+        // Both should work independently
+        let n1: String = ctx.eval(lock, "r1.getName()").unwrap();
+        let n2: String = ctx.eval(lock, "r2.getName()").unwrap();
+        assert_eq!(n1, "first");
+        assert_eq!(n2, "second");
+        Ok(())
+    });
+}
+
+/// Tests that wrapping the same resource twice returns the same JS object.
+///
+/// `Wrappable::tryGetHandle()` should detect an existing wrapper and return it.
+#[test]
+fn wrap_same_resource_twice_returns_same_object() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "singleton".to_owned(),
+            },
+        );
+
+        let w1 = SimpleResource::wrap(resource.clone(), lock);
+        ctx.set_global("w1", w1);
+        let w2 = SimpleResource::wrap(resource, lock);
+        ctx.set_global("w2", w2);
+
+        // Both wraps should return the exact same JS object
+        let same: bool = ctx.eval(lock, "w1 === w2").unwrap();
+        assert!(same);
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Resource data integrity tests
+// =============================================================================
+
+/// Tests that resource data survives a GC cycle when held by a JS global.
+#[test]
+fn resource_data_survives_gc_via_js_global() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "survivor".to_owned(),
+            },
+        );
+        let wrapped = SimpleResource::wrap(resource, lock);
+        ctx.set_global("obj", wrapped);
+
+        // Force GC — the global reference should keep it alive
+        crate::Harness::request_gc(lock);
+
+        // Data should still be correct
+        let name: String = ctx.eval(lock, "obj.getName()").unwrap();
+        assert_eq!(name, "survivor");
+        Ok(())
+    });
+}
+
+/// Tests parent-child relationships where parent is only held by JS.
+///
+/// When the parent is wrapped and held by a JS global, its `Ref<SimpleResource>` child
+/// should be traced during GC and kept alive even without any Rust strong refs.
+#[test]
+fn parent_ref_keeps_child_alive_through_gc() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+    PARENT_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let child = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "child".to_owned(),
+            },
+        );
+        let parent = ParentResource::alloc(
+            lock,
+            ParentResource {
+                child: child.clone(),
+                optional_child: None,
+            },
+        );
+        let wrapped = ParentResource::wrap(parent.clone(), lock);
+        ctx.set_global("parent", wrapped);
+
+        // Drop all Rust refs
+        std::mem::drop(child);
+        std::mem::drop(parent);
+
+        // GC should NOT collect the parent (held by global) or child (held by parent's Ref)
+        crate::Harness::request_gc(lock);
+        assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    // New context — global is gone
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(PARENT_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Tests that dropping all strong refs correctly invalidates ALL weak refs.
+///
+/// Creates multiple `WeakRef`s from different `Ref`s, verifies they all see death at the same time.
+#[test]
+fn instance_drop_invalidates_all_weak_refs() {
+    SIMPLE_RESOURCE_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let original = SimpleResource::alloc(
+            lock,
+            SimpleResource {
+                name: "shared-target".to_owned(),
+            },
+        );
+        let clone1 = original.clone();
+        let clone2 = original.clone();
+
+        // Create weak refs from different strong refs
+        let weak_from_original = jsg::WeakRef::from(&original);
+        let weak_from_clone1 = jsg::WeakRef::from(&clone1);
+        let weak_from_clone2 = jsg::WeakRef::from(&clone2);
+
+        // All alive
+        assert!(weak_from_original.is_alive());
+        assert!(weak_from_clone1.is_alive());
+        assert!(weak_from_clone2.is_alive());
+
+        // Drop all strong refs — resource is destroyed
+        std::mem::drop(original);
+        std::mem::drop(clone1);
+        std::mem::drop(clone2);
+        assert_eq!(SIMPLE_RESOURCE_DROPS.load(Ordering::SeqCst), 1);
+
+        // ALL weak refs see death
+        assert!(!weak_from_original.is_alive());
+        assert!(!weak_from_clone1.is_alive());
+        assert!(!weak_from_clone2.is_alive());
+        assert!(weak_from_original.upgrade().is_none());
+        assert!(weak_from_clone1.upgrade().is_none());
+        assert!(weak_from_clone2.upgrade().is_none());
+        Ok(())
+    });
+}
