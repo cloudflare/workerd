@@ -1,4 +1,27 @@
-use core::ffi::c_void;
+//! V8 JavaScript engine bindings and garbage collector integration.
+//!
+//! This module provides Rust wrappers for V8 types and the cppgc (Oilpan) garbage collector,
+//! enabling safe interop between Rust and V8's JavaScript runtime.
+//!
+//! # Core Types
+//!
+//! - [`IsolatePtr`] - Safe wrapper around `v8::Isolate*`, the V8 runtime instance
+//! - [`Local<'a, T>`] - Stack-allocated handle to a V8 value, tied to a `HandleScope`
+//! - [`Global<T>`] - Persistent handle that outlives `HandleScope`s
+//! - [`TracedReference<T>`] - Handle traced by the garbage collector for cppgc objects
+//!
+//! # Garbage Collection
+//!
+//! The [`cppgc`] submodule provides Rust wrappers for V8's C++ garbage collector types:
+//!
+//! - [`cppgc::Handle`] - Strong persistent reference (off-heap → on-heap)
+//! - [`cppgc::WeakHandle`] - Weak persistent reference (off-heap → on-heap)
+//! - [`cppgc::Member`] - Strong member reference (on-heap → on-heap, needs tracing)
+//! - [`cppgc::WeakMember`] - Weak member reference (on-heap → on-heap, needs tracing)
+//!
+//! Resources implement [`GarbageCollected`] to trace their V8 handles during GC.
+
+use std::ffi::c_char;
 use std::fmt::Display;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -17,6 +40,14 @@ pub mod ffi {
 
     #[derive(Debug)]
     struct Global {
+        ptr: usize,
+    }
+
+    struct TracedReference {
+        ptr: usize,
+    }
+
+    struct CppgcVisitor {
         ptr: usize,
     }
 
@@ -40,17 +71,18 @@ pub mod ffi {
         ReferenceError,
     }
 
-    /// Module visibility level, corresponds to `workerd::jsg::ModuleType` from modules.capnp.
-    /// Values are automatically assigned by `cxx` because of extern declaration below.
-    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-    #[repr(u16)]
-    enum ModuleType {
-        BUNDLE,
-        BUILTIN,
-        INTERNAL,
-    }
-    unsafe extern "C++" {
-        type ModuleType;
+    extern "Rust" {
+        /// Called from C++ RustResource destructor to drop the Rust object.
+        /// The `resource` pointer contains a fat pointer (data[2]) to `dyn GarbageCollected`.
+        unsafe fn cppgc_invoke_drop(resource: *mut RustResource);
+
+        /// Called from C++ RustResource::Trace to trace nested handles.
+        /// The `resource` pointer contains a fat pointer (data[2]) to `dyn GarbageCollected`.
+        unsafe fn cppgc_invoke_trace(resource: *const RustResource, visitor: *mut CppgcVisitor);
+
+        /// Called from C++ RustResource::GetHumanReadableName.
+        /// Returns null if no name is available, otherwise a static string.
+        unsafe fn cppgc_invoke_get_name(resource: *const RustResource) -> *const c_char;
     }
 
     unsafe extern "C++" {
@@ -58,6 +90,11 @@ pub mod ffi {
 
         type Isolate;
         type FunctionCallbackInfo;
+        type RustResource;
+        type CppgcPersistent;
+        type CppgcWeakPersistent;
+        type CppgcMember;
+        type CppgcWeakMember;
 
         // Local<T>
         pub unsafe fn local_drop(value: Local);
@@ -228,15 +265,21 @@ pub mod ffi {
         ) -> u64;
 
         // Global<T>
-        pub unsafe fn global_drop(value: Global);
+        pub unsafe fn global_reset(value: *mut Global);
         pub unsafe fn global_clone(value: &Global) -> Global;
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
-        pub unsafe fn global_make_weak(
+
+        // TracedReference<T> (cppgc/Oilpan)
+        pub unsafe fn traced_reference_from_local(
             isolate: *mut Isolate,
-            value: *mut Global,
-            data: usize, /* void* */
-            callback: unsafe fn(isolate: *mut Isolate, data: usize) -> (),
-        );
+            value: Local,
+        ) -> TracedReference;
+        pub unsafe fn traced_reference_to_local(
+            isolate: *mut Isolate,
+            value: &TracedReference,
+        ) -> Local;
+        pub unsafe fn traced_reference_reset(value: *mut TracedReference);
+        pub unsafe fn traced_reference_is_empty(value: &TracedReference) -> bool;
 
         // Unwrappers
         pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> String;
@@ -271,6 +314,46 @@ pub mod ffi {
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
+
+        // cppgc - Allocate Rust objects directly on the GC heap
+        pub unsafe fn cppgc_make_garbage_collected(
+            isolate: *mut Isolate,
+            size: usize,
+            alignment: usize,
+        ) -> *mut RustResource;
+        pub fn cppgc_rust_resource_size() -> usize;
+        pub unsafe fn cppgc_rust_resource_data(resource: *mut RustResource) -> *mut usize;
+        pub unsafe fn cppgc_rust_resource_data_const(resource: *const RustResource)
+        -> *const usize;
+        pub unsafe fn cppgc_visitor_trace(visitor: *mut CppgcVisitor, handle: &TracedReference);
+        pub unsafe fn cppgc_visitor_trace_member(visitor: *mut CppgcVisitor, member_storage: usize);
+        pub unsafe fn cppgc_visitor_trace_weak_member(
+            visitor: *mut CppgcVisitor,
+            weak_member_storage: usize,
+        );
+        pub fn cppgc_persistent_size() -> usize;
+        pub unsafe fn cppgc_persistent_construct(storage: usize, resource: *mut RustResource);
+        pub unsafe fn cppgc_persistent_destruct(storage: usize);
+        pub unsafe fn cppgc_persistent_get(storage: usize) -> *mut RustResource;
+        pub unsafe fn cppgc_persistent_assign(storage: usize, resource: *mut RustResource);
+        // WeakPersistent inline storage functions
+        pub fn cppgc_weak_persistent_size() -> usize;
+        pub unsafe fn cppgc_weak_persistent_construct(storage: usize, resource: *mut RustResource);
+        pub unsafe fn cppgc_weak_persistent_destruct(storage: usize);
+        pub unsafe fn cppgc_weak_persistent_get(storage: usize) -> *mut RustResource;
+        pub unsafe fn cppgc_weak_persistent_assign(storage: usize, resource: *mut RustResource);
+        // Member inline storage functions
+        pub fn cppgc_member_size() -> usize;
+        pub unsafe fn cppgc_member_construct(storage: usize, resource: *mut RustResource);
+        pub unsafe fn cppgc_member_destruct(storage: usize);
+        pub unsafe fn cppgc_member_get(storage: usize) -> *mut RustResource;
+        pub unsafe fn cppgc_member_assign(storage: usize, resource: *mut RustResource);
+        // WeakMember inline storage functions
+        pub fn cppgc_weak_member_size() -> usize;
+        pub unsafe fn cppgc_weak_member_construct(storage: usize, resource: *mut RustResource);
+        pub unsafe fn cppgc_weak_member_destruct(storage: usize);
+        pub unsafe fn cppgc_weak_member_get(storage: usize) -> *mut RustResource;
+        pub unsafe fn cppgc_weak_member_assign(storage: usize, resource: *mut RustResource);
     }
 
     pub struct ConstructorDescriptor {
@@ -305,13 +388,22 @@ pub mod ffi {
             isolate: *mut Isolate,
             resource: usize,      /* R* */
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-            drop_callback: usize, /* R* -> () */
         ) -> Local /* v8::Local<Value> */;
 
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> usize /* R* */;
+    }
+
+    /// Module visibility level, mirroring workerd::jsg::ModuleType from modules.capnp.
+    ///
+    /// CXX shared enums cannot reference existing C++ enums, so we define matching values here.
+    /// The conversion to workerd::jsg::ModuleType happens in jsg.h's RustModuleRegistry.
+    enum ModuleType {
+        Bundle = 0,
+        Builtin = 1,
+        Internal = 2,
     }
 
     unsafe extern "C++" {
@@ -1037,6 +1129,14 @@ impl<T> Global<T> {
         &self.handle
     }
 
+    /// Returns a mutable reference to the underlying FFI handle.
+    ///
+    /// # Safety
+    /// The caller must ensure the returned reference is not used after this `Global` is dropped.
+    pub unsafe fn as_ffi_mut(&mut self) -> *mut ffi::Global {
+        &raw mut self.handle
+    }
+
     pub fn as_local<'a>(&self, lock: &mut Lock) -> Local<'a, T> {
         unsafe {
             Local::from_ffi(
@@ -1046,27 +1146,13 @@ impl<T> Global<T> {
         }
     }
 
-    /// Makes this global handle weak, allowing V8 to garbage collect the object
-    /// and invoke the callback when the object is being collected.
+    /// Resets this global handle, releasing the persistent reference.
     ///
     /// # Safety
-    /// The caller must ensure:
-    /// - `isolate` is a valid V8 isolate wrapper
-    /// - `data` encodes a value that remains valid until the callback is invoked
-    /// - `callback` can safely handle the provided data value
-    pub unsafe fn make_weak(
-        &mut self,
-        isolate: IsolatePtr,
-        data: *mut c_void,
-        callback: fn(*mut ffi::Isolate, usize) -> (),
-    ) {
+    /// The caller must ensure the global handle is valid.
+    pub unsafe fn reset(&mut self) {
         unsafe {
-            ffi::global_make_weak(
-                isolate.as_ffi(),
-                &raw mut self.handle,
-                data as usize,
-                callback,
-            );
+            ffi::global_reset(&raw mut self.handle);
         }
     }
 }
@@ -1092,12 +1178,7 @@ impl<T> From<ffi::Global> for Global<T> {
 
 impl<T> Drop for Global<T> {
     fn drop(&mut self) {
-        let handle = ffi::Global {
-            ptr: self.handle.ptr,
-        };
-        unsafe {
-            ffi::global_drop(handle);
-        }
+        unsafe { self.reset() };
     }
 }
 
@@ -1210,15 +1291,704 @@ impl<'a> FunctionCallbackInfo<'a> {
     }
 }
 
+/// A reference to a V8 value that is traced by the garbage collector.
+///
+/// Note: This type intentionally does NOT implement `Drop`. `TracedReference` is managed by V8's
+/// traced handles infrastructure. During cppgc finalization, the traced handle memory may already
+/// be freed, so calling `reset()` would cause a use-after-free. V8 automatically cleans up traced
+/// references during GC.
+pub struct TracedReference<T> {
+    handle: ffi::TracedReference,
+    _marker: PhantomData<T>,
+}
+
+impl<T> TracedReference<T> {
+    pub fn is_empty(&self) -> bool {
+        unsafe { ffi::traced_reference_is_empty(&self.handle) }
+    }
+
+    pub fn get<'a>(&self, lock: &mut Lock) -> Local<'a, T> {
+        unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::traced_reference_to_local(lock.isolate().as_ffi(), &self.handle),
+            )
+        }
+    }
+
+    pub fn reset(&mut self) {
+        unsafe {
+            ffi::traced_reference_reset(&raw mut self.handle);
+        }
+    }
+
+    /// # Safety
+    /// The returned reference must not outlive this handle.
+    pub unsafe fn as_ffi_ref(&self) -> &ffi::TracedReference {
+        &self.handle
+    }
+}
+
+impl<T> From<Local<'_, T>> for TracedReference<T> {
+    fn from(local: Local<'_, T>) -> Self {
+        Self {
+            handle: unsafe {
+                ffi::traced_reference_from_local(local.isolate.as_ffi(), local.into_ffi())
+            },
+            _marker: PhantomData,
+        }
+    }
+}
+
+/// A fat pointer to a `dyn GarbageCollected` trait object.
+///
+/// This struct has the same memory layout as a Rust fat pointer: `[data_ptr, vtable_ptr]`.
+/// It's used to store trait object pointers in C++ `RustResource::data[2]` and safely
+/// reconstruct them on the Rust side.
+///
+/// Uses `NonNull` internally to enforce that the pointers are never null.
+#[repr(C)]
+struct TraitObjectPtr {
+    data: NonNull<()>,
+    vtable: NonNull<()>,
+}
+
+impl TraitObjectPtr {
+    /// Creates a `TraitObjectPtr` from a mutable reference to any `GarbageCollected` type.
+    fn from_ref(obj: &mut dyn GarbageCollected) -> Self {
+        // SAFETY: Transmute is safe here because we're converting a fat pointer to its raw
+        // representation which is guaranteed to be [data_ptr, vtable_ptr] for trait objects.
+        // References are always non-null, so NonNull is valid.
+        let [data, vtable] =
+            unsafe { std::mem::transmute::<*mut dyn GarbageCollected, [NonNull<()>; 2]>(obj) };
+        Self { data, vtable }
+    }
+
+    /// Reconstructs a shared reference from the stored fat pointer.
+    ///
+    /// # Safety
+    /// The original object must still be alive for lifetime `'a`.
+    #[expect(clippy::needless_lifetimes)]
+    unsafe fn as_ref<'a>(&'a self) -> &'a dyn GarbageCollected {
+        let fat_ptr = unsafe {
+            std::mem::transmute::<[NonNull<()>; 2], *const dyn GarbageCollected>([
+                self.data,
+                self.vtable,
+            ])
+        };
+        unsafe { &*fat_ptr }
+    }
+
+    /// Reconstructs a mutable reference from the stored fat pointer.
+    ///
+    /// # Safety
+    /// The original object must still be alive for lifetime `'a`, and no other references may exist.
+    #[expect(clippy::needless_lifetimes)]
+    unsafe fn as_mut<'a>(&'a mut self) -> &'a mut dyn GarbageCollected {
+        let fat_ptr = unsafe {
+            std::mem::transmute::<[NonNull<()>; 2], *mut dyn GarbageCollected>([
+                self.data,
+                self.vtable,
+            ])
+        };
+        unsafe { &mut *fat_ptr }
+    }
+}
+
+/// Returns a reference to the `TraitObjectPtr` stored in a `RustResource`.
+///
+/// # Safety
+/// The resource pointer must be valid and contain a properly initialized `TraitObjectPtr`.
+unsafe fn get_trait_object_ptr(resource: *const ffi::RustResource) -> &'static TraitObjectPtr {
+    let data_ptr = unsafe { ffi::cppgc_rust_resource_data_const(resource) };
+    unsafe { &*data_ptr.cast::<TraitObjectPtr>() }
+}
+
+/// Returns a mutable reference to the `TraitObjectPtr` stored in a `RustResource`.
+///
+/// # Safety
+/// The resource pointer must be valid and contain a properly initialized `TraitObjectPtr`.
+unsafe fn get_trait_object_ptr_mut(
+    resource: *mut ffi::RustResource,
+) -> &'static mut TraitObjectPtr {
+    let data_ptr = unsafe { ffi::cppgc_rust_resource_data(resource) };
+    unsafe { &mut *data_ptr.cast::<TraitObjectPtr>() }
+}
+
+unsafe fn cppgc_invoke_drop(resource: *mut ffi::RustResource) {
+    let trait_ptr = unsafe { get_trait_object_ptr_mut(resource) };
+    let obj = unsafe { trait_ptr.as_mut() };
+    unsafe { std::ptr::drop_in_place(obj) };
+}
+
+unsafe fn cppgc_invoke_trace(resource: *const ffi::RustResource, visitor: *mut ffi::CppgcVisitor) {
+    let trait_ptr = unsafe { get_trait_object_ptr(resource) };
+    let obj = unsafe { trait_ptr.as_ref() };
+    let mut gc_visitor = unsafe {
+        GcVisitor::from_raw(ffi::CppgcVisitor {
+            ptr: (*visitor).ptr,
+        })
+    };
+    obj.trace(&mut gc_visitor);
+}
+
+unsafe fn cppgc_invoke_get_name(resource: *const ffi::RustResource) -> *const c_char {
+    let trait_ptr = unsafe { get_trait_object_ptr(resource) };
+    let obj = unsafe { trait_ptr.as_ref() };
+    obj.get_name()
+        .map_or(std::ptr::null(), std::ffi::CStr::as_ptr)
+}
+
+pub mod cppgc {
+    use std::cell::UnsafeCell;
+    use std::marker::PhantomData;
+    use std::ptr::NonNull;
+
+    use super::GarbageCollected;
+    use super::IsolatePtr;
+    use super::ffi;
+
+    const PERSISTENT_USIZE_COUNT: usize = 2;
+    const WEAK_PERSISTENT_USIZE_COUNT: usize = 2;
+    const MEMBER_USIZE_COUNT: usize = 1;
+    const WEAK_MEMBER_USIZE_COUNT: usize = 1;
+
+    fn object_offset_for<T>() -> usize {
+        let base = ffi::cppgc_rust_resource_size();
+        let align = std::mem::align_of::<T>();
+        (base + align - 1) & !(align - 1)
+    }
+
+    unsafe fn get_object_from_rust_resource<T: GarbageCollected>(
+        rust_resource: *const ffi::RustResource,
+    ) -> *mut T {
+        unsafe {
+            rust_resource
+                .cast::<u8>()
+                .add(object_offset_for::<T>())
+                .cast::<T>()
+                .cast_mut()
+        }
+    }
+
+    /// # Safety
+    /// The isolate must be valid and locked by the current thread.
+    ///
+    /// # Panics
+    /// Panics if allocation fails (null pointer returned from cppgc).
+    pub unsafe fn make_garbage_collected<T: GarbageCollected + 'static>(
+        isolate: IsolatePtr,
+        obj: T,
+    ) -> Ptr<T> {
+        const {
+            assert!(std::mem::align_of::<T>() <= 16);
+        }
+
+        let base_size = ffi::cppgc_rust_resource_size();
+        let aligned_offset = object_offset_for::<T>();
+        let additional_bytes = (aligned_offset - base_size) + std::mem::size_of::<T>();
+
+        let pointer = unsafe {
+            ffi::cppgc_make_garbage_collected(
+                isolate.as_ffi(),
+                additional_bytes,
+                std::mem::align_of::<T>(),
+            )
+        };
+
+        assert!(!pointer.is_null(), "cppgc allocation failed");
+
+        unsafe {
+            let inner = get_object_from_rust_resource::<T>(pointer);
+            inner.write(obj);
+
+            // Store the fat pointer (data + vtable) in RustResource::data[2]
+            let data_ptr = ffi::cppgc_rust_resource_data(pointer);
+            let trait_ptr = super::TraitObjectPtr::from_ref(&mut *inner);
+            std::ptr::write(data_ptr.cast::<super::TraitObjectPtr>(), trait_ptr);
+        }
+
+        Ptr {
+            pointer: unsafe { NonNull::new_unchecked(pointer) },
+            _phantom: PhantomData,
+        }
+    }
+
+    /// # Safety
+    /// `rust_resource` must point to a valid `RustResource` containing an object of type T.
+    pub unsafe fn rust_resource_to_instance<T: GarbageCollected>(
+        rust_resource: *mut ffi::RustResource,
+    ) -> *mut T {
+        unsafe { get_object_from_rust_resource::<T>(rust_resource) }
+    }
+
+    /// # Safety
+    /// `instance` must point to a valid object allocated via `make_garbage_collected`.
+    pub unsafe fn instance_to_rust_resource<T: GarbageCollected>(
+        instance: *mut T,
+    ) -> *mut ffi::RustResource {
+        let offset = object_offset_for::<T>();
+        unsafe {
+            instance
+                .cast::<u8>()
+                .sub(offset)
+                .cast::<ffi::RustResource>()
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct Ptr<T: GarbageCollected> {
+        pointer: NonNull<ffi::RustResource>,
+        _phantom: PhantomData<T>,
+    }
+
+    impl<T: GarbageCollected> Ptr<T> {
+        pub fn get(&self) -> &T {
+            unsafe { &*get_object_from_rust_resource(self.pointer.as_ptr()) }
+        }
+
+        pub fn as_rust_resource(&self) -> *mut ffi::RustResource {
+            self.pointer.as_ptr()
+        }
+    }
+
+    impl<T: GarbageCollected> std::ops::Deref for Ptr<T> {
+        type Target = T;
+
+        fn deref(&self) -> &T {
+            self.get()
+        }
+    }
+
+    impl<T: GarbageCollected + std::fmt::Debug> std::fmt::Debug for Ptr<T> {
+        fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+            std::fmt::Debug::fmt(&**self, fmt)
+        }
+    }
+
+    // cppgc handles cannot be bitwise moved after construction due to internal
+    // back-pointers. We use Box to ensure stable addresses.
+
+    struct PersistentInner(Box<[usize; PERSISTENT_USIZE_COUNT]>);
+
+    impl PersistentInner {
+        fn new(resource: *mut ffi::RustResource) -> Self {
+            let mut storage = Box::new([0usize; PERSISTENT_USIZE_COUNT]);
+            unsafe { ffi::cppgc_persistent_construct(storage.as_mut_ptr() as usize, resource) }
+            Self(storage)
+        }
+
+        fn get(&self) -> *mut ffi::RustResource {
+            unsafe { ffi::cppgc_persistent_get(self.0.as_ptr() as usize) }
+        }
+    }
+
+    impl Drop for PersistentInner {
+        fn drop(&mut self) {
+            unsafe { ffi::cppgc_persistent_destruct(self.0.as_mut_ptr() as usize) }
+        }
+    }
+
+    pub struct Handle {
+        inner: UnsafeCell<Option<PersistentInner>>,
+    }
+
+    impl Default for Handle {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl Handle {
+        pub fn new() -> Self {
+            Self {
+                inner: UnsafeCell::new(None),
+            }
+        }
+
+        /// # Safety
+        /// The resource pointer must be valid and allocated via `make_garbage_collected`.
+        pub unsafe fn from_resource(resource: *mut ffi::RustResource) -> Self {
+            Self {
+                inner: UnsafeCell::new(Some(PersistentInner::new(resource))),
+            }
+        }
+
+        pub fn has_persistent(&self) -> bool {
+            // SAFETY: V8 isolate is single-threaded
+            unsafe { (*self.inner.get()).is_some() }
+        }
+
+        pub fn get_resource(&self) -> Option<NonNull<ffi::RustResource>> {
+            // SAFETY: V8 isolate is single-threaded
+            unsafe {
+                (*self.inner.get())
+                    .as_ref()
+                    .and_then(|p| NonNull::new(p.get()))
+            }
+        }
+
+        /// Clears the persistent handle, releasing the GC root.
+        /// This enables cycle collection for traced refs.
+        pub fn clear(&self) {
+            // SAFETY: V8 isolate is single-threaded
+            unsafe {
+                (*self.inner.get()).take();
+            }
+        }
+
+        pub fn release(&mut self) {
+            // SAFETY: We have &mut self
+            unsafe {
+                (*self.inner.get()).take();
+            }
+        }
+    }
+
+    struct WeakPersistentInner(Box<[usize; WEAK_PERSISTENT_USIZE_COUNT]>);
+
+    impl WeakPersistentInner {
+        fn new(resource: *mut ffi::RustResource) -> Self {
+            let mut storage = Box::new([0usize; WEAK_PERSISTENT_USIZE_COUNT]);
+            unsafe { ffi::cppgc_weak_persistent_construct(storage.as_mut_ptr() as usize, resource) }
+            Self(storage)
+        }
+
+        fn get(&self) -> *mut ffi::RustResource {
+            unsafe { ffi::cppgc_weak_persistent_get(self.0.as_ptr() as usize) }
+        }
+    }
+
+    impl Drop for WeakPersistentInner {
+        fn drop(&mut self) {
+            unsafe { ffi::cppgc_weak_persistent_destruct(self.0.as_mut_ptr() as usize) }
+        }
+    }
+
+    #[derive(Default)]
+    pub struct WeakHandle {
+        inner: Option<WeakPersistentInner>,
+    }
+
+    impl WeakHandle {
+        /// # Safety
+        /// The resource pointer must be valid and allocated via `make_garbage_collected`.
+        pub unsafe fn from_resource(resource: *mut ffi::RustResource) -> Self {
+            Self {
+                inner: Some(WeakPersistentInner::new(resource)),
+            }
+        }
+
+        pub fn get(&self) -> Option<NonNull<ffi::RustResource>> {
+            self.inner.as_ref().and_then(|p| NonNull::new(p.get()))
+        }
+
+        pub fn is_alive(&self) -> bool {
+            self.get().is_some()
+        }
+    }
+
+    pub(super) struct MemberInner(Box<UnsafeCell<[usize; MEMBER_USIZE_COUNT]>>);
+
+    impl MemberInner {
+        fn new(resource: *mut ffi::RustResource) -> Self {
+            let storage = Box::new(UnsafeCell::new([0usize; MEMBER_USIZE_COUNT]));
+            unsafe { ffi::cppgc_member_construct(storage.get() as usize, resource) }
+            Self(storage)
+        }
+
+        fn get(&self) -> *mut ffi::RustResource {
+            unsafe { ffi::cppgc_member_get(self.0.get() as usize) }
+        }
+
+        fn assign(&self, resource: *mut ffi::RustResource) {
+            unsafe { ffi::cppgc_member_assign(self.0.get() as usize, resource) }
+        }
+
+        pub(super) fn as_usize(&self) -> usize {
+            self.0.get() as usize
+        }
+    }
+
+    impl Drop for MemberInner {
+        fn drop(&mut self) {
+            unsafe { ffi::cppgc_member_destruct(self.0.get() as usize) }
+        }
+    }
+
+    pub struct Member {
+        pub(super) inner: UnsafeCell<Option<MemberInner>>,
+    }
+
+    impl Default for Member {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl Member {
+        pub fn new() -> Self {
+            Self {
+                inner: UnsafeCell::new(None),
+            }
+        }
+
+        pub fn from_resource(resource: NonNull<ffi::RustResource>) -> Self {
+            Self {
+                inner: UnsafeCell::new(Some(MemberInner::new(resource.as_ptr()))),
+            }
+        }
+
+        pub fn get(&self) -> Option<NonNull<ffi::RustResource>> {
+            // SAFETY: V8 isolate is single-threaded, so no concurrent access is possible.
+            unsafe {
+                (*self.inner.get())
+                    .as_ref()
+                    .and_then(|m| NonNull::new(m.get()))
+            }
+        }
+
+        pub fn set(&self, resource: Option<NonNull<ffi::RustResource>>) {
+            let resource_ptr = resource.map_or(std::ptr::null_mut(), NonNull::as_ptr);
+            // SAFETY: V8 isolate is single-threaded, so no concurrent access is possible.
+            unsafe {
+                if let Some(ref m) = *self.inner.get() {
+                    m.assign(resource_ptr);
+                } else if let Some(r) = resource {
+                    *self.inner.get() = Some(MemberInner::new(r.as_ptr()));
+                }
+            }
+        }
+    }
+
+    pub(super) struct WeakMemberInner(Box<UnsafeCell<[usize; WEAK_MEMBER_USIZE_COUNT]>>);
+
+    impl WeakMemberInner {
+        fn new(resource: *mut ffi::RustResource) -> Self {
+            let storage = Box::new(UnsafeCell::new([0usize; WEAK_MEMBER_USIZE_COUNT]));
+            unsafe { ffi::cppgc_weak_member_construct(storage.get() as usize, resource) }
+            Self(storage)
+        }
+
+        fn get(&self) -> *mut ffi::RustResource {
+            unsafe { ffi::cppgc_weak_member_get(self.0.get() as usize) }
+        }
+
+        fn assign(&self, resource: *mut ffi::RustResource) {
+            unsafe { ffi::cppgc_weak_member_assign(self.0.get() as usize, resource) }
+        }
+
+        pub(super) fn as_usize(&self) -> usize {
+            self.0.get() as usize
+        }
+    }
+
+    impl Drop for WeakMemberInner {
+        fn drop(&mut self) {
+            unsafe { ffi::cppgc_weak_member_destruct(self.0.get() as usize) }
+        }
+    }
+
+    pub struct WeakMember {
+        pub(super) inner: UnsafeCell<Option<WeakMemberInner>>,
+    }
+
+    impl Default for WeakMember {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl WeakMember {
+        pub fn new() -> Self {
+            Self {
+                inner: UnsafeCell::new(None),
+            }
+        }
+
+        pub fn from_resource(resource: NonNull<ffi::RustResource>) -> Self {
+            Self {
+                inner: UnsafeCell::new(Some(WeakMemberInner::new(resource.as_ptr()))),
+            }
+        }
+
+        pub fn get(&self) -> Option<NonNull<ffi::RustResource>> {
+            // SAFETY: V8 isolate is single-threaded, so no concurrent access is possible.
+            unsafe {
+                (*self.inner.get())
+                    .as_ref()
+                    .and_then(|m| NonNull::new(m.get()))
+            }
+        }
+
+        pub fn is_alive(&self) -> bool {
+            // SAFETY: V8 isolate is single-threaded, so no concurrent access is possible.
+            unsafe { (*self.inner.get()).is_some() }
+        }
+
+        pub fn set(&self, resource: Option<NonNull<ffi::RustResource>>) {
+            let resource_ptr = resource.map_or(std::ptr::null_mut(), NonNull::as_ptr);
+            // SAFETY: V8 isolate is single-threaded, so no concurrent access is possible.
+            unsafe {
+                if let Some(ref m) = *self.inner.get() {
+                    m.assign(resource_ptr);
+                } else if let Some(r) = resource {
+                    *self.inner.get() = Some(WeakMemberInner::new(r.as_ptr()));
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn handle_default_is_empty() {
+            let handle = Handle::new();
+            assert!(!handle.has_persistent());
+            assert!(handle.get_resource().is_none());
+        }
+
+        #[test]
+        fn member_default_is_empty() {
+            let member = Member::new();
+            assert!(member.get().is_none());
+        }
+
+        #[test]
+        fn weak_member_default_is_empty() {
+            let weak_member = WeakMember::new();
+            assert!(!weak_member.is_alive());
+            assert!(weak_member.get().is_none());
+        }
+    }
+}
+
+pub trait GarbageCollected {
+    fn trace(&self, _visitor: &mut GcVisitor<'_>) {}
+
+    fn get_name(&self) -> Option<&'static std::ffi::CStr> {
+        None
+    }
+}
+
+/// Trait for accessing parent context during GC visitation.
+///
+/// This is implemented by `Instance<R>` to provide context for dynamic
+/// strong/traced switching of `Ref`s.
+pub trait GcParent {
+    /// Returns the current strong reference count.
+    fn strong_refcount(&self) -> u32;
+
+    /// Returns whether this instance has a JS wrapper.
+    fn has_wrapper(&self) -> bool;
+}
+
+/// Visitor for garbage collection tracing.
+///
+/// `GcVisitor` wraps the cppgc visitor and tracks parent context for dynamic
+/// strong/traced switching of `Ref`s.
+pub struct GcVisitor<'a> {
+    visitor: ffi::CppgcVisitor,
+    /// Reference to the parent being traced (used for dynamic Ref switching)
+    parent: Option<&'a dyn GcParent>,
+}
+
+impl GcVisitor<'_> {
+    /// Creates a new `GcVisitor` from a raw cppgc visitor.
+    ///
+    /// # Safety
+    /// The visitor must be valid for the lifetime of this `GcVisitor`.
+    pub unsafe fn from_raw(visitor: ffi::CppgcVisitor) -> Self {
+        Self {
+            visitor,
+            parent: None,
+        }
+    }
+
+    /// Creates a child visitor with the given parent context.
+    ///
+    /// Use this when tracing through a resource to provide context for
+    /// dynamic strong/traced switching of child `Ref`s.
+    pub fn with_parent<'b>(&mut self, parent: &'b dyn GcParent) -> GcVisitor<'b> {
+        GcVisitor {
+            visitor: ffi::CppgcVisitor {
+                ptr: self.visitor.ptr,
+            },
+            parent: Some(parent),
+        }
+    }
+
+    /// Returns the parent context if available.
+    pub fn parent(&self) -> Option<&dyn GcParent> {
+        self.parent
+    }
+
+    pub fn trace<T>(&mut self, handle: &TracedReference<T>) {
+        unsafe {
+            ffi::cppgc_visitor_trace(std::ptr::from_mut(&mut self.visitor), handle.as_ffi_ref());
+        }
+    }
+
+    pub fn trace_member(&mut self, member: &cppgc::Member) {
+        // SAFETY: V8 isolate is single-threaded, so no concurrent access is possible.
+        // We're in a GC trace callback, so the member is guaranteed to be valid.
+        if let Some(m) = unsafe { &*member.inner.get() } {
+            unsafe {
+                ffi::cppgc_visitor_trace_member(
+                    std::ptr::from_mut(&mut self.visitor),
+                    m.as_usize(),
+                );
+            }
+        }
+    }
+
+    pub fn trace_weak_member(&mut self, member: &cppgc::WeakMember) {
+        // SAFETY: V8 isolate is single-threaded, so no concurrent access is possible.
+        // We're in a GC trace callback, so the member is guaranteed to be valid.
+        if let Some(m) = unsafe { &*member.inner.get() } {
+            unsafe {
+                ffi::cppgc_visitor_trace_weak_member(
+                    std::ptr::from_mut(&mut self.visitor),
+                    m.as_usize(),
+                );
+            }
+        }
+    }
+
+    /// Visits a `Ref` during GC tracing, handling dynamic strong/traced switching.
+    ///
+    /// This method:
+    /// 1. Calls `ref.visit()` to potentially switch the ref between strong and traced,
+    ///    and trace the Member storage if in traced mode
+    /// 2. Traces the target's wrapper if it exists
+    /// 3. If no wrapper, recursively traces through the target's children
+    ///
+    /// This mirrors the behavior of `Wrappable::visitRef` in C++.
+    pub fn visit_ref<R: crate::Resource>(&mut self, r: &crate::Ref<R>) {
+        let instance = r.visit(self);
+
+        if let Some(wrapper) = instance.traced_reference() {
+            // Target has a wrapper - trace it
+            self.trace(wrapper);
+        } else {
+            // No wrapper - trace transitively through the target's children
+            let mut child_visitor = self.with_parent(instance);
+            instance.resource.trace(&mut child_visitor);
+        }
+    }
+}
+
 /// A safe wrapper around a V8 isolate pointer.
 ///
-/// `Isolate` provides a type-safe abstraction over raw `v8::Isolate*` pointers,
+/// `IsolatePtr` provides a type-safe abstraction over raw `v8::Isolate*` pointers,
 /// ensuring that the pointer is always non-null. This type is `Copy` and can be
 /// freely passed around without worrying about ownership.
 ///
 /// # Thread Safety
 ///
-/// V8 isolates are single-threaded. While `Isolate` itself is `Send` and `Sync`
+/// V8 isolates are single-threaded. While `IsolatePtr` itself is `Send` and `Sync`
 /// (as it's just a pointer wrapper), V8 operations must only be performed on the
 /// thread that owns the isolate lock. Use `is_locked()` to verify the current
 /// thread holds the lock before performing V8 operations.
@@ -1227,7 +1997,7 @@ impl<'a> FunctionCallbackInfo<'a> {
 ///
 /// ```ignore
 /// // Create from raw pointer (unsafe)
-/// let isolate = unsafe { v8::Isolate::from_ffi(raw_ptr) };
+/// let isolate = unsafe { v8::IsolatePtr::from_ffi(raw_ptr) };
 ///
 /// // Check if locked before V8 operations
 /// assert!(unsafe { isolate.is_locked() });
@@ -1241,7 +2011,7 @@ pub struct IsolatePtr {
 }
 
 impl IsolatePtr {
-    /// Creates an `Isolate` from a raw pointer.
+    /// Creates an `IsolatePtr` from a raw pointer.
     ///
     /// # Safety
     /// The pointer must be non-null and point to a valid V8 isolate.
@@ -1250,6 +2020,12 @@ impl IsolatePtr {
         Self {
             handle: unsafe { NonNull::new_unchecked(handle) },
         }
+    }
+
+    /// Creates an `IsolatePtr` from a `NonNull` pointer.
+    pub fn from_non_null(handle: NonNull<ffi::Isolate>) -> Self {
+        debug_assert!(unsafe { ffi::isolate_is_locked(handle.as_ptr()) });
+        Self { handle }
     }
 
     /// Returns whether this isolate is currently locked by the current thread.
@@ -1264,5 +2040,10 @@ impl IsolatePtr {
     /// Returns the raw pointer to the V8 isolate.
     pub fn as_ffi(&self) -> *mut ffi::Isolate {
         self.handle.as_ptr()
+    }
+
+    /// Returns the `NonNull` pointer to the V8 isolate.
+    pub fn as_non_null(&self) -> NonNull<ffi::Isolate> {
+        self.handle
     }
 }

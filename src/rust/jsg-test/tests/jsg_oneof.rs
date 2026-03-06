@@ -1,7 +1,6 @@
 use jsg::ExceptionType;
 use jsg::Number;
-use jsg::ResourceState;
-use jsg::ResourceTemplate;
+use jsg::Resource;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_oneof;
 use jsg_macros::jsg_resource;
@@ -37,7 +36,7 @@ enum ThreeTypes {
 
 #[jsg_resource]
 struct EnumTestResource {
-    _state: ResourceState,
+    _unused: u8,
 }
 
 #[jsg_resource]
@@ -100,11 +99,8 @@ fn jsg_oneof_derives_debug_and_clone() {
 fn jsg_oneof_string_or_number_accepts_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EnumTestResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = EnumTestResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EnumTestResource::alloc(lock, EnumTestResource { _unused: 0 });
+        let wrapped = EnumTestResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         let result: String = ctx.eval(lock, "resource.stringOrNumber('hello')").unwrap();
@@ -117,11 +113,8 @@ fn jsg_oneof_string_or_number_accepts_string() {
 fn jsg_oneof_string_or_number_accepts_number() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EnumTestResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = EnumTestResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EnumTestResource::alloc(lock, EnumTestResource { _unused: 0 });
+        let wrapped = EnumTestResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         let result: String = ctx.eval(lock, "resource.stringOrNumber(42)").unwrap();
@@ -134,11 +127,8 @@ fn jsg_oneof_string_or_number_accepts_number() {
 fn jsg_oneof_string_or_number_rejects_boolean() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EnumTestResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = EnumTestResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EnumTestResource::alloc(lock, EnumTestResource { _unused: 0 });
+        let wrapped = EnumTestResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         let err = ctx
@@ -156,11 +146,8 @@ fn jsg_oneof_string_or_number_rejects_boolean() {
 fn jsg_oneof_string_or_bool_accepts_both() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EnumTestResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = EnumTestResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EnumTestResource::alloc(lock, EnumTestResource { _unused: 0 });
+        let wrapped = EnumTestResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         let result: String = ctx.eval(lock, "resource.stringOrBool('test')").unwrap();
@@ -176,11 +163,8 @@ fn jsg_oneof_string_or_bool_accepts_both() {
 fn jsg_oneof_three_types_accepts_all() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EnumTestResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = EnumTestResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EnumTestResource::alloc(lock, EnumTestResource { _unused: 0 });
+        let wrapped = EnumTestResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         let result: String = ctx.eval(lock, "resource.threeTypes('hello')").unwrap();
@@ -199,11 +183,8 @@ fn jsg_oneof_three_types_accepts_all() {
 fn jsg_oneof_three_types_rejects_null_and_undefined() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EnumTestResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = EnumTestResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EnumTestResource::alloc(lock, EnumTestResource { _unused: 0 });
+        let wrapped = EnumTestResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         let err = ctx
@@ -225,11 +206,8 @@ fn jsg_oneof_three_types_rejects_null_and_undefined() {
 fn jsg_oneof_variant_order_matches_declaration() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EnumTestResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = EnumTestResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EnumTestResource::alloc(lock, EnumTestResource { _unused: 0 });
+        let wrapped = EnumTestResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         // StringOrNumber has String first, Number second
@@ -253,11 +231,8 @@ fn jsg_oneof_variant_order_matches_declaration() {
 fn jsg_oneof_reference_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EnumTestResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = EnumTestResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = EnumTestResource::alloc(lock, EnumTestResource { _unused: 0 });
+        let wrapped = EnumTestResource::wrap(resource, lock);
         ctx.set_global("resource", wrapped);
 
         let result: String = ctx

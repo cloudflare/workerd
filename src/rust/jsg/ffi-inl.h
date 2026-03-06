@@ -62,4 +62,49 @@ inline v8::Global<T>* global_as_ref_from_ffi(Global& value) {
   return reinterpret_cast<v8::Global<T>*>(ptr_void);
 }
 
+// TracedReference<T>
+static_assert(
+    sizeof(v8::TracedReference<v8::Value>) == sizeof(TracedReference), "Size should match");
+static_assert(
+    alignof(v8::TracedReference<v8::Value>) == alignof(TracedReference), "Alignment should match");
+
+template <typename T>
+inline TracedReference to_ffi(v8::TracedReference<T>&& value) {
+  size_t result;
+  auto ptr_void = reinterpret_cast<void*>(&result);
+  new (ptr_void) v8::TracedReference<T>(kj::mv(value));
+  return TracedReference{result};
+}
+
+template <typename T>
+inline v8::TracedReference<T> traced_reference_from_ffi(TracedReference&& value) {
+  auto ptr_void = reinterpret_cast<void*>(&value.ptr);
+  return kj::mv(*reinterpret_cast<v8::TracedReference<T>*>(ptr_void));
+}
+
+template <typename T>
+inline const v8::TracedReference<T>& traced_reference_as_ref_from_ffi(
+    const TracedReference& value) {
+  auto ptr_void = reinterpret_cast<const void*>(&value.ptr);
+  return *reinterpret_cast<const v8::TracedReference<T>*>(ptr_void);
+}
+
+template <typename T>
+inline v8::TracedReference<T>* traced_reference_as_ref_from_ffi(TracedReference& value) {
+  auto ptr_void = reinterpret_cast<void*>(&value.ptr);
+  return reinterpret_cast<v8::TracedReference<T>*>(ptr_void);
+}
+
+// CppgcVisitor - wraps a pointer to cppgc::Visitor
+static_assert(sizeof(cppgc::Visitor*) == sizeof(CppgcVisitor), "Size should match");
+static_assert(alignof(cppgc::Visitor*) == alignof(CppgcVisitor), "Alignment should match");
+
+inline CppgcVisitor to_ffi(cppgc::Visitor* visitor) {
+  return CppgcVisitor{reinterpret_cast<size_t>(visitor)};
+}
+
+inline cppgc::Visitor* cppgc_visitor_from_ffi(CppgcVisitor* value) {
+  return reinterpret_cast<cppgc::Visitor*>(value->ptr);
+}
+
 }  // namespace workerd::rust::jsg
