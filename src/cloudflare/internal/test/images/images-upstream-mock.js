@@ -180,7 +180,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
         /** @type {any} */
         const obj = {
           image: await imageAsString(form.get('image')),
-          // @ts-ignore
+          // @ts-expect-error - form.get() returns FormDataEntryValue which is not assignable to string
           transforms: JSON.parse(form.get('transforms') || '{}'),
         };
         for (const x of [

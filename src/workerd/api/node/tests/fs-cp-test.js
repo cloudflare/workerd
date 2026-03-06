@@ -392,7 +392,7 @@ export const preserveTimestampsTests = {
 
     // Copy without preserveTimestamps (default behavior)
     cpSync(pathA, pathG);
-    const copiedStat = lstatSync(pathG);
+    const _copiedStat = lstatSync(pathG);
 
     // Copy with preserveTimestamps: true
     cpSync(pathA, pathH, { preserveTimestamps: true });
@@ -1031,7 +1031,7 @@ export const preserveTimestampsTestsCallback = {
         else resolve();
       });
     });
-    const copiedStat = lstatSync(pathG);
+    const _copiedStat = lstatSync(pathG);
 
     // Copy with preserveTimestamps: true
     await new Promise((resolve, reject) => {
@@ -1603,7 +1603,7 @@ export const preserveTimestampsTestsPromises = {
 
     // Copy without preserveTimestamps (default behavior)
     await fsPromises.cp(pathA, pathG);
-    const copiedStat = lstatSync(pathG);
+    const _copiedStat = lstatSync(pathG);
 
     // Copy with preserveTimestamps: true
     await fsPromises.cp(pathA, pathH, { preserveTimestamps: true });

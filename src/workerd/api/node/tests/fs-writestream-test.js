@@ -284,8 +284,8 @@ export const writeStreamTest13 = {
   async test() {
     const file = nextFile();
     const handle = await promises.open(file, 'w+');
-    let calls = 0;
-    const { write: originalWriteFunction, writev: originalWritevFunction } =
+    let _calls = 0;
+    const { write: _originalWriteFunction, writev: _originalWritevFunction } =
       handle;
     handle.write = mock.fn(handle.write.bind(handle));
     handle.writev = mock.fn(handle.writev.bind(handle));

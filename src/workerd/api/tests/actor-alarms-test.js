@@ -10,6 +10,7 @@ export class DurableObjectExample {
   }
 
   async waitForAlarm(scheduledTime) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     let self = this;
     const { promise, resolve, reject } = Promise.withResolvers();
     self.resolve = resolve;

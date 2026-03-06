@@ -1,11 +1,4 @@
-import {
-  notDeepStrictEqual,
-  deepStrictEqual,
-  strictEqual,
-  ok,
-  rejects,
-  throws,
-} from 'node:assert';
+import { deepStrictEqual, strictEqual, ok, rejects, throws } from 'node:assert';
 import {
   KeyObject,
   SecretKeyObject,
@@ -18,8 +11,6 @@ import {
   generateKeySync,
   generateKeyPair,
   generateKeyPairSync,
-  generatePrimeSync,
-  diffieHellman,
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { promisify } from 'node:util';

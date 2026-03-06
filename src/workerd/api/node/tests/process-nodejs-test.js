@@ -12,6 +12,7 @@ const processBuiltinScheme = processMod.getBuiltinModule('node:process');
 queueMicrotask(() => process);
 queueMicrotask(() => Buffer);
 process.env.QUX = 1;
+// eslint-disable-next-line @typescript-eslint/no-unused-expressions
 Buffer;
 
 const originalProcess = process;
@@ -383,6 +384,7 @@ export const processEnv = {
       assert.strictEqual(symbol in process.env, false);
 
       // Verify that deleting a symbol key returns true.
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       assert.strictEqual(delete process.env[symbol], true);
 
       // Checks that well-known symbols like `Symbol.toStringTag` won’t throw.

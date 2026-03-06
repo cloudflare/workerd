@@ -748,7 +748,9 @@ export const testSetEgressHttp = {
     try {
       // test we recover from aborts
       await stub.abort();
-    } catch {}
+    } catch {
+      // intentionally empty
+    }
 
     stub = env.MY_CONTAINER.get(id);
     // should work idempotent

@@ -33,7 +33,9 @@ export const timingSafeEqual = {
       try {
         crypto.subtle.timingSafeEqual(a, b);
         throw new Error('inputs should have caused an error', a, b);
-      } catch {}
+      } catch {
+        // intentionally empty
+      }
     });
   },
 };
@@ -90,15 +92,6 @@ export const cryptoGcmIvZeroLength = {
 
 export const cryptoZeroLength = {
   async test() {
-    function hex2Uint8Array(str) {
-      var v = str.match(/.{1,2}/g);
-      var buf = new Uint8Array((str.length + 1) / 2);
-      for (var i = 0; i < v.length; i++) {
-        buf[i] = parseInt(v[i], 16);
-      }
-      return buf;
-    }
-
     function arrayBuffer2hex(arr) {
       return Array.from(new Uint8Array(arr))
         .map((i) => ('0' + i.toString(16)).slice(-2))

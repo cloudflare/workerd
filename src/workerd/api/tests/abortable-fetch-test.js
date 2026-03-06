@@ -1,4 +1,4 @@
-import { strictEqual, ok, throws } from 'node:assert';
+import { strictEqual, ok } from 'node:assert';
 
 // Test for the AbortSignal and AbortController standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
@@ -8,7 +8,7 @@ export const abortControllerAlreadyAborted = {
     const ac = new AbortController();
     ac.abort();
     try {
-      const result = await env.subrequest.fetch('http://example.org', {
+      const _result = await env.subrequest.fetch('http://example.org', {
         signal: ac.signal,
       });
       throw new Error('should have failed');

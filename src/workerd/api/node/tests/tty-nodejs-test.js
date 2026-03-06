@@ -1,5 +1,5 @@
 import * as tty from 'node:tty';
-import { strictEqual, deepStrictEqual, ok } from 'node:assert';
+import { strictEqual, deepStrictEqual } from 'node:assert';
 
 export const ttyTest = {
   test() {

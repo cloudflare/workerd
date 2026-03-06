@@ -1,11 +1,5 @@
 import * as trace_events from 'node:trace_events';
-import {
-  strictEqual,
-  deepStrictEqual,
-  throws,
-  ok,
-  doesNotThrow,
-} from 'node:assert';
+import { strictEqual, throws, doesNotThrow } from 'node:assert';
 
 export const traceEventsTest = {
   test() {

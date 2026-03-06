@@ -50,13 +50,9 @@ import util from 'node:util';
 
 import { default as assert } from 'node:assert';
 
-const strictEqualMessageStart = 'Expected values to be strictly equal:\n';
+const _strictEqualMessageStart = 'Expected values to be strictly equal:\n';
 const start = 'Expected values to be strictly deep-equal:';
 const actExp = '+ actual - expected';
-
-function thrower(errorConstructor) {
-  throw new errorConstructor({});
-}
 
 export const test_ok = {
   test(ctrl, env, ctx) {
@@ -708,7 +704,6 @@ export const spiesOnSetter = {
   test() {
     const obj = {
       prop: 100,
-      // eslint-disable-next-line accessor-pairs
       set method(val) {
         this.prop = val;
       },
@@ -1131,7 +1126,6 @@ export const mocksASetter = {
   test() {
     const obj = {
       prop: 100,
-      // eslint-disable-next-line accessor-pairs
       set method(val) {
         this.prop = val;
       },
@@ -1198,7 +1192,6 @@ export const mocksASetterWithSyntaxSugar = {
   test() {
     const obj = {
       prop: 100,
-      // eslint-disable-next-line accessor-pairs
       set method(val) {
         this.prop = val;
       },
@@ -1243,7 +1236,7 @@ export const mockedFunctionsMatchNameAndLength = {
     }
 
     function func1() {}
-    const func2 = function (a) {}; // eslint-disable-line func-style
+    const func2 = function (a) {};
     const arrow = (a, b, c) => {};
     const obj = { method(a, b) {} };
 

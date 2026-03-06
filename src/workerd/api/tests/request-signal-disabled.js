@@ -12,9 +12,9 @@ export class OtherServer extends WorkerEntrypoint {
 }
 export class Server extends WorkerEntrypoint {
   async fetch(req) {
-    const resSameRequest = await this.env.OtherServer.rpcEcho(req);
-    const resNewRequest = await this.env.OtherServer.rpcEcho(new Request(req));
-    const resClonedRequest = await this.env.OtherServer.rpcEcho(req.clone());
+    const _resSameRequest = await this.env.OtherServer.rpcEcho(req);
+    const _resNewRequest = await this.env.OtherServer.rpcEcho(new Request(req));
+    const _resClonedRequest = await this.env.OtherServer.rpcEcho(req.clone());
 
     return new Response('ok');
   }
