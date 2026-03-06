@@ -79,6 +79,11 @@ class EntrypointsModule: public jsg::Object {
 
   void waitUntil(kj::Promise<void> promise);
 
+  // Throws away the current JS isolate and recreates the worker from scratch. The current
+  // request continues running on the old isolate; subsequent requests will use a fresh
+  // isolate with re-executed top-level module code and fresh global state.
+  void abortIsolate(jsg::Optional<kj::String> reason);
+
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE(WorkflowEntrypoint);
@@ -90,6 +95,7 @@ class EntrypointsModule: public jsg::Object {
     JSG_NESTED_TYPE_NAMED(Fetcher, ServiceStub);
 
     JSG_METHOD(waitUntil);
+    JSG_METHOD(abortIsolate);
   }
 };
 

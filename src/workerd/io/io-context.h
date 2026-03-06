@@ -858,6 +858,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     getIoChannelFactory().abortAllActors(reason);
   }
 
+  // Signals that the current worker's JS isolate should be thrown away and recreated from scratch.
+  // This immediately aborts the current IoContext and terminates V8 execution, causing the current
+  // request to fail. Subsequent requests will use a freshly created worker.
+  void abortIsolate(kj::Maybe<kj::String> reason = kj::none);
+
   // Get an HttpClient to use for Cache API subrequests.
   kj::Own<CacheClient> getCacheClient();
 
