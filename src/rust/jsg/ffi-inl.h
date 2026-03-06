@@ -62,4 +62,16 @@ inline v8::Global<T>* global_as_ref_from_ffi(Global& value) {
   return reinterpret_cast<v8::Global<T>*>(ptr_void);
 }
 
+// GcVisitor - wraps a pointer to jsg::GcVisitor
+static_assert(sizeof(::workerd::jsg::GcVisitor*) == sizeof(GcVisitor), "Size should match");
+static_assert(alignof(::workerd::jsg::GcVisitor*) == alignof(GcVisitor), "Alignment should match");
+
+inline GcVisitor to_ffi(::workerd::jsg::GcVisitor* visitor) {
+  return GcVisitor{reinterpret_cast<size_t>(visitor)};
+}
+
+inline ::workerd::jsg::GcVisitor* gc_visitor_from_ffi(GcVisitor* value) {
+  return reinterpret_cast<::workerd::jsg::GcVisitor*>(value->ptr);
+}
+
 }  // namespace workerd::rust::jsg

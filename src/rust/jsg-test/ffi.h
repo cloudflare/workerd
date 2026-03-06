@@ -50,6 +50,13 @@ class TestHarness {
 
 kj::Own<TestHarness> create_test_harness();
 
+// Triggers a full garbage collection for testing purposes.
+void request_gc(Isolate* isolate);
+
+// Creates a V8 object with the C++ WORKERD_WRAPPABLE_TAG set in its internal fields.
+// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
+::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate);
+
 }  // namespace rust::jsg_test
 
 }  // namespace workerd

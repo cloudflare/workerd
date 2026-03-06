@@ -8,6 +8,8 @@
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
+#include <cppgc/common.h>
+#include <v8-cppgc.h>
 #include <v8.h>
 
 #include <capnp/message.h>
@@ -106,6 +108,31 @@ void TestHarness::run_in_context(
     EvalContext evalContext(lock.v8Isolate, v8Context);
     callback(data, lock.v8Isolate, evalContext);
   });
+}
+
+void request_gc(Isolate* isolate) {
+  // Request V8 garbage collection
+  isolate->RequestGarbageCollectionForTesting(
+      v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
+
+  // Also explicitly trigger cppgc collection for the CppHeap
+  if (auto* cppHeap = isolate->GetCppHeap()) {
+    cppHeap->CollectGarbageForTesting(cppgc::EmbedderStackState::kNoHeapPointers);
+  }
+}
+
+::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate) {
+  auto tmpl = v8::ObjectTemplate::New(isolate);
+  tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
+  auto obj = ::workerd::jsg::check(tmpl->NewInstance(isolate->GetCurrentContext()));
+
+  // Set the C++ wrappable tag (NOT the Rust tag) to simulate a C++ JSG object
+  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_WRAPPABLE_TAG);
+  obj->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+      tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+
+  return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
 }
 
 }  // namespace rust::jsg_test

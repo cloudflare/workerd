@@ -1,6 +1,5 @@
 use jsg::Number;
-use jsg::ResourceState;
-use jsg::ResourceTemplate;
+use jsg::Resource;
 use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
@@ -13,9 +12,7 @@ struct Person {
 }
 
 #[jsg_resource]
-struct ArrayResource {
-    _state: ResourceState,
-}
+struct ArrayResource;
 
 #[jsg_resource]
 impl ArrayResource {
@@ -158,11 +155,8 @@ impl ArrayResource {
 fn resource_accepts_array_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         let result: Number = ctx.eval(lock, "arr.sum([1, 2, 3, 4, 5])").unwrap();
@@ -180,11 +174,8 @@ fn resource_accepts_array_parameter() {
 fn resource_accepts_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         let result: Number = ctx.eval(lock, "arr.sumSlice([1, 2, 3, 4, 5])").unwrap();
@@ -203,11 +194,8 @@ fn resource_accepts_slice_parameter() {
 fn resource_returns_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         let result: Vec<Number> = ctx.eval(lock, "arr.double([1, 2, 3])").unwrap();
@@ -230,11 +218,8 @@ fn resource_returns_array() {
 fn resource_accepts_typed_array_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         let result: Vec<u8> = ctx
@@ -254,11 +239,8 @@ fn resource_accepts_typed_array_parameter() {
 fn resource_returns_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         let is_u8: bool = ctx
@@ -276,11 +258,8 @@ fn resource_returns_typed_array() {
 fn resource_accepts_typed_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Test &[u8] accepts Uint8Array
@@ -309,11 +288,8 @@ fn resource_accepts_typed_array_slice_parameter() {
 fn typed_array_slice_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // &[u8] should reject Int8Array
@@ -342,11 +318,8 @@ fn typed_array_slice_rejects_wrong_type() {
 fn resource_accepts_and_returns_struct_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         let result: Vec<Person> = ctx
@@ -695,11 +668,8 @@ fn typed_array_empty() {
 fn float32_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Test Vec<f32> parameter
@@ -730,11 +700,8 @@ fn float32_array_parameter_and_return() {
 fn float32_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Test &[f32] parameter
@@ -757,11 +724,8 @@ fn float32_array_slice_parameter() {
 fn float32_array_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Float32Array should reject Float64Array
@@ -825,11 +789,8 @@ fn float32_array_to_js_and_from_js() {
 fn float64_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Test Vec<f64> parameter
@@ -860,11 +821,8 @@ fn float64_array_parameter_and_return() {
 fn float64_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Test &[f64] parameter
@@ -887,11 +845,8 @@ fn float64_array_slice_parameter() {
 fn float64_array_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Float64Array should reject Float32Array
@@ -942,11 +897,8 @@ fn float64_array_to_js_and_from_js() {
 fn bigint64_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Test Vec<i64> parameter
@@ -983,11 +935,8 @@ fn bigint64_array_parameter_and_return() {
 fn bigint64_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Test &[i64] parameter
@@ -1010,11 +959,8 @@ fn bigint64_array_slice_parameter() {
 fn bigint64_array_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // BigInt64Array should reject BigUint64Array
@@ -1064,11 +1010,8 @@ fn bigint64_array_to_js_and_from_js() {
 fn biguint64_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Test Vec<u64> parameter
@@ -1099,11 +1042,8 @@ fn biguint64_array_parameter_and_return() {
 fn biguint64_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // Test &[u64] parameter
@@ -1126,11 +1066,8 @@ fn biguint64_array_slice_parameter() {
 fn biguint64_array_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ArrayResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ArrayResourceTemplate::new(lock);
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = ArrayResource::alloc(lock, ArrayResource);
+        let wrapped = ArrayResource::wrap(resource, lock);
         ctx.set_global("arr", wrapped);
 
         // BigUint64Array should reject BigInt64Array

@@ -29,7 +29,7 @@ The macro automatically detects whether a method is an instance method or a stat
 - **Instance methods** (with `&self`/`&mut self`) are placed on the prototype, called on instances (e.g., `obj.getName()`).
 - **Static methods** (without a receiver) are placed on the constructor, called on the class itself (e.g., `MyClass.create()`).
 
-Parameters and return values are handled via the `jsg::Wrappable` trait. Any type implementing `Wrappable` can be used as a parameter or return value:
+Parameters and return values are handled via the `jsg::FromJS` and `jsg::ToJS` traits. Any type implementing these traits can be used as a parameter or return value:
 
 - `Option<T>` - accepts `T` or `undefined`, rejects `null`
 - `Nullable<T>` - accepts `T`, `null`, or `undefined`
@@ -66,17 +66,13 @@ impl DnsUtil {
 
 Generates boilerplate for JSG resources. Applied to both struct definitions and impl blocks. Automatically implements `jsg::Type::class_name()` using the struct name, or a custom name if provided via the `name` parameter.
 
-**Important:** Resource structs must include a `_state: jsg::ResourceState` field for internal JSG state management.
-
 ```rust
 #[jsg_resource]
-pub struct DnsUtil {
-    pub _state: jsg::ResourceState,
-}
+pub struct DnsUtil {}
 
 #[jsg_resource(name = "CustomUtil")]
 pub struct MyUtil {
-    pub _state: jsg::ResourceState,
+    pub value: u32,
 }
 
 #[jsg_resource]
@@ -93,7 +89,12 @@ impl DnsUtil {
 }
 ```
 
-On struct definitions, generates `jsg::Type`, wrapper struct, and `ResourceTemplate` implementations. On impl blocks, scans for `#[jsg_method]` attributes and generates the `Resource` trait implementation. Methods with a receiver (`&self`/`&mut self`) are registered as instance methods; methods without a receiver are registered as static methods.
+On struct definitions, generates:
+- `jsg::Type` implementation
+- `jsg::GarbageCollected` implementation (default, no-op trace)
+- Wrapper struct and `ResourceTemplate` implementations
+
+On impl blocks, scans for `#[jsg_method]` attributes and generates the `Resource` trait implementation. Methods with a receiver (`&self`/`&mut self`) are registered as instance methods; methods without a receiver are registered as static methods.
 
 ## `#[jsg_oneof]`
 
@@ -123,3 +124,42 @@ impl MyResource {
 ```
 
 The macro generates type-checking code that matches JavaScript values to enum variants without coercion. If no variant matches, a `TypeError` is thrown listing all expected types.
+
+### Garbage Collection
+
+Resources are automatically integrated with V8's garbage collector through the C++ `Wrappable` base class. The macro automatically generates a `GarbageCollected` implementation that traces fields requiring GC integration:
+
+- `Ref<T>` fields - traces the underlying resource
+- `WeakRef<T>` fields - weak reference (no-op trace, does not keep the target alive)
+- `Option<Ref<T>>` / `Nullable<Ref<T>>` - conditionally traces
+
+```rust
+#[jsg_resource]
+pub struct MyResource {
+    // Automatically traced (strong - keeps child alive)
+    child_resource: Option<Ref<ChildResource>>,
+
+    // Nullable variant (traces when Nullable::Some)
+    nullable_child: Nullable<Ref<ChildResource>>,
+
+    // Weak reference (does not keep target alive)
+    observer: WeakRef<ChildResource>,
+
+    // Not traced (plain data)
+    name: String,
+}
+```
+
+For complex cases or custom tracing logic, you can manually implement `GarbageCollected` without using the `jsg_resource` macro:
+
+```rust
+pub struct CustomResource {
+    data: String,
+}
+
+impl jsg::GarbageCollected for CustomResource {
+    fn trace(&self, visitor: &mut jsg::GcVisitor) {
+        // Custom tracing logic
+    }
+}
+```
