@@ -5,14 +5,20 @@ Subject: Don't attempt to use rules_android
 
 
 diff --git a/MODULE.bazel b/MODULE.bazel
-index a321128ae62530e160b6d2ef7c99a98f7071396d..237cac531da071da049eaa3c35c84be7fbcc5a9f 100644
 --- a/MODULE.bazel
 +++ b/MODULE.bazel
-@@ -12,35 +12,7 @@
- # See the License for the specific language governing permissions and
- # limitations under the License.
- 
--bazel_dep(name = "rules_android", version = "0.6.0")
+@@ -23,69 +23,14 @@
+ bazel_dep(name = "platforms", version = "0.0.10")
+-bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
++bazel_dep(name = "protobuf", version = "31.1")
+ bazel_dep(name = "rules_python", version = "1.0.0")
+-bazel_dep(name = "rules_android", version = "0.6.6")
+-
+-remote_android_extensions = use_extension(
+-    "@rules_android//bzlmod_extensions:android_extensions.bzl",
+-    "remote_android_tools_extensions",
+-)
+-use_repo(remote_android_extensions, "android_tools")
 -
 -android_sdk_repository_extension = use_extension(
 -    "@rules_android//rules/android_sdk_repository:rule.bzl",
@@ -26,9 +32,12 @@ index a321128ae62530e160b6d2ef7c99a98f7071396d..237cac531da071da049eaa3c35c84be7
 -    api_level = 35,
 -    build_tools_version = "35.0.1",
 -)
+-use_repo(android_sdk_repository_extension, "androidsdk")
 -
--bazel_dep(name = "rules_jvm_external", version = "6.6")
--bazel_dep(name = "rules_android_ndk", version = "0.1.2")
+-register_toolchains("@androidsdk//:sdk-toolchain", "@androidsdk//:all")
+-
+-bazel_dep(name = "rules_jvm_external", version = "6.9")
+-bazel_dep(name = "rules_android_ndk", version = "0.1.3")
 -
 -android_ndk_repository_extension = use_extension(
 -    "@rules_android_ndk//:extension.bzl",
@@ -44,10 +53,46 @@ index a321128ae62530e160b6d2ef7c99a98f7071396d..237cac531da071da049eaa3c35c84be7
 -use_repo(android_ndk_repository_extension, "androidndk")
 -
 -register_toolchains("@androidndk//:all")
-+module(name = "perfetto")
+-
+-# Perfetto configuration repository extension.
+-# This creates @perfetto_cfg which provides PERFETTO_CONFIG struct.
+-perfetto_cfg_ext = use_extension(
+-    "//bazel:perfetto_cfg_ext.bzl",
+-    "perfetto_cfg_ext",
+-)
+-use_repo(perfetto_cfg_ext, "perfetto_cfg")
 +bazel_dep(name = "perfetto_cfg", version = "0.0.0")
-+bazel_dep(name = "platforms", version = "1.0.0")
-+bazel_dep(name = "protobuf", version = "33.1")
+ 
+ # Perfetto third-party dependencies extension.
+ # These are the same deps defined in //bazel:deps.bzl for WORKSPACE users.
+@@ -89,27 +34,3 @@
+     "perfetto_dep_sqlite_src",
+     "perfetto_dep_zlib",
+ )
+-
+-# Maven dependencies for Android instrumentation tests.
+-# Use a unique name to avoid conflicts with other modules (e.g., bazel_worker_java).
+-maven = use_extension(
+-    "@rules_jvm_external//:extensions.bzl",
+-    "maven",
+-)
+-maven.install(
+-    name = "perfetto_maven",
+-    artifacts = [
+-        "androidx.test:runner:1.6.2",
+-        "androidx.test:monitor:1.7.2",
+-        "com.google.truth:truth:1.4.4",
+-        "junit:junit:4.13.2",
+-        "androidx.test.ext:junit:1.2.1",
+-    ],
+-    repositories = [
+-        "https://maven.google.com",
+-        "https://repo1.maven.org/maven2",
+-    ],
+-    # Use rules_android's aar_import to avoid toolchain type mismatch.
+-    aar_import_bzl_label = "@rules_android//rules:rules.bzl",
+-)
+-use_repo(maven, "perfetto_maven")
 diff --git a/bazel/rules.bzl b/bazel/rules.bzl
 index 563382a18bfde2506f613f274304387dace9f2dd..d7e77cf21416588a3a55e0bb6d67099a148d1de1 100644
 --- a/bazel/rules.bzl

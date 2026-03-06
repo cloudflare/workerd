@@ -30,10 +30,10 @@ index 141f138e08de849e3e02b3b2b346e643b9e40c70..bdcb2831c55e21c6d511f56dfc79a507
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index c6fa53f23d5036a328867403dd56fed504189c9b..06f48d09baf3705e3c5edcafd0243745a24a6f4b 100644
+index 9dfad16174088cb5b007ffd6441f3998371d4655..f025e7dace968ceb9187f19222d90f557677dc4e 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3474,6 +3474,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+@@ -3511,6 +3511,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
    private_->serializer.SetTreatFunctionsAsHostObjects(mode);
  }
  
@@ -45,10 +45,10 @@ index c6fa53f23d5036a328867403dd56fed504189c9b..06f48d09baf3705e3c5edcafd0243745
                                          Local<Value> value) {
    auto i_isolate = i::Isolate::Current();
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 48690e7a75653535d6f38a265363d713b10fe0b6..80ceef9e294978269a3065ceda3aaa4cfffd625b 100644
+index 03a67c4b13e11ee6d1013c974175b26ead0e5ef4..abba3c959210ebf12d51668d38d5400e9a7c668f 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
-@@ -338,6 +338,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+@@ -340,6 +340,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
    treat_functions_as_host_objects_ = mode;
  }
  
@@ -59,7 +59,7 @@ index 48690e7a75653535d6f38a265363d713b10fe0b6..80ceef9e294978269a3065ceda3aaa4c
  void ValueSerializer::WriteTag(SerializationTag tag) {
    uint8_t raw_tag = static_cast<uint8_t>(tag);
    WriteRawBytes(&raw_tag, sizeof(raw_tag));
-@@ -609,7 +613,12 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
+@@ -611,7 +615,12 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
    InstanceType instance_type = receiver->map()->instance_type();
    if (IsCallable(*receiver)) {
      if (treat_functions_as_host_objects_) {
@@ -73,7 +73,7 @@ index 48690e7a75653535d6f38a265363d713b10fe0b6..80ceef9e294978269a3065ceda3aaa4c
      }
      return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
    } else if (IsSpecialReceiverInstanceType(instance_type) &&
-@@ -1278,7 +1287,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
+@@ -1298,7 +1307,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
    return ThrowIfOutOfMemory();
  }
  
@@ -83,7 +83,7 @@ index 48690e7a75653535d6f38a265363d713b10fe0b6..80ceef9e294978269a3065ceda3aaa4c
    if (!delegate_) {
      isolate_->Throw(*isolate_->factory()->NewError(
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 2d0a746c90522500fcf17d73f3024512b1bb5481..7ec442c5e002e8a7e00c7d0ea5dc3e77744bb55d 100644
+index ddc5f27a80f93bae209f3fe8731d4df4baa58ead..496aab365007a45806264c8d3b981bd7a494f903 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -111,6 +111,15 @@ class ValueSerializer {

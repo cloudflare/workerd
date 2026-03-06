@@ -8,10 +8,10 @@ Similar to fp16, these dependencies now needs to be downloaded by bazel.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 35a076ee7c124f33afc4f63aeace1eb928be643b..881f0ae62987d7737e91a8638a5e9d0b0a2b6af2 100644
+index 401ab449242f3e11028872baec6584b8169e11f1..8c4ce514cd6dbd4e2a389c04b591a26f56a76724 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4536,17 +4536,19 @@ cc_library(
+@@ -4577,17 +4577,19 @@ cc_library(
      ],
  )
  
@@ -42,7 +42,7 @@ index 35a076ee7c124f33afc4f63aeace1eb928be643b..881f0ae62987d7737e91a8638a5e9d0b
  
  v8_library(
      name = "v8_libshared",
-@@ -4577,15 +4579,15 @@ v8_library(
+@@ -4618,15 +4620,15 @@ v8_library(
      ],
      deps = [
          ":lib_dragonbox",
@@ -61,7 +61,7 @@ index 35a076ee7c124f33afc4f63aeace1eb928be643b..881f0ae62987d7737e91a8638a5e9d0b
  )
  
 diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
-index d283ace0bb0ad143de3d6d2f8d83a2e18a204cc5..fc17478770ff46d919adc473a1f3832c02134f1d 100644
+index 06849f39146789df8eaa7d192803dc7a34f8838e..3ab036e76312f6554308136d1a758f26f775135f 100644
 --- a/src/builtins/builtins-typed-array.cc
 +++ b/src/builtins/builtins-typed-array.cc
 @@ -2,6 +2,7 @@
@@ -81,7 +81,7 @@ index d283ace0bb0ad143de3d6d2f8d83a2e18a204cc5..fc17478770ff46d919adc473a1f3832c
  namespace v8::internal {
  
 diff --git a/src/objects/string-inl.h b/src/objects/string-inl.h
-index 829d678168cf194d06832db7b1d27c5c13e7ab2a..0193ad2176f2aa3e608b087a42af4cba975f76de 100644
+index 175fabb486a8892771bd901e6dfda2d5af5ad305..8149433531edaca95431adee17e920ea46708ee1 100644
 --- a/src/objects/string-inl.h
 +++ b/src/objects/string-inl.h
 @@ -12,6 +12,8 @@
