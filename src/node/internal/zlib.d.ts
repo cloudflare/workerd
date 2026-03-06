@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { owner_symbol, type Zlib } from 'node-internal:internal_zlib_base';
 
 type InternalCompressCallback = (res: Error | ArrayBuffer) => void;
