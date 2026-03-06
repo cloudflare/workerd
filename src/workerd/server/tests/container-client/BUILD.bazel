@@ -10,3 +10,11 @@ wd_test(
         "requires-network",  # Accesses unix://var/run/docker.sock
     ],
 )
+
+wd_test(
+    size = "enormous",
+    src = "test-entrypoint.wd-test",
+    args = ["--experimental"],
+    data = ["test-entrypoint.js"],
+    tags = ["off-by-default"],
+)
