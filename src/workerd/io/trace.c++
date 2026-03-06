@@ -1516,13 +1516,41 @@ CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
   }
 }
 
-CompleteSpan CompleteSpan::clone() const {
-  CompleteSpan copy(spanId, parentSpanId, operationName.clone(), startTime, endTime);
-  copy.tags.reserve(tags.size());
-  for (auto& tag: tags) {
-    copy.tags.insert(tag.key.clone(), spanTagClone(tag.value));
+SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
+    : spanId(reader.getSpanId()),
+      parentSpanId(reader.getParentSpanId()),
+      operationName(kj::str(reader.getOperationName())),
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {}
+
+void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
+  builder.setOperationName(operationName.asPtr());
+  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setSpanId(spanId);
+  builder.setParentSpanId(parentSpanId);
+}
+
+SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
+    : spanId(reader.getSpanId()),
+      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
+  auto tagsParam = reader.getTags();
+  tags.reserve(tagsParam.size());
+  for (auto tagParam: tagsParam) {
+    tags.insert(kj::ConstString(kj::heapString(tagParam.getKey())),
+        deserializeTagValue(tagParam.getValue()));
   }
-  return copy;
+}
+
+void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
+  builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setSpanId(spanId);
+
+  auto tagsParam = builder.initTags(tags.size());
+  auto i = 0;
+  for (auto& tag: tags) {
+    auto tagParam = tagsParam[i++];
+    tagParam.setKey(tag.key.asPtr());
+    serializeTagValue(tagParam.initValue(), tag.value);
+  }
 }
 }  // namespace tracing
 
@@ -1534,7 +1562,8 @@ SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
   KJ_IF_SOME(obs, observer) {
     // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created, we
     // should be able to fold this virtual call and just get the timestamp directly.
-    span.emplace(kj::mv(operationName), startTime.orDefault(obs->getTime()));
+    kj::Date time = startTime.orDefault([&]() { return obs->getTime(); });
+    span.emplace(kj::mv(operationName), time);
     this->observer = kj::mv(obs);
   }
 }
