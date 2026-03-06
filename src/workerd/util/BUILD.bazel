@@ -261,6 +261,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":sentry",
+        ":strong-bool",
         "@capnp-cpp//src/capnp",
         "@capnp-cpp//src/kj",
     ],
