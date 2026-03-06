@@ -1,4 +1,4 @@
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual } from 'node:assert';
 
 export const basic = {
   async test(ctrl, env) {

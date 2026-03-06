@@ -193,7 +193,7 @@ export let decoyMemoryIgnored = {
   async test() {
     const decoyMemory = new WebAssembly.Memory({ initial: 1 });
     // The module imports (func "env" "log") only — decoy_memory is extra.
-    const instance = await WebAssembly.instantiate(decoyModule, {
+    const _instance = await WebAssembly.instantiate(decoyModule, {
       env: {
         log: () => {},
         decoy_memory: decoyMemory,

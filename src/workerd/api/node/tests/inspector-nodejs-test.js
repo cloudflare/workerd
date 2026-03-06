@@ -95,10 +95,10 @@ export const inspectorSession = {
 
 export const inspectorSessionMethods = {
   test() {
-    let session;
+    let _session;
     try {
-      session = new inspector.Session();
-    } catch (e) {
+      _session = new inspector.Session();
+    } catch (_e) {
       const SessionProto = inspector.Session.prototype;
 
       assert.strictEqual(typeof SessionProto.connect, 'function');

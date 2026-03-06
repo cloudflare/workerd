@@ -404,10 +404,10 @@ export const testChildProcessProperties = {
 
 export const testExecReturnsChildProcess = {
   async test() {
-    let result;
+    let _result;
     try {
-      result = exec('ls');
-    } catch (e) {
+      _result = exec('ls');
+    } catch (_e) {
       // Expected to throw
     }
     ok(true);

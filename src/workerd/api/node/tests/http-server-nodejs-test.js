@@ -358,7 +358,6 @@ export const testHttpServerNonUtf8Header = {
     }
 
     {
-      const { promise, resolve } = Promise.withResolvers();
       // Test multi-value header
       await using server = http.createServer((req, res) => {
         res.writeHead(200, [

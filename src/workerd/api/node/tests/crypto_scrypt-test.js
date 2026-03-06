@@ -244,7 +244,7 @@ export const defaultsTest = {
 
 export const badArgsTest = {
   test() {
-    for (const { args, expected } of badargs) {
+    for (const { args, expected: _expected } of badargs) {
       throws(() => scrypt(...args));
       throws(() => scryptSync(...args));
     }

@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+import _fs from 'node:fs';
 import { Duplex } from 'node:stream';
 
 // If the test doesn't crash, it passes. There was a bug carried over from

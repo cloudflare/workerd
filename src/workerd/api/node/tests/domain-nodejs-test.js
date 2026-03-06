@@ -129,7 +129,7 @@ export const domainTest = {
     strictEqual(emitted, true);
 
     // Test domain with async function (should work normally)
-    let asyncResult = null;
+    let _asyncResult = null;
     const asyncFn = async function (value) {
       return Promise.resolve(value * 2);
     };

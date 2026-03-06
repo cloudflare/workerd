@@ -1,5 +1,5 @@
 import * as wasi from 'node:wasi';
-import { strictEqual, deepStrictEqual, throws, ok } from 'node:assert';
+import { strictEqual, deepStrictEqual, throws } from 'node:assert';
 
 export const wasiTest = {
   test() {

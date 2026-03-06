@@ -1,11 +1,11 @@
-import { strictEqual, ok, throws } from 'node:assert';
+import { strictEqual, throws } from 'node:assert';
 
 export const basics = {
   test(ctx, env) {
     strictEqual(env.unsafe.eval('1'), 1);
 
     // eval does not capture outer scope.
-    let m = 1;
+    let _m = 1;
     throws(() => env.unsafe.eval('m'));
 
     throws(() => env.unsafe.eval(' throw new Error("boom"); ', 'foo'), {

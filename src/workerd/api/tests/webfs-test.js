@@ -1,11 +1,4 @@
-import {
-  ok,
-  strictEqual,
-  deepStrictEqual,
-  notDeepStrictEqual,
-  rejects,
-  throws,
-} from 'node:assert';
+import { ok, strictEqual, deepStrictEqual, rejects } from 'node:assert';
 
 ok(navigator.storage instanceof StorageManager);
 

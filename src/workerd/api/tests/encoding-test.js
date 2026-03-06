@@ -40,7 +40,7 @@ const utf8Labels = ['unicode-1-1-utf-8', 'utf-8', 'utf8'];
 
 export const decodeStreamingTest = {
   test() {
-    let results = [];
+    let _results = [];
 
     for (const label of windows1252Labels) {
       ok(
@@ -99,7 +99,7 @@ export const decodeStreamingTest = {
             'code point fragment (tail) to be replaced with replacement character'
           );
 
-          const errMsg = 'Failed to decode input.';
+          const _errMsg = 'Failed to decode input.';
 
           // Exception to be thrown decoding code point fragment (tail) in fatal mode
           throws(() => fatalDecoder.decode(head));
@@ -373,7 +373,10 @@ export const encodeWptTest = {
         throws(() => enc.encodeInto('', new view(new ArrayBuffer(0))));
       });
 
-      throws(() => enc.encodeInto('', new ArrayBuffer(0)));
+      {
+        const enc = new TextEncoder();
+        throws(() => enc.encodeInto('', new ArrayBuffer(0)));
+      }
     }
   },
 };

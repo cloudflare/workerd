@@ -177,7 +177,7 @@ export let rpcReturnsTransferOwnership = {
 
     {
       using stub = new RpcStub(counter);
-      using stub2 = (await ctx.exports.TestService.roundTrip(stub)).stub;
+      using _stub2 = (await ctx.exports.TestService.roundTrip(stub)).stub;
 
       await scheduler.wait(0);
       assert.strictEqual(counter.disposeCount, 0);

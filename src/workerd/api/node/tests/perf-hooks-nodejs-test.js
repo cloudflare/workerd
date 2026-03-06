@@ -345,7 +345,7 @@ export const testPerformanceMeasure = {
     perfHooksPerformance.clearMeasures();
 
     const mark1 = perfHooksPerformance.mark('start-mark');
-    const mark2 = perfHooksPerformance.mark('end-mark');
+    const _mark2 = perfHooksPerformance.mark('end-mark');
 
     const measure1 = perfHooksPerformance.measure(
       'test-measure-1',
@@ -730,6 +730,7 @@ export const testEventCounts = {
     ok(!forEachCalled, 'forEach should not call callback when map is empty');
 
     eventCounts.forEach(function () {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
       forEachContext = this;
     }, customThis);
     strictEqual(

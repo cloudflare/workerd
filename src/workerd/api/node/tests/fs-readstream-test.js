@@ -3,7 +3,6 @@ import {
   createReadStream,
   statSync,
   writeFileSync,
-  readFileSync,
   openSync,
   open as openAsync,
   close as closeAsync,
@@ -11,7 +10,7 @@ import {
   promises,
 } from 'node:fs';
 
-import { notStrictEqual, ok, strictEqual, throws } from 'node:assert';
+import { ok, strictEqual, throws } from 'node:assert';
 import { mock } from 'node:test';
 
 strictEqual(typeof ReadStream, 'function');
@@ -905,7 +904,7 @@ export const fileHandleReadableWebStreamTest = {
     writeFileSync('/tmp/stream.txt', 'abcde'.repeat(1000));
     const fh = await promises.open('/tmp/stream.txt', 'r');
     const stream = fh.readableWebStream();
-    const enc = new TextEncoder();
+    const _enc = new TextEncoder();
     let data = '';
     for await (const chunk of stream) {
       strictEqual(chunk instanceof Uint8Array, true);

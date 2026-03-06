@@ -1,22 +1,4 @@
-import {
-  deepEqual,
-  deepStrictEqual,
-  doesNotMatch,
-  doesNotReject,
-  doesNotThrow,
-  equal,
-  fail,
-  ifError,
-  match,
-  notDeepEqual,
-  notDeepStrictEqual,
-  notEqual,
-  notStrictEqual,
-  ok,
-  rejects,
-  strictEqual,
-  throws,
-} from 'node:assert';
+import { ok, strictEqual, throws } from 'node:assert';
 
 import { default as path } from 'node:path';
 
@@ -394,7 +376,7 @@ export const test_path_normalize = {
 export const test_path_join = {
   test(ctrl, env, ctx) {
     const failures = [];
-    const backslashRE = /\\/g;
+    const _backslashRE = /\\/g;
 
     const joinTests = [
       [['.', 'x/b', '..', '/b/c.js'], 'x/b/c.js'],
@@ -449,6 +431,7 @@ export const test_path_join = {
     joinTests.forEach((test) => {
       const actual = path.join.apply(null, test[0]);
       const expected = test[1];
+      // eslint-disable-next-line no-undef
       if (actual !== expected && actualAlt !== expected) {
         const delimiter = test[0].map(JSON.stringify).join(',');
         const message = `path.posix.join(${delimiter})\n  expect=${JSON.stringify(
@@ -477,7 +460,7 @@ export const test_path_isabsolute = {
 export const test_path_extname = {
   test(ctrl, env, ctx) {
     const failures = [];
-    const slashRE = /\//g;
+    const _slashRE = /\//g;
 
     [
       ['', ''],

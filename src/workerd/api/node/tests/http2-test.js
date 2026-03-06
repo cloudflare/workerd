@@ -1,5 +1,5 @@
 import http2 from 'node:http2';
-import { strictEqual, deepStrictEqual, throws } from 'node:assert';
+import { strictEqual } from 'node:assert';
 
 export const http2Test = {
   test() {

@@ -153,6 +153,7 @@ wd_test(
         "module-imports-test.js",
         "test.wasm",
     ],
+    lint = False,
 )
 
 wd_test(

@@ -93,7 +93,7 @@ export const pipeToJsToInternalErroredSource = {
 export const pipeThroughJsToInternalErroredSourcePreventAbort = {
   async test() {
     const enc = new TextEncoder();
-    const dec = new TextDecoder();
+    const _dec = new TextDecoder();
     const transform = new IdentityTransformStream();
     const rs = new ReadableStream({
       async pull() {
@@ -247,7 +247,7 @@ export const pipeThroughJsToInternalCloses = {
     const transform = new IdentityTransformStream();
     const readable = rs.pipeThrough(transform);
 
-    for await (const chunk of readable) {
+    for await (const _chunk of readable) {
       // consume all chunks
     }
 
@@ -381,7 +381,7 @@ export const pipeToInternalToJsSimple = {
 // Test pipeTo error in internal readable aborts JS writable when preventAbort = false
 export const pipeToInternalToJsError = {
   async test() {
-    const enc = new TextEncoder();
+    const _enc = new TextEncoder();
 
     const { readable, writable } = new IdentityTransformStream();
 
@@ -674,7 +674,7 @@ export const pipeToJsToNativeCancelAlready = {
       },
     });
 
-    const { writable, readable } = new TransformStream();
+    const { writable, readable: _readable } = new TransformStream();
 
     await rejects(source.pipeTo(writable, { signal }), { message: 'boom' });
   },

@@ -400,7 +400,7 @@ export const nullUndefinedHandler = {
   test() {
     // TODO(bug): Odd as it may seem, the spec allows passing null and undefined
     // to addEventListener. We currently do not handle these correctly.
-    const target = new EventTarget();
+    const _target = new EventTarget();
     // target.addEventListener('foo', null);
     // target.addEventListener('foo', undefined);
   },

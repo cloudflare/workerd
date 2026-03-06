@@ -2,6 +2,14 @@ load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config")
 load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 
+exports_files(
+    [
+        "base.eslint.config.mjs",
+        "base.tsconfig.json",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 js_library(
     name = "base-eslint",
     srcs = [
