@@ -17,6 +17,7 @@ namespace workerd {
 
 class Frankenvalue;
 class IoContext_IncomingRequest;
+struct Worker_VersionInfo;
 
 // An interface representing the services made available by a worker/pipeline to handle a
 // request.
@@ -115,6 +116,7 @@ class WorkerInterface: public kj::HttpService {
     // for this event.
     virtual kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
         kj::Maybe<kj::StringPtr> entrypointName,
+        kj::Maybe<Worker_VersionInfo> versionInfo,
         Frankenvalue props,
         kj::TaskSet& waitUntilTasks) = 0;
 

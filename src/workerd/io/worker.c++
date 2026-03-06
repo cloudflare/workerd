@@ -2310,9 +2310,9 @@ static inline kj::Own<T> fakeOwn(T& ref) {
 
 kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     kj::Maybe<kj::StringPtr> name,
+    kj::Maybe<VersionInfo> versionInfo,
     Frankenvalue props,
-    kj::Maybe<Worker::Actor&> actor,
-    kj::Maybe<VersionInfo> versionInfo) {
+    kj::Maybe<Worker::Actor&> actor) {
   KJ_IF_SOME(a, actor) {
     KJ_IF_SOME(h, a.getHandler()) {
       return fakeOwn(h);

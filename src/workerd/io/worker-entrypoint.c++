@@ -329,7 +329,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
         cfBlobJson, lock,
         lock.getExportedHandler(
-            entrypointName, kj::mv(props), context.getActor(), kj::mv(versionInfo)),
+            entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()),
         kj::mv(signal));
   })
       .then([this, &context, &wrappedResponse = *wrappedResponse, workerTracer](
@@ -616,7 +616,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
 
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(
-            entrypointName, kj::mv(props), context.getActor(), kj::mv(versionInfo)));
+            entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()));
   }));
 
   static auto constexpr waitForFinished = [](IoContext& context,
@@ -699,7 +699,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
           }
 
           auto handler = lock.getExportedHandler(
-              entrypointName, kj::mv(props), context.getActor(), kj::mv(versionInfo));
+              entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor());
           return lock.getGlobalScope().runAlarm(scheduledTime, timeout, retryCount, lock, handler);
         });
 
@@ -775,7 +775,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
     return context.awaitJs(lock,
         lock.getGlobalScope().test(lock,
             lock.getExportedHandler(
-                entrypointName, kj::mv(props), context.getActor(), kj::mv(versionInfo))));
+                entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor())));
   }));
 
   static auto constexpr waitForFinished =
@@ -825,7 +825,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
     t.setEventInfo(*incomingRequest, event->getEventInfo());
   }
 
-  auto promise = event->run(kj::mv(incomingRequest), entrypointName, kj::mv(props), waitUntilTasks)
+  auto promise = event
+                     ->run(kj::mv(incomingRequest), entrypointName, kj::mv(versionInfo),
+                         kj::mv(props), waitUntilTasks)
                      .attach(kj::mv(event));
 
   // TODO(cleanup): In theory `context` may have been destroyed by now if `event->run()` dropped

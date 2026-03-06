@@ -468,6 +468,7 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
 
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
       kj::TaskSet& waitUntilTasks) override;
 

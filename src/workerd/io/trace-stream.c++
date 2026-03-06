@@ -608,10 +608,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
  public:
   TailStreamTarget(IoContext& ioContext,
       kj::Maybe<kj::StringPtr> entrypointNamePtr,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
       kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : weakIoContext(ioContext.getWeakRef()),
         entrypointNamePtr(kj::mv(entrypointNamePtr)),
+        versionInfo(kj::mv(versionInfo)),
         props(kj::mv(props)),
         doneFulfiller(kj::mv(doneFulfiller)) {}
 
@@ -723,8 +725,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         events.size() == 1 && events[0].event.is<Onset>(), "Expected only a single onset event");
     auto& event = events[0];
 
-    auto handler = KJ_REQUIRE_NONNULL(
-        lock.getExportedHandler(entrypointNamePtr, kj::mv(props), ioContext.getActor()),
+    auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointNamePtr,
+                                          kj::mv(versionInfo), kj::mv(props), ioContext.getActor()),
         "Failed to get handler to worker.");
     StringCache stringCache;
 
@@ -916,6 +918,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
   kj::Own<IoContext::WeakRef> weakIoContext;
   kj::Maybe<kj::StringPtr> entrypointNamePtr;
+  kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;
   // The done fulfiller is resolved when we receive the outcome event
   // or rejected if the capability is dropped before receiving the outcome
@@ -939,14 +942,15 @@ EventInfo TailStreamCustomEvent::getEventInfo() const {
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(kj::heap<TailStreamTarget>(
-      ioContext, kj::mv(entrypointName), kj::mv(props), kj::mv(doneFulfiller)));
+  capFulfiller->fulfill(kj::heap<TailStreamTarget>(ioContext, kj::mv(entrypointName),
+      kj::mv(versionInfo), kj::mv(props), kj::mv(doneFulfiller)));
 
   donePromise = donePromise.attach(ioContext.registerPendingEvent());
 

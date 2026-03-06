@@ -8,6 +8,7 @@
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/async.h>
@@ -341,6 +342,7 @@ class QueueCustomEvent final: public WorkerInterface::CustomEvent, public kj::Re
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
       kj::TaskSet& waitUntilTasks) override;
 
