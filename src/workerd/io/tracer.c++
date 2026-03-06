@@ -478,6 +478,19 @@ void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value)
   attributes.add(tracing::Attribute{kj::mv(key), kj::mv(value)});
 }
 
+void WorkerTracer::setTailTags(kj::ArrayPtr<const tracing::TailTag> tags) {
+  if (tags.size() == 0) {
+    trace->tailTags = kj::none;
+    return;
+  }
+
+  trace->tailTags = KJ_MAP(tag, tags) { return tag.clone(); };
+  for (auto& tag: tags) {
+    setWorkerAttribute(
+        kj::ConstString(kj::str(tag.key)), kj::ConstString(kj::str(tag.value)));
+  }
+}
+
 SpanParent BaseTracer::makeUserRequestSpan() {
   KJ_IF_SOME(func, makeUserRequestSpanFunc) {
     return func();

@@ -398,6 +398,20 @@ JsRpcEventInfo JsRpcEventInfo::clone() const {
   return JsRpcEventInfo(kj::str(methodName));
 }
 
+TailTag::TailTag(kj::String key, kj::String value): key(kj::mv(key)), value(kj::mv(value)) {}
+
+TailTag::TailTag(rpc::Trace::TailTag::Reader reader)
+    : key(kj::str(reader.getKey())), value(kj::str(reader.getValue())) {}
+
+void TailTag::copyTo(rpc::Trace::TailTag::Builder builder) const {
+  builder.setKey(key);
+  builder.setValue(value);
+}
+
+TailTag TailTag::clone() const {
+  return TailTag(kj::str(key), kj::str(value));
+}
+
 kj::String JsRpcEventInfo::toString() const {
   return kj::str("JsRpcEventInfo: ", methodName);
 }
@@ -753,6 +767,13 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
     }
   }
 
+  KJ_IF_SOME(tags, tailTags) {
+    auto list = builder.initTailTags(tags.size());
+    for (auto i: kj::indices(tags)) {
+      tags[i].copyTo(list[i]);
+    }
+  }
+
   KJ_IF_SOME(e, entrypoint) {
     builder.setEntrypoint(e);
   }
@@ -857,6 +878,10 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
 
   if (auto tags = reader.getScriptTags(); tags.size() > 0) {
     scriptTags = KJ_MAP(tag, tags) { return kj::str(tag); };
+  }
+
+  if (auto tags = reader.getTailTags(); tags.size() > 0) {
+    tailTags = KJ_MAP(tag, tags) { return tracing::TailTag(tag); };
   }
 
   if (reader.hasEntrypoint()) {

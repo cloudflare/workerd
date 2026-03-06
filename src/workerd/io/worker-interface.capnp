@@ -114,6 +114,11 @@ struct Trace @0x8e8d911203762d34 {
     methodName @0 :Text;
   }
 
+  struct TailTag {
+    key @0 :Text;
+    value @1 :Text;
+  }
+
   struct ScheduledEventInfo {
     scheduledTime @0 :Float64;
     cron @1 :Text;
@@ -168,6 +173,7 @@ struct Trace @0x8e8d911203762d34 {
 
   entrypoint @22 :Text;
   durableObjectId @27 :Text;
+  tailTags @28 :List(TailTag);
 
   diagnosticChannelEvents @17 :List(DiagnosticChannelEvent);
   struct DiagnosticChannelEvent {

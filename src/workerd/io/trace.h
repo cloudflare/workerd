@@ -362,6 +362,20 @@ struct JsRpcEventInfo final {
   kj::String toString() const;
 };
 
+struct TailTag final {
+  TailTag(kj::String key, kj::String value);
+  TailTag(rpc::Trace::TailTag::Reader reader);
+  TailTag(TailTag&&) = default;
+  TailTag& operator=(TailTag&&) = default;
+  KJ_DISALLOW_COPY(TailTag);
+
+  kj::String key;
+  kj::String value;
+
+  void copyTo(rpc::Trace::TailTag::Builder builder) const;
+  TailTag clone() const;
+};
+
 // Describes a scheduled request
 struct ScheduledEventInfo final {
   explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
@@ -869,6 +883,7 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> dispatchNamespace;
   kj::Maybe<kj::String> scriptId;
   kj::Array<kj::String> scriptTags;
+  kj::Maybe<kj::Array<tracing::TailTag>> tailTags;
   kj::Maybe<kj::String> entrypoint;
   kj::Maybe<kj::String> durableObjectId;
 
