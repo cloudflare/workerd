@@ -10,6 +10,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/analytics-engine.capnp.h>
+#include <workerd/api/queue.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/worker-rpc.h>
@@ -5080,7 +5081,14 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     }
 
     kj::Promise<void> runScheduled(RunScheduledContext context) override {
-      throwUnsupported();
+      auto params = context.getParams();
+      auto scheduledTime = kj::UNIX_EPOCH + params.getScheduledTime() * kj::SECONDS;
+      auto cron = params.getCron();
+      auto worker = getWorker();
+      auto result = co_await worker->runScheduled(scheduledTime, cron);
+      auto resp = context.getResults().initResult();
+      resp.setOutcome(result.outcome);
+      resp.setRetry(result.retry);
     }
 
     kj::Promise<void> runAlarm(RunAlarmContext context) override {
@@ -5088,7 +5096,36 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     }
 
     kj::Promise<void> queue(QueueContext context) override {
-      throwUnsupported();
+      auto event = kj::refcounted<api::QueueCustomEvent>(context.getParams());
+      auto eventRef = kj::addRef(*event);
+      auto worker = getWorker();
+      auto result = co_await worker->customEvent(kj::mv(event));
+
+      auto resp = context.getResults().initResult();
+      resp.setOutcome(result.outcome);
+      resp.setAckAll(eventRef->getAckAll());
+
+      auto retryBatch = eventRef->getRetryBatch();
+      auto rb = resp.initRetryBatch();
+      rb.setRetry(retryBatch.retry);
+      KJ_IF_SOME(delay, retryBatch.delaySeconds) {
+        rb.setDelaySeconds(delay);
+      }
+
+      auto explicitAcks = eventRef->getExplicitAcks();
+      auto acks = resp.initExplicitAcks(explicitAcks.size());
+      for (auto i: kj::indices(explicitAcks)) {
+        acks.set(i, explicitAcks[i]);
+      }
+
+      auto retryMessages = eventRef->getRetryMessages();
+      auto retries = resp.initRetryMessages(retryMessages.size());
+      for (auto i: kj::indices(retryMessages)) {
+        retries[i].setMsgId(retryMessages[i].msgId);
+        KJ_IF_SOME(delay, retryMessages[i].delaySeconds) {
+          retries[i].setDelaySeconds(delay);
+        }
+      }
     }
 
     kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
