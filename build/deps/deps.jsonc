@@ -37,7 +37,8 @@
       "owner": "capnproto",
       "repo": "capnproto",
       "branch": "v2",
-      "extra_strip_prefix": "/c++"
+      "extra_strip_prefix": "/c++",
+      "freeze_commit": "22c4d06f04216a42753dc3fe12556f9ed0e619df"
     },
     // We want to avoid version skew with v8, so we use identical versions.
     {
