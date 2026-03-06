@@ -4,10 +4,11 @@
 
 #pragma once
 
-#include <kj/array.h>
-#include <kj/common.h>
 #include <v8-forward.h>
 #include <v8-persistent-handle.h>
+
+#include <kj/array.h>
+#include <kj/common.h>
 
 #include <cstdint>
 
@@ -81,8 +82,7 @@ struct TrackedWasmInstance {
     // Fast-path: if the module set its terminated flag, remove immediately.
     KJ_IF_SOME(offset, terminatedByteOffset) {
       uint32_t terminated = 0;
-      for (auto& b:
-          memory.slice(offset, offset + WASM_SIGNAL_FIELD_BYTES)) {
+      for (auto& b: memory.slice(offset, offset + WASM_SIGNAL_FIELD_BYTES)) {
         terminated |= b;
       }
       if (terminated != 0) return false;

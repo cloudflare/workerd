@@ -1629,8 +1629,9 @@ void Worker::Isolate::registerTrackedWasmInstance(jsg::Lock& js,
     kj::Maybe<uint32_t> terminatedOffset) const {
   // Register the WASM module for receiving shutdown signals. The signal handler will
   // iterate the list unconditionally when CPU time is nearly exhausted.
-  KJ_IF_SOME(entry, limitEnforcer->getTrackedWasmInstances().registerSignal(
-      js, kj::mv(memory), signalOffset, terminatedOffset)) {
+  KJ_IF_SOME(entry,
+      limitEnforcer->getTrackedWasmInstances().registerSignal(
+          js, kj::mv(memory), signalOffset, terminatedOffset)) {
     // Set up a weak reference to the instance. When V8 collects it, the handle becomes
     // empty and the GC prologue filter removes the entry, releasing the strong memory ref.
     entry.instanceRef.Reset(js.v8Isolate, instance);
@@ -1682,9 +1683,9 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
     js.withinHandleScope([&] {
       if (info.Length() < 4 || !info[0]->IsObject() || !info[1]->IsWasmMemoryObject() ||
           !info[2]->IsNumber() || !info[3]->IsNumber()) {
-        js.v8Isolate->ThrowException(js.str(
-            "registerTrackedWasmInstance: expected "
-            "(WebAssembly.Instance, WebAssembly.Memory, number, number)"_kj));
+        js.v8Isolate->ThrowException(
+            js.str("registerTrackedWasmInstance: expected "
+                   "(WebAssembly.Instance, WebAssembly.Memory, number, number)"_kj));
         return;
       }
       auto instance = info[0].As<v8::Object>();
