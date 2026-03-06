@@ -387,6 +387,26 @@ KJ_TEST("WHATWG tests") {
   KJ_ASSERT(MimeType::isText(MimeType::XJAVASCRIPT));
   KJ_ASSERT(MimeType::isText(
       KJ_ASSERT_NONNULL(MimeType::tryParse("application/json; charset=\"utf-8\""_kj))));
+
+  auto svgMime = KJ_ASSERT_NONNULL(MimeType::tryParse("image/svg+xml"_kj));
+  KJ_ASSERT(MimeType::isXml(svgMime));
+  KJ_ASSERT(MimeType::isText(svgMime));
+
+  auto svgMimeWithCharset =
+      KJ_ASSERT_NONNULL(MimeType::tryParse("image/svg+xml; charset=utf-8"_kj));
+  KJ_ASSERT(MimeType::isXml(svgMimeWithCharset));
+  KJ_ASSERT(MimeType::isText(svgMimeWithCharset));
+
+  KJ_ASSERT(MimeType::isXml(MimeType::XHTML));
+  KJ_ASSERT(MimeType::isXml(
+      KJ_ASSERT_NONNULL(MimeType::tryParse("application/atom+xml"_kj))));
+
+  KJ_ASSERT(MimeType::isXml(
+      KJ_ASSERT_NONNULL(MimeType::tryParse("text/xml"_kj))));
+  KJ_ASSERT(MimeType::isXml(
+      KJ_ASSERT_NONNULL(MimeType::tryParse("application/xml"_kj))));
+  KJ_ASSERT(!MimeType::isXml(
+      KJ_ASSERT_NONNULL(MimeType::tryParse("image/xml"_kj))));
 }
 
 KJ_TEST("Extract Mime Type") {

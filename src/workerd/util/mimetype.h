@@ -113,8 +113,8 @@ class MimeType final {
   static constexpr bool isXml(const T& mimeType) {
     auto type = mimeType.type();
     auto subtype = mimeType.subtype();
-    return (type == "text" || type == "application") &&
-        (subtype == "xml" || subtype.endsWith("+xml"));
+    return ((type == "text" || type == "application") && subtype == "xml") ||
+        subtype.endsWith("+xml");
   }
 
   template <IsMimeType T>
