@@ -106,6 +106,19 @@ jsg::Promise<void> Container::interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<F
       kj::joinPromisesFailFast(kj::arr(reqV4.sendIgnoringResult(), reqV6.sendIgnoringResult())));
 }
 
+jsg::Promise<void> Container::interceptOutboundHttps(
+    jsg::Lock& js, kj::String sniGlob, jsg::Ref<Fetcher> binding) {
+  auto& ioctx = IoContext::current();
+  auto channel = binding->getSubrequestChannel(ioctx);
+  auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+
+  auto req = rpcClient->setEgressHttpsRequest();
+  req.setSniGlob(sniGlob);
+  req.setChannelToken(token);
+
+  return ioctx.awaitIo(js, req.sendIgnoringResult());
+}
+
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 

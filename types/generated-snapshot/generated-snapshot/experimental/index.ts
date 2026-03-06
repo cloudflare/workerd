@@ -293,7 +293,6 @@ export declare namespace WebAssembly {
 export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   DOMException: typeof DOMException;
   WorkerGlobalScope: typeof WorkerGlobalScope;
-  EventTarget: typeof EventTarget;
   btoa(data: string): string;
   atob(data: string): string;
   setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;

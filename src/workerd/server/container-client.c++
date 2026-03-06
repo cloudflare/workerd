@@ -160,6 +160,127 @@ kj::StringPtr signalToString(uint32_t signal) {
       return "SIGKILL"_kj;
   }
 }
+
+// ASCII-only case-insensitive equality for DNS hostnames / SNI.
+bool asciiCaseInsensitiveEquals(kj::ArrayPtr<const char> a, kj::ArrayPtr<const char> b) {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    char ca = (a[i] >= 'A' && a[i] <= 'Z') ? (a[i] | 0x20) : a[i];
+    char cb = (b[i] >= 'A' && b[i] <= 'Z') ? (b[i] | 0x20) : b[i];
+    if (ca != cb) return false;
+  }
+  return true;
+}
+
+// Matches a hostname against a glob pattern (only leading '*' supported).
+// "*.example.com" also matches "a.b.example.com" because RFC 6125 single-label
+// restriction doesn't apply to interception config (not a TLS certificate).
+// Case-insensitive per RFC 6066 §3.
+bool matchSniGlob(kj::StringPtr glob, kj::StringPtr hostname) {
+  if (glob == "*") return true;
+  if (glob.startsWith("*.")) {
+    // "*.example.com" should match "foo.example.com" but not "example.com"
+    auto suffix = glob.slice(1);  // ".example.com"
+    if (hostname.size() <= suffix.size()) return false;
+    return asciiCaseInsensitiveEquals(hostname.slice(hostname.size() - suffix.size()), suffix);
+  }
+  return asciiCaseInsensitiveEquals(glob, hostname);
+}
+
+// Extract stdout from Docker's multiplexed exec stream.
+// Format: repeated [stream_type(1), padding(3), size_big_endian(4)] + payload(size).
+// stream_type 1 = stdout.
+kj::Maybe<kj::String> demuxDockerExecStream(kj::ArrayPtr<const kj::byte> data) {
+  kj::Vector<kj::byte> result;
+  size_t offset = 0;
+  while (offset + 8 <= data.size()) {
+    uint8_t streamType = data[offset];
+    uint32_t frameSize = (static_cast<uint32_t>(data[offset + 4]) << 24) |
+        (static_cast<uint32_t>(data[offset + 5]) << 16) |
+        (static_cast<uint32_t>(data[offset + 6]) << 8) | static_cast<uint32_t>(data[offset + 7]);
+    offset += 8;
+    if (offset + frameSize > data.size()) {
+      KJ_LOG(WARNING, "Docker exec stream truncated: frame at offset", offset, "claims", frameSize,
+          "bytes but only", data.size() - offset, "remain");
+      break;
+    }
+    if (streamType == 1) {
+      result.addAll(data.slice(offset, offset + frameSize));
+    }
+
+    offset += frameSize;
+  }
+
+  if (result.empty()) return kj::none;
+  auto bytes = result.releaseAsArray();
+  return kj::str(bytes.asChars());
+}
+
+void writeTarField(kj::ArrayPtr<kj::byte> field, kj::StringPtr value) {
+  auto len = kj::min(value.size(), field.size());
+  auto src = value.asBytes().first(len);
+  field.first(len).copyFrom(src);
+}
+
+// Creates a minimal POSIX (ustar) tar archive containing a single file.
+// Used to upload CA certs via PUT /containers/{id}/archive.
+// Only handles small files with short known filenames. Replace with a
+// proper tar library if requirements grow.
+kj::Array<kj::byte> createTarWithFile(
+    kj::StringPtr filename, kj::ArrayPtr<const kj::byte> content) {
+  KJ_REQUIRE(filename.size() < 100, "tar filename must be < 100 bytes");
+  KJ_REQUIRE(
+      content.size() < 8ull * 1024 * 1024 * 1024, "tar content too large for 11-digit octal");
+  // Tar: 512-byte header + content padded to 512 + two 512-byte EOF blocks.
+  size_t paddedSize = (content.size() + 511) & ~511;
+  size_t totalSize = 512 + paddedSize + 1024;
+  auto tar = kj::heapArray<kj::byte>(totalSize);
+  tar.asPtr().fill(0);
+
+  auto header = tar.first(512);
+
+  // Name (offset 0, 100 bytes)
+  writeTarField(header.slice(0, 100), filename);
+
+  // Mode (offset 100, 8 bytes)
+  writeTarField(header.slice(100, 108), "0000644"_kj);
+
+  // UID/GID (offset 108/116, 8 bytes each)
+  writeTarField(header.slice(108, 116), "0000000"_kj);
+  writeTarField(header.slice(116, 124), "0000000"_kj);
+
+  // Size (offset 124, 12 bytes), octal
+  {
+    char sizeBuf[12];
+    snprintf(sizeBuf, sizeof(sizeBuf), "%011lo", static_cast<unsigned long>(content.size()));
+    writeTarField(header.slice(124, 136), kj::StringPtr(sizeBuf));
+  }
+
+  // Mtime (offset 136, 12 bytes)
+  writeTarField(header.slice(136, 148), "00000000000"_kj);
+
+  // Typeflag (offset 156), '0' = regular file
+  header[156] = '0';
+
+  // Magic (offset 257, 6 bytes) + version (offset 263, 2 bytes)
+  writeTarField(header.slice(257, 263), "ustar"_kj);
+  writeTarField(header.slice(263, 265), "00"_kj);
+
+  // Checksum (offset 148, 8 bytes): sum of all header bytes with checksum field as spaces.
+  header.slice(148, 156).fill(' ');
+  uint32_t checksum = 0;
+  for (auto b: header) checksum += b;
+  {
+    char csumBuf[8];
+    snprintf(csumBuf, sizeof(csumBuf), "%06o ", checksum);
+    writeTarField(header.slice(148, 155), kj::StringPtr(csumBuf));
+  }
+
+  tar.slice(512, 512 + content.size()).copyFrom(content);
+
+  return tar;
+}
+
 }  // namespace
 
 template <typename T>
@@ -274,9 +395,10 @@ class InnerEgressService final: public kj::HttpService {
  public:
   using ChannelLookup = kj::Function<kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>>()>;
 
-  InnerEgressService(ChannelLookup lookupChannel, kj::StringPtr destAddr)
+  InnerEgressService(ChannelLookup lookupChannel, kj::StringPtr destAddr, bool isTls = false)
       : lookupChannel(kj::mv(lookupChannel)),
-        destAddr(kj::str(destAddr)) {}
+        destAddr(kj::str(destAddr)),
+        isTls(isTls) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr requestUri,
@@ -293,10 +415,11 @@ class InnerEgressService final: public kj::HttpService {
     auto urlForWorker = kj::str(requestUri);
     // Probably only a path, try to get it from Host:
     if (requestUri.startsWith("/")) {
-      auto baseUrl = kj::str("http://", destAddr);
+      auto scheme = isTls ? "https://"_kj : "http://"_kj;
+      auto baseUrl = kj::str(scheme, destAddr);
       // Use Host: when possible
       KJ_IF_SOME(host, headers.get(kj::HttpHeaderId::HOST)) {
-        baseUrl = kj::str("http://", host);
+        baseUrl = kj::str(scheme, host);
       }
 
       // Parse url, if invalid, try to use the original requestUri (http://<ip>/<path>
@@ -313,7 +436,14 @@ class InnerEgressService final: public kj::HttpService {
  private:
   ChannelLookup lookupChannel;
   kj::String destAddr;
+  bool isTls;
 };
+
+kj::Promise<void> pumpBidirectional(kj::AsyncIoStream& a, kj::AsyncIoStream& b) {
+  auto aToB = a.pumpTo(b).then([&b](uint64_t) { b.shutdownWrite(); });
+  auto bToA = b.pumpTo(a).then([&a](uint64_t) { a.shutdownWrite(); });
+  co_await kj::joinPromisesFailFast(kj::arr(kj::mv(aToB), kj::mv(bToA)));
+}
 
 // Outer HTTP service that handles CONNECT requests from the sidecar.
 class EgressHttpService final: public kj::HttpService {
@@ -331,6 +461,18 @@ class EgressHttpService final: public kj::HttpService {
     co_return co_await response.sendError(405, "Method Not Allowed", headerTable);
   }
 
+  // CONNECT protocol between the sidecar and workerd:
+  //
+  // The sidecar sends an HTTP CONNECT for every outbound connection from the container.
+  // If it detected a TLS ClientHello, it includes an "X-Tls-Sni" header with the SNI.
+  //
+  // Response status codes signal the sidecar what to do:
+  //   200: Workerd will handle this connection (intercepted HTTP/HTTPS or plaintext
+  //        passthrough). For TLS with a mapping the sidecar MITMs and sends decrypted
+  //        HTTP through the tunnel; for plaintext it sends raw bytes.
+  //   202: TLS with no matching HTTPS mapping. Sidecar passes raw TLS bytes through
+  //        the tunnel without decryption (workerd forwards to destination or drops
+  //        if internet is disabled).
   kj::Promise<void> connect(kj::StringPtr host,
       const kj::HttpHeaders& headers,
       kj::AsyncIoStream& connection,
@@ -338,6 +480,46 @@ class EgressHttpService final: public kj::HttpService {
       kj::HttpConnectSettings settings) override {
     auto destAddr = kj::str(host);
 
+    auto tlsSni = headers.get(containerClient.egressHeaderTable.tlsSniId);
+
+    KJ_IF_SOME(sni, tlsSni) {
+      auto httpsMapping = containerClient.findEgressHttpsMapping(sni);
+
+      if (httpsMapping != kj::none) {
+        // Mapping matched; tell sidecar to MITM and send us decrypted HTTP.
+        kj::HttpHeaders responseHeaders(headerTable);
+        response.accept(200, "OK", responseHeaders);
+
+        // Looks up the mapping on each request so channel replacements are
+        // picked up on existing tunnels.
+        auto innerService = kj::heap<InnerEgressService>(
+            [&client = containerClient, sniStr = kj::str(sni)]()
+                -> kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> {
+          return client.findEgressHttpsMapping(sniStr);
+        },
+            destAddr, /*isTls=*/true);
+        auto innerServer =
+            kj::heap<kj::HttpServer>(containerClient.timer, headerTable, *innerService);
+        co_await innerServer->listenHttpCleanDrain(connection);
+        co_return;
+      }
+
+      // No HTTPS mapping, pass raw TLS through (202).
+      kj::HttpHeaders responseHeaders(headerTable);
+      response.accept(202, "Accepted", responseHeaders);
+
+      if (!containerClient.internetEnabled) {
+        connection.shutdownWrite();
+        co_return;
+      }
+
+      auto addr = co_await containerClient.network.parseAddress(destAddr);
+      auto destConn = co_await addr->connect();
+      co_await pumpBidirectional(connection, *destConn);
+      co_return;
+    }
+
+    // No TLS, plain HTTP proxying.
     kj::HttpHeaders responseHeaders(headerTable);
     response.accept(200, "OK", responseHeaders);
 
@@ -355,9 +537,7 @@ class EgressHttpService final: public kj::HttpService {
           destAddr);
       auto innerServer =
           kj::heap<kj::HttpServer>(containerClient.timer, headerTable, *innerService);
-
       co_await innerServer->listenHttpCleanDrain(connection);
-
       co_return;
     }
 
@@ -369,15 +549,7 @@ class EgressHttpService final: public kj::HttpService {
     // No egress mapping and internet enabled, so forward via raw TCP
     auto addr = co_await containerClient.network.parseAddress(destAddr);
     auto destConn = co_await addr->connect();
-
-    auto connToDestination = connection.pumpTo(*destConn).then(
-        [&destConn = *destConn](uint64_t) { destConn.shutdownWrite(); });
-
-    auto destinationToConn =
-        destConn->pumpTo(connection).then([&connection](uint64_t) { connection.shutdownWrite(); });
-
-    co_await kj::joinPromisesFailFast(
-        kj::arr(kj::mv(connToDestination), kj::mv(destinationToConn)));
+    co_await pumpBidirectional(connection, *destConn);
     co_return;
   }
 
@@ -498,6 +670,119 @@ kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Net
     auto result = co_await response.body->readAllText();
     co_return Response{.statusCode = response.statusCode, .body = kj::mv(result)};
   }
+}
+
+kj::Promise<kj::Maybe<kj::String>> ContainerClient::readFileFromContainer(
+    kj::StringPtr container, kj::StringPtr path) {
+  // Uses Docker exec ("cat <path>") instead of the archive/tar API to avoid
+  // tar format parsing issues across Docker versions.
+  capnp::JsonCodec createCodec;
+  createCodec.handleByAnnotation<docker_api::Docker::ExecCreateRequest>();
+  capnp::MallocMessageBuilder createMsg;
+  auto createReq = createMsg.initRoot<docker_api::Docker::ExecCreateRequest>();
+  auto cmdList = createReq.initCmd(2);
+  cmdList.set(0, "cat");
+  cmdList.set(1, path);
+  createReq.setAttachStdout(true);
+
+  auto createResponse =
+      co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+          kj::str("/containers/", container, "/exec"), createCodec.encode(createReq));
+  if (createResponse.statusCode != 201) {
+    co_return kj::Maybe<kj::String>(kj::none);
+  }
+
+  capnp::JsonCodec respCodec;
+  respCodec.handleByAnnotation<docker_api::Docker::ExecCreateResponse>();
+  capnp::MallocMessageBuilder respMsg;
+  auto createResp = respMsg.initRoot<docker_api::Docker::ExecCreateResponse>();
+  respCodec.decode(createResponse.body, createResp);
+  if (!createResp.hasId()) {
+    co_return kj::Maybe<kj::String>(kj::none);
+  }
+  auto execId = kj::str(createResp.getId());
+
+  // Tty=false gives us the multiplexed stream format (no \r\n mangling).
+  capnp::JsonCodec startCodec;
+  startCodec.handleByAnnotation<docker_api::Docker::ExecStartRequest>();
+  capnp::MallocMessageBuilder startMsg;
+  auto startReq = startMsg.initRoot<docker_api::Docker::ExecStartRequest>();
+  // Detach and Tty default to false, which is what we want.
+
+  auto startResponse = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/exec/", execId, "/start"), startCodec.encode(startReq));
+  if (startResponse.statusCode != 200) {
+    co_return kj::Maybe<kj::String>(kj::none);
+  }
+
+  co_return demuxDockerExecStream(startResponse.body.asBytes());
+}
+
+kj::Promise<void> ContainerClient::writeFileToContainer(kj::StringPtr container,
+    kj::StringPtr dir,
+    kj::StringPtr filename,
+    kj::ArrayPtr<const kj::byte> content) {
+  kj::HttpHeaderTable table;
+  auto address = co_await network.parseAddress(kj::str(dockerPath));
+  auto connection = co_await address->connect();
+  auto httpClient = kj::newHttpClient(table, *connection).attach(kj::mv(connection));
+
+  auto tar = createTarWithFile(filename, content);
+
+  kj::HttpHeaders headers(table);
+  headers.setPtr(kj::HttpHeaderId::HOST, "localhost");
+  headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/x-tar");
+  headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(tar.size()));
+
+  auto endpoint = kj::str("/containers/", container, "/archive?path=", kj::encodeUriComponent(dir));
+  auto req = httpClient->request(kj::HttpMethod::PUT, endpoint, headers, tar.size());
+  {
+    auto body = kj::mv(req.body);
+    co_await body->write(tar.asBytes());
+  }
+  auto response = co_await req.response;
+  auto result = co_await response.body->readAllText();
+  JSG_REQUIRE(response.statusCode == 200, Error, "Failed to write file", dir, filename,
+      "to container [", response.statusCode, "] ", result);
+}
+
+static constexpr kj::StringPtr sidecarCaCertPath = "/ca/ca.crt"_kj;
+
+// Distro-independent path for the Cloudflare CA cert inside the user container.
+// Written relative to /etc; Docker's tar extraction creates intermediate dirs.
+static constexpr kj::StringPtr cloudflareCaDir = "/etc"_kj;
+static constexpr kj::StringPtr cloudflareCaFilename =
+    "cloudflare/certs/cloudflare-containers-ca.crt"_kj;
+
+kj::Promise<void> ContainerClient::injectCACert() {
+  if (caCertInjected.exchange(true, std::memory_order_acquire)) {
+    co_return;
+  }
+
+  bool succeeded = false;
+  KJ_DEFER(if (!succeeded) caCertInjected.store(false, std::memory_order_release));
+
+  // Retry because the sidecar may still be generating the cert.
+  static constexpr int caCertMaxRetries = 5;
+  static constexpr auto caCertRetryDelay = 1 * kj::SECONDS;
+  kj::Maybe<kj::String> maybeCaCert;
+  for (int attempt = 0; attempt < caCertMaxRetries; ++attempt) {
+    maybeCaCert = co_await readFileFromContainer(sidecarContainerName, sidecarCaCertPath);
+    if (maybeCaCert != kj::none) break;
+    if (attempt + 1 < caCertMaxRetries) {
+      co_await timer.afterDelay(caCertRetryDelay);
+    }
+  }
+
+  auto caCert = KJ_REQUIRE_NONNULL(kj::mv(maybeCaCert), "Sidecar CA cert not found at ",
+      sidecarCaCertPath, " after ", caCertMaxRetries, " attempts.",
+      " Ensure the sidecar is running with --tls-intercept.");
+
+  co_await writeFileToContainer(
+      containerName, cloudflareCaDir, cloudflareCaFilename, caCert.asBytes());
+
+  succeeded = true;
+  co_return;
 }
 
 kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer() {
@@ -740,7 +1025,7 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
 
   auto ipv6Enabled = co_await isDaemonIpv6Enabled();
 
-  uint32_t cmdSize = 4;            // --http-egress-port <port> --docker-gateway-cidr <cidr>
+  uint32_t cmdSize = 5;  // --http-egress-port <port> --docker-gateway-cidr <cidr> --tls-intercept
   if (!ipv6Enabled) cmdSize += 1;  // --disable-ipv6
 
   auto cmd = jsonRoot.initCmd(cmdSize);
@@ -752,6 +1037,10 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   if (!ipv6Enabled) {
     cmd.set(idx++, "--disable-ipv6");
   }
+
+  // Enabling tls-intercept is OK because it adds minimal overhead,
+  // we won't attempt to intercept in workerd unless the SNI glob matches.
+  cmd.set(idx++, "--tls-intercept");
 
   auto hostConfig = jsonRoot.initHostConfig();
   // Share network namespace with the main container
@@ -863,12 +1152,15 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   co_await createContainer(entrypoint, environment, params);
   co_await startContainer();
 
-  // Opt in to the proxy sidecar container only if the user has configured egressMappings
-  // for now. In the future, it will always run when a user container is running
-  if (!egressMappings.empty()) {
+  if (!egressMappings.empty() || !egressHttpsMappings.empty()) {
     // The user container will be blocked on network connectivity until this finishes.
     containerSidecarStarted = false;
     co_await ensureSidecarStarted();
+  }
+
+  if (!egressHttpsMappings.empty()) {
+    caCertInjected = false;
+    co_await injectCACert();
   }
 
   containerStarted.store(true, std::memory_order_release);
@@ -972,6 +1264,28 @@ kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient
   return kj::none;
 }
 
+void ContainerClient::upsertEgressHttpsMapping(EgressHttpsMapping mapping) {
+  for (auto& m: egressHttpsMappings) {
+    if (m.sniGlob == mapping.sniGlob) {
+      m.channel = kj::mv(mapping.channel);
+      return;
+    }
+  }
+
+  egressHttpsMappings.add(kj::mv(mapping));
+}
+
+kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient::
+    findEgressHttpsMapping(kj::StringPtr sni) {
+  for (auto& mapping: egressHttpsMappings) {
+    if (matchSniGlob(mapping.sniGlob, sni)) {
+      return kj::addRef(*mapping.channel);
+    }
+  }
+
+  return kj::none;
+}
+
 kj::Promise<void> ContainerClient::ensureSidecarStarted() {
   if (containerSidecarStarted.exchange(true, std::memory_order_acquire)) {
     co_return;
@@ -1030,6 +1344,46 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
   upsertEgressMapping(EgressMapping{
     .cidr = kj::mv(cidr),
     .port = port,
+    .channel = kj::mv(subrequestChannel),
+  });
+
+  co_return;
+}
+
+kj::Promise<void> ContainerClient::setEgressHttps(SetEgressHttpsContext context) {
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
+  auto params = context.getParams();
+  auto sniGlob = kj::str(params.getSniGlob());
+  auto tokenBytes = params.getChannelToken();
+
+  KJ_REQUIRE(sniGlob.size() > 0, "sniGlob must not be empty");
+  if (sniGlob[0] == '*') {
+    KJ_REQUIRE(sniGlob.size() == 1 || (sniGlob[1] == '.' && sniGlob.size() > 2),
+        "wildcard glob must be \"*\" or \"*.hostname\", got: ", sniGlob);
+  }
+  for (size_t i = 1; i < sniGlob.size(); ++i) {
+    KJ_REQUIRE(sniGlob[i] != '*', "sniGlob may only contain a leading '*', got: ", sniGlob);
+  }
+
+  co_await ensureEgressListenerStarted();
+
+  if (containerStarted.load(std::memory_order_acquire)) {
+    co_await ensureSidecarStarted();
+  }
+
+  if (containerStarted.load(std::memory_order_acquire) &&
+      containerSidecarStarted.load(std::memory_order_acquire)) {
+    co_await injectCACert();
+  }
+
+  auto subrequestChannel = channelTokenHandler.decodeSubrequestChannelToken(
+      workerd::IoChannelFactory::ChannelTokenUsage::RPC, tokenBytes);
+
+  upsertEgressHttpsMapping(EgressHttpsMapping{
+    .sniGlob = kj::mv(sniGlob),
     .channel = kj::mv(subrequestChannel),
   });
 

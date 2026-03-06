@@ -2,6 +2,7 @@ const { createServer } = require('http');
 
 const webSocketEnabled = process.env.WS_ENABLED === 'true';
 const wsProxyTarget = process.env.WS_PROXY_TARGET || null;
+const wsProxySecure = process.env.WS_PROXY_SECURE === 'true';
 
 const server = createServer(function (req, res) {
   if (req.url === '/ws') {
@@ -55,6 +56,24 @@ const server = createServer(function (req, res) {
     return;
   }
 
+  if (req.url === '/intercept-https') {
+    const targetHost = req.headers['x-host'] || 'example.com';
+    fetch(`https://${targetHost}`)
+      .then((result) => result.text())
+      .then((body) => {
+        res.writeHead(200);
+        res.write(body);
+        res.end();
+      })
+      .catch((err) => {
+        res.writeHead(500);
+        res.write(`${targetHost} ${err.message}`);
+        res.end();
+      });
+
+    return;
+  }
+
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.write('Hello World!');
   res.end();
@@ -66,7 +85,8 @@ if (webSocketEnabled) {
 
   wss.on('connection', function (clientWs) {
     if (wsProxyTarget) {
-      const targetWs = new WebSocket(`ws://${wsProxyTarget}/ws`);
+      const protocol = wsProxySecure ? 'wss' : 'ws';
+      const targetWs = new WebSocket(`${protocol}://${wsProxyTarget}/ws`);
       const ready = new Promise(function (resolve) {
         targetWs.on('open', resolve);
       });
