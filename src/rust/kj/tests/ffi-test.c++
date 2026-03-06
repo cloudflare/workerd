@@ -13,6 +13,11 @@
 
 using namespace kj_rs;
 
+// Helper to cast kj::HttpHeaderId to the layout-compatible kj::rust::HttpHeaderId by value.
+static kj::rust::HttpHeaderId toRustHeaderId(const kj::HttpHeaderId& kjId) {
+  return reinterpret_cast<const kj::rust::HttpHeaderId&>(kjId);
+}
+
 static kj::StringPtr tlsHost;
 
 kj::Promise<void> startTls(kj::StringPtr hostName) {
@@ -74,20 +79,21 @@ KJ_TEST("get header by id round-trip through Rust") {
 
   // Round-trip: C++ -> Rust (get_header_value_via_id) -> C++ (get_header_by_id shim) -> value.
   {
-    auto value = kj::rust::tests::get_header_value_via_id(headers, customId);
+    auto value = kj::rust::tests::get_header_value_via_id(headers, toRustHeaderId(customId));
     auto strValue = kj::StringPtr(reinterpret_cast<const char*>(value.data()), value.size());
     KJ_EXPECT(strValue == "hello-from-cpp", strValue);
   }
 
   // Absent header should return empty.
   {
-    auto value = kj::rust::tests::get_header_value_via_id(headers, absentId);
+    auto value = kj::rust::tests::get_header_value_via_id(headers, toRustHeaderId(absentId));
     KJ_EXPECT(value.empty(), "expected empty slice for absent header");
   }
 
   // Builtin header via HttpHeaderId.
   {
-    auto value = kj::rust::tests::get_header_value_via_id(headers, kj::HttpHeaderId::HOST);
+    auto value =
+        kj::rust::tests::get_header_value_via_id(headers, toRustHeaderId(kj::HttpHeaderId::HOST));
     auto strValue = kj::StringPtr(reinterpret_cast<const char*>(value.data()), value.size());
     KJ_EXPECT(strValue == "example.com", strValue);
   }

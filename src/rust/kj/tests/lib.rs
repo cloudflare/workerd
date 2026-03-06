@@ -36,9 +36,9 @@ pub mod ffi {
 
         /// Look up a header value by HttpHeaderId, returning the value or an empty slice if absent.
         /// This exercises the C++ -> Rust -> C++ round-trip for HttpHeaderId.
-        unsafe fn get_header_value_via_id(
-            headers: &HttpHeaders,
-            id: &HttpHeaderId,
+        unsafe fn get_header_value_via_id<'a>(
+            headers: &'a HttpHeaders,
+            id: HttpHeaderId,
         ) -> &'a [u8];
     }
 }
@@ -92,7 +92,7 @@ fn new_proxy_http_service(service: KjOwn<ffi::HttpService>) -> Box<DynHttpServic
 
 fn get_header_value_via_id<'a>(
     headers: &'a ffi::HttpHeaders,
-    id: &ffi::HttpHeaderId,
+    id: kj::http::ffi::HttpHeaderId,
 ) -> &'a [u8] {
     // Call the FFI shim directly. The returned slice borrows from the C++ HttpHeaders object.
     let maybe: Option<&'a [u8]> = unsafe { kj::http::ffi::get_header_by_id(headers, id) }.into();

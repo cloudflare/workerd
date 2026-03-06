@@ -59,12 +59,14 @@ pub mod ffi {
     }
 
     // --- HttpHeaderId
-    // Opaque handle to a kj::HttpHeaderId, which identifies a header by numeric index in an
-    // HttpHeaderTable. This supports both builtin headers and custom headers registered via
-    // HttpHeaderTable::Builder::add(). Pass these by reference from C++ to Rust and back.
+    // Layout-compatible mirror of kj::HttpHeaderId (pointer + uint + padding = 16 bytes).
+    // Verified by static_assert on the C++ side and assert_eq_size! on the Rust side.
 
-    unsafe extern "C++" {
-        type HttpHeaderId;
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    struct HttpHeaderId {
+        table: usize,
+        id: u32,
+        _pad: u32,
     }
 
     // --- HttpHeaders
@@ -105,7 +107,7 @@ pub mod ffi {
         ) -> KjMaybe<&'a [u8]>;
         unsafe fn get_header_by_id<'a>(
             this_: &'a HttpHeaders,
-            id: &HttpHeaderId,
+            id: HttpHeaderId,
         ) -> KjMaybe<&'a [u8]>;
     }
 
@@ -177,6 +179,7 @@ pub mod ffi {
 
 assert_eq_size!(ffi::HttpConnectSettings, [u8; 16]);
 assert_eq_align!(ffi::HttpConnectSettings, u64);
+assert_eq_size!(ffi::HttpHeaderId, [u8; 16]);
 
 pub type HeaderId = ffi::BuiltinIndicesEnum;
 pub type HttpHeaderId = ffi::HttpHeaderId;
@@ -191,7 +194,7 @@ impl HttpHeadersRef<'_> {
 
     /// Look up a header by its `kj::HttpHeaderId`. This works for both builtin headers and custom
     /// headers registered via `HttpHeaderTable::Builder::add()`.
-    pub fn get_by_id(&self, id: &HttpHeaderId) -> Option<&[u8]> {
+    pub fn get_by_id(&self, id: HttpHeaderId) -> Option<&[u8]> {
         unsafe { ffi::get_header_by_id(self.0, id).into() }
     }
 

@@ -13,6 +13,13 @@ static_assert(alignof(kj::rust::HttpConnectSettings) == alignof(uint64_t),
     "HttpConnectSettings alignment mismatch");
 
 namespace kj::rust {
+
+kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_id(
+    const HttpHeaders& headers, HttpHeaderId id) {
+  auto header = headers.get(reinterpret_cast<const kj::HttpHeaderId&>(id));
+  return header.map([](auto header) { return header.asBytes().template as<kj_rs::Rust>(); });
+}
+
 kj::Promise<void> connect(HttpService& service,
     ::rust::Slice<const kj::byte> host,
     const HttpHeaders& headers,
