@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 // This file extends `standards.ts` with specific comments overrides for Cloudflare Workers APIs
 // that aren't adequately described by a standard .d.ts file
 
