@@ -14,7 +14,6 @@ const unitTests :Workerd.Config = (
           # This module below exercises a bug which caused our internal introspection.py
           # module to import it instead of the SDK module. See EW-9317 for more info.
           (name = "workers.py", pythonModule = embed "vendor/a.py"),
-          (name = "numpy", pythonRequirement = "")
         ],
         compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "disable_python_no_global_handlers"],
       )

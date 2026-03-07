@@ -17,7 +17,6 @@ declare namespace MetadataReader {
   const isTracing: () => boolean;
   const shouldSnapshotToDisk: () => boolean;
   const isCreatingBaselineSnapshot: () => boolean;
-  const getRequirements: () => string[];
   const getMainModule: () => string;
   const hasMemorySnapshot: () => boolean;
   const getNames: () => string[];
@@ -32,8 +31,9 @@ declare namespace MetadataReader {
   const getPyodideVersion: () => string;
   const getPackagesVersion: () => string;
   const getPackagesLock: () => string;
-  const read: (index: number, position: number, buffer: Uint8Array) => number;
+  const getRequirements: () => string[];
   const getTransitiveRequirements: () => Set<string>;
+  const read: (index: number, position: number, buffer: Uint8Array) => number;
   const getCompatibilityFlags: () => CompatibilityFlags;
   const setCpuLimitNearlyExceededCallback: (
     buf: Uint8Array,
