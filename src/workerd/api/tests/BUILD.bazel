@@ -595,6 +595,12 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-cross-context-empty-request-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-cross-context-empty-request-test.js"],
+)
+
+wd_test(
     src = "error-in-error-event-test.wd-test",
     args = ["--experimental"],
     data = ["error-in-error-event-test.js"],
