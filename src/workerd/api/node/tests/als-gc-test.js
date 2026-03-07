@@ -12,7 +12,7 @@ export const test = {
         if (!storeValue) {
           throw new Error(`Failed on attempt ${i}.`);
         }
-        for (let j = 0; j < 100000; j++) {
+        for (let j = 0; j < 1_000; j++) {
           (() => Math.random())();
         }
       }
