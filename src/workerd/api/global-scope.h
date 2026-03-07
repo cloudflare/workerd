@@ -9,6 +9,7 @@
 #include "http.h"
 #include "messagechannel.h"
 #include "performance.h"
+#include "sockets.h"
 
 #include <workerd/api/hibernation-event-params.h>
 #ifdef WORKERD_FUZZILLI
@@ -293,6 +294,10 @@ struct ExportedHandler {
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
+  using ConnectHandler = jsg::Promise<void>(
+      jsg::Ref<Socket> socket, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
+
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
@@ -332,6 +337,7 @@ struct ExportedHandler {
   jsg::SelfRef self;
 
   JSG_STRUCT(fetch,
+      connect,
       tail,
       trace,
       tailStream,
@@ -349,6 +355,7 @@ struct ExportedHandler {
 
   JSG_STRUCT_TS_DEFINE(
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
+    type ExportedHandlerConnectHandler<Env = unknown> = (socket: Socket, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTailStreamHandler<Env = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -359,6 +366,7 @@ struct ExportedHandler {
   JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown> {
     email?: EmailExportedHandler<Env>;
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
+    connect?: ExportedHandlerConnectHandler<Env>;
     tail?: ExportedHandlerTailHandler<Env>;
     trace?: ExportedHandlerTraceHandler<Env>;
     tailStream?: ExportedHandlerTailStreamHandler<Env>;
@@ -457,6 +465,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       kj::Maybe<jsg::Ref<AbortSignal>> abortSignal);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
+
+  // Received TCP/socket ingress (called from C++, not JS).
+  kj::Promise<void> connect(kj::String host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      kj::HttpService::ConnectResponse& response,
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received sendTraces (called from C++, not JS).
   void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,

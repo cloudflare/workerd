@@ -221,11 +221,6 @@ jobs:
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
 
-      - name: Run Miniflare unit tests
-        run: pnpm test:ci --filter miniflare
-        env:
-          MINIFLARE_WORKERD_PATH: /tmp/workerd
-
       - name: Run Vite unit tests
         run: pnpm test:ci --filter @cloudflare/vite-plugin
         env:
@@ -238,6 +233,11 @@ jobs:
 
       - name: Run Wrangler Node.js e2e tests
         run: pnpm test:e2e --filter wrangler -- unenv-preset
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Miniflare unit tests
+        run: pnpm test:ci --filter miniflare
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
 
