@@ -154,5 +154,13 @@ def wd_rust_crate(
         rust_unpretty(
             name = name + "@expand",
             deps = [":" + name],
-            tags = ["manual", "off-by-default"],
+            tags = ["manual"],
+        )
+
+    if len(test_proc_macro_deps) > 0:
+        rust_unpretty(
+            name = name + "_test@expand",
+            deps = [":" + name + "_test"],
+            tags = ["manual"],
+            testonly = True,
         )
