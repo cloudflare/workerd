@@ -902,6 +902,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   void writeLogfwdr(uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage);
 
+  kj::Own<IoCrossContextExecutor> getCrossContextExecutor();
   jsg::JsObject getPromiseContextTag(jsg::Lock& js);
 
   // The IoChannelFactory must be accessed through the

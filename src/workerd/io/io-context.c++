@@ -1492,9 +1492,13 @@ void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeTyp
   }
 }
 
+kj::Own<IoCrossContextExecutor> IoContext::getCrossContextExecutor() {
+  return kj::heap<IoCrossContextExecutor>(deleteQueue.queue.addRef());
+}
+
 jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
   if (promiseContextTag == kj::none) {
-    auto deferral = kj::heap<IoCrossContextExecutor>(deleteQueue.queue.addRef());
+    auto deferral = getCrossContextExecutor();
     promiseContextTag = jsg::JsRef(js, js.opaque(kj::mv(deferral)));
   }
   return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);

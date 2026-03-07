@@ -622,12 +622,8 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
 };
 }  // namespace
 
-AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
-    jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason,
-    Flag flag)
-    : canceler(
-          IoContext::current().addObject(kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
-      flag(flag),
+AbortSignal::AbortSignal(jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason, Flag flag)
+    : flag(flag),
       reason(kj::mv(maybeReason)) {}
 
 kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
@@ -659,7 +655,7 @@ void AbortSignal::addEventListener(jsg::Lock& js,
 }
 
 bool AbortSignal::getAborted(jsg::Lock& js) {
-  return canceler->isCanceled() || hasPendingReason();
+  return reason != kj::none || hasPendingReason();
 }
 
 jsg::JsValue AbortSignal::getReason(jsg::Lock& js) {
@@ -691,15 +687,14 @@ kj::Exception AbortSignal::abortException(
 }
 
 jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
-  auto exception = abortException(js, maybeReason);
   KJ_IF_SOME(reason, maybeReason) {
-    return js.alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
+    return js.alloc<AbortSignal>(reason.addRef(js));
   }
-  return js.alloc<AbortSignal>(kj::cp(exception), js.exceptionToJsValue(kj::mv(exception)));
+  return js.alloc<AbortSignal>(js.exceptionToJsValue(abortException(js, maybeReason)));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
-  if (canceler->isCanceled()) {
+  if (getAborted(js)) {
     KJ_IF_SOME(r, reason) {
       js.throwException(r.getHandle(js));
     } else {
@@ -739,7 +734,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler) {
   // If nothing was passed in, we can just return a signal that never aborts.
   if (signals.size() == 0) {
-    return js.alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
+    return js.alloc<AbortSignal>(kj::none, AbortSignal::Flag::NEVER_ABORTS);
   }
 
   // Let's check to see if any of the signals are already aborted. If it is, we can
@@ -787,17 +782,11 @@ void AbortSignal::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(reason, onAbortHandler);
 }
 
-RefcountedCanceler& AbortSignal::getCanceler() {
-  return *canceler;
-}
-
 void AbortSignal::triggerAbort(
     jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
-  KJ_ASSERT(flag != Flag::NEVER_ABORTS);
-  if (canceler->isCanceled()) {
+  if (reason != kj::none || flag == Flag::NEVER_ABORTS) {
     return;
   }
-  auto exception = AbortSignal::abortException(js, maybeReason);
   KJ_IF_SOME(r, maybeReason) {
     KJ_SWITCH_ONEOF(r) {
       KJ_CASE_ONEOF(value, jsg::JsValue) {
@@ -808,13 +797,13 @@ void AbortSignal::triggerAbort(
       }
     }
   } else {
-    reason = js.exceptionToJsValue(kj::cp(exception));
+    reason = js.exceptionToJsValue(AbortSignal::abortException(js, kj::none));
   }
-
-  canceler->cancel(kj::mv(exception));
 
   // 1. Dispatch to RPC clients
   if (!rpcClients.empty()) {
+    // Let's make sure we're triggering from the correct IoContext.
+    auto _ = *rpcClients.front();
     IoContext& ioContext = IoContext::current();
     jsg::Serializer ser(js);
     KJ_IF_SOME(r, reason) {
@@ -849,7 +838,7 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "AbortSignal can only be serialized for RPC.");
 
-  serializer.writeRawUint32(static_cast<uint>(canceler->isCanceled()));
+  serializer.writeRawUint32(static_cast<uint>(getAborted(js)));
   serializer.writeRawUint32(static_cast<uint>(flag));
   KJ_IF_SOME(r, reason) {
     serializer.write(js, r.getHandle(js));
@@ -904,12 +893,12 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
 
   if (flag == Flag::NEVER_ABORTS) {
     // The signal can't be aborted. We don't need to setup RPC
-    return js.alloc<AbortSignal>(/* exception */ kj::none, /* maybeReason */ kj::none, flag);
+    return js.alloc<AbortSignal>(/* maybeReason */ kj::none, flag);
   }
 
   // The AbortSignalImpl will receive any remote triggerAbort requests and fulfill the promise with the reason for abort
 
-  auto signal = js.alloc<AbortSignal>(/* exception */ kj::none, /* maybeReason */ kj::none, flag);
+  auto signal = js.alloc<AbortSignal>(/* maybeReason */ kj::none, flag);
 
   auto& ioctx = IoContext::current();
 
@@ -1078,18 +1067,72 @@ kj::Promise<void> Scheduler::wait(
   auto promise = kj::mv(paf.promise);
 
   KJ_IF_SOME(options, maybeOptions) {
-    KJ_IF_SOME(s, options.signal) {
-      promise = s->wrap(js, kj::mv(promise));
-      // When the signal aborts and the canceler drops the promise, clear the underlying
-      // timeout to free the quota slot. clearTimeoutImpl is a no-op if the timeout has
-      // already fired, so this is safe on the normal completion path as well.
-      promise = promise.attach(kj::defer([timeoutId, &ioContext = IoContext::current()]() {
-        ioContext.clearTimeoutImpl(TimeoutId::fromNumber(timeoutId));
-      }));
-    }
+    // When the signal aborts and the canceler drops the promise, clear the underlying
+    // timeout to free the quota slot. clearTimeoutImpl is a no-op if the timeout has
+    // already fired, so this is safe on the normal completion path as well.
+    auto& ioContext = IoContext::current();
+    promise = AbortSignal::maybeCancelWrap(js, options.signal, kj::mv(promise))
+                  .attach(kj::defer([timeoutId, &ioContext]() {
+      ioContext.clearTimeoutImpl(TimeoutId::fromNumber(timeoutId));
+    }));
   }
 
   return kj::mv(promise);
+}
+
+AbortSignal::CancelerAndHandler AbortSignal::newMaybeCrossContextCancelHandler(
+    jsg::Lock& js, jsg::Ref<AbortSignal> signal) {
+  signal->subscribeToRpcAbort(js);
+
+  if (signal->getAborted(js)) {
+    // The signal is already aborted! So we can just trigger the canceler immediately and
+    // return a dummy handler that doesn't actually do anything since we don't need it to.
+    auto exception = js.exceptionToKj(signal->getReason(js));
+    auto canceler = kj::rc<RefcountedCanceler>(kj::mv(exception));
+    return {
+      .canceler = kj::mv(canceler),
+      .handler = kj::Own<void>(nullptr, kj::NullDisposer::instance),
+    };
+  }
+
+  auto& ioContext = IoContext::current();
+  auto executor = ioContext.getCrossContextExecutor();
+  auto canceler = kj::rc<RefcountedCanceler>();
+
+  // Note that the handler here wraps an IoContext-attached kj::Canceler.
+  // We are not, however, using an ioContext.addFunctor here because we
+  // need to be able to handle the case where this is invoked from the
+  // wrong IoContext. Be extremely careful here! Pay close attention to
+  // how the IoContext checks are handled within the handler lambda.
+  auto handler = signal->newNativeHandler(js, kj::str("abort"),
+      [signal = signal.addRef(), canceler = ioContext.addObject(canceler.addRef().toOwn()),
+          ioContext = ioContext.getWeakRef(),
+          executor = kj::mv(executor)](jsg::Lock& js, jsg::Ref<Event>) mutable {
+    // First, let's check that the original context even still exists.
+    KJ_IF_SOME(originalContext, ioContext->tryGet()) {
+      if (!originalContext.isCurrent()) {
+        // Doh! the abort signal fired from a different IoContext that the one that
+        // created this handler. We need to arrange to have the canceler triggered
+        // in the correct IoContext.
+        return executor->execute(
+            js, [canceler = kj::mv(canceler), signal = signal.addRef()](jsg::Lock& js) mutable {
+          canceler->cancel(js.exceptionToKj(signal->getReason(js)));
+        });
+      }
+
+      // We are in the right context so we can just trigger the canceler directly.
+      auto exception = js.exceptionToKj(signal->getReason(js));
+      canceler->cancel(kj::mv(exception));
+    } else {
+      // IoContext that was used to create this handler no longer exists.
+      // This becomes a non-op
+    }
+  },
+      true /* once */);
+  return {
+    .canceler = kj::mv(canceler),
+    .handler = kj::mv(handler),
+  };
 }
 
 void ExtendableEvent::waitUntil(kj::Promise<void> promise) {

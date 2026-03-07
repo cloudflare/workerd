@@ -23,19 +23,19 @@ class RefcountedCanceler: public kj::Refcounted {
  public:
   class Listener {
    public:
-    explicit Listener(RefcountedCanceler& canceler, kj::Function<void()> fn)
+    explicit Listener(kj::Rc<RefcountedCanceler> canceler, kj::Function<void()> fn)
         : fn(kj::mv(fn)),
-          canceler(canceler) {
-      canceler.addListener(*this);
+          canceler(kj::mv(canceler)) {
+      this->canceler->addListener(*this);
     }
 
     ~Listener() {
-      canceler.removeListener(*this);
+      canceler->removeListener(*this);
     }
 
    private:
     kj::Function<void()> fn;
-    RefcountedCanceler& canceler;
+    kj::Rc<RefcountedCanceler> canceler;
     kj::ListLink<Listener> link;
 
     friend class RefcountedCanceler;

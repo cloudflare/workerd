@@ -525,7 +525,7 @@ export const rpcCrossRequestSignal = {
       {
         name: 'Error',
         message:
-          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, request/response bodies, and others) created in the context of one request handler cannot be accessed from a different request's handler. This is a limitation of Cloudflare Workers which allows us to improve overall performance. (I/O type: RefcountedCanceler)",
+          "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, request/response bodies, and others) created in the context of one request handler cannot be accessed from a different request's handler. This is a limitation of Cloudflare Workers which allows us to improve overall performance. (I/O type: AbortTriggerRpcClient)",
       }
     );
   },
@@ -590,5 +590,37 @@ export const rpcDestroySignalClean = {
     // A release message was sent, the signal will remain in an unaborted state
     ok(!signal.aborted);
     strictEqual(signal.reason, undefined);
+  },
+};
+
+const ac = new AbortController();
+let isFirstRequest = false;
+
+export const topLevelAbortController = {
+  async test(ctrl, env) {
+    const results = await Promise.allSettled([
+      env.subrequest.fetch('http://example.com'),
+      env.subrequest.fetch('http://example.com'),
+    ]);
+    ok(results[0].status === 'fulfilled');
+    ok(results[1].status === 'fulfilled');
+    strictEqual(await results[0].value.text(), 'Hello World\n');
+    strictEqual(await results[1].value.text(), 'Hello World\n');
+  },
+};
+
+export default {
+  async fetch(req, env) {
+    if (!isFirstRequest) {
+      isFirstRequest = true;
+      await rejects(scheduler.wait(5_000, { signal: ac.signal }), {
+        message: 'boomdiggity',
+      });
+    } else {
+      ac.abort(new Error('boomdiggity'));
+      isFirstRequest = false;
+    }
+
+    return new Response('Hello World\n');
   },
 };
