@@ -425,7 +425,7 @@ class WebSocket: public EventTarget {
   inline static const size_t SUGGESTED_MAX_MESSAGE_SIZE = 1u << 20;
 
   // Maximum size of a WebSocket attachment.
-  inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 2;
+  inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 16;
 
   struct AwaitingConnection {
     // A canceler associated with the pending websocket connection for `new Websocket()`.
