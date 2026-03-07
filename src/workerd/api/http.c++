@@ -645,7 +645,7 @@ jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
   KJ_IF_SOME(s, thisSignal) {
     return s.addRef();
   }
-  auto newSignal = js.alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
+  auto newSignal = js.alloc<AbortSignal>(kj::none, AbortSignal::Flag::NEVER_ABORTS);
   thisSignal = newSignal.addRef();
   return newSignal;
 }
@@ -1530,7 +1530,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     return ioContext.awaitIo(js,
         AbortSignal::maybeCancelWrap(js, signal, kj::mv(webSocketResponse)),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-            client = kj::mv(client), signal = kj::mv(signal)](
+            client = kj::mv(client), maybeSignal = kj::mv(signal)](
             jsg::Lock& js, kj::HttpClient::WebSocketResponse&& response) mutable
         -> jsg::Promise<jsg::Ref<Response>> {
       KJ_SWITCH_ONEOF(response.webSocketOrBody) {
@@ -1542,17 +1542,24 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
         KJ_CASE_ONEOF(webSocket, kj::Own<kj::WebSocket>) {
           KJ_ASSERT(response.statusCode == 101);
           webSocket = webSocket.attach(kj::mv(client));
-          KJ_IF_SOME(s, signal) {
+          KJ_IF_SOME(signal, maybeSignal) {
             // If the AbortSignal has already been triggered, then we need to stop here.
-            if (s->getAborted(js)) {
-              return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
+            if (signal->getAborted(js)) {
+              return js.rejectedPromise<jsg::Ref<Response>>(signal->getReason(js));
             }
-            webSocket = kj::refcounted<AbortableWebSocket>(kj::mv(webSocket), s->getCanceler());
+
+            auto cancelerAndHandler = AbortSignal::newMaybeCrossContextCancelHandler(
+                js, signal.addRef());
+
+            webSocket = kj::refcounted<AbortableWebSocket>(
+                kj::mv(webSocket),
+                kj::mv(cancelerAndHandler.canceler),
+                kj::mv(cancelerAndHandler.handler));
           }
           return js.resolvedPromise(makeHttpResponse(js, jsRequest->getMethodEnum(),
               kj::mv(urlList), response.statusCode, response.statusText, *response.headers,
               newNullInputStream(), js.alloc<WebSocket>(js, kj::mv(webSocket)),
-              jsRequest->getResponseBodyEncoding(), kj::mv(signal)));
+              jsRequest->getResponseBodyEncoding(), kj::mv(maybeSignal)));
         }
       }
       KJ_UNREACHABLE;
@@ -1603,7 +1610,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
           co_await promise;
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
-          if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
+          if (exception.getType() != kj::Exception::Type::DISCONNECTED &&
+              !exception.getDescription().startsWith("jsg.DOMException(AbortError): ")) {
             kj::throwFatalException(kj::mv(exception));
           }
           // Ignore DISCONNECTED exceptions thrown by the writePromise, so that we always
@@ -1669,14 +1677,21 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
     kj::HttpClient::Response&& response) {
-  auto signal = jsRequest->getSignal();
+  auto maybeSignal = jsRequest->getSignal();
 
-  KJ_IF_SOME(s, signal) {
+  KJ_IF_SOME(signal, maybeSignal) {
     // If the AbortSignal has already been triggered, then we need to stop here.
-    if (s->getAborted(js)) {
-      return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
+    if (signal->getAborted(js)) {
+      return js.rejectedPromise<jsg::Ref<Response>>(signal->getReason(js));
     }
-    response.body = kj::refcounted<AbortableInputStream>(kj::mv(response.body), s->getCanceler());
+
+    auto cancelerAndHandler = AbortSignal::newMaybeCrossContextCancelHandler(
+        js, signal.addRef());
+
+    response.body = kj::refcounted<AbortableInputStream>(
+        kj::mv(response.body),
+        kj::mv(cancelerAndHandler.canceler),
+        kj::mv(cancelerAndHandler.handler));
   }
 
   if (isRedirectStatusCode(response.statusCode) &&
@@ -1700,7 +1715,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
 
   auto result = makeHttpResponse(js, jsRequest->getMethodEnum(), kj::mv(urlList),
       response.statusCode, response.statusText, *response.headers, kj::mv(response.body), kj::none,
-      jsRequest->getResponseBodyEncoding(), kj::mv(signal));
+      jsRequest->getResponseBodyEncoding(), kj::mv(maybeSignal));
 
   return js.resolvedPromise(kj::mv(result));
 }

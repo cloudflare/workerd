@@ -10,6 +10,7 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat", "enable_abortsignal_rpc", "experimental"],
         bindings = [
           (name = "RpcRemoteEnd", service = (name = "abortsignal-test", entrypoint = "RpcRemoteEnd")),
+          (name = "subrequest", service = "abortsignal-test"),
         ]
       )
     ),
