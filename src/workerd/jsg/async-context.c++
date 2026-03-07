@@ -186,9 +186,5 @@ v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(Lock& js) {
   return getJSWrapper(js.v8Isolate);
 }
 
-void AsyncContextFrame::jsgVisitForGc(GcVisitor& visitor) {
-  for (auto& entry: storage) {
-    visitor.visit(entry.value);
-  }
-}
+void AsyncContextFrame::jsgVisitForGc(GcVisitor& visitor) {}
 }  // namespace workerd::jsg
