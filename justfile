@@ -93,6 +93,7 @@ internal-pr:
 # update dependencies with a given prefix (all by default)
 update-deps prefix="":
   ./build/deps/update-deps.py {{prefix}}
+  just format
 
 # equivalent to `cargo update`; use `workspace` or <package> to limit update scope
 update-rust package="full":
