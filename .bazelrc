@@ -15,7 +15,7 @@ build --test_timeout=3,15,60,240
 # As part of starlarkification, Bazel 8 and 9 remove a number of rules which now need to be imported
 # from other repositories. In the long term, load() statements will be needed to import these rules.
 # For now, we can still autoload the affected repositories when needed. Do this only for a remaining
-# protobuf components and rules_cc (needed with Bazel 9).
+# protobuf component and rules_cc (needed with Bazel 9).
 common --incompatible_autoload_externally="+ProtoInfo,+cc_binary,+cc_import,+cc_library,+cc_shared_library,+cc_test,+cc_toolchain"
 
 # TODO(cleanup): Bazel 9 sets this by default, which breaks the macOS-cross build. Fix and re-enable.
