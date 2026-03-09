@@ -64,6 +64,8 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   pointers used by the C++ JSG layer to wrap/unwrap the Rust object.
 - **`#[jsg_resource]`** on the impl block registers the type as a JS-visible resource.
 - **`#[jsg_method]`** auto-converts Rust `snake_case` method names to JavaScript `camelCase`.
+  Methods with a receiver (`&self`/`&mut self`) are registered as instance methods on the prototype;
+  methods without a receiver are registered as static methods on the constructor.
   Verify the converted name is correct and matches the intended API surface.
 - **`#[jsg_struct]`** is for value types (passed by value across the JS boundary).
 - **`#[jsg_oneof]`** is for union/variant types (mapped from JS values by trying each variant).

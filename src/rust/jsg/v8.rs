@@ -312,6 +312,11 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> usize /* R* */;
+
+        pub unsafe fn function_template_get_function(
+            isolate: *mut Isolate,
+            constructor: &Global, /* v8::Global<FunctionTemplate> */
+        ) -> Local /* v8::Local<Function> */;
     }
 
     unsafe extern "C++" {
@@ -365,6 +370,7 @@ impl Display for Local<'_, Value> {
 }
 #[derive(Debug)]
 pub struct Object;
+pub struct Function;
 pub struct FunctionTemplate;
 pub struct Array;
 pub struct TypedArray;
@@ -607,6 +613,12 @@ impl PartialEq for Local<'_, Value> {
 
 impl<'a> From<Local<'a, Object>> for Local<'a, Value> {
     fn from(value: Local<'a, Object>) -> Self {
+        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
+    }
+}
+
+impl<'a> From<Local<'a, Function>> for Local<'a, Value> {
+    fn from(value: Local<'a, Function>) -> Self {
         unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
     }
 }
@@ -1076,6 +1088,25 @@ impl<T> From<Local<'_, T>> for Global<T> {
         Self {
             handle: unsafe { ffi::local_to_global(local.isolate.as_ffi(), local.into_ffi()) },
             _marker: PhantomData,
+        }
+    }
+}
+
+impl Global<FunctionTemplate> {
+    /// Returns the constructor function for this function template.
+    ///
+    /// This is the V8 `Function` object that can be called as a constructor or
+    /// used to access static methods, analogous to a JavaScript class reference
+    /// (e.g., `URL`, `TextEncoder`).
+    pub fn as_local_function<'a>(&self, lock: &mut Lock) -> Local<'a, Function> {
+        // SAFETY: `lock` guarantees the isolate is locked and a HandleScope is active.
+        // `self.handle` is a valid `Global<FunctionTemplate>` created by `create_resource_template`.
+        // The returned `Local` is tied to the current HandleScope via the `'a` lifetime.
+        unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::function_template_get_function(lock.isolate().as_ffi(), &self.handle),
+            )
         }
     }
 }

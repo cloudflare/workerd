@@ -25,7 +25,7 @@
 - **CXX bridge**: `#[cxx::bridge(namespace = "workerd::rust::<crate>")]` with companion `ffi.c++`/`ffi.h` files
 - **Namespace**: always `workerd::rust::*` except `python-parser` → `edgeworker::rust::python_parser`
 - **Errors**: `thiserror` for library crates; `jsg::Error` with `ExceptionType` for JSG-facing crates
-- **JSG resources**: must include `_state: jsg::ResourceState` field; `#[jsg_method]` auto-converts `snake_case` → `camelCase`
+- **JSG resources**: must include `_state: jsg::ResourceState` field; `#[jsg_method]` auto-converts `snake_case` → `camelCase`; methods with `&self`/`&mut self` become instance methods, methods without a receiver become static methods
 - **Formatting**: `rustfmt.toml` — `group_imports = "StdExternalCrate"`, `imports_granularity = "Item"` (one `use` per import)
 - **Linting**: `just clippy <crate>` — pedantic+nursery; `allow-unwrap-in-tests`
 - **Tests**: inline `#[cfg(test)]` modules; JSG tests use `jsg_test::Harness::run_in_context()`

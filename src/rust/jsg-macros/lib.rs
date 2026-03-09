@@ -128,6 +128,13 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let fn_block = &input_fn.block;
     let callback_name = syn::Ident::new(&format!("{fn_name}_callback"), fn_name.span());
 
+    // Methods with a receiver (&self, &mut self) become instance methods on the prototype.
+    // Methods without a receiver become static methods on the constructor.
+    let has_self = fn_sig
+        .inputs
+        .iter()
+        .any(|arg| matches!(arg, FnArg::Receiver(_)));
+
     let params: Vec<_> = fn_sig
         .inputs
         .iter()
@@ -179,6 +186,18 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    let invocation = if has_self {
+        quote! {
+            let this = args.this();
+            let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
+            let result = self_.#fn_name(#(#arg_exprs),*);
+        }
+    } else {
+        quote! {
+            let result = Self::#fn_name(#(#arg_exprs),*);
+        }
+    };
+
     quote! {
         #fn_vis #fn_sig { #fn_block }
 
@@ -187,9 +206,7 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let mut lock = unsafe { jsg::Lock::from_args(args) };
             let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
             #(#unwraps)*
-            let this = args.this();
-            let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
-            let result = self_.#fn_name(#(#arg_exprs),*);
+            #invocation
             #result_handling
         }
     }
@@ -291,9 +308,23 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
                 .unwrap_or_else(|| snake_to_camel(&rust_name.to_string()));
             let callback = syn::Ident::new(&format!("{rust_name}_callback"), rust_name.span());
 
-            Some(quote! {
-                jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback }
-            })
+            // Methods with a receiver (&self, &mut self) become instance methods on the prototype.
+            // Methods without a receiver become static methods on the constructor.
+            let has_self = method
+                .sig
+                .inputs
+                .iter()
+                .any(|arg| matches!(arg, FnArg::Receiver(_)));
+
+            if has_self {
+                Some(quote! {
+                    jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback }
+                })
+            } else {
+                Some(quote! {
+                    jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback }
+                })
+            }
         })
         .collect();
 

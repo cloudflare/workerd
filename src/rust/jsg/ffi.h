@@ -144,6 +144,9 @@ inline void register_add_builtin_module(ModuleRegistry& registry,
 
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor);
 
+// FunctionTemplate
+Local function_template_get_function(Isolate* isolate, const Global& tmpl);
+
 // Realm
 Realm* realm_from_isolate(Isolate* isolate);
 

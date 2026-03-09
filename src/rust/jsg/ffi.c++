@@ -484,6 +484,15 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
 }
 
+// FunctionTemplate
+Local function_template_get_function(Isolate* isolate, const Global& tmpl) {
+  auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
+  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
+  auto function = ::workerd::jsg::check(local_tmpl->GetFunction(isolate->GetCurrentContext()));
+  return to_ffi(kj::mv(function));
+}
+
+// Realm
 Realm* realm_from_isolate(Isolate* isolate) {
   auto* realm =
       static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
