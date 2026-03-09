@@ -1459,14 +1459,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # block until a reader pulls. Previously HWM defaulted to 1, which caused
   # pull() to fire at startup, clearing backpressure before any write.
 
-<<<<<<< HEAD
-  workflowsPreserveNonRetryableErrorMessage @169 :Bool
-      $compatEnableFlag("workflows_preserve_non_retryable_error_message")
-      $experimental;
-  # When enabled, if a Workflow step throws a NonRetryableError, the error message
-  # and name are preserved on the thrown exception instead of being replaced with
-  # a generic "NonRetryableError" string.
-=======
   specCompliantPropertyAttributes @169 :Bool
       $compatEnableFlag("spec_compliant_property_attributes")
       $compatDisableFlag("no_spec_compliant_property_attributes")
@@ -1485,5 +1477,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #  - Interface objects (nested types) become own properties of globalThis
   #    with { writable: true, enumerable: false, configurable: true }, instead
   #    of being inherited from the prototype chain.
->>>>>>> 75c098c656acf561df3b74158999482e7db929d5
+
+  workflowsPreserveNonRetryableErrorMessage @170 :Bool
+      $compatEnableFlag("workflows_preserve_non_retryable_error_message")
+      $experimental;
+  # When enabled, if a Workflow step throws a NonRetryableError, the error message
+  # and name are preserved on the thrown exception instead of being replaced with
+  # a generic "NonRetryableError" string.
 }
