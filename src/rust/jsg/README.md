@@ -71,3 +71,23 @@ if lock.feature_flags().get_node_js_compat() {
 | C++ call site | `src/workerd/io/worker.c++` (`initIsolate`) |
 | Cap'n Proto schema | `src/workerd/io/compatibility-date.capnp` |
 | Generated Rust bindings | `//src/workerd/io:compatibility-date_capnp_rust` (Bazel target) |
+
+## Static Constants
+
+To expose numeric constants on a resource class (equivalent to `JSG_STATIC_CONSTANT` in C++), use `#[jsg_static_constant]` on `const` items inside a `#[jsg_resource]` impl block:
+
+```rust
+use jsg_macros::jsg_static_constant;
+
+#[jsg_resource]
+impl WebSocket {
+    #[jsg_static_constant]
+    pub const CONNECTING: i32 = 0;
+
+    #[jsg_static_constant]
+    pub const OPEN: i32 = 1;
+}
+// JS: WebSocket.CONNECTING === 0, instance.OPEN === 1
+```
+
+Constants are set on both the constructor and prototype as read-only, non-configurable properties per Web IDL. The name is used as-is (no camelCase conversion). Only numeric types are supported (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`).

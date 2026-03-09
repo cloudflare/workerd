@@ -287,11 +287,17 @@ pub mod ffi {
         callback: usize,
     }
 
+    pub struct StaticConstantDescriptor {
+        pub name: String,
+        pub value: f64, /* number */
+    }
+
     pub struct ResourceDescriptor {
         pub name: String,
         pub constructor: KjMaybe<ConstructorDescriptor>,
         pub methods: Vec<MethodDescriptor>,
         pub static_methods: Vec<StaticMethodDescriptor>,
+        pub static_constants: Vec<StaticConstantDescriptor>,
     }
 
     // Resources
