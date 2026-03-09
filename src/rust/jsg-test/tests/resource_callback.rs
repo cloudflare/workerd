@@ -8,6 +8,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use jsg::ExceptionType;
 use jsg::Number;
 use jsg::ResourceState;
 use jsg::ResourceTemplate;
@@ -168,6 +169,127 @@ fn resource_method_returns_non_result_values() {
         // Test maybeName returns string for Some
         let result: String = ctx.eval(lock, "resource.maybeName()").unwrap();
         assert_eq!(result, "TestResource");
+        Ok(())
+    });
+}
+
+#[jsg_resource]
+struct MathResource {
+    _state: ResourceState,
+}
+
+#[jsg_resource]
+impl MathResource {
+    #[jsg_method]
+    pub fn add(a: Number, b: Number) -> Number {
+        Number::new(a.value() + b.value())
+    }
+
+    #[jsg_method]
+    pub fn greet(name: String) -> String {
+        format!("Hello, {name}!")
+    }
+
+    #[jsg_method]
+    pub fn divide(a: Number, b: Number) -> Result<Number, jsg::Error> {
+        if b.value() == 0.0 {
+            return Err(jsg::Error::new_range_error("Division by zero"));
+        }
+        Ok(Number::new(a.value() / b.value()))
+    }
+
+    #[jsg_method]
+    pub fn get_prefix(&self) -> String {
+        "math".to_owned()
+    }
+}
+
+/// Validates that methods without &self are registered as static methods on the class.
+#[test]
+fn static_method_callable_on_class() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let template = MathResourceTemplate::new(lock);
+        let constructor = template.get_constructor().as_local_function(lock);
+        ctx.set_global("MathResource", constructor.into());
+
+        let result: Number = ctx.eval(lock, "MathResource.add(2, 3)").unwrap();
+        assert!((result.value() - 5.0).abs() < f64::EPSILON);
+
+        let result: String = ctx.eval(lock, "MathResource.greet('World')").unwrap();
+        assert_eq!(result, "Hello, World!");
+        Ok(())
+    });
+}
+
+/// Validates that instance methods still work when static methods are present.
+#[test]
+fn instance_and_static_methods_coexist() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Ref::new(MathResource {
+            _state: ResourceState::default(),
+        });
+        let mut template = MathResourceTemplate::new(lock);
+
+        // Expose the class constructor as a global
+        let constructor = template.get_constructor().as_local_function(lock);
+        ctx.set_global("MathResource", constructor.into());
+
+        // Expose an instance as a global
+        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        ctx.set_global("math", wrapped);
+
+        // Instance method works on the object
+        let result: String = ctx.eval(lock, "math.getPrefix()").unwrap();
+        assert_eq!(result, "math");
+
+        // Static method works on the class
+        let result: Number = ctx.eval(lock, "MathResource.add(10, 20)").unwrap();
+        assert!((result.value() - 30.0).abs() < f64::EPSILON);
+
+        // Static methods are NOT on the instance
+        let is_undefined: bool = ctx.eval(lock, "typeof math.add === 'undefined'").unwrap();
+        assert!(is_undefined);
+        Ok(())
+    });
+}
+
+/// Validates that static methods with Result return type work on the success path.
+#[test]
+fn static_method_result_return_type() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let template = MathResourceTemplate::new(lock);
+        let constructor = template.get_constructor().as_local_function(lock);
+        ctx.set_global("MathResource", constructor.into());
+
+        let result: String = ctx.eval(lock, "MathResource.greet('Rust')").unwrap();
+        assert_eq!(result, "Hello, Rust!");
+        Ok(())
+    });
+}
+
+/// Validates that static methods propagate JS exceptions from `Result::Err`.
+#[test]
+fn static_method_throws_exception() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let template = MathResourceTemplate::new(lock);
+        let constructor = template.get_constructor().as_local_function(lock);
+        ctx.set_global("MathResource", constructor.into());
+
+        // Valid call succeeds
+        let result: Number = ctx.eval(lock, "MathResource.divide(10, 2)").unwrap();
+        assert!((result.value() - 5.0).abs() < f64::EPSILON);
+
+        // Division by zero throws a RangeError
+        let err = ctx
+            .eval::<Number>(lock, "MathResource.divide(1, 0)")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert!(err.message.contains("Division by zero"));
         Ok(())
     });
 }

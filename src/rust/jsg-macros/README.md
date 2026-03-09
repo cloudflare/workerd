@@ -24,6 +24,11 @@ pub struct MyRecord {
 
 Generates FFI callback functions for JSG resource methods. The `name` parameter is optional and defaults to converting the method name from `snake_case` to `camelCase`.
 
+The macro automatically detects whether a method is an instance method or a static method based on the presence of a receiver (`&self` or `&mut self`):
+
+- **Instance methods** (with `&self`/`&mut self`) are placed on the prototype, called on instances (e.g., `obj.getName()`).
+- **Static methods** (without a receiver) are placed on the constructor, called on the class itself (e.g., `MyClass.create()`).
+
 Parameters and return values are handled via the `jsg::Wrappable` trait. Any type implementing `Wrappable` can be used as a parameter or return value:
 
 - `Option<T>` - accepts `T` or `undefined`, rejects `null`
@@ -32,19 +37,27 @@ Parameters and return values are handled via the `jsg::Wrappable` trait. Any typ
 
 ```rust
 impl DnsUtil {
+    // Instance method: called as obj.parseCaaRecord(...)
     #[jsg_method(name = "parseCaaRecord")]
     pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
         // Errors are thrown as JavaScript exceptions
     }
 
+    // Instance method: called as obj.getName()
     #[jsg_method]
     pub fn get_name(&self) -> String {
         self.name.clone()
     }
 
+    // Instance method: void methods return undefined in JavaScript
     #[jsg_method]
     pub fn reset(&self) {
-        // Void methods return undefined in JavaScript
+    }
+
+    // Static method: called as DnsUtil.create(...)
+    #[jsg_method]
+    pub fn create(name: String) -> Result<String, jsg::Error> {
+        Ok(name)
     }
 }
 ```
@@ -70,12 +83,17 @@ pub struct MyUtil {
 impl DnsUtil {
     #[jsg_method]
     pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
-        // implementation
+        // Instance method on the prototype
+    }
+
+    #[jsg_method]
+    pub fn create(name: String) -> Result<String, jsg::Error> {
+        // Static method on the constructor (no &self)
     }
 }
 ```
 
-On struct definitions, generates `jsg::Type`, wrapper struct, and `ResourceTemplate` implementations. On impl blocks, scans for `#[jsg_method]` attributes and generates the `Resource` trait implementation.
+On struct definitions, generates `jsg::Type`, wrapper struct, and `ResourceTemplate` implementations. On impl blocks, scans for `#[jsg_method]` attributes and generates the `Resource` trait implementation. Methods with a receiver (`&self`/`&mut self`) are registered as instance methods; methods without a receiver are registered as static methods.
 
 ## `#[jsg_oneof]`
 
