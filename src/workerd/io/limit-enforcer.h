@@ -124,6 +124,10 @@ class LimitEnforcer {
   // be dropped when JavaScript is done, before unlocking the isolate.
   virtual kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) = 0;
 
+  // Called before delivering a request to a dynamic worker. Throws a JSG exception if
+  // more than N dynamic workers have in-flight requests
+  virtual kj::Own<void> enterDynamicWorkerRequest(kj::StringPtr scriptId) = 0;
+
   // Called on each new event delivered that should cause an actor's resource limits to be
   // "topped up". This method does nothing if the IoContext is not an actor. Note that this must
   // not be called while in a JS scope, i.e. when `enterJs()` has been called and the returned
