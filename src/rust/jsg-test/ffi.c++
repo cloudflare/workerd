@@ -1,5 +1,6 @@
 #include "ffi.h"
 
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg-test/lib.rs.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -9,6 +10,7 @@
 
 #include <v8.h>
 
+#include <capnp/message.h>
 #include <kj/common.h>
 
 using namespace kj_rs;
@@ -38,7 +40,14 @@ TestHarness::TestHarness(::workerd::jsg::V8StackScope&)
     : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())),
       locker(isolate->getIsolate()),
       isolateScope(isolate->getIsolate()),
-      realm(::workerd::rust::jsg::realm_create(isolate->getIsolate())) {
+      realm([&] {
+        // Build default (all-false) feature flags for the test realm.
+        capnp::MallocMessageBuilder flagsMessage;
+        flagsMessage.initRoot<CompatibilityFlags>();
+        auto words = capnp::canonicalize(flagsMessage.getRoot<CompatibilityFlags>().asReader());
+        return ::workerd::rust::jsg::realm_create(
+            isolate->getIsolate(), words.asBytes().as<Rust>());
+      }()) {
   isolate->getIsolate()->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*realm);
 }
 

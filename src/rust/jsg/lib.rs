@@ -9,10 +9,12 @@ use std::rc::Rc;
 
 use kj_rs::KjMaybe;
 
+pub mod feature_flags;
 pub mod modules;
 pub mod v8;
 mod wrappable;
 
+pub use feature_flags::FeatureFlags;
 pub use v8::BigInt64Array;
 pub use v8::BigUint64Array;
 pub use v8::Float32Array;
@@ -32,8 +34,11 @@ mod ffi {
     extern "Rust" {
         type Realm;
 
+        /// Create a fully-initialized Realm with feature flags.
+        /// `feature_flags_data` is canonical (single-segment, no segment table) Cap'n Proto
+        /// bytes produced by `capnp::canonicalize()` on the C++ side.
         #[expect(clippy::unnecessary_box_returns)]
-        unsafe fn realm_create(isolate: *mut Isolate) -> Box<Realm>;
+        unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
     }
 
     unsafe extern "C++" {
@@ -630,8 +635,19 @@ impl Lock {
         todo!()
     }
 
-    fn realm(&mut self) -> &mut Realm {
+    pub(crate) fn realm(&mut self) -> &mut Realm {
         unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
+    }
+
+    /// Returns the current worker's compatibility flags reader.
+    ///
+    /// ```ignore
+    /// if lock.feature_flags().get_node_js_compat() {
+    ///     // Node.js compatibility behavior
+    /// }
+    /// ```
+    pub fn feature_flags(&mut self) -> compatibility_date_capnp::compatibility_flags::Reader<'_> {
+        self.realm().feature_flags.reader()
     }
 
     /// Throws an error as a V8 exception.
@@ -876,14 +892,17 @@ pub unsafe fn drop_resource<R: Resource>(_isolate: *mut ffi::Isolate, this: *mut
 pub struct Realm {
     isolate: v8::IsolatePtr,
     resources: Vec<*mut ResourceState>,
+    /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
+    feature_flags: FeatureFlags,
 }
 
 impl Realm {
-    /// Creates a new Realm from a V8 isolate.
-    pub fn from_isolate(isolate: v8::IsolatePtr) -> Self {
+    /// Creates a new Realm with its feature flags.
+    pub fn new(isolate: v8::IsolatePtr, feature_flags: FeatureFlags) -> Self {
         Self {
             isolate,
             resources: Vec::new(),
+            feature_flags,
         }
     }
 
@@ -928,6 +947,7 @@ impl Drop for Realm {
 }
 
 #[expect(clippy::unnecessary_box_returns)]
-unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
-    unsafe { Box::new(Realm::from_isolate(v8::IsolatePtr::from_ffi(isolate))) }
+unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]) -> Box<Realm> {
+    let feature_flags = FeatureFlags::from_bytes(feature_flags_data);
+    unsafe { Box::new(Realm::new(v8::IsolatePtr::from_ffi(isolate), feature_flags)) }
 }
