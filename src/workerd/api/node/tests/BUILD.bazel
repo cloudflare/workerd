@@ -722,3 +722,9 @@ wd_test(
     args = ["--experimental"],
     data = ["buffer-effective-size-concat-test.js"],
 )
+
+wd_test(
+    src = "als-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["als-gc-test.js"],
+)

@@ -10,7 +10,9 @@
 #include <workerd/server/docker-api.capnp.h>
 
 #include <capnp/compat/byte-stream.h>
+#include <capnp/compat/json.h>
 #include <capnp/list.h>
+#include <capnp/message.h>
 #include <kj/async-io.h>
 #include <kj/async.h>
 #include <kj/cidr.h>
@@ -22,6 +24,22 @@
 #include <atomic>
 
 namespace workerd::server {
+
+// Decode a JSON string into a Cap'n Proto message of type T. The MallocMessageBuilder is
+// heap-allocated and returned as an owned pointer so that the decoded data outlives this
+// call. Callers must keep the returned message alive while accessing the root via
+// message->getRoot<T>(). A previous version allocated the builder on the stack and returned
+// a Builder (which is just a pointer into the message's arena); that caused every caller to
+// dereference freed memory after the function returned.
+template <typename T>
+kj::Own<capnp::MallocMessageBuilder> decodeJsonResponse(kj::StringPtr response) {
+  auto message = kj::heap<capnp::MallocMessageBuilder>();
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<T>();
+  auto jsonRoot = message->initRoot<T>();
+  codec.decode(response, jsonRoot);
+  return message;
+}
 
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().

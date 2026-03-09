@@ -380,6 +380,14 @@ copy_file(
 )
 
 kj_test(
+    src = "container-client-test.c++",
+    deps = [
+        ":container-client",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
     src = "facet-tree-index-test.c++",
     deps = [
         ":facet-tree-index",
