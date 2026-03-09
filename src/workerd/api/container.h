@@ -77,10 +77,8 @@ class Container: public jsg::Object {
     JSG_METHOD(getTcpPort);
     JSG_METHOD(setInactivityTimeout);
 
-    if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(interceptOutboundHttp);
-      JSG_METHOD(interceptAllOutboundHttp);
-    }
+    JSG_METHOD(interceptOutboundHttp);
+    JSG_METHOD(interceptAllOutboundHttp);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
