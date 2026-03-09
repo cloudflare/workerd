@@ -28,7 +28,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     // Makes a request to the alarm manager to run the alarm handler at the given time, returning
     // a promise that resolves when the scheduling has succeeded. `priorTask` is any work we must
     // wait on prior to scheduling the new request, as of this writing, this would be the
-    // alarmLaterChain, which holds promises to move the alarm time "later" than is currently set.
+    // alarmLaterInFlight promise, which tracks any in-flight request to move the alarm "later"
+    // than is currently set.
     virtual kj::Promise<void> scheduleRun(
         kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask);
 
@@ -263,9 +264,19 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // for the output gate lock hold trace when a non-allowUnconfirmed write occurs.
   SpanParent currentCommitSpan = nullptr;
 
-  // Promise chain for serializing "move alarm later" operations to prevent races
-  // at the alarm manager. Each update waits for the previous one to complete.
-  kj::ForkedPromise<void> alarmLaterChain = kj::Promise<void>(kj::READY_NOW).fork();
+  // Promise for the currently in-flight "move alarm later" operation, if any.
+  // Used to serialize move-earlier operations against any pending move-later operation.
+  kj::ForkedPromise<void> alarmLaterInFlight = kj::Promise<void>(kj::READY_NOW).fork();
+
+  // True when a "move alarm later" request is currently in-flight via scheduleLaterAlarm().
+  bool alarmLaterIsInFlight = false;
+
+  // When a "move alarm later" request is already in-flight and we need to schedule another one,
+  // instead of chaining onto the promise (which can grow without bound), we just store the
+  // desired alarm time here. When the in-flight request completes, it checks this variable and
+  // starts a new request if needed. The outer Maybe indicates whether there is a pending time at
+  // all; the inner Maybe<Date> is the alarm time to set (where kj::none means "clear the alarm").
+  kj::Maybe<kj::Maybe<kj::Date>> pendingLaterAlarmTime;
 
   // Version counter that increments on every alarm change. Used to detect if another commit
   // modified the alarm while we were async, allowing us to skip redundant post-commit alarm
@@ -285,6 +296,12 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // when the request is confirmed.
   kj::Promise<void> requestScheduledAlarm(
       kj::Maybe<kj::Date> requestedTime, kj::Promise<void> priorTask);
+
+  // Schedules a "move alarm later" operation. If no move-later is currently in-flight, starts one
+  // immediately. If one is already in-flight, stores the desired time in `pendingLaterAlarmTime`
+  // so it will be picked up when the current in-flight operation completes. This prevents the
+  // promise chain from growing without bound.
+  void scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParent parentSpan);
 
   struct PrecommitAlarmState {
     // Promise for the completion of precommit alarm scheduling

@@ -1143,6 +1143,60 @@ KJ_TEST("rejected move-later alarm scheduling request does not break gate") {
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
 }
 
+KJ_TEST("rapid move-later alarm changes coalesce into bounded scheduleRun calls") {
+  // This test exercises the scenario that previously caused unbounded promise chain growth.
+  // When many commits each move the alarm time later while a scheduleRun is already in-flight,
+  // the scheduleLaterAlarm mechanism should coalesce them into at most one pending request,
+  // rather than chaining N promises (one per commit).
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Move alarm to 2ms.  The db commit completes, triggering a post-commit scheduleRun(2ms)
+  // since the alarm moved later.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+  // The first move-later scheduleRun starts.
+  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
+
+  // While 2ms scheduleRun is in-flight, move alarm to 3ms, 4ms, 5ms in rapid succession.
+  // Each commit completes immediately but the scheduleRun for 2ms is still pending.
+  // With the old unbounded chain, each of these would add a new promise to the chain,
+  // resulting in separate scheduleRun calls for 3ms, 4ms, and 5ms.
+  // With the fix, they should all coalesce: only the final value (5ms) should be scheduled
+  // after the 2ms scheduleRun completes.
+  test.setAlarm(threeMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});  // No new scheduleRun -- coalesced into pending.
+  KJ_ASSERT(expectSync(test.getAlarm()) == threeMs);
+
+  test.setAlarm(fourMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});  // No new scheduleRun -- coalesced into pending.
+  KJ_ASSERT(expectSync(test.getAlarm()) == fourMs);
+
+  test.setAlarm(fiveMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});  // No new scheduleRun -- coalesced into pending.
+  KJ_ASSERT(expectSync(test.getAlarm()) == fiveMs);
+
+  // Now fulfill the 2ms scheduleRun.  The coalesced pending time (5ms) should be scheduled next.
+  fulfiller2Ms->fulfill();
+  auto fulfiller5Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(5ms)"})[0]);
+  // Importantly, there is exactly one scheduleRun(5ms), not three separate calls for 3ms, 4ms, 5ms.
+
+  fulfiller5Ms->fulfill();
+  test.pollAndExpectCalls({});
+
+  KJ_ASSERT(expectSync(test.getAlarm()) == fiveMs);
+}
+
 KJ_TEST("an exception thrown during merged commits does not hang") {
   ActorSqliteTest test({.monitorOutputGate = false});
 
