@@ -12,7 +12,11 @@ wd_rust_crate(
     ],
     cxx_bridge_tags = ["no-clang-tidy"],
     visibility = ["//visibility:public"],
-    deps = [":ffi"],
+    deps = [
+        ":ffi",
+        "//src/workerd/io:compatibility-date_capnp_rust",
+        "@crates_vendor//:capnp",
+    ],
 )
 
 wd_cc_library(

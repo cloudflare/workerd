@@ -732,9 +732,12 @@ struct Worker::Isolate::Impl {
     kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
-      realm = ::workerd::rust::jsg::realm_create(lock->v8Isolate);
+      auto featureFlagsWords = capnp::canonicalize(api.getFeatureFlags());
+      realm = ::workerd::rust::jsg::realm_create(
+          lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
       lock->v8Isolate->SetData(
           ::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*KJ_REQUIRE_NONNULL(realm));
+
       limitEnforcer.customizeIsolate(lock->v8Isolate);
       if (inspectorPolicy != InspectorPolicy::DISALLOW) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.

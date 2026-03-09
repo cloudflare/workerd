@@ -8,7 +8,7 @@
 
 | Crate                | Purpose                                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------------------ |
-| `jsg/`               | Rust JSG bindings: `Lock`, `Ref<T>`, `Resource`, `Struct`, `Type`, `Realm`, module registration        |
+| `jsg/`               | Rust JSG bindings: `Lock`, `Ref<T>`, `Resource`, `Struct`, `Type`, `Realm`, `FeatureFlags`, module registration |
 | `jsg-macros/`        | Proc macros: `#[jsg_struct]`, `#[jsg_method]`, `#[jsg_resource]`, `#[jsg_oneof]`                       |
 | `jsg-test/`          | Test harness (`Harness`) for JSG Rust bindings                                                         |
 | `api/`               | Rust-implemented Node.js APIs; registers modules via `register_nodejs_modules()`                       |
@@ -30,3 +30,4 @@
 - **Linting**: `just clippy <crate>` — pedantic+nursery; `allow-unwrap-in-tests`
 - **Tests**: inline `#[cfg(test)]` modules; JSG tests use `jsg_test::Harness::run_in_context()`
 - **FFI pointers**: functions receiving raw pointers must be `unsafe fn` (see `jsg/README.md`)
+- **Feature flags**: `Lock::feature_flags()` returns a capnp `compatibility_flags::Reader` for the current worker. Use `lock.feature_flags().get_node_js_compat()`. Flags are parsed once and stored in the `Realm` at construction; C++ passes canonical capnp bytes to `realm_create()`. Schema: `src/workerd/io/compatibility-date.capnp`, generated Rust bindings: `compatibility_date_capnp` crate.
