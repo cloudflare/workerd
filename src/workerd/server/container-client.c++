@@ -162,16 +162,6 @@ kj::StringPtr signalToString(uint32_t signal) {
 }
 }  // namespace
 
-template <typename T>
-T::Builder decodeJsonResponse(kj::StringPtr response) {
-  capnp::JsonCodec codec;
-  codec.handleByAnnotation<T>();
-  capnp::MallocMessageBuilder message;
-  auto jsonRoot = message.initRoot<T>();
-  codec.decode(response, jsonRoot);
-  return jsonRoot;
-}
-
 ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::Timer& timer,
     kj::Network& network,
@@ -390,7 +380,8 @@ kj::Promise<ContainerClient::IPAMConfigResult> ContainerClient::getDockerBridgeI
   auto response = co_await dockerApiRequest(
       network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str("/networks/bridge"));
   if (response.statusCode == 200) {
-    auto jsonRoot = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
+    auto message = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
+    auto jsonRoot = message->getRoot<docker_api::Docker::NetworkInspectResponse>();
     auto ipamConfig = jsonRoot.getIpam().getConfig();
     if (ipamConfig.size() > 0) {
       auto config = ipamConfig[0];
@@ -417,7 +408,8 @@ kj::Promise<bool> ContainerClient::isDaemonIpv6Enabled() {
     co_return false;
   }
 
-  auto jsonRoot = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
+  auto message = decodeJsonResponse<docker_api::Docker::NetworkInspectResponse>(response.body);
+  auto jsonRoot = message->getRoot<docker_api::Docker::NetworkInspectResponse>();
   for (auto config: jsonRoot.getIpam().getConfig()) {
     // IPv6 subnets contain ':' (e.g. "fd00::/80", "2001:db8::/64")
     if (kj::StringPtr(config.getSubnet()).findFirst(':') != kj::none) {
@@ -513,7 +505,8 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
 
   JSG_REQUIRE(response.statusCode == 200, Error, "Container inspect failed");
   // Parse JSON response
-  auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(response.body);
+  auto message = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(response.body);
+  auto jsonRoot = message->getRoot<docker_api::Docker::ContainerInspectResponse>();
   kj::HashMap<uint16_t, uint16_t> portMappings;
   for (auto portMapping: jsonRoot.getNetworkSettings().getPorts().getObject()) {
     auto port = portMapping.getName();
@@ -567,7 +560,8 @@ kj::Promise<kj::Maybe<uint16_t>> ContainerClient::inspectSidecarEgressPort() {
 
   JSG_REQUIRE(response.statusCode == 200, Error, "Sidecar container inspect failed");
 
-  auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(response.body);
+  auto message = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(response.body);
+  auto jsonRoot = message->getRoot<docker_api::Docker::ContainerInspectResponse>();
 
   // Check if sidecar is actually running
   if (jsonRoot.hasState()) {
@@ -889,7 +883,8 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   JSG_REQUIRE(response.statusCode == 200, Error,
       "Monitoring container failed with: ", response.statusCode, " ", response.body);
 
-  auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
+  auto message = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
+  auto jsonRoot = message->getRoot<docker_api::Docker::ContainerMonitorResponse>();
   results.setExitCode(jsonRoot.getStatusCode());
 }
 
