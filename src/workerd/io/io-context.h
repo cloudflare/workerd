@@ -967,6 +967,16 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // TODO: Used for Cache PUT serialization.
   kj::Promise<void> cachePutSerializer;
 
+  // The timeout manager needs to live below `deleteQueue` because the promises may refer to
+  // objects in the queue.
+  //
+  // ATTENTION: `timeoutManager` MUST be declared before both `waitUntilTasks` and `tasks` so it
+  // outlives them. During TaskSet destruction, deferred callbacks (e.g. the one in Scheduler::wait
+  // that clears the timer slot via clearTimeoutImpl) still need a live timeoutManager. C++ destroys
+  // members in reverse declaration order, so declaring timeoutManager first ensures it is destroyed
+  // last among these three.
+  kj::Own<TimeoutManager> timeoutManager;
+
   kj::TaskSet waitUntilTasks;
   EventOutcome waitUntilStatusValue = EventOutcome::OK;
 
@@ -978,17 +988,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   uint addTaskCounter = 0;
   kj::TaskSet tasks;
-
-  // The timeout manager needs to live below `deleteQueue` because the promises may refer to
-  // objects in the queue.
-
-  // ATTENTION: `tasks` and `timeoutManager` MUST be destructed before any other member.
-  // If any other member is destructed after (is declared later in the class than) these two
-  // members, then there is a possibility that callbacks will attempt to use a partially or fully
-  // destructed IoContext object. For the same reason, any promises stored outside of the
-  // IoContext (e.g. in the ActorContext) MUST be canceled when the IoContext is
-  // destructed.
-  kj::Own<TimeoutManager> timeoutManager;
 
   // This canceler will be canceled when the IoContext is destroyed. Use it to wrap promises that
   // need to be held externally but which should error if the IoContext is canceled. This is used

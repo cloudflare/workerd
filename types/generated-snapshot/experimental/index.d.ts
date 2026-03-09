@@ -293,6 +293,7 @@ declare namespace WebAssembly {
 interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   DOMException: typeof DOMException;
   WorkerGlobalScope: typeof WorkerGlobalScope;
+  EventTarget: typeof EventTarget;
   btoa(data: string): string;
   atob(data: string): string;
   setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;
@@ -4546,16 +4547,6 @@ interface EventCounts {
 interface AiSearchInternalError extends Error {}
 interface AiSearchNotFoundError extends Error {}
 interface AiSearchNameNotSetError extends Error {}
-// Filter types (shared with AutoRAG for compatibility)
-type ComparisonFilter = {
-  key: string;
-  type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
-  value: string | number | boolean;
-};
-type CompoundFilter = {
-  type: "and" | "or";
-  filters: ComparisonFilter[];
-};
 // AI Search V2 Request Types
 type AiSearchSearchRequest = {
   messages: Array<{
@@ -4569,7 +4560,7 @@ type AiSearchSearchRequest = {
       match_threshold?: number;
       /** Maximum number of results (1-50, default 10) */
       max_num_results?: number;
-      filters?: CompoundFilter | ComparisonFilter;
+      filters?: VectorizeVectorMetadataFilter;
       /** Context expansion (0-3, default 0) */
       context_expansion?: number;
       [key: string]: unknown;
@@ -4603,7 +4594,7 @@ type AiSearchChatCompletionsRequest = {
       retrieval_type?: "vector" | "keyword" | "hybrid";
       match_threshold?: number;
       max_num_results?: number;
-      filters?: CompoundFilter | ComparisonFilter;
+      filters?: VectorizeVectorMetadataFilter;
       context_expansion?: number;
       [key: string]: unknown;
     };
@@ -10434,6 +10425,15 @@ interface AutoRAGUnauthorizedError extends Error {}
  * @see AiSearchNameNotSetError
  */
 interface AutoRAGNameNotSetError extends Error {}
+type ComparisonFilter = {
+  key: string;
+  type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+  value: string | number | boolean;
+};
+type CompoundFilter = {
+  type: "and" | "or";
+  filters: ComparisonFilter[];
+};
 /**
  * @deprecated AutoRAG has been replaced by AI Search.
  * Use AiSearchSearchRequest with the new API instead.
@@ -12653,15 +12653,18 @@ declare namespace CloudflareWorkersModule {
     timestamp: Date;
     type: string;
   };
+  export type WorkflowStepContext = {
+    attempt: number;
+  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
-      callback: () => Promise<T>,
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
-      callback: () => Promise<T>,
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
@@ -12759,6 +12762,7 @@ type ConversionOptions = {
       convertOGImage?: boolean;
     };
     hostname?: string;
+    cssSelector?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;

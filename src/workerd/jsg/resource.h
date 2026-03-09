@@ -1317,6 +1317,10 @@ struct ResourceTypeBuilder {
 
   template <const char* name, auto method>
   inline void registerMethod() {
+    // Per Web IDL, function .length = number of required arguments.
+    constexpr int specLength = requiredArgumentCount<decltype(method)>;
+    const int length = getSpecCompliantPropertyAttributes(isolate) ? specLength : 0;
+
     if constexpr (isFastApiCompatible<decltype(method)>) {
       if (typeWrapper.isFastApiEnabled()) {
         auto cFunction = v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self,
@@ -1324,7 +1328,7 @@ struct ResourceTypeBuilder {
         auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
             &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
                 ArgumentIndexes<decltype(method)>>::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
+            v8::Local<v8::Value>(), signature, length, v8::ConstructorBehavior::kThrow,
             v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
 
         prototype->Set(isolate, name, functionTemplate);
@@ -1336,11 +1340,15 @@ struct ResourceTypeBuilder {
         v8::FunctionTemplate::New(isolate,
             &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
                 ArgumentIndexes<decltype(method)>>::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow));
+            v8::Local<v8::Value>(), signature, length, v8::ConstructorBehavior::kThrow));
   }
 
   template <const char* name, typename Method, Method method>
   inline void registerStaticMethod() {
+    // Per Web IDL, function .length = number of required arguments.
+    constexpr int specLength = requiredArgumentCount<Method>;
+    const int length = getSpecCompliantPropertyAttributes(isolate) ? specLength : 0;
+
     if constexpr (isFastApiCompatible<Method>) {
       if (typeWrapper.isFastApiEnabled()) {
         auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name, Self, Method,
@@ -1352,8 +1360,8 @@ struct ResourceTypeBuilder {
         auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
             &StaticMethodCallback<TypeWrapper, name, Self, Method, method,
                 ArgumentIndexes<Method>>::callback,
-            v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
-            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+            v8::Local<v8::Value>(), v8::Local<v8::Signature>(), length,
+            v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
         functionTemplate->RemovePrototype();
         constructor->Set(v8StrIntern(isolate, name), functionTemplate);
         return;
@@ -1365,7 +1373,8 @@ struct ResourceTypeBuilder {
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
         &StaticMethodCallback<TypeWrapper, name, Self, Method, method,
             ArgumentIndexes<Method>>::callback,
-        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
+        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), length,
+        v8::ConstructorBehavior::kThrow);
     functionTemplate->RemovePrototype();
     constructor->Set(v8StrIntern(isolate, name), functionTemplate);
   }
@@ -1399,6 +1408,8 @@ struct ResourceTypeBuilder {
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
 
+    const bool specCompliant = getSpecCompliantPropertyAttributes(isolate);
+
     bool useSlowApi = true;
     if constexpr (isFastApiCompatible<Getter> && isFastApiCompatible<Setter>) {
       if (typeWrapper.isFastApiEnabled()) {
@@ -1409,8 +1420,9 @@ struct ResourceTypeBuilder {
 
         auto setterCFunction = v8::CFunction::Make(Scb::template fastCallback<>);
         setterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Scb::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
-            v8::SideEffectType::kHasSideEffect, {&setterCFunction, 1});
+            v8::Local<v8::Value>(), signature, specCompliant ? 1 : 0,
+            v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect,
+            {&setterCFunction, 1});
 
         useSlowApi = false;
       }
@@ -1421,8 +1433,22 @@ struct ResourceTypeBuilder {
       // properties because it will not properly handle the prototype chain when it comes
       // to using setters... which is annoying. It means we end up having to use FunctionTemplates
       // instead of the more convenient property callbacks.
-      getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
-      setterFn = v8::FunctionTemplate::New(isolate, &Scb::callback);
+      if (specCompliant) {
+        // Per Web IDL, getter .length = 0; setter .length = 1.
+        getterFn = v8::FunctionTemplate::New(
+            isolate, Gcb::callback, v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0);
+        setterFn = v8::FunctionTemplate::New(
+            isolate, &Scb::callback, v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 1);
+      } else {
+        getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
+        setterFn = v8::FunctionTemplate::New(isolate, &Scb::callback);
+      }
+    }
+
+    if (specCompliant) {
+      // Per Web IDL, getter .name = "get <name>", setter .name = "set <name>".
+      getterFn->SetClassName(v8Str(isolate, kj::str("get ", name)));
+      setterFn->SetClassName(v8Str(isolate, kj::str("set ", name)));
     }
 
     prototype->SetAccessorProperty(v8Name, getterFn, setterFn,
@@ -1459,7 +1485,15 @@ struct ResourceTypeBuilder {
     if (!Gcb::enumerable) {
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
-    auto getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
+    v8::Local<v8::FunctionTemplate> getterFn;
+    if (getSpecCompliantPropertyAttributes(isolate)) {
+      // Per Web IDL, getter .name = "get <name>", .length = 0.
+      getterFn = v8::FunctionTemplate::New(
+          isolate, Gcb::callback, v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0);
+      getterFn->SetClassName(v8Str(isolate, kj::str("get ", name)));
+    } else {
+      getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
+    }
 
     prototype->SetAccessorProperty(v8Name, getterFn, {},
         Gcb::enumerable ? v8::PropertyAttribute::ReadOnly
@@ -1508,8 +1542,13 @@ struct ResourceTypeBuilder {
     auto v8Name = v8StrIntern(isolate, name);
     auto v8Value = typeWrapper.wrap(isolate, kj::none, kj::mv(value));
 
-    constructor->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
-    constructor->PrototypeTemplate()->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
+    // Per Web IDL, constants are {writable: false, enumerable: true, configurable: false}.
+    const auto attrs = getSpecCompliantPropertyAttributes(isolate)
+        ? static_cast<v8::PropertyAttribute>(
+              v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontDelete)
+        : v8::PropertyAttribute::ReadOnly;
+    constructor->Set(v8Name, v8Value, attrs);
+    constructor->PrototypeTemplate()->Set(v8Name, v8Value, attrs);
   }
 
   template <const char* name, typename Getter, Getter getter>
@@ -1570,7 +1609,28 @@ struct ResourceTypeBuilder {
     static_assert(
         hasGetTemplate, "Type must be listed in JSG_DECLARE_ISOLATE_TYPE to be declared nested.");
 
-    prototype->Set(isolate, name, typeWrapper.getTemplate(isolate, static_cast<Type*>(nullptr)));
+    auto tmpl = typeWrapper.getTemplate(isolate, static_cast<Type*>(nullptr));
+
+    // Always install on the prototype so that types declared on parent classes are
+    // inherited through FunctionTemplate::Inherit().
+    prototype->Set(isolate, name, tmpl);
+
+    if constexpr (isContext) {
+      if (getSpecCompliantPropertyAttributes(isolate)) {
+        // Per Web IDL, [Exposed] interface objects must be own properties of the global
+        // object with { writable: true, enumerable: false, configurable: true }.  When
+        // building the global scope (isContext == true), also install on the instance
+        // template so that they become own properties of globalThis.
+        //
+        // NOTE: V8's FunctionTemplate::Inherit() does NOT propagate instance-template
+        // properties to child types.  This means nested types declared on a parent
+        // context type (e.g. WorkerGlobalScope) won't automatically appear as own
+        // properties of the child (e.g. ServiceWorkerGlobalScope).  To keep things
+        // simple, the leaf context type must declare all its nested types directly -
+        // don't rely on inheriting nested types from parent context classes.
+        instance->Set(isolate, name, tmpl, v8::PropertyAttribute::DontEnum);
+      }
+    }
   }
 
   inline void registerTypeScriptRoot() { /* only needed for RTTI */ }
@@ -1913,8 +1973,12 @@ class ResourceWrapper {
 
       v8::Local<v8::FunctionTemplate> constructor;
       if constexpr (!isContext && HasConstructorMethod<T>) {
+        // Per Web IDL, constructor .length = number of required arguments.
+        constexpr int specCtorLength = requiredArgumentCount<decltype(T::constructor)>;
+        const int ctorLength = getSpecCompliantPropertyAttributes(isolate) ? specCtorLength : 0;
         constructor =
-            v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback);
+            v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback,
+                v8::Local<v8::Value>(), v8::Local<v8::Signature>(), ctorLength);
       } else {
         constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
       }

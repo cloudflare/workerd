@@ -207,6 +207,14 @@ class IsolateBase {
     shouldSetImmutablePrototypeFlag = true;
   }
 
+  inline bool shouldUseSpecCompliantPropertyAttributes() const {
+    return specCompliantPropertyAttributesFlag;
+  }
+
+  void enableSpecCompliantPropertyAttributes() {
+    specCompliantPropertyAttributesFlag = true;
+  }
+
   inline void disableTopLevelAwait() {
     allowTopLevelAwait = false;
   }
@@ -363,6 +371,7 @@ class IsolateBase {
   bool requireReturnsDefaultExportEnabled = false;
   bool setToStringTag = false;
   bool shouldSetImmutablePrototypeFlag = false;
+  bool specCompliantPropertyAttributesFlag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;

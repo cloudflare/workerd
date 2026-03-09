@@ -16,6 +16,7 @@ type AiSearchService = object;
 interface Fetcher {
   fetch: typeof fetch;
   aiSearch: () => AiSearchService;
+  gateway: (gatewayId: string) => AiGateway;
 }
 
 interface AiError {
@@ -418,7 +419,10 @@ export class Ai {
     return service.transform(files, options);
   }
 
-  gateway(gatewayId: string): AiGateway {
+  gateway(gatewayId: string, options?: { beta?: boolean }): AiGateway {
+    if (options?.beta === true) {
+      return this.#fetcher.gateway(gatewayId);
+    }
     return new AiGateway(this.#fetcher, gatewayId);
   }
 

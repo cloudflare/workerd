@@ -410,16 +410,10 @@ export default {
     expectedFailures: [
       // Headers interface tests
       /^Headers interface/,
-      /^Headers must be primary interface/,
-      /^Stringification of new Headers/,
       // Request interface tests
       /^Request interface/,
-      /^Request must be primary interface/,
-      /^Stringification of new Request/,
       // Response interface tests
       /^Response interface/,
-      /^Response must be primary interface/,
-      /^Stringification of new Response/,
       // FetchLaterResult interface tests (not implemented)
       /^FetchLaterResult interface/,
       // Window interface tests (not applicable to workers)

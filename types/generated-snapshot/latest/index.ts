@@ -3907,16 +3907,6 @@ export declare abstract class Performance {
 export interface AiSearchInternalError extends Error {}
 export interface AiSearchNotFoundError extends Error {}
 export interface AiSearchNameNotSetError extends Error {}
-// Filter types (shared with AutoRAG for compatibility)
-export type ComparisonFilter = {
-  key: string;
-  type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
-  value: string | number | boolean;
-};
-export type CompoundFilter = {
-  type: "and" | "or";
-  filters: ComparisonFilter[];
-};
 // AI Search V2 Request Types
 export type AiSearchSearchRequest = {
   messages: Array<{
@@ -3930,7 +3920,7 @@ export type AiSearchSearchRequest = {
       match_threshold?: number;
       /** Maximum number of results (1-50, default 10) */
       max_num_results?: number;
-      filters?: CompoundFilter | ComparisonFilter;
+      filters?: VectorizeVectorMetadataFilter;
       /** Context expansion (0-3, default 0) */
       context_expansion?: number;
       [key: string]: unknown;
@@ -3964,7 +3954,7 @@ export type AiSearchChatCompletionsRequest = {
       retrieval_type?: "vector" | "keyword" | "hybrid";
       match_threshold?: number;
       max_num_results?: number;
-      filters?: CompoundFilter | ComparisonFilter;
+      filters?: VectorizeVectorMetadataFilter;
       context_expansion?: number;
       [key: string]: unknown;
     };
@@ -9798,6 +9788,15 @@ export interface AutoRAGUnauthorizedError extends Error {}
  * @see AiSearchNameNotSetError
  */
 export interface AutoRAGNameNotSetError extends Error {}
+export type ComparisonFilter = {
+  key: string;
+  type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+  value: string | number | boolean;
+};
+export type CompoundFilter = {
+  type: "and" | "or";
+  filters: ComparisonFilter[];
+};
 /**
  * @deprecated AutoRAG has been replaced by AI Search.
  * Use AiSearchSearchRequest with the new API instead.
@@ -11973,15 +11972,18 @@ export declare namespace CloudflareWorkersModule {
     timestamp: Date;
     type: string;
   };
+  export type WorkflowStepContext = {
+    attempt: number;
+  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
-      callback: () => Promise<T>,
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
-      callback: () => Promise<T>,
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
@@ -12069,6 +12071,7 @@ export type ConversionOptions = {
       convertOGImage?: boolean;
     };
     hostname?: string;
+    cssSelector?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;

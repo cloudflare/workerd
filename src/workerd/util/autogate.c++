@@ -25,8 +25,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "streaming-tail-worker"_kj;
     case AutogateKey::TAIL_STREAM_REFACTOR:
       return "tail-stream-refactor"_kj;
-    case AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH:
-      return "increase-external-memory-adjustment-for-fetch"_kj;
     case AutogateKey::RUST_BACKED_NODE_DNS:
       return "rust-backed-node-dns"_kj;
     case AutogateKey::RPC_USE_EXTERNAL_PUSHER:
@@ -69,7 +67,19 @@ bool Autogate::isEnabled(AutogateKey key) {
   return defaultResult;
 }
 
-void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates) {
+void Autogate::initAutogate(
+    capnp::List<capnp::Text>::Reader gates, IgnoreAllAutogatesEnv ignoreEnv) {
+  // If the WORKERD_ALL_AUTOGATES env var is set, enable all gates regardless of what
+  // was passed in. This ensures the @all-autogates test variant works even when
+  // initAutogate({}) is called early (e.g. by TestFixture), which would otherwise
+  // set globalAutogate to all-false and prevent isEnabled() from reaching its env var
+  // fallback.
+  //
+  // Callers (e.g. the production server) that manage the all-autogates behavior themselves and
+  // build selective gate configs can pass IgnoreAllAutogatesEnv::YES to skip this override.
+  if (!ignoreEnv && getenv("WORKERD_ALL_AUTOGATES") != nullptr) {
+    return initAllAutogates();
+  }
   globalAutogate = Autogate(gates);
 }
 

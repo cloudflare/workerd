@@ -1,4 +1,53 @@
 /**
+ * ESLint rule to require a Cloudflare copyright header at the top of every file.
+ *
+ * Requires files to start with:
+ *   // Copyright (c) <year or year-range> Cloudflare, Inc.
+ *   // Licensed under the Apache 2.0 license found in the LICENSE file or at:
+ *   //     https://opensource.org/licenses/Apache-2.0
+ */
+export const requireCopyrightHeader = {
+  meta: {
+    type: 'suggestion',
+    docs: {
+      description:
+        'Require a Cloudflare copyright header at the top of every file',
+    },
+    messages: {
+      missingHeader:
+        'File is missing the Cloudflare copyright header. Add the following at the top of the file:\n// Copyright (c) {{year}} Cloudflare, Inc.\n// Licensed under the Apache 2.0 license found in the LICENSE file or at:\n//     https://opensource.org/licenses/Apache-2.0',
+    },
+    fixable: 'code',
+    schema: [],
+  },
+  create(context) {
+    return {
+      Program(node) {
+        const sourceText = context.sourceCode.getText();
+        const headerPattern =
+          /^\/\/ Copyright \(c\) \d{4}(-\d{4})? Cloudflare, Inc\.\n\/\/ Licensed under the Apache 2\.0 license found in the LICENSE file or at:\n\/\/     https:\/\/opensource\.org\/licenses\/Apache-2\.0/;
+
+        if (!headerPattern.test(sourceText)) {
+          const year = new Date().getFullYear();
+          context.report({
+            node,
+            messageId: 'missingHeader',
+            data: { year: String(year) },
+            fix(fixer) {
+              const header =
+                `// Copyright (c) ${year} Cloudflare, Inc.\n` +
+                '// Licensed under the Apache 2.0 license found in the LICENSE file or at:\n' +
+                '//     https://opensource.org/licenses/Apache-2.0\n';
+              return fixer.insertTextBefore(node, header);
+            },
+          });
+        }
+      },
+    };
+  },
+};
+
+/**
  * ESLint rule to disallow re-exporting a namespace import as default.
  *
  * Disallows patterns like:
@@ -59,6 +108,7 @@ export const noExportDefaultOfImportStar = {
 
 export default {
   rules: {
+    'require-copyright-header': requireCopyrightHeader,
     'no-export-default-of-import-star': noExportDefaultOfImportStar,
   },
 };

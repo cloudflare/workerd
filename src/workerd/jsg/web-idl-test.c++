@@ -72,6 +72,80 @@ static_assert(webidl::hasDuplicateTypes<bool, char, int, int> == true);
 static_assert(webidl::FlattenedTypeTraits<kj::String, USVString>::stringTypeCount == 2);
 static_assert(webidl::FlattenedTypeTraits<kj::String, DOMString>::stringTypeCount == 2);
 
+// =====================================================================================
+// ArgumentIndexes tests (meta.h)
+
+// Member function - no magic param.
+struct Dummy {
+  int noMagic(int, double, bool);
+  int withLock(Lock&, int, double);
+  int withInfo(const v8::FunctionCallbackInfo<v8::Value>&, int);
+  int constNoMagic(int) const;
+  int constWithLock(Lock&, int, double) const;
+  int constWithInfo(const v8::FunctionCallbackInfo<v8::Value>&) const;
+};
+
+static_assert(
+    kj::isSameType<ArgumentIndexes<decltype(&Dummy::noMagic)>, kj::_::Indexes<0, 1, 2>>());
+static_assert(kj::isSameType<ArgumentIndexes<decltype(&Dummy::withLock)>, kj::_::Indexes<0, 1>>());
+static_assert(kj::isSameType<ArgumentIndexes<decltype(&Dummy::withInfo)>, kj::_::Indexes<0>>());
+static_assert(kj::isSameType<ArgumentIndexes<decltype(&Dummy::constNoMagic)>, kj::_::Indexes<0>>());
+static_assert(
+    kj::isSameType<ArgumentIndexes<decltype(&Dummy::constWithLock)>, kj::_::Indexes<0, 1>>());
+static_assert(kj::isSameType<ArgumentIndexes<decltype(&Dummy::constWithInfo)>, kj::_::Indexes<>>());
+
+// Free functions.
+static_assert(kj::isSameType<ArgumentIndexes<int(int, int)>, kj::_::Indexes<0, 1>>());
+static_assert(kj::isSameType<ArgumentIndexes<void(Lock&, int)>, kj::_::Indexes<0>>());
+static_assert(kj::isSameType<ArgumentIndexes<void()>, kj::_::Indexes<>>());
+
+// =====================================================================================
+// requiredArgumentCount tests (meta.h + web-idl.h)
+
+// All required - count equals total visible args.
+static_assert(requiredArgumentCount<int(int, double, bool)> == 3);
+static_assert(requiredArgumentCount<int(Lock&, int, double, bool)> == 3);
+
+// No args �� length is 0.
+static_assert(requiredArgumentCount<void()> == 0);
+static_assert(requiredArgumentCount<void(Lock&)> == 0);
+
+// Optional args stop the count.
+static_assert(requiredArgumentCount<void(int, Optional<int>)> == 1);
+static_assert(requiredArgumentCount<void(int, double, Optional<int>)> == 2);
+static_assert(requiredArgumentCount<void(Optional<int>)> == 0);
+static_assert(requiredArgumentCount<void(Lock&, int, Optional<int>)> == 1);
+
+// LenientOptional also stops the count.
+static_assert(requiredArgumentCount<void(int, LenientOptional<int>)> == 1);
+
+// TypeHandler<T> is invisible - does not count and does not stop.
+static_assert(requiredArgumentCount<void(TypeHandler<int>&, int, double)> == 2);
+static_assert(requiredArgumentCount<void(int, TypeHandler<int>&, double)> == 2);
+static_assert(requiredArgumentCount<void(int, TypeHandler<int>&, Optional<double>)> == 1);
+// Arguments following optionals are not counted
+static_assert(requiredArgumentCount<void(int, TypeHandler<int>&, Optional<double>, int)> == 1);
+
+// Arguments<T> is invisible - does not count and does not stop.
+static_assert(requiredArgumentCount<void(int, Arguments<int>)> == 1);
+
+// Member functions.
+static_assert(requiredArgumentCount<decltype(&Dummy::noMagic)> == 3);
+static_assert(requiredArgumentCount<decltype(&Dummy::withLock)> == 2);
+static_assert(requiredArgumentCount<decltype(&Dummy::withInfo)> == 1);
+static_assert(requiredArgumentCount<decltype(&Dummy::constNoMagic)> == 1);
+static_assert(requiredArgumentCount<decltype(&Dummy::constWithLock)> == 2);
+static_assert(requiredArgumentCount<decltype(&Dummy::constWithInfo)> == 0);
+
+// =====================================================================================
+// isValuelessArg tests (web-idl.h)
+
+static_assert(detail::isValuelessArg<TypeHandler<int>> == true);
+static_assert(detail::isValuelessArg<Arguments<int>> == true);
+static_assert(detail::isValuelessArg<int> == false);
+static_assert(detail::isValuelessArg<Optional<int>> == false);
+static_assert(detail::isValuelessArg<kj::String> == false);
+
 KJ_TEST("web-idl meta") {
   // Nothing to actually do here; tests are compile-time
 }

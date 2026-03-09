@@ -8,6 +8,7 @@
 // Type traits and concepts to help us map between C++ and Web IDL types.
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/meta.h>
 
 #include <kj/array.h>
 #include <kj/common.h>
@@ -332,3 +333,37 @@ struct UnionTypeValidator {
 };
 
 }  // namespace workerd::jsg::webidl
+
+// =======================================================================================
+// RequiredArgCount_ specialization — counts leading required (non-optional, non-valueless)
+// arguments in a tuple of JS-visible parameter types.
+//
+// This completes the definition of requiredArgumentCount<T> declared in meta.h.  We place
+// it here (rather than meta.h) because we need the full JSG type system: isOptional,
+// Optional<T>, LenientOptional<T>, TypeHandler<T>, Arguments<T>.
+
+namespace workerd::jsg::detail {
+
+// True for parameter types that do not consume a JS argument at all.
+template <typename T>
+constexpr bool isValuelessArg = false;
+template <typename T>
+constexpr bool isValuelessArg<TypeHandler<T>> = true;
+template <typename T>
+constexpr bool isValuelessArg<Arguments<T>> = true;
+
+template <>
+struct RequiredArgCount_<TypeList<>> {
+  static constexpr int value = 0;
+};
+
+template <typename Head, typename... Tail>
+struct RequiredArgCount_<TypeList<Head, Tail...>> {
+  using D = kj::Decay<Head>;
+  static constexpr int value = isValuelessArg<D>
+      ? RequiredArgCount_<TypeList<Tail...>>::value  // skip invisible args, continue
+      : (webidl::isOptional<D> ? 0                   // optional arg — stop counting required
+                               : 1 + RequiredArgCount_<TypeList<Tail...>>::value);
+};
+
+}  // namespace workerd::jsg::detail

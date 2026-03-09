@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { Server as HttpServer } from 'node-internal:internal_http_server';
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import type { Server as _Server } from 'node:https';

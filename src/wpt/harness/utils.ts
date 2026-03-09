@@ -33,7 +33,11 @@ import {
 } from './common';
 
 declare global {
-  var GLOBAL: { isWindow(): boolean; isWorker(): boolean };
+  var GLOBAL: {
+    isWindow(): boolean;
+    isWorker(): boolean;
+    isShadowRealm(): boolean;
+  };
 
   function done(): undefined;
   function subsetTestByKey<T>(
@@ -86,6 +90,9 @@ globalThis.GLOBAL = {
     return false;
   },
   isWorker(): boolean {
+    return false;
+  },
+  isShadowRealm(): boolean {
     return false;
   },
 };

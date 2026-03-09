@@ -9,7 +9,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
@@ -157,9 +156,9 @@ IoContext::IoContext(ThreadContext& thread,
       threadId(getThreadId()),
       deleteQueue(kj::arc<DeleteQueue>()),
       cachePutSerializer(kj::READY_NOW),
+      timeoutManager(kj::heap<TimeoutManagerImpl>()),
       waitUntilTasks(*this),
       tasks(*this),
-      timeoutManager(kj::heap<TimeoutManagerImpl>()),
       deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
@@ -942,15 +941,12 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   }
 
   // Subrequests use a lot of unaccounted C++ memory, so we adjust V8's external memory counter to
-  // pressure the GC and protect against OOMs. When the autogate is enabled, we apply this
-  // adjustment to ALL subrequests (not just fetch). We only apply this when the JS lock is held
-  // (i.e., when JS code initiated the subrequest); infrastructure paths that bypass JS don't need
-  // it.
-  if (util::Autogate::isEnabled(util::AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH)) {
-    KJ_IF_SOME(lock, currentLock) {
-      jsg::Lock& js = lock;
-      ret = ret.attach(js.getExternalMemoryAdjustment(8 * 1024));
-    }
+  // pressure the GC and protect against OOMs. We apply this adjustment to ALL subrequests (not
+  // just fetch). We only apply this when the JS lock is held (i.e., when JS code initiated the
+  // subrequest); infrastructure paths that bypass JS don't need it.
+  KJ_IF_SOME(lock, currentLock) {
+    jsg::Lock& js = lock;
+    ret = ret.attach(js.getExternalMemoryAdjustment(8 * 1024));
   }
 
   return kj::mv(ret);
@@ -1042,13 +1038,11 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   limitEnforcer->newSubrequest(false);
   auto ret = getIoChannelFactory().getCache();
 
-  // Apply external memory adjustment for Cache API subrequests when autogate is enabled (same as
-  // other subrequests in getSubrequestNoChecks).
-  if (util::Autogate::isEnabled(util::AutogateKey::INCREASE_EXTERNAL_MEMORY_ADJUSTMENT_FOR_FETCH)) {
-    KJ_IF_SOME(lock, currentLock) {
-      jsg::Lock& js = lock;
-      ret = ret.attach(js.getExternalMemoryAdjustment(8 * 1024));
-    }
+  // Apply external memory adjustment for Cache API subrequests (same as other subrequests in
+  // getSubrequestNoChecks).
+  KJ_IF_SOME(lock, currentLock) {
+    jsg::Lock& js = lock;
+    ret = ret.attach(js.getExternalMemoryAdjustment(8 * 1024));
   }
 
   return kj::mv(ret);
