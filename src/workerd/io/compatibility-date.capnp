@@ -1477,4 +1477,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #  - Interface objects (nested types) become own properties of globalThis
   #    with { writable: true, enumerable: false, configurable: true }, instead
   #    of being inherited from the prototype chain.
+
+  workflowsPreserveNonRetryableErrorMessage @170 :Bool
+      $compatEnableFlag("workflows_preserve_non_retryable_error_message")
+      $experimental;
+  # When enabled, if a Workflow step throws a NonRetryableError, the error message
+  # and name are preserved on the thrown exception instead of being replaced with
+  # a generic "NonRetryableError" string.
 }
