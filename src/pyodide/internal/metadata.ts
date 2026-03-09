@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 /**
  * This is an exception we should be throwing whenever there is something unexpected in our runtime
  * that is **not** a result of the user doing something wrong, i.e. it's an internal error that is

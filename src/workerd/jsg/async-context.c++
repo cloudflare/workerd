@@ -187,8 +187,7 @@ v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(Lock& js) {
 }
 
 void AsyncContextFrame::jsgVisitForGc(GcVisitor& visitor) {
-  for (auto& entry: storage) {
-    visitor.visit(entry.value);
-  }
+  // tracing will make the members weak and will allow
+  // them to be gc'd, which is not what we want.
 }
 }  // namespace workerd::jsg

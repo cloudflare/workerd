@@ -1382,7 +1382,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   containersPidNamespace @160 :Bool
     $compatEnableFlag("containers_pid_namespace")
     $compatDisableFlag("no_containers_pid_namespace")
-    $experimental;
+    $compatEnableDate("2026-04-01");
   # When enabled, containers attached to Durable Objects do NOT share the host PID namespace
   # (they get their own isolated PID namespace). When disabled (the default), containers share
   # the host PID namespace.
@@ -1463,8 +1463,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("spec_compliant_property_attributes")
       $compatDisableFlag("no_spec_compliant_property_attributes")
       $experimental;
-  # Fixes several Web IDL compliance issues on constructor, method, getter,
-  # and setter property attributes:
+  # Fixes several Web IDL compliance issues on property attributes:
   #  - Constructor .length reflects the number of required arguments instead
   #    of always being 0.
   #  - Method and static method .length reflects the number of required
@@ -1472,4 +1471,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #  - Getter .length is explicitly 0 and setter .length is 1.
   #  - Getter .name is "get <name>" and setter .name is "set <name>" per the
   #    Web IDL spec, instead of empty strings.
+  #  - Constants gain DontDelete (non-configurable) on both the constructor
+  #    and prototype, matching { writable: false, enumerable: true,
+  #    configurable: false } per Web IDL.
+  #  - Interface objects (nested types) become own properties of globalThis
+  #    with { writable: true, enumerable: false, configurable: true }, instead
+  #    of being inherited from the prototype chain.
 }

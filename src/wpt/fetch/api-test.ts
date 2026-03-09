@@ -410,7 +410,6 @@ export default {
     expectedFailures: [
       // Headers interface tests
       /^Headers interface/,
-      /^Headers must be primary interface/,
       // Request interface tests
       /^Request interface/,
       // Response interface tests
