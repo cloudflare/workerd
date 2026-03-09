@@ -8,14 +8,14 @@
  *   `await env.STREAM.videos.*`
  *   `await env.STREAM.watermarks.*`
  * - Per-video operations:
- *   `await env.STREAM.video(uid).downloads.*`
- *   `await env.STREAM.video(uid).captions.*`
+ *   `await env.STREAM.video(id).downloads.*`
+ *   `await env.STREAM.video(id).captions.*`
  *
  * Example usage:
  * ```ts
- * await env.STREAM.video(uid).downloads.create();
+ * await env.STREAM.video(id).downloads.create();
  *
- * const video = env.STREAM.video(uid)
+ * const video = env.STREAM.video(id)
  * const captions = video.captions.list();
  * const videoDetails = video.get()
  * ```
@@ -23,10 +23,10 @@
 interface StreamBinding {
   /**
    * Returns a handle scoped to a single video for per-video operations.
-   * @param uid The unique identifier for the video.
+   * @param id The unique identifier for the video.
    * @returns A handle for per-video operations.
    */
-  video(uid: string): StreamVideoHandle;
+  video(id: string): StreamVideoHandle;
   /**
    * Uploads a new video from a File.
    * @param file The video file to upload.
@@ -39,7 +39,7 @@ interface StreamBinding {
    * @param params Optional upload parameters.
    * @returns The uploaded video details.
    */
-  upload(url: string, params?: StreamUploadUrlParams): Promise<StreamVideo>;
+  upload(url: string, params?: StreamUrlUploadParams): Promise<StreamVideo>;
   /**
    * Creates a direct upload that allows video uploads without an API key.
    */
@@ -58,18 +58,18 @@ interface StreamVideoHandle {
   /**
    * The unique identifier for the video.
    */
-  uid: string;
+  id: string;
   /**
    * Get a full videos details
    * @returns The full video details.
    */
-  get(): Promise<StreamVideo>;
+  details(): Promise<StreamVideo>;
   /**
-   * Edit details for a single video.
+   * Update details for a single video.
    * @param params The fields to update for the video.
    * @returns The updated video details.
    */
-  edit(params: StreamEditVideoParams): Promise<StreamVideo>;
+  update(params: StreamUpdateVideoParams): Promise<StreamVideo>;
   /**
    * Deletes a video and its copies from Cloudflare Stream.
    * @returns A promise that resolves when deletion completes.
@@ -89,7 +89,7 @@ interface StreamVideo {
   /**
    * The unique identifier for the video.
    */
-  uid: string;
+  id: string;
   /**
    * A user-defined identifier for the media creator.
    */
@@ -180,13 +180,13 @@ interface StreamVideo {
    */
   watermark: StreamWatermark | null;
   /**
-   * The live input UID associated with the video, if any.
+   * The live input id associated with the video, if any.
    */
-  liveInput?: string | null;
+  liveInputId?: string | null;
   /**
-   * The source video UID if this is a clip.
+   * The source video id if this is a clip.
    */
-  clippedFrom: string | null;
+  clippedFromId: string | null;
   /**
    * Public details associated with the video.
    */
@@ -254,7 +254,7 @@ type StreamDirectUpload = {
   /**
    * A Cloudflare-generated unique identifier for a media item.
    */
-  uid: string;
+  id: string;
   /**
    * The watermark profile applied to the upload.
    */
@@ -288,7 +288,7 @@ type StreamDirectUploadCreateParams = {
    */
   allowedOrigins?: Array<string>;
   /**
-   * Indicates whether the video can be accessed using the UID. When set to `true`,
+   * Indicates whether the video can be accessed using the id. When set to `true`,
    * a signed token must be generated with a signing key to view the video.
    */
   requireSignedURLs?: boolean;
@@ -311,10 +311,10 @@ type StreamDirectUploadWatermark = {
   /**
    * The unique identifier for the watermark profile.
    */
-  uid: string;
+  id: string;
 };
 
-type StreamUploadUrlParams = {
+type StreamUrlUploadParams = {
   /**
    * Lists the origins allowed to display the video. Enter allowed origin
    * domains in an array and use `*` for wildcard subdomains. Empty arrays allow the
@@ -331,7 +331,7 @@ type StreamUploadUrlParams = {
    */
   meta?: Record<string, string>;
   /**
-   * Indicates whether the video can be a accessed using the UID. When
+   * Indicates whether the video can be a accessed using the id. When
    * set to `true`, a signed token must be generated with a signing key to view the
    * video.
    */
@@ -389,12 +389,14 @@ interface StreamScopedCaptions {
 
 interface StreamScopedDownloads {
   /**
-   * Creates a download for a video when a video is ready to view. Available
+   * Generates a download for a video when a video is ready to view. Available
    * types are `default` and `audio`. Defaults to `default` when omitted.
    * @param downloadType The download type to create.
    * @returns The current downloads for the video.
    */
-  create(downloadType?: StreamDownloadType): Promise<StreamDownloadGetResponse>;
+  generate(
+    downloadType?: StreamDownloadType
+  ): Promise<StreamDownloadGetResponse>;
   /**
    * Lists the downloads created for a video.
    * @returns The current downloads for the video.
@@ -414,27 +416,27 @@ interface StreamVideos {
    * Lists all videos in a users account.
    * @returns The list of videos.
    */
-  list(): Promise<StreamVideo[]>;
+  list(params?: StreamVideosListParams): Promise<StreamVideo[]>;
 }
 
 interface StreamWatermarks {
   /**
-   * Create a new watermark profile
+   * Generate a new watermark profile
    * @param file The image file to upload
    * @param params The watermark creation parameters.
    * @returns The created watermark profile.
    */
-  create(
+  generate(
     file: File,
     params: StreamWatermarkCreateParams
   ): Promise<StreamWatermark>;
   /**
-   * Create a new watermark profile
+   * Generate a new watermark profile
    * @param url The image url to upload
    * @param params The watermark creation parameters.
    * @returns The created watermark profile.
    */
-  create(
+  generate(
     url: string,
     params: StreamWatermarkCreateParams
   ): Promise<StreamWatermark>;
@@ -457,7 +459,7 @@ interface StreamWatermarks {
   delete(watermarkId: string): Promise<void>;
 }
 
-type StreamEditVideoParams = {
+type StreamUpdateVideoParams = {
   /**
    * Lists the origins allowed to display the video. Enter allowed origin
    * domains in an array and use `*` for wildcard subdomains. Empty arrays allow the
@@ -481,7 +483,7 @@ type StreamEditVideoParams = {
    */
   meta?: Record<string, string>;
   /**
-   * Indicates whether the video can be a accessed using the UID. When
+   * Indicates whether the video can be a accessed using the id. When
    * set to `true`, a signed token must be generated with a signing key to view the
    * video.
    */
@@ -567,7 +569,7 @@ type StreamWatermark = {
   /**
    * The unique identifier for a watermark profile.
    */
-  uid: string;
+  id: string;
   /**
    * The size of the image in bytes.
    */
@@ -646,12 +648,39 @@ type StreamWatermarkCreateParams = {
    */
   scale?: number;
   /**
-   * The location of the image. Valid positions are: `upperRight`, `upperLeft`,
-   * `lowerLeft`, `lowerRight`, and `center`. Note that `center` ignores the
-   * `padding` parameter.
+   * The location of the image.
    */
   position?: StreamWatermarkPosition;
 };
+
+type StreamVideosListParams = {
+  /**
+   * The maximum number of videos to return.
+   */
+  limit?: number;
+  /**
+   * Return videos created before this timestamp.
+   * (RFC3339/RFC3339Nano)
+   */
+  before?: string;
+  /**
+   * Comparison operator for the `before` field.
+   * @default 'lt'
+   */
+  beforeComp?: StreamPaginationComparison;
+  /**
+   * Return videos created after this timestamp.
+   * (RFC3339/RFC3339Nano)
+   */
+  after?: string;
+  /**
+   * Comparison operator for the `after` field.
+   * @default 'gte'
+   */
+  afterComp?: StreamPaginationComparison;
+};
+
+type StreamPaginationComparison = 'eq' | 'gt' | 'gte' | 'lt' | 'lte';
 
 /**
  * Error object for Stream binding operations.
