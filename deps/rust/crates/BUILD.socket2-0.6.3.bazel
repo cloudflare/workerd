@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "windows_targets",
+    name = "socket2",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,9 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "all",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,18 +38,27 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=windows-targets",
+        "crate-name=socket2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.53.5",
+    version = "0.6.3",
     deps = select({
+        "@rules_rust//rust/platform:aarch64-apple-darwin": [
+            "@crates_vendor__libc-0.2.183//:libc",  # cfg(any(unix, target_os = "wasi"))
+        ],
+        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
+            "@crates_vendor__libc-0.2.183//:libc",  # cfg(any(unix, target_os = "wasi"))
+        ],
+        "@rules_rust//rust/platform:x86_64-apple-darwin": [
+            "@crates_vendor__libc-0.2.183//:libc",  # cfg(any(unix, target_os = "wasi"))
+        ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__windows_x86_64_msvc-0.53.1//:windows_x86_64_msvc",  # cfg(all(any(target_arch = "x86_64", target_arch = "arm64ec"), target_env = "msvc", not(windows_raw_dylib)))
+            "@crates_vendor__windows-sys-0.61.2//:windows_sys",  # cfg(windows)
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__windows_x86_64_gnu-0.53.1//:windows_x86_64_gnu",  # cfg(all(target_arch = "x86_64", target_env = "gnu", not(target_abi = "llvm"), not(windows_raw_dylib)))
+            "@crates_vendor__libc-0.2.183//:libc",  # cfg(any(unix, target_os = "wasi"))
         ],
         "//conditions:default": [],
     }),
