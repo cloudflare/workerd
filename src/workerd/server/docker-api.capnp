@@ -313,6 +313,7 @@ struct Docker {
     id @0 :Text $Json.name("Id");
     warning @1 :Text $Json.name("Warning");
   }
+
 }
 
 struct ProxyEverything {

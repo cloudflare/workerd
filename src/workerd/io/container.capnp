@@ -119,8 +119,19 @@ interface Container @0x9aaceefc06523bca {
   # Configures egress HTTP routing for the container. When the container attempts to connect to the
   # specified host:port, the connection should be routed back to the Workers runtime using the channel token.
   # The format of hostPort can be '<ip|cidr>[':'<port>]'. If port is omitted, it's assumed to only cover port 80.
-  # This method does not support HTTPs yet.
 
+  setEgressHttps @9 (sniGlob :Text, channelToken :Data);
+  # Intercepts outbound TLS connections whose SNI matches `sniGlob`, routing decrypted
+  # HTTP to the worker binding identified by `channelToken`. The runtime must ensure
+  # the container trusts the interception CA.
+  #
+  # sniGlob: glob pattern for TLS SNI hostnames (e.g. "*.example.com", "*").
+  #   "*.example.com" matches any subdomain including nested ones like "a.b.example.com".
+  # channelToken: opaque token identifying the worker binding to route requests to.
+  #
+  # This method does not support specifying ports as it's designed for traffic firewall
+  # of internet access of the container through Workers. To hit a Worker in another
+  # port that is not 443, use setEgressHttp.
 
   # TODO: setEgressTcp
 }
