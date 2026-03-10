@@ -4,9 +4,12 @@
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 #include <workerd/rust/jsg/ffi-inl.h>
+#include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
 #include <kj/common.h>
+
+#include <memory>
 
 using namespace kj_rs;
 
@@ -45,6 +48,24 @@ namespace workerd::rust::jsg {
   }
 
 // =============================================================================
+
+// Wrappable implementation - calls into Rust via CXX bridge
+Wrappable::~Wrappable() {
+  wrappable_invoke_drop(*this);
+}
+
+void Wrappable::jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) {
+  auto ffi_visitor = to_ffi(&visitor);
+  wrappable_invoke_trace(*this, &ffi_visitor);
+}
+
+kj::StringPtr Wrappable::jsgGetMemoryName() const {
+  return wrappable_invoke_get_name(*this);
+}
+
+size_t Wrappable::jsgGetMemorySelfSize() const {
+  return sizeof(Wrappable);
+}
 
 // Local<T>
 void local_drop(Local value) {
@@ -254,20 +275,27 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback) {
-  auto self = reinterpret_cast<void*>(resource);
+Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl) {
+  // Check if already wrapped
+  KJ_IF_SOME(handle, wrappable->tryGetHandle(isolate)) {
+    return to_ffi(v8::Local<v8::Value>::Cast(handle));
+  }
+
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
   auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
   v8::Local<v8::Object> object = ::workerd::jsg::check(
       local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
+
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
+  wrappable->attachWrapper(isolate, object, true);
+
+  // Override tag to identify as Rust object for unwrapping
   auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
   object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
       tagAddress,
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
-  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
-      self,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
-  return to_ffi(kj::mv(object));
+
+  return to_ffi(v8::Local<v8::Value>::Cast(object));
 }
 
 // Unwrappers
@@ -291,16 +319,26 @@ double unwrap_number(Isolate* isolate, Local value) {
       ->Value();
 }
 
-size_t unwrap_resource(Isolate* isolate, Local value) {
-  auto v8_obj = local_from_ffi<v8::Object>(kj::mv(value));
-  KJ_ASSERT(v8_obj->GetAlignedPointerFromInternalField(
-                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
-                static_cast<v8::EmbedderDataTypeTag>(
-                    ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX)) ==
-      const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG));
-  return reinterpret_cast<size_t>(v8_obj->GetAlignedPointerFromInternalField(
-      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
-      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
+kj::Rc<Wrappable> unwrap_resource(Isolate* isolate, Local value) {
+  auto v8_val = local_from_ffi<v8::Value>(kj::mv(value));
+  // Non-object values (numbers, strings, booleans, etc.) are never wrapped resources.
+  if (!v8_val->IsObject()) return nullptr;
+  auto v8_obj = v8_val.As<v8::Object>();
+  // Plain JS objects have no internal fields; check before reading to avoid V8 fatal error.
+  if (v8_obj->InternalFieldCount() < ::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT ||
+      v8_obj->GetAlignedPointerFromInternalField(
+          ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+          static_cast<v8::EmbedderDataTypeTag>(
+              ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX)) !=
+          const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG)) {
+    return nullptr;
+  }
+  auto* ptr = static_cast<Wrappable*>(
+      reinterpret_cast<::workerd::jsg::Wrappable*>(v8_obj->GetAlignedPointerFromInternalField(
+          ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+          static_cast<v8::EmbedderDataTypeTag>(
+              ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX))));
+  return ptr->toRc();
 }
 
 // TypedArray unwrap functions
@@ -363,8 +401,9 @@ DEFINE_TYPED_ARRAY_GET(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_GET(biguint64_array, BigUint64Array, uint64_t)
 
 // Global<T>
-void global_drop(Global value) {
-  global_from_ffi<v8::Value>(kj::mv(value));
+void global_reset(Global* value) {
+  auto* glbl = global_as_ref_from_ffi<v8::Value>(*value);
+  glbl->Reset();
 }
 
 Global global_clone(const Global& value) {
@@ -377,13 +416,59 @@ Local global_to_local(Isolate* isolate, const Global& value) {
   return to_ffi(kj::mv(local));
 }
 
-void global_make_weak(Isolate* isolate, Global* value, size_t data, WeakCallback callback) {
-  // callback is unused; GC-based cleanup not yet implemented.
-  // Cleanup happens in Realm::drop() during context disposal.
-  auto glbl = global_as_ref_from_ffi<v8::Object>(*value);
-  glbl->SetWeak(reinterpret_cast<void*>(data), [](const v8::WeakCallbackInfo<void>& info) {
-    KJ_UNIMPLEMENTED("global_make_weak");
-  }, v8::WeakCallbackType::kParameter);
+// Wrappable - data access (used by wrappable_invoke_* callbacks from C++)
+const uintptr_t* wrappable_data(const Wrappable& wrappable) {
+  return wrappable.data;
+}
+
+// Wrappable lifecycle
+kj::Rc<Wrappable> wrappable_new(uintptr_t data_ptr, uintptr_t vtable_ptr) {
+  auto rc = kj::rc<Wrappable>();
+  rc->data[0] = data_ptr;
+  rc->data[1] = vtable_ptr;
+  rc->addStrongRef();
+  return kj::mv(rc);
+}
+
+kj::Rc<Wrappable> wrappable_to_rc(Wrappable& wrappable) {
+  return wrappable.toRc();
+}
+
+void wrappable_add_strong_ref(Wrappable& wrappable) {
+  wrappable.addStrongRef();
+}
+
+void wrappable_remove_strong_ref(Wrappable& wrappable) {
+  // maybeDeferDestruction() requires a kj::Own<Wrappable> to take ownership of.
+  // We must temporarily increment the refcount via addRef() to create that handle.
+  //
+  // Refcount accounting:
+  //   addRef(wrappable)      �� +1 (creates `own`)
+  //   maybeDeferDestruction  → internally stores `own` in RefToDelete
+  //   ~RefToDelete           → calls removeStrongRef() for GC tracking, drops `own` → -1
+  // Net effect: 0 (the actual kj::Rc decrement happens later when Rust drops the KjRc).
+  auto own = kj::addRef(wrappable);
+  wrappable.maybeDeferDestruction(true, kj::mv(own), &wrappable);
+}
+
+void wrappable_visit_ref(
+    Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor) {
+  auto* gcVisitor = gc_visitor_from_ffi(visitor);
+
+  // Convert opaque uintptr_t to kj::Maybe<Wrappable&>
+  kj::Maybe<::workerd::jsg::Wrappable&> parentMaybe;
+  if (*ref_parent != 0) {
+    parentMaybe = *reinterpret_cast<::workerd::jsg::Wrappable*>(*ref_parent);
+  }
+
+  wrappable.visitRef(*gcVisitor, parentMaybe, *ref_strong);
+
+  // Write back
+  KJ_IF_SOME(p, parentMaybe) {
+    *ref_parent = reinterpret_cast<uintptr_t>(&p);
+  } else {
+    *ref_parent = 0;
+  }
 }
 
 // FunctionCallbackInfo
@@ -435,13 +520,6 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     prototype->Set(v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
   }
 
-  // Previously, miniflare would use the lack of a Symbol.toStringTag on a class to
-  // detect a type that came from the runtime. That's obviously a bit problematic because
-  // Symbol.toStringTag is required for full compliance on standard web platform APIs.
-  // To help use cases where it is necessary to detect if a class is a runtime class, we
-  // will add a special symbol to the prototype of the class to indicate. Note that
-  // because this uses the global symbol registry user code could still mark their own
-  // classes with this symbol but that's unlikely to be a problem in any practical case.
   auto internalMarker =
       v8::Symbol::For(isolate, ::workerd::jsg::v8StrIntern(isolate, "cloudflare:internal-class"));
   prototype->Set(internalMarker, internalMarker,
@@ -449,17 +527,6 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
           v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
 
   constructor->SetClassName(classname);
-
-  // auto& typeWrapper = static_cast<TypeWrapper&>(*this);
-
-  // ResourceTypeBuilder<TypeWrapper, T, isContext> builder(
-  //     typeWrapper, isolate, constructor, instance, prototype, signature);
-
-  // if constexpr (isDetected<GetConfiguration, T>()) {
-  //   T::template registerMembers<decltype(builder), T>(builder, configuration);
-  // } else {
-  //   T::template registerMembers<decltype(builder), T>(builder);
-  // }
 
   for (const auto& method: descriptor.static_methods) {
     auto functionTemplate = v8::FunctionTemplate::New(isolate,

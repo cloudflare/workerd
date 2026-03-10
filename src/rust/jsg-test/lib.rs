@@ -12,7 +12,6 @@ mod ffi {
     #[namespace = "workerd::rust::jsg"]
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
-
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
     }
@@ -25,7 +24,6 @@ mod ffi {
 
     unsafe extern "C++" {
         include!("workerd/rust/jsg-test/ffi.h");
-
         type TestHarness;
         type EvalContext;
 
@@ -38,6 +36,20 @@ mod ffi {
 
         pub unsafe fn eval(self: &EvalContext, code: &str) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
+
+        /// Triggers a full garbage collection for testing purposes.
+        /// Note: For GC to actually collect objects, they must not be reachable from the
+        /// current HandleScope.
+        #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
+        #[allow(dead_code)]
+        pub unsafe fn request_gc(isolate: *mut Isolate);
+
+        /// Creates a V8 object with the C++ `WORKERD_WRAPPABLE_TAG` in its internal fields.
+        /// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn create_cpp_tagged_object(isolate: *mut Isolate) -> Local;
+
     }
 }
 
@@ -106,6 +118,30 @@ impl EvalContext<'_> {
         }
     }
 
+    /// Evaluates JavaScript and returns the raw `Local<Value>` without type conversion.
+    pub fn eval_raw<'a>(
+        &self,
+        lock: &mut jsg::Lock,
+        code: &str,
+    ) -> Result<v8::Local<'a, v8::Value>, EvalError<'a>> {
+        let _ = lock; // proves isolate lock is held
+        let result = unsafe { self.inner.eval(code) };
+        let opt_local: Option<v8::ffi::Local> = result.value.into();
+        if result.success {
+            match opt_local {
+                Some(local) => Ok(unsafe { v8::Local::from_ffi(self.isolate, local) }),
+                None => unreachable!(),
+            }
+        } else {
+            match opt_local {
+                Some(local) => Err(EvalError::Exception(unsafe {
+                    v8::Local::from_ffi(self.isolate, local)
+                })),
+                None => Err(EvalError::EvalFailed),
+            }
+        }
+    }
+
     pub fn set_global(&self, name: &str, value: v8::Local<v8::Value>) {
         unsafe { self.inner.set_global(name, value.into_ffi()) }
     }
@@ -154,6 +190,21 @@ impl Harness {
         unsafe {
             self.0
                 .run_in_context(&raw mut callback as usize, trampoline::<F>);
+        }
+    }
+
+    pub fn request_gc(lock: &mut jsg::Lock) {
+        unsafe {
+            ffi::request_gc(lock.isolate().as_ffi());
+        }
+    }
+
+    /// Creates a V8 object tagged with the C++ `WORKERD_WRAPPABLE_TAG`.
+    /// Used to test that Rust unwrap rejects non-Rust wrappable objects.
+    pub fn create_cpp_tagged_object<'a>(lock: &mut jsg::Lock) -> v8::Local<'a, v8::Value> {
+        unsafe {
+            let local = ffi::create_cpp_tagged_object(lock.isolate().as_ffi());
+            v8::Local::from_ffi(lock.isolate(), local)
         }
     }
 }
