@@ -245,14 +245,11 @@ function isDrawTransformer(input: unknown): input is DrawTransformer {
 }
 
 interface ServiceEntrypointStub {
-  details(imageId: string): Promise<ImageMetadata | null>;
-  image(imageId: string): Promise<ReadableStream<Uint8Array> | null>;
+  image(imageId: string): ImageHandle;
   upload(
     image: ReadableStream<Uint8Array> | ArrayBuffer,
     options?: ImageUploadOptions
   ): Promise<ImageMetadata>;
-  update(imageId: string, options: ImageUpdateOptions): Promise<ImageMetadata>;
-  delete(imageId: string): Promise<boolean>;
   list(options?: ImageListOptions): Promise<ImageList>;
 }
 
@@ -263,11 +260,7 @@ class HostedImagesBindingImpl implements HostedImagesBinding {
     this.#fetcher = fetcher;
   }
 
-  async details(imageId: string): Promise<ImageMetadata | null> {
-    return this.#fetcher.details(imageId);
-  }
-
-  async image(imageId: string): Promise<ReadableStream<Uint8Array> | null> {
+  image(imageId: string): ImageHandle {
     return this.#fetcher.image(imageId);
   }
 
@@ -276,17 +269,6 @@ class HostedImagesBindingImpl implements HostedImagesBinding {
     options?: ImageUploadOptions
   ): Promise<ImageMetadata> {
     return this.#fetcher.upload(image, options);
-  }
-
-  async update(
-    imageId: string,
-    options: ImageUpdateOptions
-  ): Promise<ImageMetadata> {
-    return this.#fetcher.update(imageId, options);
-  }
-
-  async delete(imageId: string): Promise<boolean> {
-    return this.#fetcher.delete(imageId);
   }
 
   async list(options?: ImageListOptions): Promise<ImageList> {
