@@ -42,7 +42,7 @@ rust_proc_macro(
     ],
     version = "0.2.114",
     deps = [
-        "@crates_vendor__quote-1.0.44//:quote",
+        "@crates_vendor__quote-1.0.45//:quote",
         "@crates_vendor__wasm-bindgen-macro-support-0.2.114//:wasm_bindgen_macro_support",
     ],
 )
