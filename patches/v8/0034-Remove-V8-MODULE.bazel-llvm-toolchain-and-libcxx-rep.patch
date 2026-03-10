@@ -1,0 +1,292 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Workerd Maintainers <workers-dev@cloudflare.com>
+Date: Wed, 4 Mar 2026 12:37:49 -0800
+Subject: Remove V8 MODULE.bazel llvm toolchain and libcxx repo rules
+
+These reference third_party/ sources that are not present in the GitHub
+tarball. Workerd provides its own toolchain, so these are not needed.
+
+diff --git a/MODULE.bazel b/MODULE.bazel
+index 7d7ba53b579605a6f469fe01ddf699d1284110e3..7ddd8259e790ebbfce0bfbb08e08ed4130592f9b 100644
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -22,167 +22,7 @@ pip.parse(
+ )
+ use_repo(pip, "v8_python_deps")
+ 
+-# Define the local LLVM toolchain repository
+-llvm_toolchain_repository = use_repo_rule("//bazel/toolchain:llvm_repository.bzl", "llvm_toolchain_repository")
+ 
+-llvm_toolchain_repository(
+-    name = "llvm_toolchain",
+-    path = "third_party/llvm-build/Release+Asserts",
+-    config_file_content = """
+-load("@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl", "feature", "flag_group", "flag_set", "tool_path")
+-
+-def _impl(ctx):
+-    tool_paths = [
+-        tool_path(name = "gcc", path = "bin/clang"),
+-        tool_path(name = "ld", path = "bin/lld"),
+-        tool_path(name = "ar", path = "bin/llvm-ar"),
+-        tool_path(name = "cpp", path = "bin/clang++"),
+-        tool_path(name = "gcov", path = "/bin/false"),
+-        tool_path(name = "nm", path = "bin/llvm-nm"),
+-        tool_path(name = "objdump", path = "bin/llvm-objdump"),
+-        tool_path(name = "strip", path = "bin/llvm-strip"),
+-    ]
+-
+-    features = [
+-        feature(
+-            name = "default_compile_flags",
+-            enabled = True,
+-            flag_sets = [
+-                flag_set(
+-                    actions = [
+-                        "c-compile",
+-                        "c++-compile",
+-                        "c++-header-parsing",
+-                        "c++-module-compile",
+-                        "c++-module-codegen",
+-                        "linkstamp-compile",
+-                        "assemble",
+-                        "preprocess-assemble",
+-                    ],
+-                    flag_groups = [
+-                        flag_group(
+-                            flags = [
+-                                "--sysroot={WORKSPACE_ROOT}/build/linux/debian_bullseye_amd64-sysroot",
+-                                "-nostdinc++",
+-                                "-isystem",
+-                                "{WORKSPACE_ROOT}/buildtools/third_party/libc++",
+-                                "-isystem",
+-                                "{WORKSPACE_ROOT}/third_party/libc++/src/include",
+-                                "-isystem",
+-                                "{WORKSPACE_ROOT}/third_party/libc++abi/src/include",
+-                                "-isystem",
+-                                "{WORKSPACE_ROOT}/third_party/libc++/src/src",
+-                                "-isystem",
+-                                "{WORKSPACE_ROOT}/third_party/llvm-libc/src",
+-                                "-D_LIBCPP_HARDENING_MODE_DEFAULT=_LIBCPP_HARDENING_MODE_NONE",
+-                                "-DLIBC_NAMESPACE=__llvm_libc_cr",
+-                            ],
+-                        ),
+-                    ],
+-                ),
+-            ],
+-        ),
+-        feature(
+-            name = "default_linker_flags",
+-            enabled = True,
+-            flag_sets = [
+-                flag_set(
+-                    actions = [
+-                        "c++-link-executable",
+-                        "c++-link-dynamic-library",
+-                        "c++-link-nodeps-dynamic-library",
+-                    ],
+-                    flag_groups = [
+-                        flag_group(
+-                            flags = [
+-                                "--sysroot={WORKSPACE_ROOT}/build/linux/debian_bullseye_amd64-sysroot",
+-                                "-fuse-ld=lld",
+-                                "-lm",
+-                                "-lpthread",
+-                            ],
+-                        ),
+-                    ],
+-                ),
+-            ],
+-        ),
+-    ]
+-
+-    return cc_common.create_cc_toolchain_config_info(
+-        ctx = ctx,
+-        features = features,
+-        cxx_builtin_include_directories = [
+-            "{WORKSPACE_ROOT}/buildtools/third_party/libc++",
+-            "{WORKSPACE_ROOT}/third_party/libc++/src/include",
+-            "{WORKSPACE_ROOT}/third_party/libc++abi/src/include",
+-            "{WORKSPACE_ROOT}/third_party/libc++/src/src",
+-            "{WORKSPACE_ROOT}/third_party/llvm-libc/src",
+-            "{WORKSPACE_ROOT}/third_party/llvm-build/Release+Asserts/lib/clang/22/include",
+-            "{WORKSPACE_ROOT}/third_party/llvm-build/Release+Asserts/lib/clang/23/include",
+-            "{WORKSPACE_ROOT}/build/linux/debian_bullseye_amd64-sysroot/usr/include",
+-            "{WORKSPACE_ROOT}/build/linux/debian_bullseye_amd64-sysroot/usr/local/include",
+-        ],
+-        toolchain_identifier = "local_clang",
+-        host_system_name = "local",
+-        target_system_name = "local",
+-        target_cpu = "k8",
+-        target_libc = "unknown",
+-        compiler = "clang",
+-        abi_version = "unknown",
+-        abi_libc_version = "unknown",
+-        tool_paths = tool_paths,
+-    )
+-
+-cc_toolchain_config = rule(
+-    implementation = _impl,
+-    attrs = {},
+-    provides = [CcToolchainConfigInfo],
+-)
+-""",
+-    build_file_content = """
+-load(":cc_toolchain_config.bzl", "cc_toolchain_config")
+-
+-package(default_visibility = ["//visibility:public"])
+-
+-filegroup(
+-    name = "all_files",
+-    srcs = glob(["**/*"]),
+-)
+-
+-filegroup(name = "empty")
+-
+-cc_toolchain_config(name = "k8_toolchain_config")
+-
+-cc_toolchain(
+-    name = "k8_toolchain",
+-    all_files = ":all_files",
+-    ar_files = ":all_files",
+-    compiler_files = ":all_files",
+-    dwp_files = ":empty",
+-    linker_files = ":all_files",
+-    objcopy_files = ":all_files",
+-    strip_files = ":all_files",
+-    supports_param_files = 0,
+-    toolchain_config = ":k8_toolchain_config",
+-    toolchain_identifier = "local_clang",
+-)
+-
+-toolchain(
+-    name = "cc_toolchain_k8",
+-    exec_compatible_with = [
+-        "@platforms//cpu:x86_64",
+-        "@platforms//os:linux",
+-    ],
+-    target_compatible_with = [
+-        "@platforms//cpu:x86_64",
+-        "@platforms//os:linux",
+-    ],
+-    toolchain = ":k8_toolchain",
+-    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+-)
+-""",
+-)
+-
+-register_toolchains("@llvm_toolchain//:cc_toolchain_k8")
+ 
+ # Define local repository for libc++ from third_party sources
+ libcxx_repository = use_repo_rule("//bazel/toolchain:libcxx_repository.bzl", "libcxx_repository")
+diff --git a/bazel/toolchain/libcxx_repository.bzl b/bazel/toolchain/libcxx_repository.bzl
+index a7d5f11053dd333c5bec614c27168a0effb7b4aa..ed367ef64871133867e9eccb07c6482a4de08ceb 100644
+--- a/bazel/toolchain/libcxx_repository.bzl
++++ b/bazel/toolchain/libcxx_repository.bzl
+@@ -1,99 +1,17 @@
+-"""Repository rule for building libc++ from third_party sources."""
++"""Stub repository rule: workerd uses the system/toolchain libc++, so @libcxx
++is an empty shim that satisfies the dep in bazel/defs.bzl without pulling in
++any third_party sources."""
+ 
+ def _libcxx_repository_impl(ctx):
+-    # Find the workspace root
+-    workspace_root = ctx.path(Label("@//:BUILD.bazel")).dirname
+-
+-    # Symlink the source directories
+-    ctx.symlink(workspace_root.get_child("third_party").get_child("libc++"), "libc++")
+-    ctx.symlink(workspace_root.get_child("third_party").get_child("libc++abi"), "libc++abi")
+-    ctx.symlink(workspace_root.get_child("third_party").get_child("llvm-libc"), "llvm-libc")
+-    ctx.symlink(workspace_root.get_child("buildtools").get_child("third_party").get_child("libc++"), "buildtools_libc++")
+-
+-    # Get the external repository path for include flags
+-    # In bzlmod, repo names may have prefixes, so we need to determine the actual path
+-    repo_path = "external/" + ctx.name
+-
+-    # Create the BUILD file
+-    # NOTE: We don't use 'includes' attribute here because it creates relative paths
+-    # that conflict with the toolchain's absolute paths, breaking #include_next.
+-    # The toolchain provides the libc++ include paths via -isystem flags.
+-    build_content = '''
++    ctx.file("BUILD.bazel", """
+ package(default_visibility = ["//visibility:public"])
+ 
+-LIBCXX_COPTS = [
+-    "-std=c++23",
+-    "-fPIC",
+-    "-fstrict-aliasing",
+-    "-fexceptions",
+-    "-frtti",
+-    "-D_LIBCPP_BUILDING_LIBRARY",
+-    "-D_LIBCPP_HARDENING_MODE_DEFAULT=_LIBCPP_HARDENING_MODE_NONE",
+-    "-DLIBC_NAMESPACE=__llvm_libc_cr",
+-]
+-
+-cc_library(
+-    name = "libc++abi",
+-    srcs = glob([
+-        "libc++abi/src/src/*.cpp",
+-        "libc++abi/src/src/*.h",
+-        "libc++abi/src/src/demangle/*.h",
+-    ], exclude = [
+-        # Exclude files not needed for Linux build
+-        "libc++abi/src/src/cxa_noexception.cpp",
+-        "libc++abi/src/src/stdlib_new_delete.cpp",
+-    ]),
+-    hdrs = glob([
+-        "libc++abi/src/include/**/*.h",
+-        "libc++/src/include/**/*",
+-        "libc++/src/src/include/*.h",
+-        "libc++abi/src/src/demangle/*.def",
+-        "buildtools_libc++/__config_site",
+-        "buildtools_libc++/__assertion_handler",
+-        "llvm-libc/src/**/*.h",
+-    ]),
+-    copts = LIBCXX_COPTS + [
+-        "-DLIBCXXABI_SILENT_TERMINATE",
+-        "-iquote", "{REPO_PATH}/libc++abi/src/src",
+-        "-iquote", "{REPO_PATH}/libc++abi/src/src/demangle",
+-    ],
+-    linkstatic = True,
+-)
+-
+-cc_library(
+-    name = "libc++",
+-    srcs = glob([
+-        "libc++/src/src/*.cpp",
+-        "libc++/src/src/*.h",
+-        "libc++/src/src/filesystem/*.cpp",
+-        "libc++/src/src/filesystem/*.h",
+-        "libc++/src/src/ryu/*.cpp",
+-        "libc++/src/src/include/*.h",
+-        "libc++/src/src/include/ryu/*.h",
+-    ]) + glob(["libc++/src/src/support/**/*.ipp"], allow_empty = True),
+-    hdrs = glob([
+-        "libc++/src/include/**/*",
+-        "buildtools_libc++/__config_site",
+-        "buildtools_libc++/__assertion_handler",
+-        "llvm-libc/src/**/*.h",
+-    ]),
+-    copts = LIBCXX_COPTS + [
+-        "-DLIBCXX_BUILDING_LIBCXXABI",
+-        "-iquote", "{REPO_PATH}/libc++/src/src",
+-        "-iquote", "{REPO_PATH}/libc++/src/src/filesystem",
+-    ],
+-    linkopts = [
+-        "-lpthread",
+-        "-lm",
+-    ],
+-    deps = [":libc++abi"],
+-    linkstatic = True,
+-)
+-'''.format(REPO_PATH=repo_path)
+-    ctx.file("BUILD.bazel", build_content)
++# Empty stub – the real libc++ is provided by the toolchain.
++cc_library(name = "libc++")
++cc_library(name = "libc++abi")
++""")
+ 
+ libcxx_repository = repository_rule(
+     implementation = _libcxx_repository_impl,
+     local = True,
+-    configure = True,
+ )
