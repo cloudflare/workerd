@@ -184,11 +184,30 @@ bool local_is_array_buffer_view(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsArrayBufferView();
 }
 
+bool local_is_function(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsFunction();
+}
+
 ::rust::String local_type_of(Isolate* isolate, const Local& val) {
   auto v8Val = local_as_ref_from_ffi<v8::Value>(val);
   v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
   v8::String::Utf8Value utf8(isolate, typeStr);
   return ::rust::String(*utf8, utf8.length());
+}
+
+// Local<Function>
+Local local_function_call(
+    Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
+  auto context = isolate->GetCurrentContext();
+  auto fn = local_as_ref_from_ffi<v8::Function>(function);
+  auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
+
+  v8::LocalVector<v8::Value> v8Args(isolate, args.size());
+  for (size_t i = 0; i < args.size(); i++) {
+    v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
+  }
+
+  return to_ffi(::workerd::jsg::check(fn->Call(context, receiver, v8Args.size(), v8Args.data())));
 }
 
 // Local<Object>

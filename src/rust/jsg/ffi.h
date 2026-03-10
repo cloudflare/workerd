@@ -70,7 +70,12 @@ bool local_is_bigint64_array(const Local& val);
 bool local_is_biguint64_array(const Local& val);
 bool local_is_array_buffer(const Local& val);
 bool local_is_array_buffer_view(const Local& val);
+bool local_is_function(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
+
+// Local<Function>
+Local local_function_call(
+    Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);

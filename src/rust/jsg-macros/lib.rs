@@ -144,13 +144,26 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
+    // Check if the first typed parameter is `&mut Lock` — if so, pass `&mut lock`
+    // directly instead of extracting it from JS args (like C++ jsg::Lock&).
+    let has_lock_param = params.first().is_some_and(|ty| is_lock_ref(ty));
+    let js_arg_offset = usize::from(has_lock_param);
+
     let (unwraps, arg_exprs): (Vec<_>, Vec<_>) = params
         .iter()
         .enumerate()
         .map(|(i, ty)| {
-            let arg = syn::Ident::new(&format!("arg{i}"), fn_name.span());
+            // First param is &mut Lock — pass the callback's lock directly.
+            if i == 0 && has_lock_param {
+                let unwrap = quote! {};
+                let arg_expr = quote! { &mut lock };
+                return (unwrap, arg_expr);
+            }
+
+            let js_index = i - js_arg_offset;
+            let arg = syn::Ident::new(&format!("arg{js_index}"), fn_name.span());
             let unwrap = quote! {
-                let #arg = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#i)) {
+                let #arg = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
                     Ok(v) => v,
                     Err(err) => {
                         lock.throw_exception(&err);
@@ -464,6 +477,26 @@ fn is_result_type(ty: &syn::Type) -> bool {
 pub fn jsg_static_constant(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Marker attribute — the actual registration is handled by #[jsg_resource] on the impl block.
     item
+}
+
+/// Returns true if the type is `&mut Lock` or `&mut jsg::Lock`.
+///
+/// When a method's first typed parameter matches this pattern, the macro passes the
+/// callback's `lock` directly instead of extracting it from JavaScript arguments.
+fn is_lock_ref(ty: &syn::Type) -> bool {
+    let syn::Type::Reference(ref_type) = ty else {
+        return false;
+    };
+    if ref_type.mutability.is_none() {
+        return false;
+    }
+    let syn::Type::Path(type_path) = ref_type.elem.as_ref() else {
+        return false;
+    };
+    let Some(last) = type_path.path.segments.last() else {
+        return false;
+    };
+    last.ident == "Lock"
 }
 
 /// Generates `jsg::Type` and `jsg::FromJS` implementations for union types.
