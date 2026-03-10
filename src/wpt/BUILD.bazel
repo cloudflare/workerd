@@ -133,7 +133,10 @@ wpt_test(
 wpt_test(
     name = "websockets",
     size = "large",
-    compat_flags = ["websocket_standard_binary_type"],
+    compat_flags = [
+        "websocket_standard_binary_type",
+        "web_socket_auto_reply_to_close",
+    ],
     config = "websockets-test.ts",
     start_server = True,
     target_compatible_with = select({

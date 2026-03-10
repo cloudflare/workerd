@@ -1484,4 +1484,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, if a Workflow step throws a NonRetryableError, the error message
   # and name are preserved on the thrown exception instead of being replaced with
   # a generic "NonRetryableError" string.
+
+  webSocketAutoReplyToClose @171 :Bool
+    $compatEnableFlag("web_socket_auto_reply_to_close")
+    $compatDisableFlag("web_socket_manual_reply_to_close")
+    $compatEnableDate("2026-04-07");
+  # When enabled, a reciprocal Close frame is automatically sent through the
+  # outgoing message pump when a server-initiated close is received, and the
+  # WebSocket readyState is CLOSED (3) when the close event fires. Previously,
+  # no close reply was sent and readyState was CLOSING (2). The WebSocket spec
+  # requires readyState to be CLOSED when the close event is dispatched.
 }

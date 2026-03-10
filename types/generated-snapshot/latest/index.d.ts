@@ -3583,7 +3583,7 @@ declare var WebSocket: {
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
  */
 interface WebSocket extends EventTarget<WebSocketEventMap> {
-  accept(): void;
+  accept(options?: WebSocketAcceptOptions): void;
   /**
    * The **`WebSocket.send()`** method enqueues the specified data to be transmitted to the server over the WebSocket connection, increasing the value of `bufferedAmount` by the number of bytes needed to contain the data.
    *
@@ -3628,6 +3628,16 @@ interface WebSocket extends EventTarget<WebSocketEventMap> {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/binaryType)
    */
   binaryType: "blob" | "arraybuffer";
+}
+interface WebSocketAcceptOptions {
+  /**
+   * When set to `true`, receiving a server-initiated WebSocket Close frame will not
+   * automatically send a reciprocal Close frame, leaving the connection in a half-open
+   * state. This is useful for proxying scenarios where you need to coordinate closing
+   * both sides independently. Defaults to `false` when the
+   * `no_web_socket_half_open_by_default` compatibility flag is enabled.
+   */
+  allowHalfOpen?: boolean;
 }
 declare const WebSocketPair: {
   new (): {

@@ -515,6 +515,12 @@ wd_test(
 )
 
 wd_test(
+    src = "websocket-allow-half-open-test.wd-test",
+    args = ["--experimental"],
+    data = ["websocket-allow-half-open-test.js"],
+)
+
+wd_test(
     src = "websocket-constructor-test.wd-test",
     args = ["--experimental"],
     data = ["websocket-constructor-test.js"],
