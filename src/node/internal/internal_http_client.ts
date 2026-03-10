@@ -387,7 +387,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       signal: this.#abortController.signal,
       redirect: 'manual',
       encodeResponseBody: 'manual',
-    } as unknown as RequestInit)
+    } as RequestInit & { encodeResponseBody: 'manual' })
       .then(this.#handleFetchResponse.bind(this))
       .catch(this.#handleFetchError.bind(this));
   }
