@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "http-client-nodejs-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules"],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules", "nodejs_zlib"],
         bindings = [
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "PONG_SERVER_PORT", fromEnvironment = "PONG_SERVER_PORT"),
@@ -15,6 +15,7 @@ const unitTests :Workerd.Config = (
           (name = "DEFAULT_HEADERS_EXIST_PORT", fromEnvironment = "DEFAULT_HEADERS_EXIST_PORT"),
           (name = "REQUEST_ARGUMENTS_PORT", fromEnvironment = "REQUEST_ARGUMENTS_PORT"),
           (name = "HELLO_WORLD_SERVER_PORT", fromEnvironment = "HELLO_WORLD_SERVER_PORT"),
+          (name = "GZIP_SERVER_PORT", fromEnvironment = "GZIP_SERVER_PORT"),
         ],
       )
     ),
