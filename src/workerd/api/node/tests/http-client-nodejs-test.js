@@ -6,6 +6,7 @@ import http from 'node:http';
 import { strictEqual, ok, throws, deepStrictEqual } from 'node:assert';
 import { once } from 'node:events';
 import { get } from 'node:http';
+import { gunzipSync } from 'node:zlib';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -16,6 +17,7 @@ export const checkPortsSetCorrectly = {
       'DEFAULT_HEADERS_EXIST_PORT',
       'REQUEST_ARGUMENTS_PORT',
       'HELLO_WORLD_SERVER_PORT',
+      'GZIP_SERVER_PORT',
     ];
     for (const key of keys) {
       strictEqual(typeof env[key], 'string');
@@ -525,6 +527,38 @@ export const testBodyDataDuplicationRegression = {
         )
       );
 
+    await promise;
+  },
+};
+
+// Verify that the http module does not automatically decompress response bodies.
+// Node.js http passes raw bytes through, leaving Content-Encoding handling to the caller.
+export const testHttpClientGzipResponseNotAutoDecompressed = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    http.get(
+      {
+        hostname: env.SIDECAR_HOSTNAME,
+        port: env.GZIP_SERVER_PORT,
+      },
+      (res) => {
+        strictEqual(res.headers['content-encoding'], 'gzip');
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          try {
+            const raw = Buffer.concat(chunks);
+            // The body should still be compressed — manually gunzipping
+            // should recover the original text.
+            const decompressed = gunzipSync(raw);
+            strictEqual(decompressed.toString(), 'hello from gzip server');
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+    );
     await promise;
   },
 };

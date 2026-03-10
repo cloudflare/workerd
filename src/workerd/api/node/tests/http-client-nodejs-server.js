@@ -6,6 +6,7 @@
 // It is executed using the appropriate Node.js version defined in build/deps/nodejs.MODULE.bazel.
 const http = require('node:http');
 const assert = require('node:assert/strict');
+const zlib = require('node:zlib');
 
 function listenTo(server, port) {
   server.listen(port, process.env.SIDECAR_HOSTNAME, () => {
@@ -120,3 +121,14 @@ const helloWorldServer = http.createServer((req, res) => {
 });
 
 listenTo(helloWorldServer, process.env.HELLO_WORLD_SERVER_PORT);
+
+const gzipServer = http.createServer((_req, res) => {
+  const body = zlib.gzipSync(Buffer.from('hello from gzip server'));
+  res.writeHead(200, {
+    'Content-Encoding': 'gzip',
+    'Content-Type': 'text/plain',
+  });
+  res.end(body);
+});
+
+listenTo(gzipServer, process.env.GZIP_SERVER_PORT);

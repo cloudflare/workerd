@@ -510,6 +510,7 @@ wd_test(
         "DEFAULT_HEADERS_EXIST_PORT",
         "REQUEST_ARGUMENTS_PORT",
         "HELLO_WORLD_SERVER_PORT",
+        "GZIP_SERVER_PORT",
     ],
 )
 

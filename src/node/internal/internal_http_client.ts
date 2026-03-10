@@ -365,24 +365,29 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       url = new URL(this.path, url);
     }
 
-    // Our fetch implementation has the following limitations.
+    // Our fetch implementation has the following limitation:
     //
-    // 1. Content decoding is handled automatically by fetch,
-    //    but expectation is that it's not handled in http.
-    // 2. Nothing is directly waiting for fetch promise here.
-    //    It's up to the user of the HTTP API to arrange for
-    //    the request to be held open until the fetch completes,
-    //    typically by passing some promise to ctx.waitUntil()
-    //    and resolving that promise when the request is complete.
+    // Nothing is directly waiting for fetch promise here.
+    // It's up to the user of the HTTP API to arrange for
+    // the request to be held open until the fetch completes,
+    // typically by passing some promise to ctx.waitUntil()
+    // and resolving that promise when the request is complete.
     //
-    // TODO(soon): Address these concerns and limitations.
+    // TODO(soon): Address this limitation.
+
+    // We use encodeResponseBody: 'manual' to prevent fetch from automatically
+    // decompressing the response body. Node.js http does not auto-decompress;
+    // callers are expected to handle Content-Encoding themselves.
+    // The type assertion is needed because the DOM RequestInit type does not
+    // include the workerd-specific encodeResponseBody property.
     fetch(url, {
       method: this.method,
       headers,
       body: body ?? null,
       signal: this.#abortController.signal,
       redirect: 'manual',
-    })
+      encodeResponseBody: 'manual',
+    } as RequestInit & { encodeResponseBody: 'manual' })
       .then(this.#handleFetchResponse.bind(this))
       .catch(this.#handleFetchError.bind(this));
   }
