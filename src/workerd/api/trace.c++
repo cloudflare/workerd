@@ -592,6 +592,7 @@ jsg::Ref<TraceMetrics> UnsafeTraceMetrics::fromTrace(jsg::Lock& js, jsg::Ref<Tra
 namespace {
 kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::ArrayPtr<kj::Own<Trace>> traces) {
   // Mark the request as delivered because we're about to run some JS.
@@ -614,10 +615,11 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   try {
     co_await context.run(
         [&context, nonEmptyTraces = nonEmptyTraces.asPtr(), entrypointName = kj::mv(entrypointName),
-            props = kj::mv(props)](Worker::Lock& lock) mutable {
+            versionInfo = kj::mv(versionInfo), props = kj::mv(props)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
-      auto handler = lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor());
+      auto handler = lock.getExportedHandler(
+          entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor());
       return lock.getGlobalScope().sendTraces(nonEmptyTraces, lock, handler);
     });
   } catch (kj::Exception& e) {
@@ -645,11 +647,12 @@ tracing::EventInfo TraceCustomEvent::getEventInfo() const {
 
 auto TraceCustomEvent::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) -> kj::Promise<Result> {
   // Don't bother to wait around for the handler to run, just hand it off to the waitUntil tasks.
   waitUntilTasks.add(sendTracesToExportedHandler(
-      kj::mv(incomingRequest), entrypointNamePtr, kj::mv(props), traces));
+      kj::mv(incomingRequest), entrypointNamePtr, kj::mv(versionInfo), kj::mv(props), traces));
 
   // Reporting a proper outcome and return event here would be nice, but for that we'd need to await
   // running the tail handler...

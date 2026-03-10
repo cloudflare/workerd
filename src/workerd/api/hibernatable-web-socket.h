@@ -66,6 +66,7 @@ class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEven
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
       kj::TaskSet& waitUntilTasks) override;
 

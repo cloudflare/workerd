@@ -573,6 +573,7 @@ tracing::EventInfo QueueCustomEvent::getEventInfo() const {
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   // This method has three main chunks of logic:
@@ -594,14 +595,16 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
   // 2. This is where we call into the worker's queue event handler
   auto runProm = context.run(
       [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
-          &metrics = incomingRequest->getMetrics(),
+          &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
           props = kj::mv(props)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
     auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),
         context.addObject(result), lock,
-        lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler);
+        lock.getExportedHandler(
+            entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()),
+        typeHandler);
     queueEvent->event = kj::mv(startResp.event);
     queueEvent->exportedHandlerProm = kj::mv(startResp.exportedHandlerProm);
     queueEvent->isServiceWorkerHandler = startResp.isServiceWorkerHandler;

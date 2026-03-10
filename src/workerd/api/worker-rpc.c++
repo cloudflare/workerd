@@ -1971,6 +1971,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
  public:
   EntrypointJsRpcTarget(IoContext& ioCtx,
       kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
       kj::Maybe<kj::String> wrapperModule,
       kj::Maybe<kj::Own<BaseTracer>> tracer)
@@ -1979,6 +1980,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
+        versionInfo(kj::mv(versionInfo)),
         props(kj::mv(props)),
         wrapperModule(kj::mv(wrapperModule)),
         tracer(kj::mv(tracer)) {}
@@ -1997,9 +1999,9 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
     jsg::Lock& js = lock;
 
-    auto handler =
-        KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, kj::mv(props), ioCtx.getActor()),
-            "Failed to get handler to worker.");
+    auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, kj::mv(versionInfo),
+                                          kj::mv(props), ioCtx.getActor()),
+        "Failed to get handler to worker.");
 
     if (handler->missingSuperclass && wrapperModule == kj::none) {
       // JS RPC is not enabled on the server side, we cannot call any methods.
@@ -2063,6 +2065,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
  private:
   IoContext& ioCtx;
   kj::Maybe<kj::String> entrypointName;
+  kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;
   kj::Maybe<kj::String> wrapperModule;
   kj::Maybe<kj::Own<BaseTracer>> tracer;
@@ -2152,6 +2155,7 @@ class JsRpcSessionCustomEvent::ServerTopLevelMembrane final: public capnp::Membr
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   IoContext& ioctx = incomingRequest->getContext();
@@ -2164,8 +2168,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(props), kj::mv(wrapperModule),
-      mapAddRef(incomingRequest->getWorkerTracer()));
+  EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
+      kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()));
   capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
 
   try {

@@ -2188,14 +2188,16 @@ class Server::WorkerService final: public Service,
     kj::Own<RequestObserver> observer =
         kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
 
-    return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
-        kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
-        {},  // ioContextDependency
+    return newWorkerEntrypoint(
+        threadContext, kj::atomicAddRef(*worker), entrypointName, kj::mv(props), kj::mv(actor),
+        kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance), {},  // ioContextDependency
         kj::Own<IoChannelFactory>(this, kj::NullDisposer::instance), kj::mv(observer),
         waitUntilTasks,
         true,                  // tunnelExceptions
         kj::mv(workerTracer),  // workerTracer
-        kj::mv(metadata.cfBlobJson));
+        kj::mv(metadata.cfBlobJson),
+        kj::none  // versionInfo
+    );
   }
 
   class ActorNamespace final {
