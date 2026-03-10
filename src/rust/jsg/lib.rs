@@ -59,6 +59,7 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
         constructor: KjMaybe::None,
         methods: Vec::new(),
         static_methods: Vec::new(),
+        static_constants: Vec::new(),
     };
 
     for m in R::members() {
@@ -85,6 +86,15 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
                     .push(v8::ffi::StaticMethodDescriptor {
                         name,
                         callback: callback as usize,
+                    });
+            }
+            Member::StaticConstant { name, value } => {
+                let ConstantValue::Number(number_value) = value;
+                descriptor
+                    .static_constants
+                    .push(v8::ffi::StaticConstantDescriptor {
+                        name,
+                        value: number_value,
                     });
             }
         }
@@ -748,6 +758,41 @@ pub trait Type: Sized {
     fn is_exact(value: &v8::Local<v8::Value>) -> bool;
 }
 
+/// Represents a constant value that can be exposed to JavaScript.
+pub enum ConstantValue {
+    Number(f64),
+}
+
+macro_rules! impl_constant_value_from_lossless {
+    ($($t:ty),*) => {
+        $(
+            impl From<$t> for ConstantValue {
+                fn from(v: $t) -> Self {
+                    Self::Number(f64::from(v))
+                }
+            }
+        )*
+    };
+}
+
+impl_constant_value_from_lossless!(i8, i16, i32, u8, u16, u32, f32, f64);
+
+// i64/u64 can lose precision in f64 (52-bit mantissa), but JavaScript numbers are
+// always f64 so this is inherent to the language boundary.
+impl From<i64> for ConstantValue {
+    #[expect(clippy::cast_precision_loss)]
+    fn from(v: i64) -> Self {
+        Self::Number(v as f64)
+    }
+}
+
+impl From<u64> for ConstantValue {
+    #[expect(clippy::cast_precision_loss)]
+    fn from(v: u64) -> Self {
+        Self::Number(v as f64)
+    }
+}
+
 pub enum Member {
     Constructor {
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
@@ -764,6 +809,10 @@ pub enum Member {
     StaticMethod {
         name: String,
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
+    },
+    StaticConstant {
+        name: String,
+        value: ConstantValue,
     },
 }
 

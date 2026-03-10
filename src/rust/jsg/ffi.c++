@@ -480,6 +480,20 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     prototype->Set(name, functionTemplate);
   }
 
+  for (const auto& constant: descriptor.static_constants) {
+    auto name = ::workerd::jsg::check(v8::String::NewFromUtf8(
+        isolate, constant.name.data(), v8::NewStringType::kInternalized, constant.name.size()));
+    auto value = v8::Number::New(isolate, constant.value);
+
+    // Per Web IDL, constants are {writable: false, enumerable: true, configurable: false}.
+    auto attrs = ::workerd::jsg::getSpecCompliantPropertyAttributes(isolate)
+        ? static_cast<v8::PropertyAttribute>(
+              v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontDelete)
+        : v8::PropertyAttribute::ReadOnly;
+    constructor->Set(name, value, attrs);
+    prototype->Set(name, value, attrs);
+  }
+
   auto result = scope.Escape(constructor);
   return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
 }

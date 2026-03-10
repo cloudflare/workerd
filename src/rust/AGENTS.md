@@ -9,7 +9,7 @@
 | Crate                | Purpose                                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------------------ |
 | `jsg/`               | Rust JSG bindings: `Lock`, `Ref<T>`, `Resource`, `Struct`, `Type`, `Realm`, `FeatureFlags`, module registration |
-| `jsg-macros/`        | Proc macros: `#[jsg_struct]`, `#[jsg_method]`, `#[jsg_resource]`, `#[jsg_oneof]`                       |
+| `jsg-macros/`        | Proc macros: `#[jsg_struct]`, `#[jsg_method]`, `#[jsg_resource]`, `#[jsg_oneof]`, `#[jsg_static_constant]` |
 | `jsg-test/`          | Test harness (`Harness`) for JSG Rust bindings                                                         |
 | `api/`               | Rust-implemented Node.js APIs; registers modules via `register_nodejs_modules()`                       |
 | `dns/`               | DNS record parsing (CAA, NAPTR) via CXX bridge; legacy duplicate of `api/dns.rs`, pending removal      |
@@ -25,7 +25,7 @@
 - **CXX bridge**: `#[cxx::bridge(namespace = "workerd::rust::<crate>")]` with companion `ffi.c++`/`ffi.h` files
 - **Namespace**: always `workerd::rust::*` except `python-parser` → `edgeworker::rust::python_parser`
 - **Errors**: `thiserror` for library crates; `jsg::Error` with `ExceptionType` for JSG-facing crates
-- **JSG resources**: must include `_state: jsg::ResourceState` field; `#[jsg_method]` auto-converts `snake_case` → `camelCase`; methods with `&self`/`&mut self` become instance methods, methods without a receiver become static methods
+- **JSG resources**: must include `_state: jsg::ResourceState` field; `#[jsg_method]` auto-converts `snake_case` → `camelCase`; methods with `&self`/`&mut self` become instance methods, methods without a receiver become static methods; `#[jsg_static_constant]` on `const` items exposes read-only numeric constants on both constructor and prototype (name kept as-is, no camelCase)
 - **Formatting**: `rustfmt.toml` — `group_imports = "StdExternalCrate"`, `imports_granularity = "Item"` (one `use` per import)
 - **Linting**: `just clippy <crate>` — pedantic+nursery; `allow-unwrap-in-tests`
 - **Tests**: inline `#[cfg(test)]` modules; JSG tests use `jsg_test::Harness::run_in_context()`

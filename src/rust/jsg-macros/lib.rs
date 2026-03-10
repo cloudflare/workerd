@@ -328,6 +328,34 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
         })
         .collect();
 
+    let constant_registrations: Vec<_> = impl_block
+        .items
+        .iter()
+        .filter_map(|item| {
+            let syn::ImplItem::Const(constant) = item else {
+                return None;
+            };
+            let attr = constant.attrs.iter().find(|a| {
+                a.path().is_ident("jsg_static_constant")
+                    || a.path()
+                        .segments
+                        .last()
+                        .is_some_and(|s| s.ident == "jsg_static_constant")
+            })?;
+
+            let rust_name = &constant.ident;
+            let js_name = extract_name_attribute(&attr.meta.to_token_stream().to_string())
+                .unwrap_or_else(|| rust_name.to_string());
+
+            Some(quote! {
+                jsg::Member::StaticConstant {
+                    name: #js_name.to_owned(),
+                    value: jsg::ConstantValue::from(Self::#rust_name),
+                }
+            })
+        })
+        .collect();
+
     let type_name = match &**self_ty {
         syn::Type::Path(p) => p
             .path
@@ -350,7 +378,7 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
         #[automatically_derived]
         impl jsg::Resource for #self_ty {
             fn members() -> Vec<jsg::Member> where Self: Sized {
-                vec![#(#method_registrations,)*]
+                vec![#(#method_registrations,)* #(#constant_registrations,)*]
             }
 
             fn get_drop_fn(&self) -> unsafe extern "C" fn(*mut jsg::v8::ffi::Isolate, *mut std::os::raw::c_void) {
@@ -408,6 +436,34 @@ fn is_result_type(ty: &syn::Type) -> bool {
         return segment.ident == "Result";
     }
     false
+}
+
+/// Marks a `const` item inside a `#[jsg_resource]` impl block as a static constant
+/// exposed to JavaScript on both the constructor and prototype.
+///
+/// The constant name is used as-is for the JavaScript property name (no camelCase
+/// conversion), matching the convention that constants are `UPPER_SNAKE_CASE` in
+/// both Rust and JavaScript.
+///
+/// Only numeric types are supported (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`).
+///
+/// # Example
+///
+/// ```ignore
+/// #[jsg_resource]
+/// impl MyResource {
+///     #[jsg_static_constant]
+///     pub const MAX_SIZE: u32 = 1024;
+///
+///     #[jsg_static_constant]
+///     pub const STATUS_OK: i32 = 0;
+/// }
+/// // In JavaScript: MyResource.MAX_SIZE === 1024
+/// ```
+#[proc_macro_attribute]
+pub fn jsg_static_constant(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Marker attribute — the actual registration is handled by #[jsg_resource] on the impl block.
+    item
 }
 
 /// Generates `jsg::Type` and `jsg::FromJS` implementations for union types.

@@ -14,6 +14,7 @@ use jsg::ResourceState;
 use jsg::ResourceTemplate;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_static_constant;
 
 #[jsg_resource]
 struct EchoResource {
@@ -310,6 +311,133 @@ fn resource_method_returns_null_for_none() {
 
         let result: Option<String> = ctx.eval(lock, "resource.maybeName()").unwrap();
         assert!(result.is_none());
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Static constant tests
+// =============================================================================
+
+#[jsg_resource]
+struct ConstantResource {
+    _state: ResourceState,
+}
+
+#[jsg_resource]
+impl ConstantResource {
+    #[jsg_static_constant]
+    pub const MAX_SIZE: u32 = 1024;
+
+    #[jsg_static_constant]
+    pub const STATUS_OK: i32 = 0;
+
+    #[jsg_static_constant]
+    pub const STATUS_ERROR: i32 = -1;
+
+    #[jsg_static_constant]
+    pub const SCALE_FACTOR: f64 = 2.5;
+
+    #[jsg_method]
+    pub fn get_name(&self) -> String {
+        "constant_resource".to_owned()
+    }
+}
+
+/// Validates that static constants are accessible on the constructor.
+#[test]
+fn static_constant_accessible_on_constructor() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let template = ConstantResourceTemplate::new(lock);
+        let constructor = template.get_constructor().as_local_function(lock);
+        ctx.set_global("ConstantResource", constructor.into());
+
+        let result: Number = ctx.eval(lock, "ConstantResource.MAX_SIZE").unwrap();
+        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
+
+        let result: Number = ctx.eval(lock, "ConstantResource.STATUS_OK").unwrap();
+        assert!((result.value() - 0.0).abs() < f64::EPSILON);
+
+        let result: Number = ctx.eval(lock, "ConstantResource.STATUS_ERROR").unwrap();
+        assert!((result.value() - (-1.0)).abs() < f64::EPSILON);
+
+        let result: Number = ctx.eval(lock, "ConstantResource.SCALE_FACTOR").unwrap();
+        assert!((result.value() - 2.5).abs() < f64::EPSILON);
+        Ok(())
+    });
+}
+
+/// Validates that static constants are also accessible on instances (via prototype).
+#[test]
+fn static_constant_accessible_on_instance() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Ref::new(ConstantResource {
+            _state: ResourceState::default(),
+        });
+        let mut template = ConstantResourceTemplate::new(lock);
+        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        ctx.set_global("obj", wrapped);
+
+        let result: Number = ctx.eval(lock, "obj.MAX_SIZE").unwrap();
+        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
+
+        let result: Number = ctx.eval(lock, "obj.STATUS_OK").unwrap();
+        assert!((result.value() - 0.0).abs() < f64::EPSILON);
+        Ok(())
+    });
+}
+
+/// Validates that static constants are read-only (not writable).
+#[test]
+fn static_constant_is_read_only() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let template = ConstantResourceTemplate::new(lock);
+        let constructor = template.get_constructor().as_local_function(lock);
+        ctx.set_global("ConstantResource", constructor.into());
+
+        // Attempt to overwrite should silently fail (strict mode would throw).
+        // The value should remain unchanged.
+        let result: Number = ctx
+            .eval(
+                lock,
+                "ConstantResource.MAX_SIZE = 9999; ConstantResource.MAX_SIZE",
+            )
+            .unwrap();
+        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
+        Ok(())
+    });
+}
+
+/// Validates that static constants coexist with methods.
+#[test]
+fn static_constant_coexists_with_methods() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Ref::new(ConstantResource {
+            _state: ResourceState::default(),
+        });
+        let mut template = ConstantResourceTemplate::new(lock);
+
+        let constructor = template.get_constructor().as_local_function(lock);
+        ctx.set_global("ConstantResource", constructor.into());
+
+        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        ctx.set_global("obj", wrapped);
+
+        // Instance method works
+        let result: String = ctx.eval(lock, "obj.getName()").unwrap();
+        assert_eq!(result, "constant_resource");
+
+        // Static constant works on constructor
+        let result: Number = ctx.eval(lock, "ConstantResource.MAX_SIZE").unwrap();
+        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
+
+        // Static constant works on instance
+        let result: Number = ctx.eval(lock, "obj.MAX_SIZE").unwrap();
+        assert!((result.value() - 1024.0).abs() < f64::EPSILON);
         Ok(())
     });
 }

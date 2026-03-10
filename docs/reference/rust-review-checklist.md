@@ -67,6 +67,9 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   Methods with a receiver (`&self`/`&mut self`) are registered as instance methods on the prototype;
   methods without a receiver are registered as static methods on the constructor.
   Verify the converted name is correct and matches the intended API surface.
+- **`#[jsg_static_constant]`** on a `const` item inside a `#[jsg_resource]` impl block exposes it
+  as a read-only numeric constant on both the constructor and prototype (Rust equivalent of
+  `JSG_STATIC_CONSTANT`). The name is used as-is (no camelCase conversion).
 - **`#[jsg_struct]`** is for value types (passed by value across the JS boundary).
 - **`#[jsg_oneof]`** is for union/variant types (mapped from JS values by trying each variant).
 - **Type mappings**: `jsg::Number` wraps JS numbers (distinct from `f64`). `Vec<u8>` maps to

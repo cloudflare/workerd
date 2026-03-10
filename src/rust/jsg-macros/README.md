@@ -93,7 +93,36 @@ impl DnsUtil {
 }
 ```
 
-On struct definitions, generates `jsg::Type`, wrapper struct, and `ResourceTemplate` implementations. On impl blocks, scans for `#[jsg_method]` attributes and generates the `Resource` trait implementation. Methods with a receiver (`&self`/`&mut self`) are registered as instance methods; methods without a receiver are registered as static methods.
+On struct definitions, generates `jsg::Type`, wrapper struct, and `ResourceTemplate` implementations. On impl blocks, scans for `#[jsg_method]` and `#[jsg_static_constant]` attributes and generates the `Resource` trait implementation. Methods with a receiver (`&self`/`&mut self`) are registered as instance methods; methods without a receiver are registered as static methods.
+
+## `#[jsg_static_constant]`
+
+Exposes a Rust `const` item as a read-only static constant on both the JavaScript constructor and prototype. This is the Rust equivalent of `JSG_STATIC_CONSTANT` in C++ JSG.
+
+The constant name is used as-is for the JavaScript property name (no camelCase conversion), matching the convention that constants are `UPPER_SNAKE_CASE` in both Rust and JavaScript. Only numeric types are supported (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`).
+
+```rust
+#[jsg_resource]
+impl WebSocket {
+    #[jsg_static_constant]
+    pub const CONNECTING: i32 = 0;
+
+    #[jsg_static_constant]
+    pub const OPEN: i32 = 1;
+
+    #[jsg_static_constant]
+    pub const CLOSING: i32 = 2;
+
+    #[jsg_static_constant]
+    pub const CLOSED: i32 = 3;
+}
+// In JavaScript:
+//   WebSocket.CONNECTING === 0
+//   WebSocket.OPEN === 1
+//   new WebSocket(...).CLOSING === 2  (also on instances via prototype)
+```
+
+Per Web IDL, constants are `{writable: false, enumerable: true, configurable: false}`.
 
 ## `#[jsg_oneof]`
 
