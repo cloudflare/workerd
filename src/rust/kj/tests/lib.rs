@@ -2,6 +2,7 @@ use std::pin::Pin;
 
 use kj::Result;
 use kj::http::ConnectResponse;
+use kj::http::CustomHttpHeaderId;
 use kj::http::CxxHttpService;
 use kj::http::DynHttpService;
 use kj::http::HttpConnectSettings;
@@ -11,6 +12,7 @@ use kj::http::HttpService;
 use kj::http::HttpServiceResponse;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
+use kj_rs::KjMaybe;
 use kj_rs::KjOwn;
 
 #[cxx::bridge(namespace = "kj::rust::tests")]
@@ -19,6 +21,8 @@ pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/kj/ffi.h");
         type HttpService = kj::http::ffi::HttpService;
+        type HttpHeaders = kj::http::ffi::HttpHeaders;
+        type HttpHeaderId = kj::http::ffi::HttpHeaderId;
     }
 
     #[namespace = "kj::rust"]
@@ -31,6 +35,18 @@ pub mod ffi {
 
         #[expect(clippy::unnecessary_box_returns)]
         fn new_proxy_http_service(service: KjOwn<HttpService>) -> Box<DynHttpService>;
+
+        /// Look up a header value by HttpHeaderId, returning the value if present.
+        /// This exercises the C++ -> Rust -> C++ round-trip for HttpHeaderId.
+        unsafe fn get_header_value_via_id<'a>(
+            headers: &'a HttpHeaders,
+            id: &HttpHeaderId,
+        ) -> KjMaybe<&'a [u8]>;
+
+        /// Receive an array of HttpHeaderIdpointers, convert to &[HttpHeaderIdRef] via
+        /// from_ptr_slice, look up each header, and assert all are present.
+        /// This exercises passing a kj::ArrayPtr<const kj::HttpHeaderId> into Rust.
+        unsafe fn assert_header_ids_present(headers: &HttpHeaders, ids: &[*const HttpHeaderId]);
     }
 }
 
@@ -79,4 +95,26 @@ fn new_proxy_http_service(service: KjOwn<ffi::HttpService>) -> Box<DynHttpServic
         target: service.into(),
     }
     .into_ffi()
+}
+
+fn get_header_value_via_id<'a>(
+    headers: &'a ffi::HttpHeaders,
+    id: &ffi::HttpHeaderId,
+) -> KjMaybe<&'a [u8]> {
+    unsafe { kj::http::ffi::get_header_by_id(headers, id) }
+}
+
+/// # Safety
+///
+/// Each pointer in `ids` must be non-null and point to a valid, live `HttpHeaderId`.
+unsafe fn assert_header_ids_present(headers: &ffi::HttpHeaders, ids: &[*const ffi::HttpHeaderId]) {
+    let headers_ref = HttpHeadersRef::from(headers);
+    let id_refs = unsafe { CustomHttpHeaderId::from_ptr_slice(ids) };
+    for (i, &id_ref) in id_refs.iter().enumerate() {
+        let value = headers_ref.get_by_id(id_ref);
+        assert!(
+            value.is_some(),
+            "expected header at index {i} to be present, but got None"
+        );
+    }
 }
