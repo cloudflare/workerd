@@ -3694,6 +3694,7 @@ interface Socket {
   get secureTransport(): "on" | "off" | "starttls";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
+  proxyTo(sock: Socket): Promise<void>;
 }
 interface SocketOptions {
   secureTransport?: string;
