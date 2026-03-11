@@ -25,7 +25,8 @@ ThreadContext::HeaderIdBundle::HeaderIdBundle(kj::HttpHeaderTable::Builder& buil
       contentLength(builder.add("Content-Length")),
       accept(builder.add("Accept")),
       acceptEncoding(builder.add("Accept-Encoding")),
-      cfRay(builder.add("CF-Ray")) {}
+      cfRay(builder.add("CF-Ray")),
+      origin(builder.add("Origin")) {}
 
 ThreadContext::ThreadContext(kj::Timer& timer,
     kj::EntropySource& entropySource,
