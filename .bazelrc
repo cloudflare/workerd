@@ -193,6 +193,8 @@ build:limited-dbg-info --copt='-g1' --copt="-fdebug-info-for-profiling"
 # Miscellaneous platform-independent options
 build --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True
 build --@capnp-cpp//src/capnp:gen_rust=True
+# always have KJ_IREQUIRE checks enabled, this matches workers production.
+build --@capnp-cpp//src/kj:kj_enable_irequire=True
 # overriden in config=opt
 build --@capnp-cpp//src/kj:debug_memory=True
 build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
