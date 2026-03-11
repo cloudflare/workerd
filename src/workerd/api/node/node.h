@@ -6,7 +6,6 @@
 
 #include <workerd/api/node/async-hooks.h>
 #include <workerd/api/node/buffer.h>
-#include <workerd/api/node/dns.h>
 #include <workerd/api/node/module.h>
 #include <workerd/api/node/process.h>
 #include <workerd/api/node/sqlite.h>
@@ -19,7 +18,6 @@
 #include <workerd/jsg/url.h>
 #include <workerd/rust/api/lib.rs.h>
 #include <workerd/rust/jsg/jsg.h>
-#include <workerd/util/autogate.h>
 
 #include <node/node.capnp.h>
 
@@ -87,12 +85,6 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
   }
 
 #undef V
-
-  // Only register C++ DnsUtil if Rust implementation is not enabled
-  if (!util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_DNS)) {
-    registry.template addBuiltinModule<DnsUtil>(
-        "node-internal:dns", workerd::jsg::ModuleRegistry::Type::INTERNAL);
-  }
 
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
@@ -216,10 +208,8 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     }
   }
 
-  if (util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_DNS)) {
-    ::workerd::rust::jsg::RustModuleRegistry r(registry);
-    ::workerd::rust::api::register_nodejs_modules(r);
-  }
+  ::workerd::rust::jsg::RustModuleRegistry r(registry);
+  ::workerd::rust::api::register_nodejs_modules(r);
 }
 
 template <class TypeWrapper>
@@ -234,11 +224,6 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
     NODEJS_MODULES_EXPERIMENTAL(V)
   }
 #undef V
-  // Only register C++ DnsUtil if Rust implementation is not enabled
-  if (!util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_DNS)) {
-    static const auto kDnsUtilSpecifier = "node-internal:dns"_url;
-    builder.addObject<DnsUtil, TypeWrapper>(kDnsUtilSpecifier);
-  }
   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE);
   return builder.finish();
 }
@@ -272,5 +257,5 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
   EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
-      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES,          \
-      EW_NODE_TIMERS_ISOLATE_TYPES, EW_NODE_SQLITE_ISOLATE_TYPES
+      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES,       \
+      EW_NODE_SQLITE_ISOLATE_TYPES
