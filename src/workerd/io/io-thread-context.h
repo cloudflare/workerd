@@ -36,6 +36,7 @@ class ThreadContext {
     const kj::HttpHeaderId accept;          // used in tracing instrumentation
     const kj::HttpHeaderId acceptEncoding;  // used in tracing instrumentation
     const kj::HttpHeaderId cfRay;           // used in tracing instrumentation
+    const kj::HttpHeaderId origin;
   };
 
   ThreadContext(kj::Timer& timer,
