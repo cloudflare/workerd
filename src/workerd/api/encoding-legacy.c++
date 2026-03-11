@@ -58,24 +58,21 @@ kj::Maybe<jsg::JsString> LegacyDecoder::decode(
     // https://github.com/hsivonen/encoding_rs/issues/126#issuecomment-3677642122
     return js.str();
   }
-  // Reset decoder state after flush, matching IcuDecoder's KJ_DEFER contract.
-  // This ensures decodePtr() (used by TextDecoderStream) resets correctly on flush.
-  KJ_DEFER({
-    if (flush) reset();
-  });
 
   ::workerd::rust::encoding::DecodeOptions options{.flush = flush, .fatal = fatal.toBool()};
-  // kj_rs::RustMutable is used to avoid a copy of the underlying buffer.
+  // Decode into the Rust-side reusable buffer. The Rust decoder handles
+  // lazy reset internally when a previous call used flush=true.
   auto result =
       ::workerd::rust::encoding::decode(*state, buffer.as<kj_rs::RustMutable>(), kj::mv(options));
 
   if (fatal.toBool() && result.had_error) {
-    // Decoder state already reset by the Rust side on fatal error.
     return kj::none;
   }
 
-  auto output = kj::from<kj_rs::Rust>(result.output);
-  return js.str(output);
+  // Read the decoded UTF-16 output directly from the Rust-owned buffer,
+  // avoiding a Vec<u16> move across the CXX bridge.
+  auto ptr = reinterpret_cast<const uint16_t*>(result.output_ptr);
+  return js.str(kj::ArrayPtr<const uint16_t>(ptr, result.output_len));
 }
 
 }  // namespace workerd::api

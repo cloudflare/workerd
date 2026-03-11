@@ -7,6 +7,10 @@
 //! Exposes a streaming decoder to C++ via CXX bridge. All legacy encodings
 //! (CJK multi-byte, single-byte windows-1252, and x-user-defined) are handled
 //! by a single opaque `Decoder` type backed by `encoding_rs::Decoder`.
+//!
+//! The output buffer is owned by the `Decoder` and reused across calls to
+//! avoid repeated heap allocations. C++ reads the decoded UTF-16 data via
+//! the pointer and length returned in `DecodeResult`.
 
 #[cxx::bridge(namespace = "workerd::rust::encoding")]
 mod ffi {
@@ -26,10 +30,16 @@ mod ffi {
         XUserDefined,
     }
 
-    /// Result of a decode operation.
+    /// Result of a decode operation. The output pointer refers to the
+    /// decoder's internal buffer and is valid until the next `decode` or
+    /// `reset` call. Encoded as `usize` because CXX shared structs cannot
+    /// contain raw pointers.
     struct DecodeResult {
-        /// UTF-16 output.
-        output: Vec<u16>,
+        /// Pointer to the UTF-16 output buffer, as `usize`.
+        /// Cast to `const uint16_t*` on the C++ side.
+        output_ptr: usize,
+        /// Number of UTF-16 code units in the output.
+        output_len: usize,
         /// True if a fatal decoding error was encountered. Only meaningful
         /// when the caller requested fatal mode — in replacement mode errors
         /// are silently replaced with U+FFFD and this flag is not set.
@@ -49,12 +59,14 @@ mod ffi {
         #[expect(clippy::unnecessary_box_returns)]
         fn new_decoder(encoding: Encoding) -> Box<Decoder>;
 
-        /// Decode a chunk of bytes. Set `flush` to true on the final chunk.
-        /// When `fatal` is true and an error is encountered, `had_error` is
-        /// set and the output may be incomplete.
+        /// Decode a chunk of bytes. The decoded UTF-16 output is stored in
+        /// the decoder's internal buffer; the returned `DecodeResult`
+        /// carries a pointer and length into that buffer. Set `flush` to
+        /// true on the final chunk. When `fatal` is true and an error is
+        /// encountered, `had_error` is set and the output may be incomplete.
         fn decode(decoder: &mut Decoder, input: &[u8], options: &DecodeOptions) -> DecodeResult;
 
-        /// Reset the decoder to its initial state.
+        /// Reset the decoder to its initial state (for explicit reset calls).
         fn reset(decoder: &mut Decoder);
     }
 }
@@ -63,6 +75,11 @@ mod ffi {
 pub struct Decoder {
     encoding: &'static encoding_rs::Encoding,
     inner: encoding_rs::Decoder,
+    /// Reusable output buffer — kept across calls to avoid allocation.
+    output: Vec<u16>,
+    /// Set after a flush decode; checked at the start of the next decode
+    /// to lazily reconstruct the inner decoder.
+    needs_reset: bool,
 }
 
 /// Map a CXX-shared `Encoding` variant to the corresponding
@@ -87,6 +104,8 @@ pub fn new_decoder(encoding: ffi::Encoding) -> Box<Decoder> {
     Box::new(Decoder {
         inner: encoding.new_decoder_without_bom_handling(),
         encoding,
+        output: Vec::new(),
+        needs_reset: false,
     })
 }
 
@@ -95,14 +114,22 @@ pub fn decode(
     input: &[u8],
     options: &ffi::DecodeOptions,
 ) -> ffi::DecodeResult {
-    // max_utf16_buffer_length() returns None on usize overflow. The +4 covers extra
-    // UTF-16 code units from decoder state. Safe even if slightly short since the decode loop
-    // below resizes on OutputFull.
+    // Lazy reset: reconstruct the inner decoder only when a previous flush
+    // marked it as needed, avoiding the cost on one-shot decodes where the
+    // decoder is never reused.
+    if state.needs_reset {
+        state.inner = state.encoding.new_decoder_without_bom_handling();
+        state.needs_reset = false;
+    }
+
+    // Reuse the output buffer — clear length but keep the allocation.
+    state.output.clear();
     let max_len = state
         .inner
         .max_utf16_buffer_length(input.len())
         .unwrap_or(input.len() + 4);
-    let mut output = vec![0u16; max_len];
+    state.output.resize(max_len, 0);
+
     let mut total_read = 0usize;
     let mut total_written = 0usize;
 
@@ -110,7 +137,7 @@ pub fn decode(
         loop {
             let (result, read, written) = state.inner.decode_to_utf16_without_replacement(
                 &input[total_read..],
-                &mut output[total_written..],
+                &mut state.output[total_written..],
                 options.flush,
             );
             total_read += read;
@@ -119,13 +146,16 @@ pub fn decode(
             match result {
                 encoding_rs::DecoderResult::InputEmpty => break,
                 encoding_rs::DecoderResult::OutputFull => {
-                    output.resize(output.len() * 2, 0);
+                    state.output.resize(state.output.len() * 2, 0);
                 }
                 encoding_rs::DecoderResult::Malformed(_, _) => {
+                    // Reset immediately on fatal error so the decoder is
+                    // ready for a fresh sequence if reused.
                     state.inner = state.encoding.new_decoder_without_bom_handling();
-                    output.truncate(total_written);
+                    state.output.truncate(total_written);
                     return ffi::DecodeResult {
-                        output,
+                        output_ptr: state.output.as_ptr() as usize,
+                        output_len: state.output.len(),
                         had_error: true,
                     };
                 }
@@ -135,7 +165,7 @@ pub fn decode(
         loop {
             let (result, read, written, _had_errors) = state.inner.decode_to_utf16(
                 &input[total_read..],
-                &mut output[total_written..],
+                &mut state.output[total_written..],
                 options.flush,
             );
             total_read += read;
@@ -144,19 +174,28 @@ pub fn decode(
             match result {
                 encoding_rs::CoderResult::InputEmpty => break,
                 encoding_rs::CoderResult::OutputFull => {
-                    output.resize(output.len() * 2, 0);
+                    state.output.resize(state.output.len() * 2, 0);
                 }
             }
         }
     }
 
-    output.truncate(total_written);
-    ffi::DecodeResult {
-        output,
-        had_error: false,
+    state.output.truncate(total_written);
+
+    if options.flush {
+        // Defer the actual reset to the next decode() call.
+        state.needs_reset = true;
     }
+
+    ffi::DecodeResult {
+        output_ptr: state.output.as_ptr() as usize,
+        output_len: state.output.len(),
+        had_error: false,
+    };
 }
 
 pub fn reset(state: &mut Decoder) {
     state.inner = state.encoding.new_decoder_without_bom_handling();
+    state.needs_reset = false;
+    // Intentionally keep state.output — preserves the allocation for reuse.
 }
