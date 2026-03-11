@@ -13,11 +13,11 @@
  *
  * Example usage:
  * ```ts
- * await env.STREAM.video(id).downloads.create();
+ * await env.STREAM.video(id).downloads.generate();
  *
  * const video = env.STREAM.video(id)
  * const captions = video.captions.list();
- * const videoDetails = video.get()
+ * const videoDetails = video.details()
  * ```
  */
 interface StreamBinding {
@@ -31,6 +31,11 @@ interface StreamBinding {
    * Uploads a new video from a File.
    * @param file The video file to upload.
    * @returns The uploaded video details.
+   * @throws {BadRequestError} if the upload parameter is invalid
+   * @throws {QuotaReachedError} if the account storage capacity is exceeded
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {RateLimitedError} if the server received too many requests
+   * @throws {InternalError} if an unexpected error occurs
    */
   upload(file: File): Promise<StreamVideo>;
   /**
@@ -38,10 +43,21 @@ interface StreamBinding {
    * @param url The URL to upload from.
    * @param params Optional upload parameters.
    * @returns The uploaded video details.
+   * @throws {BadRequestError} if the upload parameter is invalid or the URL is invalid
+   * @throws {QuotaReachedError} if the account storage capacity is exceeded
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {RateLimitedError} if the server received too many requests
+   * @throws {AlreadyUploadedError} if a video was already uploaded to this URL
+   * @throws {InternalError} if an unexpected error occurs
    */
   upload(url: string, params?: StreamUrlUploadParams): Promise<StreamVideo>;
   /**
    * Creates a direct upload that allows video uploads without an API key.
+   * @param params Parameters for the direct upload
+   * @returns The direct upload details.
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {RateLimitedError} if the server received too many requests
+   * @throws {InternalError} if an unexpected error occurs
    */
   createDirectUpload(
     params: StreamDirectUploadCreateParams
@@ -62,22 +78,30 @@ interface StreamVideoHandle {
   /**
    * Get a full videos details
    * @returns The full video details.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   details(): Promise<StreamVideo>;
   /**
    * Update details for a single video.
    * @param params The fields to update for the video.
    * @returns The updated video details.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {InternalError} if an unexpected error occurs
    */
   update(params: StreamUpdateVideoParams): Promise<StreamVideo>;
   /**
    * Deletes a video and its copies from Cloudflare Stream.
    * @returns A promise that resolves when deletion completes.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   delete(): Promise<void>;
   /**
    * Creates a signed URL token for a video.
    * @returns The signed token that was created.
+   * @throws {InternalError} if the signing key cannot be retrieved or the token cannot be signed
    */
   generateToken(): Promise<string>;
 
@@ -364,12 +388,23 @@ interface StreamScopedCaptions {
    * @param language The BCP 47 language tag for the caption or subtitle.
    * @param file The caption or subtitle file to upload.
    * @returns The created caption entry.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the language or file is invalid
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {InternalError} if an unexpected error occurs
    */
   upload(language: string, file: File): Promise<StreamCaption>;
   /**
    * Generate captions or subtitles for the provided language via AI.
    * @param language The BCP 47 language tag to generate.
    * @returns The generated caption entry.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the language is invalid
+   * @throws {StreamError} if a generated caption already exists
+   * @throws {StreamError} if the video duration is too long
+   * @throws {StreamError} if the video is missing audio
+   * @throws {StreamError} if the requested language is not supported
+   * @throws {InternalError} if an unexpected error occurs
    */
   generate(language: string): Promise<StreamCaption>;
   /**
@@ -377,12 +412,16 @@ interface StreamScopedCaptions {
    * Use the language parameter to filter by a specific language.
    * @param language The optional BCP 47 language tag to filter by.
    * @returns The list of captions or subtitles.
+   * @throws {NotFoundError} if the video or caption is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   list(language?: string): Promise<StreamCaption[]>;
   /**
    * Removes the captions or subtitles from a video.
    * @param language The BCP 47 language tag to remove.
    * @returns A promise that resolves when deletion completes.
+   * @throws {NotFoundError} if the video or caption is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   delete(language: string): Promise<void>;
 }
@@ -393,6 +432,11 @@ interface StreamScopedDownloads {
    * types are `default` and `audio`. Defaults to `default` when omitted.
    * @param downloadType The download type to create.
    * @returns The current downloads for the video.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the download type is invalid
+   * @throws {StreamError} if the video duration is too long to generate a download
+   * @throws {StreamError} if the video is not ready to stream
+   * @throws {InternalError} if an unexpected error occurs
    */
   generate(
     downloadType?: StreamDownloadType
@@ -400,6 +444,8 @@ interface StreamScopedDownloads {
   /**
    * Lists the downloads created for a video.
    * @returns The current downloads for the video.
+   * @throws {NotFoundError} if the video or downloads are not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   get(): Promise<StreamDownloadGetResponse>;
   /**
@@ -407,6 +453,8 @@ interface StreamScopedDownloads {
    * Defaults to `default` when omitted.
    * @param downloadType The download type to delete.
    * @returns A promise that resolves when deletion completes.
+   * @throws {NotFoundError} if the video or downloads are not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   delete(downloadType?: StreamDownloadType): Promise<void>;
 }
@@ -415,6 +463,8 @@ interface StreamVideos {
   /**
    * Lists all videos in a users account.
    * @returns The list of videos.
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {InternalError} if an unexpected error occurs
    */
   list(params?: StreamVideosListParams): Promise<StreamVideo[]>;
 }
@@ -425,6 +475,11 @@ interface StreamWatermarks {
    * @param file The image file to upload
    * @param params The watermark creation parameters.
    * @returns The created watermark profile.
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {InvalidURLError} if the URL is invalid
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
+   * @throws {InternalError} if an unexpected error occurs
    */
   generate(
     file: File,
@@ -435,6 +490,11 @@ interface StreamWatermarks {
    * @param url The image url to upload
    * @param params The watermark creation parameters.
    * @returns The created watermark profile.
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {InvalidURLError} if the URL is invalid
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
+   * @throws {InternalError} if an unexpected error occurs
    */
   generate(
     url: string,
@@ -443,18 +503,23 @@ interface StreamWatermarks {
   /**
    * Lists all watermark profiles for an account.
    * @returns The list of watermark profiles.
+   * @throws {InternalError} if an unexpected error occurs
    */
   list(): Promise<StreamWatermark[]>;
   /**
    * Retrieves details for a single watermark profile.
    * @param watermarkId The watermark profile identifier.
    * @returns The watermark profile details.
+   * @throws {NotFoundError} if the watermark is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   get(watermarkId: string): Promise<StreamWatermark>;
   /**
    * Deletes a watermark profile.
    * @param watermarkId The watermark profile identifier.
    * @returns A promise that resolves when deletion completes.
+   * @throws {NotFoundError} if the watermark is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   delete(watermarkId: string): Promise<void>;
 }
@@ -687,6 +752,47 @@ type StreamPaginationComparison = 'eq' | 'gt' | 'gte' | 'lt' | 'lte';
  */
 interface StreamError extends Error {
   readonly code: number;
+  readonly statusCode: number;
   readonly message: string;
   readonly stack?: string;
+}
+
+interface InternalError extends StreamError {
+  name: 'InternalError';
+}
+
+interface BadRequestError extends StreamError {
+  name: 'BadRequestError';
+}
+
+interface NotFoundError extends StreamError {
+  name: 'NotFoundError';
+}
+
+interface ForbiddenError extends StreamError {
+  name: 'ForbiddenError';
+}
+
+interface RateLimitedError extends StreamError {
+  name: 'RateLimitedError';
+}
+
+interface QuotaReachedError extends StreamError {
+  name: 'QuotaReachedError';
+}
+
+interface MaxFileSizeError extends StreamError {
+  name: 'MaxFileSizeError';
+}
+
+interface InvalidURLError extends StreamError {
+  name: 'InvalidURLError';
+}
+
+interface AlreadyUploadedError extends StreamError {
+  name: 'AlreadyUploadedError';
+}
+
+interface TooManyWatermarksError extends StreamError {
+  name: 'TooManyWatermarksError';
 }
