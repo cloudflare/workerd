@@ -191,7 +191,7 @@ pub fn decode(
         output_ptr: state.output.as_ptr() as usize,
         output_len: state.output.len(),
         had_error: false,
-    };
+    }
 }
 
 pub fn reset(state: &mut Decoder) {
