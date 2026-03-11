@@ -119,6 +119,41 @@ interface RequestInitCfProperties extends Record<string, unknown> {
    * (e.g. { '200-299': 86400, '404': 1, '500-599': 0 })
    */
   cacheTtlByStatus?: Record<string, number>;
+  /**
+   * Explicit Cache-Control header value to set on the response stored in cache.
+   * This gives full control over cache directives (e.g. 'public, max-age=3600, s-maxage=86400').
+   *
+   * Cannot be used together with `cacheTtl` or the `cache` request option (`no-store`/`no-cache`),
+   * as these are mutually exclusive cache control mechanisms. Setting both will throw a TypeError.
+   *
+   * Can be used together with `cacheTtlByStatus`.
+   */
+  cacheControl?: string;
+  /**
+   * Whether the response should be eligible for Cache Reserve storage.
+   */
+  cacheReserveEligible?: boolean;
+  /**
+   * Whether to respect strong ETags (as opposed to weak ETags) from the origin.
+   */
+  respectStrongEtag?: boolean;
+  /**
+   * Whether to strip ETag headers from the origin response before caching.
+   */
+  stripEtags?: boolean;
+  /**
+   * Whether to strip Last-Modified headers from the origin response before caching.
+   */
+  stripLastModified?: boolean;
+  /**
+   * Whether to enable Cache Deception Armor, which protects against web cache
+   * deception attacks by verifying the Content-Type matches the URL extension.
+   */
+  cacheDeceptionArmor?: boolean;
+  /**
+   * Minimum file size in bytes for a response to be eligible for Cache Reserve storage.
+   */
+  cacheReserveMinimumFileSize?: number;
   scrapeShield?: boolean;
   apps?: boolean;
   image?: RequestInitCfPropertiesImage;
