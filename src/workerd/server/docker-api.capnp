@@ -11,11 +11,6 @@ $Cxx.allowCancellation;
 
 struct Docker {
   # Docker API structures for container operations
-  struct PortBinding {
-    hostIp @0 :Text $Json.name("HostIp");
-    hostPort @1 :Text $Json.name("HostPort");
-  }
-
   struct LogConfig {
     type @0 :Text $Json.name("Type");
     config @1 :Json.Value $Json.name("Config");
@@ -317,5 +312,11 @@ struct Docker {
   struct NetworkCreateResponse {
     id @0 :Text $Json.name("Id");
     warning @1 :Text $Json.name("Warning");
+  }
+}
+
+struct ProxyEverything {
+  struct Port {
+    port @0 :UInt16 $Json.name("port");
   }
 }
