@@ -57,7 +57,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::String dockerPath,
       kj::String containerName,
       kj::String imageName,
-      kj::Maybe<kj::String> containerEgressInterceptorImage,
+      kj::String containerEgressInterceptorImage,
       kj::TaskSet& waitUntilTasks,
       kj::Promise<void> pendingCleanup,
       kj::Function<void(kj::Promise<void>)> cleanupCallback,
@@ -89,7 +89,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::String imageName;
 
   // Container egress interceptor image name (sidecar for egress proxy)
-  kj::Maybe<kj::String> containerEgressInterceptorImage;
+  kj::String containerEgressInterceptorImage;
 
   kj::TaskSet& waitUntilTasks;
 
@@ -118,12 +118,15 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   struct InspectResponse {
     bool isRunning;
-    kj::HashMap<uint16_t, uint16_t> ports;
   };
 
   struct IPAMConfigResult {
     kj::String gateway;
     kj::String subnet;
+  };
+
+  struct SidecarInspectResponse {
+    uint16_t ingressHostPort;
   };
 
   // Docker API v1.50 helper methods
@@ -133,9 +136,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
       kj::String endpoint,
       kj::Maybe<kj::String> body = kj::none);
   kj::Promise<InspectResponse> inspectContainer();
-  // Inspect the sidecar container and extract the --http-egress-port from its args.
-  // Returns kj::none if the sidecar doesn't exist or is not running.
-  kj::Promise<kj::Maybe<uint16_t>> inspectSidecarEgressPort();
+
+  kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
       kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
       rpc::Container::StartParams::Reader params);
@@ -145,6 +147,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> destroyContainer();
 
   // Sidecar container management (for egress proxy)
+  // Inspect the sidecar container to retrieve the port to ingress to
+  kj::Promise<kj::Maybe<SidecarInspectResponse>> inspectSidecar();
   kj::Promise<void> createSidecarContainer(uint16_t egressPort, kj::String networkCidr);
   kj::Promise<void> startSidecarContainer();
   kj::Promise<void> destroySidecarContainer();
@@ -187,6 +191,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Maybe<kj::Promise<void>> egressListenerTask;
 
   uint16_t egressListenerPort = 0;
+  kj::Maybe<uint16_t> sidecarIngressHostPort;
 
   // All mutating RPCs need to ask and wait on an RpcTurn before doing any mutations.
   // monitor() is an exception. It waits for all pending mutating RPCs without joining
