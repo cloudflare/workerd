@@ -158,7 +158,8 @@ fn local_object_into_value() {
         let obj_val = ctx.eval_raw("({})").unwrap();
         let obj = obj_val.try_as::<v8::Object>().unwrap();
         // Into<Local<Value>> should compile and not panic in debug.
-        let _value: v8::Local<v8::Value> = obj.into();
+        let value: v8::Local<v8::Value> = obj.into();
+        assert!(value.is_object());
         Ok(())
     });
 }
@@ -170,7 +171,8 @@ fn local_function_into_value() {
     harness.run_in_context(|_lock, ctx| {
         let func_val = ctx.eval_raw("(() => {})").unwrap();
         let func = func_val.try_as::<v8::Function>().unwrap();
-        let _value: v8::Local<v8::Value> = func.into();
+        let value: v8::Local<v8::Value> = func.into();
+        assert!(value.is_object());
         Ok(())
     });
 }
@@ -182,7 +184,8 @@ fn local_array_into_value() {
     harness.run_in_context(|_lock, ctx| {
         let arr_val = ctx.eval_raw("[1, 2]").unwrap();
         let arr = arr_val.try_as::<v8::Array>().unwrap();
-        let _value: v8::Local<v8::Value> = arr.into();
+        let value: v8::Local<v8::Value> = arr.into();
+        assert!(value.is_array());
         Ok(())
     });
 }

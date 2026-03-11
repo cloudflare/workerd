@@ -493,10 +493,14 @@ fn is_lock_ref(ty: &syn::Type) -> bool {
     let syn::Type::Path(type_path) = ref_type.elem.as_ref() else {
         return false;
     };
-    let Some(last) = type_path.path.segments.last() else {
-        return false;
-    };
-    last.ident == "Lock"
+    let segments: Vec<_> = type_path.path.segments.iter().collect();
+    match segments.len() {
+        // `&mut Lock` — bare import (assumes `use jsg::Lock;`)
+        1 => segments[0].ident == "Lock",
+        // `&mut jsg::Lock` — fully qualified path
+        2 => segments[0].ident == "jsg" && segments[1].ident == "Lock",
+        _ => false,
+    }
 }
 
 /// Generates `jsg::Type` and `jsg::FromJS` implementations for union types.

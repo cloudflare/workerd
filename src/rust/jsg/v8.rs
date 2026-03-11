@@ -744,6 +744,10 @@ impl_local_cast!(Uint32Array -> Value, is_uint32_array);
 impl_local_cast!(Int8Array -> Value, is_int8_array);
 impl_local_cast!(Int16Array -> Value, is_int16_array);
 impl_local_cast!(Int32Array -> Value, is_int32_array);
+impl_local_cast!(Float32Array -> Value, is_float32_array);
+impl_local_cast!(Float64Array -> Value, is_float64_array);
+impl_local_cast!(BigInt64Array -> Value, is_bigint64_array);
+impl_local_cast!(BigUint64Array -> Value, is_biguint64_array);
 
 // TypedArray base type to Value. Uses `is_array_buffer_view` which also matches
 // `DataView`, but this is acceptable because `TypedArray` is only constructed from
@@ -757,6 +761,15 @@ impl_local_cast!(Uint32Array -> TypedArray, is_uint32_array);
 impl_local_cast!(Int8Array -> TypedArray, is_int8_array);
 impl_local_cast!(Int16Array -> TypedArray, is_int16_array);
 impl_local_cast!(Int32Array -> TypedArray, is_int32_array);
+impl_local_cast!(Float32Array -> TypedArray, is_float32_array);
+impl_local_cast!(Float64Array -> TypedArray, is_float64_array);
+impl_local_cast!(BigInt64Array -> TypedArray, is_bigint64_array);
+impl_local_cast!(BigUint64Array -> TypedArray, is_biguint64_array);
+
+// Upcasts to Object (Function, Array, TypedArray are all Object subtypes in V8)
+impl_local_cast!(Function -> Object, is_function);
+impl_local_cast!(Array -> Object, is_array);
+impl_local_cast!(TypedArray -> Object, is_array_buffer_view);
 
 impl Local<'_, Array> {
     /// Creates a new JavaScript array with the given length.
