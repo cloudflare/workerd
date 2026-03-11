@@ -84,7 +84,17 @@ export type PyodideEntrypointHelper = {
   workerEntrypoint: any;
   patchWaitUntil: typeof patchWaitUntil;
   patch_env_helper: (patch: unknown) => Generator<void>;
+  callRpcMethod: (binding: any, method: string, ...args: any[]) => any;
 };
+
+// Calls an RPC method on a JS binding entirely from the JS side, bypassing
+// Pyodide's JsProxy attribute resolution. Pyodide misidentifies bindings with
+// JSG_WILDCARD_PROPERTY (like Fetcher) as iterators because the wildcard makes
+// hasMethod("next") return true. This causes Python generator protocol methods
+// (send/next/throw/close) to shadow the JS RPC methods of the same name.
+function callRpcMethod(binding: any, method: string, ...args: any[]): any {
+  return binding[method](...args);
+}
 
 // Function to import JavaScript modules from Python
 let _pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
@@ -109,6 +119,7 @@ export async function setDoAnImport(
     workerEntrypoint,
     patchWaitUntil,
     patch_env_helper,
+    callRpcMethod,
   };
 }
 

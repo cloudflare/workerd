@@ -1018,6 +1018,8 @@ class _FetcherWrapper:
     def _getattr_helper(self, name):
         attr = getattr(self._binding, name)
 
+        # TODO: check if this is actually needed. Can the attribute be
+        # non-callable regarding the fetcher is an RPC object?
         if not callable(attr):
             return attr
 
@@ -1025,7 +1027,9 @@ class _FetcherWrapper:
         async def wrapper(*args, **kwargs):
             js_args = [python_to_rpc(arg) for arg in args]
             js_kwargs = {k: python_to_rpc(v) for k, v in kwargs.items()}
-            result = attr(*js_args, **js_kwargs)
+            result = _pyodide_entrypoint_helper.callRpcMethod(
+                self._binding, name, *js_args, **js_kwargs
+            )
             if hasattr(result, "then") and callable(result.then):
                 return python_from_rpc(await result)
             else:

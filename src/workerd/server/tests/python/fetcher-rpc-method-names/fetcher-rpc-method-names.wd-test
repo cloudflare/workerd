@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "py", worker = .pyWorker),
+    (name = "js", worker = .jsWorker),
+  ],
+);
+
+const pyWorker :Workerd.Worker = (
+
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "rpc", "python_no_global_handlers"],
+
+  modules = [
+    (name = "worker.py", pythonModule = embed "worker.py"),
+  ],
+
+  bindings = [
+    (name = "SERVICE", service = (name = "js", entrypoint = "JsService")),
+  ],
+);
+
+const jsWorker :Workerd.Worker = (
+
+  compatibilityFlags = ["nodejs_compat", "rpc"],
+
+  modules = [
+    (name = "worker", esModule = embed "worker.js"),
+  ],
+);
