@@ -6,7 +6,7 @@ from inspect import isawaitable
 from typing import Any
 
 import js
-from workers import Context, Request, wait_until
+from workers import Context, Request
 
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 logger = logging.getLogger("asgi")
@@ -115,12 +115,7 @@ async def start_application(app):
 
 
 async def process_request(
-    app: Any,
-    req: "Request | js.Request",
-    env: Any,
-    # added for waitUntil, but not used anymore
-    # TODO(later): remove this parameter after unvendoring Python SDK from workerd
-    ctx: Context | None,
+    app: Any, req: "Request | js.Request", env: Any, ctx: Context
 ) -> js.Response:
     from js import Object, Response, TransformStream
 
@@ -129,10 +124,8 @@ async def process_request(
     status = None
     headers = None
     result = Future()
+    is_sse = False
     finished_response = Event()
-
-    # Streaming state — initialized lazily on first body chunk with more_body=True.
-    writer = None
 
     receive_queue = Queue()
     if req.body:
@@ -155,52 +148,60 @@ async def process_request(
             message = {"type": "http.disconnect"}
         return message
 
+    # Create a transform stream for handling streaming responses
+    transform_stream = TransformStream.new()
+    readable = transform_stream.readable
+    writable = transform_stream.writable
+    writer = writable.getWriter()
+
     async def send(got):
         nonlocal status
         nonlocal headers
-        nonlocal writer
+        nonlocal is_sse
 
         if got["type"] == "http.response.start":
             status = got["status"]
             # Like above, we need to convert byte-pairs into string explicitly.
             headers = [(k.decode(), v.decode()) for k, v in got["headers"]]
+            # Check if this is a server-sent events response
+            for k, v in headers:
+                if k.lower() == "content-type" and v.lower().startswith(
+                    "text/event-stream"
+                ):
+                    is_sse = True
+                    break
+            if is_sse:
+                # For SSE, create and return the response immediately after http.response.start
+                resp = Response.new(
+                    readable, headers=Object.fromEntries(headers), status=status
+                )
+                result.set_result(resp)
 
         elif got["type"] == "http.response.body":
             body = got["body"]
             more_body = got.get("more_body", False)
 
-            if writer is not None:
-                # Already in streaming mode — write chunk to the stream.
-                with acquire_js_buffer(body) as jsbytes:
-                    await writer.write(jsbytes)
+            # Convert body to JS buffer
+            px = create_proxy(body)
+            buf = px.getBuffer()
+            px.destroy()
+
+            if is_sse:
+                # For SSE, write chunk to the stream
+                await writer.write(buf.data)
+                # If this is the last chunk, close the writer
                 if not more_body:
                     await writer.close()
                     finished_response.set()
-            elif more_body:
-                # First body chunk with more data coming — switch to streaming.
-                # Create a TransformStream so the runtime can start consuming
-                # body chunks as they are written.
-                transform_stream = TransformStream.new()
-                readable = transform_stream.readable
-                writer = transform_stream.writable.getWriter()
-                resp = Response.new(
-                    readable, headers=Object.fromEntries(headers), status=status
-                )
-                result.set_result(resp)
-                with acquire_js_buffer(body) as jsbytes:
-                    await writer.write(jsbytes)
             else:
-                # Complete body in a single chunk
-                px = create_proxy(body)
-                buf = px.getBuffer()
-                px.destroy()
                 resp = Response.new(
                     buf.data, headers=Object.fromEntries(headers), status=status
                 )
                 result.set_result(resp)
+                await writer.close()
                 finished_response.set()
 
-    # Run the application in the background
+    # Run the application in the background to handle SSE
     async def run_app():
         try:
             await app(request_to_scope(req, env), receive, send)
@@ -211,8 +212,7 @@ async def process_request(
         except Exception as e:
             if not result.done():
                 result.set_exception(e)
-                if writer is not None:
-                    await writer.close()
+                await writer.close()  # Close the writer
                 finished_response.set()
             else:
                 # Response already sent — exception can't be propagated to the
@@ -220,10 +220,22 @@ async def process_request(
                 logger.exception("Exception in ASGI application after response started")
 
     # Create task to run the application in the background
-    app_task = create_proxy(create_task(run_app()))
-    wait_until(app_task)
-    app_task.destroy()
-    return await result
+    app_task = create_task(run_app())
+
+    # Wait for the result (the response)
+    response = await result
+
+    # For non-SSE responses, we need to wait for the application to complete
+    if not is_sse:
+        await app_task
+    else:  # noqa: PLR5501
+        if ctx is not None:
+            ctx.waitUntil(create_proxy(app_task))
+        else:
+            raise RuntimeError(
+                "Server-Side-Events require ctx to be passed to asgi.fetch"
+            )
+    return response
 
 
 async def process_websocket(app: Any, req: "Request | js.Request") -> js.Response:

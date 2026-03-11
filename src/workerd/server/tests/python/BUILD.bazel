@@ -25,6 +25,8 @@ py_wd_test("env-param")
 
 py_wd_test("asgi")
 
+py_wd_test("asgi-sse")
+
 py_wd_test("random")
 
 py_wd_test("subdirectory")

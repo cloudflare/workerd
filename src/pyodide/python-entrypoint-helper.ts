@@ -76,10 +76,7 @@ function patchWaitUntil(ctx: {
 
 export type PyodideEntrypointHelper = {
   doAnImport: (mod: string) => Promise<any>;
-  cloudflareWorkersModule: {
-    env: any;
-    waitUntil: (p: Promise<void> | PyFuture<void>) => void;
-  };
+  cloudflareWorkersModule: { env: any };
   cloudflareSocketsModule: any;
   workerEntrypoint: any;
   patchWaitUntil: typeof patchWaitUntil;
