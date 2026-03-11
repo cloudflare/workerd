@@ -20,7 +20,6 @@ oci_image(
     name = "image",
     base = "@node_25_slim",
     cmd = ["/{}/app".format(package_name())],
-    exposed_ports = ["8080"],
     tags = [
         "no-remote",
         "requires-container-engine",

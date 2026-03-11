@@ -5,7 +5,7 @@ import { scheduler } from 'node:timers/promises';
 // 5s timeout for some of the requests going to the container.
 // We can get to have a stack trace with an
 // abort signal.
-const DEFAULT_TIMEOUT_DURATION = 5_000;
+const DEFAULT_TIMEOUT_DURATION = 10_000;
 
 // Use a unique DO name per test invocation because different test flavors may
 // run concurrently, and this avoids them accidentally sharing the same object.
@@ -247,9 +247,9 @@ export class DurableObjectExample extends DurableObject {
           });
           break;
         } catch (e) {
-          if (!e.message.includes('container port not found')) {
+          if (!e.message.includes('Container is not listening to port 8080')) {
             console.error(
-              'Error querying getTcpPort().fetch() that is not related to container port not found',
+              'Error querying getTcpPort().fetch() that is not related to the container not listening yet',
               e.message
             );
 
@@ -271,6 +271,29 @@ export class DurableObjectExample extends DurableObject {
       assert.equal(resp.statusText, 'OK');
       assert.strictEqual(await resp.text(), 'Hello World!');
     }
+  }
+
+  async testPortNotListening() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start();
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    await assert.rejects(
+      container.getTcpPort(8081).fetch('http://foo/bar', {
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      }),
+      /Container is not listening to port 8081/
+    );
+
+    await container.destroy();
+    await monitor;
   }
 
   async testPidNamespace() {
@@ -628,6 +651,16 @@ export const testWebSockets = {
   },
 };
 
+export const testPortNotListening = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testPortNotListening')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testPortNotListening();
+  },
+};
+
 // Test alarm functionality with containers
 export const testAlarm = {
   async test(_ctrl, env) {
@@ -713,7 +746,7 @@ export const testSetInactivityTimeout = {
     {
       const stub = env.MY_CONTAINER.getByName(name);
 
-      await stub.testSetInactivityTimeout(3000);
+      await stub.testSetInactivityTimeout(10_000);
 
       await assert.rejects(() => stub.abort(), {
         name: 'Error',
