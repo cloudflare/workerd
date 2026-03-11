@@ -113,16 +113,16 @@
       "build_file": "//:build/BUILD.simdutf",
       "file_regex": "singleheader.zip"
     },
-    // This should match the version specified in V8 DEPS, but in practice it is generally acceptable
-    // for it to be behind – zlib is very stable and its API has not changed in a long time, most
-    // changes to the Chromium fork affect ancillary tools and not the zlib library itself.
+    // In theory this should match the version specified in V8 DEPS, but in practice we should get
+    // the latest commit – zlib is very stable and its API has not changed in a long time, but we
+    // want to pick up any bug fixes, security patches and performance improvements more quickly
+    // than we would through V8 updates.
     {
       "name": "zlib",
       "type": "git_clone",
       "use_bazel_dep": true,
       "url": "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
       "branch": "main",
-      "freeze_commit": "85f05b0835f934e52772efc308baa80cdd491838",
       "build_file": "//:build/BUILD.zlib",
       "patches": ["//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"]
     },

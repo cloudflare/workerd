@@ -77,11 +77,7 @@ build:ci-linux-arm-asan --config=ci-linux-asan
 build:ci-linux --build_tag_filters=-off-by-default
 build:ci-linux-arm --build_tag_filters=-off-by-default
 
-# Unlike the bazel Unix toolchain the macOS toolchain sets "-O0 -DDEBUG" for fastbuild by
-# default. This is unhelpful for compile speeds and test performance, remove the DEBUG
-# define.
-build:ci-macOS --copt=-UDEBUG
-test:ci-macOS --config=ci-disable-benchmarks
+build:ci-macOS --config=ci-disable-benchmarks
 
 build:ci-macOS-debug --config=debug
 

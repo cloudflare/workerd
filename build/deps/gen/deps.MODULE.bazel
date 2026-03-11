@@ -148,7 +148,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "85f05b0835f934e52772efc308baa80cdd491838",
+    commit = "b80f1d1e5256ac25f6aea3f31f13d458981cb1f9",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",
