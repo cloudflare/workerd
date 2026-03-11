@@ -6,7 +6,8 @@ from inspect import isawaitable
 from typing import Any
 
 import js
-from workers import Context, Request, wait_until
+from workers import Context, Request
+from workers import waitUntil as wait_until
 
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 logger = logging.getLogger("asgi")
