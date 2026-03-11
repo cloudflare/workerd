@@ -149,6 +149,12 @@ class ZlibContext final {
   // Ref: https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/src/node_zlib.cc#L760
   void work();
 
+  // Returns true when the zlib stream has reached Z_STREAM_END, indicating
+  // that all compressed data has been fully processed.
+  bool isStreamEnd() const {
+    return err == Z_STREAM_END;
+  }
+
   uint getAvailIn() const {
     return stream.avail_in;
   };
@@ -284,9 +290,11 @@ class BrotliEncoderContext final: public BrotliContext {
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, uint32_t value);
   kj::Maybe<CompressionError> getError() const;
+  bool isStreamEnd() const;
 
  private:
   bool lastResult = false;
+  bool streamEnd = false;
   kj::Own<BrotliEncoderStateStruct> state;
 };
 
@@ -304,6 +312,7 @@ class BrotliDecoderContext final: public BrotliContext {
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, uint32_t value);
   kj::Maybe<CompressionError> getError() const;
+  bool isStreamEnd() const;
 
  private:
   BrotliDecoderResult lastResult = BROTLI_DECODER_RESULT_SUCCESS;
@@ -360,6 +369,7 @@ class ZstdEncoderContext final: public ZstdContext {
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, int value);
   kj::Maybe<CompressionError> getError() const;
+  bool isStreamEnd() const;
 
  private:
   size_t lastResult = 0;
@@ -378,6 +388,7 @@ class ZstdDecoderContext final: public ZstdContext {
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, int value);
   kj::Maybe<CompressionError> getError() const;
+  bool isStreamEnd() const;
 
  private:
   size_t lastResult = 0;

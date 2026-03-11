@@ -2857,3 +2857,57 @@ export const zlibParamsAfterWriteNoStalePointers = {
     );
   },
 };
+
+// Regression test for https://github.com/cloudflare/workerd/issues/6286
+// inflateRawSync throws "Memory limit exceeded" when maxOutputLength is set
+// to exactly the decompressed size. This is an off-by-one error in the
+// GrowableBuffer: after zlib fills the buffer completely (avail_out == 0),
+// the processing loop tries to add another chunk which exceeds maxCapacity.
+export const maxOutputLengthExactSize = {
+  test() {
+    // Create a known payload and compress it with deflateRaw
+    const original = Buffer.from('a]b]c]d]e]f]g]h]i]j]k]l]m]n]o]p]'.repeat(32));
+    const compressed = zlib.deflateRawSync(original);
+    const exactSize = original.length;
+
+    // This should succeed — maxOutputLength is exactly the output size.
+    // Before the fix, this throws RangeError: "Memory limit exceeded"
+    const decompressed = zlib.inflateRawSync(compressed, {
+      maxOutputLength: exactSize,
+    });
+    assert.deepStrictEqual(decompressed, original);
+
+    // Sanity check: maxOutputLength + 1 also works
+    const decompressed2 = zlib.inflateRawSync(compressed, {
+      maxOutputLength: exactSize + 1,
+    });
+    assert.deepStrictEqual(decompressed2, original);
+
+    // Same bug affects inflateSync
+    const compressedZlib = zlib.deflateSync(original);
+    const decompressed3 = zlib.inflateSync(compressedZlib, {
+      maxOutputLength: exactSize,
+    });
+    assert.deepStrictEqual(decompressed3, original);
+
+    // And gunzipSync
+    const compressedGzip = zlib.gzipSync(original);
+    const decompressed4 = zlib.gunzipSync(compressedGzip, {
+      maxOutputLength: exactSize,
+    });
+    assert.deepStrictEqual(decompressed4, original);
+
+    // And brotliDecompressSync
+    const compressedBrotli = zlib.brotliCompressSync(original);
+    const decompressed5 = zlib.brotliDecompressSync(compressedBrotli, {
+      maxOutputLength: exactSize,
+    });
+    assert.deepStrictEqual(decompressed5, original);
+
+    // Verify that a maxOutputLength that's genuinely too small still throws
+    assert.throws(
+      () => zlib.inflateRawSync(compressed, { maxOutputLength: exactSize - 1 }),
+      RangeError
+    );
+  },
+};

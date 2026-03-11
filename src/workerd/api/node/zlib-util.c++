@@ -93,6 +93,10 @@ class GrowableBuffer final {
     }
   }
 
+  bool atMaxCapacity() const {
+    return size() >= maxCapacity;
+  }
+
  private:
   kj::ArrayBuilder<kj::byte> builder;
   size_t chunkSize;
@@ -670,6 +674,8 @@ void BrotliEncoderContext::work() {
   lastResult = BrotliEncoderCompressStream(
       state.get(), flush, &availIn, &internalNext, &availOut, &nextOut, nullptr);
   nextIn += internalNext - nextIn;
+
+  streamEnd = lastResult && BrotliEncoderIsFinished(state.get());
 }
 
 kj::Maybe<CompressionError> BrotliEncoderContext::initialize(
@@ -707,6 +713,10 @@ kj::Maybe<CompressionError> BrotliEncoderContext::getError() const {
   }
 
   return kj::none;
+}
+
+bool BrotliEncoderContext::isStreamEnd() const {
+  return streamEnd;
 }
 
 BrotliDecoderContext::BrotliDecoderContext(ZlibMode _mode): BrotliContext(_mode) {
@@ -768,6 +778,10 @@ kj::Maybe<CompressionError> BrotliDecoderContext::getError() const {
   }
 
   return kj::none;
+}
+
+bool BrotliDecoderContext::isStreamEnd() const {
+  return lastResult == BROTLI_DECODER_RESULT_SUCCESS;
 }
 
 // =======================================================================================
@@ -892,6 +906,11 @@ kj::Maybe<CompressionError> ZstdEncoderContext::getError() const {
   return kj::none;
 }
 
+bool ZstdEncoderContext::isStreamEnd() const {
+  // ZSTD_compressStream2 returns 0 when flush_ == ZSTD_e_end and the frame is fully flushed.
+  return !ZSTD_isError(lastResult) && lastResult == 0;
+}
+
 ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode)
     : ZstdContext(_mode),
       dctx_(kj::disposeWith<zstdFreeDCtx>(ZSTD_createDCtx())) {}
@@ -957,6 +976,11 @@ kj::Maybe<CompressionError> ZstdDecoderContext::getError() const {
   }
 
   return kj::none;
+}
+
+bool ZstdDecoderContext::isStreamEnd() const {
+  // ZSTD_decompressStream returns 0 when a frame is completely decoded and fully flushed.
+  return !ZSTD_isError(lastResult) && lastResult == 0;
 }
 
 template <typename CompressionContext>
@@ -1052,6 +1076,14 @@ static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& resul
     }
 
     result.adjustUnused(ctx.getAvailOut());
+
+    if (ctx.getAvailOut() == 0 && result.atMaxCapacity()) {
+      // The output buffer was completely filled and has reached maxOutputLength.
+      // If the stream is done, the output just happened to fit exactly — return it.
+      // Otherwise the decompressed data exceeds maxOutputLength.
+      JSG_REQUIRE(ctx.isStreamEnd(), RangeError, "Memory limit exceeded");
+      break;
+    }
   } while (ctx.getAvailOut() == 0);
 
   return result.releaseAsArray();
