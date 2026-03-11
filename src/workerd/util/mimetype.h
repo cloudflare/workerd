@@ -113,8 +113,11 @@ class MimeType final {
   static constexpr bool isXml(const T& mimeType) {
     auto type = mimeType.type();
     auto subtype = mimeType.subtype();
-    return (type == "text" || type == "application") &&
-        (subtype == "xml" || subtype.endsWith("+xml"));
+    // Bare "xml" subtype is only valid for text/xml and application/xml.
+    // The "+xml" structured syntax suffix (RFC 6838 §4.2.8, RFC 6839) indicates
+    // XML-based content regardless of top-level type (e.g. image/svg+xml).
+    return ((type == "text" || type == "application") && subtype == "xml") ||
+        subtype.endsWith("+xml");
   }
 
   template <IsMimeType T>
