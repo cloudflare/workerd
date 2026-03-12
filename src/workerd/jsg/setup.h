@@ -575,7 +575,7 @@ class Isolate: public IsolateBase {
       v8::IsolateGroup group,
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
-      kj::Own<ExternalStringAllocator> externalStringAllocator = defaultExternalStringAllocator(),
+      kj::Own<ExternalStringAllocator> externalStringAllocator,
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
       : IsolateBase(system,
