@@ -77,8 +77,33 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
   return js.alloc<WorkerStub>(ioctx.addObject(kj::mv(isolateChannel)));
 }
 
-DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(
-    jsg::Lock& js, IoContext& ioctx, CompatibilityDateValidation compatDateValidation,
+jsg::Ref<WorkerStub> WorkerLoader::load(jsg::Lock& js, WorkerCode code) {
+  auto& ioctx = IoContext::current();
+
+  auto source = toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
+
+  // Annoyingly, the callback we pass to `loadIsolate()` technically may be called any number of
+  // times. Yes, even though we aren't providing an ID. The runtime can actually evict the isolate
+  // while a stub still exists, as long as there is no active request on the stub, and then
+  // recreate the isolate on the next request. Moreover, it may ultimately destroy the `ownContent`
+  // in another thread, so we need to use atomic refcounting on it. Ugh!
+  struct OwnContentWrapper: public kj::AtomicRefcounted {
+    kj::Own<void> content;
+    OwnContentWrapper(kj::Own<void> content): content(kj::mv(content)) {}
+  };
+  auto ownContentWrapper = kj::atomicRefcounted<OwnContentWrapper>(kj::mv(source.ownContent));
+
+  auto isolateChannel = ioctx.getIoChannelFactory().loadIsolate(channel, kj::none,
+      [source = kj::mv(source), ownContentWrapper = kj::mv(ownContentWrapper)]() mutable {
+    return source.clone(kj::atomicAddRef(*ownContentWrapper));
+  });
+
+  return js.alloc<WorkerStub>(ioctx.addObject(kj::mv(isolateChannel)));
+}
+
+DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
+    IoContext& ioctx,
+    CompatibilityDateValidation compatDateValidation,
     WorkerCode code) {
   auto extractedSource = extractSource(js, code);
   auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);

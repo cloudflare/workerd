@@ -864,3 +864,52 @@ export let startupException = {
     }
   },
 };
+
+export let justLoad = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.load({
+      compatibilityDate: '2025-01-01',
+      mainModule: 'foo.js',
+      modules: {
+        'foo.js': `
+          import {WorkerEntrypoint} from "cloudflare:workers";
+          export default {
+            greet(name) { return "Hello, " + name; }
+          }
+          export let alternate = {
+            greet(name, env, ctx) { return \`\${ctx.props.greeting}, \${name}\`; }
+          }
+          export class FancyPropsEntrypoint extends WorkerEntrypoint {
+            async run() {
+              let greet1 = await this.ctx.props.greeter.greet("Dave");
+              let greet2 = await this.ctx.props.greeter2.greet("Eve");
+              return [greet1, greet2].join("\\n");
+            }
+          }
+        `,
+      },
+    });
+
+    {
+      let result = await worker.getEntrypoint().greet('Alice');
+      assert.strictEqual(result, 'Hello, Alice');
+    }
+
+    let greeter = worker.getEntrypoint('alternate', {
+      props: { greeting: 'Welcome' },
+    });
+    let greeter2 = worker.getEntrypoint('alternate', {
+      props: { greeting: 'Howdy' },
+    });
+
+    {
+      let result = await greeter.greet('Bob');
+      assert.strictEqual(result, 'Welcome, Bob');
+    }
+
+    {
+      let result = await greeter2.greet('Carol');
+      assert.strictEqual(result, 'Howdy, Carol');
+    }
+  },
+};
