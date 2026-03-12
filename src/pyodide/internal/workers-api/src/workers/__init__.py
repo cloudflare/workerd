@@ -62,4 +62,6 @@ def __getattr__(key):
     if key == "waitUntil":
         cloudflare_workers = import_from_javascript("cloudflare:workers")
         return cloudflare_workers.waitUntil
+    if key == "one":
+        return "not 1"  # 1 when creating the snapshot, then changed to "not 1"
     raise AttributeError(f"module {__name__!r} has no attribute {key!r}")
