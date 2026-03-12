@@ -197,7 +197,34 @@ static SqliteDatabase::UdfResultValue jsResultToSqlite(jsg::Lock& js, v8::Local<
   }
 }
 
-// Helper to call a JS function with exception handling
+// Convert a single SQLite UDF argument to a JS value.
+static v8::Local<v8::Value> udfArgToJs(
+    jsg::Lock& js, const SqliteDatabase::UdfArgValue& arg) {
+  KJ_SWITCH_ONEOF(arg) {
+    KJ_CASE_ONEOF(intVal, int64_t) {
+      return v8::Number::New(js.v8Isolate, static_cast<double>(intVal));
+    }
+    KJ_CASE_ONEOF(doubleVal, double) {
+      return v8::Number::New(js.v8Isolate, doubleVal);
+    }
+    KJ_CASE_ONEOF(strVal, kj::StringPtr) {
+      return jsg::v8Str(js.v8Isolate, strVal);
+    }
+    KJ_CASE_ONEOF(blobVal, kj::ArrayPtr<const kj::byte>) {
+      auto copy = kj::heapArray<kj::byte>(blobVal.size());
+      memcpy(copy.begin(), blobVal.begin(), blobVal.size());
+      return js.wrapBytes(kj::mv(copy));
+    }
+    KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
+      return v8::Null(js.v8Isolate);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+// Helper to call a JS function with exception handling.
+// Uses TryCatch to tunnel JS exceptions through the KJ exception system so they
+// can be rethrown with their original stack traces after passing through SQLite's C API.
 static v8::Local<v8::Value> callJsFunction(jsg::Lock& js,
     v8::Local<v8::Function> func,
     v8::Local<v8::Value> recv,
@@ -208,6 +235,8 @@ static v8::Local<v8::Value> callJsFunction(jsg::Lock& js,
   if (tryCatch.HasCaught()) {
     jsg::throwTunneledException(js.v8Isolate, tryCatch.Exception());
   }
+  // Handle the edge case where Call() returns empty without throwing (e.g. isolate termination).
+  JSG_REQUIRE(!maybeResult.IsEmpty(), Error, "UDF call failed unexpectedly");
   return maybeResult.ToLocalChecked();
 }
 
@@ -238,29 +267,10 @@ void SqlStorage::createScalarFunction(
     JSG_REQUIRE(funcHandle->IsFunction(), TypeError, "UDF callback must be a function");
     auto func = funcHandle.As<v8::Function>();
 
-    // Convert SQLite args directly to individual JS values (no intermediate array).
     auto argc = static_cast<int>(args.size());
     auto argv = kj::heapArray<v8::Local<v8::Value>>(argc);
     for (auto i: kj::zeroTo(argc)) {
-      KJ_SWITCH_ONEOF(args[i]) {
-        KJ_CASE_ONEOF(intVal, int64_t) {
-          argv[i] = v8::Number::New(js.v8Isolate, static_cast<double>(intVal));
-        }
-        KJ_CASE_ONEOF(doubleVal, double) {
-          argv[i] = v8::Number::New(js.v8Isolate, doubleVal);
-        }
-        KJ_CASE_ONEOF(strVal, kj::StringPtr) {
-          argv[i] = jsg::v8Str(js.v8Isolate, strVal);
-        }
-        KJ_CASE_ONEOF(blobVal, kj::ArrayPtr<const kj::byte>) {
-          auto copy = kj::heapArray<kj::byte>(blobVal.size());
-          memcpy(copy.begin(), blobVal.begin(), blobVal.size());
-          argv[i] = js.wrapBytes(kj::mv(copy));
-        }
-        KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
-          argv[i] = v8::Null(js.v8Isolate);
-        }
-      }
+      argv[i] = udfArgToJs(js, args[i]);
     }
 
     auto resultVal = callJsFunction(js, func, v8::Undefined(js.v8Isolate), argc, argv.begin());
@@ -348,29 +358,10 @@ void SqlStorage::createAggregateFunction(
     auto stepVal = jsg::check(instance->Get(js.v8Context(), stepKey));
     auto stepFunc = stepVal.As<v8::Function>();
 
-    // Convert SQL args to individual JS args (skip intermediate array).
     auto argc = static_cast<int>(args.size());
     auto argv = kj::heapArray<v8::Local<v8::Value>>(argc);
     for (auto i: kj::zeroTo(argc)) {
-      KJ_SWITCH_ONEOF(args[i]) {
-        KJ_CASE_ONEOF(intVal, int64_t) {
-          argv[i] = v8::Number::New(js.v8Isolate, static_cast<double>(intVal));
-        }
-        KJ_CASE_ONEOF(doubleVal, double) {
-          argv[i] = v8::Number::New(js.v8Isolate, doubleVal);
-        }
-        KJ_CASE_ONEOF(strVal, kj::StringPtr) {
-          argv[i] = jsg::v8Str(js.v8Isolate, strVal);
-        }
-        KJ_CASE_ONEOF(blobVal, kj::ArrayPtr<const kj::byte>) {
-          auto copy = kj::heapArray<kj::byte>(blobVal.size());
-          memcpy(copy.begin(), blobVal.begin(), blobVal.size());
-          argv[i] = js.wrapBytes(kj::mv(copy));
-        }
-        KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
-          argv[i] = v8::Null(js.v8Isolate);
-        }
-      }
+      argv[i] = udfArgToJs(js, args[i]);
     }
 
     auto stepResult = callJsFunction(js, stepFunc, instance, argc, argv.begin());
@@ -518,49 +509,12 @@ void SqlStorage::createArrayAggregateFunction(
     // For single-arg UDFs, push the value directly. For multi-arg, push an array of args.
     v8::Local<v8::Value> valueToPush;
     if (args.size() == 1) {
-      KJ_SWITCH_ONEOF(args[0]) {
-        KJ_CASE_ONEOF(intVal, int64_t) {
-          valueToPush = v8::Number::New(js.v8Isolate, static_cast<double>(intVal));
-        }
-        KJ_CASE_ONEOF(doubleVal, double) {
-          valueToPush = v8::Number::New(js.v8Isolate, doubleVal);
-        }
-        KJ_CASE_ONEOF(strVal, kj::StringPtr) {
-          valueToPush = jsg::v8Str(js.v8Isolate, strVal);
-        }
-        KJ_CASE_ONEOF(blobVal, kj::ArrayPtr<const kj::byte>) {
-          auto copy = kj::heapArray<kj::byte>(blobVal.size());
-          memcpy(copy.begin(), blobVal.begin(), blobVal.size());
-          valueToPush = js.wrapBytes(kj::mv(copy));
-        }
-        KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
-          valueToPush = v8::Null(js.v8Isolate);
-        }
-      }
+      valueToPush = udfArgToJs(js, args[0]);
     } else {
-      // Multi-arg: build a JS array of the args.
       auto argc = static_cast<int>(args.size());
       auto argv = kj::heapArray<v8::Local<v8::Value>>(argc);
       for (auto i: kj::zeroTo(argc)) {
-        KJ_SWITCH_ONEOF(args[i]) {
-          KJ_CASE_ONEOF(intVal, int64_t) {
-            argv[i] = v8::Number::New(js.v8Isolate, static_cast<double>(intVal));
-          }
-          KJ_CASE_ONEOF(doubleVal, double) {
-            argv[i] = v8::Number::New(js.v8Isolate, doubleVal);
-          }
-          KJ_CASE_ONEOF(strVal, kj::StringPtr) {
-            argv[i] = jsg::v8Str(js.v8Isolate, strVal);
-          }
-          KJ_CASE_ONEOF(blobVal, kj::ArrayPtr<const kj::byte>) {
-            auto copy = kj::heapArray<kj::byte>(blobVal.size());
-            memcpy(copy.begin(), blobVal.begin(), blobVal.size());
-            argv[i] = js.wrapBytes(kj::mv(copy));
-          }
-          KJ_CASE_ONEOF(nullVal, decltype(nullptr)) {
-            argv[i] = v8::Null(js.v8Isolate);
-          }
-        }
+        argv[i] = udfArgToJs(js, args[i]);
       }
       valueToPush = v8::Array::New(js.v8Isolate, argv.begin(), argc);
     }
@@ -642,7 +596,11 @@ void SqlStorage::newAggregate(jsg::Lock& js, kj::String name, jsg::JsValue callb
       lengthVal->IsNumber() ? static_cast<int>(lengthVal.As<v8::Number>()->Value()) : 0;
 
   if (funcLength == 0) {
-    // Factory pattern: call the function to validate it returns {step, final}.
+    // Factory pattern: call the function once at registration to validate it returns
+    // {step, final}. Note: this is an eager validation call with a side effect — the factory
+    // runs once here and the result is discarded. The factory will be called again for each
+    // aggregation group during query execution. If this is a concern, the validation could
+    // be deferred to first use, but early errors are more user-friendly.
     v8::TryCatch tryCatch(js.v8Isolate);
     auto maybeResult = func->Call(js.v8Context(), v8::Undefined(js.v8Isolate), 0, nullptr);
 

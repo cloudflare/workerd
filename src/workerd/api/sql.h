@@ -83,7 +83,7 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 
       JSG_METHOD(setMaxPageCountForTest);
 
-      // User-defined functions are experimental
+      // TODO(soon): Add a proper compatibility flag before removing the experimental gate.
       JSG_METHOD(newFunction);
       JSG_METHOD(newAggregate);
     }
@@ -162,6 +162,12 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
     // object with step/final methods. We can't store v8 handles in the UdfResultValue (which
     // flows through the sqlite.c++ layer), so we store them here keyed by a monotonic ID.
     // The UdfResultValue holds the int64_t ID as a handle to look up the instance.
+    //
+    // Cleanup: entries are removed in the finalCb lambda. SQLite guarantees xFinal is called
+    // for every aggregation group, even when the step callback errors. See
+    // https://www.sqlite.org/c3ref/create_function.html ("xFinal is always called").
+    //
+    // Overflow of nextInstanceId is practically impossible (~18 quintillion groups).
     uint64_t nextInstanceId = 1;
     kj::HashMap<uint64_t, jsg::JsRef<jsg::JsValue>> activeInstances;
 

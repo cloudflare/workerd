@@ -2661,7 +2661,7 @@ static void setResultFromUdfResultValue(
 
 // Static callback that SQLite calls when a UDF is invoked.
 // The user_data parameter points to a RegisteredUdf structure.
-static void udfCallback(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
+void udfCallback(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
   auto* udf = static_cast<SqliteDatabase::RegisteredUdf*>(sqlite3_user_data(ctx));
 
   // Convert arguments to UdfArgValue array (non-owning pointers to SQLite-managed memory)
@@ -2682,8 +2682,11 @@ static void udfCallback(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
     udf->db->setPendingUdfException(kj::mv(e));
     sqlite3_result_error(ctx, "UDF error", -1);
   } catch (std::exception& e) {
+    udf->db->setPendingUdfException(
+        KJ_EXCEPTION(FAILED, kj::str("UDF threw std::exception: ", e.what())));
     sqlite3_result_error(ctx, e.what(), -1);
   } catch (...) {
+    udf->db->setPendingUdfException(KJ_EXCEPTION(FAILED, "UDF threw unknown exception"));
     sqlite3_result_error(ctx, "Unknown error in UDF", -1);
   }
 }
@@ -2720,7 +2723,7 @@ void SqliteDatabase::registerScalarFunction(
 }
 
 // Static callback for aggregate step function.
-static void aggregateStepCallback(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
+void aggregateStepCallback(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
   auto* udf = static_cast<SqliteDatabase::RegisteredAggregateUdf*>(sqlite3_user_data(ctx));
 
   // Get or allocate aggregate context
@@ -2760,14 +2763,18 @@ static void aggregateStepCallback(sqlite3_context* ctx, int argc, sqlite3_value*
     udf->db->setPendingUdfException(kj::mv(e));
     sqlite3_result_error(ctx, "Aggregate step error", -1);
   } catch (std::exception& e) {
+    udf->db->setPendingUdfException(
+        KJ_EXCEPTION(FAILED, kj::str("Aggregate step threw std::exception: ", e.what())));
     sqlite3_result_error(ctx, e.what(), -1);
   } catch (...) {
+    udf->db->setPendingUdfException(
+        KJ_EXCEPTION(FAILED, "Aggregate step threw unknown exception"));
     sqlite3_result_error(ctx, "Unknown error in aggregate step", -1);
   }
 }
 
 // Static callback for aggregate final function.
-static void aggregateFinalCallback(sqlite3_context* ctx) {
+void aggregateFinalCallback(sqlite3_context* ctx) {
   auto* udf = static_cast<SqliteDatabase::RegisteredAggregateUdf*>(sqlite3_user_data(ctx));
 
   // Get aggregate context (don't allocate if it doesn't exist - means no rows were processed)
@@ -2786,8 +2793,12 @@ static void aggregateFinalCallback(sqlite3_context* ctx) {
     udf->db->setPendingUdfException(kj::mv(e));
     sqlite3_result_error(ctx, "Aggregate final error", -1);
   } catch (std::exception& e) {
+    udf->db->setPendingUdfException(
+        KJ_EXCEPTION(FAILED, kj::str("Aggregate final threw std::exception: ", e.what())));
     sqlite3_result_error(ctx, e.what(), -1);
   } catch (...) {
+    udf->db->setPendingUdfException(
+        KJ_EXCEPTION(FAILED, "Aggregate final threw unknown exception"));
     sqlite3_result_error(ctx, "Unknown error in aggregate final", -1);
   }
 

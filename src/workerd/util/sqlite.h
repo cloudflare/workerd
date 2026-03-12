@@ -18,6 +18,8 @@
 struct sqlite3;
 struct sqlite3_vfs;
 struct sqlite3_stmt;
+struct sqlite3_context;
+struct sqlite3_value;
 
 KJ_DECLARE_NON_POLYMORPHIC(sqlite3_stmt);
 
@@ -366,7 +368,11 @@ class SqliteDatabase {
   // us to preserve the full exception (including tunneled JS exceptions with
   // their stack traces) instead of losing it when converting to a SQLite error.
   void setPendingUdfException(kj::Exception&& exception) {
-    pendingUdfException = kj::mv(exception);
+    // First error wins — if a query invokes multiple UDFs that both throw,
+    // we preserve the first exception rather than silently clobbering it.
+    if (pendingUdfException == kj::none) {
+      pendingUdfException = kj::mv(exception);
+    }
   }
 
  private:
@@ -417,15 +423,16 @@ class SqliteDatabase {
 
   // Storage for registered user-defined functions.
   // The callback must be stored as a raw pointer inside SQLite's user_data,
-  // so we keep ownership here in a HashMap.
-  // Note: RegisteredUdf and RegisteredAggregateUdf are defined in sqlite.c++ because their
-  // definitions use callback types that can't be completed here. We forward-declare them as
-  // public so the callback functions can access them.
- public:
+  // so we keep ownership here in a HashMap. The structs are defined in sqlite.c++
+  // because their definitions use callback types that can't be completed here.
+  // The static callback functions in sqlite.c++ access them via sqlite3_user_data().
   struct RegisteredUdf;
   struct RegisteredAggregateUdf;
 
- private:
+  // The SQLite C API callbacks need to cast user_data back to the registered UDF types.
+  friend void udfCallback(sqlite3_context*, int, sqlite3_value**);
+  friend void aggregateStepCallback(sqlite3_context*, int, sqlite3_value**);
+  friend void aggregateFinalCallback(sqlite3_context*);
   kj::HashMap<kj::StringPtr, kj::Own<RegisteredUdf>> registeredUdfs;
   kj::HashMap<kj::StringPtr, kj::Own<RegisteredAggregateUdf>> registeredAggregateUdfs;
 
