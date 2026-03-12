@@ -5,6 +5,7 @@
 #include "observer.h"
 #include "type-wrapper.h"
 #include "url.h"
+#include "workerd/jsg/util.h"
 
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.capnp.h>
@@ -112,7 +113,8 @@ struct TestContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
 
 #define PREAMBLE(fn)                                                                               \
-  TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), 123, kj::heap<IsolateObserver>()); \
+  TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), 123, kj::heap<IsolateObserver>(),  \
+      kj::heap<DefaultExternalStringAllocator>());                                                 \
   isolate.runInLockScope([&](auto& lock) {                                                         \
     IsolateBase::from(lock.v8Isolate).setUsingNewModuleRegistry();                                 \
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.template newContext<TestContext>().getHandle(lock),        \

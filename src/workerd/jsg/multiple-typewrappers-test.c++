@@ -141,7 +141,7 @@ KJ_TEST("Create a context with a configuration then create a default context wit
   auto flags = flagsArena.initRoot<::workerd::CompatibilityFlags>();
   auto flagsReader = flags.asReader();
   TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), Configuration(flagsReader),
-      kj::heap<IsolateObserver>(), {}, false);
+      kj::heap<IsolateObserver>(), kj::heap<DefaultExternalStringAllocator>(), {}, false);
   isolate.runInLockScope([&](TestIsolate::Lock& lock) {
     jsg::JsContext<TestContext> context =
         lock.newContextWithConfiguration<TestContext>(Configuration(flagsReader), {});
