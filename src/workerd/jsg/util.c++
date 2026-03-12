@@ -828,6 +828,8 @@ class ExternString: public Type {
     auto& allocator = getAllocatorForIsolate(isolate);
     auto mem = allocator.allocate(sizeof(ExternString<Type, Data>));
     if (mem == nullptr) {
+      isolate->ThrowException(v8::Exception::Error(
+          v8::String::NewFromUtf8Literal(isolate, "External string allocation failed")));
       return v8::MaybeLocal<v8::String>();
     }
 
@@ -844,6 +846,8 @@ class ExternString: public Type {
       // This should happen only if the string is too long
       resource->~ExternString<Type, Data>();
       allocator.deallocate(mem);
+      isolate->ThrowException(v8::Exception::Error(
+          v8::String::NewFromUtf8Literal(isolate, "External string allocation failed")));
       return v8::MaybeLocal<v8::String>();
     }
 
