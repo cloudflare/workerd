@@ -34,5 +34,15 @@ KJ_TEST("Crypto error conversion") {
   KJ_EXPECT_THROW_MESSAGE("jsg.DOMException(OperationError): Invalid point encoding.", OSSLCALL(0));
 }
 
+KJ_TEST("RSA_R_KEY_SIZE_TOO_SMALL is a user-facing error") {
+  ClearErrorOnReturn clearErrorOnReturn;
+
+  // RSA_R_KEY_SIZE_TOO_SMALL should be converted to a DOMException(OperationError) rather than
+  // an internal error (which would generate Sentry noise).
+  OPENSSL_PUT_ERROR(RSA, RSA_R_KEY_SIZE_TOO_SMALL);
+  KJ_EXPECT_THROW_MESSAGE(
+      "jsg.DOMException(OperationError): RSA key size is too small.", OSSLCALL(0));
+}
+
 }  // namespace
 }  // namespace workerd::api
