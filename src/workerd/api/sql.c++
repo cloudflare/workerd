@@ -151,10 +151,25 @@ double SqlStorage::getDatabaseSize(jsg::Lock& js) {
   return dbSize;
 }
 
-// Helper function to convert JS result back to SQLite UdfResultValue
-static SqliteDatabase::UdfResultValue jsResultToSqlite(jsg::Lock& js, v8::Local<v8::Value> handle) {
+// Helper function to convert JS result back to SQLite UdfResultValue.
+// [[nodiscard]] ensures callers don't accidentally discard the result, which would
+// cause the UDF to silently return NULL to SQLite.
+[[nodiscard]] static SqliteDatabase::UdfResultValue jsResultToSqlite(
+    jsg::Lock& js, v8::Local<v8::Value> handle) {
   if (handle->IsNull() || handle->IsUndefined()) {
     return nullptr;
+  } else if (handle->IsBoolean()) {
+    // Map booleans to integers: true -> 1, false -> 0
+    // This matches SQLite's convention where boolean values are represented as integers.
+    return handle.As<v8::Boolean>()->Value() ? static_cast<int64_t>(1) : static_cast<int64_t>(0);
+  } else if (handle->IsBigInt()) {
+    // BigInt support with range checking. SQLite integers are signed 64-bit.
+    v8::Local<v8::BigInt> bigint = handle.As<v8::BigInt>();
+    bool lossless = false;
+    int64_t value = bigint->Int64Value(&lossless);
+    JSG_REQUIRE(lossless, RangeError,
+        "BigInt value is outside the range of SQLite integers (-2^63 to 2^63-1).");
+    return value;
   } else if (handle->IsNumber()) {
     double num = handle.As<v8::Number>()->Value();
     double intPart;
@@ -179,7 +194,7 @@ static SqliteDatabase::UdfResultValue jsResultToSqlite(jsg::Lock& js, v8::Local<
         "UDF returned a Promise. UDFs must be synchronous - async functions are not supported. "
         "If you need async data, fetch it before the query and pass it as a parameter.");
   } else {
-    // For other types (objects, arrays, booleans, dates, etc.), stringify them.
+    // For other types (objects, arrays, dates, etc.), stringify them.
     // This allows useful cases like returning Date objects (which stringify to a date string)
     // or arrays (which stringify to comma-separated values), or objects with custom toString().
     auto str = kj::str(js.toString(jsg::JsValue(handle)));
@@ -242,7 +257,11 @@ static v8::Local<v8::Value> callJsFunction(jsg::Lock& js,
 
 void SqlStorage::createScalarFunction(
     jsg::Lock& js, kj::String name, jsg::JsRef<jsg::JsValue> callback) {
-  auto jsFunc = kj::heap<RegisteredScalarFunction>(kj::str(name), kj::mv(callback));
+  // Normalize to lowercase for case-insensitive consistency with SQLite.
+  // SQLite function names are case-insensitive, so `MyFunc` and `MYFUNC` are the same.
+  // We store the lowercase version to ensure HashMap lookups match SQLite's behavior.
+  auto lowerName = toLowercase(name);
+  auto jsFunc = kj::heap<RegisteredScalarFunction>(kj::mv(lowerName), kj::mv(callback));
   auto* jsFuncPtr = jsFunc.get();
   // Erase any existing entry first, then insert. We can't use upsert because the HashMap
   // key is a StringPtr pointing to the value's name field - upsert would keep the old key
@@ -281,7 +300,9 @@ void SqlStorage::createScalarFunction(
 
 void SqlStorage::createAggregateFunction(
     jsg::Lock& js, kj::String name, jsg::JsRef<jsg::JsValue> factory) {
-  auto jsFunc = kj::heap<RegisteredAggregateFunction>(kj::str(name), kj::mv(factory));
+  // Normalize to lowercase for case-insensitive consistency with SQLite.
+  auto lowerName = toLowercase(name);
+  auto jsFunc = kj::heap<RegisteredAggregateFunction>(kj::mv(lowerName), kj::mv(factory));
   auto* jsFuncPtr = jsFunc.get();
   // Erase any existing entry first, then insert. We can't use upsert because the HashMap
   // key is a StringPtr pointing to the value's name field - upsert would keep the old key
@@ -413,6 +434,14 @@ void SqlStorage::createAggregateFunction(
       instance = resultVal.As<v8::Object>();
     }
 
+    // Ensure we clean up the side table entry even if the final callback throws.
+    // SQLite guarantees xFinal is called exactly once, so this is our only chance.
+    KJ_DEFER({
+      KJ_IF_SOME(id, maybeInstanceId) {
+        jsFuncPtr->activeInstances.erase(id);
+      }
+    });
+
     // Get the final function from the instance.
     auto finalKey = jsg::v8StrIntern(js.v8Isolate, "final"_kj);
     auto finalVal = jsg::check(instance->Get(js.v8Context(), finalKey));
@@ -421,11 +450,6 @@ void SqlStorage::createAggregateFunction(
     auto finalFunc = finalVal.As<v8::Function>();
 
     auto resultVal = callJsFunction(js, finalFunc, instance, 0, nullptr);
-
-    // Remove the instance from the side table now that aggregation is complete.
-    KJ_IF_SOME(id, maybeInstanceId) {
-      jsFuncPtr->activeInstances.erase(id);
-    }
 
     return jsResultToSqlite(js, resultVal);
   };
@@ -440,11 +464,19 @@ static constexpr uint MAX_REGISTERED_UDFS = 256;
 static void validateUdfName(kj::StringPtr name) {
   JSG_REQUIRE(name.size() > 0, TypeError, "Function name cannot be empty.");
   JSG_REQUIRE(name.size() <= 255, TypeError, "Function name is too long (max 255 bytes).");
-  JSG_REQUIRE(!name.startsWith("_cf_"), TypeError,
+
+  // SQLite function names are case-insensitive, so we validate against lowercase.
+  auto lowerName = toLowercase(name);
+
+  JSG_REQUIRE(!lowerName.startsWith("_cf_"), TypeError,
       "Function names starting with '_cf_' are reserved for internal use.");
-  // SQLite reserves function names starting with "sqlite_" — user code must not shadow them.
-  JSG_REQUIRE(!name.startsWith("sqlite_"), TypeError,
+  JSG_REQUIRE(!lowerName.startsWith("sqlite_"), TypeError,
       "Function names starting with 'sqlite_' are reserved by SQLite.");
+
+  // Prevent shadowing built-in SQLite functions like count(), sum(), max(), etc.
+  // This protects internal query correctness and billing accuracy.
+  JSG_REQUIRE(!SqliteDatabase::isBuiltInFunction(lowerName), TypeError,
+      kj::str("Cannot override built-in SQLite function '", name, "'."));
 }
 
 void SqlStorage::newFunction(jsg::Lock& js, kj::String name, jsg::JsValue callback) {
@@ -469,7 +501,9 @@ void SqlStorage::createArrayAggregateFunction(
   // State management uses the same side-table approach as the factory pattern, but
   // instead of a JS {step, final} instance, we store a JS array that accumulates values.
 
-  auto jsFunc = kj::heap<RegisteredAggregateFunction>(kj::str(name), kj::mv(callback));
+  // Normalize to lowercase for case-insensitive consistency with SQLite.
+  auto lowerName = toLowercase(name);
+  auto jsFunc = kj::heap<RegisteredAggregateFunction>(kj::mv(lowerName), kj::mv(callback));
   auto* jsFuncPtr = jsFunc.get();
   registeredAggregateFunctions.erase(jsFuncPtr->name.asPtr());
   registeredAggregateFunctions.insert(jsFuncPtr->name.asPtr(), kj::mv(jsFunc));
@@ -552,6 +586,13 @@ void SqlStorage::createArrayAggregateFunction(
       valuesArray = v8::Array::New(js.v8Isolate);
     }
 
+    // Ensure we clean up the side table entry even if the callback throws.
+    KJ_DEFER({
+      KJ_IF_SOME(id, maybeInstanceId) {
+        jsFuncPtr->activeInstances.erase(id);
+      }
+    });
+
     // Call the user's callback with the accumulated values array.
     v8::Local<v8::Value> funcHandle = jsFuncPtr->factory.getHandle(js);
     JSG_REQUIRE(funcHandle->IsFunction(), TypeError, "Aggregate callback must be a function");
@@ -559,11 +600,6 @@ void SqlStorage::createArrayAggregateFunction(
 
     v8::Local<v8::Value> argv[] = {valuesArray};
     auto resultVal = callJsFunction(js, func, v8::Undefined(js.v8Isolate), 1, argv);
-
-    // Clean up the side table entry.
-    KJ_IF_SOME(id, maybeInstanceId) {
-      jsFuncPtr->activeInstances.erase(id);
-    }
 
     return jsResultToSqlite(js, resultVal);
   };

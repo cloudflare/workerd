@@ -2995,16 +2995,16 @@ export class UdfTestDO extends DurableObject {
     const r2 = sql.exec('SELECT return_array() AS val').one();
     assert.strictEqual(r2.val, '1,2,3');
 
-    // Boolean true -> coerced to string "true" or number?
+    // Boolean true -> maps to integer 1 (SQLite convention)
     sql.newFunction('return_true', () => true);
     const r3 = sql.exec('SELECT return_true() AS val').one();
-    // Booleans are not numbers in JS, so they get stringified
-    assert.strictEqual(r3.val, 'true');
+    // Booleans map to integers: true -> 1, false -> 0 (matches SQLite convention)
+    assert.strictEqual(r3.val, 1);
 
-    // Boolean false
+    // Boolean false -> maps to integer 0
     sql.newFunction('return_false', () => false);
     const r4 = sql.exec('SELECT return_false() AS val').one();
-    assert.strictEqual(r4.val, 'false');
+    assert.strictEqual(r4.val, 0);
 
     // Date -> should be coerced to string (ISO format or similar)
     sql.newFunction('return_date', () => new Date('2024-01-15T12:00:00Z'));
@@ -3031,19 +3031,29 @@ export class UdfTestDO extends DurableObject {
     }
     assert.ok(symbolThrew, 'Returning a Symbol should throw');
 
-    // BigInt -> can't be implicitly converted to Number or String in some cases
+    // BigInt within int64 range -> converts to SQLite integer
     sql.newFunction('return_bigint', () => BigInt(9007199254740993));
-    let bigintThrew = false;
-    let bigintVal;
+    const bigintResult = sql.exec('SELECT return_bigint() AS val').one();
+    // BigInt values within int64 range are converted to integers
+    assert.strictEqual(bigintResult.val, 9007199254740993);
+
+    // BigInt outside int64 range -> throws RangeError
+    sql.newFunction('return_bigint_overflow', () =>
+      BigInt('9223372036854775808')
+    ); // 2^63
+    let overflowThrew = false;
+    let overflowError;
     try {
-      bigintVal = sql.exec('SELECT return_bigint() AS val').one().val;
+      sql.exec('SELECT return_bigint_overflow() AS val').one();
     } catch (e) {
-      bigintThrew = true;
+      overflowThrew = true;
+      overflowError = e;
     }
-    // Document behavior - BigInt may throw or may get stringified
+    assert.ok(overflowThrew, 'BigInt overflow should throw');
     assert.ok(
-      bigintThrew || bigintVal !== undefined,
-      `BigInt either threw or returned: ${bigintVal}`
+      overflowError.message.includes('outside the range') ||
+        overflowError.message.includes('RangeError'),
+      `BigInt overflow error should mention range, got: ${overflowError.message}`
     );
   }
 
@@ -3469,36 +3479,29 @@ export class UdfTestDO extends DurableObject {
   }
 
   /**
-   * Test attempting to shadow a built-in function.
-   * This should either fail or the user function should take precedence.
+   * Test that shadowing built-in functions is rejected.
+   * This protects internal query correctness and billing accuracy.
    */
   async testShadowBuiltinFunction() {
     const sql = this.state.storage.sql;
 
-    // Try to shadow the built-in abs() function
-    sql.newFunction('abs', (x) => x * 1000); // Very different from real abs
+    // Attempting to shadow built-in abs() should throw
+    assert.throws(() => sql.newFunction('abs', (x) => x * 1000), {
+      name: 'TypeError',
+      message: "Cannot override built-in SQLite function 'abs'.",
+    });
 
-    // What happens when we call abs()?
-    const result = sql.exec('SELECT abs(-5) AS val').one();
+    // Attempting to shadow built-in upper() should throw
+    assert.throws(() => sql.newFunction('upper', (s) => s + '_CUSTOM'), {
+      name: 'TypeError',
+      message: "Cannot override built-in SQLite function 'upper'.",
+    });
 
-    // Document the behavior: either user function wins or built-in wins
-    // Most SQLite bindings allow user functions to shadow built-ins
-    // If user function wins: result should be -5000
-    // If built-in wins: result should be 5
-    assert.ok(
-      result.val === -5000 || result.val === 5,
-      `abs(-5) should return either -5000 (user) or 5 (built-in), got ${result.val}`
-    );
-
-    // Also test with upper()
-    sql.newFunction('upper', (s) => s + '_CUSTOM');
-    const result2 = sql.exec("SELECT upper('test') AS val").one();
-
-    // Document behavior
-    assert.ok(
-      result2.val === 'test_CUSTOM' || result2.val === 'TEST',
-      `upper('test') should return either 'test_CUSTOM' (user) or 'TEST' (built-in), got ${result2.val}`
-    );
+    // Case-insensitive: ABS should also be rejected
+    assert.throws(() => sql.newFunction('ABS', (x) => x), {
+      name: 'TypeError',
+      message: "Cannot override built-in SQLite function 'ABS'.",
+    });
   }
 
   // ===========================================================================

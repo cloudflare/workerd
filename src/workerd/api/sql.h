@@ -96,7 +96,16 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
     JSG_TS_OVERRIDE({
       exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: any[]): SqlStorageCursor<T>;
       newFunction(name: string, callback: (...args: SqlStorageValue[]) => SqlStorageValue): void;
-      newAggregate(name: string, callback: (values: SqlStorageValue[]) => SqlStorageValue): void;
+      /**
+       * Array-based aggregate: receives all values at once.
+       * For single-argument aggregates, `values` is `SqlStorageValue[]`.
+       * For multi-argument aggregates, `values` is `SqlStorageValue[][]` (array of argument tuples).
+       */
+      newAggregate(name: string, callback: (values: SqlStorageValue[] | SqlStorageValue[][]) => SqlStorageValue): void;
+      /**
+       * Factory-based aggregate: returns an object with step/final methods.
+       * More memory-efficient for large datasets since it doesn't buffer all values.
+       */
       newAggregate(name: string, factory: () => {
         step: (...args: SqlStorageValue[]) => void;
         final: () => SqlStorageValue;

@@ -215,6 +215,23 @@ class SqliteCallScope {
 #define SQLITE_CALL_SCOPE                                                                          \
   for (SqliteCallScope sqliteCallScope; !sqliteCallScope.done; sqliteCallScope.done = true)
 
+// Helper function to convert a string to lowercase.
+// SQLite function names are case-insensitive, so we normalize to lowercase for HashMap lookups.
+// This function is declared in sqlite.h and used by sql.c++ for UDF name normalization.
+kj::String toLowercase(kj::StringPtr str) {
+  auto result = kj::heapString(str.size());
+  for (auto i: kj::zeroTo(str.size())) {
+    char c = str[i];
+    // ASCII lowercase conversion
+    if (c >= 'A' && c <= 'Z') {
+      result[i] = c + ('a' - 'A');
+    } else {
+      result[i] = c;
+    }
+  }
+  return result;
+}
+
 namespace {
 
 void disposeSqlite(sqlite3_stmt* stmt) {
@@ -264,22 +281,6 @@ kj::Maybe<kj::StringPtr> toMaybeString(const char* cstr) {
   } else {
     return kj::StringPtr(cstr);
   }
-}
-
-// Helper function to convert a string to lowercase.
-// SQLite function names are case-insensitive, so we normalize to lowercase for HashMap lookups.
-kj::String toLowercase(kj::StringPtr str) {
-  auto result = kj::heapString(str.size());
-  for (auto i: kj::zeroTo(str.size())) {
-    char c = str[i];
-    // ASCII lowercase conversion
-    if (c >= 'A' && c <= 'Z') {
-      result[i] = c + ('a' - 'A');
-    } else {
-      result[i] = c;
-    }
-  }
-  return result;
 }
 
 // We allowlist these SQLite functions.
@@ -488,6 +489,18 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 }  // namespace
 
 // =======================================================================================
+
+bool SqliteDatabase::isBuiltInFunction(kj::StringPtr name) {
+  // Build the set lazily on first call.
+  static const kj::HashSet<kj::StringPtr> builtInSet = []() {
+    kj::HashSet<kj::StringPtr> result;
+    for (const kj::StringPtr& func: ALLOWED_SQLITE_FUNCTIONS) {
+      result.insert(func);
+    }
+    return result;
+  }();
+  return builtInSet.contains(toLowercase(name));
+}
 
 SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
 
@@ -1553,7 +1566,14 @@ void SqliteDatabase::Query::nextRow(bool first) {
     rowsWritten = getRowsWritten();
     if (err == SQLITE_DONE) {
       done = true;
-    } else if (err != SQLITE_ROW) {
+      // Clear any stale pending exception. In edge cases, SQLite may recover internally
+      // from a UDF error and still return SQLITE_DONE. We don't want a stale exception
+      // from this query leaking to a future unrelated query.
+      db.pendingUdfException = kj::none;
+    } else if (err == SQLITE_ROW) {
+      // Clear stale pending exception on success. Same rationale as SQLITE_DONE.
+      db.pendingUdfException = kj::none;
+    } else {
       // Check if a UDF threw an exception. If so, rethrow it instead of the generic SQLite error.
       // This preserves the full exception including tunneled JS exceptions with their stack traces.
       // Note: We must move the exception out before clearing pendingUdfException, because

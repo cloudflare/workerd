@@ -362,6 +362,11 @@ class SqliteDatabase {
       AggregateStepCallback stepCallback,
       AggregateFinalCallback finalCallback);
 
+  // Check if a function name (case-insensitive) matches a built-in SQLite function.
+  // Used to prevent UDFs from shadowing critical built-ins like count(), sum(), etc.
+  static bool isBuiltInFunction(kj::StringPtr name);
+
+ private:
   // Store an exception that occurred in a UDF callback.
   // This is called by the UDF callback when an exception is thrown, so that
   // the exception can be rethrown after sqlite3_step() returns. This allows
@@ -375,7 +380,6 @@ class SqliteDatabase {
     }
   }
 
- private:
   const Vfs& vfs;
   kj::Path path;
   bool readOnly;
@@ -1098,5 +1102,14 @@ inline SqliteDatabase::Statement SqliteDatabase::prepareMulti(
 // Note: The UdfArgument and UdfContext classes are defined in sqlite.c++ because they
 // require the full sqlite3.h definitions. They're used internally by the UDF callback
 // infrastructure and are not needed in the header.
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+// Convert a string to ASCII lowercase. Used for case-insensitive SQL function name
+// normalization. SQLite function names are case-insensitive, so we normalize to
+// lowercase for consistent HashMap lookups.
+kj::String toLowercase(kj::StringPtr str);
 
 }  // namespace workerd
