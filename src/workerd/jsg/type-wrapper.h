@@ -35,6 +35,39 @@ concept ValueLessParameter =
       wrapper.unwrap(js, context, ptr);
     };
 
+// =======================================================================================
+// RequiredArgCount_ specialization — counts leading required JS-visible arguments.
+//
+// This completes the definition of requiredArgumentCount<TypeWrapper, T> declared in meta.h.
+// It lives here (rather than meta.h or web-idl.h) because it needs the ValueLessParameter
+// concept above to automatically detect ALL injected parameter types — TypeHandler<T>,
+// InjectConfiguration<T> (e.g. CompatibilityFlags::Reader), and any future valueless types.
+//
+// Arguments<T> (variadic rest args) is detected separately via isArguments<>() because it
+// does not satisfy ValueLessParameter — it consumes remaining JS arguments rather than being
+// injected by the runtime.
+//
+// Template instantiation of requiredArgumentCount happens from resource.h templates, which
+// are only instantiated after this header is fully parsed, so these specializations are
+// guaranteed to be visible at the point of use.
+namespace detail {
+
+template <typename TypeWrapper>
+struct RequiredArgCount_<TypeWrapper, TypeList<>> {
+  static constexpr int value = 0;
+};
+
+template <typename TypeWrapper, typename Head, typename... Tail>
+struct RequiredArgCount_<TypeWrapper, TypeList<Head, Tail...>> {
+  using D = kj::Decay<Head>;
+  static constexpr int value = (isArguments<D>() || ValueLessParameter<TypeWrapper, D>)
+      ? RequiredArgCount_<TypeWrapper, TypeList<Tail...>>::value  // skip injected args
+      : (webidl::isOptional<D> ? 0  // optional arg — stop counting required
+                               : 1 + RequiredArgCount_<TypeWrapper, TypeList<Tail...>>::value);
+};
+
+}  // namespace detail
+
 // TypeWrapper mixin for V8 handles.
 //
 // This is just a trivial pass-through.

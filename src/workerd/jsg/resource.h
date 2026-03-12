@@ -1318,7 +1318,7 @@ struct ResourceTypeBuilder {
   template <const char* name, auto method>
   inline void registerMethod() {
     // Per Web IDL, function .length = number of required arguments.
-    constexpr int specLength = requiredArgumentCount<decltype(method)>;
+    constexpr int specLength = requiredArgumentCount<TypeWrapper, decltype(method)>;
     const int length = getSpecCompliantPropertyAttributes(isolate) ? specLength : 0;
 
     if constexpr (isFastApiCompatible<decltype(method)>) {
@@ -1346,7 +1346,7 @@ struct ResourceTypeBuilder {
   template <const char* name, typename Method, Method method>
   inline void registerStaticMethod() {
     // Per Web IDL, function .length = number of required arguments.
-    constexpr int specLength = requiredArgumentCount<Method>;
+    constexpr int specLength = requiredArgumentCount<TypeWrapper, Method>;
     const int length = getSpecCompliantPropertyAttributes(isolate) ? specLength : 0;
 
     if constexpr (isFastApiCompatible<Method>) {
@@ -1974,7 +1974,7 @@ class ResourceWrapper {
       v8::Local<v8::FunctionTemplate> constructor;
       if constexpr (!isContext && HasConstructorMethod<T>) {
         // Per Web IDL, constructor .length = number of required arguments.
-        constexpr int specCtorLength = requiredArgumentCount<decltype(T::constructor)>;
+        constexpr int specCtorLength = requiredArgumentCount<TypeWrapper, decltype(T::constructor)>;
         const int ctorLength = getSpecCompliantPropertyAttributes(isolate) ? specCtorLength : 0;
         constructor =
             v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback,
