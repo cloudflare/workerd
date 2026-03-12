@@ -10,6 +10,7 @@
 #include "v8-platform-wrapper.h"
 
 #include <workerd/jsg/observer.h>
+#include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
 
 #include <v8-profiler.h>
@@ -243,6 +244,10 @@ class IsolateBase {
     return *observer;
   }
 
+  ExternalStringAllocator& getExternalStringAllocator() {
+    return *externalStringAllocator;
+  }
+
   // Implementation of MemoryRetainer
   void jsgGetMemoryInfo(MemoryTracker& tracker) const;
   kj::StringPtr jsgGetMemoryName() const {
@@ -442,6 +447,7 @@ class IsolateBase {
   explicit IsolateBase(V8System& system,
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer,
+      kj::Own<ExternalStringAllocator> externalStringAllocator,
       v8::IsolateGroup group);
   ~IsolateBase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
@@ -473,6 +479,7 @@ class IsolateBase {
 
   HeapTracer heapTracer;
   kj::Own<IsolateObserver> observer;
+  kj::Own<ExternalStringAllocator> externalStringAllocator;
 
   friend class Data;
   friend class Wrappable;
@@ -568,9 +575,14 @@ class Isolate: public IsolateBase {
       v8::IsolateGroup group,
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
+      kj::Own<ExternalStringAllocator> externalStringAllocator = defaultExternalStringAllocator(),
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
-      : IsolateBase(system, kj::mv(createParams), kj::mv(observer), group) {
+      : IsolateBase(system,
+            kj::mv(createParams),
+            kj::mv(observer),
+            kj::mv(externalStringAllocator),
+            group) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
@@ -585,7 +597,11 @@ class Isolate: public IsolateBase {
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
-      : IsolateBase(system, kj::mv(createParams), kj::mv(observer), v8::IsolateGroup::Create()) {
+      : IsolateBase(system,
+            kj::mv(createParams),
+            kj::mv(observer),
+            defaultExternalStringAllocator(),
+            v8::IsolateGroup::Create()) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
@@ -600,6 +616,7 @@ class Isolate: public IsolateBase {
             v8::IsolateGroup::GetDefault(),
             nullptr,
             kj::mv(observer),
+            defaultExternalStringAllocator(),
             kj::mv(createParams)) {}
 
   template <typename MetaConfiguration>

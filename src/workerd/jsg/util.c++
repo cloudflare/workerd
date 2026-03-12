@@ -761,6 +761,29 @@ void returnRejectedPromise(const v8::PropertyCallbackInfo<v8::Value>& info,
   returnRejectedPromiseImpl<const v8::PropertyCallbackInfo<v8::Value>&>(info, exception, tryCatch);
 }
 
+static ExternalStringAllocator& getAllocatorForIsolate(v8::Isolate* isolate) {
+  return IsolateBase::from(isolate).getExternalStringAllocator();
+}
+
+// Default allocator that uses standard new/delete.
+// We typically don't use the new/delete operators directly,
+// but in this case we have to because V8's ExternalStringResource may default to `delete this`
+// if not overridden, and we are allocating raw byte arrays for placement new.
+class DefaultExternalStringAllocator final: public ExternalStringAllocator {
+ public:
+  void* allocate(size_t size) override {
+    return operator new(size);
+  }
+  void deallocate(void* ptr) override {
+    operator delete(ptr);
+  }
+};
+
+kj::Own<ExternalStringAllocator> defaultExternalStringAllocator() {
+  static DefaultExternalStringAllocator allocator;
+  return kj::Own<ExternalStringAllocator>(&allocator, kj::NullDisposer::instance);
+}
+
 // ======================================================================================
 
 template <typename Type, typename Data>
@@ -802,6 +825,14 @@ class ExternString: public Type {
     return length() * sizeof(Data);
   }
 
+  // Override Dispose() so that V8 properly deallocates through the configured
+  // ExternalStringAllocator rather than using `delete this` (the default).
+  void Dispose() override {
+    auto& allocator = getAllocatorForIsolate(isolate);
+    this->~ExternString();
+    allocator.deallocate(this);
+  }
+
   static v8::MaybeLocal<v8::String> createExtern(
       v8::Isolate* isolate, kj::ArrayPtr<const Data>& buf) {
     if (buf.size() == 0) {
@@ -813,9 +844,15 @@ class ExternString: public Type {
     // heap allocated string than an external. We're not doing that here currently, but
     // we might?
 
-    // We typically don't use the new keyword in workerd/Workers but in this case we
-    // have to.
-    auto resource = new ExternString<Type, Data>(isolate, buf);
+    auto& allocator = getAllocatorForIsolate(isolate);
+    auto mem = allocator.allocate(sizeof(ExternString<Type, Data>));
+    if (mem == nullptr) {
+      isolate->ThrowException(v8::Exception::Error(
+          v8::String::NewFromUtf8Literal(isolate, "String allocation failed")));
+      return v8::MaybeLocal<v8::String>();
+    }
+
+    auto resource = new (mem) ExternString<Type, Data>(isolate, buf);
 
     v8::MaybeLocal<v8::String> str;
     if constexpr (kj::isSameType<Type, v8::String::ExternalOneByteStringResource>()) {
@@ -826,7 +863,10 @@ class ExternString: public Type {
     }
     if (str.IsEmpty()) {
       // This should happen only if the string is too long
-      delete resource;
+      resource->~ExternString<Type, Data>();
+      allocator.deallocate(mem);
+      isolate->ThrowException(v8::Exception::Error(
+          v8::String::NewFromUtf8Literal(isolate, "String allocation failed")));
       return v8::MaybeLocal<v8::String>();
     }
 
