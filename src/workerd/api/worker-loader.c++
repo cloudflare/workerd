@@ -67,64 +67,7 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
           jsg::Lock& js) mutable {
     return getCode(js).then(
         js, [&ioctx, compatDateValidation](jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
-      auto extractedSource = extractSource(js, code);
-      auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);
-      CompatibilityFlags::Reader compatFlags = *ownCompatFlags;
-
-      Frankenvalue env;
-      KJ_IF_SOME(codeEnv, code.env) {
-        env = Frankenvalue::fromJs(js, codeEnv.getHandle(js));
-      }
-
-      kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
-      KJ_IF_SOME(maybeOut, code.globalOutbound) {
-        KJ_IF_SOME(out, maybeOut) {
-          auto channel = out->getSubrequestChannel(ioctx);
-          channel->requireAllowsTransfer();
-          globalOutbound = kj::mv(channel);
-        } else {
-          // Application passed `null` to disable internet access. Leave `globalOutbound` as
-          // `kj::none`.
-        }
-      } else {
-        // Inherit the calling worker's global outbound channel.
-        //
-        // Note we don't need to enforce transferrability in this case because if it was the global
-        // outbound of the parent, it must be OK to be the global outbound of the child.
-        globalOutbound =
-            ioctx.getIoChannelFactory().getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL);
-      }
-
-      kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tailChannels;
-      KJ_IF_SOME(tails, code.tails) {
-        tailChannels = KJ_MAP(tail, tails) {
-          auto channel = tail->getSubrequestChannel(ioctx);
-          channel->requireAllowsTransfer();
-          return kj::mv(channel);
-        };
-      }
-
-      kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTailChannels;
-      KJ_IF_SOME(streamingTails, code.streamingTails) {
-        JSG_REQUIRE(code.allowExperimental.orDefault(false), Error,
-            "Streaming tail workers are experimental. You must pass the option "
-            "'allowExperimental: true' to the worker loader to use them");
-
-        streamingTailChannels = KJ_MAP(tail, streamingTails) {
-          auto channel = tail->getSubrequestChannel(ioctx);
-          channel->requireAllowsTransfer();
-          return kj::mv(channel);
-        };
-      }
-
-      return {.source = kj::mv(extractedSource),
-        .compatibilityFlags = compatFlags,
-        .env = kj::mv(env),
-        .globalOutbound = kj::mv(globalOutbound),
-        .tails = kj::mv(tailChannels),
-        .streamingTails = kj::mv(streamingTailChannels),
-        .ownContent = ownCompatFlags.attach(kj::mv(code.modules), kj::mv(code.mainModule)),
-        .ownContentIsRpcResponse = false};
+      return toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
     });
   });
 
@@ -132,6 +75,69 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
       ioctx.getIoChannelFactory().loadIsolate(channel, kj::mv(name), kj::mv(reenterAndGetCode));
 
   return js.alloc<WorkerStub>(ioctx.addObject(kj::mv(isolateChannel)));
+}
+
+DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(
+    jsg::Lock& js, IoContext& ioctx, CompatibilityDateValidation compatDateValidation,
+    WorkerCode code) {
+  auto extractedSource = extractSource(js, code);
+  auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);
+  CompatibilityFlags::Reader compatFlags = *ownCompatFlags;
+
+  Frankenvalue env;
+  KJ_IF_SOME(codeEnv, code.env) {
+    env = Frankenvalue::fromJs(js, codeEnv.getHandle(js));
+  }
+
+  kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
+  KJ_IF_SOME(maybeOut, code.globalOutbound) {
+    KJ_IF_SOME(out, maybeOut) {
+      auto channel = out->getSubrequestChannel(ioctx);
+      channel->requireAllowsTransfer();
+      globalOutbound = kj::mv(channel);
+    } else {
+      // Application passed `null` to disable internet access. Leave `globalOutbound` as
+      // `kj::none`.
+    }
+  } else {
+    // Inherit the calling worker's global outbound channel.
+    //
+    // Note we don't need to enforce transferrability in this case because if it was the global
+    // outbound of the parent, it must be OK to be the global outbound of the child.
+    globalOutbound =
+        ioctx.getIoChannelFactory().getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL);
+  }
+
+  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tailChannels;
+  KJ_IF_SOME(tails, code.tails) {
+    tailChannels = KJ_MAP(tail, tails) {
+      auto channel = tail->getSubrequestChannel(ioctx);
+      channel->requireAllowsTransfer();
+      return kj::mv(channel);
+    };
+  }
+
+  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTailChannels;
+  KJ_IF_SOME(streamingTails, code.streamingTails) {
+    JSG_REQUIRE(code.allowExperimental.orDefault(false), Error,
+        "Streaming tail workers are experimental. You must pass the option "
+        "'allowExperimental: true' to the worker loader to use them");
+
+    streamingTailChannels = KJ_MAP(tail, streamingTails) {
+      auto channel = tail->getSubrequestChannel(ioctx);
+      channel->requireAllowsTransfer();
+      return kj::mv(channel);
+    };
+  }
+
+  return {.source = kj::mv(extractedSource),
+    .compatibilityFlags = compatFlags,
+    .env = kj::mv(env),
+    .globalOutbound = kj::mv(globalOutbound),
+    .tails = kj::mv(tailChannels),
+    .streamingTails = kj::mv(streamingTailChannels),
+    .ownContent = ownCompatFlags.attach(kj::mv(code.modules), kj::mv(code.mainModule)),
+    .ownContentIsRpcResponse = false};
 }
 
 Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& code) {
