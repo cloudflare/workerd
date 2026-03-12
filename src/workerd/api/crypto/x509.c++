@@ -514,7 +514,7 @@ constexpr StackOfXASN1Disposer stackOfXASN1Disposer;
 
 kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(
     jsg::Lock& js, kj::Array<const kj::byte> raw) {
-  ClearErrorOnReturn ClearErrorOnReturn;
+  ClearErrorOnReturn clearErrorOnReturn;
   KJ_IF_SOME(bio, loadBio(raw)) {
     auto ptr = PEM_read_bio_X509_AUX(bio.get(), nullptr, NoPasswordCallback, nullptr);
     if (ptr == nullptr) {
@@ -522,7 +522,9 @@ kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(
       auto data = raw.begin();
       ptr = d2i_X509(nullptr, &data, raw.size());
       if (ptr == nullptr) {
-        throwOpensslError(__FILE__, __LINE__, "X509Certificate::parse()");
+        // Invalid certificate data is a user input error, not an internal error.
+        // Return kj::none and let the JS layer throw a user-facing error.
+        return kj::none;
       }
     }
     return js.alloc<X509Certificate>(ptr);

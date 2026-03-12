@@ -114,7 +114,15 @@ export class X509Certificate {
         buffer
       );
     }
-    this.#handle = cryptoImpl.X509Certificate.parse(buffer);
+    const handle = cryptoImpl.X509Certificate.parse(buffer);
+    if (handle == null) {
+      throw new ERR_INVALID_ARG_VALUE(
+        'buffer',
+        buffer,
+        'is not a valid certificate'
+      );
+    }
+    this.#handle = handle;
   }
 
   get subject() {
