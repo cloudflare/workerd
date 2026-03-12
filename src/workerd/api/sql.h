@@ -114,12 +114,17 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
     }
     for (auto& entry: registeredAggregateFunctions) {
       visitor.visit(entry.value->factory);
+      for (auto& instance: entry.value->activeInstances) {
+        visitor.visit(instance.value);
+      }
     }
   }
 
-  // Helper methods for createFunction - implemented in sql.c++
+  // Helper methods for UDF registration - implemented in sql.c++
   void createScalarFunction(jsg::Lock& js, kj::String name, jsg::JsRef<jsg::JsValue> callback);
   void createAggregateFunction(jsg::Lock& js, kj::String name, jsg::JsRef<jsg::JsValue> factory);
+  void createArrayAggregateFunction(
+      jsg::Lock& js, kj::String name, jsg::JsRef<jsg::JsValue> callback);
 
   bool isAllowedName(kj::StringPtr name) const override;
   bool isAllowedTrigger(kj::StringPtr name) const override;
@@ -152,6 +157,13 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   struct RegisteredAggregateFunction {
     kj::String name;
     jsg::JsRef<jsg::JsValue> factory;  // Factory function that returns {step, final}
+
+    // Side table for aggregate instance state. During aggregation, the factory creates a JS
+    // object with step/final methods. We can't store v8 handles in the UdfResultValue (which
+    // flows through the sqlite.c++ layer), so we store them here keyed by a monotonic ID.
+    // The UdfResultValue holds the int64_t ID as a handle to look up the instance.
+    uint64_t nextInstanceId = 1;
+    kj::HashMap<uint64_t, jsg::JsRef<jsg::JsValue>> activeInstances;
 
     RegisteredAggregateFunction(kj::String name, jsg::JsRef<jsg::JsValue> factory)
         : name(kj::mv(name)),
