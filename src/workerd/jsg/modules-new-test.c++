@@ -9,7 +9,6 @@
 
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.capnp.h>
-#include <workerd/jsg/setup.h>
 
 #include <capnp/message.h>
 #include <kj/async-io.h>
