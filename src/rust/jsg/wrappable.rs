@@ -388,14 +388,12 @@ impl<T: Type + FromJS<ResultType = T>> FromJS for Vec<T> {
     type ResultType = Self;
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-        if !value.is_array() {
-            return Err(Error::new_type_error(format!(
-                "Expected Array but got {}",
-                value.type_of()
-            )));
-        }
+        let type_name = value.type_of();
+        let array = value
+            .try_as::<v8::Array>()
+            .ok_or_else(|| Error::new_type_error(format!("Expected Array but got {type_name}")))?;
 
-        let globals = unsafe { value.as_array() }.iterate();
+        let globals = array.iterate();
         let mut result = Self::with_capacity(globals.len());
         for global in globals {
             let local = global.as_local(lock);

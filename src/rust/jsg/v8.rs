@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+use crate::Error;
 use crate::FromJS;
 use crate::Lock;
 use crate::Number;
@@ -143,7 +144,16 @@ pub mod ffi {
         pub unsafe fn local_is_biguint64_array(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
+        pub unsafe fn local_is_function(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
+
+        // Local<Function>
+        pub unsafe fn local_function_call(
+            isolate: *mut Isolate,
+            function: &Local,
+            recv: &Local,
+            args: &[Local],
+        ) -> Local;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -572,6 +582,11 @@ impl<'a, T> Local<'a, T> {
         unsafe { ffi::local_is_array_buffer_view(&self.handle) }
     }
 
+    /// Returns true if the value is a JavaScript function.
+    pub fn is_function(&self) -> bool {
+        unsafe { ffi::local_is_function(&self.handle) }
+    }
+
     /// Returns the JavaScript type of the underlying value as a string.
     ///
     /// Uses V8's native `TypeOf` method which returns the same result as
@@ -582,11 +597,6 @@ impl<'a, T> Local<'a, T> {
     pub fn type_of(&self) -> String {
         unsafe { ffi::local_type_of(self.isolate.as_ffi(), &self.handle) }
     }
-
-    /// Returns the isolate associated with this local handle.
-    pub fn isolate(&self) -> IsolatePtr {
-        self.isolate
-    }
 }
 
 impl<T> Clone for Local<'_, T> {
@@ -595,19 +605,56 @@ impl<T> Clone for Local<'_, T> {
     }
 }
 
+/// Trait for safe checked casts between V8 `Local` handle types.
+///
+/// Use via the turbofish method on `Local<Value>`:
+/// ```ignore
+/// let func: Local<Function> = value.try_as::<Function>().unwrap();
+/// ```
+pub trait As<T>: Sized {
+    type Output;
+
+    /// Attempts to cast this handle to the target type.
+    /// Returns `None` if the underlying value is not of the target type.
+    fn try_as(self) -> Option<Self::Output>;
+}
+
+/// Implements `As<$target>` for `Local<Value>` using the given type-check method.
+macro_rules! impl_as {
+    ($target:ident, $check:ident) => {
+        impl<'a> As<$target> for Local<'a, Value> {
+            type Output = Local<'a, $target>;
+
+            fn try_as(self) -> Option<Local<'a, $target>> {
+                if self.$check() {
+                    // SAFETY: We verified the type above.
+                    Some(unsafe { Local::from_ffi(self.isolate, self.into_ffi()) })
+                } else {
+                    None
+                }
+            }
+        }
+    };
+}
+
+impl_as!(Function, is_function);
+impl_as!(Object, is_object);
+impl_as!(Array, is_array);
+
 // Value-specific implementations
 impl<'a> Local<'a, Value> {
     pub fn to_global(self, lock: &'a mut Lock) -> Global<Value> {
         unsafe { ffi::local_to_global(lock.isolate().as_ffi(), self.into_ffi()).into() }
     }
 
-    /// Casts this value to an Array.
+    /// Attempts a checked cast to a more specific `Local<T>` type.
     ///
-    /// # Safety
-    /// The caller must ensure this value is actually an array (check with `is_array()`).
-    pub unsafe fn as_array(self) -> Local<'a, Array> {
-        debug_assert!(self.is_array());
-        unsafe { Local::from_ffi(self.isolate, self.into_ffi()) }
+    /// Returns `None` if the value is not of the target type.
+    pub fn try_as<T>(self) -> Option<<Self as As<T>>::Output>
+    where
+        Self: As<T>,
+    {
+        As::<T>::try_as(self)
     }
 }
 
@@ -617,31 +664,112 @@ impl PartialEq for Local<'_, Value> {
     }
 }
 
-impl<'a> From<Local<'a, Object>> for Local<'a, Value> {
-    fn from(value: Local<'a, Object>) -> Self {
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
+impl Local<'_, Function> {
+    /// Calls this function and converts the result via [`FromJS`].
+    ///
+    /// `receiver` is the `this` value; pass `None` for `undefined`. Any `Local<T>`
+    /// that converts to `Local<Value>` (via `Into`) can be used directly.
+    ///
+    /// `args` is a slice of `Local<Value>` — use [`ToJS::to_js`] to convert Rust
+    /// values, or `.into()` for other `Local<T>` handles.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let result: Number = func.call(lock, None::<Local<Value>>, &[x.to_js(lock), y.to_js(lock)])?;
+    /// ```
+    pub fn call<'b, R: FromJS, Recv: Into<Local<'b, Value>>>(
+        &self,
+        lock: &mut Lock,
+        receiver: Option<Recv>,
+        args: &[Local<'_, Value>],
+    ) -> Result<R::ResultType, Error> {
+        let recv = receiver.map_or_else(|| Local::<Value>::undefined(lock), Into::into);
+
+        // Build a contiguous array of ffi::Local handles for the FFI call.
+        let ffi_args: Vec<ffi::Local> = args
+            .iter()
+            .map(|a| unsafe { ffi::local_clone(a.as_ffi()) })
+            .collect();
+
+        // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
+        // self.handle is a valid Local<Function>. recv and ffi_args are valid Local handles.
+        let result = unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::local_function_call(
+                    lock.isolate().as_ffi(),
+                    &self.handle,
+                    recv.as_ffi(),
+                    &ffi_args,
+                ),
+            )
+        };
+        R::from_js(lock, result)
     }
 }
 
-impl<'a> From<Local<'a, Function>> for Local<'a, Value> {
-    fn from(value: Local<'a, Function>) -> Self {
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
+/// Implements bidirectional `From` conversions between `Local<$from>` and `Local<$to>`.
+///
+/// All V8 handle subtypes share the same pointer representation, so these casts
+/// are just reinterpretations of the handle. The `assert!` verifies the type
+/// invariant at runtime — redundant for upcasts (always true) but guards
+/// downcasts against misuse.
+macro_rules! impl_local_cast {
+    ($from:ident -> $to:ident, $check:ident) => {
+        impl<'a> From<Local<'a, $from>> for Local<'a, $to> {
+            fn from(value: Local<'a, $from>) -> Self {
+                assert!(value.$check());
+                // SAFETY: V8 subtypes share handle representation; assert verifies the invariant.
+                unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
+            }
+        }
+        impl<'a> From<Local<'a, $to>> for Local<'a, $from> {
+            fn from(value: Local<'a, $to>) -> Self {
+                assert!(value.$check());
+                // SAFETY: V8 subtypes share handle representation; assert verifies the invariant.
+                unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
+            }
+        }
+    };
 }
 
-// TODO: We need to figure out a smart way of avoiding duplication.
-impl<'a> From<Local<'a, FunctionTemplate>> for Local<'a, Value> {
-    fn from(value: Local<'a, FunctionTemplate>) -> Self {
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
+// Upcasts to Value
+impl_local_cast!(Object -> Value, is_object);
+impl_local_cast!(Function -> Value, is_function);
+impl_local_cast!(Array -> Value, is_array);
+impl_local_cast!(Uint8Array -> Value, is_uint8_array);
+impl_local_cast!(Uint16Array -> Value, is_uint16_array);
+impl_local_cast!(Uint32Array -> Value, is_uint32_array);
+impl_local_cast!(Int8Array -> Value, is_int8_array);
+impl_local_cast!(Int16Array -> Value, is_int16_array);
+impl_local_cast!(Int32Array -> Value, is_int32_array);
+impl_local_cast!(Float32Array -> Value, is_float32_array);
+impl_local_cast!(Float64Array -> Value, is_float64_array);
+impl_local_cast!(BigInt64Array -> Value, is_bigint64_array);
+impl_local_cast!(BigUint64Array -> Value, is_biguint64_array);
 
-impl<'a> From<Local<'a, Array>> for Local<'a, Value> {
-    fn from(value: Local<'a, Array>) -> Self {
-        debug_assert!(value.is_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
+// TypedArray base type to Value. Uses `is_array_buffer_view` which also matches
+// `DataView`, but this is acceptable because `TypedArray` is only constructed from
+// concrete typed array types (Uint8Array, etc.) that are always ArrayBufferViews.
+impl_local_cast!(TypedArray -> Value, is_array_buffer_view);
+
+// Concrete typed arrays to TypedArray base
+impl_local_cast!(Uint8Array -> TypedArray, is_uint8_array);
+impl_local_cast!(Uint16Array -> TypedArray, is_uint16_array);
+impl_local_cast!(Uint32Array -> TypedArray, is_uint32_array);
+impl_local_cast!(Int8Array -> TypedArray, is_int8_array);
+impl_local_cast!(Int16Array -> TypedArray, is_int16_array);
+impl_local_cast!(Int32Array -> TypedArray, is_int32_array);
+impl_local_cast!(Float32Array -> TypedArray, is_float32_array);
+impl_local_cast!(Float64Array -> TypedArray, is_float64_array);
+impl_local_cast!(BigInt64Array -> TypedArray, is_bigint64_array);
+impl_local_cast!(BigUint64Array -> TypedArray, is_biguint64_array);
+
+// Upcasts to Object (Function, Array, TypedArray are all Object subtypes in V8)
+impl_local_cast!(Function -> Object, is_function);
+impl_local_cast!(Array -> Object, is_array);
+impl_local_cast!(TypedArray -> Object, is_array_buffer_view);
 
 impl Local<'_, Array> {
     /// Creates a new JavaScript array with the given length.
@@ -681,97 +809,6 @@ impl Local<'_, Array> {
             .into_iter()
             .map(|g| unsafe { Global::from_ffi(g) })
             .collect()
-    }
-}
-
-impl<'a> From<Local<'a, Uint8Array>> for Local<'a, Value> {
-    fn from(value: Local<'a, Uint8Array>) -> Self {
-        debug_assert!(value.is_uint8_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Uint16Array>> for Local<'a, Value> {
-    fn from(value: Local<'a, Uint16Array>) -> Self {
-        debug_assert!(value.is_uint16_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Uint32Array>> for Local<'a, Value> {
-    fn from(value: Local<'a, Uint32Array>) -> Self {
-        debug_assert!(value.is_uint32_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Int8Array>> for Local<'a, Value> {
-    fn from(value: Local<'a, Int8Array>) -> Self {
-        debug_assert!(value.is_int8_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Int16Array>> for Local<'a, Value> {
-    fn from(value: Local<'a, Int16Array>) -> Self {
-        debug_assert!(value.is_int16_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Int32Array>> for Local<'a, Value> {
-    fn from(value: Local<'a, Int32Array>) -> Self {
-        debug_assert!(value.is_int32_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-// TypedArray base type conversions
-impl<'a> From<Local<'a, TypedArray>> for Local<'a, Value> {
-    fn from(value: Local<'a, TypedArray>) -> Self {
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Uint8Array>> for Local<'a, TypedArray> {
-    fn from(value: Local<'a, Uint8Array>) -> Self {
-        debug_assert!(value.is_uint8_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Uint16Array>> for Local<'a, TypedArray> {
-    fn from(value: Local<'a, Uint16Array>) -> Self {
-        debug_assert!(value.is_uint16_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Uint32Array>> for Local<'a, TypedArray> {
-    fn from(value: Local<'a, Uint32Array>) -> Self {
-        debug_assert!(value.is_uint32_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Int8Array>> for Local<'a, TypedArray> {
-    fn from(value: Local<'a, Int8Array>) -> Self {
-        debug_assert!(value.is_int8_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Int16Array>> for Local<'a, TypedArray> {
-    fn from(value: Local<'a, Int16Array>) -> Self {
-        debug_assert!(value.is_int16_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
-    }
-}
-
-impl<'a> From<Local<'a, Int32Array>> for Local<'a, TypedArray> {
-    fn from(value: Local<'a, Int32Array>) -> Self {
-        debug_assert!(value.is_int32_array());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
     }
 }
 
@@ -1018,13 +1055,6 @@ impl<'a> Local<'a, Object> {
             let opt_local: Option<ffi::Local> = maybe_local.into();
             opt_local.map(|local| Local::from_ffi(lock.isolate(), local))
         }
-    }
-}
-
-impl<'a> From<Local<'a, Value>> for Local<'a, Object> {
-    fn from(value: Local<'a, Value>) -> Self {
-        debug_assert!(value.is_object());
-        unsafe { Self::from_ffi(value.isolate, value.into_ffi()) }
     }
 }
 

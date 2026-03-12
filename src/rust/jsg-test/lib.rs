@@ -106,6 +106,29 @@ impl EvalContext<'_> {
         }
     }
 
+    /// Evaluates JavaScript code and returns the raw `Local<Value>` without conversion.
+    ///
+    /// Useful for obtaining handles (e.g. functions) that aren't `FromJS` types.
+    pub fn eval_raw(&self, code: &str) -> Result<v8::Local<'_, v8::Value>, EvalError<'_>> {
+        let result = unsafe { self.inner.eval(code) };
+        let opt_local: Option<v8::ffi::Local> = result.value.into();
+
+        if result.success {
+            match opt_local {
+                Some(local) => Ok(unsafe { v8::Local::from_ffi(self.isolate, local) }),
+                None => unreachable!(),
+            }
+        } else {
+            match opt_local {
+                Some(local) => {
+                    let value = unsafe { v8::Local::from_ffi(self.isolate, local) };
+                    Err(EvalError::Exception(value))
+                }
+                None => Err(EvalError::EvalFailed),
+            }
+        }
+    }
+
     pub fn set_global(&self, name: &str, value: v8::Local<v8::Value>) {
         unsafe { self.inner.set_global(name, value.into_ffi()) }
     }
