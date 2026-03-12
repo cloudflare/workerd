@@ -113,8 +113,7 @@ struct TestContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
 
 #define PREAMBLE(fn)                                                                               \
-  TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), 123, kj::heap<IsolateObserver>(),  \
-      kj::heap<DefaultExternalStringAllocator>());                                                 \
+  TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), 123, kj::heap<IsolateObserver>()); \
   isolate.runInLockScope([&](auto& lock) {                                                         \
     IsolateBase::from(lock.v8Isolate).setUsingNewModuleRegistry();                                 \
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.template newContext<TestContext>().getHandle(lock),        \

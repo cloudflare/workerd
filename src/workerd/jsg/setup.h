@@ -589,6 +589,24 @@ class Isolate: public IsolateBase {
     }
   }
 
+  template <typename MetaConfiguration>
+  explicit Isolate(V8System& system,
+      v8::IsolateGroup group,
+      MetaConfiguration&& configuration,
+      kj::Own<IsolateObserver> observer,
+      v8::Isolate::CreateParams createParams = {},
+      bool instantiateTypeWrapper = true)
+      : IsolateBase(system,
+            kj::mv(createParams),
+            kj::mv(observer),
+            kj::heap<DefaultExternalStringAllocator>(),
+            group) {
+    wrappers.resize(1);
+    if (instantiateTypeWrapper) {
+      instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
+    }
+  }
+
   // Legacy isolate constructor that creates a new IsolateGroup for the new
   // Isolate.  Currently used by non-sandboxing edgeworker, but deprecated.
   template <typename MetaConfiguration>
