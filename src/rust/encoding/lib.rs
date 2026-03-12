@@ -30,16 +30,13 @@ mod ffi {
         XUserDefined,
     }
 
-    /// Result of a decode operation. The output pointer refers to the
+    /// Result of a decode operation. The output slice borrows the
     /// decoder's internal buffer and is valid until the next `decode` or
-    /// `reset` call. Encoded as `usize` because CXX shared structs cannot
-    /// contain raw pointers.
-    struct DecodeResult {
-        /// Pointer to the UTF-16 output buffer, as `usize`.
-        /// Cast to `const uint16_t*` on the C++ side.
-        output_ptr: usize,
-        /// Number of UTF-16 code units in the output.
-        output_len: usize,
+    /// `reset` call.
+    struct DecodeResult<'a> {
+        /// UTF-16 code units decoded from the input, borrowing the
+        /// decoder's reusable output buffer.
+        output: &'a [u16],
         /// True if a fatal decoding error was encountered. Only meaningful
         /// when the caller requested fatal mode — in replacement mode errors
         /// are silently replaced with U+FFFD and this flag is not set.
@@ -61,10 +58,10 @@ mod ffi {
 
         /// Decode a chunk of bytes. The decoded UTF-16 output is stored in
         /// the decoder's internal buffer; the returned `DecodeResult`
-        /// carries a pointer and length into that buffer. Set `flush` to
-        /// true on the final chunk. When `fatal` is true and an error is
-        /// encountered, `had_error` is set and the output may be incomplete.
-        fn decode(decoder: &mut Decoder, input: &[u8], options: &DecodeOptions) -> DecodeResult;
+        /// borrows that buffer. Set `flush` to true on the final chunk.
+        /// When `fatal` is true and an error is encountered, `had_error`
+        /// is set and the output may be incomplete.
+        unsafe fn decode<'a>(decoder: &'a mut Decoder, input: &[u8], options: &DecodeOptions) -> DecodeResult<'a>;
 
         /// Reset the decoder to its initial state (for explicit reset calls).
         fn reset(decoder: &mut Decoder);
@@ -109,11 +106,11 @@ pub fn new_decoder(encoding: ffi::Encoding) -> Box<Decoder> {
     })
 }
 
-pub fn decode(
-    state: &mut Decoder,
+pub fn decode<'a>(
+    state: &'a mut Decoder,
     input: &[u8],
     options: &ffi::DecodeOptions,
-) -> ffi::DecodeResult {
+) -> ffi::DecodeResult<'a> {
     // Lazy reset: reconstruct the inner decoder only when a previous flush
     // marked it as needed, avoiding the cost on one-shot decodes where the
     // decoder is never reused.
@@ -154,8 +151,7 @@ pub fn decode(
                     state.inner = state.encoding.new_decoder_without_bom_handling();
                     state.output.truncate(total_written);
                     return ffi::DecodeResult {
-                        output_ptr: state.output.as_ptr() as usize,
-                        output_len: state.output.len(),
+                        output: &state.output,
                         had_error: true,
                     };
                 }
@@ -188,8 +184,7 @@ pub fn decode(
     }
 
     ffi::DecodeResult {
-        output_ptr: state.output.as_ptr() as usize,
-        output_len: state.output.len(),
+        output: &state.output,
         had_error: false,
     }
 }
@@ -198,4 +193,9 @@ pub fn reset(state: &mut Decoder) {
     state.inner = state.encoding.new_decoder_without_bom_handling();
     state.needs_reset = false;
     // Intentionally keep state.output — preserves the allocation for reuse.
+    // The buffer can grow up to ~2× the largest input chunk (due to UTF-16
+    // expansion and the doubling strategy in decode()) and stays at that high-
+    // water mark. This is acceptable because the Decoder is owned by a JS
+    // TextDecoder object and is GC'd with it, so the buffer lifetime is
+    // bounded by the object's reachability.
 }
