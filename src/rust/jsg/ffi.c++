@@ -386,8 +386,9 @@ void global_drop(Global value) {
   global_from_ffi<v8::Value>(kj::mv(value));
 }
 
-Global global_clone(const Global& value) {
-  return Global{.ptr = value.ptr};
+Global global_clone(Isolate* isolate, const Global& value) {
+  auto& original = global_as_ref_from_ffi<v8::Value>(value);
+  return to_ffi(v8::Global<v8::Value>(isolate, original));
 }
 
 Local global_to_local(Isolate* isolate, const Global& value) {

@@ -239,7 +239,7 @@ pub mod ffi {
 
         // Global<T>
         pub unsafe fn global_drop(value: Global);
-        pub unsafe fn global_clone(value: &Global) -> Global;
+        pub unsafe fn global_clone(isolate: *mut Isolate, value: &Global) -> Global;
         pub unsafe fn global_to_local(isolate: *mut Isolate, value: &Global) -> Local;
         pub unsafe fn global_make_weak(
             isolate: *mut Isolate,
@@ -1168,9 +1168,18 @@ impl<T> Drop for Global<T> {
     }
 }
 
-impl<T> Clone for Global<T> {
-    fn clone(&self) -> Self {
-        unsafe { ffi::global_clone(&self.handle).into() }
+// Note: Global<T> intentionally does NOT implement the std Clone trait.
+// Cloning a V8 persistent handle requires an isolate pointer to create an
+// independent handle via v8::Global::New(isolate, original). The Clone trait
+// cannot provide this. Use the `clone()` method directly instead.
+impl<T> Global<T> {
+    /// Creates an independent copy of this persistent handle.
+    ///
+    /// This properly creates a new V8 persistent handle that references the same
+    /// JS object. Both the original and clone can be independently dropped.
+    #[must_use]
+    pub fn clone(&self, lock: &mut Lock) -> Self {
+        unsafe { ffi::global_clone(lock.isolate().as_ffi(), &self.handle).into() }
     }
 }
 

@@ -103,7 +103,7 @@ uint64_t local_biguint64_array_get(Isolate* isolate, const Local& array, size_t 
 
 // Global<T>
 void global_drop(Global value);
-Global global_clone(const Global& value);
+Global global_clone(Isolate* isolate, const Global& value);
 Local global_to_local(Isolate* isolate, const Global& value);
 void global_make_weak(
     Isolate* isolate, Global* value, size_t /* void* */ data, WeakCallback callback);
