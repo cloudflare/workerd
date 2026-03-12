@@ -20,7 +20,7 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     "encoding_rs": crate.spec(version = "0"),
     "flate2": crate.spec(version = "1"),
     "futures": crate.spec(version = "0"),
-    "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html", tag = "v2.7.1"),
+    "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html", tag = "v2.7.2"),
     "nix": crate.spec(version = "0"),
     "pico-args": crate.spec(version = "0"),
     "quote": crate.spec(version = "1"),

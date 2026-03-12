@@ -14,10 +14,7 @@ bazel_dep(name = "apple_support", version = "2.3.0")
 bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")
 
 # aspect_rules_js
-bazel_dep(name = "aspect_rules_js", version = "3.0.2")
-
-# aspect_rules_lint
-bazel_dep(name = "aspect_rules_lint", version = "2.3.0")
+bazel_dep(name = "aspect_rules_js", version = "3.0.3")
 
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.8.6")
@@ -78,8 +75,8 @@ use_repo(http, "cargo_bazel_win_x64")
 http.file(
     name = "clang_tidy_darwin_arm64",
     executable = True,
-    sha256 = "baffb5f39282537369b93165af2b13e3e70747567cdcaebd162cbd74daf3c5e7",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.0/llvm-22.1.0-darwin-arm64-clang-tidy",
+    sha256 = "65599ed9056d5da503cd4a0b179276d0676d959eb3a6b19c1720fe4ac697891a",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.1/llvm-22.1.1-darwin-arm64-clang-tidy",
 )
 use_repo(http, "clang_tidy_darwin_arm64")
 
@@ -87,8 +84,8 @@ use_repo(http, "clang_tidy_darwin_arm64")
 http.file(
     name = "clang_tidy_linux_amd64",
     executable = True,
-    sha256 = "eb82eaa5b28c2a0c0b29bd1e6f10ec28fe6c41c8ef22150ef3ca58b627eb4e94",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.0/llvm-22.1.0-linux-amd64-clang-tidy",
+    sha256 = "52b56c8f46a80dbbde9334f3de0da45744e65757b1ab467e513d5d8cd1d0b771",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.1/llvm-22.1.1-linux-amd64-clang-tidy",
 )
 use_repo(http, "clang_tidy_linux_amd64")
 
@@ -96,8 +93,8 @@ use_repo(http, "clang_tidy_linux_amd64")
 http.file(
     name = "clang_tidy_linux_arm64",
     executable = True,
-    sha256 = "f85d96e7e29e549d69e364f153b7205f499859e76568a39668a6ad7d3f392e1a",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.0/llvm-22.1.0-linux-arm64-clang-tidy",
+    sha256 = "1ac2e03fee590aaf920861e83be27e8936cd9a5476a90f43bf88c8e6eb424be6",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.1/llvm-22.1.1-linux-arm64-clang-tidy",
 )
 use_repo(http, "clang_tidy_linux_arm64")
 

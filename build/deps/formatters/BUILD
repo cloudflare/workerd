@@ -1,4 +1,3 @@
-load("@aspect_rules_lint//format:defs.bzl", "format_multirun")
 load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 load("@npm//:prettier/package_json.bzl", prettier = "bin")
 
@@ -96,13 +95,4 @@ prettier.prettier_binary(
         "--config=\"$$JS_BINARY__RUNFILES\"/$(rlocationpath //:prettierrc)",
         "--log-level=warn",
     ],
-)
-
-format_multirun(
-    name = "format",
-    cc = ":clang-format@rule",
-    javascript = ":prettier@rule",
-    python = ":ruff@rule",
-    starlark = ":buildifier@rule",
-    visibility = ["//:__pkg__"],
 )

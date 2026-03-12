@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "server.h"
-#include "workerd-api.h"
 
 #include <workerd/api/unsafe.h>
 #include <workerd/io/compatibility-date.capnp.h>

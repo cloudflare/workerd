@@ -1432,17 +1432,17 @@ def crate_repositories():
 
     maybe(
         new_git_repository,
-        name = "crates_vendor__lol_html-2.7.1",
-        commit = "e9e16dca48dd4a8ffbc77642bc4be60407585f11",
+        name = "crates_vendor__lol_html-2.7.2",
+        commit = "e3aa54798602dd27250fafde1b5a66f080046252",
         init_submodules = True,
         remote = "https://github.com/cloudflare/lol-html",
-        build_file = Label("//deps/rust/crates:BUILD.lol_html-2.7.1.bazel"),
+        build_file = Label("//deps/rust/crates:BUILD.lol_html-2.7.2.bazel"),
     )
 
     maybe(
         new_git_repository,
         name = "crates_vendor__lol_html_c_api-1.3.1",
-        commit = "e9e16dca48dd4a8ffbc77642bc4be60407585f11",
+        commit = "e3aa54798602dd27250fafde1b5a66f080046252",
         init_submodules = True,
         remote = "https://github.com/cloudflare/lol-html",
         build_file = Label("//deps/rust/crates:BUILD.lol_html_c_api-1.3.1.bazel"),

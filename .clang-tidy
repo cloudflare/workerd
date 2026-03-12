@@ -1,12 +1,11 @@
 ---
-# TODO: We currently disable default checks with -*. While many checks provide little value or
+# TODO: We currently only enable select clang-tidy checks. While many checks provide little value or
 # produce false positives, try to incrementally enable most of them.
 # TODO: these checks are in progress of cleaning up
 # Note: cppcoreguidelines-noexcept-destructor is designed to detect destructors that are missing
 # noexcept. We always use noexcept(false) as per KJ-style, but this check works for our purposes
 # too.
 Checks: >
-  -*,
   bugprone-argument-comment,
   bugprone-capturing-this-in-member-variable,
   bugprone-dynamic-static-initializers,

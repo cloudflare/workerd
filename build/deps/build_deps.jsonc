@@ -2,10 +2,6 @@
   "$schema": "deps.schema.json",
   "repositories": [
     // bazel_deps from MODULE.bazel
-    {
-      "name": "aspect_rules_lint",
-      "type": "bazel_dep"
-    },
     // bazel_lib was formerly known as aspect_bazel_lib, new versions starting with v3 are released
     // under the new name which should now be used.
     {
@@ -162,7 +158,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-linux-amd64-clang-tidy",
       "file_type": "executable",
-      "freeze_version": "clang-tidy-22.1.0"
+      "freeze_version": "clang-tidy-22.1.1"
     },
     {
       "name": "clang_tidy_linux_arm64",
@@ -171,7 +167,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-linux-arm64-clang-tidy",
       "file_type": "executable",
-      "freeze_version": "clang-tidy-22.1.0"
+      "freeze_version": "clang-tidy-22.1.1"
     },
     {
       "name": "clang_tidy_darwin_arm64",
@@ -180,7 +176,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-darwin-arm64-clang-tidy",
       "file_type": "executable",
-      "freeze_version": "clang-tidy-22.1.0"
+      "freeze_version": "clang-tidy-22.1.1"
     }
   ]
 }

@@ -60,6 +60,7 @@ wd_cc_library(
         "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
     implementation_deps = [
+        "//src/rust/jsg",
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
