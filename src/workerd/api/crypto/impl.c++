@@ -103,6 +103,7 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
       switch (ERR_GET_REASON(ERR_peek_last_error())) {
         MAP_ERROR(RSA_R_DATA_LEN_NOT_EQUAL_TO_MOD_LEN, "Invalid RSA signature.");
         MAP_ERROR(RSA_R_KEY_SIZE_TOO_SMALL, "RSA key size is too small.");
+        MAP_ERROR(RSA_R_INTERNAL_ERROR, "RSA operation failed.");
 #undef MAP_ERROR
 
         default:
@@ -140,6 +141,8 @@ kj::Vector<kj::OneOf<kj::StringPtr, OpensslUntranslatedError>> consumeAllOpenssl
               return "Invalid RSA signature."_kj;
             case RSA_R_KEY_SIZE_TOO_SMALL:
               return "RSA key size is too small."_kj;
+            case RSA_R_INTERNAL_ERROR:
+              return "RSA operation failed."_kj;
           }
           break;
         case ERR_LIB_EC:
