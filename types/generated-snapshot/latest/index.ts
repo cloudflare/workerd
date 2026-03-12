@@ -12061,62 +12061,105 @@ export interface SecretsStoreSecret {
  *
  * Usage:
  * - Binding-level operations:
- *   `await env.STREAM.liveInputs.*`
+ *   `await env.STREAM.videos.upload`
+ *   `await env.STREAM.videos.createDirectUpload`
  *   `await env.STREAM.videos.*`
+ *   `await env.STREAM.watermarks.*`
  * - Per-video operations:
- *   `await env.STREAM.video(uid).downloads.*`
- *   `await env.STREAM.video(uid).captions.*`
+ *   `await env.STREAM.video(id).downloads.*`
+ *   `await env.STREAM.video(id).captions.*`
  *
  * Example usage:
  * ```ts
- * await env.STREAM.video(uid).downloads.create();
+ * await env.STREAM.video(id).downloads.generate();
  *
- * const video = env.STREAM.video(uid)
+ * const video = env.STREAM.video(id)
  * const captions = video.captions.list();
- * const videoDetails = video.get()
+ * const videoDetails = video.details()
  * ```
  */
 export interface StreamBinding {
   /**
    * Returns a handle scoped to a single video for per-video operations.
-   * The handle exposes `get`, `edit`, `delete`, and nested `downloads`/`captions`.
-   * @param uid The unique identifier for the video.
+   * @param id The unique identifier for the video.
    * @returns A handle for per-video operations.
    */
-  video(uid: string): StreamVideoHandle;
+  video(id: string): StreamVideoHandle;
+  /**
+   * Uploads a new video from a File.
+   * @param file The video file to upload.
+   * @returns The uploaded video details.
+   * @throws {BadRequestError} if the upload parameter is invalid
+   * @throws {QuotaReachedError} if the account storage capacity is exceeded
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {RateLimitedError} if the server received too many requests
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  upload(file: File): Promise<StreamVideo>;
+  /**
+   * Uploads a new video from a provided URL.
+   * @param url The URL to upload from.
+   * @param params Optional upload parameters.
+   * @returns The uploaded video details.
+   * @throws {BadRequestError} if the upload parameter is invalid or the URL is invalid
+   * @throws {QuotaReachedError} if the account storage capacity is exceeded
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {RateLimitedError} if the server received too many requests
+   * @throws {AlreadyUploadedError} if a video was already uploaded to this URL
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  upload(url: string, params?: StreamUrlUploadParams): Promise<StreamVideo>;
+  /**
+   * Creates a direct upload that allows video uploads without an API key.
+   * @param params Parameters for the direct upload
+   * @returns The direct upload details.
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {RateLimitedError} if the server received too many requests
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  createDirectUpload(
+    params: StreamDirectUploadCreateParams,
+  ): Promise<StreamDirectUpload>;
   videos: StreamVideos;
-  keys: StreamSigningKeys;
-  liveInputs: StreamLiveInputs;
   watermarks: StreamWatermarks;
-  signedUrlTokens: StreamSignedUrlTokens;
-  uploads: StreamUploads;
-  directUploads: StreamDirectUploads;
 }
 /**
  * Handle for operations scoped to a single Stream video.
- * Use this to fetch or update the video, and to manage downloads and captions.
  */
 export interface StreamVideoHandle {
   /**
    * The unique identifier for the video.
    */
-  uid: string;
+  id: string;
   /**
    * Get a full videos details
    * @returns The full video details.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
-  get(): Promise<StreamVideo>;
+  details(): Promise<StreamVideo>;
   /**
-   * Edit details for a single video.
+   * Update details for a single video.
    * @param params The fields to update for the video.
    * @returns The updated video details.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {InternalError} if an unexpected error occurs
    */
-  edit(params: StreamEditVideoParams): Promise<StreamVideo>;
+  update(params: StreamUpdateVideoParams): Promise<StreamVideo>;
   /**
    * Deletes a video and its copies from Cloudflare Stream.
    * @returns A promise that resolves when deletion completes.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   delete(): Promise<void>;
+  /**
+   * Creates a signed URL token for a video.
+   * @returns The signed token that was created.
+   * @throws {InternalError} if the signing key cannot be retrieved or the token cannot be signed
+   */
+  generateToken(): Promise<string>;
   downloads: StreamScopedDownloads;
   captions: StreamScopedCaptions;
 }
@@ -12124,7 +12167,7 @@ export interface StreamVideo {
   /**
    * The unique identifier for the video.
    */
-  uid: string;
+  id: string;
   /**
    * A user-defined identifier for the media creator.
    */
@@ -12136,7 +12179,7 @@ export interface StreamVideo {
   /**
    * The thumbnail timestamp percentage.
    */
-  thumbnailTimestampPct: number | null;
+  thumbnailTimestampPct: number;
   /**
    * Indicates whether the video is ready to stream.
    */
@@ -12208,19 +12251,20 @@ export interface StreamVideo {
   /**
    * Playback URLs for the video.
    */
-  playback: StreamVideoPlayback;
+  hlsPlaybackUrl: string;
+  dashPlaybackUrl: string;
   /**
    * The watermark applied to the video, if any.
    */
   watermark: StreamWatermark | null;
   /**
-   * The live input UID associated with the video, if any.
+   * The live input id associated with the video, if any.
    */
-  liveInput?: string | null;
+  liveInputId?: string | null;
   /**
-   * The source video UID if this is a clip.
+   * The source video id if this is a clip.
    */
-  clippedFrom: string | null;
+  clippedFromId: string | null;
   /**
    * Public details associated with the video.
    */
@@ -12242,11 +12286,11 @@ export type StreamVideoStatus = {
   /**
    * An error reason code, if applicable.
    */
-  errReasonCode: string;
+  errorReasonCode: string;
   /**
    * An error reason text, if applicable.
    */
-  errReasonText: string;
+  errorReasonText: string;
 };
 export type StreamVideoInput = {
   /**
@@ -12258,21 +12302,7 @@ export type StreamVideoInput = {
    */
   height: number;
 };
-export type StreamVideoPlayback = {
-  /**
-   * The HLS playback URL.
-   */
-  hls: string;
-  /**
-   * The DASH playback URL.
-   */
-  dash: string;
-};
 export type StreamPublicDetails = {
-  /**
-   * The internal media identifier.
-   */
-  media_id?: number;
   /**
    * The public title for the video.
    */
@@ -12298,7 +12328,7 @@ export type StreamDirectUpload = {
   /**
    * A Cloudflare-generated unique identifier for a media item.
    */
-  uid: string;
+  id: string;
   /**
    * The watermark profile applied to the upload.
    */
@@ -12331,7 +12361,7 @@ export type StreamDirectUploadCreateParams = {
    */
   allowedOrigins?: Array<string>;
   /**
-   * Indicates whether the video can be accessed using the UID. When set to `true`,
+   * Indicates whether the video can be accessed using the id. When set to `true`,
    * a signed token must be generated with a signing key to view the video.
    */
   requireSignedURLs?: boolean;
@@ -12353,7 +12383,49 @@ export type StreamDirectUploadWatermark = {
   /**
    * The unique identifier for the watermark profile.
    */
-  uid: string;
+  id: string;
+};
+export type StreamUrlUploadParams = {
+  /**
+   * Lists the origins allowed to display the video. Enter allowed origin
+   * domains in an array and use `*` for wildcard subdomains. Empty arrays allow the
+   * video to be viewed on any origin.
+   */
+  allowedOrigins?: Array<string>;
+  /**
+   * A user-defined identifier for the media creator.
+   */
+  creator?: string;
+  /**
+   * A user modifiable key-value store used to reference other systems of
+   * record for managing videos.
+   */
+  meta?: Record<string, string>;
+  /**
+   * Indicates whether the video can be a accessed using the id. When
+   * set to `true`, a signed token must be generated with a signing key to view the
+   * video.
+   */
+  requireSignedURLs?: boolean;
+  /**
+   * Indicates the date and time at which the video will be deleted. Omit
+   * the field to indicate no change, or include with a `null` value to remove an
+   * existing scheduled deletion. If specified, must be at least 30 days from upload
+   * time.
+   */
+  scheduledDeletion?: string | null;
+  /**
+   * The timestamp for a thumbnail image calculated as a percentage value
+   * of the video's duration. To convert from a second-wise timestamp to a
+   * percentage, divide the desired timestamp by the total duration of the video. If
+   * this value is not set, the default thumbnail image is taken from 0s of the
+   * video.
+   */
+  thumbnailTimestampPct?: number;
+  /**
+   * The identifier for the watermark profile
+   */
+  watermarkId?: string;
 };
 export interface StreamScopedCaptions {
   /**
@@ -12362,12 +12434,23 @@ export interface StreamScopedCaptions {
    * @param language The BCP 47 language tag for the caption or subtitle.
    * @param file The caption or subtitle file to upload.
    * @returns The created caption entry.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the language or file is invalid
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {InternalError} if an unexpected error occurs
    */
   upload(language: string, file: File): Promise<StreamCaption>;
   /**
    * Generate captions or subtitles for the provided language via AI.
    * @param language The BCP 47 language tag to generate.
    * @returns The generated caption entry.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the language is invalid
+   * @throws {StreamError} if a generated caption already exists
+   * @throws {StreamError} if the video duration is too long
+   * @throws {StreamError} if the video is missing audio
+   * @throws {StreamError} if the requested language is not supported
+   * @throws {InternalError} if an unexpected error occurs
    */
   generate(language: string): Promise<StreamCaption>;
   /**
@@ -12375,26 +12458,39 @@ export interface StreamScopedCaptions {
    * Use the language parameter to filter by a specific language.
    * @param language The optional BCP 47 language tag to filter by.
    * @returns The list of captions or subtitles.
+   * @throws {NotFoundError} if the video or caption is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   list(language?: string): Promise<StreamCaption[]>;
   /**
    * Removes the captions or subtitles from a video.
    * @param language The BCP 47 language tag to remove.
    * @returns A promise that resolves when deletion completes.
+   * @throws {NotFoundError} if the video or caption is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   delete(language: string): Promise<void>;
 }
 export interface StreamScopedDownloads {
   /**
-   * Creates a download for a video when a video is ready to view. Available
+   * Generates a download for a video when a video is ready to view. Available
    * types are `default` and `audio`. Defaults to `default` when omitted.
    * @param downloadType The download type to create.
    * @returns The current downloads for the video.
+   * @throws {NotFoundError} if the video is not found
+   * @throws {BadRequestError} if the download type is invalid
+   * @throws {StreamError} if the video duration is too long to generate a download
+   * @throws {StreamError} if the video is not ready to stream
+   * @throws {InternalError} if an unexpected error occurs
    */
-  create(downloadType?: StreamDownloadType): Promise<StreamDownloadGetResponse>;
+  generate(
+    downloadType?: StreamDownloadType,
+  ): Promise<StreamDownloadGetResponse>;
   /**
    * Lists the downloads created for a video.
    * @returns The current downloads for the video.
+   * @throws {NotFoundError} if the video or downloads are not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   get(): Promise<StreamDownloadGetResponse>;
   /**
@@ -12402,6 +12498,8 @@ export interface StreamScopedDownloads {
    * Defaults to `default` when omitted.
    * @param downloadType The download type to delete.
    * @returns A promise that resolves when deletion completes.
+   * @throws {NotFoundError} if the video or downloads are not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   delete(downloadType?: StreamDownloadType): Promise<void>;
 }
@@ -12409,166 +12507,66 @@ export interface StreamVideos {
   /**
    * Lists all videos in a users account.
    * @returns The list of videos.
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {InternalError} if an unexpected error occurs
    */
-  list(): Promise<StreamVideo[]>;
-}
-export interface StreamSigningKeys {
-  /**
-   * Creates an RSA private key in PEM and JWK formats. Key files are only displayed
-   * once after creation. Keys are created, used, and deleted independently of
-   * videos, and every key can sign any video.
-   * @returns The newly created signing key.
-   */
-  create(): Promise<StreamSigningKey>;
-  /**
-   * Deletes signing keys and revokes all signed URLs generated with the key.
-   * @param id The signing key identifier.
-   * @returns A promise that resolves when deletion completes.
-   */
-  delete(id: string): Promise<void>;
-  /**
-   * Lists the video ID and creation date and time when a signing key was created.
-   * @returns The list of signing keys.
-   */
-  list(): Promise<StreamSigningKeySummary[]>;
-}
-export interface StreamLiveInputs {
-  /**
-   * Creates a live input, and returns credentials that you or your users can use to
-   * stream live video to Cloudflare Stream.
-   * @param params Optional parameters to configure the live input.
-   * @returns The created live input details.
-   */
-  create(params?: StreamLiveInputCreateParams): Promise<StreamLiveInput>;
-  /**
-   * Updates a specified live input.
-   * @param liveInputId The live input identifier.
-   * @param params The fields to update.
-   * @returns The updated live input details.
-   */
-  update(
-    liveInputId: string,
-    params: StreamLiveInputUpdateParams,
-  ): Promise<StreamLiveInput>;
-  /**
-   * Lists the live inputs created for an account. When include_counts is true,
-   * returns a response object with counts; otherwise returns an array.
-   * @param params Optional parameters to filter or include counts.
-   * @returns The list response or array of live inputs.
-   */
-  list(
-    params?: StreamLiveInputListParams,
-  ): Promise<StreamLiveInputListResponse>;
-  /**
-   * Prevents a live input from being streamed to and makes the live input
-   * inaccessible to any future API calls.
-   * @param liveInputId The live input identifier.
-   * @returns A promise that resolves when deletion completes.
-   */
-  delete(liveInputId: string): Promise<void>;
-  /**
-   * Retrieves details of an existing live input.
-   * @param liveInputId The live input identifier.
-   * @returns The live input details.
-   */
-  get(liveInputId: string): Promise<StreamLiveInput>;
-  outputs: StreamLiveInputOutputs;
-}
-export interface StreamLiveInputOutputs {
-  /**
-   * Creates a new output that can be used to simulcast or restream live video to
-   * other RTMP or SRT destinations. Outputs are always linked to a specific live
-   * input — one live input can have many outputs.
-   * @param liveInputId The live input identifier.
-   * @param params The output configuration.
-   * @returns The created output.
-   */
-  create(
-    liveInputId: string,
-    params: StreamLiveInputOutputCreateParams,
-  ): Promise<StreamLiveInputOutput>;
-  /**
-   * Updates the state of an output.
-   * @param liveInputId The live input identifier.
-   * @param outputId The output identifier.
-   * @param params The fields to update.
-   * @returns The updated output.
-   */
-  update(
-    liveInputId: string,
-    outputId: string,
-    params: StreamLiveInputOutputUpdateParams,
-  ): Promise<StreamLiveInputOutput>;
-  /**
-   * Retrieves all outputs associated with a specified live input.
-   * @param liveInputId The live input identifier.
-   * @returns The list of outputs.
-   */
-  list(liveInputId: string): Promise<StreamLiveInputOutput[]>;
-  /**
-   * Deletes an output and removes it from the associated live input.
-   * @param liveInputId The live input identifier.
-   * @param outputId The output identifier.
-   * @returns A promise that resolves when deletion completes.
-   */
-  delete(liveInputId: string, outputId: string): Promise<void>;
+  list(params?: StreamVideosListParams): Promise<StreamVideo[]>;
 }
 export interface StreamWatermarks {
   /**
-   * Creates watermark profiles using a single `HTTP POST multipart/form-data`
-   * request.
+   * Generate a new watermark profile
+   * @param file The image file to upload
    * @param params The watermark creation parameters.
    * @returns The created watermark profile.
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {InvalidURLError} if the URL is invalid
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
+   * @throws {InternalError} if an unexpected error occurs
    */
-  create(params: StreamWatermarkCreateParams): Promise<StreamWatermark>;
+  generate(
+    file: File,
+    params: StreamWatermarkCreateParams,
+  ): Promise<StreamWatermark>;
+  /**
+   * Generate a new watermark profile
+   * @param url The image url to upload
+   * @param params The watermark creation parameters.
+   * @returns The created watermark profile.
+   * @throws {BadRequestError} if the parameters are invalid
+   * @throws {InvalidURLError} if the URL is invalid
+   * @throws {MaxFileSizeError} if the file size is too large
+   * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
+   * @throws {InternalError} if an unexpected error occurs
+   */
+  generate(
+    url: string,
+    params: StreamWatermarkCreateParams,
+  ): Promise<StreamWatermark>;
   /**
    * Lists all watermark profiles for an account.
    * @returns The list of watermark profiles.
+   * @throws {InternalError} if an unexpected error occurs
    */
   list(): Promise<StreamWatermark[]>;
   /**
    * Retrieves details for a single watermark profile.
    * @param watermarkId The watermark profile identifier.
    * @returns The watermark profile details.
+   * @throws {NotFoundError} if the watermark is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   get(watermarkId: string): Promise<StreamWatermark>;
   /**
    * Deletes a watermark profile.
    * @param watermarkId The watermark profile identifier.
    * @returns A promise that resolves when deletion completes.
+   * @throws {NotFoundError} if the watermark is not found
+   * @throws {InternalError} if an unexpected error occurs
    */
   delete(watermarkId: string): Promise<void>;
 }
-export interface StreamSignedUrlTokens {
-  /**
-   * Creates a signed URL token for a video or live input. If params are omitted, defaults are used.
-   * @param videoId The video or live input identifier.
-   * @param params Optional token creation parameters.
-   * @returns The signed URL token response.
-   */
-  create(
-    videoId: string,
-    params?: StreamSignedUrlTokenCreateParams,
-  ): Promise<StreamSignedUrlTokenResponse>;
-}
-export interface StreamUploads {
-  /**
-   * Uploads a video file using a single multipart request. The file field must be
-   * named `file`.
-   * @param file The video file to upload.
-   * @returns The uploaded video details.
-   */
-  upload(file: File): Promise<StreamVideo>;
-}
-export interface StreamDirectUploads {
-  /**
-   * Creates a one-time direct upload URL for unauthenticated uploads.
-   * @param params The direct upload creation parameters.
-   * @returns The created direct upload details.
-   */
-  create(params: StreamDirectUploadCreateParams): Promise<StreamDirectUpload>;
-}
-export type StreamEditVideoParams = {
+export type StreamUpdateVideoParams = {
   /**
    * Lists the origins allowed to display the video. Enter allowed origin
    * domains in an array and use `*` for wildcard subdomains. Empty arrays allow the
@@ -12592,7 +12590,7 @@ export type StreamEditVideoParams = {
    */
   meta?: Record<string, string>;
   /**
-   * Indicates whether the video can be a accessed using the UID. When
+   * Indicates whether the video can be a accessed using the id. When
    * set to `true`, a signed token must be generated with a signing key to view the
    * video.
    */
@@ -12612,11 +12610,6 @@ export type StreamEditVideoParams = {
    * video.
    */
   thumbnailTimestampPct?: number;
-  /**
-   * The date and time when the video upload URL is no longer valid for
-   * direct user uploads.
-   */
-  uploadExpiry?: string;
 };
 export type StreamCaption = {
   /**
@@ -12634,7 +12627,7 @@ export type StreamCaption = {
   /**
    * The status of a generated caption.
    */
-  status?: "ready" | "inprogress" | "completed" | "error";
+  status?: "ready" | "inprogress" | "error";
 };
 export type StreamDownloadStatus = "ready" | "inprogress" | "error";
 export type StreamDownloadType = "default" | "audio";
@@ -12666,373 +12659,6 @@ export type StreamDownloadGetResponse = {
    */
   default?: StreamDownload;
 };
-/**
- * The current connection state for a live input.
- */
-export type StreamLiveInputStatusState =
-  | "disconnected"
-  | "connecting"
-  | "connected";
-/**
- * The ingest protocol reported by the live input.
- */
-export type StreamLiveInputIngestProtocol =
-  | "rtmp"
-  | "srt"
-  | "webrtc"
-  | "rtp"
-  | "";
-export type StreamLiveInputStatusBase = {
-  /**
-   * The connection state for this status entry.
-   */
-  state: StreamLiveInputStatusState;
-  /**
-   * RFC3339 timestamp of when this state was entered.
-   */
-  statusEnteredAt: string;
-  /**
-   * The ingest protocol reported by the live input.
-   */
-  ingestProtocol: StreamLiveInputIngestProtocol;
-  /**
-   * Optional reason for the status entry.
-   */
-  reason?: string;
-};
-export type StreamLiveInputStatusCurrent = StreamLiveInputStatusBase & {
-  /**
-   * RFC3339 timestamp of the last status refresh.
-   */
-  statusLastSeen: string;
-};
-export type StreamLiveInputStatusHistory = StreamLiveInputStatusBase;
-export type StreamLiveInputStatus = {
-  /**
-   * The current status entry.
-   */
-  current: StreamLiveInputStatusCurrent;
-  /**
-   * Historical status entries in descending recency.
-   */
-  history: Array<StreamLiveInputStatusHistory>;
-};
-/**
- * Details about a live input.
- */
-export type StreamLiveInput = {
-  /**
-   * A unique identifier for a live input.
-   */
-  uid: string;
-  /**
-   * Details for streaming to an live input using RTMPS.
-   */
-  rtmps: StreamLiveInputRtmps;
-  /**
-   * The date and time the live input was created.
-   */
-  created: string;
-  /**
-   * The date and time the live input was last modified.
-   */
-  modified: string;
-  /**
-   * A user modifiable key-value store used to reference other systems of record for
-   * managing live inputs.
-   */
-  meta: Record<string, string>;
-  /**
-   * The connection status of a live input.
-   */
-  status: StreamLiveInputStatus | null;
-  /**
-   * Indicates the number of days after which the live inputs recordings will be
-   * deleted. When a stream completes and the recording is ready, the value is used
-   * to calculate a scheduled deletion date for that recording. Omit the field to
-   * indicate no change, or include with a `null` value to remove an existing
-   * scheduled deletion.
-   */
-  deleteRecordingAfterDays: number | null;
-  /**
-   * Details for playback from an live input using RTMPS.
-   */
-  rtmpsPlayback?: StreamLiveInputRtmpsPlayback;
-  /**
-   * Details for streaming to a live input using SRT.
-   */
-  srt?: StreamLiveInputSrt;
-  /**
-   * Details for playback from an live input using SRT.
-   */
-  srtPlayback?: StreamLiveInputSrtPlayback;
-  /**
-   * Details for streaming to a live input using WebRTC.
-   */
-  webRTC?: StreamLiveInputWebRtc;
-  /**
-   * Details for playback from a live input using WebRTC.
-   */
-  webRTCPlayback?: StreamLiveInputWebRtcPlayback;
-  /**
-   * Records the input to a Cloudflare Stream video. Behavior depends on the mode. In
-   * most cases, the video will initially be viewable as a live video and transition
-   * to on-demand after a condition is satisfied.
-   */
-  recording?: StreamLiveInputRecording;
-  /**
-   * Indicates the creator associated with this live input.
-   */
-  defaultCreator?: string;
-  /**
-   * Custom hostnames configured for this input.
-   */
-  customHostnames?: Array<StreamLiveInputCustomHostname>;
-  /**
-   * Indicates if low-latency is preferred.
-   */
-  preferLowLatency?: boolean;
-};
-export type StreamLiveInputCustomHostname = {
-  id: string;
-  name: string;
-};
-export type StreamLiveInputRecording = {
-  /**
-   * Lists the origins allowed to display videos created with this input. Enter
-   * allowed origin domains in an array and use `*` for wildcard subdomains. An empty
-   * array allows videos to be viewed on any origin.
-   */
-  allowedOrigins?: Array<string>;
-  /**
-   * Disables reporting the number of live viewers when this property is set to
-   * `true`.
-   */
-  hideLiveViewerCount?: boolean;
-  /**
-   * Specifies the recording behavior for the live input. Set this value to `off` to
-   * prevent a recording. Set the value to `automatic` to begin a recording and
-   * transition to on-demand after Stream Live stops receiving input.
-   */
-  mode?: "off" | "automatic";
-  /**
-   * Indicates if a video using the live input has the `requireSignedURLs` property
-   * set. Also enforces access controls on any video recording of the livestream with
-   * the live input.
-   */
-  requireSignedURLs?: boolean;
-  /**
-   * Determines the amount of time a live input configured in `automatic` mode should
-   * wait before a recording transitions from live to on-demand. `0` is recommended
-   * for most use cases and indicates the platform default should be used.
-   */
-  timeoutSeconds?: number;
-};
-export type StreamLiveInputRtmps = {
-  /**
-   * The secret key to use when streaming via RTMPS to a live input.
-   */
-  streamKey: string;
-  /**
-   * The RTMPS URL you provide to the broadcaster, which they stream live video to.
-   */
-  url: string;
-};
-export type StreamLiveInputRtmpsPlayback = {
-  /**
-   * The secret key to use for playback via RTMPS.
-   */
-  streamKey: string;
-  /**
-   * The URL used to play live video over RTMPS.
-   */
-  url: string;
-};
-export type StreamLiveInputSrt = {
-  /**
-   * The secret key to use when streaming via SRT to a live input.
-   */
-  passphrase: string;
-  /**
-   * The identifier of the live input to use when streaming via SRT.
-   */
-  streamId: string;
-  /**
-   * The SRT URL you provide to the broadcaster, which they stream live video to.
-   */
-  url: string;
-};
-export type StreamLiveInputSrtPlayback = {
-  /**
-   * The secret key to use for playback via SRT.
-   */
-  passphrase: string;
-  /**
-   * The identifier of the live input to use for playback via SRT.
-   */
-  streamId: string;
-  /**
-   * The URL used to play live video over SRT.
-   */
-  url: string;
-};
-export type StreamLiveInputWebRtc = {
-  /**
-   * The WebRTC URL you provide to the broadcaster, which they stream live video to.
-   */
-  url: string;
-};
-export type StreamLiveInputWebRtcPlayback = {
-  /**
-   * The URL used to play live video over WebRTC.
-   */
-  url: string;
-};
-export type StreamLiveInputListResponse =
-  | {
-      liveInputs: Array<StreamLiveInputListResponseItem>;
-      /**
-       * The total number of remaining live inputs based on cursor position.
-       */
-      range?: number;
-      /**
-       * The total number of live inputs that match the provided filters.
-       */
-      total?: number;
-    }
-  | Array<StreamLiveInputListResponseItem>;
-export type StreamLiveInputListResponseItem = {
-  /**
-   * The unique identifier for the live input.
-   */
-  uid: string;
-  /**
-   * The date and time the live input was created.
-   */
-  created: string;
-  /**
-   * The date and time the live input was last modified.
-   */
-  modified: string;
-  /**
-   * A user modifiable key-value store for the live input.
-   */
-  meta: Record<string, string>;
-  /**
-   * The number of days after which recordings are deleted, if set.
-   */
-  deleteRecordingAfterDays: number | null;
-};
-export type StreamLiveInputCreateParams = {
-  /**
-   * Sets the creator ID asssociated with this live input.
-   */
-  defaultCreator?: string;
-  /**
-   * Indicates the number of days after which the live inputs recordings will be
-   * deleted. When a stream completes and the recording is ready, the value is used
-   * to calculate a scheduled deletion date for that recording. Omit the field to
-   * indicate no change, or include with a `null` value to remove an existing
-   * scheduled deletion.
-   */
-  deleteRecordingAfterDays?: number;
-  /**
-   * A user modifiable key-value store used to reference other systems of record for
-   * managing live inputs.
-   */
-  meta?: Record<string, string>;
-  /**
-   * Records the input to a Cloudflare Stream video. Behavior depends on the mode. In
-   * most cases, the video will initially be viewable as a live video and transition
-   * to on-demand after a condition is satisfied.
-   */
-  recording?: StreamLiveInputRecording;
-};
-export type StreamLiveInputUpdateParams = {
-  /**
-   * Sets the creator ID asssociated with this live input.
-   */
-  defaultCreator?: string;
-  /**
-   * Indicates the number of days after which the live inputs recordings will be
-   * deleted. When a stream completes and the recording is ready, the value is used
-   * to calculate a scheduled deletion date for that recording. Omit the field to
-   * indicate no change, or include with a `null` value to remove an existing
-   * scheduled deletion.
-   */
-  deleteRecordingAfterDays?: number;
-  /**
-   * A user modifiable key-value store used to reference other systems of record for
-   * managing live inputs.
-   */
-  meta?: Record<string, string>;
-  /**
-   * Records the input to a Cloudflare Stream video. Behavior depends on the mode. In
-   * most cases, the video will initially be viewable as a live video and transition
-   * to on-demand after a condition is satisfied.
-   */
-  recording?: StreamLiveInputRecording;
-};
-export type StreamLiveInputListParams = {
-  /**
-   * Includes the total number of videos associated with the submitted query parameters.
-   */
-  include_counts?: boolean;
-};
-export type StreamLiveInputOutput = {
-  /**
-   * A unique identifier for the output.
-   */
-  uid: string;
-  /**
-   * The URL an output uses to restream.
-   */
-  url: string;
-  /**
-   * When enabled, live video streamed to the associated live input will be sent to
-   * the output URL. When disabled, live video will not be sent to the output URL,
-   * even when streaming to the associated live input. Use this to control precisely
-   * when you start and stop simulcasting to specific destinations like YouTube and
-   * Twitch.
-   */
-  enabled: boolean;
-  /**
-   * The current status for the output.
-   */
-  status: StreamLiveInputStatus | null;
-  /**
-   * The streamKey used to authenticate against an output's target.
-   */
-  streamKey?: string;
-};
-export type StreamLiveInputOutputCreateParams = {
-  /**
-   * The streamKey used to authenticate against an output's target.
-   */
-  streamKey: string;
-  /**
-   * The URL an output uses to restream.
-   */
-  url: string;
-  /**
-   * When enabled, live video streamed to the associated live input will be sent to
-   * the output URL. When disabled, live video will not be sent to the output URL,
-   * even when streaming to the associated live input. Use this to control precisely
-   * when you start and stop simulcasting to specific destinations like YouTube and
-   * Twitch.
-   */
-  enabled?: boolean;
-};
-export type StreamLiveInputOutputUpdateParams = {
-  /**
-   * When enabled, live video streamed to the associated live input will be sent to
-   * the output URL. When disabled, live video will not be sent to the output URL,
-   * even when streaming to the associated live input. Use this to control precisely
-   * when you start and stop simulcasting to specific destinations like YouTube and
-   * Twitch.
-   */
-  enabled: boolean;
-};
 export type StreamWatermarkPosition =
   | "upperRight"
   | "upperLeft"
@@ -13043,7 +12669,7 @@ export type StreamWatermark = {
   /**
    * The unique identifier for a watermark profile.
    */
-  uid: string;
+  id: string;
   /**
    * The size of the image in bytes.
    */
@@ -13095,192 +12721,101 @@ export type StreamWatermark = {
    */
   position: StreamWatermarkPosition;
 };
-export type StreamWatermarkCreateParams =
-  | {
-      /**
-       * The image file to upload.
-       */
-      file: File;
-      /**
-       * A short description of the watermark profile.
-       */
-      name?: string;
-      /**
-       * The translucency of the image. A value of `0.0` makes the image completely
-       * transparent, and `1.0` makes the image completely opaque. Note that if the
-       * image is already semi-transparent, setting this to `1.0` will not make the
-       * image completely opaque.
-       */
-      opacity?: number;
-      /**
-       * The whitespace between the adjacent edges (determined by position) of the
-       * video and the image. `0.0` indicates no padding, and `1.0` indicates a fully
-       * padded video width or length, as determined by the algorithm.
-       */
-      padding?: number;
-      /**
-       * The size of the image relative to the overall size of the video. This
-       * parameter will adapt to horizontal and vertical videos automatically. `0.0`
-       * indicates no scaling (use the size of the image as-is), and `1.0 `fills the
-       * entire video.
-       */
-      scale?: number;
-      /**
-       * The location of the image. Valid positions are: `upperRight`, `upperLeft`,
-       * `lowerLeft`, `lowerRight`, and `center`. Note that `center` ignores the
-       * `padding` parameter.
-       */
-      position?: StreamWatermarkPosition;
-    }
-  | {
-      /**
-       * The image URL to copy.
-       */
-      url: string;
-      /**
-       * A short description of the watermark profile.
-       */
-      name?: string;
-      /**
-       * The translucency of the image. A value of `0.0` makes the image completely
-       * transparent, and `1.0` makes the image completely opaque. Note that if the
-       * image is already semi-transparent, setting this to `1.0` will not make the
-       * image completely opaque.
-       */
-      opacity?: number;
-      /**
-       * The whitespace between the adjacent edges (determined by position) of the
-       * video and the image. `0.0` indicates no padding, and `1.0` indicates a fully
-       * padded video width or length, as determined by the algorithm.
-       */
-      padding?: number;
-      /**
-       * The size of the image relative to the overall size of the video. This
-       * parameter will adapt to horizontal and vertical videos automatically. `0.0`
-       * indicates no scaling (use the size of the image as-is), and `1.0 `fills the
-       * entire video.
-       */
-      scale?: number;
-      /**
-       * The location of the image. Valid positions are: `upperRight`, `upperLeft`,
-       * `lowerLeft`, `lowerRight`, and `center`. Note that `center` ignores the
-       * `padding` parameter.
-       */
-      position?: StreamWatermarkPosition;
-    };
-export type StreamSignedUrlTokenResponse = {
+export type StreamWatermarkCreateParams = {
   /**
-   * The signed token used with the signed URLs feature.
+   * A short description of the watermark profile.
    */
-  token: string;
+  name?: string;
+  /**
+   * The translucency of the image. A value of `0.0` makes the image completely
+   * transparent, and `1.0` makes the image completely opaque. Note that if the
+   * image is already semi-transparent, setting this to `1.0` will not make the
+   * image completely opaque.
+   */
+  opacity?: number;
+  /**
+   * The whitespace between the adjacent edges (determined by position) of the
+   * video and the image. `0.0` indicates no padding, and `1.0` indicates a fully
+   * padded video width or length, as determined by the algorithm.
+   */
+  padding?: number;
+  /**
+   * The size of the image relative to the overall size of the video. This
+   * parameter will adapt to horizontal and vertical videos automatically. `0.0`
+   * indicates no scaling (use the size of the image as-is), and `1.0 `fills the
+   * entire video.
+   */
+  scale?: number;
+  /**
+   * The location of the image.
+   */
+  position?: StreamWatermarkPosition;
 };
-export type StreamSignedUrlTokenCreateParams = {
+export type StreamVideosListParams = {
   /**
-   * The optional ID of a Stream signing key. If present, the `pem` field
-   * is also required.
+   * The maximum number of videos to return.
    */
-  id?: string;
+  limit?: number;
   /**
-   * The optional list of access rule constraints on the token. Access
-   * can be blocked or allowed based on an IP, IP range, or by country. Access rules
-   * are evaluated from first to last. If a rule matches, the associated action is
-   * applied and no further rules are evaluated.
+   * Return videos created before this timestamp.
+   * (RFC3339/RFC3339Nano)
    */
-  accessRules?: Array<StreamSignedUrlTokenAccessRule>;
+  before?: string;
   /**
-   * The optional boolean value that enables using signed tokens to
-   * access MP4 download links for a video.
+   * Comparison operator for the `before` field.
+   * @default 'lt'
    */
-  downloadable?: boolean;
+  beforeComp?: StreamPaginationComparison;
   /**
-   * The optional unix epoch timestamp that specifies the time after a
-   * token is not accepted. The maximum time specification is 24 hours from issuing
-   * time. If this field is not set, the default is one hour after issuing.
+   * Return videos created after this timestamp.
+   * (RFC3339/RFC3339Nano)
    */
-  exp?: number;
+  after?: string;
   /**
-   * The optional unix epoch timestamp that specifies the time before a
-   * token is not accepted. If this field is not set, the default is one hour
-   * before issuing.
+   * Comparison operator for the `after` field.
+   * @default 'gte'
    */
-  nbf?: number;
-  /**
-   * The optional base64 encoded private key in PEM format associated
-   * with a Stream signing key. If present, the `id` field is also required.
-   */
-  pem?: string;
-  /**
-   * Additional token flags.
-   */
-  flags?: StreamSignedUrlTokenFlags;
+  afterComp?: StreamPaginationComparison;
 };
-export type StreamSignedUrlTokenFlags = {
-  /**
-   * When true, indicates the token is for original (non-encoded) content.
-   */
-  original?: boolean;
-};
-export type StreamSignedUrlTokenAccessRule = {
-  /**
-   * The action to take when a request matches a rule. If the action is `block`, the
-   * signed token blocks views for viewers matching the rule.
-   */
-  action?: "allow" | "block";
-  /**
-   * An array of 2-letter country codes in ISO 3166-1 Alpha-2 format used to match
-   * requests.
-   */
-  country?: Array<string>;
-  /**
-   * An array of IPv4 or IPV6 addresses or CIDRs used to match requests.
-   */
-  ip?: Array<string>;
-  /**
-   * Lists available rule types to match for requests. An `any` type matches all
-   * requests and can be used as a wildcard to apply default actions after other
-   * rules.
-   */
-  type?: "any" | "ip.src" | "ip.geoip.country";
-};
-export type StreamSigningKey = {
-  /**
-   * Identifier.
-   */
-  id: string;
-  /**
-   * The date and time a signing key was created.
-   */
-  created: string;
-  /**
-   * The signing key in JWK format.
-   */
-  jwk: string;
-  /**
-   * The signing key in PEM format.
-   */
-  pem: string;
-};
-export type StreamSigningKeySummary = {
-  /**
-   * Identifier.
-   */
-  id: string;
-  /**
-   * Identifier in snake case.
-   */
-  key_id: string;
-  /**
-   * The date and time a signing key was created.
-   */
-  created: string;
-};
+export type StreamPaginationComparison = "eq" | "gt" | "gte" | "lt" | "lte";
 /**
  * Error object for Stream binding operations.
  */
 export interface StreamError extends Error {
   readonly code: number;
+  readonly statusCode: number;
   readonly message: string;
   readonly stack?: string;
+}
+export interface InternalError extends StreamError {
+  name: "InternalError";
+}
+export interface BadRequestError extends StreamError {
+  name: "BadRequestError";
+}
+export interface NotFoundError extends StreamError {
+  name: "NotFoundError";
+}
+export interface ForbiddenError extends StreamError {
+  name: "ForbiddenError";
+}
+export interface RateLimitedError extends StreamError {
+  name: "RateLimitedError";
+}
+export interface QuotaReachedError extends StreamError {
+  name: "QuotaReachedError";
+}
+export interface MaxFileSizeError extends StreamError {
+  name: "MaxFileSizeError";
+}
+export interface InvalidURLError extends StreamError {
+  name: "InvalidURLError";
+}
+export interface AlreadyUploadedError extends StreamError {
+  name: "AlreadyUploadedError";
+}
+export interface TooManyWatermarksError extends StreamError {
+  name: "TooManyWatermarksError";
 }
 export type MarkdownDocument = {
   name: string;
