@@ -494,6 +494,26 @@ concept StrictlyBool = kj::isSameType<T, bool>();
 
 class Lock;
 
+// Interface for allocating backing stores for v8 external string.
+class ExternalStringAllocator {
+ public:
+  virtual ~ExternalStringAllocator() = default;
+
+  virtual void* allocate(size_t size) = 0;
+  virtual void deallocate(void* ptr) = 0;
+};
+
+// Default allocator that uses standard new/delete.
+class DefaultExternalStringAllocator final: public ExternalStringAllocator {
+ public:
+  void* allocate(size_t size) override {
+    return operator new(size);
+  }
+  void deallocate(void* ptr) override {
+    operator delete(ptr);
+  }
+};
+
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
 // lifetime.

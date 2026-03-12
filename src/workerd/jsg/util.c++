@@ -761,6 +761,10 @@ void returnRejectedPromise(const v8::PropertyCallbackInfo<v8::Value>& info,
   returnRejectedPromiseImpl<const v8::PropertyCallbackInfo<v8::Value>&>(info, exception, tryCatch);
 }
 
+static ExternalStringAllocator& getAllocatorForIsolate(v8::Isolate* isolate) {
+  return IsolateBase::from(isolate).getExternalStringAllocator();
+}
+
 // ======================================================================================
 
 template <typename Type, typename Data>
@@ -802,6 +806,14 @@ class ExternString: public Type {
     return length() * sizeof(Data);
   }
 
+  // Override Dispose() so that V8 properly deallocates through the configured
+  // ExternalStringAllocator rather than using `delete this` (the default).
+  void Dispose() override {
+    auto& allocator = getAllocatorForIsolate(isolate);
+    this->~ExternString();
+    allocator.deallocate(this);
+  }
+
   static v8::MaybeLocal<v8::String> createExtern(
       v8::Isolate* isolate, kj::ArrayPtr<const Data>& buf) {
     if (buf.size() == 0) {
@@ -813,9 +825,13 @@ class ExternString: public Type {
     // heap allocated string than an external. We're not doing that here currently, but
     // we might?
 
-    // We typically don't use the new keyword in workerd/Workers but in this case we
-    // have to.
-    auto resource = new ExternString<Type, Data>(isolate, buf);
+    auto& allocator = getAllocatorForIsolate(isolate);
+    auto mem = allocator.allocate(sizeof(ExternString<Type, Data>));
+    if (mem == nullptr) {
+      return v8::MaybeLocal<v8::String>();
+    }
+
+    auto resource = new (mem) ExternString<Type, Data>(isolate, buf);
 
     v8::MaybeLocal<v8::String> str;
     if constexpr (kj::isSameType<Type, v8::String::ExternalOneByteStringResource>()) {
@@ -826,7 +842,8 @@ class ExternString: public Type {
     }
     if (str.IsEmpty()) {
       // This should happen only if the string is too long
-      delete resource;
+      resource->~ExternString<Type, Data>();
+      allocator.deallocate(mem);
       return v8::MaybeLocal<v8::String>();
     }
 
