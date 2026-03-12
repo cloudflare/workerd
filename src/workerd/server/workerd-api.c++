@@ -284,7 +284,7 @@ struct WorkerdApi::Impl final {
             group,
             Configuration(*this),
             kj::mv(observerParam),
-            kj::heap<jsg::DefaultExternalStringAllocator>(),
+            jsg::defaultExternalStringAllocator(),
             kj::mv(createParams)),
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {

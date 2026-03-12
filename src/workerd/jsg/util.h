@@ -503,16 +503,8 @@ class ExternalStringAllocator {
   virtual void deallocate(void* ptr) = 0;
 };
 
-// Default allocator that uses standard new/delete.
-class DefaultExternalStringAllocator final: public ExternalStringAllocator {
- public:
-  void* allocate(size_t size) override {
-    return operator new(size);
-  }
-  void deallocate(void* ptr) override {
-    operator delete(ptr);
-  }
-};
+// Returns a singleton DefaultExternalStringAllocator.
+kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite

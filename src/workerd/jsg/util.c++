@@ -765,6 +765,25 @@ static ExternalStringAllocator& getAllocatorForIsolate(v8::Isolate* isolate) {
   return IsolateBase::from(isolate).getExternalStringAllocator();
 }
 
+// Default allocator that uses standard new/delete.
+// We typically don't use the new/delete operators directly in workerd/Workers,
+// but in this case we have to because V8's ExternalStringResource may default to `delete this`
+// if not overridden, and we are allocating raw byte arrays for placement new.
+class DefaultExternalStringAllocator final: public ExternalStringAllocator {
+ public:
+  void* allocate(size_t size) override {
+    return operator new(size);
+  }
+  void deallocate(void* ptr) override {
+    operator delete(ptr);
+  }
+};
+
+kj::Own<ExternalStringAllocator> defaultExternalStringAllocator() {
+  static DefaultExternalStringAllocator allocator;
+  return kj::Own<ExternalStringAllocator>(&allocator, kj::NullDisposer::instance);
+}
+
 // ======================================================================================
 
 template <typename Type, typename Data>

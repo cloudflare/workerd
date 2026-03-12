@@ -575,7 +575,7 @@ class Isolate: public IsolateBase {
       v8::IsolateGroup group,
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
-      kj::Own<ExternalStringAllocator> externalStringAllocator,
+      kj::Own<ExternalStringAllocator> externalStringAllocator = defaultExternalStringAllocator(),
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
       : IsolateBase(system,
@@ -599,7 +599,7 @@ class Isolate: public IsolateBase {
       : IsolateBase(system,
             kj::mv(createParams),
             kj::mv(observer),
-            kj::heap<DefaultExternalStringAllocator>(),
+            defaultExternalStringAllocator(),
             group) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
@@ -618,7 +618,7 @@ class Isolate: public IsolateBase {
       : IsolateBase(system,
             kj::mv(createParams),
             kj::mv(observer),
-            kj::heap<DefaultExternalStringAllocator>(),
+            defaultExternalStringAllocator(),
             v8::IsolateGroup::Create()) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
@@ -634,7 +634,7 @@ class Isolate: public IsolateBase {
             v8::IsolateGroup::GetDefault(),
             nullptr,
             kj::mv(observer),
-            kj::heap<DefaultExternalStringAllocator>(),
+            defaultExternalStringAllocator(),
             kj::mv(createParams)) {}
 
   template <typename MetaConfiguration>
