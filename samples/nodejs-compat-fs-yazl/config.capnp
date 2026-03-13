@@ -31,7 +31,7 @@ const helloWorld :Workerd.Worker = (
     (name = "worker", esModule = embed "worker.js"),
     (name = "yazl", commonJsModule = embed "node_modules/yazl/index.js"),
     (name = "buffer-crc32", esModule = embed "node_modules/buffer-crc32/dist/index.mjs"),
-    (name = "abc.txt", text = embed "worker.js"),
+    (name = "bootstrap.min.css", text = embed "bootstrap.min.css"),
   ],
   compatibilityDate = "2025-09-01",
   compatibilityFlags = [
