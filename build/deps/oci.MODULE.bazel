@@ -14,7 +14,7 @@ oci.pull(
 )
 oci.pull(
     name = "proxy_everything",
-    digest = "sha256:f159d9e1b0f28bc01bd106f38d62479c018d050e3f95b365c5f9b5f83f60df82",
+    digest = "sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8",
     image = "docker.io/cloudflare/proxy-everything",
     platforms = [
         "linux/amd64",

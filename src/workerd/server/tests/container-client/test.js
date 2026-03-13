@@ -273,6 +273,21 @@ export class DurableObjectExample extends DurableObject {
     }
   }
 
+  async fetchIntercept(host) {
+    return await this.ctx.container
+      .getTcpPort(8080)
+      .fetch('http://foo/intercept', {
+        headers: { 'x-host': host },
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+  }
+
+  async expectIntercept(host, expectedStatus, expectedBody) {
+    const response = await this.fetchIntercept(host);
+    assert.equal(response.status, expectedStatus);
+    assert.equal(await response.text(), expectedBody);
+  }
+
   async testPortNotListening() {
     const container = this.ctx.container;
     if (container.running) {
@@ -327,6 +342,121 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
 
     return data;
+  }
+
+  async testSetEgressHttpWithInternet() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ enableInternet: true });
+
+    await this.waitUntilContainerIsHealthy();
+
+    await container.interceptOutboundHttp(
+      'googlefakedomain.com',
+      this.ctx.exports.TestService({ props: { id: 2 } })
+    );
+
+    await this.expectIntercept(
+      'googlefakedomain.com',
+      200,
+      'hello binding: 2 http://googlefakedomain.com/'
+    );
+
+    await this.expectIntercept(
+      'googlefakedomainother.com',
+      500,
+      'googlefakedomainother.com fetch failed'
+    );
+
+    await container.interceptAllOutboundHttp(
+      this.ctx.exports.TestService({ props: { id: 5 } })
+    );
+
+    await this.expectIntercept(
+      'google.com',
+      200,
+      'hello binding: 5 http://google.com/'
+    );
+  }
+
+  async testSetEgressHttpNoInternet() {
+    const container = this.ctx.container;
+
+    if (!container.running) container.start();
+
+    // wait for container to be available
+    await this.waitUntilContainerIsHealthy();
+
+    await container.interceptOutboundHttp(
+      'google.com',
+      this.ctx.exports.TestService({ props: { id: 2 } })
+    );
+
+    await this.expectIntercept(
+      'google.com',
+      200,
+      'hello binding: 2 http://google.com/'
+    );
+
+    // This should fail as there is no hostname that matches it.
+    await this.expectIntercept('google2.com', 500, 'google2.com fetch failed');
+
+    await container.interceptOutboundHttp(
+      'google2.com',
+      this.ctx.exports.TestService({ props: { id: 4 } })
+    );
+
+    await this.expectIntercept(
+      'google.com',
+      200,
+      'hello binding: 2 http://google.com/'
+    );
+    await this.expectIntercept(
+      'google2.com',
+      200,
+      'hello binding: 4 http://google2.com/'
+    );
+
+    // From now on, all hostnames resolve to Workerd.
+    await container.interceptAllOutboundHttp(
+      this.ctx.exports.TestService({ props: { id: 6 } })
+    );
+
+    await this.expectIntercept(
+      'google.com',
+      200,
+      'hello binding: 2 http://google.com/'
+    );
+
+    await this.expectIntercept(
+      'google2.com',
+      200,
+      'hello binding: 4 http://google2.com/'
+    );
+
+    await this.expectIntercept(
+      'google3.com',
+      200,
+      'hello binding: 6 http://google3.com/'
+    );
+
+    await this.expectIntercept(
+      '1.1.1.1',
+      200,
+      'hello binding: 6 http://1.1.1.1/'
+    );
+
+    await this.expectIntercept('1.1.1.1:90', 500, '1.1.1.1:90 fetch failed');
+    await this.expectIntercept(
+      'google.com:9000',
+      500,
+      'google.com:9000 fetch failed'
+    );
   }
 
   async testSetEgressHttp() {
@@ -788,6 +918,29 @@ export const testPidNamespace = {
       /container-client-test/,
       `Expected PID 1 to be the container entrypoint, but got: ${data.init}`
     );
+  },
+};
+
+// Test setEgressHttp hostname functionality with internet (check we can establish
+// outbound with others).
+export const testSetEgressHttpWithInternet = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSetEgressHttpWithInternet')
+    );
+    let stub = env.MY_CONTAINER.get(id);
+    await stub.testSetEgressHttpWithInternet();
+  },
+};
+
+// Test setEgressHttp hostname functionality with no internet
+export const testSetEgressHttpNoInternet = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSetEgressHttpNoInternet')
+    );
+    let stub = env.MY_CONTAINER.get(id);
+    await stub.testSetEgressHttpNoInternet();
   },
 };
 

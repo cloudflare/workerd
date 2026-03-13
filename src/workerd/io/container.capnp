@@ -118,7 +118,9 @@ interface Container @0x9aaceefc06523bca {
   setEgressHttp @8 (hostPort :Text, channelToken :Data);
   # Configures egress HTTP routing for the container. When the container attempts to connect to the
   # specified host:port, the connection should be routed back to the Workers runtime using the channel token.
-  # The format of hostPort can be '<ip|cidr>[':'<port>]'. If port is omitted, it's assumed to only cover port 80.
+  # The format of hostPort can be '<ip|cidr|hostnameGlob>[':'<port>]'. If the host part is not an
+  # IP or CIDR, it is treated as a hostname glob.
+  # If port is omitted, it's assumed to only cover port 80.
   # This method does not support HTTPs yet.
 
 
