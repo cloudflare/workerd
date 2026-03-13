@@ -92,6 +92,11 @@ pub fn parse_replacement(input: &[&str]) -> jsg::Result<String, DnsParserError> 
     // Each frame starts with the length of the remaining frame.
     while length_index < input.len() {
         let length = usize::from_str_radix(input[length_index], 16)?;
+        if length + offset_index > input.len() {
+            return Err(DnsParserError::InvalidDnsResponse(
+                "replacement data too short for declared frame length".to_owned(),
+            ));
+        }
         let subset = input[offset_index..length + offset_index].to_vec();
         let decoded = decode_hex(&subset)?.join("");
 
@@ -144,10 +149,26 @@ impl DnsUtil {
     #[jsg_method]
     pub fn parse_caa_record(&self, record: String) -> Result<CaaRecord, DnsParserError> {
         // Let's remove "\\#" and the length of data from the beginning of the record
-        let data = record.split_ascii_whitespace().collect::<Vec<_>>()[2..].to_vec();
+        let parts: Vec<_> = record.split_ascii_whitespace().collect();
+        if parts.len() < 3 {
+            return Err(DnsParserError::InvalidDnsResponse(
+                "CAA record too short: expected at least 3 fields".to_owned(),
+            ));
+        }
+        let data = parts[2..].to_vec();
+        if data.len() < 2 {
+            return Err(DnsParserError::InvalidDnsResponse(
+                "CAA record data too short: expected critical and prefix length fields".to_owned(),
+            ));
+        }
         let critical = data[0].parse::<u8>()?;
         let prefix_length = data[1].parse::<usize>()?;
 
+        if data.len() < 2 + prefix_length {
+            return Err(DnsParserError::InvalidDnsResponse(format!(
+                "CAA record data too short for prefix_length {prefix_length}"
+            )));
+        }
         let field = decode_hex(&data[2..prefix_length + 2])?.join("");
         let value = decode_hex(&data[(prefix_length + 2)..])?.join("");
 
@@ -198,7 +219,20 @@ impl DnsUtil {
     /// `DnsParserError::ParseIntError`
     #[jsg_method]
     pub fn parse_naptr_record(&self, record: String) -> jsg::Result<NaptrRecord, DnsParserError> {
-        let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
+        let parts: Vec<_> = record.split_ascii_whitespace().collect();
+        if parts.len() < 2 {
+            return Err(DnsParserError::InvalidDnsResponse(
+                "NAPTR record too short".to_owned(),
+            ));
+        }
+        let data = parts[1..].to_vec();
+
+        // Need at least: length(1) + order(2) + preference(2) + flag_length(1) = 6 fields
+        if data.len() < 6 {
+            return Err(DnsParserError::InvalidDnsResponse(
+                "NAPTR record data too short: expected at least 6 fields".to_owned(),
+            ));
+        }
 
         let order_str = data[1..3].to_vec();
         let order = u32::from_str_radix(&order_str.join(""), 16)?;
@@ -207,14 +241,29 @@ impl DnsUtil {
 
         let flag_length = usize::from_str_radix(data[5], 16)?;
         let flag_offset = 6;
+        if data.len() < flag_offset + flag_length + 1 {
+            return Err(DnsParserError::InvalidDnsResponse(
+                "NAPTR record too short for flags field".to_owned(),
+            ));
+        }
         let flags = decode_hex(&data[flag_offset..flag_length + flag_offset])?.join("");
 
         let service_length = usize::from_str_radix(data[flag_offset + flag_length], 16)?;
         let service_offset = flag_offset + flag_length + 1;
+        if data.len() < service_offset + service_length + 1 {
+            return Err(DnsParserError::InvalidDnsResponse(
+                "NAPTR record too short for service field".to_owned(),
+            ));
+        }
         let service = decode_hex(&data[service_offset..service_length + service_offset])?.join("");
 
         let regexp_length = usize::from_str_radix(data[service_offset + service_length], 16)?;
         let regexp_offset = service_offset + service_length + 1;
+        if data.len() < regexp_offset + regexp_length {
+            return Err(DnsParserError::InvalidDnsResponse(
+                "NAPTR record too short for regexp field".to_owned(),
+            ));
+        }
         let regexp = decode_hex(&data[regexp_offset..regexp_length + regexp_offset])?.join("");
 
         let replacement = parse_replacement(&data[regexp_offset + regexp_length..])?;
@@ -320,5 +369,95 @@ mod tests {
         assert_eq!(record.replacement, "replacement");
         assert_eq!(record.order, 5555);
         assert_eq!(record.preference, 2222);
+    }
+
+    // =========================================================================
+    // Malformed input tests — these previously caused panics (index out of bounds)
+    // which would abort the process via CXX. They must return Err, not panic.
+    // =========================================================================
+
+    #[test]
+    fn test_parse_caa_record_empty_string() {
+        let dns_util = DnsUtil {
+            _state: ResourceState::default(),
+        };
+        assert!(dns_util.parse_caa_record(String::new()).is_err());
+    }
+
+    #[test]
+    fn test_parse_caa_record_single_token() {
+        let dns_util = DnsUtil {
+            _state: ResourceState::default(),
+        };
+        assert!(dns_util.parse_caa_record("\\#".to_owned()).is_err());
+    }
+
+    #[test]
+    fn test_parse_caa_record_two_tokens() {
+        let dns_util = DnsUtil {
+            _state: ResourceState::default(),
+        };
+        assert!(dns_util.parse_caa_record("\\# 15".to_owned()).is_err());
+    }
+
+    #[test]
+    fn test_parse_caa_record_data_too_short_for_prefix() {
+        let dns_util = DnsUtil {
+            _state: ResourceState::default(),
+        };
+        // critical=00, prefix_length=FF (255) but no data follows
+        assert!(
+            dns_util
+                .parse_caa_record("\\# 02 00 FF".to_owned())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_parse_naptr_record_empty_string() {
+        let dns_util = DnsUtil {
+            _state: ResourceState::default(),
+        };
+        assert!(dns_util.parse_naptr_record(String::new()).is_err());
+    }
+
+    #[test]
+    fn test_parse_naptr_record_single_token() {
+        let dns_util = DnsUtil {
+            _state: ResourceState::default(),
+        };
+        assert!(dns_util.parse_naptr_record("\\#".to_owned()).is_err());
+    }
+
+    #[test]
+    fn test_parse_naptr_record_too_few_fields() {
+        let dns_util = DnsUtil {
+            _state: ResourceState::default(),
+        };
+        assert!(
+            dns_util
+                .parse_naptr_record("\\# 37 15 b3".to_owned())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_parse_replacement_length_exceeds_input() {
+        // First element says frame is FF (255) bytes but only 2 bytes follow
+        let input = vec!["FF", "73", "69"];
+        assert!(parse_replacement(&input).is_err());
+    }
+
+    #[test]
+    fn test_parse_naptr_record_truncated_at_flags() {
+        let dns_util = DnsUtil {
+            _state: ResourceState::default(),
+        };
+        // Has order+preference+flag_length but no flag data
+        assert!(
+            dns_util
+                .parse_naptr_record("\\# 06 15 b3 08 ae 05".to_owned())
+                .is_err()
+        );
     }
 }
