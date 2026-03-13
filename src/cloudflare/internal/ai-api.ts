@@ -17,6 +17,7 @@ interface Fetcher {
   fetch: typeof fetch;
   aiSearch: () => AiSearchService;
   gateway: (gatewayId: string) => AiGateway;
+  autorag: (autoragId?: string) => AutoRAG;
 }
 
 interface AiError {
@@ -426,7 +427,10 @@ export class Ai {
     return new AiGateway(this.#fetcher, gatewayId);
   }
 
-  autorag(autoragId?: string): AutoRAG {
+  autorag(autoragId?: string, options?: { beta?: boolean }): AutoRAG {
+    if (options?.beta === true) {
+      return this.#fetcher.autorag(autoragId);
+    }
     return new AutoRAG(this.#fetcher, autoragId);
   }
 
