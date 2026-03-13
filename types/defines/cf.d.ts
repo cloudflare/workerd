@@ -106,8 +106,6 @@ interface RequestInitCfProperties extends Record<string, unknown> {
    * to the origin response without modifications to the origin server.
    * This will allow for greater control over the Purge by Cache Tag feature
    * utilizing changes only in the Workers process.
-   *
-   * Only available for Enterprise customers.
    */
   cacheTags?: string[];
   /**
