@@ -19,19 +19,20 @@ export const test = {
       return acc;
     }, {});
     assert.deepStrictEqual(reduced, {
-      durable_object_storage_exec: 268,
+      durable_object_storage_exec: 293,
       durable_object_storage_ingest: 1030,
       durable_object_storage_getDatabaseSize: 3,
       durable_object_storage_put: 18,
       durable_object_storage_get: 18,
       durable_object_storage_transaction: 8,
-      durable_object_subrequest: 47,
+      durable_object_subrequest: 48,
       durable_object_storage_deleteAll: 1,
       createStringTable: 4,
       runActorFunc: 4,
       durable_object_storage_sync: 4,
       getStringTableIds: 4,
       testMultiStatement: 1,
+      testStatementCacheEviction: 1,
       testRollbackKvInit: 1,
       testRollbackAlarmInit: 1,
       durable_object_storage_setAlarm: 2,
