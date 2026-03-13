@@ -585,7 +585,10 @@ impl<T> From<Option<T>> for Nullable<T> {
 
 impl<T> From<Nullable<T>> for Option<T> {
     fn from(nullable: Nullable<T>) -> Self {
-        nullable.into()
+        match nullable {
+            Nullable::Some(v) => Some(v),
+            Nullable::Null | Nullable::Undefined => None,
+        }
     }
 }
 
