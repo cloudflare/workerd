@@ -15,7 +15,26 @@ namespace workerd::api {
 
 Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
-      running(running) {}
+      running(running) {
+}
+
+void catchAndAbortOnDisconnect(jsg::Lock& js, jsg::Value err) {
+  jsg::JsValue handle = jsg::JsValue(err.getHandle(js));
+  auto kjException = js.exceptionToKj(handle);
+
+  // Check if the error is around disconnect
+  if (kjException.getType() == kj::Exception::Type::DISCONNECTED) {
+    auto e = JSG_KJ_EXCEPTION(FAILED, Error, "The client has disconnected");
+
+    // And abort the DO if it's due to a disconnect
+    IoContext::current().abort(kj::mv(e));
+  }
+
+  // Or just propagate the original error
+  js.throwException(kj::mv(err));
+}
+
+
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
@@ -129,7 +148,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
     running = false;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
-  });
+  }).catch_(js, catchAndAbortOnDisconnect);
 }
 
 jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error) {
