@@ -138,6 +138,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<InspectResponse> inspectContainer();
 
   kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
+  kj::Promise<void> updateSidecarEgressConfig(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
       kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
       rpc::Container::StartParams::Reader params);
@@ -162,26 +163,28 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // For redeeming channel tokens received via setEgressHttp
   ChannelTokenHandler& channelTokenHandler;
 
-  // Represents a parsed egress mapping with CIDR and port matching
+  // Represents a parsed egress mapping. IP/CIDR mappings match all hostnames,
+  // while hostnameGlob mappings only match requests carrying a matching hostname.
   struct EgressMapping {
-    kj::CidrRange cidr;
+    kj::OneOf<kj::CidrRange, kj::String> destination;
     uint16_t port;  // 0 means match all ports
     kj::Own<workerd::IoChannelFactory::SubrequestChannel> channel;
   };
 
   kj::Vector<EgressMapping> egressMappings;
 
-  // Insert or replace an egress mapping. If a mapping with the same CIDR and port
+  // Insert or replace an egress mapping. If a mapping with the same destination and port
   // already exists, its channel is replaced; otherwise a new mapping is added.
   void upsertEgressMapping(EgressMapping mapping);
+  kj::Vector<kj::String> getDnsAllowHostnames() const;
 
   // Find a matching egress mapping for the given destination address (host:port format).
   // Returns an addRef'd Own so the channel stays alive even if the mapping is later replaced.
   kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> findEgressMapping(
-      kj::StringPtr destAddr, uint16_t defaultPort);
+      kj::StringPtr destAddr, uint16_t defaultPort, kj::Maybe<kj::StringPtr> hostname);
 
-  // Whether general internet access is enabled for this container
-  bool internetEnabled = false;
+  // Whether general internet access is enabled for this container, when known.
+  kj::Maybe<bool> internetEnabled = kj::none;
 
   std::atomic_bool containerStarted = false;
   std::atomic_bool containerSidecarStarted = false;

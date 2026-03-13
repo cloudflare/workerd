@@ -316,7 +316,17 @@ struct Docker {
 }
 
 struct ProxyEverything {
+  struct Dns {
+    allowHostnames @0 :List(Text) $Json.name("allowHostnames");
+  }
+
+  struct Internet {
+    enabled @0 :Bool $Json.name("enabled");
+  }
+
   struct Port {
     port @0 :UInt16 $Json.name("port");
+    dns @1 :Dns $Json.name("dns");
+    internet @2 :Internet $Json.name("internet");
   }
 }
