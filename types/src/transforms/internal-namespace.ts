@@ -119,8 +119,7 @@ function createInternalNamespaceVisitor(
 
       // Ensure all nested types have the correct name. We do this after
       // overrides as some module members would otherwise have the same name as
-      // global types (e.g. `cloudflare:workers` `DurableObjectBase` and
-      // `DurableObject`)
+      // global types.
       const renames = new Map</* from */ string, /* to */ string>();
       moduleRoot.members.forEach((member) => {
         if (member._isNested) {
