@@ -565,14 +565,6 @@ impl<T> Nullable<T> {
         matches!(self, Self::Null | Self::Undefined)
     }
 
-    /// Converts from `Nullable<T>` to `Option<T>`.
-    pub fn into_option(self) -> Option<T> {
-        match self {
-            Self::Some(v) => Some(v),
-            Self::Null | Self::Undefined => None,
-        }
-    }
-
     /// Returns a reference to the contained value, or `None` if null or undefined.
     pub fn as_ref(&self) -> Option<&T> {
         match self {
@@ -593,7 +585,10 @@ impl<T> From<Option<T>> for Nullable<T> {
 
 impl<T> From<Nullable<T>> for Option<T> {
     fn from(nullable: Nullable<T>) -> Self {
-        nullable.into_option()
+        match nullable {
+            Nullable::Some(v) => Some(v),
+            Nullable::Null | Nullable::Undefined => None,
+        }
     }
 }
 
