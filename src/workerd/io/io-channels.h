@@ -354,6 +354,8 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
 
   IoChannelCapTableEntry(Type type, uint channel): type(type), channel(channel) {}
 
+  Type getType() const { return type; }
+
   // Throws if type doesn't match.
   uint getChannelNumber(Type expectedType);
 
