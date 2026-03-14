@@ -338,6 +338,23 @@ struct DynamicWorkerSource {
   //  this is false, then it is perfectly safe to transfer ownership of ownContent between threads
   //  and keep it alive indefinitely long.
   bool ownContentIsRpcResponse = true;
+
+  // Clone the DynamicWorkerSource. Caller must provide a new reference to use as `ownContent`,
+  // which must be a refcount on the same content since the pointers will not be updated. Note
+  // that if `ownContentIsRpcResponse` is false, then `ownContent` could be passed off to other
+  // threads and as such the refcount had better be atomic.
+  DynamicWorkerSource clone(kj::Own<void> newOwnContent) {
+    return {
+      .source = source.clone(),
+      .compatibilityFlags = compatibilityFlags,
+      .env = env.clone(),
+      .globalOutbound = mapAddRef(globalOutbound),
+      .tails = KJ_MAP(t, tails) { return kj::addRef(*t); },
+      .streamingTails = KJ_MAP(t, streamingTails) { return kj::addRef(*t); },
+      .ownContent = kj::mv(newOwnContent),
+      .ownContentIsRpcResponse = ownContentIsRpcResponse,
+    };
+  }
 };
 
 // A Frankenvalue::CapTableEntry which directly references a numbered I/O channel. This is ONLY
