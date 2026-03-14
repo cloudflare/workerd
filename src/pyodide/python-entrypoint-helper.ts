@@ -81,7 +81,15 @@ export type PyodideEntrypointHelper = {
   workerEntrypoint: any;
   patchWaitUntil: typeof patchWaitUntil;
   patch_env_helper: (patch: unknown) => Generator<void>;
+  callRpcMethod: (binding: any, method: string, ...args: any[]) => any;
 };
+
+// Calls an RPC method on a JS binding entirely from the JS side, bypassing
+// Pyodide's JsProxy attribute resolution. Pyodide adds extra methods such as
+// send/throw to the JsProxy which can shadow RPC methods with the same name.
+function callRpcMethod(binding: any, method: string, ...args: any[]): any {
+  return binding[method](...args);
+}
 
 // Function to import JavaScript modules from Python
 let _pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
@@ -106,6 +114,7 @@ export async function setDoAnImport(
     workerEntrypoint,
     patchWaitUntil,
     patch_env_helper,
+    callRpcMethod,
   };
 }
 
