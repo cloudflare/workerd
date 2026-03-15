@@ -100,51 +100,76 @@ static_assert(kj::isSameType<ArgumentIndexes<void(Lock&, int)>, kj::_::Indexes<0
 static_assert(kj::isSameType<ArgumentIndexes<void()>, kj::_::Indexes<>>());
 
 // =====================================================================================
-// requiredArgumentCount tests (meta.h + web-idl.h)
+// requiredArgumentCount tests (meta.h + type-wrapper.h)
+//
+// requiredArgumentCount<TypeWrapper, FuncType> uses the ValueLessParameter concept to detect
+// injected parameter types. We use a minimal mock wrapper that provides the right unwrap()
+// overloads so the concept checks succeed for TypeHandler<T> and a fake injected config type.
+
+struct FakeConfig {};  // Simulates an InjectConfiguration<T> injected type.
+
+struct MockTypeWrapper {
+  // Makes ValueLessParameter<MockTypeWrapper, TypeHandler<T>> true.
+  template <typename U>
+  const TypeHandler<U>& unwrap(Lock&, v8::Local<v8::Context>, TypeHandler<U>*);
+  // Makes ValueLessParameter<MockTypeWrapper, FakeConfig> true (simulates InjectConfiguration).
+  FakeConfig unwrap(Lock&, v8::Local<v8::Context>, FakeConfig*);
+};
+
+// Shorthand for the tests below.
+template <typename T>
+constexpr int rac = requiredArgumentCount<MockTypeWrapper, T>;
 
 // All required - count equals total visible args.
-static_assert(requiredArgumentCount<int(int, double, bool)> == 3);
-static_assert(requiredArgumentCount<int(Lock&, int, double, bool)> == 3);
+static_assert(rac<int(int, double, bool)> == 3);
+static_assert(rac<int(Lock&, int, double, bool)> == 3);
 
-// No args �� length is 0.
-static_assert(requiredArgumentCount<void()> == 0);
-static_assert(requiredArgumentCount<void(Lock&)> == 0);
+// No args — length is 0.
+static_assert(rac<void()> == 0);
+static_assert(rac<void(Lock&)> == 0);
 
 // Optional args stop the count.
-static_assert(requiredArgumentCount<void(int, Optional<int>)> == 1);
-static_assert(requiredArgumentCount<void(int, double, Optional<int>)> == 2);
-static_assert(requiredArgumentCount<void(Optional<int>)> == 0);
-static_assert(requiredArgumentCount<void(Lock&, int, Optional<int>)> == 1);
+static_assert(rac<void(int, Optional<int>)> == 1);
+static_assert(rac<void(int, double, Optional<int>)> == 2);
+static_assert(rac<void(Optional<int>)> == 0);
+static_assert(rac<void(Lock&, int, Optional<int>)> == 1);
 
 // LenientOptional also stops the count.
-static_assert(requiredArgumentCount<void(int, LenientOptional<int>)> == 1);
+static_assert(rac<void(int, LenientOptional<int>)> == 1);
 
 // TypeHandler<T> is invisible - does not count and does not stop.
-static_assert(requiredArgumentCount<void(TypeHandler<int>&, int, double)> == 2);
-static_assert(requiredArgumentCount<void(int, TypeHandler<int>&, double)> == 2);
-static_assert(requiredArgumentCount<void(int, TypeHandler<int>&, Optional<double>)> == 1);
-// Arguments following optionals are not counted
-static_assert(requiredArgumentCount<void(int, TypeHandler<int>&, Optional<double>, int)> == 1);
+static_assert(rac<void(TypeHandler<int>&, int, double)> == 2);
+static_assert(rac<void(int, TypeHandler<int>&, double)> == 2);
+static_assert(rac<void(int, TypeHandler<int>&, Optional<double>)> == 1);
+// Arguments following optionals are not counted.
+static_assert(rac<void(int, TypeHandler<int>&, Optional<double>, int)> == 1);
 
 // Arguments<T> is invisible - does not count and does not stop.
-static_assert(requiredArgumentCount<void(int, Arguments<int>)> == 1);
+static_assert(rac<void(int, Arguments<int>)> == 1);
+
+// InjectConfiguration types (e.g. CompatibilityFlags::Reader) are invisible.
+static_assert(rac<void(FakeConfig, int, double)> == 2);
+static_assert(rac<void(int, FakeConfig, double)> == 2);
+static_assert(rac<void(int, FakeConfig, Optional<double>)> == 1);
 
 // Member functions.
-static_assert(requiredArgumentCount<decltype(&Dummy::noMagic)> == 3);
-static_assert(requiredArgumentCount<decltype(&Dummy::withLock)> == 2);
-static_assert(requiredArgumentCount<decltype(&Dummy::withInfo)> == 1);
-static_assert(requiredArgumentCount<decltype(&Dummy::constNoMagic)> == 1);
-static_assert(requiredArgumentCount<decltype(&Dummy::constWithLock)> == 2);
-static_assert(requiredArgumentCount<decltype(&Dummy::constWithInfo)> == 0);
+static_assert(rac<decltype(&Dummy::noMagic)> == 3);
+static_assert(rac<decltype(&Dummy::withLock)> == 2);
+static_assert(rac<decltype(&Dummy::withInfo)> == 1);
+static_assert(rac<decltype(&Dummy::constNoMagic)> == 1);
+static_assert(rac<decltype(&Dummy::constWithLock)> == 2);
+static_assert(rac<decltype(&Dummy::constWithInfo)> == 0);
 
 // =====================================================================================
-// isValuelessArg tests (web-idl.h)
+// ValueLessParameter concept tests (type-wrapper.h)
 
-static_assert(detail::isValuelessArg<TypeHandler<int>> == true);
-static_assert(detail::isValuelessArg<Arguments<int>> == true);
-static_assert(detail::isValuelessArg<int> == false);
-static_assert(detail::isValuelessArg<Optional<int>> == false);
-static_assert(detail::isValuelessArg<kj::String> == false);
+static_assert(ValueLessParameter<MockTypeWrapper, TypeHandler<int>> == true);
+static_assert(ValueLessParameter<MockTypeWrapper, FakeConfig> == true);
+static_assert(ValueLessParameter<MockTypeWrapper, int> == false);
+static_assert(ValueLessParameter<MockTypeWrapper, Optional<int>> == false);
+static_assert(ValueLessParameter<MockTypeWrapper, kj::String> == false);
+// Arguments<T> is NOT a ValueLessParameter — it has its own handling via isArguments<>().
+static_assert(ValueLessParameter<MockTypeWrapper, Arguments<int>> == false);
 
 KJ_TEST("web-idl meta") {
   // Nothing to actually do here; tests are compile-time

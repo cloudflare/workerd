@@ -58,7 +58,7 @@ using ArgumentIndexes = ArgumentIndexes_<T>::Indexes;
 // (if any).
 
 // =======================================================================================
-// requiredArgumentCount<T> — counts leading required JS-visible arguments.
+// requiredArgumentCount<TypeWrapper, T> — counts leading required JS-visible arguments.
 //
 // Used by resource.h to set the Web IDL .length property on functions.
 //
@@ -69,11 +69,13 @@ using ArgumentIndexes = ArgumentIndexes_<T>::Indexes;
 //     appear first and are never JS-visible.  meta.h can handle them because
 //     it only needs the v8 forward declarations it already includes.
 //
-//  2. RequiredArgCount_ (in web-idl.h) skips TypeHandler<T> and Arguments<T>
-//     when counting.  These types can appear at any position in the parameter
-//     list and are "invisible" to JS callers, but they are JSG-specific types
-//     that are not available in meta.h's include graph.  web-idl.h has the
-//     full JSG type system visible, so the counting logic lives there.
+//  2. RequiredArgCount_ (in type-wrapper.h) skips all "injected" parameter
+//     types that don't consume a JS argument.  It uses the ValueLessParameter
+//     concept to automatically detect types like TypeHandler<T> and
+//     InjectConfiguration types (e.g. CompatibilityFlags::Reader), plus
+//     isArguments<>() for variadic Arguments<T>.  The TypeWrapper template
+//     parameter is required because ValueLessParameter checks whether the
+//     wrapper has a 3-arg unwrap(js, context, T*) overload for the type.
 
 // Lightweight type list; kj::Tuple is an alias template and cannot be partially specialized.
 template <typename... Ts>
@@ -117,16 +119,16 @@ struct StripMagicParam_<R(const v8::FunctionCallbackInfo<v8::Value>&, A...)> {
 template <typename T>
 using MethodArgs = StripMagicParam_<typename NormalizeFunc_<T>::type>;
 
-// Forward declaration — specialized in web-idl.h where the full JSG type system is visible.
-template <typename ArgsList>
+// Forward declaration — specialized in type-wrapper.h where ValueLessParameter is visible.
+template <typename TypeWrapper, typename ArgsList>
 struct RequiredArgCount_;
 
 }  // namespace detail
 
 // Per Web IDL, the .length of a function is the number of leading required arguments.
-// The actual counting logic lives in web-idl.h.
-template <typename T>
+// The actual counting logic lives in type-wrapper.h (needs the ValueLessParameter concept).
+template <typename TypeWrapper, typename T>
 inline constexpr int requiredArgumentCount =
-    detail::RequiredArgCount_<typename detail::MethodArgs<T>::Args>::value;
+    detail::RequiredArgCount_<TypeWrapper, typename detail::MethodArgs<T>::Args>::value;
 
 }  // namespace workerd::jsg
