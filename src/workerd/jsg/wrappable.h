@@ -18,6 +18,23 @@
 #include <kj/refcount.h>
 #include <kj/vector.h>
 
+// Niche value optimization for v8::TracedReference<T>. This teaches kj::Maybe to use
+// TracedReference's built-in empty state (IsEmpty()) as the "none" representation, eliminating
+// the extra bool + alignment padding that kj::Maybe normally adds. This saves 8 bytes per
+// Maybe<TracedReference<T>> instance while preserving full type safety.
+namespace kj {
+template <typename T>
+struct MaybeTraits<v8::TracedReference<T>> {
+  static void initNone(v8::TracedReference<T>* ptr) noexcept {
+    ctor(*ptr);
+  }
+  static bool isNone(const v8::TracedReference<T>& ref) noexcept {
+    return ref.IsEmpty();
+  }
+  static constexpr bool noneIsMoveSafe = true;
+};
+}  // namespace kj
+
 namespace cppgc {
 class Visitor;
 }
