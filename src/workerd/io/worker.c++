@@ -3634,9 +3634,15 @@ struct Worker::Actor::Impl {
 
     void inputGateLocked() override {
       metrics.inputGateLocked();
+      KJ_IF_SOME(ctx, getIoContext()) {
+        ctx.getCurrentIncomingRequest().startInputGateHoldSpan();
+      }
     }
     void inputGateReleased() override {
       metrics.inputGateReleased();
+      KJ_IF_SOME(ctx, getIoContext()) {
+        ctx.getCurrentIncomingRequest().stopInputGateHoldSpan();
+      }
     }
     void inputGateWaiterAdded() override {
       metrics.inputGateWaiterAdded();
@@ -3683,12 +3689,17 @@ struct Worker::Actor::Impl {
       metrics.storageWriteCompleted(latency);
     }
 
+    void setIoContext(IoContext& ctx) { ioContext = ctx; }
+    kj::Maybe<IoContext&> getIoContext() { return ioContext; }
+
    private:
     kj::Own<Loopback> loopback;  // only for updateAlarmInMemory()
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
 
     kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
+
+    kj::Maybe<IoContext&> ioContext = kj::none;
   };
 
   HooksImpl hooks;
@@ -4242,6 +4253,7 @@ void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
     impl->abortFulfiller = kj::none;
   }
   auto& limitEnforcer = context->getLimitEnforcer();
+  impl->hooks.setIoContext(*context);
   impl->ioContext = kj::mv(context);
   impl->metricsFlushLoopTask =
       impl->metrics->flushLoop(impl->timerChannel, limitEnforcer)
