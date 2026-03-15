@@ -143,8 +143,11 @@ struct Socket {
       options @3 :HttpOptions;
       tlsOptions @4 :TlsOptions;
     }
+    tcp :group {
+      tlsOptions @6 :TlsOptions;
+    }
 
-    # TODO(someday): TCP, TCP proxy, SMTP, Cap'n Proto, ...
+    # TODO(someday): TCP proxy, SMTP, Cap'n Proto, ...
   }
 
   service @5 :ServiceDesignator;

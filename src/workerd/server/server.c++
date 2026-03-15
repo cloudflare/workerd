@@ -33,6 +33,7 @@
 #include <workerd/server/fallback-service.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/stream-utils.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/websocket-error-handler.h>
@@ -5328,17 +5329,20 @@ class Server::HttpListener final: public kj::Refcounted {
         kj::AsyncIoStream& connection,
         ConnectResponse& response,
         kj::HttpConnectSettings settings) override {
+      TRACE_EVENT("workerd", "Connection:connect()");
       KJ_IF_SOME(h, parent.rewriter->getCapnpConnectHost()) {
         if (h == host) {
           // Client is requesting to open a capnp session!
           response.accept(200, "OK", kj::HttpHeaders(parent.headerTable));
-          return parent.acceptCapnpConnection(connection);
+          co_return co_await parent.acceptCapnpConnection(connection);
         }
       }
 
-      // TODO(someday): Deliver connect() event to to worker? For now we call the default
-      //   implementation which throws an exception.
-      return kj::HttpService::connect(host, headers, connection, response, kj::mv(settings));
+      IoChannelFactory::SubrequestMetadata metadata;
+      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+
+      auto worker = parent.service->startRequest(kj::mv(metadata));
+      co_return co_await worker->connect(host, headers, connection, response, kj::mv(settings));
     }
 
     // ---------------------------------------------------------------------------
@@ -5358,6 +5362,57 @@ class Server::HttpListener final: public kj::Refcounted {
   };
 };
 
+class Server::TcpListener final: public kj::Refcounted {
+ public:
+  TcpListener(Server& owner,
+      kj::Own<kj::ConnectionReceiver> listener,
+      kj::Own<Service> service,
+      kj::HttpHeaderTable& headerTable,
+      kj::StringPtr addrStr)
+      : owner(owner),
+        listener(kj::mv(listener)),
+        service(kj::mv(service)),
+        headerTable(headerTable),
+        addrStr(addrStr) {}
+
+  kj::Promise<void> run() {
+    TRACE_EVENT("workerd", "TcpListener::run");
+    for (;;) {
+      kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
+      TRACE_EVENT("workerd", "TcpListener handle connection");
+
+      IoChannelFactory::SubrequestMetadata metadata;
+      auto req = service->startRequest(kj::mv(metadata));
+      auto response = kj::heap<ResponseWrapper>();
+      kj::HttpHeaders headers(headerTable);
+      owner.tasks.add(req->connect(addrStr, headers, *stream.stream, *response, {})
+                          .attach(kj::mv(stream.stream), kj::mv(response))
+                          .attach(kj::mv(req)));
+    }
+  }
+
+ private:
+  Server& owner;
+  kj::Own<kj::ConnectionReceiver> listener;
+  kj::Own<Service> service;
+  kj::HttpHeaderTable& headerTable;
+  kj::StringPtr addrStr;
+
+  struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
+    void accept(
+        uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+      // Ok.. we're accepting the connection... anything to do?
+    }
+    kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+        kj::StringPtr statusText,
+        const kj::HttpHeaders& headers,
+        kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+      // Doh... we're rejecting the connection... anything to do?
+      return newNullOutputStream();
+    }
+  };
+};
+
 kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
     kj::Own<Service> service,
     kj::StringPtr physicalProtocol,
@@ -5365,6 +5420,13 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
   auto obj =
       kj::refcounted<HttpListener>(*this, kj::mv(listener), kj::mv(service), physicalProtocol,
           kj::mv(rewriter), globalContext->headerTable, timer, globalContext->httpOverCapnpFactory);
+  co_return co_await obj->run();
+}
+
+kj::Promise<void> Server::listenTcp(
+    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr) {
+  auto obj = kj::refcounted<TcpListener>(
+      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, addrStr);
   co_return co_await obj->run();
 }
 
@@ -5822,18 +5884,31 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     config::HttpOptions::Reader httpOptions;
     kj::Maybe<kj::Own<kj::TlsContext>> tls;
     kj::StringPtr physicalProtocol;
+    bool isHttp = false;
     switch (sock.which()) {
       case config::Socket::HTTP:
+        isHttp = true;
         defaultPort = 80;
         httpOptions = sock.getHttp();
         physicalProtocol = "http";
         goto validSocket;
       case config::Socket::HTTPS: {
+        isHttp = true;
         auto https = sock.getHttps();
         defaultPort = 443;
         httpOptions = https.getOptions();
         tls = makeTlsContext(https.getTlsOptions());
         physicalProtocol = "https";
+        goto validSocket;
+      }
+      case config::Socket::TCP: {
+        isHttp = false;
+        auto tcp = sock.getTcp();
+        // No default port
+        // No physical protocol mention here.
+        if (tcp.hasTlsOptions()) {
+          tls = makeTlsContext(tcp.getTlsOptions());
+        }
         goto validSocket;
       }
     }
@@ -5867,9 +5942,15 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
 
     auto handle = kj::coCapture(
-        [this, service = kj::mv(service), rewriter = kj::mv(rewriter), physicalProtocol, name](
+        [this, service = kj::mv(service), rewriter = kj::mv(rewriter), physicalProtocol, name,
+            isHttp, addrStr](
             kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
-      TRACE_EVENT("workerd", "setup listenHttp");
+      if (isHttp) {
+        TRACE_EVENT("workerd", "setup listenHttp");
+      } else {
+        TRACE_EVENT("workerd", "setup listenTcp");
+      }
+
       auto listener = co_await promise;
       KJ_IF_SOME(stream, controlOverride) {
         auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name,
@@ -5880,7 +5961,12 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
           KJ_LOG(ERROR, e);
         }
       }
-      co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
+
+      if (isHttp) {
+        co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
+      } else {
+        co_await listenTcp(kj::mv(listener), kj::mv(service), addrStr);
+      }
     });
     tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
   }
