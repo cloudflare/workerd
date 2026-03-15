@@ -46,7 +46,8 @@ import {
 
 import { inspect } from 'node-internal:internal_inspect';
 
-interface ExtendedAssertionErrorConstructorOptions extends AssertionErrorConstructorOptions {
+interface ExtendedAssertionErrorConstructorOptions
+  extends AssertionErrorConstructorOptions {
   generatedMessage?: boolean;
 }
 
