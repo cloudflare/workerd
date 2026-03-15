@@ -113,6 +113,7 @@ class WorkerTracer final: public BaseTracer {
   explicit WorkerTracer(kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel,
+      kj::Maybe<kj::Array<tracing::Attribute>> tailAttributes,
       kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
   virtual ~WorkerTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);

@@ -869,6 +869,7 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> dispatchNamespace;
   kj::Maybe<kj::String> scriptId;
   kj::Array<kj::String> scriptTags;
+  kj::Maybe<kj::Array<tracing::Attribute>> tailAttributes;
   kj::Maybe<kj::String> entrypoint;
   kj::Maybe<kj::String> durableObjectId;
 

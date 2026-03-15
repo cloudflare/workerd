@@ -21,6 +21,24 @@ namespace {
 // TODO(streaming-tail): Add a clear indicator for events being truncated based on MAX_TRACE_BYTES
 // so that developers can understand why this happens.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
+
+tracing::Attribute::Value cloneAttributeValue(const tracing::Attribute::Value& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(boolean, bool) {
+      return tracing::Attribute::Value(boolean);
+    }
+    KJ_CASE_ONEOF(number, double) {
+      return tracing::Attribute::Value(number);
+    }
+    KJ_CASE_ONEOF(integer, int64_t) {
+      return tracing::Attribute::Value(integer);
+    }
+    KJ_CASE_ONEOF(string, kj::ConstString) {
+      return tracing::Attribute::Value(string.clone());
+    }
+  }
+  KJ_UNREACHABLE;
+}
 }  // namespace
 
 kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
@@ -34,11 +52,24 @@ kj::Promise<kj::Own<Trace>> WorkerTracer::onComplete() {
 WorkerTracer::WorkerTracer(kj::Maybe<kj::Rc<kj::Refcounted>> parentPipeline,
     kj::Own<Trace> trace,
     PipelineLogLevel pipelineLogLevel,
+    kj::Maybe<kj::Array<tracing::Attribute>> tailAttributes,
     kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
-      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {}
+      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {
+  KJ_IF_SOME(tags, tailAttributes) {
+    if (tags.size() == 0) {
+      tailAttributes = kj::none;
+    } else {
+      for (auto& tag: tags) {
+        KJ_REQUIRE(tag.value.size() == 1, "tail attributes must contain exactly one value");
+        setWorkerAttribute(tag.name.clone(), cloneAttributeValue(tag.value[0]));
+      }
+    }
+  }
+  this->trace->tailAttributes = kj::mv(tailAttributes);
+}
 
 WorkerTracer::~WorkerTracer() noexcept(false) {
   // Report the outcome event, which should have been delivered by now.
