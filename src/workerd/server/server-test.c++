@@ -6012,5 +6012,383 @@ KJ_TEST("Server: workerdDebugPort WebSocket passthrough via WorkerEntrypoint") {
   wsConn.send(kj::str("\x81\x05", testMessage2));
   wsConn.recvWebSocket("echo:world");
 }
+
+KJ_TEST("Server: abortIsolate() resets module state") {
+  // This test verifies that calling abortIsolate() from cloudflare:workers:
+  // 1. Terminates the current request with a failure
+  // 2. Causes subsequent requests to see fresh module-level state (re-executed top-level code)
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-01-01",
+    compatibilityFlags = ["experimental", "nodejs_compat"],
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `import { abortIsolate } from 'cloudflare:workers';
+          `let counter = 0;
+          `export default {
+          `  async fetch(request) {
+          `    const url = new URL(request.url);
+          `    if (url.pathname === '/increment') {
+          `      counter++;
+          `      return new Response(String(counter));
+          `    }
+          `    if (url.pathname === '/reset') {
+           `      abortIsolate('resetting module state');
+           `      return new Response('unreachable');
+          `    }
+          `    return new Response('not found', { status: 404 });
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    // First request: counter goes from 0 to 1.
+    conn.httpGet200("/increment", "1");
+    // Second request: counter goes to 2, proving state persists across requests.
+    conn.httpGet200("/increment", "2");
+  }
+
+  {
+    // Third request: call abortIsolate(). Should get a 500 error.
+    // The IoContext abort and JS exception produce log messages we need to expect.
+    KJ_EXPECT_LOG(INFO, "abortIsolate(): resetting module state");
+    KJ_EXPECT_LOG(ERROR, "abortIsolate(): resetting module state");
+
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/reset");
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  {
+    auto conn = test.connect("test-addr");
+    // Fourth request: after reset, module-level counter should be back to 0, so this returns "1".
+    conn.httpGet200("/increment", "1");
+  }
+}
+
+KJ_TEST("Server: abortIsolate() preserves env bindings") {
+  // Verifies that after abortIsolate(), env bindings (text, json) are still available
+  // in the fresh worker.
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-01-01",
+    compatibilityFlags = ["experimental", "nodejs_compat"],
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `import { abortIsolate } from 'cloudflare:workers';
+          `let counter = 0;
+          `export default {
+          `  async fetch(request, env) {
+          `    const url = new URL(request.url);
+          `    if (url.pathname === '/check') {
+          `      counter++;
+          `      return new Response(JSON.stringify({
+          `        counter,
+          `        text: env.MY_TEXT,
+          `        json: env.MY_JSON,
+          `      }));
+          `    }
+          `    if (url.pathname === '/reset') {
+          `      abortIsolate();
+          `    }
+          `    return new Response('not found', { status: 404 });
+          `  }
+          `}
+      )
+    ],
+    bindings = [
+      ( name = "MY_TEXT", text = "hello-text" ),
+      ( name = "MY_JSON",
+        json = `{"key":"value"}
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/check", R"({"counter":1,"text":"hello-text","json":{"key":"value"}})");
+    conn.httpGet200("/check", R"({"counter":2,"text":"hello-text","json":{"key":"value"}})");
+  }
+
+  {
+    KJ_EXPECT_LOG(INFO, "abortIsolate() was called");
+    KJ_EXPECT_LOG(ERROR, "abortIsolate() was called");
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/reset");
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  {
+    // After reset: counter restarted at 0 (now 1), and bindings still work.
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/check", R"({"counter":1,"text":"hello-text","json":{"key":"value"}})");
+  }
+}
+
+KJ_TEST("Server: abortIsolate() with service bindings") {
+  // Verifies that after abortIsolate(), service bindings to other workers still function.
+  TestServer test(R"((
+    services = [
+      ( name = "main-worker",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental", "nodejs_compat"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { abortIsolate } from 'cloudflare:workers';
+                `let counter = 0;
+                `export default {
+                `  async fetch(request, env) {
+                `    const url = new URL(request.url);
+                `    if (url.pathname === '/check') {
+                `      counter++;
+                `      let resp = await env.backend.fetch('http://backend/hello');
+                `      let text = await resp.text();
+                `      return new Response(counter + ':' + text);
+                `    }
+                `    if (url.pathname === '/reset') {
+                `      abortIsolate();
+                `    }
+                `    return new Response('not found', { status: 404 });
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "backend", service = "backend-worker")]
+        )
+      ),
+      ( name = "backend-worker",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request) {
+                `    return new Response('from-backend');
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "main-worker"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/check", "1:from-backend");
+    conn.httpGet200("/check", "2:from-backend");
+  }
+
+  {
+    KJ_EXPECT_LOG(INFO, "abortIsolate() was called");
+    KJ_EXPECT_LOG(ERROR, "abortIsolate() was called");
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/reset");
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  {
+    // After reset: counter restarted, service binding still works.
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/check", "1:from-backend");
+  }
+}
+
+KJ_TEST("Server: abortIsolate() with durable object") {
+  // Verifies that after abortIsolate():
+  // 1. The DO binding still works after recreation
+  // 2. The DO's in-memory state also resets (in workerd, the DO shares the same isolate)
+  // 3. The worker's module-level state resets
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental", "nodejs_compat"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { abortIsolate, DurableObject } from 'cloudflare:workers';
+                `let counter = 0;
+                `export default {
+                `  async fetch(request, env) {
+                `    const url = new URL(request.url);
+                `    if (url.pathname === '/check') {
+                `      counter++;
+                `      let id = env.ns.idFromName('singleton');
+                `      let stub = env.ns.get(id);
+                `      let resp = await stub.fetch('http://do/increment');
+                `      let doCount = await resp.text();
+                `      return new Response(counter + ':' + doCount);
+                `    }
+                `    if (url.pathname === '/reset') {
+                `      abortIsolate();
+                `    }
+                `    return new Response('not found', { status: 404 });
+                `  }
+                `}
+                `export class MyDO extends DurableObject {
+                `  count = 0;
+                `  async fetch(request) {
+                `    this.count++;
+                `    return new Response(String(this.count));
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyDO")],
+          durableObjectNamespaces = [
+            ( className = "MyDO",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    // Worker counter=1, DO count=1
+    conn.httpGet200("/check", "1:1");
+    // Worker counter=2, DO count=2
+    conn.httpGet200("/check", "2:2");
+  }
+
+  {
+    KJ_EXPECT_LOG(INFO, "abortIsolate() was called");
+    KJ_EXPECT_LOG(ERROR, "abortIsolate() was called");
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/reset");
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  {
+    // After reset: both worker counter AND DO in-memory state restart,
+    // because abortIsolate() destroys all activity on the isolate including DOs.
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/check", "1:1");
+  }
+}
+
+KJ_TEST("Server: abortIsolate() terminates concurrent WebSocket connection") {
+  // Verifies that calling abortIsolate() from one request terminates other in-flight requests
+  // on the same isolate. Request 1 opens a WebSocket. Request 2 calls abortIsolate().
+  // Request 1's WebSocket should be terminated.
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-01-01",
+    compatibilityFlags = ["experimental", "nodejs_compat"],
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `import { abortIsolate } from 'cloudflare:workers';
+          `export default {
+          `  async fetch(request) {
+          `    const url = new URL(request.url);
+          `    if (request.headers.get('Upgrade') === 'websocket') {
+          `      const pair = new WebSocketPair();
+          `      const [client, server] = Object.values(pair);
+          `      server.accept();
+          `      server.addEventListener('message', (e) => {
+          `        server.send('echo:' + e.data);
+          `      });
+          `      return new Response(null, { status: 101, webSocket: client });
+          `    }
+          `    if (url.pathname === '/reset') {
+          `      abortIsolate('test abort');
+          `    }
+          `    return new Response('not found', { status: 404 });
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.start();
+
+  // Request 1: Open a WebSocket and verify it works.
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+  wsConn.send(kj::str("\x81\x05hello"));
+  wsConn.recvWebSocket("echo:hello");
+
+  {
+    // Request 2: Call abortIsolate() on a separate connection.
+    // This should terminate ALL activity on the isolate, including the WebSocket from Request 1.
+    // abortIsolate() produces several error logs:
+    // - The calling request's IoContext abort (INFO + ERROR for the reason message)
+    // - The WebSocket request's IoContext abort via onLimitsExceeded() (multiple ERROR logs)
+    // - The HTTP connection error handler for the WebSocket connection
+    KJ_EXPECT_LOG(INFO, "abortIsolate(): test abort");
+    KJ_EXPECT_LOG(ERROR, "abortIsolate(): test abort");
+    KJ_EXPECT_LOG(ERROR, "abortIsolate(): test abort");
+
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/reset");
+    conn.recv(R"(
+      HTTP/1.1 500 Internal Server Error
+      Connection: close
+      Content-Length: 21
+
+      Internal Server Error)"_blockquote);
+  }
+
+  // The WebSocket from Request 1 should now be terminated — the connection should be at EOF
+  // because abortIsolate() destroys all activity on the isolate, not just the calling request.
+  KJ_EXPECT(wsConn.isEof());
+}
+
 }  // namespace
 }  // namespace workerd::server

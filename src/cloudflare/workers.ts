@@ -151,3 +151,4 @@ export const exports = new Proxy(
 );
 
 export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
+export const abortIsolate = entrypoints.abortIsolate.bind(entrypoints);

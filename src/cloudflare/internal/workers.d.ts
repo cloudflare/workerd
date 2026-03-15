@@ -36,3 +36,4 @@ export class RpcTarget {}
 export class ServiceStub {}
 
 export function waitUntil(promise: Promise<unknown>): void;
+export function abortIsolate(reason?: string): never;
