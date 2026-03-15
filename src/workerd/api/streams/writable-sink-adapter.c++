@@ -3,9 +3,74 @@
 #include "writable.h"
 
 #include <workerd/api/system-streams.h>
+#include <workerd/jsg/iterator.h>
 #include <workerd/util/checked-queue.h>
 
 namespace workerd::api::streams {
+
+namespace {
+kj::Maybe<kj::Array<const kj::byte>> getDataFromBufferSource(
+    jsg::Lock& js, const jsg::JsValue& value) {
+  KJ_IF_SOME(view, value.tryCast<jsg::JsArrayBufferView>()) {
+    return kj::heapArray<const kj::byte>(view.asArrayPtr());
+  } else KJ_IF_SOME(buffer, value.tryCast<jsg::JsArrayBuffer>()) {
+    return kj::heapArray<const kj::byte>(buffer.asArrayPtr());
+  } else KJ_IF_SOME(buffer, value.tryCast<jsg::JsSharedArrayBuffer>()) {
+    return kj::heapArray<const kj::byte>(buffer.asArrayPtr());
+  } else KJ_IF_SOME(str, value.tryCast<jsg::JsString>()) {
+    auto utf8 = str.toString(js);
+    if (utf8.size() == 0) return kj::Array<const kj::byte>();
+    // This allows us to deal gracefully with the null-terminator
+    return utf8.asBytes().asConst().attach(utf8.releaseArray());
+  } else if (value.isStringObject()) {
+    // While Boxed strings are rare, they are technically valid buffer sources, let's
+    // go ahead and support them by unboxing and converting to UTF-8.
+    auto utf8 = value.toString(js);
+    if (utf8.size() == 0) return kj::Array<const kj::byte>();
+    // This allows us to deal gracefully with the null-terminator
+    return utf8.asBytes().asConst().attach(utf8.releaseArray());
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::Array<kj::Array<const kj::byte>>> tryGetDataFromIterable(
+    jsg::Lock& js, const jsg::JsValue& value) {
+  if (value.isString() || value.isStringObject() || value.isArrayBuffer() ||
+      value.isArrayBufferView() || value.isSharedArrayBuffer()) {
+    return kj::none;
+  }
+  KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
+    // Try getting the sync iterator.
+    auto maybeIter = obj.get(js, js.symbolIterator());
+    KJ_IF_SOME(iterFn, maybeIter.tryCast<jsg::JsFunction>()) {
+      auto maybeObj = iterFn.call(js, obj);
+      KJ_IF_SOME(iterObj, maybeObj.tryCast<jsg::JsObject>()) {
+        kj::Vector<kj::Array<const kj::byte>> pieces;
+        auto gen = jsg::Generator<jsg::JsValue>(js, iterObj);
+        // Start iterating through the iterable, converting each yielded value to bytes
+        // and accumulating the results in `pieces`. We only support synch iterables;
+        // and we require that the iterable be finite (max 64 pieces) to avoid silly
+        // memory exhaustion issues. If any of the yielded values are not value byte
+        // sources, we throw.
+        while (true) {
+          KJ_IF_SOME(next, gen.next(js)) {
+            JSG_REQUIRE(
+                pieces.size() <= 64, TypeError, "Too many pieces yielded from the iterable.");
+            auto data = JSG_REQUIRE_NONNULL(getDataFromBufferSource(js, next), TypeError,
+                "Iterable yielded a value that is not a valid buffer source or string.");
+            pieces.add(kj::mv(data));
+          } else {
+            // We're done iterating.
+            break;
+          }
+        }
+        return pieces.releaseAsArray();
+      }
+    }
+  }
+  return kj::none;
+}
+}  // namespace
 
 // The Active state maintains a queue of tasks, such as write or flush operations. Each task
 // contains a promise-returning function object and a fulfiller. When the first task is
@@ -199,107 +264,103 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
   // Let's process our data and write it!
   auto& ioContext = IoContext::current();
 
-  // We know that a WritableStreamSink only accepts bytes, so we need to
-  // verify that the value is a source of bytes. We accept three possible
-  // types: ArrayBuffer, ArrayBufferView, and String. If it is a string,
-  // we convert it to UTF-8 bytes. Anything else is an error.
-  if (value.isArrayBufferView() || value.isArrayBuffer() || value.isSharedArrayBuffer()) {
-    // We can just wrap the value with a jsg::BufferSource and write it.
-    jsg::BufferSource source(js, value);
-    if (active.options.detachOnWrite && source.canDetach(js)) {
-      // Detach from the original ArrayBuffer...
-      // ... and re-wrap it with a new BufferSource that we own.
-      source = jsg::BufferSource(js, source.detach(js));
-    }
-
-    // Zero-length writes are a no-op.
-    if (source.size() == 0) {
-      return js.resolvedPromise();
-    }
-
-    active.bytesInFlight += source.size();
-    maybeSignalBackpressure(js);
-    // Enqueue the actual write operation into the write queue. We pass in
-    // two lambdas, one that does the actual write, and one that handles
-    // errors. If the write fails, we need to transition the adapter to the
-    // errored state. If the write succeeds, we need to decrement the
-    // bytesInFlight counter.
-    //
-    // The promise returned by enqueue is not the actual write promise but
-    // a branch forked off of it. We wrap that with a JS promise that waits
-    // for it to complete. Once it does, we check if we can release backpressure.
-    // This has to be done within an Isolate lock because we need to be able
-    // to resolve or reject the JS promises. If the write fails, we instead
-    // abort the backpressure state.
-    //
-    // This slight indirection does mean that the backpressure state change
-    // may be slightly delayed after the actual write completes but that's
-    // ok.
-    //
-    // Capturing active by reference here is safe because the lambda is
-    // held by the write queue, which is itself held by Active. If active
-    // is destroyed, the write queue is destroyed along with the lambda.
-    auto promise =
-        active.enqueue(kj::coCapture([&active, source = kj::mv(source)]() -> kj::Promise<void> {
-      co_await active.sink->write(source.asArrayPtr());
-      active.bytesInFlight -= source.size();
-    }));
+  static const auto handleDone = [](jsg::Lock& js, IoContext& ioContext, kj::Promise<void> promise,
+                                     auto& self) {
     return ioContext
-        .awaitIo(js, kj::mv(promise), [self = selfRef.addRef()](jsg::Lock& js) {
-      // Why do we need a weak ref here? Well, because this is a JavaScript
-      // promise continuation. It is possible that the kj::Own holding our
-      // adapter can be dropped while we are waiting for the continuation
-      // to run. If that happens, we don't want to delay cleanup of the
-      // adapter just because of backpressure state management that would
-      // not be needed anymore, so we use a weak ref to update the backpressure
-      // state only if we are still alive.
+        .awaitIo(js, kj::mv(promise), [self = self.addRef()](jsg::Lock& js) {
       self->runIfAlive(
           [&](WritableStreamSinkJsAdapter& self) { self.maybeReleaseBackpressure(js); });
-    }).catch_(js, [self = selfRef.addRef()](jsg::Lock& js, jsg::Value exception) {
-      auto error = jsg::JsValue(exception.getHandle(js));
+    }).catch_(js, [self = self.addRef()](jsg::Lock& js, jsg::Value exception) {
       self->runIfAlive([&](WritableStreamSinkJsAdapter& self) {
+        auto error = jsg::JsValue(exception.getHandle(js));
         self.abort(js, error);
         self.backpressureState.abort(js, error);
       });
       js.throwException(kj::mv(exception));
     });
-  } else if (value.isString()) {
-    // Also super easy! Let's just convert the string to UTF-8
-    auto str = value.toString(js);
+  };
 
-    // Zero-length writes are a no-op.
-    if (str.size() == 0) {
-      return js.resolvedPromise();
+  // We know that a WritableStreamSink only accepts bytes, so we need to verify that the
+  // value is a source of bytes. We accept four possible types: ArrayBuffer, ArrayBufferView,
+  // String, and Iterables of these. If it is a string, we convert it to UTF-8 bytes. Anything
+  // else is an error.
+  // Due to V8 sandbox rules, we cannot safely directly access the memory of
+  // the ArrayBuffer or SharedArrayBuffer backing store(s) from outside of the
+  // isolate lock, instead we need to allocate copies.
+  //
+  // Because we are copying the data here, we don't need to worry about detaching
+  // the buffer or it being modified concurrently while we are writing it. If we
+  // avoid the copy later by using memory protection keys, we'll need to revisit
+  // this and make sure we are properly handling those cases.
+  // TODO(later): We can possibly optimize this by getting the memory protection key and
+  // avoiding the copy.
+  return js.tryCatch([&]() -> jsg::Promise<void> {
+    // Let's check to see if this value is an iterable of buffer sources, allowing us to
+    // perform a vectorized write. This is a bit of a tradeoff. We pay the cost of the
+    // iterator protocol and some extra bookkeeping, but in exchange we limit the number of
+    // promises we need to create and await on, which can be a performance drain.
+    KJ_IF_SOME(pieces, tryGetDataFromIterable(js, value)) {
+      size_t totalSize = 0;
+      for (auto& piece: pieces) {
+        totalSize += piece.size();
+      }
+
+      if (totalSize == 0) {
+        return js.resolvedPromise();
+      }
+
+      active.bytesInFlight += totalSize;
+
+      maybeSignalBackpressure(js);
+      auto promise = active.enqueue(kj::coCapture(
+          [&active, source = kj::mv(pieces), totalSize]() mutable -> kj::Promise<void> {
+        auto pieces = KJ_MAP(piece, source) { return piece.asPtr().asConst(); };
+        co_await active.sink->write(pieces);
+        active.bytesInFlight -= totalSize;
+      }));
+      return handleDone(js, ioContext, kj::mv(promise), selfRef);
+    } else KJ_IF_SOME(source, getDataFromBufferSource(js, value)) {
+      // Zero-length writes are a no-op.
+      if (source.size() == 0) {
+        return js.resolvedPromise();
+      }
+
+      active.bytesInFlight += source.size();
+
+      maybeSignalBackpressure(js);
+      // Enqueue the actual write operation into the write queue. We pass in
+      // two lambdas, one that does the actual write, and one that handles
+      // errors. If the write fails, we need to transition the adapter to the
+      // errored state. If the write succeeds, we need to decrement the
+      // bytesInFlight counter.
+      //
+      // The promise returned by enqueue is not the actual write promise but
+      // a branch forked off of it. We wrap that with a JS promise that waits
+      // for it to complete. Once it does, we check if we can release backpressure.
+      // This has to be done within an Isolate lock because we need to be able
+      // to resolve or reject the JS promises. If the write fails, we instead
+      // abort the backpressure state.
+      //
+      // This slight indirection does mean that the backpressure state change
+      // may be slightly delayed after the actual write completes but that's
+      // ok.
+      //
+      // Capturing active by reference here is safe because the lambda is
+      // held by the write queue, which is itself held by Active. If active
+      // is destroyed, the write queue is destroyed along with the lambda.
+      auto promise =
+          active.enqueue(kj::coCapture([&active, source = kj::mv(source)]() -> kj::Promise<void> {
+        co_await active.sink->write(source.asPtr());
+        active.bytesInFlight -= source.size();
+      }));
+      return handleDone(js, ioContext, kj::mv(promise), selfRef);
     }
 
-    active.bytesInFlight += str.size();
-    // Make sure to account for the memory used by the string while the
-    // write is in-flight/pending
-    auto accounting = js.getExternalMemoryAdjustment(str.size());
-    maybeSignalBackpressure(js);
-    // Just like above, enqueue the write operation into the write queue,
-    // ensuring that we handle both the success and failure cases.
-    auto promise = active.enqueue(kj::coCapture(
-        [&active, str = kj::mv(str), accounting = kj::mv(accounting)]() -> kj::Promise<void> {
-      co_await active.sink->write(str.asBytes());
-      active.bytesInFlight -= str.size();
-    }));
-    return ioContext
-        .awaitIo(js, kj::mv(promise), [self = selfRef.addRef()](jsg::Lock& js) {
-      self->runIfAlive(
-          [&](WritableStreamSinkJsAdapter& self) { self.maybeReleaseBackpressure(js); });
-    }).catch_(js, [self = selfRef.addRef()](jsg::Lock& js, jsg::Value exception) {
-      auto error = jsg::JsValue(exception.getHandle(js));
-      self->runIfAlive([&](WritableStreamSinkJsAdapter& self) {
-        self.abort(js, error);
-        self.backpressureState.abort(js, error);
-      });
-      js.throwException(kj::mv(exception));
-    });
-  }
-
-  auto err = js.typeError("This WritableStream only supports writing byte types."_kj);
-  return js.rejectedPromise<void>(err);
+    auto err = js.typeError("This WritableStream only supports writing byte types."_kj);
+    return js.rejectedPromise<void>(err);
+  }, [&](jsg::Value exception) -> jsg::Promise<void> {
+    return js.rejectedPromise<void>(kj::mv(exception));
+  });
 }
 
 jsg::Promise<void> WritableStreamSinkJsAdapter::flush(jsg::Lock& js) {

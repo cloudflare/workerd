@@ -112,13 +112,6 @@ class WritableStreamSinkJsAdapter final {
     // us to be able to buffer a bit more data in flight. So we will implement
     // a simple high water mark mechanism. The default is 16KB.
     size_t highWaterMark = 16384;
-
-    // When detachOnWrite is true, and a write() is made with an ArrayBuffer,
-    // or ArrayBufferView, we will attempt to detach the underlying buffer
-    // before writing it to the sink. Detaching is required by the
-    // streams spec but our original implementation does not detach
-    // and it turns out there are old workers depending on that behavior.
-    bool detachOnWrite = false;
   };
 
   WritableStreamSinkJsAdapter(jsg::Lock& js,

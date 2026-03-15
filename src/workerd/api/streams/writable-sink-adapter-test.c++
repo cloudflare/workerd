@@ -80,7 +80,6 @@ KJ_TEST("Basic construction with default options") {
         "Adapter should have default highWaterMark of 16384");
     auto& options = KJ_ASSERT_NONNULL(adapter->getOptions());
     KJ_ASSERT(options.highWaterMark == 16384);
-    KJ_ASSERT(options.detachOnWrite == false);
 
     auto readyPromise = adapter->getReady(env.js);
     KJ_ASSERT(readyPromise.getState(env.js) == jsg::Promise<void>::State::FULFILLED,
@@ -102,21 +101,6 @@ KJ_TEST("Construction with custom highWaterMark option") {
   });
 }
 
-KJ_TEST("Construction with detachOnWrite=true option") {
-  TestFixture fixture;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink =
-        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink),
-        WritableStreamSinkJsAdapter::Options{
-          .detachOnWrite = true,
-        });
-    auto& options = KJ_ASSERT_NONNULL(adapter->getOptions());
-    KJ_ASSERT(options.detachOnWrite == true);
-  });
-}
-
 KJ_TEST("Construction with all custom options combined") {
   TestFixture fixture;
 
@@ -126,11 +110,9 @@ KJ_TEST("Construction with all custom options combined") {
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink),
         WritableStreamSinkJsAdapter::Options{
           .highWaterMark = 100,
-          .detachOnWrite = true,
         });
     auto& options = KJ_ASSERT_NONNULL(adapter->getOptions());
     KJ_ASSERT(options.highWaterMark == 100);
-    KJ_ASSERT(options.detachOnWrite == true);
   });
 }
 
@@ -643,7 +625,7 @@ KJ_TEST("writing small ArrayBuffer") {
     jsg::JsValue handle(source.getHandle(env.js));
 
     auto writePromise = adapter->write(env.js, handle);
-    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should not have been called");
+    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should have been called");
     KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == 0,
         "Adapter's desired size should be 0 after writing highWaterMark bytes");
 
@@ -716,6 +698,70 @@ KJ_TEST("writing large ArrayBuffer") {
   });
 }
 
+KJ_TEST("writing arrays") {
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto recordingSink = kj::heap<SimpleEventRecordingSink>();
+    auto& state = recordingSink->getState();
+    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
+        newWritableSink(kj::mv(recordingSink)),
+        WritableStreamSinkJsAdapter::Options{
+          .highWaterMark = 5,
+        });
+
+    auto array = env.js.arr(env.js.str("hello"_kj), env.js.str("world"_kj));
+    auto writePromise = adapter->write(env.js, array);
+
+    KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should have been called");
+    KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->getDesiredSize()) == -5,
+        "Adapter's desired size should be negative after writing 10 bytes");
+
+    return env.context
+        .awaitJs(env.js, writePromise.then(env.js, [&state, &adapter = *adapter](jsg::Lock& js) {
+      KJ_ASSERT(state.writeCalled == 1, "Underlying sink's write() should have been called");
+      KJ_ASSERT(KJ_ASSERT_NONNULL(adapter.getDesiredSize()) == 5,
+          "Back to initial desired size after write completes");
+    })).attach(kj::mv(adapter));
+  });
+}
+
+KJ_TEST("throwing iterable works correctly") {
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto recordingSink = kj::heap<SimpleEventRecordingSink>();
+    auto& state = recordingSink->getState();
+    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
+        newWritableSink(kj::mv(recordingSink)),
+        WritableStreamSinkJsAdapter::Options{
+          .highWaterMark = 5,
+        });
+
+    // We need to construct our iterable...
+    auto getIter = jsg::check(
+        v8::Function::New(env.js.v8Context(), [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+      auto& js = jsg::Lock::from(args.GetIsolate());
+      auto fn = jsg::check(
+          v8::Function::New(js.v8Context(), [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        args.GetIsolate()->ThrowError(v8::String::NewFromUtf8Literal(args.GetIsolate(), "Boom"));
+      }));
+      auto obj = js.obj();
+      obj.set(js, js.str("next"_kj), jsg::JsValue(fn));
+      v8::Local<v8::Value> result = obj;
+      args.GetReturnValue().Set(result);
+    }));
+
+    auto iter = env.js.obj();
+    iter.set(env.js, env.js.symbolIterator(), jsg::JsValue(getIter));
+
+    auto writePromise = adapter->write(env.js, iter);
+    KJ_ASSERT(writePromise.getState(env.js) == jsg::Promise<void>::State::REJECTED,
+        "Write of errored should be rejected");
+    KJ_ASSERT(state.writeCalled == 0, "Underlying sink's write() should not have been called");
+  });
+}
+
 KJ_TEST("writing the wrong types reject") {
   TestFixture fixture;
 
@@ -743,6 +789,11 @@ KJ_TEST("writing the wrong types reject") {
     auto writeObject = adapter->write(env.js, env.js.obj());
     KJ_ASSERT(writeObject.getState(env.js) == jsg::Promise<void>::State::REJECTED,
         "Write of plain object should be rejected");
+
+    auto badArray = env.js.arr(env.js.boolean(true));
+    auto writeBadArray = adapter->write(env.js, badArray);
+    KJ_ASSERT(writeBadArray.getState(env.js) == jsg::Promise<void>::State::REJECTED,
+        "Write of array with non-string, non-ArrayBuffer elements");
   });
 }
 
@@ -799,56 +850,6 @@ KJ_TEST("ready promise signals backpressure correctly") {
       KJ_ASSERT(readyPromise.getState(js) == jsg::Promise<void>::State::FULFILLED,
           "Ready promise should be fulfilled when no backpressure");
     })).attach(kj::mv(adapter));
-  });
-}
-
-KJ_TEST("detachOnWrite option detaches ArrayBuffer before write") {
-  TestFixture fixture;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto recordingSink = kj::heap<SimpleEventRecordingSink>();
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableSink(kj::mv(recordingSink)),
-        WritableStreamSinkJsAdapter::Options{
-          .detachOnWrite = true,
-        });
-
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 10);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    KJ_ASSERT(!source.isDetached());
-    jsg::JsValue handle(source.getHandle(env.js));
-
-    auto writePromise = adapter->write(env.js, handle);
-
-    jsg::BufferSource source2(env.js, handle);
-    KJ_ASSERT(source2.size() == 0);
-
-    return env.context.awaitJs(env.js, kj::mv(writePromise)).attach(kj::mv(adapter));
-  });
-}
-
-KJ_TEST("detachOnWrite option detaches Uint8Array before write") {
-  TestFixture fixture;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto recordingSink = kj::heap<SimpleEventRecordingSink>();
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableSink(kj::mv(recordingSink)),
-        WritableStreamSinkJsAdapter::Options{
-          .detachOnWrite = true,
-        });
-
-    auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(env.js, 10);
-    jsg::BufferSource source(env.js, kj::mv(backing));
-    KJ_ASSERT(!source.isDetached());
-    jsg::JsValue handle(source.getHandle(env.js));
-
-    auto writePromise = adapter->write(env.js, handle);
-
-    jsg::BufferSource source2(env.js, handle);
-    KJ_ASSERT(source2.size() == 0);
-
-    return env.context.awaitJs(env.js, kj::mv(writePromise)).attach(kj::mv(adapter));
   });
 }
 
