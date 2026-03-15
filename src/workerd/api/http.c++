@@ -673,7 +673,33 @@ void Request::shallowCopyHeadersTo(kj::HttpHeaders& out) {
 }
 
 kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
-  if (cacheMode == CacheMode::NONE) {
+  // We need to clone the cf object if we're going to modify it. We modify it when:
+  // 1. cacheMode != NONE (existing behavior: map cache option to cacheTtl/cacheLevel/etc.)
+  // 2. cacheControl is not explicitly set and we need to synthesize it from cacheTtl or cacheMode
+  //
+  // For backward compatibility during migration, we dual-write: keep cacheTtl as-is but also
+  // synthesize cacheControl so downstream services can start consuming the unified field.
+  // Once downstream fully migrates to cacheControl, cacheTtl can be removed.
+
+  bool hasCacheMode = (cacheMode != CacheMode::NONE);
+  bool needsSynthesizedCacheControl = false;
+
+  // TODO(cleanup): Remove the workerdExperimental gate once validated in production.
+  bool experimentalCacheControl = FeatureFlags::get(js).getWorkerdExperimental();
+
+  if (!hasCacheMode && experimentalCacheControl) {
+    // Check if cf has cacheTtl but no cacheControl — we'll need to synthesize cacheControl.
+    KJ_IF_SOME(cfObj, cf.get(js)) {
+      if (!cfObj.has(js, "cacheControl") && cfObj.has(js, "cacheTtl")) {
+        auto ttlVal = cfObj.get(js, "cacheTtl");
+        if (!ttlVal.isUndefined()) {
+          needsSynthesizedCacheControl = true;
+        }
+      }
+    }
+  }
+
+  if (!hasCacheMode && !needsSynthesizedCacheControl) {
     return cf.serialize(js);
   }
 
@@ -687,25 +713,58 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   auto obj = KJ_ASSERT_NONNULL(clone.get(js));
 
   constexpr int NOCACHE_TTL = -1;
-  switch (cacheMode) {
-    case CacheMode::NOSTORE:
-      if (obj.has(js, "cacheTtl")) {
-        jsg::JsValue oldTtl = obj.get(js, "cacheTtl");
-        JSG_REQUIRE(oldTtl.strictEquals(js.num(NOCACHE_TTL)), TypeError,
-            kj::str("CacheTtl: ", oldTtl, ", is not compatible with cache: ",
-                getCacheModeName(cacheMode).orDefault("none"_kj), " header."));
-      } else {
-        obj.set(js, "cacheTtl", js.num(NOCACHE_TTL));
+  if (hasCacheMode) {
+    switch (cacheMode) {
+      case CacheMode::NOSTORE:
+        if (obj.has(js, "cacheTtl")) {
+          jsg::JsValue oldTtl = obj.get(js, "cacheTtl");
+          JSG_REQUIRE(oldTtl.strictEquals(js.num(NOCACHE_TTL)), TypeError,
+              kj::str("CacheTtl: ", oldTtl, ", is not compatible with cache: ",
+                  getCacheModeName(cacheMode).orDefault("none"_kj), " header."));
+        } else {
+          obj.set(js, "cacheTtl", js.num(NOCACHE_TTL));
+        }
+        KJ_FALLTHROUGH;
+      case CacheMode::RELOAD:
+        obj.set(js, "cacheLevel", js.str("bypass"_kjc));
+        break;
+      case CacheMode::NOCACHE:
+        obj.set(js, "cacheForceRevalidate", js.boolean(true));
+        break;
+      case CacheMode::NONE:
+        KJ_UNREACHABLE;
+    }
+  }
+
+  // Synthesize cacheControl from cacheTtl or cacheMode when cacheControl is not explicitly set.
+  // This dual-writes both fields so downstream can migrate to cacheControl incrementally.
+  // TODO(cleanup): Remove the workerdExperimental gate once validated in production.
+  if (experimentalCacheControl && !obj.has(js, "cacheControl")) {
+    if (hasCacheMode) {
+      // Synthesize from the cache request option.
+      switch (cacheMode) {
+        case CacheMode::NOSTORE:
+          obj.set(js, "cacheControl", js.str("no-store"_kjc));
+          break;
+        case CacheMode::NOCACHE:
+          obj.set(js, "cacheControl", js.str("no-cache"_kjc));
+          break;
+        case CacheMode::RELOAD:
+          break;
+        case CacheMode::NONE:
+          KJ_UNREACHABLE;
       }
-      KJ_FALLTHROUGH;
-    case CacheMode::RELOAD:
-      obj.set(js, "cacheLevel", js.str("bypass"_kjc));
-      break;
-    case CacheMode::NOCACHE:
-      obj.set(js, "cacheForceRevalidate", js.boolean(true));
-      break;
-    case CacheMode::NONE:
-      KJ_UNREACHABLE;
+    } else if (obj.has(js, "cacheTtl")) {
+      // Synthesize from cacheTtl value: positive/zero → max-age=N, -1 → no-store.
+      jsg::JsValue ttlVal = obj.get(js, "cacheTtl");
+      if (ttlVal.strictEquals(js.num(NOCACHE_TTL))) {
+        obj.set(js, "cacheControl", js.str("no-store"_kjc));
+      } else {
+        v8::Local<v8::Value> ttlHandle = ttlVal;
+        auto ttl = jsg::check(ttlHandle->IntegerValue(js.v8Context()));
+        obj.set(js, "cacheControl", js.str(kj::str("max-age=", ttl)));
+      }
+    }
   }
 
   return clone.serialize(js);
@@ -726,6 +785,40 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
         !FeatureFlags::get(js).getCacheReload() && (cacheMode == Request::CacheMode::RELOAD);
     JSG_REQUIRE(
         !invalidNoCache && !invalidReload, TypeError, kj::str("Unsupported cache mode: ", c));
+  }
+
+  // Validate mutual exclusion of cf.cacheControl with cf.cacheTtl and the cache request option.
+  // cacheControl provides explicit Cache-Control header override and cannot be combined with
+  // cacheTtl (which sets a simplified TTL) or the cache option (which maps to cacheTtl internally).
+  // cacheTtlByStatus is allowed alongside cacheControl since they serve different purposes.
+  // TODO(cleanup): Remove the workerdExperimental gate once validated in production.
+  if (FeatureFlags::get(js).getWorkerdExperimental()) {
+    KJ_IF_SOME(cfRef, cf) {
+      auto cfObj = jsg::JsObject(cfRef.getHandle(js));
+      if (cfObj.has(js, "cacheControl")) {
+        auto cacheControlVal = cfObj.get(js, "cacheControl");
+        if (!cacheControlVal.isUndefined()) {
+          // cacheControl + cacheTtl → throw
+          if (cfObj.has(js, "cacheTtl")) {
+            auto cacheTtlVal = cfObj.get(js, "cacheTtl");
+            if (!cacheTtlVal.isUndefined()) {
+              JSG_FAIL_REQUIRE(TypeError,
+                  "The 'cacheControl' and 'cacheTtl' options on cf are mutually exclusive. "
+                  "Use 'cacheControl' for explicit Cache-Control header directives, "
+                  "or 'cacheTtl' for a simplified TTL, but not both.");
+            }
+          }
+          // cacheControl + cache option (no-store/no-cache) → throw
+          // The cache request option maps to cacheTtl internally, so they conflict.
+          if (cache != kj::none) {
+            JSG_FAIL_REQUIRE(TypeError,
+                "The 'cacheControl' option on cf cannot be used together with the 'cache' "
+                "request option. The 'cache' option ('no-store'/'no-cache') maps to cache TTL "
+                "behavior internally, which conflicts with explicit Cache-Control directives.");
+          }
+        }
+      }
+    }
   }
 
   KJ_IF_SOME(e, encodeResponseBody) {
