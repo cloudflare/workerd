@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import http from 'node:http';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { strictEqual, ok, throws, notStrictEqual, rejects } from 'node:assert';
@@ -358,7 +361,6 @@ export const testHttpServerNonUtf8Header = {
     }
 
     {
-      const { promise, resolve } = Promise.withResolvers();
       // Test multi-value header
       await using server = http.createServer((req, res) => {
         res.writeHead(200, [

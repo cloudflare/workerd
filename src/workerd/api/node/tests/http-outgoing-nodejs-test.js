@@ -1,5 +1,8 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import http from 'node:http';
-import { throws, strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { throws, strictEqual, ok } from 'node:assert';
 import { httpServerHandler } from 'cloudflare:node';
 import { mock } from 'node:test';
 import stream from 'node:stream';
@@ -306,7 +309,7 @@ export const testHttpOutgoingBuffer = {
 // Test is taken from test/parallel/test-http-outgoing-finished.js
 export const testHttpOutgoingFinished = {
   async test(_ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
+    const { promise: _promise, resolve } = Promise.withResolvers();
     await using server = http.createServer(function (req, res) {
       let closed = false;
       res

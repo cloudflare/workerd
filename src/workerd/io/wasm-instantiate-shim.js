@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 // This file contains a shim for WebAssembly.Instance and WebAssembly.instantiate. Currently, the
 // runtime does not support instantiateStreaming, but if this ever changes, we will need to add a
 // shim for that too. V8's `SetWasmInstanceCallback` was considered as an alternative, but does

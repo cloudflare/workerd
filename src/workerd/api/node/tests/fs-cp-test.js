@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   writeFileSync,
   mkdirSync,
@@ -392,7 +395,7 @@ export const preserveTimestampsTests = {
 
     // Copy without preserveTimestamps (default behavior)
     cpSync(pathA, pathG);
-    const copiedStat = lstatSync(pathG);
+    const _copiedStat = lstatSync(pathG);
 
     // Copy with preserveTimestamps: true
     cpSync(pathA, pathH, { preserveTimestamps: true });
@@ -1031,7 +1034,7 @@ export const preserveTimestampsTestsCallback = {
         else resolve();
       });
     });
-    const copiedStat = lstatSync(pathG);
+    const _copiedStat = lstatSync(pathG);
 
     // Copy with preserveTimestamps: true
     await new Promise((resolve, reject) => {
@@ -1603,7 +1606,7 @@ export const preserveTimestampsTestsPromises = {
 
     // Copy without preserveTimestamps (default behavior)
     await fsPromises.cp(pathA, pathG);
-    const copiedStat = lstatSync(pathG);
+    const _copiedStat = lstatSync(pathG);
 
     // Copy with preserveTimestamps: true
     await fsPromises.cp(pathA, pathH, { preserveTimestamps: true });

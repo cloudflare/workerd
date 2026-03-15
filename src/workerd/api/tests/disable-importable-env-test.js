@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { env, withEnv } from 'cloudflare:workers';
 
 // This test runs with the disallow-importable-env flag set, meaning that

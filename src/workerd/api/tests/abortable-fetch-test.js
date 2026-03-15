@@ -1,4 +1,7 @@
-import { strictEqual, ok, throws } from 'node:assert';
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+import { strictEqual, ok } from 'node:assert';
 
 // Test for the AbortSignal and AbortController standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
@@ -8,7 +11,7 @@ export const abortControllerAlreadyAborted = {
     const ac = new AbortController();
     ac.abort();
     try {
-      const result = await env.subrequest.fetch('http://example.org', {
+      const _result = await env.subrequest.fetch('http://example.org', {
         signal: ac.signal,
       });
       throw new Error('should have failed');

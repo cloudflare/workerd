@@ -75,7 +75,7 @@ import { Duplex } from 'node-internal:streams_duplex';
 import { getHighWaterMark } from 'node-internal:streams_state';
 
 const streamsNodejsV24Compat =
-  Cloudflare.compatibilityFlags.enable_streams_nodejs_v24_compat; // eslint-disable-line no-undef
+  Cloudflare.compatibilityFlags.enable_streams_nodejs_v24_compat;
 
 Object.setPrototypeOf(Transform.prototype, Duplex.prototype);
 Object.setPrototypeOf(Transform, Duplex);

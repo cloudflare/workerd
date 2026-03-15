@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 // Regression tests for https://github.com/cloudflare/workerd/issues/6020
 // Unhandled rejection should NOT fire for promises that are handled through
 // multi-tick promise chains.

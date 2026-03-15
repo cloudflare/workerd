@@ -5,7 +5,8 @@ def lint_test(
         eslintrc_json,
         tsconfig_json,
         srcs,
-        data = []):
+        data = [],
+        no_copy_to_bin = []):
     js_srcs = [src for src in srcs if src.endswith(".ts") or src.endswith(".mts") or src.endswith(".js") or src.endswith(".mjs")]
 
     eslint_bin.eslint_test(
@@ -21,6 +22,7 @@ def lint_test(
             "@workerd//tools:base-tsconfig",
             "@workerd//tools:base-eslint",
         ],
+        no_copy_to_bin = no_copy_to_bin,
         tags = ["lint"],
         target_compatible_with = select({
             "@platforms//os:windows": ["@platforms//:incompatible"],

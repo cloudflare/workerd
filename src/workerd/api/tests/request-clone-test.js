@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { deepStrictEqual } from 'node:assert';
 
 // This test validates tee'ing value-oriented js-backed readable streams

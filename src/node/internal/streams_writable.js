@@ -71,7 +71,7 @@ import {
 } from 'node-internal:internal_errors';
 
 const streamsNodejsV24Compat =
-  Cloudflare.compatibilityFlags.enable_streams_nodejs_v24_compat; // eslint-disable-line no-undef
+  Cloudflare.compatibilityFlags.enable_streams_nodejs_v24_compat;
 
 const encoder = new globalThis.TextEncoder();
 

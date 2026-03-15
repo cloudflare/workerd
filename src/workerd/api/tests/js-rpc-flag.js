@@ -7,6 +7,7 @@ import assert from 'node:assert';
 // This class does not extend `DurableObject`, but because we have the `js_rpc` compat flag on,
 // it'll still accept RPC.
 export class DurableObjectExample {
+  // eslint-disable-next-line @typescript-eslint/no-useless-constructor
   constructor() {}
 
   foo() {

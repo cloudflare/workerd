@@ -196,7 +196,7 @@ export default {
       }
     } catch (err) {
       return Response.json(
-        // @ts-ignore
+        // @ts-expect-error - err is typed as unknown but has message and stack
         { error: err.message, stack: err.stack },
         { status: 500 }
       );

@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { strictEqual, ok, deepStrictEqual, rejects, throws } from 'node:assert';
 
 const enc = new TextEncoder();
@@ -15,6 +18,7 @@ export const rs = {
       }),
     });
     for await (const _ of resp.body) {
+      // intentionally empty
     }
   },
 };
@@ -32,6 +36,7 @@ export const ts = {
       body: readable,
     });
     for await (const _ of resp.body) {
+      // intentionally empty
     }
   },
 };
@@ -52,6 +57,7 @@ export const rsRequest = {
       })
     );
     for await (const _ of resp.body) {
+      // intentionally empty
     }
   },
 };
@@ -72,6 +78,7 @@ export const tsRequest = {
       })
     );
     for await (const _ of resp.body) {
+      // intentionally empty
     }
   },
 };
@@ -125,7 +132,7 @@ export const cancelReadsOnReleaseLock = {
     strictEqual(result[1].status, 'fulfilled');
 
     // Make sure we can still get another reader
-    const reader2 = rs.getReader();
+    const _reader2 = rs.getReader();
   },
 };
 
@@ -154,7 +161,7 @@ export const cancelWriteOnReleaseLock = {
     strictEqual(results[1].status, 'fulfilled');
 
     // Make sure we can still get another writer
-    const writer2 = ws.getWriter();
+    const _writer2 = ws.getWriter();
   },
 };
 
@@ -341,7 +348,7 @@ export const tsCancel = {
 export const writableStreamGcTraceFinishes = {
   test() {
     // TODO(soon): We really need better testing for GC visitation.
-    const ws = new WritableStream();
+    const _ws = new WritableStream();
     gc();
   },
 };
@@ -889,6 +896,7 @@ export const readAtLeastDefaultReaderThrows = {
 
     // Consume the stream to clean up
     for await (const _ of rs) {
+      // intentionally empty
     }
   },
 };
@@ -1032,7 +1040,7 @@ export const teeFixedLengthStreamNoHang = {
     const writer = ts.writable.getWriter();
     writer.write(new TextEncoder().encode('foo bar baz'));
     writer.close();
-    const [left, right] = ts.readable.tee();
+    const [left, _right] = ts.readable.tee();
     const response = new Response(left);
     strictEqual(await response.text(), 'foo bar baz');
   },
@@ -1098,7 +1106,7 @@ export const concurrentReadsRejected = {
   async test() {
     const { readable } = new IdentityTransformStream();
     const reader = readable.getReader();
-    const p0 = reader.read();
+    const _p0 = reader.read();
     await rejects(reader.read(), TypeError);
   },
 };

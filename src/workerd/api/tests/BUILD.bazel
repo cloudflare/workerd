@@ -583,6 +583,7 @@ wd_test(
     src = "http-test-ts.ts-wd-test",
     args = ["--experimental"],
     data = ["http-test-ts.ts"],
+    lint = False,
 )
 
 wd_test(
@@ -592,6 +593,7 @@ wd_test(
         "new-module-registry-test.js",
         "test.wasm",
     ],
+    lint = False,
 )
 
 wd_test(

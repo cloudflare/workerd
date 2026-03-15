@@ -11,7 +11,9 @@ const anything = Symbol('anything');
 const deleteAnything = (expected, actual) => {
   Object.entries(expected).forEach(([k, v]) => {
     if (v === anything) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete actual[k];
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete expected[k];
     } else if (typeof v === 'object' && typeof actual[k] === 'object') {
       deleteAnything(expected[k], actual[k]);

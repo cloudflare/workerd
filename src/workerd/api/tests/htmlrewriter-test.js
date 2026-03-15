@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   strictEqual,
   deepStrictEqual,
@@ -293,7 +296,8 @@ export const objectHandlers = {
           }
 
           // Run the iterator down until it's done.
-          for (let [k, v] of iterator) {
+          for (let [_k, _v] of iterator) {
+            // intentionally empty
           }
           // .next() should now be idempotent.
           let result = iterator.next();
@@ -451,7 +455,7 @@ export const objectHandlers = {
       .onDocument(documentHandlers)
       .on('*', elementHandlers);
 
-    let count = 0;
+    let _count = 0;
 
     const enc = new TextEncoder();
     const kInput = [

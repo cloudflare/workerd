@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import * as domain from 'node:domain';
 import { strictEqual, throws, ok } from 'node:assert';
 import { EventEmitter } from 'node:events';
@@ -129,7 +132,7 @@ export const domainTest = {
     strictEqual(emitted, true);
 
     // Test domain with async function (should work normally)
-    let asyncResult = null;
+    let _asyncResult = null;
     const asyncFn = async function (value) {
       return Promise.resolve(value * 2);
     };

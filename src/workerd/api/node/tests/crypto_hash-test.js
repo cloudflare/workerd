@@ -294,7 +294,6 @@ export const hash_pipe_test = {
 
 export const hash_one_shot = {
   test() {
-    const string = 'Node.js';
     assert.strictEqual(
       crypto.hash('sha1', 'Node.js'),
       '10b3493287f831e81a438811a1ffba01f8cec4b7'

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 // Test should not fail with a memory leak reported by ASAN.
 // Failures here would only occur in an ASAN build.
 
