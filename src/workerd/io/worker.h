@@ -897,6 +897,9 @@ class Worker::Actor final: public kj::Refcounted {
       Worker::Actor::Id id;
     };
 
+    // Returns the nesting depth of this facet. Root = 0, direct child of root = 1, etc.
+    virtual uint getDepth() const = 0;
+
     // These methods are C++ equivalents of the JavaScript ctx.facets API.
     virtual kj::Own<IoChannelFactory::ActorChannel> getFacet(
         kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) = 0;

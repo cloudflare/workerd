@@ -2489,6 +2489,13 @@ class Server::WorkerService final: public Service,
         return entry.value->addRef();
       }
 
+      uint getDepth() const override {
+        KJ_IF_SOME(p, parent) {
+          return 1 + p.getDepth();
+        }
+        return 0;
+      }
+
       kj::Own<IoChannelFactory::ActorChannel> getFacet(
           kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) override {
         auto facet = getFacetContainer(kj::str(name), kj::mv(getStartInfo));
