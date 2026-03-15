@@ -9,6 +9,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
 #include <workerd/server/docker-api.capnp.h>
+#include <workerd/util/strings.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
@@ -28,7 +29,7 @@ namespace {
 constexpr uint16_t SIDECAR_INGRESS_PORT = 39001;
 
 struct ParsedAddress {
-  kj::CidrRange cidr;
+  kj::OneOf<kj::CidrRange, kj::String> destination;
   kj::Maybe<uint16_t> port;
 };
 
@@ -85,13 +86,87 @@ kj::CidrRange makeCidr(kj::StringPtr host) {
   return kj::CidrRange(kj::str(host, isIpv6 ? "/128" : "/32"));
 }
 
+kj::Maybe<kj::CidrRange> tryMakeCidr(kj::StringPtr host) {
+  kj::Maybe<kj::CidrRange> cidr;
+  KJ_IF_SOME(_, kj::runCatchingExceptions([&]() { cidr = makeCidr(host); })) {
+    return kj::none;
+  }
+
+  return kj::mv(cidr);
+}
+
+kj::String normalizeHostname(kj::StringPtr hostname) {
+  auto hostAndPort = stripPort(hostname);
+  return workerd::toLower(hostAndPort.host);
+}
+
+kj::Maybe<kj::String> tryNormalizeHostname(kj::StringPtr hostname) {
+  kj::Maybe<kj::String> normalized;
+  KJ_IF_SOME(_, kj::runCatchingExceptions([&]() { normalized = normalizeHostname(hostname); })) {
+    return kj::none;
+  }
+
+  return kj::mv(normalized);
+}
+
+bool hostnameGlobMatches(kj::StringPtr pattern, kj::StringPtr hostname) {
+  size_t patternIndex = 0;
+  size_t hostnameIndex = 0;
+  size_t restartHostnameIndex = 0;
+  kj::Maybe<size_t> starPatternIndex;
+
+  while (hostnameIndex < hostname.size()) {
+    if (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
+      starPatternIndex = patternIndex++;
+      restartHostnameIndex = hostnameIndex;
+      continue;
+    }
+
+    if (patternIndex < pattern.size() && pattern[patternIndex] == hostname[hostnameIndex]) {
+      ++patternIndex;
+      ++hostnameIndex;
+      continue;
+    }
+
+    KJ_IF_SOME(starIndex, starPatternIndex) {
+      patternIndex = starIndex + 1;
+      hostnameIndex = ++restartHostnameIndex;
+      continue;
+    }
+
+    return false;
+  }
+
+  while (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
+    ++patternIndex;
+  }
+
+  return patternIndex == pattern.size();
+}
+
+kj::Maybe<kj::StringPtr> getHeader(const kj::HttpHeaders& headers, kj::StringPtr name) {
+  kj::Maybe<kj::StringPtr> result;
+  headers.forEach([&](kj::StringPtr headerName, kj::StringPtr value) {
+    if (result == kj::none && workerd::strcaseeq(headerName, name)) {
+      result = value;
+    }
+  });
+  return result;
+}
+
 // Parses "host[:port]" strings. Handles:
 // - IPv4: "10.0.0.1", "10.0.0.1:8080", "10.0.0.0/8", "10.0.0.0/8:8080"
 // - IPv6 with brackets: "[::1]", "[::1]:8080", "[fe80::1]", "[fe80::/10]:8080"
 // - IPv6 without brackets: "::1", "fe80::1", "fe80::/10"
 ParsedAddress parseHostPort(kj::StringPtr str) {
   auto hostAndPort = stripPort(str);
-  return {makeCidr(hostAndPort.host), hostAndPort.port};
+  KJ_REQUIRE(hostAndPort.host.size() > 0, "Host must not be empty.", str);
+
+  KJ_IF_SOME(cidr, tryMakeCidr(hostAndPort.host)) {
+    return {.destination = kj::mv(cidr), .port = hostAndPort.port};
+  }
+
+  return {.destination = workerd::toLower(hostAndPort.host), .port = hostAndPort.port};
 }
 
 kj::StringPtr signalToString(uint32_t signal) {
@@ -349,20 +424,31 @@ class EgressHttpService final: public kj::HttpService {
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
     auto destAddr = kj::str(host);
+    kj::Maybe<kj::String> requestHostname;
+    KJ_IF_SOME(value, getHeader(headers, "X-Hostname")) {
+      requestHostname = kj::str(value);
+    }
 
     kj::HttpHeaders responseHeaders(headerTable);
     response.accept(200, "OK", responseHeaders);
 
-    auto mapping = containerClient.findEgressMapping(destAddr, /*defaultPort=*/80);
+    auto mapping = containerClient.findEgressMapping(destAddr, /*defaultPort=*/80,
+        requestHostname.map([](auto& hostname) {
+      return kj::Maybe<kj::StringPtr>(hostname);
+    }).orDefault(kj::none));
 
     if (mapping != kj::none) {
       // Layer an HttpServer on top of the tunnel to handle HTTP parsing/serialization.
       // InnerEgressService looks up the mapping on each request so channel replacements
       // via interceptOutboundHttp are picked up on existing tunnels.
       auto innerService = kj::heap<InnerEgressService>(
-          [&client = containerClient, addr = kj::str(destAddr)]()
-              -> kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> {
-        return client.findEgressMapping(addr, /*defaultPort=*/80);
+          [&client = containerClient, addr = kj::str(destAddr),
+              hostname = kj::mv(
+                  requestHostname)]() -> kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> {
+        return client.findEgressMapping(addr, /*defaultPort=*/80,
+            hostname.map([](auto& value) {
+          return kj::Maybe<kj::StringPtr>(value);
+        }).orDefault(kj::none));
       },
           destAddr);
       auto innerServer =
@@ -373,7 +459,7 @@ class EgressHttpService final: public kj::HttpService {
       co_return;
     }
 
-    if (!containerClient.internetEnabled) {
+    if (!containerClient.internetEnabled.orDefault(false)) {
       connection.shutdownWrite();
       co_return;
     }
@@ -626,11 +712,39 @@ kj::Promise<void> ContainerClient::updateSidecarEgressPort(
   auto jsonRoot = message.initRoot<docker_api::ProxyEverything::Port>();
   jsonRoot.setPort(egressPort);
 
+  auto body = codec.encode(jsonRoot);
   auto response = co_await dockerApiRequest(network, kj::str("127.0.0.1:", ingressHostPort),
-      kj::HttpMethod::PUT, kj::str("/egress"), codec.encode(jsonRoot));
+      kj::HttpMethod::PUT, kj::str("/egress"), kj::mv(body));
 
   JSG_REQUIRE(response.statusCode >= 200 && response.statusCode < 300, Error,
       "Updating sidecar egress port failed with: ", response.statusCode, " ", response.body);
+}
+
+kj::Promise<void> ContainerClient::updateSidecarEgressConfig(
+    uint16_t ingressHostPort, uint16_t egressPort) {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::ProxyEverything::Port>();
+  capnp::MallocMessageBuilder message;
+  auto jsonRoot = message.initRoot<docker_api::ProxyEverything::Port>();
+  jsonRoot.setPort(egressPort);
+
+  auto allowHostnames = getDnsAllowHostnames();
+  auto dns = jsonRoot.initDns();
+  auto allowHostnamesList = dns.initAllowHostnames(allowHostnames.size());
+  for (auto i: kj::indices(allowHostnames)) {
+    allowHostnamesList.set(i, allowHostnames[i]);
+  }
+
+  KJ_IF_SOME(enabled, internetEnabled) {
+    jsonRoot.initInternet().setEnabled(enabled);
+  }
+
+  auto body = codec.encode(jsonRoot);
+  auto response = co_await dockerApiRequest(network, kj::str("127.0.0.1:", ingressHostPort),
+      kj::HttpMethod::PUT, kj::str("/egress"), kj::mv(body));
+
+  JSG_REQUIRE(response.statusCode >= 200 && response.statusCode < 300, Error,
+      "Updating sidecar egress config failed with: ", response.statusCode, " ", response.body);
 }
 
 kj::Promise<void> ContainerClient::createContainer(
@@ -771,7 +885,7 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   auto ipv6Enabled = co_await isDaemonIpv6Enabled();
 
   uint32_t cmdSize =
-      6;  // --http-egress-port <port> --http-ingress-address 0.0.0.0:<port> --docker-gateway-cidr <cidr>
+      7;  // --http-egress-port <port> --http-ingress-address 0.0.0.0:<port> --docker-gateway-cidr <cidr> --dns-enabled
   if (!ipv6Enabled) cmdSize += 1;  // --disable-ipv6
 
   auto cmd = jsonRoot.initCmd(cmdSize);
@@ -782,6 +896,7 @@ kj::Promise<void> ContainerClient::createSidecarContainer(
   cmd.set(idx++, kj::str("0.0.0.0:", SIDECAR_INGRESS_PORT));
   cmd.set(idx++, "--docker-gateway-cidr");
   cmd.set(idx++, networkCidr);
+  cmd.set(idx++, "--dns-enabled");
   if (!ipv6Enabled) {
     cmd.set(idx++, "--disable-ipv6");
   }
@@ -988,9 +1103,26 @@ kj::Promise<void> ContainerClient::listenTcp(ListenTcpContext context) {
 }
 
 void ContainerClient::upsertEgressMapping(EgressMapping mapping) {
-  auto cidrStr = mapping.cidr.toString();
   for (auto& m: egressMappings) {
-    if (m.port == mapping.port && m.cidr.toString() == cidrStr) {
+    if (m.port != mapping.port) {
+      continue;
+    }
+
+    bool matches = false;
+    KJ_SWITCH_ONEOF(m.destination) {
+      KJ_CASE_ONEOF(existingCidr, kj::CidrRange) {
+        KJ_IF_SOME(newCidr, mapping.destination.tryGet<kj::CidrRange>()) {
+          matches = existingCidr.toString() == newCidr.toString();
+        }
+      }
+      KJ_CASE_ONEOF(existingHostnameGlob, kj::String) {
+        KJ_IF_SOME(newHostnameGlob, mapping.destination.tryGet<kj::String>()) {
+          matches = existingHostnameGlob == newHostnameGlob;
+        }
+      }
+    }
+
+    if (matches) {
       m.channel = kj::mv(mapping.channel);
       return;
     }
@@ -999,17 +1131,60 @@ void ContainerClient::upsertEgressMapping(EgressMapping mapping) {
   egressMappings.add(kj::mv(mapping));
 }
 
-kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient::findEgressMapping(
-    kj::StringPtr destAddr, uint16_t defaultPort) {
-  auto hostAndPort = stripPort(destAddr);
-  uint16_t port = hostAndPort.port.orDefault(defaultPort);
+kj::Vector<kj::String> ContainerClient::getDnsAllowHostnames() const {
+  kj::Vector<kj::String> result;
 
   for (auto& mapping: egressMappings) {
-    if (mapping.cidr.matches(hostAndPort.host)) {
-      // CIDR matches, now check port.
-      // If the port is 0, we match anything.
-      if (mapping.port == 0 || mapping.port == port) {
-        return kj::addRef(*mapping.channel);
+    KJ_SWITCH_ONEOF(mapping.destination) {
+      KJ_CASE_ONEOF(_, kj::CidrRange) {
+        result.add(kj::str("*"));
+        return result;
+      }
+      KJ_CASE_ONEOF(hostnameGlob, kj::String) {
+        bool alreadyPresent = false;
+        for (auto& existing: result) {
+          if (existing == hostnameGlob) {
+            alreadyPresent = true;
+            break;
+          }
+        }
+
+        if (!alreadyPresent) {
+          result.add(kj::str(hostnameGlob));
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient::findEgressMapping(
+    kj::StringPtr destAddr, uint16_t defaultPort, kj::Maybe<kj::StringPtr> hostname) {
+  auto hostAndPort = stripPort(destAddr);
+  uint16_t port = hostAndPort.port.orDefault(defaultPort);
+  kj::Maybe<kj::String> normalizedHostname;
+  KJ_IF_SOME(hostnameValue, hostname) {
+    normalizedHostname = tryNormalizeHostname(hostnameValue);
+  }
+
+  for (auto& mapping: egressMappings) {
+    if (mapping.port != 0 && mapping.port != port) {
+      continue;
+    }
+
+    KJ_SWITCH_ONEOF(mapping.destination) {
+      KJ_CASE_ONEOF(cidr, kj::CidrRange) {
+        if (cidr.matches(hostAndPort.host)) {
+          return kj::addRef(*mapping.channel);
+        }
+      }
+      KJ_CASE_ONEOF(hostnameGlob, kj::String) {
+        KJ_IF_SOME(hostnameValue, normalizedHostname) {
+          if (hostnameGlobMatches(hostnameGlob, hostnameValue)) {
+            return kj::addRef(*mapping.channel);
+          }
+        }
       }
     }
   }
@@ -1035,7 +1210,7 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
   auto sidecar = KJ_REQUIRE_NONNULL(co_await inspectSidecar(), "started sidecar not running");
   this->sidecarIngressHostPort = sidecar.ingressHostPort;
 
-  // Wait for the sidecar's HTTP server to be ready by calling updateSidecarEgressPort
+  // Wait for the sidecar's HTTP server to be ready by calling updateSidecarEgressConfig
   // in a retry loop with a per-attempt timeout.
   constexpr int MAX_READY_RETRIES = 10;
   constexpr auto READY_RETRY_DELAY = 200 * kj::MILLISECONDS;
@@ -1044,7 +1219,7 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
     kj::Maybe<kj::Exception> maybeError;
     try {
       co_await timer.timeoutAfter(READY_ATTEMPT_TIMEOUT,
-          updateSidecarEgressPort(sidecar.ingressHostPort, egressListenerPort));
+          updateSidecarEgressConfig(sidecar.ingressHostPort, egressListenerPort));
     } catch (...) {
       maybeError = kj::getCaughtExceptionAsKj();
     }
@@ -1082,7 +1257,6 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
 
   auto parsed = parseHostPort(hostPortStr);
   uint16_t port = parsed.port.orDefault(80);
-  auto cidr = kj::mv(parsed.cidr);
 
   co_await ensureEgressListenerStarted();
 
@@ -1096,10 +1270,14 @@ kj::Promise<void> ContainerClient::setEgressHttp(SetEgressHttpContext context) {
       workerd::IoChannelFactory::ChannelTokenUsage::RPC, tokenBytes);
 
   upsertEgressMapping(EgressMapping{
-    .cidr = kj::mv(cidr),
+    .destination = kj::mv(parsed.destination),
     .port = port,
     .channel = kj::mv(subrequestChannel),
   });
+
+  KJ_IF_SOME(ingressHostPort, sidecarIngressHostPort) {
+    co_await updateSidecarEgressConfig(ingressHostPort, egressListenerPort);
+  }
 
   co_return;
 }
