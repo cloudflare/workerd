@@ -5020,6 +5020,146 @@ KJ_TEST("Server: Durable Object facets") {
   }
 }
 
+KJ_TEST("Server: Durable Object facet limits") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = env.MY_ACTOR.idFromName("limits");
+                `    let actor = env.MY_ACTOR.get(id);
+                `    return await actor.fetch(request);
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async fetch(request) {
+                `    let url = new URL(request.url);
+                `    switch (url.pathname) {
+                `      case "/name-too-long": {
+                `        try {
+                `          this.ctx.facets.get("x".repeat(257),
+                `              () => ({class: this.env.RECURSIVE}));
+                `          return new Response("no error");
+                `        } catch (e) {
+                `          return new Response(e.constructor.name + ": " + e.message);
+                `        }
+                `      }
+                `      case "/name-256-ok": {
+                `        this.ctx.facets.get("x".repeat(256),
+                `            () => ({class: this.env.RECURSIVE}));
+                `        return new Response("ok");
+                `      }
+                `      case "/abort-name-too-long": {
+                `        try {
+                `          this.ctx.facets.abort("x".repeat(257), new Error("test"));
+                `          return new Response("no error");
+                `        } catch (e) {
+                `          return new Response(e.constructor.name + ": " + e.message);
+                `        }
+                `      }
+                `      case "/delete-name-too-long": {
+                `        try {
+                `          this.ctx.facets.delete("x".repeat(257));
+                `          return new Response("no error");
+                `        } catch (e) {
+                `          return new Response(e.constructor.name + ": " + e.message);
+                `        }
+                `      }
+                `      case "/depth-ok": {
+                `        // Create 3 levels of facets below root = 4 total (the max).
+                `        let facet = this.ctx.facets.get("a",
+                `            () => ({class: this.env.RECURSIVE}));
+                `        return new Response(await facet.nestOk(2));
+                `      }
+                `      case "/depth-exceeded": {
+                `        // Create 3 levels below root, then try one more.
+                `        let facet = this.ctx.facets.get("b",
+                `            () => ({class: this.env.RECURSIVE}));
+                `        return new Response(await facet.nestDeeper(2));
+                `      }
+                `    }
+                `  }
+                `}
+                `export class RecursiveFacet extends DurableObject {
+                `  async nestOk(remaining) {
+                `    if (remaining <= 0) return "ok";
+                `    let facet = this.ctx.facets.get("child",
+                `        () => ({class: this.env.RECURSIVE}));
+                `    return await facet.nestOk(remaining - 1);
+                `  }
+                `  async nestDeeper(remaining) {
+                `    if (remaining <= 0) {
+                `      try {
+                `        this.ctx.facets.get("too-deep",
+                `            () => ({class: this.env.RECURSIVE}));
+                `        return "no error, unexpected";
+                `      } catch (e) {
+                `        return e.constructor.name + ": " + e.message;
+                `      }
+                `    }
+                `    let facet = this.ctx.facets.get("child",
+                `        () => ({class: this.env.RECURSIVE}));
+                `    return await facet.nestDeeper(remaining - 1);
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            (name = "MY_ACTOR", durableObjectNamespace = "MyActorClass"),
+            (name = "RECURSIVE",
+              durableObjectClass = (name = "hello", entrypoint = "RecursiveFacet"))
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  TestServer test(config);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // Name length limit.
+  conn.httpGet200("/name-too-long", "TypeError: Facet name is too long (max 256 characters).");
+  conn.httpGet200("/name-256-ok", "ok");
+  conn.httpGet200(
+      "/abort-name-too-long", "TypeError: Facet name is too long (max 256 characters).");
+  conn.httpGet200(
+      "/delete-name-too-long", "TypeError: Facet name is too long (max 256 characters).");
+
+  // Depth limit.
+  conn.httpGet200("/depth-ok", "ok");
+  conn.httpGet200("/depth-exceeded",
+      "Error: Facet nesting depth limit exceeded. "
+      "The maximum depth including the root Durable Object is 4.");
+}
+
 KJ_TEST("Server: Pass service stubs in ctx.props.") {
   TestServer test(R"((
     services = [

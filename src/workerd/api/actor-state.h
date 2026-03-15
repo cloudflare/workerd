@@ -412,6 +412,13 @@ class DurableObjectTransaction final: public jsg::Object, public DurableObjectSt
 
 class DurableObjectFacets: public jsg::Object {
  public:
+  // Maximum length of a facet name, in characters.
+  static constexpr size_t MAX_FACET_NAME_LENGTH = 256;
+
+  // Maximum depth of the facet tree, including the root Durable Object. Root is at depth 0, so
+  // the deepest allowed facet is at depth MAX_FACET_TREE_DEPTH - 1.
+  static constexpr uint MAX_FACET_TREE_DEPTH = 4;
+
   DurableObjectFacets(kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager)
       : facetManager(kj::mv(facetManager)) {}
 
