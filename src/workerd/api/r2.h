@@ -17,6 +17,12 @@ namespace workerd::api::public_beta {
       api::public_beta::R2Bucket::Checksums, api::public_beta::R2Bucket::StringChecksums,          \
       api::public_beta::R2Bucket::HttpMetadata, api::public_beta::R2Bucket::ListOptions,           \
       api::public_beta::R2Bucket::ListResult,                                                      \
-      api::public_beta::R2MultipartUpload::UploadPartOptions
+      api::public_beta::R2MultipartUpload::UploadPartOptions,                                      \
+      api::public_beta::R2MultipartUpload::ListPartsOptions,                                       \
+      api::public_beta::R2MultipartUpload::UploadedPartInfo,                                       \
+      api::public_beta::R2MultipartUpload::ListPartsResult,                                        \
+      api::public_beta::R2Bucket::ListMultipartUploadsOptions,                                     \
+      api::public_beta::R2Bucket::MultipartUploadInfo,                                             \
+      api::public_beta::R2Bucket::ListMultipartUploadsResult
 // The list of r2 types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api::public_beta

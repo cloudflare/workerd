@@ -342,8 +342,6 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
-  MessageChannel: typeof MessageChannel;
-  MessagePort: typeof MessagePort;
   EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
   ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
@@ -477,66 +475,56 @@ interface TestController {}
 interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
-  readonly exports: Cloudflare.Exports;
   readonly props: Props;
 }
-type ExportedHandlerFetchHandler<
-  Env = unknown,
-  CfHostMetadata = unknown,
-  Props = unknown,
-> = (
+type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
   request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>,
   env: Env,
-  ctx: ExecutionContext<Props>,
+  ctx: ExecutionContext,
 ) => Response | Promise<Response>;
-type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (
+type ExportedHandlerTailHandler<Env = unknown> = (
   events: TraceItem[],
   env: Env,
-  ctx: ExecutionContext<Props>,
+  ctx: ExecutionContext,
 ) => void | Promise<void>;
-type ExportedHandlerTraceHandler<Env = unknown, Props = unknown> = (
+type ExportedHandlerTraceHandler<Env = unknown> = (
   traces: TraceItem[],
   env: Env,
-  ctx: ExecutionContext<Props>,
+  ctx: ExecutionContext,
 ) => void | Promise<void>;
-type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (
+type ExportedHandlerTailStreamHandler<Env = unknown> = (
   event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
-  ctx: ExecutionContext<Props>,
+  ctx: ExecutionContext,
 ) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
-type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (
+type ExportedHandlerScheduledHandler<Env = unknown> = (
   controller: ScheduledController,
   env: Env,
-  ctx: ExecutionContext<Props>,
+  ctx: ExecutionContext,
 ) => void | Promise<void>;
-type ExportedHandlerQueueHandler<
-  Env = unknown,
-  Message = unknown,
-  Props = unknown,
-> = (
+type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (
   batch: MessageBatch<Message>,
   env: Env,
-  ctx: ExecutionContext<Props>,
+  ctx: ExecutionContext,
 ) => void | Promise<void>;
-type ExportedHandlerTestHandler<Env = unknown, Props = unknown> = (
+type ExportedHandlerTestHandler<Env = unknown> = (
   controller: TestController,
   env: Env,
-  ctx: ExecutionContext<Props>,
+  ctx: ExecutionContext,
 ) => void | Promise<void>;
 interface ExportedHandler<
   Env = unknown,
   QueueHandlerMessage = unknown,
   CfHostMetadata = unknown,
-  Props = unknown,
 > {
-  fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
-  tail?: ExportedHandlerTailHandler<Env, Props>;
-  trace?: ExportedHandlerTraceHandler<Env, Props>;
-  tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
-  scheduled?: ExportedHandlerScheduledHandler<Env, Props>;
-  test?: ExportedHandlerTestHandler<Env, Props>;
-  email?: EmailExportedHandler<Env, Props>;
-  queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
+  fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
+  tail?: ExportedHandlerTailHandler<Env>;
+  trace?: ExportedHandlerTraceHandler<Env>;
+  tailStream?: ExportedHandlerTailStreamHandler<Env>;
+  scheduled?: ExportedHandlerScheduledHandler<Env>;
+  test?: ExportedHandlerTestHandler<Env>;
+  email?: EmailExportedHandler<Env>;
+  queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage>;
 }
 interface StructuredSerializeOptions {
   transfer?: any[];
@@ -545,8 +533,6 @@ declare abstract class Navigator {
   sendBeacon(url: string, body?: BodyInit): boolean;
   readonly userAgent: string;
   readonly hardwareConcurrency: number;
-  readonly language: string;
-  readonly languages: string[];
 }
 interface AlarmInvocationInfo {
   readonly isRetry: boolean;
@@ -618,17 +604,14 @@ type DurableObjectLocationHint =
   | "oc"
   | "afr"
   | "me";
-type DurableObjectRoutingMode = "primary-only";
 interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
-  routingMode?: DurableObjectRoutingMode;
 }
 interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {}
 interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
-  readonly exports: Cloudflare.Exports;
   readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
@@ -1657,12 +1640,6 @@ declare class FormData {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
    */
-  append(name: string, value: string | Blob): void;
-  /**
-   * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append)
-   */
   append(name: string, value: string): void;
   /**
    * The **`append()`** method of the FormData interface appends a new value onto an existing key inside a `FormData` object, or adds the key if it does not already exist.
@@ -1694,12 +1671,6 @@ declare class FormData {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/has)
    */
   has(name: string): boolean;
-  /**
-   * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set)
-   */
-  set(name: string, value: string | Blob): void;
   /**
    * The **`set()`** method of the FormData interface sets a new value for an existing key inside a `FormData` object, or adds the key/value if it does not already exist.
    *
@@ -1922,9 +1893,7 @@ type BodyInit =
   | ArrayBufferView
   | Blob
   | URLSearchParams
-  | FormData
-  | Iterable<ArrayBuffer | ArrayBufferView>
-  | AsyncIterable<ArrayBuffer | ArrayBufferView>;
+  | FormData;
 declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/body) */
   get body(): ReadableStream | null;
@@ -2040,10 +2009,8 @@ declare var Request: {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request)
  */
-interface Request<
-  CfHostMetadata = unknown,
-  Cf = CfProperties<CfHostMetadata>,
-> extends Body {
+interface Request<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>
+  extends Body {
   /**
    * The **`clone()`** method of the Request interface creates a copy of the current `Request` object.
    *
@@ -2081,7 +2048,7 @@ interface Request<
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/signal)
    */
   signal: AbortSignal;
-  cf?: Cf;
+  cf: Cf | undefined;
   /**
    * The **`integrity`** read-only property of the Request interface contains the subresource integrity value of the request.
    *
@@ -2094,12 +2061,6 @@ interface Request<
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
    */
   keepalive: boolean;
-  /**
-   * The **`cache`** read-only property of the Request interface contains the cache mode of the request.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
-   */
-  cache?: "no-store" | "no-cache";
 }
 interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -2112,8 +2073,6 @@ interface RequestInit<Cf = CfProperties> {
   redirect?: string;
   fetcher?: Fetcher | null;
   cf?: Cf;
-  /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store" | "no-cache";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
@@ -2142,6 +2101,10 @@ type Fetcher<
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   connect(address: SocketAddress | string, options?: SocketOptions): Socket;
 };
+interface FetcherPutOptions {
+  expiration?: number;
+  expirationTtl?: number;
+}
 interface KVNamespaceListKey<Metadata, Key extends string = string> {
   name: Key;
   expiration?: number;
@@ -2620,8 +2583,6 @@ interface Transformer<I = any, O = any> {
   expectedLength?: number;
 }
 interface StreamPipeOptions {
-  preventAbort?: boolean;
-  preventCancel?: boolean;
   /**
    * Pipes this readable stream to a given writable stream destination. The way in which the piping process behaves under various error conditions can be customized with a number of passed options. It returns a promise that fulfills when the piping process completes successfully, or rejects if any errors were encountered.
    *
@@ -2640,6 +2601,8 @@ interface StreamPipeOptions {
    * The signal option can be set to an AbortSignal to allow aborting an ongoing pipe operation via the corresponding AbortController. In this case, this source readable stream will be canceled, and destination aborted, unless the respective options preventCancel or preventAbort are set.
    */
   preventClose?: boolean;
+  preventAbort?: boolean;
+  preventCancel?: boolean;
   signal?: AbortSignal;
 }
 type ReadableStreamReadResult<R = any> =
@@ -2932,13 +2895,13 @@ declare abstract class TransformStreamDefaultController<O = any> {
   terminate(): void;
 }
 interface ReadableWritablePair<R = any, W = any> {
-  readable: ReadableStream<R>;
   /**
    * Provides a convenient, chainable way of piping this readable stream through a transform stream (or any other { writable, readable } pair). It simply pipes the stream into the writable side of the supplied pair, and returns the readable side for further use.
    *
    * Piping a stream will lock it for the duration of the pipe, preventing any other consumer from acquiring a reader.
    */
   writable: WritableStream<W>;
+  readable: ReadableStream<R>;
 }
 /**
  * The **`WritableStream`** interface of the Streams API provides a standard abstraction for writing streaming data to a destination, known as a sink.
@@ -3121,7 +3084,9 @@ interface TextDecoderStreamTextDecoderStreamInit {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ByteLengthQueuingStrategy)
  */
-declare class ByteLengthQueuingStrategy implements QueuingStrategy<ArrayBufferView> {
+declare class ByteLengthQueuingStrategy
+  implements QueuingStrategy<ArrayBufferView>
+{
   constructor(init: QueuingStrategyInit);
   /**
    * The read-only **`ByteLengthQueuingStrategy.highWaterMark`** property returns the total number of bytes that can be contained in the internal queue before backpressure is applied.
@@ -3473,7 +3438,7 @@ declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
    */
-  delete(name: string, value?: string): void;
+  delete(name: string): void;
   /**
    * The **`get()`** method of the URLSearchParams interface returns the first value associated to the given search parameter.
    *
@@ -3491,7 +3456,7 @@ declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
    */
-  has(name: string, value?: string): boolean;
+  has(name: string): boolean;
   /**
    * The **`set()`** method of the URLSearchParams interface sets the value associated with a given search parameter to the given value.
    *
@@ -3537,7 +3502,6 @@ declare class URLPattern {
   get pathname(): string;
   get search(): string;
   get hash(): string;
-  get hasRegExpGroups(): boolean;
   test(input?: string | URLPatternInit, baseURL?: string): boolean;
   exec(
     input?: string | URLPatternInit,
@@ -3633,7 +3597,7 @@ declare var WebSocket: {
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
  */
 interface WebSocket extends EventTarget<WebSocketEventMap> {
-  accept(options?: WebSocketAcceptOptions): void;
+  accept(): void;
   /**
    * The **`WebSocket.send()`** method enqueues the specified data to be transmitted to the server over the WebSocket connection, increasing the value of `bufferedAmount` by the number of bytes needed to contain the data.
    *
@@ -3672,22 +3636,6 @@ interface WebSocket extends EventTarget<WebSocketEventMap> {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/extensions)
    */
   extensions: string | null;
-  /**
-   * The **`WebSocket.binaryType`** property controls the type of binary data being received over the WebSocket connection.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/binaryType)
-   */
-  binaryType: "blob" | "arraybuffer";
-}
-interface WebSocketAcceptOptions {
-  /**
-   * When set to `true`, receiving a server-initiated WebSocket Close frame will not
-   * automatically send a reciprocal Close frame, leaving the connection in a half-open
-   * state. This is useful for proxying scenarios where you need to coordinate closing
-   * both sides independently. Defaults to `false` when the
-   * `no_web_socket_half_open_by_default` compatibility flag is enabled.
-   */
-  allowHalfOpen?: boolean;
 }
 declare const WebSocketPair: {
   new (): {
@@ -3812,8 +3760,6 @@ interface Container {
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
-  interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
-  interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
 }
 interface ContainerStartupOptions {
   entrypoint?: string[];
@@ -3826,7 +3772,7 @@ interface ContainerStartupOptions {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
  */
-declare abstract class MessagePort extends EventTarget {
+interface MessagePort extends EventTarget {
   /**
    * The **`postMessage()`** method of the transfers ownership of objects to other browsing contexts.
    *
@@ -3850,26 +3796,6 @@ declare abstract class MessagePort extends EventTarget {
   start(): void;
   get onmessage(): any | null;
   set onmessage(value: any | null);
-}
-/**
- * The **`MessageChannel`** interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
- */
-declare class MessageChannel {
-  constructor();
-  /**
-   * The **`port1`** read-only property of the the port attached to the context that originated the channel.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
-   */
-  readonly port1: MessagePort;
-  /**
-   * The **`port2`** read-only property of the the port attached to the context at the other end of the channel, which the message is initially sent to.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
-   */
-  readonly port2: MessagePort;
 }
 interface MessagePortPostMessageOptions {
   transfer?: any[];
@@ -3923,10 +3849,9 @@ interface WorkerStubEntrypointOptions {
 }
 interface WorkerLoader {
   get(
-    name: string | null,
+    name: string,
     getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>,
   ): WorkerStub;
-  load(code: WorkerLoaderWorkerCode): WorkerStub;
 }
 interface WorkerLoaderModule {
   js?: string;
@@ -3959,180 +3884,6 @@ declare abstract class Performance {
   get timeOrigin(): number;
   /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancenow) */
   now(): number;
-  /**
-   * The **`toJSON()`** method of the Performance interface is a Serialization; it returns a JSON representation of the Performance object.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/toJSON)
-   */
-  toJSON(): object;
-}
-// AI Search V2 API Error Interfaces
-interface AiSearchInternalError extends Error {}
-interface AiSearchNotFoundError extends Error {}
-interface AiSearchNameNotSetError extends Error {}
-// AI Search V2 Request Types
-type AiSearchSearchRequest = {
-  messages: Array<{
-    role: "system" | "developer" | "user" | "assistant" | "tool";
-    content: string | null;
-  }>;
-  ai_search_options?: {
-    retrieval?: {
-      retrieval_type?: "vector" | "keyword" | "hybrid";
-      /** Match threshold (0-1, default 0.4) */
-      match_threshold?: number;
-      /** Maximum number of results (1-50, default 10) */
-      max_num_results?: number;
-      filters?: VectorizeVectorMetadataFilter;
-      /** Context expansion (0-3, default 0) */
-      context_expansion?: number;
-      [key: string]: unknown;
-    };
-    query_rewrite?: {
-      enabled?: boolean;
-      model?: string;
-      rewrite_prompt?: string;
-      [key: string]: unknown;
-    };
-    reranking?: {
-      /** Enable reranking (default false) */
-      enabled?: boolean;
-      model?: "@cf/baai/bge-reranker-base" | "";
-      /** Match threshold (0-1, default 0.4) */
-      match_threshold?: number;
-      [key: string]: unknown;
-    };
-    [key: string]: unknown;
-  };
-};
-type AiSearchChatCompletionsRequest = {
-  messages: Array<{
-    role: "system" | "developer" | "user" | "assistant" | "tool";
-    content: string | null;
-  }>;
-  model?: string;
-  stream?: boolean;
-  ai_search_options?: {
-    retrieval?: {
-      retrieval_type?: "vector" | "keyword" | "hybrid";
-      match_threshold?: number;
-      max_num_results?: number;
-      filters?: VectorizeVectorMetadataFilter;
-      context_expansion?: number;
-      [key: string]: unknown;
-    };
-    query_rewrite?: {
-      enabled?: boolean;
-      model?: string;
-      rewrite_prompt?: string;
-      [key: string]: unknown;
-    };
-    reranking?: {
-      enabled?: boolean;
-      model?: "@cf/baai/bge-reranker-base" | "";
-      match_threshold?: number;
-      [key: string]: unknown;
-    };
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-};
-// AI Search V2 Response Types
-type AiSearchSearchResponse = {
-  search_query: string;
-  chunks: Array<{
-    id: string;
-    type: string;
-    /** Match score (0-1) */
-    score: number;
-    text: string;
-    item: {
-      timestamp?: number;
-      key: string;
-      metadata?: Record<string, unknown>;
-    };
-    scoring_details?: {
-      /** Keyword match score (0-1) */
-      keyword_score?: number;
-      /** Vector similarity score (0-1) */
-      vector_score?: number;
-    };
-  }>;
-};
-type AiSearchListResponse = Array<{
-  id: string;
-  internal_id?: string;
-  account_id?: string;
-  account_tag?: string;
-  /** Whether the instance is enabled (default true) */
-  enable?: boolean;
-  type?: "r2" | "web-crawler";
-  source?: string;
-  [key: string]: unknown;
-}>;
-type AiSearchConfig = {
-  /** Instance ID (1-32 chars, pattern: ^[a-z0-9_]+(?:-[a-z0-9_]+)*$) */
-  id: string;
-  type: "r2" | "web-crawler";
-  source: string;
-  source_params?: object;
-  /** Token ID (UUID format) */
-  token_id?: string;
-  ai_gateway_id?: string;
-  /** Enable query rewriting (default false) */
-  rewrite_query?: boolean;
-  /** Enable reranking (default false) */
-  reranking?: boolean;
-  embedding_model?: string;
-  ai_search_model?: string;
-};
-type AiSearchInstance = {
-  id: string;
-  enable?: boolean;
-  type?: "r2" | "web-crawler";
-  source?: string;
-  [key: string]: unknown;
-};
-// AI Search Instance Service - Instance-level operations
-declare abstract class AiSearchInstanceService {
-  /**
-   * Search the AI Search instance for relevant chunks.
-   * @param params Search request with messages and AI search options
-   * @returns Search response with matching chunks
-   */
-  search(params: AiSearchSearchRequest): Promise<AiSearchSearchResponse>;
-  /**
-   * Generate chat completions with AI Search context.
-   * @param params Chat completions request with optional streaming
-   * @returns Response object (if streaming) or chat completion result
-   */
-  chatCompletions(
-    params: AiSearchChatCompletionsRequest,
-  ): Promise<Response | object>;
-  /**
-   * Delete this AI Search instance.
-   */
-  delete(): Promise<void>;
-}
-// AI Search Account Service - Account-level operations
-declare abstract class AiSearchAccountService {
-  /**
-   * List all AI Search instances in the account.
-   * @returns Array of AI Search instances
-   */
-  list(): Promise<AiSearchListResponse>;
-  /**
-   * Get an AI Search instance by ID.
-   * @param name Instance ID
-   * @returns Instance service for performing operations
-   */
-  get(name: string): AiSearchInstanceService;
-  /**
-   * Create a new AI Search instance.
-   * @param config Instance configuration
-   * @returns Instance service for performing operations
-   */
-  create(config: AiSearchConfig): Promise<AiSearchInstanceService>;
 }
 type AiImageClassificationInput = {
   image: number[];
@@ -6461,7 +6212,7 @@ interface Ai_Cf_Qwen_Qwq_32B_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -6735,7 +6486,7 @@ interface Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -6828,7 +6579,7 @@ interface Ai_Cf_Google_Gemma_3_12B_It_Prompt {
    */
   prompt: string;
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -6992,7 +6743,7 @@ interface Ai_Cf_Google_Gemma_3_12B_It_Messages {
       }
   )[];
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -7273,7 +7024,7 @@ interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -7512,7 +7263,7 @@ interface Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Messages_Inner {
   )[];
   response_format?: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_JSON_Mode;
   /**
-   * JSON schema that should be fulfilled for the response.
+   * JSON schema that should be fufilled for the response.
    */
   guided_json?: object;
   /**
@@ -8600,7 +8351,7 @@ interface Ai_Cf_Ai4Bharat_Indictrans2_En_Indic_1B_Input {
    */
   text: string | string[];
   /**
-   * Target language to translate to
+   * Target langauge to translate to
    */
   target_language:
     | "asm_Beng"
@@ -9594,7 +9345,7 @@ type AiOptions = {
    * Maximum 5 tags are allowed each request.
    * Duplicate tags will removed.
    */
-  tags?: string[];
+  tags: string[];
   gateway?: GatewayOptions;
   returnRawResponse?: boolean;
   prefix?: string;
@@ -9631,48 +9382,6 @@ type AiModelListType = Record<string, any>;
 declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  /**
-   * Access the AI Search API for managing AI-powered search instances.
-   *
-   * This is the new API that replaces AutoRAG with better namespace separation:
-   * - Account-level operations: `list()`, `create()`
-   * - Instance-level operations: `get(id).search()`, `get(id).chatCompletions()`, `get(id).delete()`
-   *
-   * @example
-   * ```typescript
-   * // List all AI Search instances
-   * const instances = await env.AI.aiSearch.list();
-   *
-   * // Search an instance
-   * const results = await env.AI.aiSearch.get('my-search').search({
-   *   messages: [{ role: 'user', content: 'What is the policy?' }],
-   *   ai_search_options: {
-   *     retrieval: { max_num_results: 10 }
-   *   }
-   * });
-   *
-   * // Generate chat completions with AI Search context
-   * const response = await env.AI.aiSearch.get('my-search').chatCompletions({
-   *   messages: [{ role: 'user', content: 'What is the policy?' }],
-   *   model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
-   * });
-   * ```
-   */
-  aiSearch(): AiSearchAccountService;
-  /**
-   * @deprecated AutoRAG has been replaced by AI Search.
-   * Use `env.AI.aiSearch` instead for better API design and new features.
-   *
-   * Migration guide:
-   * - `env.AI.autorag().list()` → `env.AI.aiSearch.list()`
-   * - `env.AI.autorag('id').search({ query: '...' })` → `env.AI.aiSearch.get('id').search({ messages: [{ role: 'user', content: '...' }] })`
-   * - `env.AI.autorag('id').aiSearch(...)` → `env.AI.aiSearch.get('id').chatCompletions(...)`
-   *
-   * Note: The old API continues to work for backwards compatibility, but new projects should use AI Search.
-   *
-   * @see AiSearchAccountService
-   * @param autoragId Optional instance ID (omit for account-level operations)
-   */
   autorag(autoragId: string): AutoRAG;
   run<
     Name extends keyof AiModelList,
@@ -9829,24 +9538,9 @@ declare abstract class AiGateway {
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
-/**
- * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchInternalError instead.
- * @see AiSearchInternalError
- */
 interface AutoRAGInternalError extends Error {}
-/**
- * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchNotFoundError instead.
- * @see AiSearchNotFoundError
- */
 interface AutoRAGNotFoundError extends Error {}
-/**
- * @deprecated This error type is no longer used in the AI Search API.
- */
 interface AutoRAGUnauthorizedError extends Error {}
-/**
- * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchNameNotSetError instead.
- * @see AiSearchNameNotSetError
- */
 interface AutoRAGNameNotSetError extends Error {}
 type ComparisonFilter = {
   key: string;
@@ -9857,11 +9551,6 @@ type CompoundFilter = {
   type: "and" | "or";
   filters: ComparisonFilter[];
 };
-/**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchSearchRequest with the new API instead.
- * @see AiSearchSearchRequest
- */
 type AutoRagSearchRequest = {
   query: string;
   filters?: CompoundFilter | ComparisonFilter;
@@ -9876,31 +9565,16 @@ type AutoRagSearchRequest = {
   };
   rewrite_query?: boolean;
 };
-/**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchChatCompletionsRequest with the new API instead.
- * @see AiSearchChatCompletionsRequest
- */
 type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
   system_prompt?: string;
 };
-/**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchChatCompletionsRequest with stream: true instead.
- * @see AiSearchChatCompletionsRequest
- */
 type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
   "stream"
 > & {
   stream: true;
 };
-/**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchSearchResponse with the new API instead.
- * @see AiSearchSearchResponse
- */
 type AutoRagSearchResponse = {
   object: "vector_store.search_results.page";
   search_query: string;
@@ -9917,11 +9591,6 @@ type AutoRagSearchResponse = {
   has_more: boolean;
   next_page: string | null;
 };
-/**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchListResponse with the new API instead.
- * @see AiSearchListResponse
- */
 type AutoRagListResponse = {
   id: string;
   enable: boolean;
@@ -9931,51 +9600,14 @@ type AutoRagListResponse = {
   paused: boolean;
   status: string;
 }[];
-/**
- * @deprecated AutoRAG has been replaced by AI Search.
- * The new API returns different response formats for chat completions.
- */
 type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
-/**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use the new AI Search API instead: `env.AI.aiSearch`
- *
- * Migration guide:
- * - `env.AI.autorag().list()` → `env.AI.aiSearch.list()`
- * - `env.AI.autorag('id').search(...)` → `env.AI.aiSearch.get('id').search(...)`
- * - `env.AI.autorag('id').aiSearch(...)` → `env.AI.aiSearch.get('id').chatCompletions(...)`
- *
- * @see AiSearchAccountService
- * @see AiSearchInstanceService
- */
 declare abstract class AutoRAG {
-  /**
-   * @deprecated Use `env.AI.aiSearch.list()` instead.
-   * @see AiSearchAccountService.list
-   */
   list(): Promise<AutoRagListResponse>;
-  /**
-   * @deprecated Use `env.AI.aiSearch.get(id).search(...)` instead.
-   * Note: The new API uses a messages array instead of a query string.
-   * @see AiSearchInstanceService.search
-   */
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
-  /**
-   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
-   * @see AiSearchInstanceService.chatCompletions
-   */
   aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
-  /**
-   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
-   * @see AiSearchInstanceService.chatCompletions
-   */
   aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;
-  /**
-   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
-   * @see AiSearchInstanceService.chatCompletions
-   */
   aiSearch(
     params: AutoRagAiSearchRequest,
   ): Promise<AutoRagAiSearchResponse | Response>;
@@ -10460,7 +10092,8 @@ interface IncomingRequestCfPropertiesBotManagement {
    */
   clientTrustScore: number;
 }
-interface IncomingRequestCfPropertiesBotManagementEnterprise extends IncomingRequestCfPropertiesBotManagement {
+interface IncomingRequestCfPropertiesBotManagementEnterprise
+  extends IncomingRequestCfPropertiesBotManagement {
   /**
    * Results of Cloudflare's Bot Management analysis
    */
@@ -11016,10 +10649,6 @@ interface D1Meta {
    */
   served_by_region?: string;
   /**
-   * The three letters airport code of the colo that executed the query.
-   */
-  served_by_colo?: string;
-  /**
    * True if-and-only-if the database instance that executed the query was the primary.
    */
   served_by_primary?: boolean;
@@ -11104,15 +10733,6 @@ declare abstract class D1PreparedStatement {
 // ignored when `Disposable` is included in the standard lib.
 interface Disposable {}
 /**
- * The returned data after sending an email
- */
-interface EmailSendResult {
-  /**
-   * The Email Message ID
-   */
-  messageId: string;
-}
-/**
  * An email message that can be sent from a Worker.
  */
 interface EmailMessage {
@@ -11153,60 +10773,27 @@ interface ForwardableEmailMessage extends EmailMessage {
    * @param headers A [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
    * @returns A promise that resolves when the email message is forwarded.
    */
-  forward(rcptTo: string, headers?: Headers): Promise<EmailSendResult>;
+  forward(rcptTo: string, headers?: Headers): Promise<void>;
   /**
    * Reply to the sender of this email message with a new EmailMessage object.
    * @param message The reply message.
    * @returns A promise that resolves when the email message is replied.
    */
-  reply(message: EmailMessage): Promise<EmailSendResult>;
-}
-/** A file attachment for an email message */
-type EmailAttachment =
-  | {
-      disposition: "inline";
-      contentId: string;
-      filename: string;
-      type: string;
-      content: string | ArrayBuffer | ArrayBufferView;
-    }
-  | {
-      disposition: "attachment";
-      contentId?: undefined;
-      filename: string;
-      type: string;
-      content: string | ArrayBuffer | ArrayBufferView;
-    };
-/** An Email Address */
-interface EmailAddress {
-  name: string;
-  email: string;
+  reply(message: EmailMessage): Promise<void>;
 }
 /**
  * A binding that allows a Worker to send email messages.
  */
 interface SendEmail {
-  send(message: EmailMessage): Promise<EmailSendResult>;
-  send(builder: {
-    from: string | EmailAddress;
-    to: string | string[];
-    subject: string;
-    replyTo?: string | EmailAddress;
-    cc?: string | string[];
-    bcc?: string | string[];
-    headers?: Record<string, string>;
-    text?: string;
-    html?: string;
-    attachments?: EmailAttachment[];
-  }): Promise<EmailSendResult>;
+  send(message: EmailMessage): Promise<void>;
 }
 declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
 }
-declare type EmailExportedHandler<Env = unknown, Props = unknown> = (
+declare type EmailExportedHandler<Env = unknown> = (
   message: ForwardableEmailMessage,
   env: Env,
-  ctx: ExecutionContext<Props>,
+  ctx: ExecutionContext,
 ) => void | Promise<void>;
 declare module "cloudflare:email" {
   let _EmailMessage: {
@@ -11235,7 +10822,7 @@ interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
    *
-   * Calling this method returns an identical socket to if you call
+   * Calling this method returns an idential socket to if you call
    * `connect("host:port")` using the `host` and `port` fields from this object.
    * Pick whichever approach works better with your preferred DB client library.
    *
@@ -11372,86 +10959,6 @@ type ImageOutputOptions = {
   background?: string;
   anim?: boolean;
 };
-interface ImageMetadata {
-  id: string;
-  filename?: string;
-  uploaded?: string;
-  requireSignedURLs: boolean;
-  meta?: Record<string, unknown>;
-  variants: string[];
-  draft?: boolean;
-  creator?: string;
-}
-interface ImageUploadOptions {
-  id?: string;
-  filename?: string;
-  requireSignedURLs?: boolean;
-  metadata?: Record<string, unknown>;
-  creator?: string;
-  encoding?: "base64";
-}
-interface ImageUpdateOptions {
-  requireSignedURLs?: boolean;
-  metadata?: Record<string, unknown>;
-  creator?: string;
-}
-interface ImageListOptions {
-  limit?: number;
-  cursor?: string;
-  sortOrder?: "asc" | "desc";
-  creator?: string;
-}
-interface ImageList {
-  images: ImageMetadata[];
-  cursor?: string;
-  listComplete: boolean;
-}
-interface HostedImagesBinding {
-  /**
-   * Get detailed metadata for a hosted image
-   * @param imageId The ID of the image (UUID or custom ID)
-   * @returns Image metadata, or null if not found
-   */
-  details(imageId: string): Promise<ImageMetadata | null>;
-  /**
-   * Get the raw image data for a hosted image
-   * @param imageId The ID of the image (UUID or custom ID)
-   * @returns ReadableStream of image bytes, or null if not found
-   */
-  image(imageId: string): Promise<ReadableStream<Uint8Array> | null>;
-  /**
-   * Upload a new hosted image
-   * @param image The image file to upload
-   * @param options Upload configuration
-   * @returns Metadata for the uploaded image
-   * @throws {@link ImagesError} if upload fails
-   */
-  upload(
-    image: ReadableStream<Uint8Array> | ArrayBuffer,
-    options?: ImageUploadOptions,
-  ): Promise<ImageMetadata>;
-  /**
-   * Update hosted image metadata
-   * @param imageId The ID of the image
-   * @param options Properties to update
-   * @returns Updated image metadata
-   * @throws {@link ImagesError} if update fails
-   */
-  update(imageId: string, options: ImageUpdateOptions): Promise<ImageMetadata>;
-  /**
-   * Delete a hosted image
-   * @param imageId The ID of the image
-   * @returns True if deleted, false if not found
-   */
-  delete(imageId: string): Promise<boolean>;
-  /**
-   * List hosted images with pagination
-   * @param options List configuration
-   * @returns List of images with pagination info
-   * @throws {@link ImagesError} if list fails
-   */
-  list(options?: ImageListOptions): Promise<ImageList>;
-}
 interface ImagesBinding {
   /**
    * Get image metadata (type, width and height)
@@ -11471,10 +10978,6 @@ interface ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions,
   ): ImageTransformer;
-  /**
-   * Access hosted images CRUD operations
-   */
-  readonly hosted: HostedImagesBinding;
 }
 interface ImageTransformer {
   /**
@@ -11545,14 +11048,8 @@ interface MediaTransformer {
    * @returns A generator for producing the transformed media output
    */
   transform(
-    transform?: MediaTransformationInputOptions,
+    transform: MediaTransformationInputOptions,
   ): MediaTransformationGenerator;
-  /**
-   * Generates the final media output with specified options.
-   * @param output - Configuration for the output format and parameters
-   * @returns The final transformation result containing the transformed media
-   */
-  output(output?: MediaTransformationOutputOptions): MediaTransformationResult;
 }
 /**
  * Generator for producing media transformation results.
@@ -11564,7 +11061,7 @@ interface MediaTransformationGenerator {
    * @param output - Configuration for the output format and parameters
    * @returns The final transformation result containing the transformed media
    */
-  output(output?: MediaTransformationOutputOptions): MediaTransformationResult;
+  output(output: MediaTransformationOutputOptions): MediaTransformationResult;
 }
 /**
  * Result of a media transformation operation.
@@ -11573,19 +11070,19 @@ interface MediaTransformationGenerator {
 interface MediaTransformationResult {
   /**
    * Returns the transformed media as a readable stream of bytes.
-   * @returns A promise containing a readable stream with the transformed media
+   * @returns A stream containing the transformed media data
    */
-  media(): Promise<ReadableStream<Uint8Array>>;
+  media(): ReadableStream<Uint8Array>;
   /**
    * Returns the transformed media as an HTTP response object.
-   * @returns The transformed media as a Promise<Response>, ready to store in cache or return to users
+   * @returns The transformed media as a Response, ready to store in cache or return to users
    */
-  response(): Promise<Response>;
+  response(): Response;
   /**
    * Returns the MIME type of the transformed media.
-   * @returns A promise containing the content type string (e.g., 'image/jpeg', 'video/mp4')
+   * @returns The content type string (e.g., 'image/jpeg', 'video/mp4')
    */
-  contentType(): Promise<string>;
+  contentType(): string;
 }
 /**
  * Configuration options for transforming media input.
@@ -11706,7 +11203,7 @@ declare module "cloudflare:pipelines" {
     protected ctx: ExecutionContext;
     constructor(ctx: ExecutionContext, env: Env);
     /**
-     * run receives an array of PipelineRecord which can be
+     * run recieves an array of PipelineRecord which can be
      * transformed and returned to the pipeline
      * @param records Incoming records from the pipeline to be transformed
      * @param metadata Information about the specific pipeline calling the transformation entrypoint
@@ -12076,18 +11573,15 @@ declare namespace CloudflareWorkersModule {
     timestamp: Date;
     type: string;
   };
-  export type WorkflowStepContext = {
-    attempt: number;
-  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
-      callback: (ctx: WorkflowStepContext) => Promise<T>,
+      callback: () => Promise<T>,
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
-      callback: (ctx: WorkflowStepContext) => Promise<T>,
+      callback: () => Promise<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
@@ -12099,21 +11593,10 @@ declare namespace CloudflareWorkersModule {
       },
     ): Promise<WorkflowStepEvent<T>>;
   }
-  export type WorkflowInstanceStatus =
-    | "queued"
-    | "running"
-    | "paused"
-    | "errored"
-    | "terminated"
-    | "complete"
-    | "waiting"
-    | "waitingForPause"
-    | "unknown";
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
-  >
-    implements Rpc.WorkflowEntrypointBranded
+  > implements Rpc.WorkflowEntrypointBranded
   {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
     protected ctx: ExecutionContext;
@@ -12152,774 +11635,12 @@ declare module "cloudflare:sockets" {
   ): Socket;
   export { _connect as connect };
 }
-/**
- * Binding entrypoint for Cloudflare Stream.
- *
- * Usage:
- * - Binding-level operations:
- *   `await env.STREAM.videos.upload`
- *   `await env.STREAM.videos.createDirectUpload`
- *   `await env.STREAM.videos.*`
- *   `await env.STREAM.watermarks.*`
- * - Per-video operations:
- *   `await env.STREAM.video(id).downloads.*`
- *   `await env.STREAM.video(id).captions.*`
- *
- * Example usage:
- * ```ts
- * await env.STREAM.video(id).downloads.generate();
- *
- * const video = env.STREAM.video(id)
- * const captions = video.captions.list();
- * const videoDetails = video.details()
- * ```
- */
-interface StreamBinding {
-  /**
-   * Returns a handle scoped to a single video for per-video operations.
-   * @param id The unique identifier for the video.
-   * @returns A handle for per-video operations.
-   */
-  video(id: string): StreamVideoHandle;
-  /**
-   * Uploads a new video from a File.
-   * @param file The video file to upload.
-   * @returns The uploaded video details.
-   * @throws {BadRequestError} if the upload parameter is invalid
-   * @throws {QuotaReachedError} if the account storage capacity is exceeded
-   * @throws {MaxFileSizeError} if the file size is too large
-   * @throws {RateLimitedError} if the server received too many requests
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  upload(file: File): Promise<StreamVideo>;
-  /**
-   * Uploads a new video from a provided URL.
-   * @param url The URL to upload from.
-   * @param params Optional upload parameters.
-   * @returns The uploaded video details.
-   * @throws {BadRequestError} if the upload parameter is invalid or the URL is invalid
-   * @throws {QuotaReachedError} if the account storage capacity is exceeded
-   * @throws {MaxFileSizeError} if the file size is too large
-   * @throws {RateLimitedError} if the server received too many requests
-   * @throws {AlreadyUploadedError} if a video was already uploaded to this URL
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  upload(url: string, params?: StreamUrlUploadParams): Promise<StreamVideo>;
-  /**
-   * Creates a direct upload that allows video uploads without an API key.
-   * @param params Parameters for the direct upload
-   * @returns The direct upload details.
-   * @throws {BadRequestError} if the parameters are invalid
-   * @throws {RateLimitedError} if the server received too many requests
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  createDirectUpload(
-    params: StreamDirectUploadCreateParams,
-  ): Promise<StreamDirectUpload>;
-  videos: StreamVideos;
-  watermarks: StreamWatermarks;
-}
-/**
- * Handle for operations scoped to a single Stream video.
- */
-interface StreamVideoHandle {
-  /**
-   * The unique identifier for the video.
-   */
-  id: string;
-  /**
-   * Get a full videos details
-   * @returns The full video details.
-   * @throws {NotFoundError} if the video is not found
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  details(): Promise<StreamVideo>;
-  /**
-   * Update details for a single video.
-   * @param params The fields to update for the video.
-   * @returns The updated video details.
-   * @throws {NotFoundError} if the video is not found
-   * @throws {BadRequestError} if the parameters are invalid
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  update(params: StreamUpdateVideoParams): Promise<StreamVideo>;
-  /**
-   * Deletes a video and its copies from Cloudflare Stream.
-   * @returns A promise that resolves when deletion completes.
-   * @throws {NotFoundError} if the video is not found
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  delete(): Promise<void>;
-  /**
-   * Creates a signed URL token for a video.
-   * @returns The signed token that was created.
-   * @throws {InternalError} if the signing key cannot be retrieved or the token cannot be signed
-   */
-  generateToken(): Promise<string>;
-  downloads: StreamScopedDownloads;
-  captions: StreamScopedCaptions;
-}
-interface StreamVideo {
-  /**
-   * The unique identifier for the video.
-   */
-  id: string;
-  /**
-   * A user-defined identifier for the media creator.
-   */
-  creator: string | null;
-  /**
-   * The thumbnail URL for the video.
-   */
-  thumbnail: string;
-  /**
-   * The thumbnail timestamp percentage.
-   */
-  thumbnailTimestampPct: number;
-  /**
-   * Indicates whether the video is ready to stream.
-   */
-  readyToStream: boolean;
-  /**
-   * The date and time the video became ready to stream.
-   */
-  readyToStreamAt: string | null;
-  /**
-   * Processing status information.
-   */
-  status: StreamVideoStatus;
-  /**
-   * A user modifiable key-value store.
-   */
-  meta: Record<string, string>;
-  /**
-   * The date and time the video was created.
-   */
-  created: string;
-  /**
-   * The date and time the video was last modified.
-   */
-  modified: string;
-  /**
-   * The date and time at which the video will be deleted.
-   */
-  scheduledDeletion: string | null;
-  /**
-   * The size of the video in bytes.
-   */
-  size: number;
-  /**
-   * The preview URL for the video.
-   */
-  preview?: string;
-  /**
-   * Origins allowed to display the video.
-   */
-  allowedOrigins: Array<string>;
-  /**
-   * Indicates whether signed URLs are required.
-   */
-  requireSignedURLs: boolean | null;
-  /**
-   * The date and time the video was uploaded.
-   */
-  uploaded: string | null;
-  /**
-   * The date and time when the upload URL expires.
-   */
-  uploadExpiry: string | null;
-  /**
-   * The maximum size in bytes for direct uploads.
-   */
-  maxSizeBytes: number | null;
-  /**
-   * The maximum duration in seconds for direct uploads.
-   */
-  maxDurationSeconds: number | null;
-  /**
-   * The video duration in seconds. -1 indicates unknown.
-   */
-  duration: number;
-  /**
-   * Input metadata for the original upload.
-   */
-  input: StreamVideoInput;
-  /**
-   * Playback URLs for the video.
-   */
-  hlsPlaybackUrl: string;
-  dashPlaybackUrl: string;
-  /**
-   * The watermark applied to the video, if any.
-   */
-  watermark: StreamWatermark | null;
-  /**
-   * The live input id associated with the video, if any.
-   */
-  liveInputId?: string | null;
-  /**
-   * The source video id if this is a clip.
-   */
-  clippedFromId: string | null;
-  /**
-   * Public details associated with the video.
-   */
-  publicDetails: StreamPublicDetails | null;
-}
-type StreamVideoStatus = {
-  /**
-   * The current processing state.
-   */
-  state: string;
-  /**
-   * The current processing step.
-   */
-  step?: string;
-  /**
-   * The percent complete as a string.
-   */
-  pctComplete?: string;
-  /**
-   * An error reason code, if applicable.
-   */
-  errorReasonCode: string;
-  /**
-   * An error reason text, if applicable.
-   */
-  errorReasonText: string;
-};
-type StreamVideoInput = {
-  /**
-   * The input width in pixels.
-   */
-  width: number;
-  /**
-   * The input height in pixels.
-   */
-  height: number;
-};
-type StreamPublicDetails = {
-  /**
-   * The public title for the video.
-   */
-  title: string | null;
-  /**
-   * The public share link.
-   */
-  share_link: string | null;
-  /**
-   * The public channel link.
-   */
-  channel_link: string | null;
-  /**
-   * The public logo URL.
-   */
-  logo: string | null;
-};
-type StreamDirectUpload = {
-  /**
-   * The URL an unauthenticated upload can use for a single multipart request.
-   */
-  uploadURL: string;
-  /**
-   * A Cloudflare-generated unique identifier for a media item.
-   */
-  id: string;
-  /**
-   * The watermark profile applied to the upload.
-   */
-  watermark: StreamWatermark | null;
-  /**
-   * The scheduled deletion time, if any.
-   */
-  scheduledDeletion: string | null;
-};
-type StreamDirectUploadCreateParams = {
-  /**
-   * The maximum duration in seconds for a video upload.
-   */
-  maxDurationSeconds: number;
-  /**
-   * The date and time after upload when videos will not be accepted.
-   */
-  expiry?: string;
-  /**
-   * A user-defined identifier for the media creator.
-   */
-  creator?: string;
-  /**
-   * A user modifiable key-value store used to reference other systems of record for
-   * managing videos.
-   */
-  meta?: Record<string, string>;
-  /**
-   * Lists the origins allowed to display the video.
-   */
-  allowedOrigins?: Array<string>;
-  /**
-   * Indicates whether the video can be accessed using the id. When set to `true`,
-   * a signed token must be generated with a signing key to view the video.
-   */
-  requireSignedURLs?: boolean;
-  /**
-   * The thumbnail timestamp percentage.
-   */
-  thumbnailTimestampPct?: number;
-  /**
-   * The date and time at which the video will be deleted. Include `null` to remove
-   * a scheduled deletion.
-   */
-  scheduledDeletion?: string | null;
-  /**
-   * The watermark profile to apply.
-   */
-  watermark?: StreamDirectUploadWatermark;
-};
-type StreamDirectUploadWatermark = {
-  /**
-   * The unique identifier for the watermark profile.
-   */
-  id: string;
-};
-type StreamUrlUploadParams = {
-  /**
-   * Lists the origins allowed to display the video. Enter allowed origin
-   * domains in an array and use `*` for wildcard subdomains. Empty arrays allow the
-   * video to be viewed on any origin.
-   */
-  allowedOrigins?: Array<string>;
-  /**
-   * A user-defined identifier for the media creator.
-   */
-  creator?: string;
-  /**
-   * A user modifiable key-value store used to reference other systems of
-   * record for managing videos.
-   */
-  meta?: Record<string, string>;
-  /**
-   * Indicates whether the video can be a accessed using the id. When
-   * set to `true`, a signed token must be generated with a signing key to view the
-   * video.
-   */
-  requireSignedURLs?: boolean;
-  /**
-   * Indicates the date and time at which the video will be deleted. Omit
-   * the field to indicate no change, or include with a `null` value to remove an
-   * existing scheduled deletion. If specified, must be at least 30 days from upload
-   * time.
-   */
-  scheduledDeletion?: string | null;
-  /**
-   * The timestamp for a thumbnail image calculated as a percentage value
-   * of the video's duration. To convert from a second-wise timestamp to a
-   * percentage, divide the desired timestamp by the total duration of the video. If
-   * this value is not set, the default thumbnail image is taken from 0s of the
-   * video.
-   */
-  thumbnailTimestampPct?: number;
-  /**
-   * The identifier for the watermark profile
-   */
-  watermarkId?: string;
-};
-interface StreamScopedCaptions {
-  /**
-   * Uploads the caption or subtitle file to the endpoint for a specific BCP47 language.
-   * One caption or subtitle file per language is allowed.
-   * @param language The BCP 47 language tag for the caption or subtitle.
-   * @param file The caption or subtitle file to upload.
-   * @returns The created caption entry.
-   * @throws {NotFoundError} if the video is not found
-   * @throws {BadRequestError} if the language or file is invalid
-   * @throws {MaxFileSizeError} if the file size is too large
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  upload(language: string, file: File): Promise<StreamCaption>;
-  /**
-   * Generate captions or subtitles for the provided language via AI.
-   * @param language The BCP 47 language tag to generate.
-   * @returns The generated caption entry.
-   * @throws {NotFoundError} if the video is not found
-   * @throws {BadRequestError} if the language is invalid
-   * @throws {StreamError} if a generated caption already exists
-   * @throws {StreamError} if the video duration is too long
-   * @throws {StreamError} if the video is missing audio
-   * @throws {StreamError} if the requested language is not supported
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  generate(language: string): Promise<StreamCaption>;
-  /**
-   * Lists the captions or subtitles.
-   * Use the language parameter to filter by a specific language.
-   * @param language The optional BCP 47 language tag to filter by.
-   * @returns The list of captions or subtitles.
-   * @throws {NotFoundError} if the video or caption is not found
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  list(language?: string): Promise<StreamCaption[]>;
-  /**
-   * Removes the captions or subtitles from a video.
-   * @param language The BCP 47 language tag to remove.
-   * @returns A promise that resolves when deletion completes.
-   * @throws {NotFoundError} if the video or caption is not found
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  delete(language: string): Promise<void>;
-}
-interface StreamScopedDownloads {
-  /**
-   * Generates a download for a video when a video is ready to view. Available
-   * types are `default` and `audio`. Defaults to `default` when omitted.
-   * @param downloadType The download type to create.
-   * @returns The current downloads for the video.
-   * @throws {NotFoundError} if the video is not found
-   * @throws {BadRequestError} if the download type is invalid
-   * @throws {StreamError} if the video duration is too long to generate a download
-   * @throws {StreamError} if the video is not ready to stream
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  generate(
-    downloadType?: StreamDownloadType,
-  ): Promise<StreamDownloadGetResponse>;
-  /**
-   * Lists the downloads created for a video.
-   * @returns The current downloads for the video.
-   * @throws {NotFoundError} if the video or downloads are not found
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  get(): Promise<StreamDownloadGetResponse>;
-  /**
-   * Delete the downloads for a video. Available types are `default` and `audio`.
-   * Defaults to `default` when omitted.
-   * @param downloadType The download type to delete.
-   * @returns A promise that resolves when deletion completes.
-   * @throws {NotFoundError} if the video or downloads are not found
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  delete(downloadType?: StreamDownloadType): Promise<void>;
-}
-interface StreamVideos {
-  /**
-   * Lists all videos in a users account.
-   * @returns The list of videos.
-   * @throws {BadRequestError} if the parameters are invalid
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  list(params?: StreamVideosListParams): Promise<StreamVideo[]>;
-}
-interface StreamWatermarks {
-  /**
-   * Generate a new watermark profile
-   * @param file The image file to upload
-   * @param params The watermark creation parameters.
-   * @returns The created watermark profile.
-   * @throws {BadRequestError} if the parameters are invalid
-   * @throws {InvalidURLError} if the URL is invalid
-   * @throws {MaxFileSizeError} if the file size is too large
-   * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  generate(
-    file: File,
-    params: StreamWatermarkCreateParams,
-  ): Promise<StreamWatermark>;
-  /**
-   * Generate a new watermark profile
-   * @param url The image url to upload
-   * @param params The watermark creation parameters.
-   * @returns The created watermark profile.
-   * @throws {BadRequestError} if the parameters are invalid
-   * @throws {InvalidURLError} if the URL is invalid
-   * @throws {MaxFileSizeError} if the file size is too large
-   * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  generate(
-    url: string,
-    params: StreamWatermarkCreateParams,
-  ): Promise<StreamWatermark>;
-  /**
-   * Lists all watermark profiles for an account.
-   * @returns The list of watermark profiles.
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  list(): Promise<StreamWatermark[]>;
-  /**
-   * Retrieves details for a single watermark profile.
-   * @param watermarkId The watermark profile identifier.
-   * @returns The watermark profile details.
-   * @throws {NotFoundError} if the watermark is not found
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  get(watermarkId: string): Promise<StreamWatermark>;
-  /**
-   * Deletes a watermark profile.
-   * @param watermarkId The watermark profile identifier.
-   * @returns A promise that resolves when deletion completes.
-   * @throws {NotFoundError} if the watermark is not found
-   * @throws {InternalError} if an unexpected error occurs
-   */
-  delete(watermarkId: string): Promise<void>;
-}
-type StreamUpdateVideoParams = {
-  /**
-   * Lists the origins allowed to display the video. Enter allowed origin
-   * domains in an array and use `*` for wildcard subdomains. Empty arrays allow the
-   * video to be viewed on any origin.
-   */
-  allowedOrigins?: Array<string>;
-  /**
-   * A user-defined identifier for the media creator.
-   */
-  creator?: string;
-  /**
-   * The maximum duration in seconds for a video upload. Can be set for a
-   * video that is not yet uploaded to limit its duration. Uploads that exceed the
-   * specified duration will fail during processing. A value of `-1` means the value
-   * is unknown.
-   */
-  maxDurationSeconds?: number;
-  /**
-   * A user modifiable key-value store used to reference other systems of
-   * record for managing videos.
-   */
-  meta?: Record<string, string>;
-  /**
-   * Indicates whether the video can be a accessed using the id. When
-   * set to `true`, a signed token must be generated with a signing key to view the
-   * video.
-   */
-  requireSignedURLs?: boolean;
-  /**
-   * Indicates the date and time at which the video will be deleted. Omit
-   * the field to indicate no change, or include with a `null` value to remove an
-   * existing scheduled deletion. If specified, must be at least 30 days from upload
-   * time.
-   */
-  scheduledDeletion?: string | null;
-  /**
-   * The timestamp for a thumbnail image calculated as a percentage value
-   * of the video's duration. To convert from a second-wise timestamp to a
-   * percentage, divide the desired timestamp by the total duration of the video. If
-   * this value is not set, the default thumbnail image is taken from 0s of the
-   * video.
-   */
-  thumbnailTimestampPct?: number;
-};
-type StreamCaption = {
-  /**
-   * Whether the caption was generated via AI.
-   */
-  generated?: boolean;
-  /**
-   * The language label displayed in the native language to users.
-   */
-  label: string;
-  /**
-   * The language tag in BCP 47 format.
-   */
-  language: string;
-  /**
-   * The status of a generated caption.
-   */
-  status?: "ready" | "inprogress" | "error";
-};
-type StreamDownloadStatus = "ready" | "inprogress" | "error";
-type StreamDownloadType = "default" | "audio";
-type StreamDownload = {
-  /**
-   * Indicates the progress as a percentage between 0 and 100.
-   */
-  percentComplete: number;
-  /**
-   * The status of a generated download.
-   */
-  status: StreamDownloadStatus;
-  /**
-   * The URL to access the generated download.
-   */
-  url?: string;
-};
-/**
- * An object with download type keys. Each key is optional and only present if that
- * download type has been created.
- */
-type StreamDownloadGetResponse = {
-  /**
-   * The audio-only download. Only present if this download type has been created.
-   */
-  audio?: StreamDownload;
-  /**
-   * The default video download. Only present if this download type has been created.
-   */
-  default?: StreamDownload;
-};
-type StreamWatermarkPosition =
-  | "upperRight"
-  | "upperLeft"
-  | "lowerLeft"
-  | "lowerRight"
-  | "center";
-type StreamWatermark = {
-  /**
-   * The unique identifier for a watermark profile.
-   */
-  id: string;
-  /**
-   * The size of the image in bytes.
-   */
-  size: number;
-  /**
-   * The height of the image in pixels.
-   */
-  height: number;
-  /**
-   * The width of the image in pixels.
-   */
-  width: number;
-  /**
-   * The date and a time a watermark profile was created.
-   */
-  created: string;
-  /**
-   * The source URL for a downloaded image. If the watermark profile was created via
-   * direct upload, this field is null.
-   */
-  downloadedFrom: string | null;
-  /**
-   * A short description of the watermark profile.
-   */
-  name: string;
-  /**
-   * The translucency of the image. A value of `0.0` makes the image completely
-   * transparent, and `1.0` makes the image completely opaque. Note that if the image
-   * is already semi-transparent, setting this to `1.0` will not make the image
-   * completely opaque.
-   */
-  opacity: number;
-  /**
-   * The whitespace between the adjacent edges (determined by position) of the video
-   * and the image. `0.0` indicates no padding, and `1.0` indicates a fully padded
-   * video width or length, as determined by the algorithm.
-   */
-  padding: number;
-  /**
-   * The size of the image relative to the overall size of the video. This parameter
-   * will adapt to horizontal and vertical videos automatically. `0.0` indicates no
-   * scaling (use the size of the image as-is), and `1.0 `fills the entire video.
-   */
-  scale: number;
-  /**
-   * The location of the image. Valid positions are: `upperRight`, `upperLeft`,
-   * `lowerLeft`, `lowerRight`, and `center`. Note that `center` ignores the
-   * `padding` parameter.
-   */
-  position: StreamWatermarkPosition;
-};
-type StreamWatermarkCreateParams = {
-  /**
-   * A short description of the watermark profile.
-   */
-  name?: string;
-  /**
-   * The translucency of the image. A value of `0.0` makes the image completely
-   * transparent, and `1.0` makes the image completely opaque. Note that if the
-   * image is already semi-transparent, setting this to `1.0` will not make the
-   * image completely opaque.
-   */
-  opacity?: number;
-  /**
-   * The whitespace between the adjacent edges (determined by position) of the
-   * video and the image. `0.0` indicates no padding, and `1.0` indicates a fully
-   * padded video width or length, as determined by the algorithm.
-   */
-  padding?: number;
-  /**
-   * The size of the image relative to the overall size of the video. This
-   * parameter will adapt to horizontal and vertical videos automatically. `0.0`
-   * indicates no scaling (use the size of the image as-is), and `1.0 `fills the
-   * entire video.
-   */
-  scale?: number;
-  /**
-   * The location of the image.
-   */
-  position?: StreamWatermarkPosition;
-};
-type StreamVideosListParams = {
-  /**
-   * The maximum number of videos to return.
-   */
-  limit?: number;
-  /**
-   * Return videos created before this timestamp.
-   * (RFC3339/RFC3339Nano)
-   */
-  before?: string;
-  /**
-   * Comparison operator for the `before` field.
-   * @default 'lt'
-   */
-  beforeComp?: StreamPaginationComparison;
-  /**
-   * Return videos created after this timestamp.
-   * (RFC3339/RFC3339Nano)
-   */
-  after?: string;
-  /**
-   * Comparison operator for the `after` field.
-   * @default 'gte'
-   */
-  afterComp?: StreamPaginationComparison;
-};
-type StreamPaginationComparison = "eq" | "gt" | "gte" | "lt" | "lte";
-/**
- * Error object for Stream binding operations.
- */
-interface StreamError extends Error {
-  readonly code: number;
-  readonly statusCode: number;
-  readonly message: string;
-  readonly stack?: string;
-}
-interface InternalError extends StreamError {
-  name: "InternalError";
-}
-interface BadRequestError extends StreamError {
-  name: "BadRequestError";
-}
-interface NotFoundError extends StreamError {
-  name: "NotFoundError";
-}
-interface ForbiddenError extends StreamError {
-  name: "ForbiddenError";
-}
-interface RateLimitedError extends StreamError {
-  name: "RateLimitedError";
-}
-interface QuotaReachedError extends StreamError {
-  name: "QuotaReachedError";
-}
-interface MaxFileSizeError extends StreamError {
-  name: "MaxFileSizeError";
-}
-interface InvalidURLError extends StreamError {
-  name: "InvalidURLError";
-}
-interface AlreadyUploadedError extends StreamError {
-  name: "AlreadyUploadedError";
-}
-interface TooManyWatermarksError extends StreamError {
-  name: "TooManyWatermarksError";
-}
 type MarkdownDocument = {
   name: string;
   blob: Blob;
 };
 type ConversionResponse =
   | {
-      id: string;
       name: string;
       mimeType: string;
       format: "markdown";
@@ -12927,7 +11648,6 @@ type ConversionResponse =
       data: string;
     }
   | {
-      id: string;
       name: string;
       mimeType: string;
       format: "error";
@@ -12945,8 +11665,6 @@ type ConversionOptions = {
     images?: EmbeddedImageConversionOptions & {
       convertOGImage?: boolean;
     };
-    hostname?: string;
-    cssSelector?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;
@@ -13113,15 +11831,6 @@ declare namespace TailStream {
     readonly level: "debug" | "error" | "info" | "log" | "warn";
     readonly message: object;
   }
-  interface DroppedEventsDiagnostic {
-    readonly diagnosticsType: "droppedEvents";
-    readonly count: number;
-  }
-  interface StreamDiagnostic {
-    readonly type: "streamDiagnostic";
-    // To add new diagnostic types, define a new interface and add it to this union type.
-    readonly diagnostic: DroppedEventsDiagnostic;
-  }
   // This marks the worker handler return information.
   // This is separate from Outcome because the worker invocation can live for a long time after
   // returning. For example - Websockets that return an http upgrade response but then continue
@@ -13154,7 +11863,6 @@ declare namespace TailStream {
     | DiagnosticChannelEvent
     | Exception
     | Log
-    | StreamDiagnostic
     | Return
     | Attributes;
   // Context in which this trace event lives.
@@ -13170,7 +11878,7 @@ declare namespace TailStream {
     // For Hibernate and Mark this would be the span under which they were emitted.
     // spanId is not set ONLY if:
     //  1. This is an Onset event
-    //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+    //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
     readonly spanId?: string;
   }
   interface TailEvent<Event extends EventType> {
