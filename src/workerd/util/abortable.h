@@ -12,10 +12,11 @@ namespace workerd {
 template <typename T>
 class AbortableImpl final {
  public:
-  AbortableImpl(kj::Own<T> inner, RefcountedCanceler& canceler)
-      : canceler(kj::addRef(canceler)),
+  AbortableImpl(kj::Own<T> inner, kj::Rc<RefcountedCanceler> canceler, kj::Own<void> opaqueHandle)
+      : canceler(canceler.addRef()),
+        opaqueHandle(kj::mv(opaqueHandle)),
         inner(kj::mv(inner)),
-        onCancel(*(this->canceler), [this]() { this->inner = kj::none; }) {}
+        onCancel(canceler.addRef(), [this]() { this->inner = kj::none; }) {}
 
   template <typename V, typename... Args, typename... ArgsT>
   kj::Promise<V> wrap(kj::Promise<V> (T::*fn)(ArgsT...), Args&&... args) {
@@ -42,7 +43,8 @@ class AbortableImpl final {
   }
 
  private:
-  kj::Own<RefcountedCanceler> canceler;
+  kj::Rc<RefcountedCanceler> canceler;
+  kj::Own<void> opaqueHandle;
   kj::Maybe<kj::Own<T>> inner;
   RefcountedCanceler::Listener onCancel;
 };
@@ -57,8 +59,10 @@ class AbortableImpl final {
 // could be combined into a single utility.
 class AbortableInputStream final: public kj::AsyncInputStream, public kj::Refcounted {
  public:
-  AbortableInputStream(kj::Own<kj::AsyncInputStream> inner, RefcountedCanceler& canceler)
-      : impl(kj::mv(inner), canceler) {}
+  AbortableInputStream(kj::Own<kj::AsyncInputStream> inner,
+      kj::Rc<RefcountedCanceler> canceler,
+      kj::Own<void> opaqueHandle)
+      : impl(kj::mv(inner), kj::mv(canceler), kj::mv(opaqueHandle)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     kj::Promise<size_t> (kj::AsyncInputStream::*tryRead)(void*, size_t, size_t) =
@@ -84,8 +88,9 @@ class AbortableInputStream final: public kj::AsyncInputStream, public kj::Refcou
 // RefcountedCanceler, which will be triggered when the AbortSignal is triggered.
 class AbortableWebSocket final: public kj::WebSocket, public kj::Refcounted {
  public:
-  AbortableWebSocket(kj::Own<kj::WebSocket> inner, RefcountedCanceler& canceler)
-      : impl(kj::mv(inner), canceler) {}
+  AbortableWebSocket(
+      kj::Own<kj::WebSocket> inner, kj::Rc<RefcountedCanceler> canceler, kj::Own<void> opaqueHandle)
+      : impl(kj::mv(inner), kj::mv(canceler), kj::mv(opaqueHandle)) {}
 
   kj::Promise<void> send(kj::ArrayPtr<const kj::byte> message) override {
     return impl.wrap(
