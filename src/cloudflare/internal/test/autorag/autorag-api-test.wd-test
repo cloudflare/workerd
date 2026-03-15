@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "autorag-api-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "rpc"],
         bindings = [
         (
           name = "ai",
@@ -15,7 +15,10 @@ const unitTests :Workerd.Config = (
             moduleName = "cloudflare-internal:ai-api",
             innerBindings = [(
               name = "fetcher",
-              service = "autorag-mock"
+              service = (
+                name = "autorag-mock",
+                entrypoint = "ServiceEntrypoint"
+              )
             )],
           )
         )
