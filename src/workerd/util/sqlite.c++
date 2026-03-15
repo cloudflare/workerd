@@ -87,10 +87,11 @@ constexpr size_t RA_MAX_METRICS_QUERY_SIZE = 1024;
 
 kj::String dbErrorMessage(int errorCode, sqlite3* db) {
   kj::StringTree msg = kj::strTree(sqlite3_errmsg(db));
+  auto extendedErrorMessage = sqlite3_extended_errcode(db);
   if (int offset = sqlite3_error_offset(db); offset != -1) {
     msg = kj::strTree(kj::mv(msg), " at offset ", offset);
   }
-  msg = kj::strTree(kj::mv(msg), ": ", namedErrorCode(errorCode));
+  msg = kj::strTree(kj::mv(msg), ": ", namedErrorCode(errorCode), "- ", extendedErrorMessage);
   return msg.flatten();
 }
 
