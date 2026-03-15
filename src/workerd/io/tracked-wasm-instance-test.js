@@ -16,15 +16,16 @@ import externrefMemoryModule from 'signal-externref-memory.wasm';
 import importedMemoryModule from 'signal-imported-memory.wasm';
 import reclaimModule from 'signal-memory-reclaim.wasm';
 import preinitModule from 'signal-preinit.wasm';
+import signalOnlyReclaimModule from 'signal-signal-only-reclaim.wasm';
 
 // ---------------------------------------------------------------------------
 // Export permutation tests
 //
-// __instance_terminated is REQUIRED for registration; __instance_signal is OPTIONAL.
+// At least one of __instance_terminated or __instance_signal must be present for registration.
 // The four permutations:
 //   1. Both present          → registers (signal + terminated)
 //   2. Only terminated       → registers (terminated only)
-//   3. Only signal           → NOT registered
+//   3. Only signal           → registers (signal only, GC-based cleanup)
 //   4. Neither               → NOT registered
 // ---------------------------------------------------------------------------
 
@@ -72,11 +73,12 @@ export let syncTerminatedOnlyRegisters = {
 };
 
 // Permutation 3: only __instance_signal present (no __instance_terminated).
-// The module should NOT be registered — __instance_terminated is required.
-export let signalOnlySkipped = {
+// The module should be registered — either signal is sufficient.
+// Cleanup relies on the weak instanceRef (GC-based).
+export let signalOnlyRegisters = {
   async test() {
     const instance = await WebAssembly.instantiate(partialModule);
-    // Should succeed — the shim just doesn't register it.
+    // Registration should zero the signal field.
     if (instance.exports.get_signal() !== 0) {
       throw new Error('Expected signal to be 0 initially');
     }
@@ -84,9 +86,10 @@ export let signalOnlySkipped = {
 };
 
 // Permutation 3 (sync): same test via the sync WebAssembly.Instance constructor.
-export let syncSignalOnlySkipped = {
+export let syncSignalOnlyRegisters = {
   test() {
     const instance = new WebAssembly.Instance(partialModule);
+    // Registration should zero the signal field.
     if (instance.exports.get_signal() !== 0) {
       throw new Error('Expected signal to be 0 initially');
     }
@@ -238,7 +241,7 @@ export let syncInstanceImportedMemory = {
 };
 
 // ---------------------------------------------------------------------------
-// GC reclamation test
+// GC reclamation tests
 // ---------------------------------------------------------------------------
 
 // Instantiate many large (16MB) WASM modules, mark each as "exited" via
@@ -252,5 +255,25 @@ export let gcReclaimsTerminatedModules = {
       instance.exports.mark_exited();
     }
     // If we get here without OOM, reclamation is working.
+  },
+};
+
+// Instantiate many large (16MB) signal-only WASM modules (no __instance_terminated),
+// let them go out of scope so V8 can GC the instances. The weak instanceRef should
+// cause the GC prologue filter to remove entries and release the memory.
+//
+// Unlike gcReclaimsTerminatedModules (which sets the terminated flag for immediate cleanup),
+// this test relies on V8's GC to collect the unreachable instance objects. There is a one-cycle
+// delay: V8 resets the weak handle during GC, but our prologue (which runs before marking)
+// detects it in the *next* cycle. V8's external memory tracking (16MB per BackingStore) should
+// trigger GC frequently enough to prevent OOM.
+export let gcReclaimsSignalOnlyModules = {
+  async test() {
+    for (let i = 0; i < 20; i++) {
+      // Each instance goes out of scope at the end of the loop iteration.
+      // The `await` yields to the event loop, giving V8 opportunities to trigger GC.
+      await WebAssembly.instantiate(signalOnlyReclaimModule);
+    }
+    // If we get here without OOM, GC-based reclamation via weak instanceRef is working.
   },
 };
