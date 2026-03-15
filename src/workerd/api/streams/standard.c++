@@ -9,6 +9,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
@@ -1865,6 +1866,13 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
 
   jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
     KJ_IF_SOME(s, state) {
+      // Note: We do NOT call beginOperation()/endOperation() here. The caller
+      // (ReadableStreamJsController::drainingRead) manages the operation scope
+      // around both this call and the returned promise's lifetime. If we added
+      // our own beginOperation/endOperation here, the endOperation would fire
+      // before the caller's wrapDrainingRead could set up its .then() callbacks,
+      // potentially destroying the Consumer while the returned promise still has
+      // dangling this-capturing callbacks from consumer->drainingRead().
       return s.consumer->drainingRead(js, maxRead);
     }
 
@@ -2104,6 +2112,10 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
 
   jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
     KJ_IF_SOME(s, state) {
+      // Note: We do NOT call beginOperation()/endOperation() here. The caller
+      // (ReadableStreamJsController::drainingRead) manages the operation scope
+      // around both this call and the returned promise's lifetime. See the
+      // comment in ValueReadable::drainingRead for the detailed explanation.
       return s.consumer->drainingRead(js, maxRead);
     }
 
@@ -2835,10 +2847,18 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
   // The drainingRead implementation captures `this` (the Consumer) in promise lambdas to
   // clear hasPendingDrainingRead. If the state is changed (destroying the Consumer) before
   // those callbacks run, we get a use-after-free.
+  //
+  // CRITICAL: state.beginOperation() MUST be called BEFORE consumer->drainingRead(), not
+  // after. The consumer->drainingRead() call may trigger onConsumerWantsData -> forcePull
+  // -> close/error, which calls deferTransitionTo. If no operation is in progress at that
+  // point, the transition fires immediately, destroying the Consumer while we're still
+  // inside its method and before the returned promise's .then() callbacks are set up.
+  // The endOperation() happens in the .then() callbacks below, ensuring the deferred
+  // state change only fires after the promise resolves/rejects and the Consumer's
+  // this-capturing callbacks have already run.
   auto wrapDrainingRead =
       [this](jsg::Lock& js,
           jsg::Promise<DrainingReadResult> promise) -> jsg::Promise<DrainingReadResult> {
-    state.beginOperation();
     return promise.then(js, [this](jsg::Lock& js, DrainingReadResult result) {
       if (state.endOperation()) {
         // A pending state was applied. Call the appropriate callback.
@@ -2847,6 +2867,10 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
         } else if (state.template is<StreamStates::Errored>()) {
           KJ_IF_SOME(err, state.template tryGetUnsafe<StreamStates::Errored>()) {
             lock.onError(js, err.getHandle(js));
+            // The error was applied during this operation — the data we collected
+            // may be invalid. Discard it and propagate the error rather than
+            // silently returning possibly-corrupt data.
+            js.throwException(err.addRef(js));
           }
         }
       }
@@ -2876,10 +2900,28 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
       return js.rejectedPromise<DrainingReadResult>(errored.addRef(js));
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
-      return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+      // beginOperation MUST be before consumer->drainingRead() — see comment above.
+      state.beginOperation();
+      return js.tryCatch([&]() {
+        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+      }, [&](jsg::Value exception) -> jsg::Promise<DrainingReadResult> {
+        state.clearPendingState();
+        (void)state.endOperation();
+        doError(js, exception.getHandle(js));
+        return js.rejectedPromise<DrainingReadResult>(kj::mv(exception));
+      });
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+      // beginOperation MUST be before consumer->drainingRead() — see comment above.
+      state.beginOperation();
+      return js.tryCatch([&]() {
+        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+      }, [&](jsg::Value exception) -> jsg::Promise<DrainingReadResult> {
+        state.clearPendingState();
+        (void)state.endOperation();
+        doError(js, exception.getHandle(js));
+        return js.rejectedPromise<DrainingReadResult>(kj::mv(exception));
+      });
     }
   }
   KJ_UNREACHABLE;
@@ -3281,6 +3323,11 @@ class AllReader {
   }
 };
 
+// PumpToReader implements the original JS promise-loop approach to pumping data from
+// a ReadableStream to a WritableStreamSink. It reads one chunk at a time using the
+// standard read() API, writes each chunk to the sink, and loops until done or errored.
+// This is the fallback path used when the ENABLE_DRAINING_READ_ON_STANDARD_STREAMS
+// autogate is not enabled.
 class PumpToReader {
  public:
   PumpToReader(jsg::Ref<ReadableStream> stream, kj::Own<WritableStreamSink> sink, bool end)
@@ -3303,17 +3350,6 @@ class PumpToReader {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         auto readable = stream.addRef();
         state.template transitionTo<Pumping>();
-        // Ownership of readable passes into the pump loop...
-        // Ownership of the sink remains with the PumpToReader...
-        // The JS Promise loop uses an IoOwn wrapping a weak ref to the PumpToReader...
-        // The ownership of everything here is a bit complicated. We have a kj::Promise
-        // wrapping a JS Promise that is essentially a loop of JS read promises followed
-        // by kj write promise. If the outer kj Promise is dropped, the PumpToReader attached
-        // to it is dropped. When that happens, there's a chance the JS continuation will still
-        // be scheduled to run. The IoOwn ensures that the PumpToReader, and the sink it owns,
-        // are always accessed from the right IoContext. The WeakRef ensures that if the
-        // PumpToReader is freed while the JS continuation is pending, there won't be a dangling
-        // reference.
         return ioContext.awaitJs(
             js, pumpLoop(js, ioContext, kj::mv(readable), ioContext.addObject(self->addRef())));
       }
@@ -3336,10 +3372,6 @@ class PumpToReader {
   };
   IoContext& ioContext;
 
-  // State machine for PumpToReader:
-  // Closed and kj::Exception are terminal states (pump is done).
-  // jsg::Ref<ReadableStream> is the initial state (has stream to pump).
-  // Pumping is the active state (pump is in progress).
   using State = StateMachine<TerminalStates<StreamStates::Closed>,
       ErrorState<kj::Exception>,
       Pumping,
@@ -3377,61 +3409,16 @@ class PumpToReader {
         return js.rejectedPromise<void>(kj::cp(errored));
       }
       KJ_CASE_ONEOF(pumping, Pumping) {
-        using Result = kj::OneOf<Pumping,  // Continue with next read.
-            kj::Array<kj::byte>,           // Bytes to write were returned.
-            StreamStates::Closed,          // Readable indicated done.
-            jsg::Value>;                   // There was an error.
+        using Result = kj::OneOf<Pumping, kj::Array<kj::byte>, StreamStates::Closed, jsg::Value>;
 
-        // The flow here is relatively straightforward but the ownership of
-        // readable/pumpToReader is fairly complicated.
-        //
-        // First, we read from the readable, attaching both a success and fail
-        // continuation. In the success continuation, we check the read result
-        // and determine if the readable is done, if the readable provided bytes,
-        // or if the read failed. This result is passed to another continuation
-        // that processes the result.
-        //
-        // Within that second continuation, we first check to see if the PumpToReader
-        // is still alive. It won't be if the kj::Promise representing the pump has
-        // been dropped. If it is not alive, we clean up by canceling the readable
-        // if necessary and just stopping. If the PumpToReader is alive, our next
-        // step is determined by the result of the read.
-        //
-        // If the read provided bytes, we write those into the sink, which returns
-        // a kj::Promise wrapped with a JS promise. If that write fails, we error
-        // the PumpToReader and cleanup. If the write succeeds, we loop again for
-        // another read.
-        //
-        // If the read indicates that we're done, we close the PumpToReader and
-        // cleanup.
-        //
-        // If the read indicates that we errored, we error the PumpToReader and
-        // cleanup.
-        //
-        // Importantly, at each step, we check the PumpToReader to ensure that
-        // we are accessing it from the correct IoContext (it is wrapped in an
-        // IoOwn), and we check that it's still alive (using the WeakRef).
-        //
-        // This loop owns both the readable and pumpToReader, however, the
-        // pumpToReader is an IoOwn<WeakRef> pointing at the actual PumpToReader
-        // instance, which is a kj heap object attached to the kj::Promise returned
-        // by the pumpTo method. If that promise gets dropped while any of the
-        // JS promises in the loop are still pending, then the PumpToReader will
-        // be freed. When the JS promise resolves, we make sure we detect that
-        // case and handle appropriately (generally by canceling the readable
-        // and exiting the loop).
         return KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none))
             .then(js,
                 ioContext.addFunctor([byteStream = readable->getController().isByteOriented()](
                                          auto& js, ReadResult result) mutable -> Result {
           if (result.done) {
-            // Indicate to the outer promise that the readable is done.
-            // There's nothing further to do.
             return StreamStates::Closed();
           }
 
-          // If we're not done, the result value must be interpretable as
-          // bytes for the read to make any sense.
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
           if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
             return js.v8Ref(js.v8TypeError("This ReadableStream did not return bytes."));
@@ -3439,7 +3426,6 @@ class PumpToReader {
 
           jsg::BufferSource bufferSource(js, handle);
           if (bufferSource.size() == 0) {
-            // Weird, but allowed. We'll skip it.
             return Pumping{};
           }
 
@@ -3447,36 +3433,22 @@ class PumpToReader {
             jsg::BackingStore backing = bufferSource.detach(js);
             return backing.asArrayPtr().attach(kj::mv(backing));
           }
-          // We do not detach in this case because, as bad as an idea as it is,
-          // the stream spec does allow a single typedarray/arraybuffer instance
-          // to be queued multiple times when using value-oriented streams.
           return bufferSource.asArrayPtr().attach(kj::mv(bufferSource));
         }),
                 [](auto& js, jsg::Value exception) mutable -> Result { return kj::mv(exception); })
             .then(js, ioContext.addFunctor( JSG_VISITABLE_LAMBDA((readable = kj::mv(readable), pumpToReader = kj::mv(pumpToReader)), (readable), (jsg::Lock & js, Result result) mutable {
               KJ_IF_SOME(reader, pumpToReader->tryGet()) {
-              // Oh good, if we got here it means we're in the right IoContext and
-              // the PumpToReader is still alive. Let's process the result.
               reader.ioContext.requireCurrentOrThrowJs();
               auto& ioContext = IoContext::current();
               KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
-              // We received bytes to write. Do so...
               auto promise = reader.sink->write(bytes).attach(kj::mv(bytes));
-              // Wrap the write promise in a canceler that will be triggered when the
-              // PumpToReader is dropped. While the write promise is pending, it is
-              // possible for the promise that is holding the PumpToReader to be
-              // dropped causing the hold on the sink to be released. If that is
-              // released while the write is still pending we can end up with an
-              // error further up the destruct chain.
               return ioContext.awaitIo(js, reader.canceler.wrap(kj::mv(promise)))
                   .then(js,
                       [](jsg::Lock& js) -> kj::Maybe<jsg::Value> {
-                // The write completed successfully.
                 return kj::Maybe<jsg::Value>(kj::none);
               },
                       [](jsg::Lock& js, jsg::Value exception) mutable -> kj::Maybe<jsg::Value> {
-                // The write failed.
                 return kj::mv(exception);
               })
                   .then(js,
@@ -3487,8 +3459,6 @@ class PumpToReader {
                             KJ_IF_SOME(reader, pumpToReader->tryGet()) {
                             auto& ioContext = reader.ioContext;
                             ioContext.requireCurrentOrThrowJs();
-                            // Oh good, if we got here it means we're in the right IoContext and
-                            // the PumpToReader is still alive.
                             KJ_IF_SOME(exception, maybeException) {
                             if (!reader.isErroredOrClosed()) {
                             reader.state.transitionTo<kj::Exception>(
@@ -3500,29 +3470,19 @@ class PumpToReader {
                             return reader.pumpLoop(
                                 js, ioContext, readable.addRef(), kj::mv(pumpToReader));
                             } else {
-                            // If we got here, we're in the right IoContext but the PumpToReader
-                            // has been destroyed. Let's cancel the readable as the last step.
                             return readable->getController().cancel(js,
                                 maybeException.map(
                                     [&](jsg::Value& ex) { return ex.getHandle(js); }));
                             }
                           })));
               }
-              KJ_CASE_ONEOF(pumping, Pumping) {
-              // If we got here, a zero-length buffer was provided by the read and we're
-              // just going to ignore it and keep going.
-              }
+              KJ_CASE_ONEOF(pumping, Pumping) {}
               KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-              // If we got here, the read signaled that we're done. Close the reader and
-              // pump one more time to shut things down.
               if (!reader.isErroredOrClosed()) {
               reader.state.transitionTo<StreamStates::Closed>();
               }
               }
               KJ_CASE_ONEOF(exception, jsg::Value) {
-              // If we got here, the read signaled an exception. Either the read failed or
-              // provided something other than bytes. Error the reader and pump one more
-              // time to shut things down.
               if (!reader.isErroredOrClosed()) {
               reader.state.transitionTo<kj::Exception>(js.exceptionToKj(kj::mv(exception)));
               }
@@ -3530,8 +3490,6 @@ class PumpToReader {
               }
               return reader.pumpLoop(js, ioContext, readable.addRef(), kj::mv(pumpToReader));
               } else {
-              // If we got here, we're in the right IoContext but the PumpToReader has been
-              // freed. There's nothing we can do except cleanup.
               KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
               return readable->getController().cancel(js, kj::none);
@@ -3540,8 +3498,6 @@ class PumpToReader {
               return readable->getController().cancel(js, kj::none);
               }
               KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-              // We do not have to cancel the readable in this case because it has already
-              // signaled that it is done. There's nothing to cancel.
               return js.resolvedPromise();
               }
               KJ_CASE_ONEOF(exception, jsg::Value) {
@@ -3556,6 +3512,70 @@ class PumpToReader {
     KJ_UNREACHABLE;
   }
 };
+
+// pumpToCoroutine uses a DrainingReader to efficiently pull all synchronously available
+// data from the stream in each iteration, then writes it to the sink using vectored
+// I/O. This minimizes isolate lock acquisitions by batching: each time the lock is
+// held, the stream's internal queue is fully drained and the JS pull callback is
+// pumped synchronously as many times as possible.
+//
+// The pump loop is a kj coroutine. Dropping the returned kj::Promise drops the
+// coroutine frame, which destroys the DrainingReader (releasing the stream lock)
+// and the sink. No WeakRef/IoOwn dance is needed because ownership is clear.
+// The coroutine that implements the pump loop takes ownership of the DrainingReader
+// and sink. The jsg::Ref<ReadableStream> is not passed into the coroutine because
+// jsg::Ref is disallowed in coroutine parameters; instead, the DrainingReader holds
+// a reference to the stream internally.
+kj::Promise<void> pumpToImpl(IoContext& ioContext,
+    kj::Own<DrainingReader> reader,
+    kj::Own<WritableStreamSink> sink,
+    bool end) {
+
+  bool writeFailed = false;
+
+  KJ_TRY {
+    while (true) {
+      // Perform a draining read to get all synchronously available data if possible
+      // or fall back to a regular read if not.
+      DrainingReadResult result = co_await ioContext.run([&reader](jsg::Lock& js) mutable {
+        auto& ioContext = IoContext::current();
+        // Use a 256KB limit to allow periodic yielding to the event loop,
+        // preventing a fast producer from monopolizing the thread.
+        constexpr size_t kMaxReadPerCycle = 256 * 1024;
+        return ioContext.awaitJs(js, reader->read(js, kMaxReadPerCycle));
+      });
+
+      // Write all the chunks we received using vectored write for efficiency.
+      if (result.chunks.size() > 0) {
+        KJ_ON_SCOPE_FAILURE(writeFailed = true);
+        auto pieces =
+            KJ_MAP(chunk, result.chunks) -> kj::ArrayPtr<const kj::byte> { return chunk.asPtr(); };
+        co_await sink->write(pieces);
+      }
+
+      // If the stream is done, end the output if needed and exit.
+      if (result.done) {
+        KJ_ON_SCOPE_FAILURE(writeFailed = true);
+        if (end) {
+          co_await sink->end();
+        }
+        co_return;
+      }
+    }
+  }
+  KJ_CATCH(exception) {
+    if (!writeFailed) {
+      sink->abort(kj::cp(exception));
+    }
+
+    co_await ioContext.run([&reader, ex = kj::cp(exception)](jsg::Lock& js) mutable {
+      auto& ioContext = IoContext::current();
+      auto error = js.exceptionToJsValue(kj::mv(ex));
+      return ioContext.awaitJs(js, reader->cancel(js, error.getHandle(js)));
+    });
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
 }  // namespace
 
 template <typename T>
@@ -3698,15 +3718,24 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
   disturbed = true;
 
   // This operation will leave the ReadableStream locked and disturbed. It will consume
-  // the stream until it either closed or errors. If the deferred proxy promise or its
-  // inner promise is dropped, the PumpToReader (and sink) will be dropped and the stream
-  // will be canceled. If the PumpToReader is dropped while there is a pending write on
-  // the sink, the pending write will be canceled.
+  // the stream until it either closed or errors.
+  //
+  // When the ENABLE_DRAINING_READ_ON_STANDARD_STREAMS autogate is enabled, uses the new
+  // pumpToImpl coroutine with DrainingReader for batched reads and vectored writes.
+  // Otherwise, falls back to the original PumpToReader JS promise loop that reads one
+  // chunk at a time.
 
   const auto handlePump = [&] {
-    KJ_ASSERT(lock.lock());
-    auto reader = kj::heap<PumpToReader>(addRef(), kj::mv(sink), end);
-    return addNoopDeferredProxy(reader->pumpTo(js).attach(kj::mv(reader)));
+    if (util::Autogate::isEnabled(util::AutogateKey::ENABLE_DRAINING_READ_ON_STANDARD_STREAMS)) {
+      auto reader = KJ_ASSERT_NONNULL(DrainingReader::create(js, *this->addRef()),
+          "Failed to create DrainingReader — stream should not be locked");
+      auto& ioContext = IoContext::current();
+      return addNoopDeferredProxy(pumpToImpl(ioContext, kj::mv(reader), kj::mv(sink), end));
+    } else {
+      KJ_ASSERT(lock.lock());
+      auto reader = kj::heap<PumpToReader>(addRef(), kj::mv(sink), end);
+      return addNoopDeferredProxy(reader->pumpTo(js).attach(kj::mv(reader)));
+    }
   };
 
   KJ_SWITCH_ONEOF(state) {
