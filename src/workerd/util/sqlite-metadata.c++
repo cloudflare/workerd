@@ -81,8 +81,8 @@ SqliteMetadata::Initialized& SqliteMetadata::ensureInitialized(bool allowUnconfi
              .allowUnconfirmed = allowUnconfirmed},
         R"(
       CREATE TABLE IF NOT EXISTS _cf_METADATA (
-        key INTEGER PRIMARY KEY,
-        value BLOB
+        "key" INTEGER PRIMARY KEY,
+        "value" BLOB
       );
     )");
     tableCreated = true;
