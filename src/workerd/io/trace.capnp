@@ -42,3 +42,25 @@ struct UserSpanData {
   parentSpanId @5 :UInt64;
 }
 
+struct SpanOpenData {
+  # Representation of a SpanOpen event, created when a user span is opened.
+  operationName @0 :Text;
+
+  startTimeNs @1 :Int64;
+  # Nanoseconds since Unix epoch
+
+  spanId @2 :UInt64;
+  parentSpanId @3 :UInt64;
+}
+
+struct SpanEndData {
+  # Representation of an event that indicates completion of a user span. This information is
+  # provided to the streaming tail worker in the Attributes and SpanClose events.
+
+  endTimeNs @0 :Int64;
+  # Nanoseconds since Unix epoch
+
+  # List of span attributes
+  tags @1 :List(Tag);
+  spanId @2 :UInt64;
+}

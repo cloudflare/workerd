@@ -31,8 +31,15 @@ class BaseTracer: public kj::Refcounted {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) = 0;
-  // Add a span.
+  // Add a complete span.
   virtual void addSpan(tracing::CompleteSpan&& span) = 0;
+  // Add information about a span when it is opened, corresponds to SpanOpen event.
+  virtual void addSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) = 0;
+  // Add span events when the span is complete (Attributes and SpanClose).
+  virtual void addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -90,6 +97,7 @@ class BaseTracer: public kj::Refcounted {
 
   // helper method for addSpan() implementations
   void adjustSpanTime(tracing::CompleteSpan& span);
+  void adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> maybeStartTime);
 
   // Function to create the root span for the new tracing format.
   kj::Maybe<MakeUserRequestSpanFunc> makeUserRequestSpanFunc;
@@ -126,6 +134,11 @@ class WorkerTracer final: public BaseTracer {
       LogLevel logLevel,
       kj::String message) override;
   void addSpan(tracing::CompleteSpan&& span) override;
+  void addSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) override;
+  void addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
@@ -181,7 +194,12 @@ class WorkerTracer final: public BaseTracer {
 
 class SpanSubmitter: public kj::Refcounted {
  public:
+  virtual void submitSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) = 0;
   virtual void submitSpan(tracing::SpanId context, tracing::SpanId spanId, const Span& span) = 0;
+
   virtual tracing::SpanId makeSpanId() = 0;
 };
 
@@ -202,6 +220,7 @@ class UserSpanObserver final: public SpanObserver {
 
   kj::Own<SpanObserver> newChild() override;
   void report(const Span& span) override;
+  void reportStart(kj::ConstString operationName, kj::Date startTime) override;
   kj::Date getTime() override;
 
  private:
