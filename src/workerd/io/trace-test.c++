@@ -593,5 +593,6 @@ KJ_TEST("Trace with Durable Object ID") {
   auto trace2 = kj::refcounted<Trace>(traceBuilder.asReader());
   KJ_ASSERT(KJ_REQUIRE_NONNULL(trace2->durableObjectId) == "abc123def456"_kj);
 }
+
 }  // namespace
 }  // namespace workerd::tracing
