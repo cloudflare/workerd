@@ -12,6 +12,7 @@
 #include <workerd/jsg/url.h>
 #include <workerd/server/docker-api.capnp.h>
 #include <workerd/util/strings.h>
+#include <workerd/util/uuid.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
@@ -1013,7 +1014,8 @@ kj::Promise<void> ContainerClient::createDockerVolume(kj::StringPtr volumeName) 
       network, kj::str(dockerPath), kj::HttpMethod::POST, kj::str("/volumes/create"), kj::mv(body));
   // 201 = created, 200 = already exists (Docker returns 200 for existing volumes)
   JSG_REQUIRE(response.statusCode == 201 || response.statusCode == 200, Error,
-      "Failed to create Docker volume '", volumeName, "': ", response.statusCode, " ", response.body);
+      "Failed to create Docker volume '", volumeName, "': ", response.statusCode, " ",
+      response.body);
 }
 
 kj::Promise<void> ContainerClient::deleteDockerVolume(kj::StringPtr volumeName) {
@@ -1021,11 +1023,11 @@ kj::Promise<void> ContainerClient::deleteDockerVolume(kj::StringPtr volumeName) 
       network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::str("/volumes/", volumeName));
   // 204 = deleted, 404 = not found (both are fine)
   JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
-      "Failed to delete Docker volume '", volumeName, "': ", response.statusCode, " ", response.body);
+      "Failed to delete Docker volume '", volumeName, "': ", response.statusCode, " ",
+      response.body);
 }
 
-kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
-    kj::StringPtr volumeName) {
+kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(kj::StringPtr volumeName) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
@@ -1038,9 +1040,8 @@ kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create"), codec.encode(jsonRoot));
-  JSG_REQUIRE(response.statusCode == 201, Error,
-      "Failed to create temp container for volume '", volumeName, "': ",
-      response.statusCode, " ", response.body);
+  JSG_REQUIRE(response.statusCode == 201, Error, "Failed to create temp container for volume '",
+      volumeName, "': ", response.statusCode, " ", response.body);
 
   auto respMessage = decodeJsonResponse<docker_api::Docker::ContainerCreateResponse>(response.body);
   auto respRoot = respMessage->getRoot<docker_api::Docker::ContainerCreateResponse>();
@@ -1052,8 +1053,8 @@ kj::Promise<void> ContainerClient::deleteTempContainer(kj::StringPtr tempContain
       kj::str("/containers/", tempContainerId, "?force=true"));
   // 204 = deleted, 404 = not found (both are fine)
   JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
-      "Failed to delete temp container '", tempContainerId, "': ",
-      response.statusCode, " ", response.body);
+      "Failed to delete temp container '", tempContainerId, "': ", response.statusCode, " ",
+      response.body);
 }
 
 ContainerClient::RpcTurn ContainerClient::getRpcTurn() {
@@ -1185,7 +1186,58 @@ kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutCont
 }
 
 kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext context) {
-  KJ_UNIMPLEMENTED("snapshotDirectory not implemented for Docker containers");
+  auto [ready, done] = getRpcTurn();
+  co_await ready;
+  KJ_DEFER(done->fulfill());
+
+  auto params = context.getParams();
+  auto dir = kj::str(params.getDir());
+  auto name = params.hasName() && params.getName().size() > 0
+      ? kj::Maybe<kj::String>(kj::str(params.getName()))
+      : kj::Maybe<kj::String>(kj::none);
+
+  JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error,
+      "snapshotDirectory() requires a running container.");
+
+  auto snapshotId = randomUUID(kj::none);
+
+  // GET tar archive of the directory from the running container.
+  auto tarResponse =
+      co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
+          kj::str("/containers/", containerName, "/archive?path=", kj::encodeUriComponent(dir)));
+
+  if (tarResponse.statusCode == 404) {
+    JSG_FAIL_REQUIRE(Error, "snapshotDirectory(): directory not found in container: ", dir);
+  }
+  JSG_REQUIRE(tarResponse.statusCode == 200, Error,
+      "snapshotDirectory(): failed to read directory '", dir,
+      "' from container: ", tarResponse.statusCode);
+
+  auto tarSize = static_cast<uint64_t>(tarResponse.body.size());
+
+  // Create a Docker volume to store the snapshot.
+  auto volumeName = kj::str("workerd-snap-", containerName, "-", snapshotId);
+  co_await createDockerVolume(volumeName);
+
+  // Store the tar in the volume via a temp container.
+  auto tempId = co_await createTempContainerWithVolume(volumeName);
+  KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
+
+  auto putResponse =
+      co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::PUT,
+          kj::str("/containers/", tempId, "/archive?path=/mnt"), kj::mv(tarResponse.body));
+  JSG_REQUIRE(putResponse.statusCode == 200, Error,
+      "snapshotDirectory(): failed to store snapshot in volume '", volumeName,
+      "': ", putResponse.statusCode);
+
+  // Populate the capnp response.
+  auto result = context.getResults().initSnapshot();
+  result.setId(snapshotId);
+  result.setSize(tarSize);
+  result.setDir(dir);
+  KJ_IF_SOME(n, name) {
+    result.setName(n);
+  }
 }
 
 kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {

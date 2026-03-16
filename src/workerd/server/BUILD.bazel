@@ -284,6 +284,7 @@ wd_cc_library(
         "//src/workerd/io:container_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:strings",
+        "//src/workerd/util:uuid",
         "@ada-url",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj",
