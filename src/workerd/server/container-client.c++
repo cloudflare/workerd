@@ -640,6 +640,40 @@ kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Net
   }
 }
 
+kj::Promise<ContainerClient::BinaryResponse> ContainerClient::dockerApiBinaryRequest(
+    kj::Network& network,
+    kj::String dockerPath,
+    kj::HttpMethod method,
+    kj::String endpoint,
+    kj::Maybe<kj::Array<kj::byte>> body) {
+  kj::HttpHeaderTable headerTable;
+  auto address = co_await network.parseAddress(dockerPath);
+  auto connection = co_await address->connect();
+  auto httpClient = kj::newHttpClient(headerTable, *connection).attach(kj::mv(connection));
+  kj::HttpHeaders headers(headerTable);
+  headers.setPtr(kj::HttpHeaderId::HOST, "localhost");
+
+  KJ_IF_SOME(requestBody, body) {
+    headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/x-tar");
+    headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(requestBody.size()));
+
+    auto req = httpClient->request(method, endpoint, headers, requestBody.size());
+    {
+      auto body = kj::mv(req.body);
+      co_await body->write(requestBody.asBytes());
+    }
+    auto response = co_await req.response;
+    auto result = co_await response.body->readAllBytes();
+    co_return BinaryResponse{.statusCode = response.statusCode, .body = kj::mv(result)};
+  } else {
+    auto req = httpClient->request(method, endpoint, headers);
+    { auto body = kj::mv(req.body); }
+    auto response = co_await req.response;
+    auto result = co_await response.body->readAllBytes();
+    co_return BinaryResponse{.statusCode = response.statusCode, .body = kj::mv(result)};
+  }
+}
+
 kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer() {
   auto endpoint = kj::str("/containers/", containerName, "/json");
 
@@ -971,6 +1005,55 @@ kj::Promise<void> ContainerClient::destroySidecarContainer() {
       kj::str("/containers/", sidecarContainerName, "/wait?condition=removed"));
   JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
       "Destroying docker network sidecar container failed: ", response.statusCode, response.body);
+}
+
+kj::Promise<void> ContainerClient::createDockerVolume(kj::StringPtr volumeName) {
+  auto body = kj::str("{\"Name\":\"", volumeName, "\"}");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::str("/volumes/create"), kj::mv(body));
+  // 201 = created, 200 = already exists (Docker returns 200 for existing volumes)
+  JSG_REQUIRE(response.statusCode == 201 || response.statusCode == 200, Error,
+      "Failed to create Docker volume '", volumeName, "': ", response.statusCode, " ", response.body);
+}
+
+kj::Promise<void> ContainerClient::deleteDockerVolume(kj::StringPtr volumeName) {
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::str("/volumes/", volumeName));
+  // 204 = deleted, 404 = not found (both are fine)
+  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
+      "Failed to delete Docker volume '", volumeName, "': ", response.statusCode, " ", response.body);
+}
+
+kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
+    kj::StringPtr volumeName) {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
+  capnp::MallocMessageBuilder message;
+  auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
+  jsonRoot.setImage(imageName);
+
+  auto hostConfig = jsonRoot.initHostConfig();
+  auto binds = hostConfig.initBinds(1);
+  binds.set(0, kj::str(volumeName, ":/mnt"));
+
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/containers/create"), codec.encode(jsonRoot));
+  JSG_REQUIRE(response.statusCode == 201, Error,
+      "Failed to create temp container for volume '", volumeName, "': ",
+      response.statusCode, " ", response.body);
+
+  auto respMessage = decodeJsonResponse<docker_api::Docker::ContainerCreateResponse>(response.body);
+  auto respRoot = respMessage->getRoot<docker_api::Docker::ContainerCreateResponse>();
+  co_return kj::str(respRoot.getId());
+}
+
+kj::Promise<void> ContainerClient::deleteTempContainer(kj::StringPtr tempContainerId) {
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+      kj::str("/containers/", tempContainerId, "?force=true"));
+  // 204 = deleted, 404 = not found (both are fine)
+  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
+      "Failed to delete temp container '", tempContainerId, "': ",
+      response.statusCode, " ", response.body);
 }
 
 ContainerClient::RpcTurn ContainerClient::getRpcTurn() {
