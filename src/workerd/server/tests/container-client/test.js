@@ -700,6 +700,193 @@ export class DurableObjectExample extends DurableObject {
     ws.close();
     await container.destroy();
   }
+
+  async testSnapshotRoundTrip() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    // Start container and write a file to snapshot
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const writeResp = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/write-file?path=/app/data/test.txt', {
+        method: 'POST',
+        body: 'snapshot-content-123',
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    assert.equal(writeResp.status, 200);
+
+    // Take a snapshot of /app/data
+    const snapshot = await container.snapshotDirectory({ dir: '/app/data' });
+    assert.strictEqual(typeof snapshot.id, 'string');
+    assert.ok(snapshot.id.length > 0, 'snapshot id should be non-empty');
+    assert.ok(snapshot.size > 0, 'snapshot size should be > 0');
+    assert.strictEqual(snapshot.dir, '/app/data');
+
+    // Destroy the container
+    await container.destroy();
+    await monitor;
+    assert.strictEqual(container.running, false);
+
+    // Start a new container with the snapshot restored
+    container.start({ enableInternet: true, snapshots: [snapshot] });
+    const monitor2 = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    // Verify the file was restored
+    const readResp = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/read-file?path=/app/data/test.txt', {
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    assert.equal(readResp.status, 200);
+    assert.strictEqual(await readResp.text(), 'snapshot-content-123');
+
+    await container.destroy();
+    await monitor2;
+  }
+
+  async testSnapshotNamedRoundTrip() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    await container
+      .getTcpPort(8080)
+      .fetch('http://foo/write-file?path=/app/data/named.txt', {
+        method: 'POST',
+        body: 'named-snapshot',
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+
+    const snapshot = await container.snapshotDirectory({
+      dir: '/app/data',
+      name: 'my-snapshot',
+    });
+    assert.strictEqual(snapshot.name, 'my-snapshot');
+    assert.strictEqual(snapshot.dir, '/app/data');
+
+    await container.destroy();
+    await monitor;
+
+    // Restore and verify
+    container.start({ enableInternet: true, snapshots: [snapshot] });
+    const monitor2 = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const readResp = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/read-file?path=/app/data/named.txt', {
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    assert.equal(readResp.status, 200);
+    assert.strictEqual(await readResp.text(), 'named-snapshot');
+
+    await container.destroy();
+    await monitor2;
+  }
+
+  async testSnapshotMultipleDirectories() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    // Write files to two different directories
+    await container
+      .getTcpPort(8080)
+      .fetch('http://foo/write-file?path=/app/dir1/file1.txt', {
+        method: 'POST',
+        body: 'content-dir1',
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    await container
+      .getTcpPort(8080)
+      .fetch('http://foo/write-file?path=/app/dir2/file2.txt', {
+        method: 'POST',
+        body: 'content-dir2',
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+
+    const snap1 = await container.snapshotDirectory({ dir: '/app/dir1' });
+    const snap2 = await container.snapshotDirectory({ dir: '/app/dir2' });
+
+    await container.destroy();
+    await monitor;
+
+    // Restore both snapshots
+    container.start({
+      enableInternet: true,
+      snapshots: [snap1, snap2],
+    });
+    const monitor2 = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const r1 = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/read-file?path=/app/dir1/file1.txt', {
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    assert.equal(r1.status, 200);
+    assert.strictEqual(await r1.text(), 'content-dir1');
+
+    const r2 = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/read-file?path=/app/dir2/file2.txt', {
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    assert.equal(r2.status, 200);
+    assert.strictEqual(await r2.text(), 'content-dir2');
+
+    await container.destroy();
+    await monitor2;
+  }
+
+  async testSnapshotNonExistentDirectory() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    await assert.rejects(
+      () => container.snapshotDirectory({ dir: '/does/not/exist' }),
+      (err) => {
+        assert.match(err.message, /directory not found/);
+        return true;
+      }
+    );
+
+    await container.destroy();
+    await monitor;
+  }
 }
 
 export class TestService extends WorkerEntrypoint {
@@ -972,5 +1159,49 @@ export const testInterceptWebSocket = {
 
     const stub = env.MY_CONTAINER.get(id);
     await stub.testInterceptWebSocket();
+  },
+};
+
+// Test snapshot round-trip: write file -> snapshot -> destroy -> restore -> verify
+export const testSnapshotRoundTrip = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSnapshotRoundTrip')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testSnapshotRoundTrip();
+  },
+};
+
+// Test snapshot with a human-friendly name
+export const testSnapshotNamedRoundTrip = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSnapshotNamedRoundTrip')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testSnapshotNamedRoundTrip();
+  },
+};
+
+// Test snapshotting multiple directories and restoring them all
+export const testSnapshotMultipleDirectories = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSnapshotMultipleDirectories')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testSnapshotMultipleDirectories();
+  },
+};
+
+// Test that snapshotting a non-existent directory gives a clear error
+export const testSnapshotNonExistentDirectory = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSnapshotNonExistentDirectory')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testSnapshotNonExistentDirectory();
   },
 };
