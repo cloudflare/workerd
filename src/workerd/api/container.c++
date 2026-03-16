@@ -18,6 +18,9 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
       running(running) {}
 
 void DirectorySnapshot::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // Version marker for forward-compatible evolution. Bump when adding fields.
+  serializer.writeRawUint32(1);
+
   serializer.writeLengthDelimited(id);
   serializer.writeRawUint64(size);
   serializer.writeLengthDelimited(dir);
@@ -33,6 +36,9 @@ void DirectorySnapshot::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 jsg::Ref<DirectorySnapshot> DirectorySnapshot::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   KJ_REQUIRE(tag == rpc::SerializationTag::DIRECTORY_SNAPSHOT);
+
+  auto version = deserializer.readRawUint32();
+  JSG_REQUIRE(version == 1, Error, "Unknown DirectorySnapshot serialization version: ", version);
 
   auto id = deserializer.readLengthDelimitedString();
   auto size = deserializer.readRawUint64();
@@ -117,8 +123,8 @@ jsg::Promise<jsg::Ref<DirectorySnapshot>> Container::snapshotDirectory(
       "snapshotDirectory() requires the 'experimental' compatibility flag.");
   JSG_REQUIRE(
       running, Error, "snapshotDirectory() cannot be called on a container that is not running.");
-  JSG_REQUIRE(options.dir.size() > 0, TypeError,
-      "snapshotDirectory() requires a non-empty directory path.");
+  JSG_REQUIRE(options.dir.size() > 1 && options.dir.startsWith("/"), TypeError,
+      "snapshotDirectory() requires an absolute directory path (starting with '/').");
 
   auto req = rpcClient->snapshotDirectoryRequest();
   req.setDir(options.dir);

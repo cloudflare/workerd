@@ -112,16 +112,6 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // EgressHttpService handles CONNECT requests from proxy-anything sidecar
   friend class EgressHttpService;
 
-  struct Response {
-    kj::uint statusCode;
-    kj::String body;
-  };
-
-  struct BinaryResponse {
-    kj::uint statusCode;
-    kj::Array<kj::byte> body;
-  };
-
   struct InspectResponse {
     bool isRunning;
   };
@@ -135,17 +125,6 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
     uint16_t ingressHostPort;
   };
 
-  // Docker API v1.50 helper methods
-  static kj::Promise<Response> dockerApiRequest(kj::Network& network,
-      kj::String dockerPath,
-      kj::HttpMethod method,
-      kj::String endpoint,
-      kj::Maybe<kj::String> body = kj::none);
-  static kj::Promise<BinaryResponse> dockerApiBinaryRequest(kj::Network& network,
-      kj::String dockerPath,
-      kj::HttpMethod method,
-      kj::String endpoint,
-      kj::Maybe<kj::Array<kj::byte>> body = kj::none);
   kj::Promise<InspectResponse> inspectContainer();
 
   kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
@@ -162,9 +141,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> createDockerVolume(kj::StringPtr volumeName);
   kj::Promise<void> deleteDockerVolume(kj::StringPtr volumeName);
   kj::Promise<kj::String> createTempContainerWithVolume(kj::StringPtr volumeName);
-  kj::Promise<void> deleteTempContainer(kj::StringPtr tempContainerId);
-  // Discover and delete all snapshot volumes for this container (best-effort).
-  kj::Promise<void> cleanupSnapshotVolumes();
+  kj::Promise<void> deleteTempContainer(kj::String tempContainerId);
 
   // Sidecar container management (for egress proxy)
   // Inspect the sidecar container to retrieve the port to ingress to

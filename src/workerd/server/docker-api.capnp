@@ -314,6 +314,11 @@ struct Docker {
     warning @1 :Text $Json.name("Warning");
   }
 
+  # Volume create request (POST /volumes/create)
+  struct VolumeCreateRequest {
+    name @0 :Text $Json.name("Name");
+  }
+
   # Volume list response (GET /volumes)
   struct VolumeListResponse {
     volumes @0 :List(Volume) $Json.name("Volumes");

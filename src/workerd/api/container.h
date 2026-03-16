@@ -3,9 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #pragma once
-// APIs that an Actor (Durable Object) uses to access its own state.
-//
-// See actor.h for APIs used by other Workers to talk to Actors.
+// Container management API for Durable Object-attached containers.
 //
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
@@ -119,7 +117,7 @@ class Container: public jsg::Object {
     }
   };
 
-  bool getRunning() {
+  bool getRunning() const {
     return running;
   }
 
