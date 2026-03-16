@@ -350,10 +350,9 @@ KJ_TEST("Iterator respects TerminateExecution via Array.from()") {
       // Array.from() runs the iteration in a V8 Torque builtin without JS back-edge
       // interrupt checks. The iterator calls TerminateExecution() after 5 items but
       // keeps returning values. The check in nextImpl should stop the iteration.
-      v8::Local<v8::String> source = jsg::v8Str(js.v8Isolate,
-          "Array.from(makeCountingIterable(5))");
-      v8::Local<v8::Script> script =
-          v8::Script::Compile(js.v8Context(), source).ToLocalChecked();
+      v8::Local<v8::String> source =
+          jsg::v8Str(js.v8Isolate, "Array.from(makeCountingIterable(5))");
+      v8::Local<v8::Script> script = v8::Script::Compile(js.v8Context(), source).ToLocalChecked();
 
       v8::TryCatch catcher(js.v8Isolate);
       v8::Local<v8::Value> result;

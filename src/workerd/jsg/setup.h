@@ -114,7 +114,9 @@ class IsolateBase {
     terminationRequested = true;
     terminateExecution();
   }
-  bool isTerminationRequested() const { return terminationRequested; }
+  bool isTerminationRequested() const {
+    return terminationRequested;
+  }
 
   using Logger = Lock::Logger;
   inline void setLoggerCallback(kj::Badge<Lock>, kj::Function<Logger>&& logger) {
