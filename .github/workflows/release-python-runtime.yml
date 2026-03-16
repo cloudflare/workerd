@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-22.04
     name: build Python runtime
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           show-progress: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Setup Runner

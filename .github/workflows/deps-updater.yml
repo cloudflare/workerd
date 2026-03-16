@@ -21,7 +21,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           show-progress: false
           token: ${{ secrets.DEVPROD_PAT }}
@@ -36,7 +36,7 @@ jobs:
         run: ./tools/cross/format.py git
       - name: Open pull request
         id: create-pr
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "update dependencies to latest version"
           branch: "automatic-update-deps"

@@ -85,13 +85,13 @@ jobs:
   bazel:
     runs-on: ${{ inputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           show-progress: false
           fetch-depth: ${{ inputs.fetch_depth }}
       - name: Cache
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/bazel-disk-cache
           key: bazel-disk-cache${{ inputs.phase}}-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
@@ -171,7 +171,7 @@ jobs:
           bazel build --config=parse_headers --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util
       - name: Upload test logs
         if: always() && inputs.upload_test_logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-logs-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}.zip
           path: bazel-testlogs/**/test.xml
@@ -210,14 +210,14 @@ jobs:
 
       - name: Upload binary
         if: inputs.upload_binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}-binary
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
           if-no-files-found: error
       - name: Upload build statistics
         if: always() && inputs.run_tests
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.os_name }}${{ inputs.arch_name }}${{ inputs.suffix }}-bazel-profile
           path: '*.bazel-profile.gz'

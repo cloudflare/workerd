@@ -29,7 +29,7 @@ jobs:
     # the build job uses 22.04 for libc compatibility.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: echo
         run: |
           echo "date=$(cat src/workerd/io/release-version.txt)" >> $GITHUB_OUTPUT;
@@ -43,10 +43,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: mukunku/tag-exists-action@v1.6.0
+      - uses: mukunku/tag-exists-action@v1.7.0
         id: check_tag
         with:
           tag: v${{ needs.version.outputs.version }}
@@ -60,7 +60,7 @@ jobs:
     if: ${{ needs.check-tag.outputs.exists != 'true' }}
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - run: git tag v${{ needs.version.outputs.version }} && git push origin v${{ needs.version.outputs.version }}
@@ -147,12 +147,12 @@ jobs:
             name: Windows-X64
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Download ${{ matrix.name }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.name }}-binary
           path: /tmp
@@ -181,7 +181,7 @@ jobs:
 
       # Upload release to npm
       - name: Use Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
       - name: Modify package.json version
@@ -202,14 +202,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout workers-sdk
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: cloudflare/workers-sdk
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: lts/*
           cache: 'pnpm'
@@ -217,7 +217,7 @@ jobs:
         run: pnpm install
 
       - name: Download workerd binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: Linux-X64-binary
           path: /tmp
@@ -238,18 +238,18 @@ jobs:
     runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Use Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
 
       - name: Cache
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         # Use same cache and build configuration as release build, this allows us to keep download
         # sizes small and generate types with optimization enabled, should be slightly faster.
         with:
@@ -295,16 +295,16 @@ jobs:
     runs-on: ubuntu-22.04-16core
     needs: [version, upload-artifacts]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           show-progress: false
       - name: Use Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24 # needed for a version of npm that supports "trusted publishing".
       - name: Cache
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         # Use same cache and build configuration as release build, this allows us to keep download
         # sizes small and generate types with optimization enabled, should be slightly faster.
         with:
