@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "tinyvec",
+rust_proc_macro(
+    name = "clap_derive",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,24 +29,25 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
         "default",
-        "tinyvec_macros",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2024",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=tinyvec",
+        "crate-name=clap_derive",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.10.0",
+    version = "4.6.0",
     deps = [
-        "@crates_vendor__tinyvec_macros-0.1.1//:tinyvec_macros",
+        "@crates_vendor__heck-0.5.0//:heck",
+        "@crates_vendor__proc-macro2-1.0.106//:proc_macro2",
+        "@crates_vendor__quote-1.0.45//:quote",
+        "@crates_vendor__syn-2.0.117//:syn",
     ],
 )

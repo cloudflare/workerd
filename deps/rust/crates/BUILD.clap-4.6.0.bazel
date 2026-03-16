@@ -38,9 +38,9 @@ rust_library(
         "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2024",
     proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.55//:clap_derive",
+        "@crates_vendor__clap_derive-4.6.0//:clap_derive",
     ],
     rustc_flags = [
         "--cap-lints=allow",
@@ -52,9 +52,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.60",
+    version = "4.6.0",
     deps = [
-        "@crates_vendor__clap_builder-4.5.60//:clap_builder",
+        "@crates_vendor__clap_builder-4.6.0//:clap_builder",
     ],
 )
 
@@ -82,9 +82,9 @@ rust_binary(
         "std",
     ],
     crate_root = "src/bin/stdio-fixture.rs",
-    edition = "2021",
+    edition = "2024",
     proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.55//:clap_derive",
+        "@crates_vendor__clap_derive-4.6.0//:clap_derive",
     ],
     rustc_flags = [
         "--cap-lints=allow",
@@ -96,9 +96,9 @@ rust_binary(
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.60",
+    version = "4.6.0",
     deps = [
         ":clap",
-        "@crates_vendor__clap_builder-4.5.60//:clap_builder",
+        "@crates_vendor__clap_builder-4.6.0//:clap_builder",
     ],
 )

@@ -11,13 +11,13 @@ bazel_dep(name = "abseil-cpp", version = "20260107.1")
 bazel_dep(name = "apple_support", version = "2.3.0")
 
 # aspect_rules_esbuild
-bazel_dep(name = "aspect_rules_esbuild", version = "0.25.0")
+bazel_dep(name = "aspect_rules_esbuild", version = "0.25.1")
 
 # aspect_rules_js
 bazel_dep(name = "aspect_rules_js", version = "3.0.3")
 
 # aspect_rules_ts
-bazel_dep(name = "aspect_rules_ts", version = "3.8.6")
+bazel_dep(name = "aspect_rules_ts", version = "3.8.7")
 
 # bazel_lib
 bazel_dep(name = "bazel_lib", version = "3.2.2")
@@ -111,7 +111,7 @@ bazel_dep(name = "rules_multirun", version = "0.13.0")
 bazel_dep(name = "rules_nodejs", version = "6.7.3")
 
 # rules_oci
-bazel_dep(name = "rules_oci", version = "2.2.7")
+bazel_dep(name = "rules_oci", version = "2.3.0")
 
 # rules_python
 bazel_dep(name = "rules_python", version = "1.9.0")

@@ -45,7 +45,7 @@ rust_library(
         "@crates_vendor__dragonbox_ecma-0.1.12//:dragonbox_ecma",
         "@crates_vendor__indexmap-2.13.0//:indexmap",
         "@crates_vendor__num_cpus-1.17.0//:num_cpus",
-        "@crates_vendor__once_cell-1.21.3//:once_cell",
+        "@crates_vendor__once_cell-1.21.4//:once_cell",
         "@crates_vendor__par-core-2.0.0//:par_core",
         "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
         "@crates_vendor__swc_atoms-9.0.0//:swc_atoms",

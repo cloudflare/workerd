@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "capnp",
+    name = "anstyle",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,7 +29,6 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
         "default",
         "std",
     ],
@@ -40,10 +39,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=capnp",
+        "crate-name=anstyle",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.25.1",
+    version = "1.0.14",
 )

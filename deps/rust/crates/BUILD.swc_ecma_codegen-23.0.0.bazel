@@ -50,7 +50,7 @@ rust_library(
         "@crates_vendor__dragonbox_ecma-0.1.12//:dragonbox_ecma",
         "@crates_vendor__memchr-2.8.0//:memchr",
         "@crates_vendor__num-bigint-0.4.6//:num_bigint",
-        "@crates_vendor__once_cell-1.21.3//:once_cell",
+        "@crates_vendor__once_cell-1.21.4//:once_cell",
         "@crates_vendor__regex-1.12.3//:regex",
         "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
         "@crates_vendor__serde-1.0.228//:serde",
