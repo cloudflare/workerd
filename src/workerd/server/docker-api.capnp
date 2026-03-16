@@ -313,6 +313,16 @@ struct Docker {
     id @0 :Text $Json.name("Id");
     warning @1 :Text $Json.name("Warning");
   }
+
+  # Volume list response (GET /volumes)
+  struct VolumeListResponse {
+    volumes @0 :List(Volume) $Json.name("Volumes");
+    warnings @1 :List(Text) $Json.name("Warnings");
+
+    struct Volume {
+      name @0 :Text $Json.name("Name");
+    }
+  }
 }
 
 struct ProxyEverything {

@@ -163,6 +163,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> deleteDockerVolume(kj::StringPtr volumeName);
   kj::Promise<kj::String> createTempContainerWithVolume(kj::StringPtr volumeName);
   kj::Promise<void> deleteTempContainer(kj::StringPtr tempContainerId);
+  // Discover and delete all snapshot volumes for this container (best-effort).
+  kj::Promise<void> cleanupSnapshotVolumes();
 
   // Sidecar container management (for egress proxy)
   // Inspect the sidecar container to retrieve the port to ingress to

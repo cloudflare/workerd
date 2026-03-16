@@ -31,6 +31,8 @@ namespace {
 
 constexpr uint16_t SIDECAR_INGRESS_PORT = 39001;
 
+constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
+
 struct ParsedAddress {
   kj::OneOf<kj::CidrRange, kj::String> destination;
   kj::Maybe<uint16_t> port;
@@ -289,11 +291,15 @@ ContainerClient::~ContainerClient() noexcept(false) {
                          .ignoreResult()
                          .catch_([](kj::Exception&&) {});
 
+  // Best-effort cleanup of Docker volumes created for snapshots.
+  auto volumeCleanup = cleanupSnapshotVolumes().catch_([](kj::Exception&&) {});
+
   // Pass the joined cleanup promise to the callback. The callback wraps it with the
   // canceler (so a future client creation can cancel it), stores it so the next
   // ContainerClient can await it, and adds a branch to waitUntilTasks to keep the
   // underlying I/O alive.
-  cleanupCallback(kj::joinPromises(kj::arr(kj::mv(sidecarCleanup), kj::mv(mainCleanup))));
+  cleanupCallback(kj::joinPromises(
+      kj::arr(kj::mv(sidecarCleanup), kj::mv(mainCleanup), kj::mv(volumeCleanup))));
 }
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
@@ -1057,6 +1063,25 @@ kj::Promise<void> ContainerClient::deleteTempContainer(kj::StringPtr tempContain
       response.body);
 }
 
+kj::Promise<void> ContainerClient::cleanupSnapshotVolumes() {
+  auto prefix = kj::str(SNAPSHOT_VOLUME_PREFIX, containerName, "-");
+  auto filterJson = kj::str("{\"name\":[\"", prefix, "\"]}");
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
+      kj::str("/volumes?filters=", kj::encodeUriComponent(filterJson)));
+
+  if (response.statusCode != 200) {
+    // Best-effort: if we can't list volumes, just bail.
+    co_return;
+  }
+
+  auto message = decodeJsonResponse<docker_api::Docker::VolumeListResponse>(response.body);
+  auto root = message->getRoot<docker_api::Docker::VolumeListResponse>();
+
+  for (auto volume: root.getVolumes()) {
+    co_await deleteDockerVolume(volume.getName());
+  }
+}
+
 ContainerClient::RpcTurn ContainerClient::getRpcTurn() {
   auto paf = kj::newPromiseAndFulfiller<void>();
   auto prev = mutationQueue.addBranch();
@@ -1120,6 +1145,38 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   co_await ensureSidecarStarted();
 
   co_await createContainer(entrypoint, environment, params);
+
+  // Restore directory snapshots into the created (but not yet started) container.
+  if (params.hasSnapshots()) {
+    auto snapshotList = params.getSnapshots();
+    for (auto i: kj::zeroTo(snapshotList.size())) {
+      auto snapshot = snapshotList[i];
+      auto snapshotId = kj::str(snapshot.getId());
+      auto dir = kj::str(snapshot.getDir());
+      auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, containerName, "-", snapshotId);
+
+      // Path::parse() rejects leading '/', so strip it and use toString(true) to restore it.
+      auto parentDir = kj::Path::parse(dir.slice(1)).parent().toString(true);
+
+      auto tempId = co_await createTempContainerWithVolume(volumeName);
+      KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
+
+      auto tarResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
+          kj::HttpMethod::GET, kj::str("/containers/", tempId, "/archive?path=/mnt"));
+      JSG_REQUIRE(tarResponse.statusCode == 200, Error, "Failed to read snapshot '", snapshotId,
+          "' from volume '", volumeName, "': ", tarResponse.statusCode);
+
+      // PUT the tar into the created (but not started) main container.
+      auto putResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
+          kj::HttpMethod::PUT,
+          kj::str("/containers/", containerName,
+              "/archive?path=", kj::encodeUriComponent(parentDir), "&noOverwriteDirNonDir=true"),
+          kj::mv(tarResponse.body));
+      JSG_REQUIRE(putResponse.statusCode == 200, Error, "Failed to restore snapshot '", snapshotId,
+          "' to '", dir, "': ", putResponse.statusCode);
+    }
+  }
+
   co_await startContainer();
 
   containerStarted.store(true, std::memory_order_release);
@@ -1216,7 +1273,7 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   auto tarSize = static_cast<uint64_t>(tarResponse.body.size());
 
   // Create a Docker volume to store the snapshot.
-  auto volumeName = kj::str("workerd-snap-", containerName, "-", snapshotId);
+  auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, containerName, "-", snapshotId);
   co_await createDockerVolume(volumeName);
 
   // Store the tar in the volume via a temp container.
