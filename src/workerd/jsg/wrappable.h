@@ -31,7 +31,7 @@ struct MaybeTraits<v8::TracedReference<T>> {
   static bool isNone(const v8::TracedReference<T>& ref) noexcept {
     return ref.IsEmpty();
   }
-  static constexpr bool noneIsMoveSafe = true;
+  static constexpr bool noneIsMoveSafe = false;
 };
 }  // namespace kj
 
