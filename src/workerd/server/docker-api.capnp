@@ -319,6 +319,11 @@ struct Docker {
     name @0 :Text $Json.name("Name");
   }
 
+  # Volume list filters query parameter (GET /volumes?filters=...)
+  struct VolumeListFilters {
+    name @0 :List(Text) $Json.name("name");
+  }
+
   # Volume list response (GET /volumes)
   struct VolumeListResponse {
     volumes @0 :List(Volume) $Json.name("Volumes");

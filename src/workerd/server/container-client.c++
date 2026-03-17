@@ -347,8 +347,8 @@ kj::Promise<DockerBinaryResponse> dockerApiBinaryRequest(kj::Network& network,
     kj::String dockerPath,
     kj::HttpMethod method,
     kj::String endpoint,
-    kj::Maybe<kj::Array<kj::byte>> body = kj::none,
-    uint64_t maxResponseSize = kj::maxValue) {
+    kj::Maybe<kj::Array<kj::byte>> body,
+    uint64_t maxResponseSize) {
   kj::Maybe<kj::ArrayPtr<const kj::byte>> bodyBytes;
   KJ_IF_SOME(b, body) {
     bodyBytes = b.asPtr();
@@ -360,7 +360,13 @@ kj::Promise<DockerBinaryResponse> dockerApiBinaryRequest(kj::Network& network,
 kj::Promise<void> cleanupSnapshotVolumes(
     kj::Network& network, kj::String dockerPath, kj::String containerName) {
   auto prefix = kj::str(SNAPSHOT_VOLUME_PREFIX, containerName, "-");
-  auto filterJson = kj::str("{\"name\":[\"", prefix, "\"]}");
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::VolumeListFilters>();
+  capnp::MallocMessageBuilder filterMessage;
+  auto filters = filterMessage.initRoot<docker_api::Docker::VolumeListFilters>();
+  auto names = filters.initName(1);
+  names.set(0, prefix);
+  auto filterJson = codec.encode(filters);
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
       kj::str("/volumes?filters=", kj::encodeUriComponent(filterJson)));
 
@@ -1242,7 +1248,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
       auto putResponse =
           co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::PUT,
               kj::str("/containers/", containerName, "/archive?path=%2F&noOverwriteDirNonDir=true"),
-              kj::mv(tarResponse.body));
+              kj::mv(tarResponse.body), MAX_JSON_RESPONSE_SIZE);
       JSG_REQUIRE(putResponse.statusCode == 200, Error, "Failed to restore snapshot '", snapshotId,
           "' to '", dir, "': ", putResponse.statusCode);
     }
@@ -1363,7 +1369,7 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   auto putResponse =
       co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::PUT,
           kj::str("/containers/", tempId, "/archive?path=", kj::encodeUriComponent(mountPath)),
-          kj::mv(tarResponse.body));
+          kj::mv(tarResponse.body), MAX_JSON_RESPONSE_SIZE);
   JSG_REQUIRE(putResponse.statusCode == 200, Error,
       "snapshotDirectory(): failed to store snapshot in volume '", volumeName,
       "': ", putResponse.statusCode);
