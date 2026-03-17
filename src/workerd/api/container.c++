@@ -4,6 +4,8 @@
 
 #include "container.h"
 
+#include <cmath>
+
 #include <workerd/api/http.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -16,41 +18,6 @@ namespace workerd::api {
 Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
       running(running) {}
-
-void DirectorySnapshot::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  // Version marker for forward-compatible evolution. Bump when adding fields.
-  serializer.writeRawUint32(1);
-
-  serializer.writeLengthDelimited(id);
-  serializer.writeRawUint64(size);
-  serializer.writeLengthDelimited(dir);
-
-  KJ_IF_SOME(n, name) {
-    serializer.writeRawUint32(1);
-    serializer.writeLengthDelimited(n);
-  } else {
-    serializer.writeRawUint32(0);
-  }
-}
-
-jsg::Ref<DirectorySnapshot> DirectorySnapshot::deserialize(
-    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-  KJ_REQUIRE(tag == rpc::SerializationTag::DIRECTORY_SNAPSHOT);
-
-  auto version = deserializer.readRawUint32();
-  JSG_REQUIRE(version == 1, Error, "Unknown DirectorySnapshot serialization version: ", version);
-
-  auto id = deserializer.readLengthDelimitedString();
-  auto size = deserializer.readRawUint64();
-  auto dir = deserializer.readLengthDelimitedString();
-
-  kj::Maybe<kj::String> name = kj::none;
-  if (deserializer.readRawUint32() != 0) {
-    name = deserializer.readLengthDelimitedString();
-  }
-
-  return js.alloc<DirectorySnapshot>(kj::mv(id), size, kj::mv(dir), kj::mv(name));
-}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
@@ -99,10 +66,15 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
       auto list = req.initSnapshots(snapshots.size());
       for (auto i: kj::indices(snapshots)) {
         auto snapshot = list[i];
-        snapshot.setId(snapshots[i]->getId());
-        snapshot.setSize(snapshots[i]->getSizeRaw());
-        snapshot.setDir(snapshots[i]->getDir());
-        KJ_IF_SOME(name, snapshots[i]->getNameForRpc()) {
+        double size = snapshots[i].size;
+        JSG_REQUIRE(std::isfinite(size) && size >= 0 &&
+                size <= static_cast<double>((1ull << 53) - 1) &&
+                std::floor(size) == size,
+            RangeError, "Snapshot size must be a non-negative integer <= Number.MAX_SAFE_INTEGER");
+        snapshot.setId(snapshots[i].id);
+        snapshot.setSize(static_cast<uint64_t>(size));
+        snapshot.setDir(snapshots[i].dir);
+        KJ_IF_SOME(name, snapshots[i].name) {
           snapshot.setName(name);
         }
       }
@@ -116,7 +88,7 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   running = true;
 }
 
-jsg::Promise<jsg::Ref<DirectorySnapshot>> Container::snapshotDirectory(
+jsg::Promise<DirectorySnapshot> Container::snapshotDirectory(
     jsg::Lock& js, SnapshotDirectoryOptions options) {
   auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(flags.getWorkerdExperimental(), Error,
@@ -135,17 +107,19 @@ jsg::Promise<jsg::Ref<DirectorySnapshot>> Container::snapshotDirectory(
 
   return IoContext::current()
       .awaitIo(js, req.send())
-      .then(
-          js, [](jsg::Lock& js, capnp::Response<rpc::Container::SnapshotDirectoryResults> results) {
+      .then(js, [](jsg::Lock& js, capnp::Response<rpc::Container::SnapshotDirectoryResults> results) {
     auto snapshot = results.getSnapshot();
-    kj::Maybe<kj::String> name = kj::none;
+    jsg::Optional<kj::String> name = kj::none;
     auto snapshotName = snapshot.getName();
     if (snapshotName.size() > 0) {
       name = kj::str(snapshotName);
     }
 
-    return js.alloc<DirectorySnapshot>(
-        kj::str(snapshot.getId()), snapshot.getSize(), kj::str(snapshot.getDir()), kj::mv(name));
+    JSG_REQUIRE(snapshot.getSize() <= (1ull << 53) - 1, RangeError,
+        "Snapshot size exceeds Number.MAX_SAFE_INTEGER");
+
+    return DirectorySnapshot{kj::str(snapshot.getId()), static_cast<double>(snapshot.getSize()),
+      kj::str(snapshot.getDir()), kj::mv(name)};
   });
 }
 

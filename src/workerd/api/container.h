@@ -8,69 +8,25 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/io-own.h>
-#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
 
 class Fetcher;
 
-class DirectorySnapshot: public jsg::Object {
- public:
-  DirectorySnapshot(kj::String id, uint64_t size, kj::String dir, kj::Maybe<kj::String> name)
-      : id(kj::mv(id)),
-        size(size),
-        dir(kj::mv(dir)),
-        name(kj::mv(name)) {}
-
-  kj::StringPtr getId() const {
-    return id;
-  }
-
-  double getSize() const {
-    return size;
-  }
-
-  kj::StringPtr getDir() const {
-    return dir;
-  }
-
-  jsg::Optional<kj::StringPtr> getName() const {
-    return name.map([](const kj::String& n) -> kj::StringPtr { return n; });
-  }
-
-  kj::Maybe<kj::StringPtr> getNameForRpc() const {
-    return name.map([](const kj::String& n) -> kj::StringPtr { return n; });
-  }
-
-  uint64_t getSizeRaw() const {
-    return size;
-  }
-
-  JSG_RESOURCE_TYPE(DirectorySnapshot) {
-    JSG_READONLY_PROTOTYPE_PROPERTY(id, getId);
-    JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
-    JSG_READONLY_PROTOTYPE_PROPERTY(dir, getDir);
-    JSG_READONLY_PROTOTYPE_PROPERTY(name, getName);
-  }
-
-  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-  static jsg::Ref<DirectorySnapshot> deserialize(
-      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
-
-  JSG_SERIALIZABLE(rpc::SerializationTag::DIRECTORY_SNAPSHOT);
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("id", id);
-    tracker.trackField("dir", dir);
-    tracker.trackField("name", name);
-  }
-
- private:
+struct DirectorySnapshot {
   kj::String id;
-  uint64_t size;
+  double size;
   kj::String dir;
-  kj::Maybe<kj::String> name;
+  jsg::Optional<kj::String> name;
+
+  JSG_STRUCT(id, size, dir, name);
+  JSG_STRUCT_TS_OVERRIDE(DirectorySnapshot {
+    readonly id: string;
+    readonly size: number;
+    readonly dir: string;
+    readonly name?: string;
+  });
 };
 
 // Implements the `ctx.container` API for durable-object-attached containers. This API allows
@@ -93,7 +49,7 @@ class Container: public jsg::Object {
     bool enableInternet = false;
     jsg::Optional<jsg::Dict<kj::String>> env;
     jsg::Optional<int64_t> hardTimeout;
-    jsg::Optional<kj::Array<jsg::Ref<DirectorySnapshot>>> snapshots;
+    jsg::Optional<kj::Array<DirectorySnapshot>> snapshots;
 
     // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
 
@@ -131,8 +87,7 @@ class Container: public jsg::Object {
   jsg::Promise<void> interceptOutboundHttp(
       jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding);
   jsg::Promise<void> interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<Fetcher> binding);
-  jsg::Promise<jsg::Ref<DirectorySnapshot>> snapshotDirectory(
-      jsg::Lock& js, SnapshotDirectoryOptions options);
+  jsg::Promise<DirectorySnapshot> snapshotDirectory(jsg::Lock& js, SnapshotDirectoryOptions options);
 
   // TODO(containers): listenTcp()
 

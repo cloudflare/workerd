@@ -731,6 +731,7 @@ export class DurableObjectExample extends DurableObject {
     assert.ok(snapshot.id.length > 0, 'snapshot id should be non-empty');
     assert.ok(snapshot.size > 0, 'snapshot size should be > 0');
     assert.strictEqual(snapshot.dir, '/app/data');
+    assert.strictEqual(snapshot.name, undefined);
 
     // Destroy the container
     await container.destroy();

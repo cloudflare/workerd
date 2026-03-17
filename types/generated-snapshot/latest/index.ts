@@ -3762,10 +3762,10 @@ export interface EventSourceEventSourceInit {
   fetcher?: Fetcher;
 }
 export interface DirectorySnapshot {
-  get id(): string;
-  get size(): number;
-  get dir(): string;
-  get name(): string | undefined;
+  readonly id: string;
+  readonly size: number;
+  readonly dir: string;
+  readonly name?: string;
 }
 export interface Container {
   get running(): boolean;

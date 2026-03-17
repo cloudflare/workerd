@@ -438,10 +438,6 @@ enum SerializationTag {
   #
   # Similar to serviceStub, this refers to the entrypoint of a Worker that can be instantiated
   # anywhere and any time, and thus can be persisted and used in `env` and `ctx.props`, etc.
-
-  directorySnapshot @13;
-  # A container directory snapshot handle that can be stored in Durable Object storage and passed
-  # around by value.
 }
 
 enum StreamEncoding {
