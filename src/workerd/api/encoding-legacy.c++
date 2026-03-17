@@ -69,10 +69,8 @@ kj::Maybe<jsg::JsString> LegacyDecoder::decode(
     return kj::none;
   }
 
-  // Read the decoded UTF-16 output directly from the Rust-owned buffer,
-  // avoiding a Vec<u16> move across the CXX bridge.
-  auto ptr = reinterpret_cast<const uint16_t*>(result.output_ptr);
-  return js.str(kj::ArrayPtr<const uint16_t>(ptr, result.output_len));
+  // Zero-copy view of the UTF-16 output slice from the Rust-owned buffer.
+  return js.str(kj::from<kj_rs::Rust>(result.output));
 }
 
 }  // namespace workerd::api
