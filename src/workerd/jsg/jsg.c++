@@ -368,6 +368,13 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   return jsg::JsObject(module.getHandle(*this).As<v8::Object>());
 }
 
+kj::Maybe<JsObject> Lock::resolvePublicBuiltinModule(kj::StringPtr specifier) {
+  auto& isolate = IsolateBase::from(v8Isolate);
+  KJ_ASSERT(isolate.isUsingNewModuleRegistry());
+  return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
+      *this, specifier, jsg::modules::ResolveContext::Type::PUBLIC_BUILTIN);
+}
+
 kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requireEsm) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {

@@ -253,6 +253,12 @@ wd_test(
 )
 
 wd_test(
+    src = "process-getbuiltin-newmodreg-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-getbuiltin-newmodreg-test.js"],
+)
+
+wd_test(
     src = "process-legacy-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["process-legacy-nodejs-test.js"],

@@ -1537,6 +1537,13 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
       MODULE_LOOKUP(context, kBuiltinOnly);
       break;
     }
+    case ResolveContext::Type::PUBLIC_BUILTIN: {
+      // For public built-in resolution, we only use builtin bundles.
+      // This excludes both worker bundle modules and internal-only modules,
+      // returning only built-ins that are normally importable by user code.
+      MODULE_LOOKUP(context, kBuiltin);
+      break;
+    }
   }
 
   return kj::none;

@@ -2849,6 +2849,14 @@ class Lock {
   // This variation can be used only for internal built-ins.
   kj::Maybe<JsObject> resolveInternalModule(kj::StringPtr specifier);
 
+  // Resolve a user-importable built-in module namespace from the given specifier.
+  // Unlike resolveInternalModule, this only searches user-importable built-ins
+  // (PUBLIC_BUILTIN context), excluding internal-only modules and worker bundle
+  // modules. Use this for user-facing APIs like process.getBuiltinModule() that
+  // must not expose internal modules or return user bundle overrides.
+  // Only valid when the new module registry is in use.
+  kj::Maybe<JsObject> resolvePublicBuiltinModule(kj::StringPtr specifier);
+
   // Resolve a module namespace from the given specifier.
   // This variation includes modules from the worker bundle.
   kj::Maybe<JsObject> resolveModule(
