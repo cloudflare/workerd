@@ -3884,6 +3884,12 @@ export interface EventSourceEventSourceInit {
   withCredentials?: boolean;
   fetcher?: Fetcher;
 }
+export interface DirectorySnapshot {
+  get id(): string;
+  get size(): number;
+  get dir(): string;
+  get name(): string | undefined;
+}
 export interface Container {
   get running(): boolean;
   start(options?: ContainerStartupOptions): void;
@@ -3894,12 +3900,20 @@ export interface Container {
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
   interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
   interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
+  snapshotDirectory(
+    options: ContainerSnapshotDirectoryOptions,
+  ): Promise<DirectorySnapshot>;
+}
+export interface ContainerSnapshotDirectoryOptions {
+  dir: string;
+  name?: string;
 }
 export interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
+  snapshots?: DirectorySnapshot[];
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.

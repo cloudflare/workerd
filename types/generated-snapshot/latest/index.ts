@@ -3761,6 +3761,12 @@ export interface EventSourceEventSourceInit {
   withCredentials?: boolean;
   fetcher?: Fetcher;
 }
+export interface DirectorySnapshot {
+  get id(): string;
+  get size(): number;
+  get dir(): string;
+  get name(): string | undefined;
+}
 export interface Container {
   get running(): boolean;
   start(options?: ContainerStartupOptions): void;
@@ -3777,6 +3783,7 @@ export interface ContainerStartupOptions {
   enableInternet: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
+  snapshots?: DirectorySnapshot[];
 }
 /**
  * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
