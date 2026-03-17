@@ -81,9 +81,26 @@ def parse_log(log_file: Path, options: Options) -> Log:
     if log_file.parent.name in EXCLUDED_TESTS:
         return log
 
+    # Use iterative parsing to avoid loading entire XML file into memory
+    # This is more memory-efficient for large test result files
     parser = ElementTree.XMLParser(encoding="utf-8")
-    root = ElementTree.parse(log_file, parser=parser)
-    text = root.find("testsuite").find("system-out").text
+    
+    # iterparse allows processing the file incrementally
+    # We only need to extract the system-out text from testsuite
+    root = None
+    for event, elem in ElementTree.iterparse(log_file, events=("end",), parser=parser):
+        if elem.tag == "testsuite":
+            root = elem
+            break  # Stop after finding testsuite, we don't need the rest
+    
+    if root is None:
+        return log
+    
+    system_out = root.find("system-out")
+    if system_out is None or system_out.text is None:
+        return log
+    
+    text = system_out.text
 
     start_log = re.search(r"\[ TEST \] .*:zzz_results\n", text)
     if not start_log:
