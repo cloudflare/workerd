@@ -1108,7 +1108,8 @@ kj::Promise<void> ContainerClient::deleteDockerVolume(kj::StringPtr volumeName) 
       response.body);
 }
 
-kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(kj::StringPtr volumeName) {
+kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
+    kj::StringPtr volumeName, kj::StringPtr mountPath) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
@@ -1117,7 +1118,7 @@ kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(kj::Strin
 
   auto hostConfig = jsonRoot.initHostConfig();
   auto binds = hostConfig.initBinds(1);
-  binds.set(0, kj::str(volumeName, ":/mnt"));
+  binds.set(0, kj::str(volumeName, ":", mountPath));
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create"), codec.encode(jsonRoot));
@@ -1218,22 +1219,30 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 
       auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, containerName, "-", snapshotId);
       auto parentDir = validateSnapshotDir(dir);
+      auto mountPath = parentDir == "/" ? kj::str("/mnt") : kj::str("/mnt", parentDir);
 
-      auto tempId = co_await createTempContainerWithVolume(volumeName);
+      auto firstSeparator = dir.slice(1).findFirst('/');
+      auto archiveRoot = firstSeparator.map([&](size_t i) {
+        return kj::str(dir.slice(1, i + 1));
+      }).orDefault(kj::str(dir.slice(1)));
+
+      auto tempId = co_await createTempContainerWithVolume(volumeName, mountPath);
       KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
 
-      auto tarResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
-          kj::HttpMethod::GET, kj::str("/containers/", tempId, "/archive?path=/mnt"), kj::none,
-          MAX_SNAPSHOT_TAR_SIZE);
+      auto tarResponse =
+          co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
+              kj::str("/containers/", tempId, "/archive?path=/mnt/",
+                  kj::encodeUriComponent(archiveRoot)),
+              kj::none, MAX_SNAPSHOT_TAR_SIZE);
       JSG_REQUIRE(tarResponse.statusCode == 200, Error, "Failed to read snapshot '", snapshotId,
           "' from volume '", volumeName, "': ", tarResponse.statusCode);
 
-      // PUT the tar into the created (but not started) main container.
-      auto putResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
-          kj::HttpMethod::PUT,
-          kj::str("/containers/", containerName,
-              "/archive?path=", kj::encodeUriComponent(parentDir), "&noOverwriteDirNonDir=true"),
-          kj::mv(tarResponse.body));
+      // PUT the tar into the created (but not started) main container at / so the
+      // tar's full path structure is restored without requiring parentDir to pre-exist.
+      auto putResponse =
+          co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::PUT,
+              kj::str("/containers/", containerName, "/archive?path=%2F&noOverwriteDirNonDir=true"),
+              kj::mv(tarResponse.body));
       JSG_REQUIRE(putResponse.statusCode == 200, Error, "Failed to restore snapshot '", snapshotId,
           "' to '", dir, "': ", putResponse.statusCode);
     }
@@ -1318,7 +1327,8 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error,
       "snapshotDirectory() requires a running container.");
 
-  validateSnapshotDir(dir);
+  auto parentDir = validateSnapshotDir(dir);
+  auto mountPath = parentDir == "/" ? kj::str("/mnt") : kj::str("/mnt", parentDir);
 
   auto snapshotId = randomUUID(kj::none);
 
@@ -1347,12 +1357,13 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   });
 
   // Store the tar in the volume via a temp container.
-  auto tempId = co_await createTempContainerWithVolume(volumeName);
+  auto tempId = co_await createTempContainerWithVolume(volumeName, mountPath);
   KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
 
   auto putResponse =
       co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::PUT,
-          kj::str("/containers/", tempId, "/archive?path=/mnt"), kj::mv(tarResponse.body));
+          kj::str("/containers/", tempId, "/archive?path=", kj::encodeUriComponent(mountPath)),
+          kj::mv(tarResponse.body));
   JSG_REQUIRE(putResponse.statusCode == 200, Error,
       "snapshotDirectory(): failed to store snapshot in volume '", volumeName,
       "': ", putResponse.statusCode);
