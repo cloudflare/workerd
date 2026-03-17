@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@opennextjs/cloudflare": "1.16.3",
-    "next": "16.1.6",
+    "next": "16.1.7",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "wrangler": "4.63.0"
