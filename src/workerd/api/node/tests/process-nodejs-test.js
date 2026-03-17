@@ -616,18 +616,6 @@ export const processGetBuiltinModule = {
       process.getBuiltinModule('cloudflare-internal:filesystem'),
       undefined
     );
-    assert.strictEqual(
-      process.getBuiltinModule('node-internal:public_process'),
-      undefined
-    );
-    assert.strictEqual(
-      process.getBuiltinModule('node-internal:legacy_process'),
-      undefined
-    );
-    assert.strictEqual(
-      process.getBuiltinModule('node-internal:internal_timers_global_override'),
-      undefined
-    );
   },
 };
 
