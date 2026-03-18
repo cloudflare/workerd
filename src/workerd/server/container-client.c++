@@ -25,8 +25,6 @@
 #include <kj/exception.h>
 #include <kj/string.h>
 
-#include <atomic>
-
 namespace workerd::server {
 
 namespace {
@@ -46,7 +44,8 @@ constexpr size_t MAX_SNAPSHOT_TAR_SIZE = 1ULL * 1024 * 1024 * 1024;  // 1 GiB
 static_assert(static_cast<double>(MAX_SNAPSHOT_TAR_SIZE) == MAX_SNAPSHOT_TAR_SIZE,
     "MAX_SNAPSHOT_TAR_SIZE must be exactly representable as double");
 
-std::atomic<bool> staleSnapshotVolumeCheckScheduled = false;
+// Ensures the stale-volume check runs at most once per process.
+bool staleSnapshotVolumeCheckScheduled = false;
 
 // Validate a snapshot directory path. Rejects relative paths, embedded null bytes,
 // and path traversal components (".."). Returns the validated parent directory path
@@ -63,8 +62,8 @@ kj::String validateSnapshotDir(kj::StringPtr dir) {
   kj::Maybe<kj::Path> maybeParsedDir;
   KJ_IF_SOME(exc,
       kj::runCatchingExceptions([&]() { maybeParsedDir = kj::Path::parse(dir.slice(1)); })) {
-    (void)exc;
-    JSG_FAIL_REQUIRE(Error, "Snapshot directory contains invalid path components: ", dir);
+    JSG_FAIL_REQUIRE(Error, "Snapshot directory contains invalid path components: ", dir, "; ",
+        exc.getDescription());
   }
   return KJ_ASSERT_NONNULL(kj::mv(maybeParsedDir)).parent().toString(true);
 }
@@ -446,7 +445,8 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
       channelTokenHandler(channelTokenHandler) {
-  if (!staleSnapshotVolumeCheckScheduled.exchange(true, std::memory_order_relaxed)) {
+  if (!staleSnapshotVolumeCheckScheduled) {
+    staleSnapshotVolumeCheckScheduled = true;
     waitUntilTasks.add(warnAboutStaleSnapshotVolumes(network, kj::str(this->dockerPath))
                            .catch_([](kj::Exception&& e) {
       KJ_LOG(WARNING, "failed to inspect snapshot volumes for staleness", e);
