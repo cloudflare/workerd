@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 //! Tests for resource method callbacks.
 //!
 //! These tests ensure that resource methods can be called from JavaScript and that
@@ -10,15 +14,13 @@ use std::rc::Rc;
 
 use jsg::ExceptionType;
 use jsg::Number;
-use jsg::ResourceState;
-use jsg::ResourceTemplate;
+use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_static_constant;
 
 #[jsg_resource]
 struct EchoResource {
-    _state: ResourceState,
     prefix: String,
 }
 
@@ -38,7 +40,6 @@ impl EchoResource {
 
 #[jsg_resource]
 struct DirectReturnResource {
-    _state: ResourceState,
     name: String,
     counter: Rc<Cell<u32>>,
 }
@@ -78,13 +79,10 @@ impl DirectReturnResource {
 fn resource_method_callback_receives_correct_self() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EchoResource {
-            _state: ResourceState::default(),
+        let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
         });
-        let mut template = EchoResourceTemplate::new(lock);
-        // SAFETY: Lock is valid, resource is a valid Ref, and template holds a valid FunctionTemplate.
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let wrapped = resource.to_js(lock);
         ctx.set_global("echoResource", wrapped);
 
         // Call the method from JavaScript
@@ -99,13 +97,10 @@ fn resource_method_callback_receives_correct_self() {
 fn resource_method_can_be_called_multiple_times() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EchoResource {
-            _state: ResourceState::default(),
+        let resource = jsg::Rc::new(EchoResource {
             prefix: ">> ".to_owned(),
         });
-        let mut template = EchoResourceTemplate::new(lock);
-        // SAFETY: Lock is valid, resource is a valid Ref, and template holds a valid FunctionTemplate.
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let wrapped = resource.to_js(lock);
         ctx.set_global("echo", wrapped);
 
         // First call
@@ -124,13 +119,10 @@ fn resource_method_can_be_called_multiple_times() {
 fn resource_method_accepts_str_ref_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(EchoResource {
-            _state: ResourceState::default(),
+        let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
         });
-        let mut template = EchoResourceTemplate::new(lock);
-        // SAFETY: Lock is valid, resource is a valid Ref, and template holds a valid FunctionTemplate.
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let wrapped = resource.to_js(lock);
         ctx.set_global("echo", wrapped);
 
         let result: String = ctx.eval(lock, "echo.greet('World')").unwrap();
@@ -145,14 +137,11 @@ fn resource_method_returns_non_result_values() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let counter = Rc::new(Cell::new(42));
-        let resource = jsg::Ref::new(DirectReturnResource {
-            _state: ResourceState::default(),
+        let resource = jsg::Rc::new(DirectReturnResource {
             name: "TestResource".to_owned(),
             counter: counter.clone(),
         });
-        let mut template = DirectReturnResourceTemplate::new(lock);
-        // SAFETY: Lock is valid, resource is a valid Ref, and template holds a valid FunctionTemplate.
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let wrapped = resource.to_js(lock);
         ctx.set_global("resource", wrapped);
 
         // Test getString returns string
@@ -179,9 +168,7 @@ fn resource_method_returns_non_result_values() {
 }
 
 #[jsg_resource]
-struct MathResource {
-    _state: ResourceState,
-}
+struct MathResource;
 
 #[jsg_resource]
 impl MathResource {
@@ -214,8 +201,7 @@ impl MathResource {
 fn static_method_callable_on_class() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let template = MathResourceTemplate::new(lock);
-        let constructor = template.get_constructor().as_local_function(lock);
+        let constructor = jsg::resource::function_template_of::<MathResource>(lock);
         ctx.set_global("MathResource", constructor.into());
 
         let result: Number = ctx.eval(lock, "MathResource.add(2, 3)").unwrap();
@@ -232,18 +218,13 @@ fn static_method_callable_on_class() {
 fn instance_and_static_methods_coexist() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(MathResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = MathResourceTemplate::new(lock);
-
         // Expose the class constructor as a global
-        let constructor = template.get_constructor().as_local_function(lock);
+        let constructor = jsg::resource::function_template_of::<MathResource>(lock);
         ctx.set_global("MathResource", constructor.into());
 
-        // Expose an instance as a global
-        // SAFETY: Lock is valid, resource is a valid Ref, and template holds a valid FunctionTemplate.
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        // Allocate and expose an instance as a global
+        let resource = jsg::Rc::new(MathResource);
+        let wrapped = resource.to_js(lock);
         ctx.set_global("math", wrapped);
 
         // Instance method works on the object
@@ -266,8 +247,7 @@ fn instance_and_static_methods_coexist() {
 fn static_method_result_return_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let template = MathResourceTemplate::new(lock);
-        let constructor = template.get_constructor().as_local_function(lock);
+        let constructor = jsg::resource::function_template_of::<MathResource>(lock);
         ctx.set_global("MathResource", constructor.into());
 
         let result: String = ctx.eval(lock, "MathResource.greet('Rust')").unwrap();
@@ -281,8 +261,7 @@ fn static_method_result_return_type() {
 fn static_method_throws_exception() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let template = MathResourceTemplate::new(lock);
-        let constructor = template.get_constructor().as_local_function(lock);
+        let constructor = jsg::resource::function_template_of::<MathResource>(lock);
         ctx.set_global("MathResource", constructor.into());
 
         // Valid call succeeds
@@ -305,14 +284,11 @@ fn static_method_throws_exception() {
 fn resource_method_returns_null_for_none() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(DirectReturnResource {
-            _state: ResourceState::default(),
+        let resource = jsg::Rc::new(DirectReturnResource {
             name: String::new(),
             counter: Rc::new(Cell::new(0)),
         });
-        let mut template = DirectReturnResourceTemplate::new(lock);
-        // SAFETY: Lock is valid, resource is a valid Ref, and template holds a valid FunctionTemplate.
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let wrapped = resource.to_js(lock);
         ctx.set_global("resource", wrapped);
 
         let result: Option<String> = ctx.eval(lock, "resource.maybeName()").unwrap();
@@ -326,9 +302,7 @@ fn resource_method_returns_null_for_none() {
 // =============================================================================
 
 #[jsg_resource]
-struct ConstantResource {
-    _state: ResourceState,
-}
+struct ConstantResource;
 
 #[jsg_resource]
 impl ConstantResource {
@@ -355,8 +329,7 @@ impl ConstantResource {
 fn static_constant_accessible_on_constructor() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let template = ConstantResourceTemplate::new(lock);
-        let constructor = template.get_constructor().as_local_function(lock);
+        let constructor = jsg::resource::function_template_of::<ConstantResource>(lock);
         ctx.set_global("ConstantResource", constructor.into());
 
         let result: Number = ctx.eval(lock, "ConstantResource.MAX_SIZE").unwrap();
@@ -379,12 +352,8 @@ fn static_constant_accessible_on_constructor() {
 fn static_constant_accessible_on_instance() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ConstantResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ConstantResourceTemplate::new(lock);
-        // SAFETY: Lock is valid, resource is a valid Ref, and template holds a valid FunctionTemplate.
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = jsg::Rc::new(ConstantResource {});
+        let wrapped = resource.to_js(lock);
         ctx.set_global("obj", wrapped);
 
         let result: Number = ctx.eval(lock, "obj.MAX_SIZE").unwrap();
@@ -401,8 +370,7 @@ fn static_constant_accessible_on_instance() {
 fn static_constant_is_read_only() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let template = ConstantResourceTemplate::new(lock);
-        let constructor = template.get_constructor().as_local_function(lock);
+        let constructor = jsg::resource::function_template_of::<ConstantResource>(lock);
         ctx.set_global("ConstantResource", constructor.into());
 
         // Attempt to overwrite should silently fail (strict mode would throw).
@@ -423,16 +391,12 @@ fn static_constant_is_read_only() {
 fn static_constant_coexists_with_methods() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(ConstantResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = ConstantResourceTemplate::new(lock);
+        let resource = jsg::Rc::new(ConstantResource {});
 
-        let constructor = template.get_constructor().as_local_function(lock);
+        let constructor = jsg::resource::function_template_of::<ConstantResource>(lock);
         ctx.set_global("ConstantResource", constructor.into());
 
-        // SAFETY: Lock is valid, resource is a valid Ref, and template holds a valid FunctionTemplate.
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let wrapped = resource.to_js(lock);
         ctx.set_global("obj", wrapped);
 
         // Instance method works

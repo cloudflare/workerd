@@ -136,6 +136,9 @@ class Wrappable: public kj::Refcounted {
 
   void addStrongRef();
   void removeStrongRef();
+  uint getStrongRefcount() const {
+    return strongRefcount;
+  }
 
   // Called by jsg::Ref<T> to ensure that its Wrappable is destroyed under the isolate lock.
   // `ownSelf` keeps the raw `self` pointer valid -- they are passed separately because Wrappable is

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 use std::pin::Pin;
 
 use jsg::FromJS;
@@ -12,7 +16,6 @@ mod ffi {
     #[namespace = "workerd::rust::jsg"]
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
-
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
     }
@@ -23,9 +26,15 @@ mod ffi {
         value: KjMaybe<Local>,
     }
 
+    enum GcType {
+        /// Full (major) GC — collects both young and old generations, plus cppgc heap.
+        Full = 0,
+        /// Minor (scavenge) GC — collects only the young generation.
+        Minor = 1,
+    }
+
     unsafe extern "C++" {
         include!("workerd/rust/jsg-test/ffi.h");
-
         type TestHarness;
         type EvalContext;
 
@@ -38,6 +47,20 @@ mod ffi {
 
         pub unsafe fn eval(self: &EvalContext, code: &str) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
+
+        /// Triggers garbage collection for testing purposes.
+        /// Note: For GC to actually collect objects, they must not be reachable from the
+        /// current HandleScope.
+        #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
+        #[allow(dead_code)]
+        pub unsafe fn request_gc(isolate: *mut Isolate, gc_type: GcType);
+
+        /// Creates a V8 object with the C++ `WORKERD_WRAPPABLE_TAG` in its internal fields.
+        /// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn create_cpp_tagged_object(isolate: *mut Isolate) -> Local;
+
     }
 }
 
@@ -189,6 +212,26 @@ impl Harness {
         unsafe {
             self.0
                 .run_in_context(&raw mut callback as usize, trampoline::<F>);
+        }
+    }
+
+    pub fn request_gc(lock: &mut jsg::Lock) {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Full) };
+    }
+
+    pub fn request_minor_gc(lock: &mut jsg::Lock) {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Minor) };
+    }
+
+    /// Creates a V8 object tagged with the C++ `WORKERD_WRAPPABLE_TAG`.
+    /// Used to test that Rust unwrap rejects non-Rust wrappable objects.
+    pub fn create_cpp_tagged_object<'a>(lock: &mut jsg::Lock) -> v8::Local<'a, v8::Value> {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe {
+            let local = ffi::create_cpp_tagged_object(lock.isolate().as_ffi());
+            v8::Local::from_ffi(lock.isolate(), local)
         }
     }
 }

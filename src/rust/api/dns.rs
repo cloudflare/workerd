@@ -1,4 +1,7 @@
-use jsg::ResourceState;
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_struct;
@@ -114,14 +117,14 @@ pub fn parse_replacement(input: &[&str]) -> jsg::Result<String, DnsParserError> 
 }
 
 #[jsg_resource]
-pub struct DnsUtil {
-    // TODO(soon): Generated code. Move this to jsg-macros.
-    #[expect(clippy::pub_underscore_fields)]
-    pub _state: ResourceState,
-}
+pub struct DnsUtil;
 
 #[jsg_resource]
 impl DnsUtil {
+    pub fn new() -> jsg::Rc<Self> {
+        jsg::Rc::new(Self {})
+    }
+
     /// Parses an unknown RR format returned from Cloudflare DNS.
     /// Specification is available at
     /// `<https://datatracker.ietf.org/doc/html/rfc3597>`
@@ -313,9 +316,7 @@ mod tests {
 
     #[test]
     fn test_parse_caa_record_issue() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         let record = dns_util
             .parse_caa_record("\\# 15 00 05 69 73 73 75 65 70 6b 69 2e 67 6f 6f 67".to_owned())
             .unwrap();
@@ -327,9 +328,7 @@ mod tests {
 
     #[test]
     fn test_parse_caa_record_issuewild() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         let record = dns_util
             .parse_caa_record(
                 "\\# 21 00 09 69 73 73 75 65 77 69 6c 64 6c 65 74 73 65 6e 63 72 79 70 74"
@@ -344,9 +343,7 @@ mod tests {
 
     #[test]
     fn test_parse_caa_record_invalid_field() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         let result = dns_util.parse_caa_record(
             "\\# 15 00 05 69 6e 76 61 6c 69 64 70 6b 69 2e 67 6f 6f 67".to_owned(),
         );
@@ -356,9 +353,7 @@ mod tests {
 
     #[test]
     fn test_parse_naptr_record() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         let record = dns_util
             .parse_naptr_record("\\# 37 15 b3 08 ae 01 73 0a 6d 79 2d 73 65 72 76 69 63 65 06 72 65 67 65 78 70 0b 72 65 70 6c 61 63 65 6d 65 6e 74 00".to_owned())
             .unwrap();
@@ -378,33 +373,25 @@ mod tests {
 
     #[test]
     fn test_parse_caa_record_empty_string() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         assert!(dns_util.parse_caa_record(String::new()).is_err());
     }
 
     #[test]
     fn test_parse_caa_record_single_token() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         assert!(dns_util.parse_caa_record("\\#".to_owned()).is_err());
     }
 
     #[test]
     fn test_parse_caa_record_two_tokens() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         assert!(dns_util.parse_caa_record("\\# 15".to_owned()).is_err());
     }
 
     #[test]
     fn test_parse_caa_record_data_too_short_for_prefix() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         // critical=00, prefix_length=FF (255) but no data follows
         assert!(
             dns_util
@@ -415,25 +402,19 @@ mod tests {
 
     #[test]
     fn test_parse_naptr_record_empty_string() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         assert!(dns_util.parse_naptr_record(String::new()).is_err());
     }
 
     #[test]
     fn test_parse_naptr_record_single_token() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         assert!(dns_util.parse_naptr_record("\\#".to_owned()).is_err());
     }
 
     #[test]
     fn test_parse_naptr_record_too_few_fields() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         assert!(
             dns_util
                 .parse_naptr_record("\\# 37 15 b3".to_owned())
@@ -450,9 +431,7 @@ mod tests {
 
     #[test]
     fn test_parse_naptr_record_truncated_at_flags() {
-        let dns_util = DnsUtil {
-            _state: ResourceState::default(),
-        };
+        let dns_util = DnsUtil {};
         // Has order+preference+flag_length but no flag data
         assert!(
             dns_util

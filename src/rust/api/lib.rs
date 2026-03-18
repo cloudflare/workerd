@@ -1,10 +1,12 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 use std::pin::Pin;
 
-use jsg::ResourceState;
-use jsg::ResourceTemplate;
+use jsg::ToJS;
 
 use crate::dns::DnsUtil;
-use crate::dns::DnsUtilTemplate;
 
 pub mod dns;
 
@@ -25,23 +27,18 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry,
         "node-internal:dns",
-        // SAFETY: isolate is a valid pointer provided by V8 during module resolution.
+        // SAFETY: isolate is valid and locked — called from C++ module registration.
         |isolate| unsafe {
             let mut lock = jsg::Lock::from_isolate_ptr(isolate);
-            let dns_util = jsg::Ref::new(DnsUtil {
-                _state: ResourceState::default(),
-            });
-            let mut dns_util_template = DnsUtilTemplate::new(&mut lock);
-
-            jsg::wrap_resource(&mut lock, dns_util, &mut dns_util_template).into_ffi()
+            let dns_util = DnsUtil::new();
+            dns_util.to_js(&mut lock).into_ffi()
         },
-        jsg::modules::ModuleType::INTERNAL,
+        jsg::modules::ModuleType::Internal,
     );
 }
 
 #[cfg(test)]
 mod tests {
-    use jsg::ResourceTemplate;
     use jsg_test::Harness;
 
     use super::*;
@@ -49,15 +46,11 @@ mod tests {
     #[test]
     fn test_wrap_resource_equality() {
         let harness = Harness::new();
-        // SAFETY: Harness guarantees lock and context are valid within run_in_context.
-        harness.run_in_context(|lock, _ctx| unsafe {
-            let dns_util = jsg::Ref::new(DnsUtil {
-                _state: ResourceState::default(),
-            });
-            let mut dns_util_template = DnsUtilTemplate::new(lock);
+        harness.run_in_context(|lock, _ctx| {
+            let dns_util = DnsUtil::new();
 
-            let lhs = jsg::wrap_resource(lock, dns_util.clone(), &mut dns_util_template);
-            let rhs = jsg::wrap_resource(lock, dns_util, &mut dns_util_template);
+            let lhs = dns_util.clone().to_js(lock);
+            let rhs = dns_util.to_js(lock);
 
             assert_eq!(lhs, rhs);
             Ok(())
