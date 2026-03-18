@@ -1191,7 +1191,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonExternalSDK @140 :Bool
     $compatEnableFlag("enable_python_external_sdk")
     $compatDisableFlag("disable_python_external_sdk")
-    $experimental;
+    $compatEnableDate("2026-04-21");
   # Don't include the Python sdk from the runtime, use a vendored copy.
 
   fastJsgStruct @141 :Bool

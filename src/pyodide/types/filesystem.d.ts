@@ -29,7 +29,11 @@ interface FSLookupResult<Info> {
 interface FS {
   mkdir: (dirname: string) => void;
   mkdirTree: (dirname: string) => void;
-  writeFile: (fname: string, contents: Uint8Array, options: object) => void;
+  writeFile: (
+    fname: string,
+    contents: Uint8Array | string,
+    options?: { canOwn: boolean }
+  ) => void;
   readFile: (fname: string, options?: { encoding?: string }) => Uint8Array;
   mount(fs: object, options: { info?: any }, path: string): void;
   createNode<Info>(

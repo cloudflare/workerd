@@ -13,7 +13,7 @@ import {
   COMPATIBILITY_FLAGS,
   IS_WORKERD,
   LEGACY_GLOBAL_HANDLERS,
-  LEGACY_INCLUDE_SDK,
+  EXTERNAL_SDK,
   LOCKFILE,
   MAIN_MODULE_NAME,
   SHOULD_SNAPSHOT_TO_DISK,
@@ -200,6 +200,24 @@ async function applyPatch(pyodide: Pyodide, patchName: string): Promise<void> {
 }
 
 async function injectWorkersApi(pyodide: Pyodide): Promise<void> {
+  if (EXTERNAL_SDK) {
+    pyodide.FS.mkdir(`${pyodide.FS.sitePackages}/workers`);
+    const template = [
+      `err = ModuleNotFoundError("No module named '$MODNAME'", name="$MODNAME")`,
+      `err.add_note("You need to update to workers-py >= 1.90 or to pass disable_python_external_sdk")`,
+      `raise err`,
+    ].join('\n');
+    pyodide.FS.writeFile(
+      `${pyodide.FS.sitePackages}/workers/__init__.py`,
+      template.replaceAll('$MODNAME', 'workers')
+    );
+    pyodide.FS.writeFile(
+      `${pyodide.FS.sitePackages}/asgi.py`,
+      template.replaceAll('$MODNAME', 'asgi')
+    );
+    return;
+  }
+
   const sitePackages = pyodide.FS.sitePackages;
   if (pyodide.version === PyodideVersion.V0_26_0a2) {
     // Inject at cloudflare.workers for backwards compatibility
@@ -250,9 +268,7 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     pyodide.registerJsModule('_cloudflare_compat_flags', COMPATIBILITY_FLAGS);
 
     // Inject modules that enable JS features to be used idiomatically from Python.
-    if (LEGACY_INCLUDE_SDK) {
-      await injectWorkersApi(pyodide);
-    }
+    await injectWorkersApi(pyodide);
 
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
