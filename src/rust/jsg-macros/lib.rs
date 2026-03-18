@@ -510,6 +510,10 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
         })
         .collect();
 
+    let constructor_registration = generate_constructor_registration(impl_block, self_ty);
+
+    let constructor_vec: Vec<_> = constructor_registration.into_iter().collect();
+
     quote! {
         #impl_block
 
@@ -520,6 +524,7 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
                 Self: Sized,
             {
                 vec![
+                    #(#constructor_vec,)*
                     #(#method_registrations,)*
                     #(#constant_registrations,)*
                 ]
@@ -527,6 +532,129 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
         }
     }
     .into()
+}
+
+/// Scans an impl block for a `#[jsg_constructor]` attribute and generates the
+/// constructor callback registration. Returns `None` if no constructor is defined.
+fn generate_constructor_registration(
+    impl_block: &ItemImpl,
+    self_ty: &syn::Type,
+) -> Option<quote::__private::TokenStream> {
+    let constructors: Vec<_> = impl_block
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::ImplItem::Fn(m) if m.attrs.iter().any(|a| is_attr(a, "jsg_constructor")) => {
+                Some(m)
+            }
+            _ => None,
+        })
+        .collect();
+
+    if constructors.len() > 1 {
+        return Some(quote! {
+            compile_error!("only one #[jsg_constructor] is allowed per impl block");
+        });
+    }
+
+    constructors
+        .into_iter()
+        .map(|method| {
+            let rust_method_name = &method.sig.ident;
+            let callback_name = syn::Ident::new(
+                &format!("{rust_method_name}_constructor_callback"),
+                rust_method_name.span(),
+            );
+
+            // Constructor must NOT have a self receiver.
+            let has_self = method
+                .sig
+                .inputs
+                .iter()
+                .any(|arg| matches!(arg, FnArg::Receiver(_)));
+            if has_self {
+                return quote! {
+                    compile_error!("#[jsg_constructor] must be a static method (no self receiver)");
+                };
+            }
+
+            // Constructor must return Self.
+            let returns_self = matches!(&method.sig.output,
+                syn::ReturnType::Type(_, ty) if matches!(&**ty,
+                    syn::Type::Path(p) if p.path.is_ident("Self")
+                )
+            );
+            if !returns_self {
+                return quote! {
+                    compile_error!("#[jsg_constructor] must return Self");
+                };
+            }
+
+            // Extract parameters (same pattern as jsg_method).
+            let params: Vec<_> = method
+                .sig
+                .inputs
+                .iter()
+                .filter_map(|arg| {
+                    if let FnArg::Typed(pat_type) = arg {
+                        Some((*pat_type.ty).clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let has_lock_param = params.first().is_some_and(is_lock_ref);
+            let js_arg_offset = usize::from(has_lock_param);
+
+            let (unwraps, arg_exprs): (Vec<_>, Vec<_>) = params
+            .iter()
+            .enumerate()
+            .skip(js_arg_offset)
+            .map(|(i, ty)| {
+                let js_index = i - js_arg_offset;
+                let var = syn::Ident::new(&format!("arg{js_index}"), method.sig.ident.span());
+                let unwrap = quote! {
+                    let #var = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            lock.throw_exception(&e);
+                            return;
+                        }
+                    };
+                };
+                (unwrap, quote! { #var })
+            })
+            .unzip();
+
+            let lock_arg = if has_lock_param {
+                quote! { &mut lock, }
+            } else {
+                quote! {}
+            };
+
+            quote! {
+                jsg::Member::Constructor {
+                    callback: {
+                        unsafe extern "C" fn #callback_name(
+                            info: *mut jsg::v8::ffi::FunctionCallbackInfo,
+                        ) {
+                            // SAFETY: info is a valid V8 FunctionCallbackInfo from the constructor call.
+                            let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(info) };
+                            let mut lock = unsafe { jsg::Lock::from_args(info) };
+
+                            #(#unwraps)*
+
+                            let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
+                            let rc = jsg::Rc::new(resource);
+                            rc.attach_to_this(&mut args);
+                        }
+                        #callback_name
+                    },
+                }
+            }
+        })
+        .next()
 }
 
 /// Extracts named fields from a struct, returning an empty list for unit structs.
@@ -630,6 +758,30 @@ fn is_result_type(ty: &syn::Type) -> bool {
 /// ```
 #[proc_macro_attribute]
 pub fn jsg_static_constant(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Marker attribute — the actual registration is handled by #[jsg_resource] on the impl block.
+    item
+}
+
+/// Marks a static method as the JavaScript constructor for a `#[jsg_resource]`.
+///
+/// The method must be a static function (no `self` receiver) that returns `Self`.
+/// When JavaScript calls `new MyResource(args)`, V8 invokes this method,
+/// wraps the returned resource, and attaches it to the `this` object.
+///
+/// ```ignore
+/// #[jsg_resource]
+/// impl MyResource {
+///     #[jsg_constructor]
+///     fn constructor(name: String) -> Self {
+///         Self { name }
+///     }
+/// }
+/// // JS: let obj = new MyResource("hello");
+/// ```
+///
+/// Only one `#[jsg_constructor]` is allowed per impl block.
+#[proc_macro_attribute]
+pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Marker attribute — the actual registration is handled by #[jsg_resource] on the impl block.
     item
 }

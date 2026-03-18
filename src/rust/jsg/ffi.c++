@@ -333,6 +333,20 @@ Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global&
   return to_ffi(v8::Local<v8::Value>::Cast(object));
 }
 
+void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args) {
+  auto* isolate = args.GetIsolate();
+  auto object = args.This();
+
+  // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
+  wrappable->attachWrapper(isolate, object, true);
+
+  // Override tag to identify as Rust object for unwrapping
+  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+      tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+}
+
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
   v8::Local<v8::String> v8Str = ::workerd::jsg::check(

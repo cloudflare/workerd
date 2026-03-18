@@ -113,6 +113,16 @@ impl<R: Resource> Rc<R> {
         Weak::from(self)
     }
 
+    /// Attaches this resource to the `this` object in a V8 constructor callback.
+    ///
+    /// Called from `#[jsg_constructor]`-generated code. V8 has already created
+    /// the `this` object from the `FunctionTemplate`'s `InstanceTemplate`;
+    /// this method attaches the `Wrappable` to it so that instance methods
+    /// can resolve the resource via `resolve_resource`.
+    pub fn attach_to_this(&self, info: &mut v8::FunctionCallbackInfo) {
+        self.wrappable.attach_to_this(info);
+    }
+
     /// Returns the C++ Wrappable's strong reference count.
     #[cfg(debug_assertions)]
     pub fn strong_refcount(&self) -> u32 {

@@ -125,6 +125,25 @@ impl WebSocket {
 
 Per Web IDL, constants are `{writable: false, enumerable: true, configurable: false}`.
 
+## `#[jsg_constructor]`
+
+Marks a static method as the JavaScript constructor for a `#[jsg_resource]`. When JavaScript calls `new MyClass(args)`, V8 invokes this method, creates a `jsg::Rc<Self>`, and attaches it to the `this` object.
+
+```rust
+#[jsg_resource]
+impl MyResource {
+    #[jsg_constructor]
+    fn constructor(name: String) -> Self {
+        Self { name }
+    }
+}
+// JS: let r = new MyResource("hello");
+```
+
+The method must be static (no `self` receiver) and must return `Self`. Only one `#[jsg_constructor]` is allowed per impl block. The first parameter may be `&mut Lock` if the constructor needs isolate access — it is not exposed as a JS argument.
+
+If no `#[jsg_constructor]` is present, `new MyClass()` throws an `Illegal constructor` error.
+
 ## `#[jsg_oneof]`
 
 Generates `jsg::Type` and `jsg::FromJS` implementations for union types. Use this to accept parameters that can be one of several JavaScript types.
