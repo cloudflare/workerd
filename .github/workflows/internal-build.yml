@@ -37,7 +37,7 @@ jobs:
           fi
 
       # Try to checkout the merge commit - will fail if PR isn't mergeable
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         id: checkout_merge
         continue-on-error: true
         with:

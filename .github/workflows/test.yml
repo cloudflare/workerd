@@ -110,12 +110,12 @@ jobs:
   check-snapshot:
     runs-on: ubuntu-22.04-16core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           show-progress: false
       - name: Cache
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         # Use same cache and build configuration as release build, this allows us to keep download
         # sizes small and generate types with optimization enabled, should be slightly faster.
         with:
@@ -139,7 +139,7 @@ jobs:
             cat types.diff
             echo EOF
           } >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         id: artifact-upload-step
         with:
           name: generated-snapshot
@@ -173,14 +173,14 @@ jobs:
     runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout workers-sdk
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: cloudflare/workers-sdk
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           # Match workers-sdk node version
           node-version: 20.19.6
@@ -189,7 +189,7 @@ jobs:
         run: pnpm install
 
       - name: Download workerd binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: linux-X64-binary
           path: /tmp
@@ -198,7 +198,7 @@ jobs:
         run: chmod +x /tmp/workerd
 
       - name: Download generated types
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: generated-snapshot
           path: /tmp/test-types
