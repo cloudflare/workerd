@@ -1,27 +1,30 @@
-use std::cell::UnsafeCell;
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
-use std::ops::DerefMut;
-use std::os::raw::c_void;
-use std::ptr::NonNull;
-use std::rc::Rc;
-
-use kj_rs::KjMaybe;
 
 pub mod feature_flags;
 pub mod modules;
+pub mod resource;
 pub mod v8;
 mod wrappable;
 
 pub use feature_flags::FeatureFlags;
+pub use resource::Rc;
+pub use resource::Resource;
+pub use resource::Weak;
 pub use v8::BigInt64Array;
 pub use v8::BigUint64Array;
 pub use v8::Float32Array;
 pub use v8::Float64Array;
+pub use v8::GcVisitor;
 pub use v8::Int8Array;
 pub use v8::Int16Array;
 pub use v8::Int32Array;
+pub use v8::IsolatePtr;
 pub use v8::Uint8Array;
 pub use v8::Uint16Array;
 pub use v8::Uint32Array;
@@ -52,125 +55,6 @@ mod ffi {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
-    let mut descriptor = v8::ffi::ResourceDescriptor {
-        name: R::class_name().to_owned(),
-        constructor: KjMaybe::None,
-        methods: Vec::new(),
-        static_methods: Vec::new(),
-        static_constants: Vec::new(),
-    };
-
-    for m in R::members() {
-        match m {
-            Member::Constructor { callback } => {
-                descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
-                    callback: callback as usize,
-                });
-            }
-            Member::Method { name, callback } => {
-                descriptor.methods.push(v8::ffi::MethodDescriptor {
-                    name,
-                    callback: callback as usize,
-                });
-            }
-            Member::Property {
-                name: _,
-                getter_callback: _,
-                setter_callback: _,
-            } => todo!(),
-            Member::StaticMethod { name, callback } => {
-                descriptor
-                    .static_methods
-                    .push(v8::ffi::StaticMethodDescriptor {
-                        name,
-                        callback: callback as usize,
-                    });
-            }
-            Member::StaticConstant { name, value } => {
-                let ConstantValue::Number(number_value) = value;
-                descriptor
-                    .static_constants
-                    .push(v8::ffi::StaticConstantDescriptor {
-                        name,
-                        value: number_value,
-                    });
-            }
-        }
-    }
-
-    descriptor
-}
-
-pub fn create_resource_constructor<R: Resource>(
-    lock: &mut Lock,
-) -> v8::Global<v8::FunctionTemplate> {
-    // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-    unsafe {
-        v8::ffi::create_resource_template(lock.isolate().as_ffi(), &get_resource_descriptor::<R>())
-            .into()
-    }
-}
-
-/// Wraps a Rust resource for exposure to JavaScript.
-///
-/// # Safety
-/// The caller must ensure V8 operations are performed within the correct isolate/context and
-/// that the resource's lifetime is properly managed via the Realm.
-pub unsafe fn wrap_resource<'a, R: Resource + 'a, RT: ResourceTemplate>(
-    lock: &mut Lock,
-    mut resource: Ref<R>,
-    resource_template: &mut RT,
-) -> v8::Local<'a, v8::Value> {
-    match resource
-        .get_state()
-        .strong_wrapper
-        .as_ref()
-        .map(|val| val.as_local(lock))
-    {
-        Some(value) if value.has_value() => value.into(),
-        _ => {
-            let constructor = resource_template.get_constructor();
-
-            // Store the leaked Ref in ResourceState.this and the drop function
-            let drop_fn = (*resource).get_drop_fn();
-            resource.get_state().this = Ref::into_raw(resource.clone()).cast();
-            resource.get_state().drop_fn = Some(drop_fn);
-
-            // SAFETY: Lock guarantees the isolate is locked; the resource pointer and constructor are valid.
-            let instance: v8::Local<'a, v8::Value> = unsafe {
-                v8::Local::from_ffi(
-                    lock.isolate(),
-                    v8::ffi::wrap_resource(
-                        lock.isolate().as_ffi(),
-                        resource.get_state().this as usize,
-                        constructor.as_ffi_ref(),
-                        drop_fn as usize,
-                    ),
-                )
-            };
-            // SAFETY: Lock guarantees the isolate is locked; the instance is a valid V8 object.
-            unsafe {
-                resource
-                    .get_state()
-                    .attach_wrapper(lock.realm(), instance.clone().into());
-            }
-            instance
-        }
-    }
-}
-
-pub fn unwrap_resource<'a, R: Resource>(
-    lock: &'a mut Lock,
-    value: v8::Local<v8::Value>,
-) -> &'a mut R {
-    // SAFETY: The isolate is locked and value wraps a valid resource pointer.
-    let ptr =
-        unsafe { v8::ffi::unwrap_resource(lock.isolate().as_ffi(), value.into_ffi()) as *mut R };
-    // SAFETY: The pointer was stored by wrap_resource and points to a valid R.
-    unsafe { &mut *ptr }
-}
 
 impl From<&str> for ExceptionType {
     fn from(value: &str) -> Self {
@@ -283,7 +167,7 @@ impl Error {
 
     /// Creates a V8 exception from this error.
     pub fn to_local<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
-        // SAFETY: isolate is valid; exception_create returns a valid Local handle.
+        // SAFETY: isolate is valid and locked (guaranteed by caller).
         unsafe {
             v8::Local::from_ffi(
                 isolate,
@@ -598,11 +482,20 @@ impl<T> From<Nullable<T>> for Option<T> {
     }
 }
 
-/// Provides access to V8 operations within an isolate lock.
+/// Proof that the V8 isolate is valid and exclusively locked by the current thread.
 ///
-/// A Lock wraps a V8 isolate pointer and is passed to resource methods and callbacks to
-/// perform V8 operations like creating objects, wrapping values, and accessing the Realm.
-/// This is analogous to `jsg::Lock` in C++ JSG.
+/// A `Lock` instance can only be created when the C++ `jsg::Lock` (or equivalent)
+/// is held, meaning:
+/// - The `v8::Isolate` pointer is valid and has not been disposed.
+/// - The current thread holds the isolate lock (`v8::Locker` is active).
+/// - No other thread can enter the isolate concurrently.
+///
+/// `Lock` is passed to resource methods and callbacks to perform V8 operations
+/// like creating objects, wrapping values, and accessing the `Realm`. It is
+/// analogous to `jsg::Lock&` in C++ JSG.
+///
+/// `Lock` is neither `Send` nor `Sync` — it cannot escape the thread that
+/// created it.
 pub struct Lock {
     isolate: v8::IsolatePtr,
 }
@@ -611,7 +504,7 @@ impl Lock {
     /// # Safety
     /// The caller must ensure that `args` is a valid pointer to `FunctionCallbackInfo`.
     pub unsafe fn from_args(args: *mut v8::ffi::FunctionCallbackInfo) -> Self {
-        // SAFETY: fci_get_isolate returns the isolate from a valid FunctionCallbackInfo.
+        // SAFETY: args is a valid FunctionCallbackInfo pointer (guaranteed by caller).
         unsafe { Self::from_isolate_ptr(v8::ffi::fci_get_isolate(args)) }
     }
 
@@ -619,11 +512,15 @@ impl Lock {
     ///
     /// # Safety
     /// The caller must ensure that `isolate` is a valid pointer to an `Isolate`.
+    ///
+    /// # Panics
+    /// Panics if the isolate is not currently locked.
     pub unsafe fn from_isolate_ptr(isolate: *mut v8::ffi::Isolate) -> Self {
-        Self {
-            // SAFETY: Caller guarantees the isolate pointer is valid.
-            isolate: unsafe { v8::IsolatePtr::from_ffi(isolate) },
-        }
+        // SAFETY: isolate pointer is valid (guaranteed by caller).
+        let isolate = unsafe { v8::IsolatePtr::from_ffi(isolate) };
+        // SAFETY: Lock guarantees the isolate is valid
+        assert!(unsafe { isolate.is_locked() });
+        Self { isolate }
     }
 
     /// Returns the isolate associated with this lock.
@@ -632,7 +529,7 @@ impl Lock {
     }
 
     pub fn new_object<'a>(&mut self) -> v8::Local<'a, v8::Object> {
-        // SAFETY: The isolate is locked and a HandleScope is active.
+        // SAFETY: Lock guarantees the isolate is valid and locked
         unsafe {
             v8::Local::from_ffi(
                 self.isolate(),
@@ -641,16 +538,21 @@ impl Lock {
         }
     }
 
+    pub fn throw_error(&mut self, message: &str) {
+        // SAFETY: Lock guarantees the isolate is valid and locked
+        unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ffi(), message) }
+    }
+
     pub fn await_io<F, C, I, R>(self, _fut: F, _callback: C) -> Result<R>
     where
         F: Future<Output = I>,
         C: FnOnce(Self, I) -> Result<R>,
     {
-        todo!()
+        unimplemented!("Lock::await_io is not yet implemented for Rust resources")
     }
 
     pub(crate) fn realm(&mut self) -> &mut Realm {
-        // SAFETY: The isolate is locked; realm_from_isolate returns a valid Realm pointer.
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); Realm pointer is valid.
         unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
     }
 
@@ -667,76 +569,12 @@ impl Lock {
 
     /// Throws an error as a V8 exception.
     pub fn throw_exception(&mut self, err: &Error) {
-        // SAFETY: The isolate is locked and the exception local handle is valid.
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
             v8::ffi::isolate_throw_exception(
                 self.isolate().as_ffi(),
                 err.to_local(self.isolate()).into_ffi(),
             );
-        }
-    }
-}
-
-/// This is analogous to `jsg::Ref<T>` in C++ JSG.
-///
-/// # Thread Safety
-///
-/// **`Ref<T>` is not thread-safe and must not be sent or shared across threads.**
-/// Resources managed by `Ref<T>` are bound to the thread of the V8 isolate in which they were created.
-/// Attempting to send or access a `Ref<T>` from another thread is undefined behavior.
-/// This is enforced by the use of `Rc` and `UnsafeCell`, which are not `Send` or `Sync`.
-pub struct Ref<T: Resource> {
-    val: Rc<UnsafeCell<T>>,
-}
-
-impl<T: Resource> Deref for Ref<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        let ptr = self.val.get();
-        // SAFETY: UnsafeCell::get returns a valid pointer; Ref ensures single-thread access.
-        unsafe { &*ptr }
-    }
-}
-
-impl<T: Resource> DerefMut for Ref<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        let ptr = self.val.get();
-        // SAFETY: UnsafeCell::get returns a valid pointer; Ref ensures single-thread access.
-        unsafe { &mut *ptr }
-    }
-}
-
-impl<T: Resource> Ref<T> {
-    pub fn new(t: T) -> Self {
-        Self {
-            val: Rc::new(UnsafeCell::new(t)),
-        }
-    }
-
-    pub fn into_raw(r: Self) -> *mut T {
-        UnsafeCell::raw_get(Rc::into_raw(r.val))
-    }
-
-    /// Reconstructs a `Ref<T>` from a raw pointer.
-    ///
-    /// # Safety
-    /// The caller must ensure:
-    /// - `this` is a valid pointer that was previously created by `Ref::into_raw()`
-    /// - This pointer has not been used to reconstruct a `Ref` that is still alive
-    /// - The pointer is properly aligned and points to a valid `T` instance
-    pub unsafe fn from_raw(this: *mut T) -> Self {
-        Self {
-            // SAFETY: Caller guarantees the pointer was created by Ref::into_raw.
-            val: unsafe { Rc::from_raw(this.cast::<UnsafeCell<T>>()) },
-        }
-    }
-}
-
-impl<T: Resource> Clone for Ref<T> {
-    fn clone(&self) -> Self {
-        Self {
-            val: self.val.clone(),
         }
     }
 }
@@ -751,11 +589,6 @@ impl<T: Resource> Clone for Ref<T> {
 pub trait Type: Sized {
     /// The JavaScript class name for this type (used in error messages).
     fn class_name() -> &'static str;
-
-    /// Same as jsgGetMemoryName
-    fn memory_name() -> &'static str {
-        std::any::type_name::<Self>()
-    }
 
     /// Same as jsgGetMemorySelfSize
     fn memory_self_size() -> usize {
@@ -825,97 +658,16 @@ pub enum Member {
     },
 }
 
-/// Tracks the V8 wrapper object for a Rust resource.
+/// Trait for types that participate in V8 garbage collection tracing.
 ///
-/// Each Resource embeds a `ResourceState` to maintain the connection between the Rust object and
-/// its JavaScript wrapper. When a resource is wrapped, the `ResourceState` stores a weak V8 handle
-/// to the wrapper object along with pointers needed for cleanup: the leaked `Ref<R>` pointer
-/// and the drop function to reconstruct it. The Realm uses this state to perform deterministic
-/// cleanup when the context is disposed.
-pub struct ResourceState {
-    pub this: *mut c_void,
-    pub drop_fn: Option<unsafe extern "C" fn(*mut v8::ffi::Isolate, *mut c_void)>,
-    pub strong_wrapper: Option<v8::Global<v8::Object>>,
-    pub isolate: Option<v8::IsolatePtr>,
-}
+/// Implementors can report nested GC-visible references via [`GcVisitor`] and
+/// optionally provide a class name for heap snapshot tooling.
+pub trait GarbageCollected {
+    /// Trace nested GC-visible references. Called during V8 GC marking.
+    fn trace(&self, _visitor: &mut GcVisitor);
 
-impl Default for ResourceState {
-    fn default() -> Self {
-        Self {
-            this: std::ptr::null_mut(),
-            drop_fn: None,
-            strong_wrapper: None,
-            isolate: None,
-        }
-    }
-}
-
-impl ResourceState {
-    /// Attaches a V8 wrapper object to this resource state.
-    ///
-    /// # Safety
-    /// The caller must ensure:
-    /// - `object` is a valid V8 local object handle
-    /// - This method is called from the correct V8 isolate/context
-    /// - `self.this` pointer remains valid until either the weak callback fires or `Realm::drop()` is called
-    ///
-    /// # Panics
-    /// Panics if a wrapper has already been attached (i.e., `strong_wrapper` is not `None`).
-    pub unsafe fn attach_wrapper(&mut self, realm: &mut Realm, object: v8::Local<v8::Object>) {
-        assert!(self.strong_wrapper.is_none());
-
-        self.strong_wrapper = Some(object.into());
-        self.isolate = Some(realm.isolate());
-
-        realm.add_resource(NonNull::from(&mut *self));
-
-        let Some(wrapper) = self.strong_wrapper.as_mut() else {
-            unreachable!("This should not happen")
-        };
-        let isolate = self.isolate.expect("isolate should be set");
-        // SAFETY: The isolate is valid, self.this is a valid resource pointer stored during wrapping.
-        unsafe {
-            wrapper.make_weak(isolate, self.this, Self::weak_callback);
-        }
-    }
-
-    fn weak_callback(_isolate: *mut v8::ffi::Isolate, _data: usize) {
-        // TODO: Implement GC-based cleanup for resources that outlive their context.
-        // Current resources like DnsUtil don't require GC cleanup.
-        // All cleanup happens deterministically in Realm::drop() during context disposal.
-    }
-}
-
-/// Rust types exposed to JavaScript as resource types.
-///
-/// Resource types are passed by reference and call back into Rust when JavaScript accesses
-/// their members. This is analogous to `JSG_RESOURCE_TYPE` in C++ JSG. Resources must provide
-/// member declarations, a cleanup function for GC, and access to their V8 wrapper state.
-pub trait Resource: Type {
-    /// Returns the list of methods, properties, and constructors exposed to JavaScript.
-    fn members() -> Vec<Member>
-    where
-        Self: Sized;
-
-    /// Returns the cleanup function called when V8 GC collects the wrapper or the context is
-    /// disposed. This function reconstructs the leaked `Ref<R>` and drops it.
-    fn get_drop_fn(&self) -> unsafe extern "C" fn(*mut v8::ffi::Isolate, *mut c_void);
-
-    /// Returns mutable access to the `ResourceState` tracking this resource's V8 wrapper.
-    fn get_state(&mut self) -> &mut ResourceState;
-}
-
-/// Caches the V8 `FunctionTemplate` for a resource type.
-///
-/// A `ResourceTemplate` is created per Lock and caches the V8 function template used to
-/// instantiate JavaScript wrappers for a resource type. This avoids recreating the template
-/// on every wrap operation.
-pub trait ResourceTemplate {
-    /// Creates a new template for the given lock, initializing the V8 function template.
-    fn new(lock: &mut Lock) -> Self;
-
-    /// Returns the cached V8 function template used to create wrappers.
-    fn get_constructor(&self) -> &v8::Global<v8::FunctionTemplate>;
+    /// Class name for heap snapshots / debugging.
+    fn memory_name(&self) -> &'static str;
 }
 
 /// Rust types that are deep-copied into JavaScript as value types.
@@ -924,34 +676,15 @@ pub trait ResourceTemplate {
 /// further Rust involvement after wrapping. This is analogous to `JSG_STRUCT` in C++ JSG.
 pub trait Struct: Type {}
 
-/// Drops a resource by reconstructing it from a raw pointer and dropping it.
-/// This function is typically used as a callback when V8 garbage collects a wrapped object.
+/// Per-isolate state for Rust resources exposed to JavaScript.
 ///
-/// # Safety
-/// The caller must ensure:
-/// - `this` is a valid pointer to a resource of type `R` that was previously created by `Ref::into_raw()`
-/// - This function is only called once per resource
-/// - The resource has not already been dropped
-pub unsafe fn drop_resource<R: Resource>(_isolate: *mut ffi::Isolate, this: *mut c_void) {
-    let this = this.cast::<R>();
-    // SAFETY: Caller guarantees this pointer was created by Ref::into_raw and hasn't been freed.
-    let this = unsafe { Ref::from_raw(this) };
-    drop(this);
-}
-
-/// Tracks the lifetime of Rust resources exposed to a V8 context.
-///
-/// When Rust resources are wrapped for JavaScript, they are leaked via `Ref::into_raw()` to
-/// create stable pointers that outlive V8's GC. The Realm tracks all such leaked resources
-/// and ensures deterministic cleanup when the V8 context is disposed.
-///
-/// A Realm is created per V8 context and stored in the context's embedder data. Resources
-/// register themselves via `add_resource()` during wrapping. When the context is torn down,
-/// `Drop` iterates all tracked resources and calls their drop functions to reconstruct and
-/// free any leaked `Ref<R>` values for wrappers not yet collected by V8's GC.
+/// A Realm is created for each V8 isolate and stored in the isolate's data slot. It holds
+/// cached function templates and tracks resource instances. When all Rust `Ref` handles to a
+/// resource are dropped and no JS references remain, V8 GC collects the wrapper and the
+/// `CppgcShim` destruction triggers cleanup of the underlying `Wrappable`.
 pub struct Realm {
     isolate: v8::IsolatePtr,
-    resources: Vec<*mut ResourceState>,
+    pub(crate) resources: resource::Resources,
     /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
     feature_flags: FeatureFlags,
 }
@@ -961,13 +694,9 @@ impl Realm {
     pub fn new(isolate: v8::IsolatePtr, feature_flags: FeatureFlags) -> Self {
         Self {
             isolate,
-            resources: Vec::new(),
+            resources: resource::Resources::default(),
             feature_flags,
         }
-    }
-
-    pub fn add_resource(&mut self, resource: NonNull<ResourceState>) {
-        self.resources.push(resource.as_ptr());
     }
 
     pub fn isolate(&self) -> v8::IsolatePtr {
@@ -978,39 +707,16 @@ impl Realm {
 impl Drop for Realm {
     fn drop(&mut self) {
         debug_assert!(
-            // SAFETY: The isolate pointer is valid during Realm's lifetime.
+            // SAFETY: isolate pointer is valid (guaranteed by Realm construction).
             unsafe { self.isolate.is_locked() },
             "Realm must be dropped while holding the isolate lock"
         );
-
-        // Clean up all leaked Refs during deterministic context disposal.
-        // Each resource_ptr points to a ResourceState embedded in a Resource.
-        // When wrapping a resource, we leak a Ref<R> and store the raw pointer
-        // in ResourceState.this. If strong_wrapper is still Some, the V8 object
-        // wasn't GC'd, so we must manually drop the leaked Ref by calling drop_fn.
-        for resource_ptr in &self.resources {
-            // SAFETY: resource_ptr is valid; we only access it before calling drop_fn which frees it.
-            unsafe {
-                let resource_state = &**resource_ptr;
-                // Only drop if the wrapper hasn't been collected by V8's GC
-                if resource_state.strong_wrapper.is_some()
-                    && let Some(drop_fn) = resource_state.drop_fn
-                    && !resource_state.this.is_null()
-                {
-                    // Note: Do not access resource_state after drop_fn returns, as
-                    // ResourceState is embedded inside the Resource which is now freed.
-                    let isolate = resource_state.isolate.expect("isolate should be set");
-                    drop_fn(isolate.as_ffi(), resource_state.this);
-                }
-            }
-        }
-        self.resources.clear();
     }
 }
 
 #[expect(clippy::unnecessary_box_returns)]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]) -> Box<Realm> {
     let feature_flags = FeatureFlags::from_bytes(feature_flags_data);
-    // SAFETY: Caller guarantees the isolate pointer is valid.
+    // SAFETY: isolate pointer is valid (guaranteed by C++ caller).
     unsafe { Box::new(Realm::new(v8::IsolatePtr::from_ffi(isolate), feature_flags)) }
 }

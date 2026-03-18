@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use quote::quote;
@@ -7,8 +11,8 @@ use syn::Fields;
 use syn::FnArg;
 use syn::ItemFn;
 use syn::ItemImpl;
+use syn::Type;
 use syn::parse_macro_input;
-use syn::spanned::Spanned;
 
 /// Generates `jsg::Struct` and `jsg::Type` implementations for data structures.
 ///
@@ -18,38 +22,34 @@ use syn::spanned::Spanned;
 pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let name = &input.ident;
-    let class_name = extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string());
+    let class_name = extract_name_attribute(attr).unwrap_or_else(|| name.to_string());
 
-    let Data::Struct(data) = &input.data else {
-        return error(&input, "#[jsg_struct] can only be applied to structs");
-    };
-    let Fields::Named(fields) = &data.fields else {
-        return error(
-            &input,
-            "#[jsg_struct] only supports structs with named fields",
-        );
+    let named_fields = match extract_named_fields(&input, "jsg_struct") {
+        Ok(fields) => fields,
+        Err(err) => return err,
     };
 
-    let field_assignments = fields.named.iter().filter_map(|field| {
-        if !matches!(field.vis, syn::Visibility::Public(_)) {
-            return None;
-        }
-        let field_name = field.ident.as_ref()?;
-        let field_name_str = field_name.to_string();
-        Some(quote! {
-            let #field_name = jsg::v8::ToLocalValue::to_local(&this.#field_name, lock);
-            obj.set(lock, #field_name_str, #field_name);
-        })
-    });
+    let mut field_assignments = Vec::new();
+    let mut field_extractions = Vec::new();
+    let mut field_names = Vec::new();
 
-    let field_extractions = fields.named.iter().filter_map(|field| {
+    for field in &named_fields {
+        // Only public fields are projected into JavaScript objects.
         if !matches!(field.vis, syn::Visibility::Public(_)) {
-            return None;
+            continue;
         }
-        let field_name = field.ident.as_ref()?;
+        // Named fields always have an ident; guard is purely defensive.
+        let Some(field_name) = field.ident.as_ref() else {
+            continue;
+        };
         let field_name_str = field_name.to_string();
         let field_type = &field.ty;
-        Some(quote! {
+
+        field_assignments.push(quote! {
+            let #field_name = jsg::v8::ToLocalValue::to_local(&this.#field_name, lock);
+            obj.set(lock, #field_name_str, #field_name);
+        });
+        field_extractions.push(quote! {
             let #field_name = {
                 let prop = obj.get(lock, #field_name_str)
                     .ok_or_else(|| jsg::Error::new_type_error(
@@ -57,15 +57,9 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                     ))?;
                 <#field_type as jsg::FromJS>::from_js(lock, prop)?
             };
-        })
-    });
-
-    let field_names = fields.named.iter().filter_map(|field| {
-        if !matches!(field.vis, syn::Visibility::Public(_)) {
-            return None;
-        }
-        field.ident.as_ref()
-    });
+        });
+        field_names.push(field_name);
+    }
 
     quote! {
         #input
@@ -202,7 +196,17 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let invocation = if has_self {
         quote! {
             let this = args.this();
-            let self_ = jsg::unwrap_resource::<Self>(&mut lock, this);
+            // SAFETY: V8 dispatched through this type's FunctionTemplate, so the
+            // receiver is guaranteed to be a wrapped instance of Self. The &mut is
+            // sound because V8 is single-threaded and no other Rust code can alias
+            // the resource during the callback.
+            let self_: &mut Self = unsafe {
+                let wrappable = jsg::v8::WrappableRc::from_js(lock.isolate(), this)
+                    .expect("receiver is not a Rust-wrapped resource");
+                &mut *wrappable.resolve_resource::<Self>()
+                    .expect("type mismatch in resource callback")
+                    .as_ptr()
+            };
             let result = self_.#fn_name(#(#arg_exprs),*);
         }
     } else {
@@ -229,8 +233,14 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Generates boilerplate for JSG resources.
 ///
-/// On structs: generates `jsg::Type` and `ResourceTemplate`.
+/// On structs: generates `jsg::Type`, `jsg::ToJS`, `jsg::FromJS`, and `jsg::GarbageCollected`.
 /// On impl blocks: generates `Resource` trait with method registrations.
+///
+/// The generated `GarbageCollected` implementation automatically traces fields that
+/// need GC integration:
+/// - `Rc<T>` fields - traced as a strong GC edge
+/// - `Option<Rc<T>>` / `Nullable<Rc<T>>` - conditionally traced when `Some`
+/// - `Weak<T>` fields - not traced (weak references don't keep the target alive)
 #[proc_macro_attribute]
 pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     if let Ok(impl_block) = syn::parse::<ItemImpl>(item.clone()) {
@@ -238,16 +248,36 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let input = parse_macro_input!(item as DeriveInput);
-    let name = &input.ident;
-    let class_name = extract_name_attribute(&attr.to_string()).unwrap_or_else(|| name.to_string());
-    let template_name = syn::Ident::new(&format!("{name}Template"), name.span());
+    let name: &syn::Ident = &input.ident;
 
-    if !matches!(&input.data, Data::Struct(_)) {
-        return error(
-            &input,
-            "#[jsg_resource] can only be applied to structs or impl blocks",
-        );
-    }
+    let class_name = if attr.is_empty() {
+        name.to_string()
+    } else {
+        extract_name_attribute(attr).unwrap_or_else(|| name.to_string())
+    };
+
+    let fields = match extract_named_fields(&input, "jsg_resource") {
+        Ok(fields) => fields,
+        Err(err) => return err,
+    };
+
+    // Generate trace statements for traceable fields
+    let trace_statements = generate_trace_statements(&fields);
+    let name_str = name.to_string();
+    let gc_impl = quote! {
+        #[automatically_derived]
+        impl jsg::GarbageCollected for #name {
+            fn trace(&self, visitor: &mut jsg::GcVisitor) {
+                // Suppress unused warning when there are no traceable fields.
+                let _ = visitor;
+                #(#trace_statements)*
+            }
+
+            fn memory_name(&self) -> &'static str {
+                #name_str
+            }
+        }
+    };
 
     quote! {
         #input
@@ -263,64 +293,162 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[automatically_derived]
         impl jsg::ToJS for #name {
-            fn to_js<'a, 'b>(self, _lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
+            fn to_js<'a, 'b>(self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
             where
                 'b: 'a,
             {
-                todo!("Resource to_js is not yet supported")
+                let r = jsg::Rc::new(self);
+                r.to_js(lock)
             }
         }
 
         #[automatically_derived]
         impl jsg::FromJS for #name {
-            type ResultType = jsg::Ref<Self>;
+            type ResultType = jsg::Rc<Self>;
 
-            fn from_js(_lock: &mut jsg::Lock, _value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
-                todo!("Resource from_js is not yet supported")
+            fn from_js(
+                lock: &mut jsg::Lock,
+                value: jsg::v8::Local<jsg::v8::Value>,
+            ) -> Result<Self::ResultType, jsg::Error> {
+                <jsg::Rc<Self> as jsg::FromJS>::from_js(lock, value)
             }
         }
 
-        #[automatically_derived]
-        pub struct #template_name {
-            pub constructor: jsg::v8::Global<jsg::v8::FunctionTemplate>,
-        }
+        #gc_impl
+    }
+    .into()
+}
 
-        #[automatically_derived]
-        impl jsg::ResourceTemplate for #template_name {
-            fn new(lock: &mut jsg::Lock) -> Self {
-                Self { constructor: jsg::create_resource_constructor::<#name>(lock) }
-            }
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TraceableType {
+    /// `Rc<T>` - trace via `GarbageCollected` trait on the inner type
+    Ref,
+    /// `Weak<T>` - weak reference, not traced (doesn't keep the target alive)
+    Weak,
+    /// Not a traceable type
+    None,
+}
 
-            fn get_constructor(&self) -> &jsg::v8::Global<jsg::v8::FunctionTemplate> {
-                &self.constructor
+enum OptionalKind {
+    Option,
+    Nullable,
+}
+
+/// Checks if a type path matches a known JSG traceable type.
+///
+/// Matches `jsg::Rc<T>` and `jsg::Weak<T>` (qualified with `jsg::` prefix).
+/// Does NOT match unqualified `Rc<T>` — this avoids confusion with `std::rc::Rc<T>`.
+/// Users must write `jsg::Rc<T>` in struct field types for GC tracing.
+fn get_traceable_type(ty: &Type) -> TraceableType {
+    if let Type::Path(type_path) = ty {
+        let segments = &type_path.path.segments;
+
+        // Must be qualified as jsg::Rc or jsg::Weak (exactly 2 segments).
+        if segments.len() == 2 && segments[0].ident == "jsg" {
+            match segments[1].ident.to_string().as_str() {
+                "Rc" => return TraceableType::Ref,
+                "Weak" => return TraceableType::Weak,
+                _ => {}
             }
         }
     }
-    .into()
+    TraceableType::None
+}
+
+/// Extracts the inner type from `Option<T>` or `Nullable<T>` if present.
+fn extract_optional_inner(ty: &Type) -> Option<(OptionalKind, &Type)> {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+    {
+        let kind = match segment.ident.to_string().as_str() {
+            "Option" => OptionalKind::Option,
+            "Nullable" => OptionalKind::Nullable,
+            _ => return None,
+        };
+        return Some((kind, inner));
+    }
+    None
+}
+
+/// Generates trace statements for all traceable fields in a struct.
+fn generate_trace_statements(
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> Vec<quote::__private::TokenStream> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            let field_name = field.ident.as_ref()?;
+            let ty = &field.ty;
+
+            // Check if it's Option<Traceable> or Nullable<Traceable>
+            if let Some((kind, inner_ty)) = extract_optional_inner(ty) {
+                let pattern = match kind {
+                    OptionalKind::Option => quote! { Some(ref inner) },
+                    OptionalKind::Nullable => quote! { jsg::Nullable::Some(ref inner) },
+                };
+                match get_traceable_type(inner_ty) {
+                    // Rc<T> is a strong reference — visit it so the GC knows the edge.
+                    TraceableType::Ref => {
+                        return Some(quote! {
+                            if let #pattern = self.#field_name {
+                                visitor.visit_ref(inner);
+                            }
+                        });
+                    }
+                    // Weak<T> doesn't keep the target alive and has no GC edges to trace.
+                    TraceableType::Weak | TraceableType::None => {}
+                }
+            }
+
+            match get_traceable_type(ty) {
+                TraceableType::Ref => Some(quote! {
+                    visitor.visit_ref(&self.#field_name);
+                }),
+                // Weak<T> doesn't keep the target alive and has no GC edges to trace.
+                TraceableType::Weak | TraceableType::None => None,
+            }
+        })
+        .collect()
 }
 
 fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
     let self_ty = &impl_block.self_ty;
 
+    if !matches!(&**self_ty, syn::Type::Path(_)) {
+        return error(
+            self_ty,
+            "#[jsg_resource] impl blocks must use a simple path type (e.g., `impl MyResource`)",
+        );
+    }
+
     let method_registrations: Vec<_> = impl_block
         .items
         .iter()
         .filter_map(|item| {
+            // Skip non-function items (e.g. type aliases, consts).
             let syn::ImplItem::Fn(method) = item else {
                 return None;
             };
-            let attr = method.attrs.iter().find(|a| {
-                a.path().is_ident("jsg")
-                    || a.path()
-                        .segments
-                        .last()
-                        .is_some_and(|s| s.ident == "jsg_method")
-            })?;
 
-            let rust_name = &method.sig.ident;
-            let js_name = extract_name_attribute(&attr.meta.to_token_stream().to_string())
-                .unwrap_or_else(|| snake_to_camel(&rust_name.to_string()));
-            let callback = syn::Ident::new(&format!("{rust_name}_callback"), rust_name.span());
+            // Only methods annotated with #[jsg_method] are registered.
+            let attr = method.attrs.iter().find(|a| is_attr(a, "jsg_method"))?;
+
+            let rust_method_name = &method.sig.ident;
+            // Use explicit name from #[jsg_method(name = "...")] if provided,
+            // otherwise convert snake_case to camelCase.
+            let js_name = attr
+                .meta
+                .require_list()
+                .ok()
+                .map(|list| list.tokens.clone().into())
+                .and_then(extract_name_attribute)
+                .unwrap_or_else(|| snake_to_camel(&rust_method_name.to_string()));
+            let callback_name = syn::Ident::new(
+                &format!("{rust_method_name}_callback"),
+                rust_method_name.span(),
+            );
 
             // Methods with a receiver (&self, &mut self) become instance methods on the prototype.
             // Methods without a receiver become static methods on the constructor.
@@ -330,15 +458,22 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
                 .iter()
                 .any(|arg| matches!(arg, FnArg::Receiver(_)));
 
-            if has_self {
-                Some(quote! {
-                    jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback }
-                })
+            let member = if has_self {
+                quote! {
+                    jsg::Member::Method {
+                        name: #js_name.to_owned(),
+                        callback: Self::#callback_name,
+                    }
+                }
             } else {
-                Some(quote! {
-                    jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback }
-                })
-            }
+                quote! {
+                    jsg::Member::StaticMethod {
+                        name: #js_name.to_owned(),
+                        callback: Self::#callback_name,
+                    }
+                }
+            };
+            Some(member)
         })
         .collect();
 
@@ -358,7 +493,12 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
             })?;
 
             let rust_name = &constant.ident;
-            let js_name = extract_name_attribute(&attr.meta.to_token_stream().to_string())
+            let js_name = attr
+                .meta
+                .require_list()
+                .ok()
+                .map(|list| list.tokens.clone().into())
+                .and_then(extract_name_attribute)
                 .unwrap_or_else(|| rust_name.to_string());
 
             Some(quote! {
@@ -370,41 +510,51 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
         })
         .collect();
 
-    let type_name = match &**self_ty {
-        syn::Type::Path(p) => p
-            .path
-            .segments
-            .last()
-            .map_or("Unknown", |s| s.ident.to_string().leak()),
-        _ => "Unknown",
-    };
-    let drop_fn = syn::Ident::new(&format!("drop_{type_name}"), self_ty.span());
-
     quote! {
         #impl_block
 
-        #[allow(non_snake_case)]
-        #[automatically_derived]
-        unsafe extern "C" fn #drop_fn(isolate: *mut jsg::v8::ffi::Isolate, this: *mut std::os::raw::c_void) {
-            jsg::drop_resource::<#self_ty>(isolate, this);
-        }
-
         #[automatically_derived]
         impl jsg::Resource for #self_ty {
-            fn members() -> Vec<jsg::Member> where Self: Sized {
-                vec![#(#method_registrations,)* #(#constant_registrations,)*]
-            }
-
-            fn get_drop_fn(&self) -> unsafe extern "C" fn(*mut jsg::v8::ffi::Isolate, *mut std::os::raw::c_void) {
-                #drop_fn
-            }
-
-            fn get_state(&mut self) -> &mut jsg::ResourceState {
-                &mut self._state
+            fn members() -> Vec<jsg::Member>
+            where
+                Self: Sized,
+            {
+                vec![
+                    #(#method_registrations,)*
+                    #(#constant_registrations,)*
+                ]
             }
         }
     }
     .into()
+}
+
+/// Extracts named fields from a struct, returning an empty list for unit structs.
+/// Returns `Err` with a compile error for tuple structs or non-struct data.
+fn extract_named_fields(
+    input: &DeriveInput,
+    macro_name: &str,
+) -> Result<syn::punctuated::Punctuated<syn::Field, syn::token::Comma>, TokenStream> {
+    match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => Ok(fields.named.clone()),
+            Fields::Unit => Ok(syn::punctuated::Punctuated::new()),
+            Fields::Unnamed(_) => Err(error(
+                input,
+                &format!("#[{macro_name}] does not support tuple structs"),
+            )),
+        },
+        _ => Err(error(
+            input,
+            &format!("#[{macro_name}] can only be applied to structs or impl blocks"),
+        )),
+    }
+}
+
+/// Checks if an attribute matches a given name, handling both unqualified (`#[jsg_method]`)
+/// and qualified (`#[jsg_macros::jsg_method]`) paths.
+fn is_attr(attr: &syn::Attribute, name: &str) -> bool {
+    attr.path().is_ident(name) || attr.path().segments.last().is_some_and(|s| s.ident == name)
 }
 
 fn error(tokens: &impl ToTokens, msg: &str) -> TokenStream {
@@ -413,16 +563,20 @@ fn error(tokens: &impl ToTokens, msg: &str) -> TokenStream {
         .into()
 }
 
-fn extract_name_attribute(attr_str: &str) -> Option<String> {
-    attr_str.find("name")?.checked_add(0)?;
-    attr_str
-        .split('=')
-        .nth(1)?
-        .trim()
-        .trim_matches(|c| c == '"' || c == ')' || c == ' ')
-        .split('"')
-        .next()
-        .map(str::to_owned)
+fn extract_name_attribute(tokens: TokenStream) -> Option<String> {
+    let nv: syn::MetaNameValue = syn::parse(tokens).ok()?;
+    if !nv.path.is_ident("name") {
+        return None;
+    }
+    if let syn::Expr::Lit(syn::ExprLit {
+        lit: syn::Lit::Str(s),
+        ..
+    }) = &nv.value
+    {
+        Some(s.value())
+    } else {
+        None
+    }
 }
 
 fn snake_to_camel(s: &str) -> String {

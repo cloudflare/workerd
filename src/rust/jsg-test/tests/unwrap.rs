@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 use jsg::Number;
 use jsg::v8::ToLocalValue;
 
@@ -124,6 +128,52 @@ fn v8_unwrap_string_returns_correct_values() {
         let unwrapped_unicode =
             unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), unicode.into_ffi()) };
         assert_eq!(unwrapped_unicode.as_str(), "こんにちは");
+        Ok(())
+    });
+}
+
+/// Tests that `unwrap_resource` rejects a C++ JSG object (tagged with `WORKERD_WRAPPABLE_TAG`).
+///
+/// Rust wrappables use `WORKERD_RUST_WRAPPABLE_TAG` (0xeb05), while C++ JSG objects use
+/// `WORKERD_WRAPPABLE_TAG` (0xeb04). Attempting to unwrap a C++ object through the Rust path
+/// must return nullptr to prevent reading garbage from non-existent `data[2]` fields.
+#[test]
+fn unwrap_resource_rejects_cpp_tagged_object() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let cpp_obj = crate::Harness::create_cpp_tagged_object(lock);
+
+        // unwrap_resource returns nullptr because the object has the C++ tag, not the Rust tag.
+        let result =
+            // SAFETY: isolate is valid and locked, value is a valid Local.
+            unsafe { jsg::v8::ffi::unwrap_resource(lock.isolate().as_ffi(), cpp_obj.into_ffi()) };
+        assert!(
+            result.get().is_null(),
+            "unwrap_resource should return null for a C++ tagged object"
+        );
+
+        Ok(())
+    });
+}
+
+/// Tests that `unwrap_resource` rejects a plain JS object with no internal fields.
+///
+/// A plain `{}` object has no wrappable tag at all. This verifies we don't crash on
+/// objects that were never wrapped by either the C++ or Rust JSG layer.
+#[test]
+fn unwrap_resource_rejects_plain_js_object() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let plain_obj = ctx.eval_raw("({})").unwrap();
+
+        let result =
+            // SAFETY: isolate is valid and locked, value is a valid Local.
+            unsafe { jsg::v8::ffi::unwrap_resource(lock.isolate().as_ffi(), plain_obj.into_ffi()) };
+        assert!(
+            result.get().is_null(),
+            "unwrap_resource should return null for a plain JS object"
+        );
+
         Ok(())
     });
 }

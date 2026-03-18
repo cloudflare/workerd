@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 #pragma once
 
 #include <workerd/jsg/jsg.h>
@@ -49,6 +53,16 @@ class TestHarness {
 };
 
 kj::Own<TestHarness> create_test_harness();
+
+// Forward-declared; defined by the CXX-generated lib.rs.h header.
+enum class GcType : uint8_t;
+
+// Triggers garbage collection for testing purposes.
+void request_gc(Isolate* isolate, GcType gc_type);
+
+// Creates a V8 object with the C++ WORKERD_WRAPPABLE_TAG set in its internal fields.
+// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
+::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate);
 
 }  // namespace rust::jsg_test
 
