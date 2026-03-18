@@ -87,8 +87,8 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   running = true;
 }
 
-jsg::Promise<DirectorySnapshot> Container::snapshotDirectory(
-    jsg::Lock& js, SnapshotDirectoryOptions options) {
+jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
+    jsg::Lock& js, DirectorySnapshotOptions options) {
   JSG_REQUIRE(
       running, Error, "snapshotDirectory() cannot be called on a container that is not running.");
   JSG_REQUIRE(options.dir.size() > 1 && options.dir.startsWith("/"), TypeError,
@@ -115,8 +115,8 @@ jsg::Promise<DirectorySnapshot> Container::snapshotDirectory(
     JSG_REQUIRE(snapshot.getSize() <= (1ull << 53) - 1, RangeError,
         "Snapshot size exceeds Number.MAX_SAFE_INTEGER");
 
-    return DirectorySnapshot{kj::str(snapshot.getId()), static_cast<double>(snapshot.getSize()),
-      kj::str(snapshot.getDir()), kj::mv(name)};
+    return Container::DirectorySnapshot{kj::str(snapshot.getId()),
+      static_cast<double>(snapshot.getSize()), kj::str(snapshot.getDir()), kj::mv(name)};
   });
 }
 

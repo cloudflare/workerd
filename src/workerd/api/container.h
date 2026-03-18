@@ -14,15 +14,6 @@ namespace workerd::api {
 
 class Fetcher;
 
-struct DirectorySnapshot {
-  kj::String id;
-  double size;
-  kj::String dir;
-  jsg::Optional<kj::String> name;
-
-  JSG_STRUCT(id, size, dir, name);
-};
-
 // Implements the `ctx.container` API for durable-object-attached containers. This API allows
 // the DO to supervise the attached container (lightweight virtual machine), including starting,
 // stopping, monitoring, making requests to the container, intercepting outgoing network requests,
@@ -31,7 +22,16 @@ class Container: public jsg::Object {
  public:
   Container(rpc::Container::Client rpcClient, bool running);
 
-  struct SnapshotDirectoryOptions {
+  struct DirectorySnapshot {
+    kj::String id;
+    double size;
+    kj::String dir;
+    jsg::Optional<kj::String> name;
+
+    JSG_STRUCT(id, size, dir, name);
+  };
+
+  struct DirectorySnapshotOptions {
     kj::String dir;
     jsg::Optional<kj::String> name;
 
@@ -55,7 +55,7 @@ class Container: public jsg::Object {
           enableInternet: boolean;
           env?: Record<string, string>;
           hardTimeout?: number | bigint;
-          snapshots?: DirectorySnapshot[];
+          snapshots?: ContainerDirectorySnapshot[];
         });
       } else {
         JSG_TS_OVERRIDE(ContainerStartupOptions {
@@ -82,7 +82,7 @@ class Container: public jsg::Object {
       jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding);
   jsg::Promise<void> interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<Fetcher> binding);
   jsg::Promise<DirectorySnapshot> snapshotDirectory(
-      jsg::Lock& js, SnapshotDirectoryOptions options);
+      jsg::Lock& js, DirectorySnapshotOptions options);
 
   // TODO(containers): listenTcp()
 
@@ -122,7 +122,7 @@ class Container: public jsg::Object {
 };
 
 #define EW_CONTAINER_ISOLATE_TYPES                                                                 \
-  api::DirectorySnapshot, api::Container, api::Container::SnapshotDirectoryOptions,                \
+  api::Container, api::Container::DirectorySnapshot, api::Container::DirectorySnapshotOptions,     \
       api::Container::StartupOptions
 
 }  // namespace workerd::api
