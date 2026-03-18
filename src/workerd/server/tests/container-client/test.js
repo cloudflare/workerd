@@ -459,6 +459,62 @@ export class DurableObjectExample extends DurableObject {
     );
   }
 
+  async createSnapshotForTransfer() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const writeResp = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/write-file?path=/app/data/cross-do.txt', {
+        method: 'POST',
+        body: 'cross-do-snapshot',
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    assert.equal(writeResp.status, 200);
+
+    const snapshot = await container.snapshotDirectory({
+      dir: '/app/data',
+      name: 'cross-do-snapshot',
+    });
+
+    await container.destroy();
+    await monitor;
+
+    return snapshot;
+  }
+
+  async restoreTransferredSnapshot(snapshot) {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ enableInternet: true, snapshots: [snapshot] });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const readResp = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/read-file?path=/app/data/cross-do.txt', {
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    assert.equal(readResp.status, 200);
+    assert.strictEqual(await readResp.text(), 'cross-do-snapshot');
+
+    await container.destroy();
+    await monitor;
+  }
+
   async testSetEgressHttp() {
     const container = this.ctx.container;
 
@@ -1204,5 +1260,26 @@ export const testSnapshotNonExistentDirectory = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testSnapshotNonExistentDirectory();
+  },
+};
+
+// Test that a snapshot created by one DO can be sent to another DO and restored there.
+export const testSnapshotCrossDoRestore = {
+  async test(_ctrl, env) {
+    const sourceId = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSnapshotCrossDoRestore-source')
+    );
+    const targetId = env.MY_DUPLICATE_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSnapshotCrossDoRestore-target')
+    );
+
+    const source = env.MY_CONTAINER.get(sourceId);
+    const target = env.MY_DUPLICATE_CONTAINER.get(targetId);
+
+    const snapshot = await source.createSnapshotForTransfer();
+    assert.strictEqual(snapshot.dir, '/app/data');
+    assert.strictEqual(snapshot.name, 'cross-do-snapshot');
+
+    await target.restoreTransferredSnapshot(snapshot);
   },
 };

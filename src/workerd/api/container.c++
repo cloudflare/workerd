@@ -90,9 +90,6 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
 
 jsg::Promise<DirectorySnapshot> Container::snapshotDirectory(
     jsg::Lock& js, SnapshotDirectoryOptions options) {
-  auto flags = FeatureFlags::get(js);
-  JSG_REQUIRE(flags.getWorkerdExperimental(), Error,
-      "snapshotDirectory() requires the 'experimental' compatibility flag.");
   JSG_REQUIRE(
       running, Error, "snapshotDirectory() cannot be called on a container that is not running.");
   JSG_REQUIRE(options.dir.size() > 1 && options.dir.startsWith("/"), TypeError,

@@ -357,42 +357,6 @@ kj::Promise<DockerBinaryResponse> dockerApiBinaryRequest(kj::Network& network,
       bodyBytes, "application/x-tar"_kj, maxResponseSize);
 }
 
-kj::Promise<void> cleanupSnapshotVolumes(
-    kj::Network& network, kj::String dockerPath, kj::String containerName) {
-  auto prefix = kj::str(SNAPSHOT_VOLUME_PREFIX, containerName, "-");
-  capnp::JsonCodec codec;
-  codec.handleByAnnotation<docker_api::Docker::VolumeListFilters>();
-  capnp::MallocMessageBuilder filterMessage;
-  auto filters = filterMessage.initRoot<docker_api::Docker::VolumeListFilters>();
-  auto names = filters.initName(1);
-  names.set(0, prefix);
-  auto filterJson = codec.encode(filters);
-  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
-      kj::str("/volumes?filters=", kj::encodeUriComponent(filterJson)));
-
-  if (response.statusCode != 200) {
-    // Best-effort: if we can't list volumes, just bail.
-    co_return;
-  }
-
-  auto message = decodeJsonResponse<docker_api::Docker::VolumeListResponse>(response.body);
-  auto root = message->getRoot<docker_api::Docker::VolumeListResponse>();
-
-  // Delete each volume independently so one failure doesn't prevent cleanup of the rest.
-  for (auto volume: root.getVolumes()) {
-    try {
-      auto deleteResponse = co_await dockerApiRequest(network, kj::str(dockerPath),
-          kj::HttpMethod::DELETE, kj::str("/volumes/", volume.getName()));
-      // 204 = deleted, 404 = not found (both are fine for cleanup)
-      KJ_REQUIRE(deleteResponse.statusCode == 204 || deleteResponse.statusCode == 404,
-          "Failed to delete Docker volume during cleanup: ", deleteResponse.statusCode);
-    } catch (...) {
-      auto e = kj::getCaughtExceptionAsKj();
-      KJ_LOG(WARNING, "failed to delete snapshot volume", volume.getName(), e);
-    }
-  }
-}
-
 }  // namespace
 
 ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
@@ -433,16 +397,11 @@ ContainerClient::~ContainerClient() noexcept(false) {
                          .ignoreResult()
                          .catch_([](kj::Exception&&) {});
 
-  // Best-effort cleanup of Docker volumes created for snapshots.
-  auto volumeCleanup = cleanupSnapshotVolumes(network, kj::str(dockerPath), kj::str(containerName))
-                           .catch_([](kj::Exception&&) {});
-
   // Pass the joined cleanup promise to the callback. The callback wraps it with the
   // canceler (so a future client creation can cancel it), stores it so the next
   // ContainerClient can await it, and adds a branch to waitUntilTasks to keep the
   // underlying I/O alive.
-  cleanupCallback(kj::joinPromises(
-      kj::arr(kj::mv(sidecarCleanup), kj::mv(mainCleanup), kj::mv(volumeCleanup))));
+  cleanupCallback(kj::joinPromises(kj::arr(kj::mv(sidecarCleanup), kj::mv(mainCleanup))));
 }
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
@@ -1223,7 +1182,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
             "Invalid snapshot ID: must contain only hex digits and hyphens");
       }
 
-      auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, containerName, "-", snapshotId);
+      auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
       auto parentDir = validateSnapshotDir(dir);
       auto mountPath = parentDir == "/" ? kj::str("/mnt") : kj::str("/mnt", parentDir);
 
@@ -1355,7 +1314,7 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
 
   // Create a Docker volume to store the snapshot. If anything after this fails,
   // clean up the volume so we don't leak Docker resources on retries.
-  auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, containerName, "-", snapshotId);
+  auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
   co_await createDockerVolume(volumeName);
   bool volumeCommitted = false;
   KJ_DEFER(if (!volumeCommitted) {
