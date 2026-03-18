@@ -21,12 +21,6 @@ struct DirectorySnapshot {
   jsg::Optional<kj::String> name;
 
   JSG_STRUCT(id, size, dir, name);
-  JSG_STRUCT_TS_OVERRIDE(DirectorySnapshot {
-    readonly id: string;
-    readonly size: number;
-    readonly dir: string;
-    readonly name?: string;
-  });
 };
 
 // Implements the `ctx.container` API for durable-object-attached containers. This API allows
