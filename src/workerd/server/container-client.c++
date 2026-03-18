@@ -47,25 +47,31 @@ static_assert(static_cast<double>(MAX_SNAPSHOT_TAR_SIZE) == MAX_SNAPSHOT_TAR_SIZ
 // Ensures the stale-volume check runs at most once per process.
 bool staleSnapshotVolumeCheckScheduled = false;
 
-// Validate a snapshot directory path. Rejects relative paths, embedded null bytes,
-// and path traversal components (".."). Returns the validated parent directory path
-// (with leading '/') suitable for the Docker archive API.
-kj::String validateSnapshotDir(kj::StringPtr dir) {
-  JSG_REQUIRE(dir.size() > 1 && dir[0] == '/', Error,
-      "Snapshot directory must be an absolute path, got: ", dir);
-
-  JSG_REQUIRE(
-      dir.findFirst('\0') == kj::none, Error, "Snapshot directory must not contain null bytes");
-
-  // kj::Path::parse rejects ".." and other dangerous components, but throws a raw KJ
-  // exception. Wrap it so the JS caller gets a user-friendly error.
-  kj::Maybe<kj::Path> maybeParsedDir;
-  KJ_IF_SOME(exc,
-      kj::runCatchingExceptions([&]() { maybeParsedDir = kj::Path::parse(dir.slice(1)); })) {
-    JSG_FAIL_REQUIRE(Error, "Snapshot directory contains invalid path components: ", dir, "; ",
-        exc.getDescription());
+// Strip trailing slashes from a path, preserving bare "/".
+kj::String normalizePath(kj::String path) {
+  while (path.size() > 1 && path[path.size() - 1] == '/') {
+    path = kj::str(path.first(path.size() - 1));
   }
-  return KJ_ASSERT_NONNULL(kj::mv(maybeParsedDir)).parent().toString(true);
+  return kj::mv(path);
+}
+
+// Validate an absolute path for snapshot use (both creation dir and restore mount point).
+// Rejects relative paths, embedded null bytes, and path traversal components ("..").
+// Accepts "/" as a valid path.
+void validateAbsolutePath(kj::StringPtr path) {
+  JSG_REQUIRE(
+      path.size() > 0 && path[0] == '/', Error, "Snapshot path must be absolute, got: ", path);
+
+  JSG_REQUIRE(path.findFirst('\0') == kj::none, Error, "Snapshot path must not contain null bytes");
+
+  // "/" is valid (root). For longer paths, kj::Path::parse rejects ".." and other
+  // dangerous components, but throws a raw KJ exception. Wrap it for a user-friendly error.
+  if (path.size() > 1) {
+    KJ_IF_SOME(exc, kj::runCatchingExceptions([&]() { (void)kj::Path::parse(path.slice(1)); })) {
+      JSG_FAIL_REQUIRE(
+          Error, "Snapshot path contains invalid components: ", path, "; ", exc.getDescription());
+    }
+  }
 }
 
 struct ParsedAddress {
@@ -1241,11 +1247,11 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 
   co_await createContainer(entrypoint, environment, params);
 
-  // Restore directory snapshots into the created (but not yet started) container.
   if (params.hasSnapshots()) {
     auto snapshotList = params.getSnapshots();
     for (auto i: kj::zeroTo(snapshotList.size())) {
-      auto snapshot = snapshotList[i];
+      auto entry = snapshotList[i];
+      auto snapshot = entry.getSnapshot();
       auto snapshotId = kj::str(snapshot.getId());
       auto dir = kj::str(snapshot.getDir());
 
@@ -1256,34 +1262,47 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
             "Invalid snapshot ID: must contain only hex digits and hyphens");
       }
 
-      auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
-      auto parentDir = validateSnapshotDir(dir);
-      auto mountPath = parentDir == "/" ? kj::str("/mnt") : kj::str("/mnt", parentDir);
+      const auto mountPointText = entry.getMountPoint();
+      const auto restoreDir =
+          normalizePath(mountPointText.size() > 0 ? kj::str(mountPointText) : kj::str(dir));
+      validateAbsolutePath(restoreDir);
 
-      auto firstSeparator = dir.slice(1).findFirst('/');
-      auto archiveRoot = firstSeparator.map([&](size_t i) {
-        return kj::str(dir.slice(1, i + 1));
-      }).orDefault(kj::str(dir.slice(1)));
+      auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
+
+      // The volume stores raw directory contents (no directory wrapper) at /mnt.
+      // Mount it at /mnt{restoreDir} so Docker creates the target directory hierarchy,
+      // then GET from the first path component to obtain a tar with the full path.
+      // Special case: restoreDir == "/" → mount at /mnt, GET with path=/mnt/. to
+      // avoid the extra mnt/ wrapper.
+      auto mountPath = restoreDir == "/" ? kj::str("/mnt") : kj::str("/mnt", restoreDir);
 
       auto tempId = co_await createTempContainerWithVolume(volumeName, mountPath);
       KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
 
-      auto tarResponse =
-          co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
-              kj::str("/containers/", tempId, "/archive?path=/mnt/",
-                  kj::encodeUriComponent(archiveRoot)),
-              kj::none, MAX_SNAPSHOT_TAR_SIZE);
+      kj::String archiveGetPath;
+      if (restoreDir == "/") {
+        archiveGetPath = kj::str("/containers/", tempId, "/archive?path=/mnt/.");
+      } else {
+        auto firstSeparator = restoreDir.slice(1).findFirst('/');
+        auto archiveRoot =
+            firstSeparator.map([&](size_t pos) {
+          return kj::str(restoreDir.slice(1, pos + 1));
+        }).orDefault(kj::str(restoreDir.slice(1)));
+        archiveGetPath = kj::str(
+            "/containers/", tempId, "/archive?path=/mnt/", kj::encodeUriComponent(archiveRoot));
+      }
+
+      auto tarResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
+          kj::HttpMethod::GET, kj::mv(archiveGetPath), kj::none, MAX_SNAPSHOT_TAR_SIZE);
       JSG_REQUIRE(tarResponse.statusCode == 200, Error, "Failed to read snapshot '", snapshotId,
           "' from volume '", volumeName, "': ", tarResponse.statusCode);
 
-      // PUT the tar into the created (but not started) main container at / so the
-      // tar's full path structure is restored without requiring parentDir to pre-exist.
       auto putResponse =
           co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::PUT,
               kj::str("/containers/", containerName, "/archive?path=%2F&noOverwriteDirNonDir=true"),
               kj::mv(tarResponse.body), MAX_JSON_RESPONSE_SIZE);
       JSG_REQUIRE(putResponse.statusCode == 200, Error, "Failed to restore snapshot '", snapshotId,
-          "' to '", dir, "': ", putResponse.statusCode);
+          "' to '", restoreDir, "': ", putResponse.statusCode);
     }
   }
 
@@ -1366,16 +1385,23 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error,
       "snapshotDirectory() requires a running container.");
 
-  auto parentDir = validateSnapshotDir(dir);
-  auto mountPath = parentDir == "/" ? kj::str("/mnt") : kj::str("/mnt", parentDir);
+  validateAbsolutePath(dir);
+  dir = normalizePath(kj::mv(dir));
 
   auto snapshotId = randomUUID(kj::none);
 
-  // GET tar archive of the directory from the running container.
-  auto tarResponse =
-      co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::GET,
-          kj::str("/containers/", containerName, "/archive?path=", kj::encodeUriComponent(dir)),
-          kj::none, MAX_SNAPSHOT_TAR_SIZE);
+  // GET tar archive of the directory CONTENTS from the running container.
+  // The trailing "/." tells Docker to return contents without the directory wrapper,
+  // so the tar entries are relative to the directory (e.g., "hello/aaa.txt" instead
+  // of "data/hello/aaa.txt"). This decouples storage from the directory name,
+  // allowing restore to a different mount point.
+  // Append "/." to the path to get directory contents without the directory wrapper.
+  // For dir == "/", this is just "/."; for others, e.g. "/app/data" → "/app/data/.".
+  auto archivePath = dir == "/" ? kj::str("/.") : kj::str(dir, "/.");
+  auto tarResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
+      kj::HttpMethod::GET,
+      kj::str("/containers/", containerName, "/archive?path=", kj::encodeUriComponent(archivePath)),
+      kj::none, MAX_SNAPSHOT_TAR_SIZE);
 
   if (tarResponse.statusCode == 404) {
     JSG_FAIL_REQUIRE(Error, "snapshotDirectory(): directory not found in container: ", dir);
@@ -1386,8 +1412,8 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
 
   auto tarSize = static_cast<uint64_t>(tarResponse.body.size());
 
-  // Create a Docker volume to store the snapshot. If anything after this fails,
-  // clean up the volume so we don't leak Docker resources on retries.
+  // Create a Docker volume to store the snapshot contents. If anything after this
+  // fails, clean up the volume so we don't leak Docker resources on retries.
   auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
   co_await createDockerVolume(volumeName);
   bool volumeCommitted = false;
@@ -1395,14 +1421,13 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
     waitUntilTasks.add(deleteDockerVolume(volumeName).catch_([](kj::Exception&&) {}));
   });
 
-  // Store the tar in the volume via a temp container.
-  auto tempId = co_await createTempContainerWithVolume(volumeName, mountPath);
+  // Store the contents tar in the volume via a temp container mounted at /mnt.
+  auto tempId = co_await createTempContainerWithVolume(volumeName);
   KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
 
-  auto putResponse =
-      co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::PUT,
-          kj::str("/containers/", tempId, "/archive?path=", kj::encodeUriComponent(mountPath)),
-          kj::mv(tarResponse.body), MAX_JSON_RESPONSE_SIZE);
+  auto putResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
+      kj::HttpMethod::PUT, kj::str("/containers/", tempId, "/archive?path=/mnt"),
+      kj::mv(tarResponse.body), MAX_JSON_RESPONSE_SIZE);
   JSG_REQUIRE(putResponse.statusCode == 200, Error,
       "snapshotDirectory(): failed to store snapshot in volume '", volumeName,
       "': ", putResponse.statusCode);
@@ -1410,7 +1435,6 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   volumeCommitted = true;
   KJ_LOG(INFO, "created snapshot volume", volumeName, dir, tarSize);
 
-  // Populate the capnp response.
   auto result = context.getResults().initSnapshot();
   result.setId(snapshotId);
   result.setSize(tarSize);

@@ -45,8 +45,17 @@ interface Container @0x9aaceefc06523bca {
     compatibilityFlags @4 :CompatibilityFlags;
     # Compatibility flags for this worker
 
-    snapshots @5 :List(DirectorySnapshot);
+    snapshots @5 :List(SnapshotRestoreParams);
     # Directory snapshots to restore before the container starts.
+  }
+
+  struct SnapshotRestoreParams {
+    snapshot @0 :DirectorySnapshot;
+    # The snapshot to restore.
+
+    mountPoint @1 :Text;
+    # Where to mount the snapshot in the container filesystem.
+    # If empty, the snapshot is restored to its original directory.
   }
 
   struct DirectorySnapshot {

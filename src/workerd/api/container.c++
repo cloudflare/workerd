@@ -65,16 +65,22 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     KJ_IF_SOME(snapshots, options.snapshots) {
       auto list = req.initSnapshots(snapshots.size());
       for (auto i: kj::indices(snapshots)) {
-        auto snapshot = list[i];
-        double size = snapshots[i].size;
+        auto entry = list[i];
+        auto& restore = snapshots[i];
+        auto& snap = restore.snapshot;
+        double size = snap.size;
         JSG_REQUIRE(std::isfinite(size) && size >= 0 &&
                 size <= static_cast<double>((1ull << 53) - 1) && std::floor(size) == size,
             RangeError, "Snapshot size must be a non-negative integer <= Number.MAX_SAFE_INTEGER");
-        snapshot.setId(snapshots[i].id);
-        snapshot.setSize(static_cast<uint64_t>(size));
-        snapshot.setDir(snapshots[i].dir);
-        KJ_IF_SOME(name, snapshots[i].name) {
-          snapshot.setName(name);
+        auto snapshotBuilder = entry.initSnapshot();
+        snapshotBuilder.setId(snap.id);
+        snapshotBuilder.setSize(static_cast<uint64_t>(size));
+        snapshotBuilder.setDir(snap.dir);
+        KJ_IF_SOME(name, snap.name) {
+          snapshotBuilder.setName(name);
+        }
+        KJ_IF_SOME(mp, restore.mountPoint) {
+          entry.setMountPoint(mp);
         }
       }
     }
@@ -91,7 +97,7 @@ jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
     jsg::Lock& js, DirectorySnapshotOptions options) {
   JSG_REQUIRE(
       running, Error, "snapshotDirectory() cannot be called on a container that is not running.");
-  JSG_REQUIRE(options.dir.size() > 1 && options.dir.startsWith("/"), TypeError,
+  JSG_REQUIRE(options.dir.size() > 0 && options.dir.startsWith("/"), TypeError,
       "snapshotDirectory() requires an absolute directory path (starting with '/').");
 
   auto req = rpcClient->snapshotDirectoryRequest();

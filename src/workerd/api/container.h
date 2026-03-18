@@ -38,12 +38,19 @@ class Container: public jsg::Object {
     JSG_STRUCT(dir, name);
   };
 
+  struct SnapshotRestoreParams {
+    DirectorySnapshot snapshot;
+    jsg::Optional<kj::String> mountPoint;
+
+    JSG_STRUCT(snapshot, mountPoint);
+  };
+
   struct StartupOptions {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
     bool enableInternet = false;
     jsg::Optional<jsg::Dict<kj::String>> env;
     jsg::Optional<int64_t> hardTimeout;
-    jsg::Optional<kj::Array<DirectorySnapshot>> snapshots;
+    jsg::Optional<kj::Array<SnapshotRestoreParams>> snapshots;
 
     // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
 
@@ -55,7 +62,7 @@ class Container: public jsg::Object {
           enableInternet: boolean;
           env?: Record<string, string>;
           hardTimeout?: number | bigint;
-          snapshots?: ContainerDirectorySnapshot[];
+          snapshots?: ContainerSnapshotRestoreParams[];
         });
       } else {
         JSG_TS_OVERRIDE(ContainerStartupOptions {
@@ -123,6 +130,6 @@ class Container: public jsg::Object {
 
 #define EW_CONTAINER_ISOLATE_TYPES                                                                 \
   api::Container, api::Container::DirectorySnapshot, api::Container::DirectorySnapshotOptions,     \
-      api::Container::StartupOptions
+      api::Container::SnapshotRestoreParams, api::Container::StartupOptions
 
 }  // namespace workerd::api
