@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: mukunku/tag-exists-action@v1.6.0
+      - uses: mukunku/tag-exists-action@v1.7.0
         id: check_tag
         with:
           tag: v${{ needs.version.outputs.version }}
@@ -207,7 +207,7 @@ jobs:
           repository: cloudflare/workers-sdk
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:

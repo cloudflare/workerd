@@ -146,7 +146,7 @@ jobs:
           path: bazel-bin/types/definitions/
       - name: 'Comment on PR with error details'
         if: failure()
-        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728
+        uses: marocchino/sticky-pull-request-comment@70d2764d1a7d5d9560b100cbea0077fc8f633987  # v3.0.2
         with:
           message: |
             The generated output of `@cloudflare/workers-types` has been changed by this PR. If this is intentional, run `just generate-types` to update the snapshot. Alternatively, you can download the full generated types: ${{ steps.artifact-upload-step.outputs.artifact-url }}
@@ -161,7 +161,7 @@ jobs:
             </details>
       - name: 'Comment on PR with error details'
         if: success()
-        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728
+        uses: marocchino/sticky-pull-request-comment@70d2764d1a7d5d9560b100cbea0077fc8f633987  # v3.0.2
         with:
           only_update: true
           message: |
@@ -178,7 +178,7 @@ jobs:
           repository: cloudflare/workers-sdk
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
