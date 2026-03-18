@@ -492,6 +492,10 @@ export class DurableObjectExample extends DurableObject {
   }
 
   async restoreTransferredSnapshot(snapshot) {
+    assert.ok(snapshot.id, 'snapshot must have a non-empty id');
+    assert.ok(snapshot.size > 0, 'snapshot must have a positive size');
+    assert.strictEqual(snapshot.dir, '/app/data');
+
     const container = this.ctx.container;
     if (container.running) {
       const monitor = container.monitor().catch((_err) => {});

@@ -25,6 +25,8 @@
 #include <kj/exception.h>
 #include <kj/string.h>
 
+#include <atomic>
+
 namespace workerd::server {
 
 namespace {
@@ -35,12 +37,16 @@ constexpr uint16_t SIDECAR_INGRESS_PORT = 39001;
 constexpr uint64_t MAX_JSON_RESPONSE_SIZE = 16ULL * 1024 * 1024;
 
 constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
+constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
+constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
 // Maximum size of a snapshot tar archive held in memory during snapshot create/restore.
 constexpr size_t MAX_SNAPSHOT_TAR_SIZE = 1ULL * 1024 * 1024 * 1024;  // 1 GiB
 
 static_assert(static_cast<double>(MAX_SNAPSHOT_TAR_SIZE) == MAX_SNAPSHOT_TAR_SIZE,
     "MAX_SNAPSHOT_TAR_SIZE must be exactly representable as double");
+
+std::atomic<bool> staleSnapshotVolumeCheckScheduled = false;
 
 // Validate a snapshot directory path. Rejects relative paths, embedded null bytes,
 // and path traversal components (".."). Returns the validated parent directory path
@@ -357,6 +363,64 @@ kj::Promise<DockerBinaryResponse> dockerApiBinaryRequest(kj::Network& network,
       bodyBytes, "application/x-tar"_kj, maxResponseSize);
 }
 
+kj::String currentSnapshotVolumeTimestamp() {
+  return kj::str((kj::systemPreciseCalendarClock().now() - kj::UNIX_EPOCH) / kj::SECONDS);
+}
+
+kj::Maybe<int64_t> tryGetSnapshotCreatedAt(capnp::JsonValue::Reader labels) {
+  if (!labels.isObject()) {
+    return kj::none;
+  }
+
+  for (auto field: labels.getObject()) {
+    if (field.getName() != SNAPSHOT_VOLUME_CREATED_AT_LABEL) {
+      continue;
+    }
+
+    auto value = field.getValue();
+    if (!value.isString()) {
+      return kj::none;
+    }
+    return value.getString().tryParseAs<int64_t>();
+  }
+
+  return kj::none;
+}
+
+kj::Promise<void> warnAboutStaleSnapshotVolumes(kj::Network& network, kj::String dockerPath) {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::VolumeListFilters>();
+  capnp::MallocMessageBuilder filterMessage;
+  auto filters = filterMessage.initRoot<docker_api::Docker::VolumeListFilters>();
+  auto names = filters.initName(1);
+  names.set(0, SNAPSHOT_VOLUME_PREFIX);
+
+  auto response = co_await dockerApiRequest(network, kj::mv(dockerPath), kj::HttpMethod::GET,
+      kj::str("/volumes?filters=", kj::encodeUriComponent(codec.encode(filters))));
+  if (response.statusCode != 200) {
+    co_return;
+  }
+
+  auto message = decodeJsonResponse<docker_api::Docker::VolumeListResponse>(response.body);
+  auto root = message->getRoot<docker_api::Docker::VolumeListResponse>();
+  auto now = kj::systemPreciseCalendarClock().now();
+  kj::Vector<kj::String> staleVolumes;
+
+  for (auto volume: root.getVolumes()) {
+    KJ_IF_SOME(createdAtSeconds, tryGetSnapshotCreatedAt(volume.getLabels())) {
+      auto createdAt = kj::UNIX_EPOCH + createdAtSeconds * kj::SECONDS;
+      if (now - createdAt >= SNAPSHOT_STALE_AGE) {
+        staleVolumes.add(kj::str(volume.getName()));
+      }
+    }
+  }
+
+  if (!staleVolumes.empty()) {
+    KJ_LOG(WARNING, "the following snapshot volumes were created 30+ days ago and may be stale",
+        kj::strArray(staleVolumes, ", "));
+  }
+}
+
 }  // namespace
 
 ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
@@ -381,7 +445,14 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       waitUntilTasks(waitUntilTasks),
       pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
-      channelTokenHandler(channelTokenHandler) {}
+      channelTokenHandler(channelTokenHandler) {
+  if (!staleSnapshotVolumeCheckScheduled.exchange(true, std::memory_order_relaxed)) {
+    waitUntilTasks.add(warnAboutStaleSnapshotVolumes(network, kj::str(this->dockerPath))
+                           .catch_([](kj::Exception&& e) {
+      KJ_LOG(WARNING, "failed to inspect snapshot volumes for staleness", e);
+    }));
+  }
+}
 
 ContainerClient::~ContainerClient() noexcept(false) {
   stopEgressListener();
@@ -1055,6 +1126,9 @@ kj::Promise<void> ContainerClient::createDockerVolume(kj::StringPtr volumeName) 
   capnp::MallocMessageBuilder message;
   auto req = message.initRoot<docker_api::Docker::VolumeCreateRequest>();
   req.setName(volumeName);
+  auto labels = req.initLabels().initObject(1);
+  labels[0].setName(SNAPSHOT_VOLUME_CREATED_AT_LABEL);
+  labels[0].initValue().setString(currentSnapshotVolumeTimestamp());
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/volumes/create"), codec.encode(req));
@@ -1334,6 +1408,7 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
       "': ", putResponse.statusCode);
 
   volumeCommitted = true;
+  KJ_LOG(INFO, "created snapshot volume", volumeName, dir, tarSize);
 
   // Populate the capnp response.
   auto result = context.getResults().initSnapshot();

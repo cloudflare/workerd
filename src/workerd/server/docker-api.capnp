@@ -317,6 +317,12 @@ struct Docker {
   # Volume create request (POST /volumes/create)
   struct VolumeCreateRequest {
     name @0 :Text $Json.name("Name");
+    labels @1 :Json.Value $Json.name("Labels");
+  }
+
+  # Volume list filters query parameter (GET /volumes?filters=...)
+  struct VolumeListFilters {
+    name @0 :List(Text) $Json.name("name");
   }
 
   # Volume list response (GET /volumes)
@@ -326,6 +332,7 @@ struct Docker {
 
     struct Volume {
       name @0 :Text $Json.name("Name");
+      labels @1 :Json.Value $Json.name("Labels");
     }
   }
 }

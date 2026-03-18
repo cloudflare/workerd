@@ -87,7 +87,8 @@ class Container: public jsg::Object {
   jsg::Promise<void> interceptOutboundHttp(
       jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding);
   jsg::Promise<void> interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<Fetcher> binding);
-  jsg::Promise<DirectorySnapshot> snapshotDirectory(jsg::Lock& js, SnapshotDirectoryOptions options);
+  jsg::Promise<DirectorySnapshot> snapshotDirectory(
+      jsg::Lock& js, SnapshotDirectoryOptions options);
 
   // TODO(containers): listenTcp()
 

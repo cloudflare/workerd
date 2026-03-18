@@ -4,11 +4,11 @@
 
 #include "container.h"
 
-#include <cmath>
-
 #include <workerd/api/http.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+
+#include <cmath>
 
 namespace workerd::api {
 
@@ -68,8 +68,7 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
         auto snapshot = list[i];
         double size = snapshots[i].size;
         JSG_REQUIRE(std::isfinite(size) && size >= 0 &&
-                size <= static_cast<double>((1ull << 53) - 1) &&
-                std::floor(size) == size,
+                size <= static_cast<double>((1ull << 53) - 1) && std::floor(size) == size,
             RangeError, "Snapshot size must be a non-negative integer <= Number.MAX_SAFE_INTEGER");
         snapshot.setId(snapshots[i].id);
         snapshot.setSize(static_cast<uint64_t>(size));
@@ -104,7 +103,8 @@ jsg::Promise<DirectorySnapshot> Container::snapshotDirectory(
 
   return IoContext::current()
       .awaitIo(js, req.send())
-      .then(js, [](jsg::Lock& js, capnp::Response<rpc::Container::SnapshotDirectoryResults> results) {
+      .then(
+          js, [](jsg::Lock& js, capnp::Response<rpc::Container::SnapshotDirectoryResults> results) {
     auto snapshot = results.getSnapshot();
     jsg::Optional<kj::String> name = kj::none;
     auto snapshotName = snapshot.getName();
