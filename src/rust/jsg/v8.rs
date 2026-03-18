@@ -388,6 +388,11 @@ pub mod ffi {
             constructor: &Global, /* v8::Global<FunctionTemplate> */
         ) -> Local /* v8::Local<Value> */;
 
+        pub unsafe fn wrappable_attach_wrapper(
+            wrappable: KjRc<Wrappable>,
+            args: Pin<&mut FunctionCallbackInfo>,
+        );
+
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
@@ -1755,6 +1760,19 @@ impl WrappableRc {
                 ),
             )
         }
+    }
+
+    /// Attaches this Wrappable to the `this` object in a V8 constructor callback.
+    ///
+    /// V8 has already created the `this` object from the `FunctionTemplate`'s
+    /// `InstanceTemplate`; this method attaches the Wrappable to it via
+    /// `CppgcShim` so that instance methods can resolve the resource.
+    pub fn attach_to_this(&self, info: &mut FunctionCallbackInfo) {
+        // SAFETY: info is valid for the duration of the callback.
+        let pin = unsafe { std::pin::Pin::new_unchecked(&mut *info.0) };
+        // SAFETY: The Pin guarantees info is valid. wrap_constructor attaches
+        // the Wrappable to args.This() and sets the Rust tag.
+        unsafe { ffi::wrappable_attach_wrapper(self.handle.clone(), pin) };
     }
 
     /// Creates an owning `WrappableRc` from a raw `*const ffi::Wrappable` pointer.

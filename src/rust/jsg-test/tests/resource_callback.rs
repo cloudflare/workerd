@@ -15,6 +15,7 @@ use std::rc::Rc;
 use jsg::ExceptionType;
 use jsg::Number;
 use jsg::ToJS;
+use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_static_constant;
@@ -410,6 +411,149 @@ fn static_constant_coexists_with_methods() {
         // Static constant works on instance
         let result: Number = ctx.eval(lock, "obj.MAX_SIZE").unwrap();
         assert!((result.value() - 1024.0).abs() < f64::EPSILON);
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Constructor tests
+// =============================================================================
+
+#[jsg_resource]
+struct Greeting {
+    message: String,
+}
+
+#[jsg_resource]
+impl Greeting {
+    #[jsg_constructor]
+    fn constructor(message: String) -> Self {
+        Self { message }
+    }
+
+    #[jsg_method]
+    fn get_message(&self) -> String {
+        self.message.clone()
+    }
+}
+
+/// Resources without `#[jsg_constructor]` should throw when called with `new`.
+#[test]
+fn resource_without_constructor_throws() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<EchoResource>(lock);
+        ctx.set_global("EchoResource", constructor.into());
+
+        let result: Result<Number, _> = ctx.eval(lock, "new EchoResource('hi')");
+        assert!(result.is_err(), "should throw illegal constructor");
+        Ok(())
+    });
+}
+
+/// A `#[jsg_constructor]` method is callable from JavaScript via `new`.
+#[test]
+fn constructor_creates_instance() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<Greeting>(lock);
+        ctx.set_global("Greeting", constructor.into());
+
+        let result: String = ctx
+            .eval(lock, "new Greeting('hello').getMessage()")
+            .unwrap();
+        assert_eq!(result, "hello");
+        Ok(())
+    });
+}
+
+/// Constructor arguments are converted from JS types via `FromJS`.
+#[test]
+fn constructor_converts_arguments() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<Greeting>(lock);
+        ctx.set_global("Greeting", constructor.into());
+
+        // Number is coerced to string by V8
+        let result: String = ctx
+            .eval(lock, "new Greeting(String(42)).getMessage()")
+            .unwrap();
+        assert_eq!(result, "42");
+        Ok(())
+    });
+}
+
+/// Multiple `new` calls create distinct JS objects.
+#[test]
+fn constructor_creates_distinct_objects() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<Greeting>(lock);
+        ctx.set_global("Greeting", constructor.into());
+
+        let result: String = ctx
+            .eval(
+                lock,
+                "let a = new Greeting('one'); let b = new Greeting('two'); \
+                 a.getMessage() + ',' + b.getMessage()",
+            )
+            .unwrap();
+        assert_eq!(result, "one,two");
+        Ok(())
+    });
+}
+
+/// `instanceof` works correctly for constructor-created instances.
+#[test]
+fn constructor_instanceof_works() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<Greeting>(lock);
+        ctx.set_global("Greeting", constructor.into());
+
+        let result: String = ctx
+            .eval(
+                lock,
+                "let g = new Greeting('test'); \
+                 String(g instanceof Greeting)",
+            )
+            .unwrap();
+        assert_eq!(result, "true");
+        Ok(())
+    });
+}
+
+// Constructor with Lock parameter
+
+#[jsg_resource]
+struct Counter {
+    value: Number,
+}
+
+#[jsg_resource]
+impl Counter {
+    #[jsg_constructor]
+    fn constructor(_lock: &mut jsg::Lock, value: Number) -> Self {
+        Self { value }
+    }
+
+    #[jsg_method]
+    fn get_value(&self) -> Number {
+        self.value
+    }
+}
+
+/// `#[jsg_constructor]` with a `Lock` parameter works.
+#[test]
+fn constructor_with_lock_parameter() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<Counter>(lock);
+        ctx.set_global("Counter", constructor.into());
+
+        let result: Number = ctx.eval(lock, "new Counter(99).getValue()").unwrap();
+        assert!((result.value() - 99.0).abs() < f64::EPSILON);
         Ok(())
     });
 }

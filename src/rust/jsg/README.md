@@ -48,15 +48,14 @@ impl MyResource {
 ### Lifecycle
 
 ```rust
-// Allocate on the KJ heap
+// Create a resource
 let resource = jsg::Rc::new(MyResource { ... });
 
-// Wrap as a JS object (uses cached FunctionTemplate)
-let js_obj = MyResource::wrap(resource.clone(), &mut lock);
+// Convert to a JS object (uses cached FunctionTemplate)
+let js_obj = resource.to_js(&mut lock);
 
-// Unwrap from JS back to Rust
-let r: &mut MyResource = MyResource::unwrap(&mut lock, js_val)
-    .expect("not a Rust-wrapped resource");
+// Convert from JS back to a Ref
+let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 ```
 
 ### GC Behavior
@@ -137,6 +136,39 @@ if lock.feature_flags().get_node_js_compat() {
 | Cap'n Proto schema | `src/workerd/io/compatibility-date.capnp` |
 | Generated Rust bindings | `//src/workerd/io:compatibility-date_capnp_rust` (Bazel target) |
 
+
+## Constructors
+
+To allow JavaScript to create instances of a resource via `new MyResource(args)`, mark a static method with `#[jsg_constructor]`:
+
+```rust
+use jsg_macros::{jsg_resource, jsg_method, jsg_constructor};
+
+#[jsg_resource]
+struct Greeting {
+    message: String,
+}
+
+#[jsg_resource]
+impl Greeting {
+    #[jsg_constructor]
+    fn constructor(message: String) -> Self {
+        Self { message }
+    }
+
+    #[jsg_method]
+    fn get_message(&self) -> String {
+        self.message.clone()
+    }
+}
+// JS: let g = new Greeting("hello"); g.getMessage() === "hello"
+```
+
+**Rules:**
+- The method must be static (no `self` receiver) and must return `Self`.
+- Only one `#[jsg_constructor]` is allowed per impl block.
+- The first parameter may be `&mut Lock` (or `&mut jsg::Lock`) if the constructor needs isolate access; it is not exposed as a JS argument.
+- If no `#[jsg_constructor]` is present, `new MyResource()` throws an `Illegal constructor` error, matching C++ JSG behavior.
 
 ## Static Constants
 
