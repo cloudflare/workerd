@@ -2,13 +2,14 @@
 
 import json
 import logging
+import os
 import subprocess
 from argparse import ArgumentParser, Namespace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from sys import exit
-from typing import Optional
+from typing import Callable, Optional
 
 # This file is symlinked into the internal repo as tools/format.py, so the root may be two levels up
 # or three.
@@ -87,7 +88,9 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
     return any(file.match(glob) for glob in globs)
 
 
-def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProcess:
+def run_bazel_tool(
+    tool_name: str, args: list[str], build_target: str | None = None
+) -> subprocess.CompletedProcess:
     # Use the formatter executable from bazel-bin
     tool_suffix = Path("build") / "deps" / "formatters" / tool_name
     internal_tool_path = BAZEL_BIN / "external" / "+dep_workerd+workerd" / tool_suffix
@@ -98,8 +101,9 @@ def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProce
     if workerd_tool_path.exists():
         return subprocess.run([workerd_tool_path, *args], cwd=ROOT)
 
-    # Use the new formatter targets in build/deps/formatters
-    build_target = f"@workerd//build/deps/formatters:{tool_name}@rule"
+    # Use the formatter targets in build/deps/formatters
+    if build_target is None:
+        build_target = f"@workerd//build/deps/formatters:{tool_name}@rule"
     download_result = subprocess.run(["bazel", "build", build_target])
     if download_result.returncode != 0:
         logging.error(f"Failed to download {tool_name}")
@@ -111,13 +115,23 @@ def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProce
         return subprocess.run([workerd_tool_path, *args], cwd=ROOT)
 
 
+def _run_parallel(
+    run_fn: Callable, files: list[Path], cmd: list, max_workers: int = 16
+) -> bool:
+    """Split files across parallel invocations of run_fn(cmd + chunk)."""
+    n_workers = min(os.cpu_count() or 1, len(files), max_workers)
+    if n_workers <= 1:
+        return run_fn(cmd + files).returncode == 0
+
+    chunks = [files[i::n_workers] for i in range(n_workers)]
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        results = list(pool.map(lambda chunk: run_fn(cmd + chunk), chunks))
+    return all(r.returncode == 0 for r in results)
+
+
 def clang_format(files: list[Path], check: bool = False) -> bool:
-    if check:
-        cmd = ["--dry-run", "--Werror"]
-    else:
-        cmd = ["-i"]
-    result = run_bazel_tool("clang-format", cmd + files)
-    return result.returncode == 0
+    cmd = ["--dry-run", "--Werror"] if check else ["-i"]
+    return _run_parallel(lambda args: run_bazel_tool("clang-format", args), files, cmd)
 
 
 def prettier(files: list[Path], check: bool = False) -> bool:
@@ -126,13 +140,28 @@ def prettier(files: list[Path], check: bool = False) -> bool:
     if not PRETTIER.exists():
         subprocess.run(["bazel", "build", "//:node_modules/prettier"])
     cmd = [PRETTIER, "--log-level=warn", "--check" if check else "--write"]
-    result = subprocess.run(cmd + files, cwd=ROOT)
-    return result.returncode == 0
+    return _run_parallel(
+        lambda args: subprocess.run(args, cwd=ROOT), files, cmd, max_workers=8
+    )
 
 
 def buildifier(files: list[Path], check: bool = False) -> bool:
     cmd = ["--mode=check" if check else "--mode=fix"]
     result = run_bazel_tool("buildifier", cmd + files)
+    return result.returncode == 0
+
+
+def rustfmt(files: list[Path], check: bool = False) -> bool:
+    # Used by edgeworker (via format.json); uses a standalone rustfmt binary to
+    # avoid pulling in the V8 build cache through bazel toolchain resolution.
+    if not files:
+        return True
+    cmd = ["--edition", "2024"]
+    if check:
+        cmd.append("--check")
+    result = run_bazel_tool(
+        "rustfmt", cmd + files, build_target="//build/deps/formatters:rustfmt@rule"
+    )
     return result.returncode == 0
 
 
@@ -201,6 +230,7 @@ FORMATTERS = {
     "prettier": prettier,
     "ruff": ruff,
     "buildifier": buildifier,
+    "rustfmt": rustfmt,
 }
 
 
