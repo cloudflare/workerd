@@ -67,16 +67,12 @@ void Wrappable::jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) {
 }
 
 kj::StringPtr Wrappable::jsgGetMemoryName() const {
-  // We can't construct kj::StringPtr directly from rust::Str because
-  // kj::StringPtr(ArrayPtr<const char>) is explicit+private and rust::Str
-  // is not NUL-terminated. Instead, copy once into a cached kj::String
-  // on first call and return a view of it.
-  KJ_IF_SOME(name, memoryName) {
-    return name;
-  }
+  // memory_name() on the Rust side returns a &'static str backed by a
+  // compile-time c"..." literal, so the pointer is valid for the process
+  // lifetime. Construct kj::StringPtr directly from data+size — no copy,
+  // no allocation, no caching needed.
   auto name = wrappable_invoke_get_name(*this);
-  auto& cached = memoryName.emplace(kj::str(kj::from<Rust>(name)));
-  return cached;
+  return kj::StringPtr(name.data(), name.size());
 }
 
 size_t Wrappable::jsgGetMemorySelfSize() const {

@@ -9,7 +9,8 @@
 //!
 //! # Core Types
 //!
-//! - [`IsolatePtr`] - Safe wrapper around `v8::Isolate*`, the V8 runtime instance
+//! - [`IsolatePtr`] - Non-null wrapper around `v8::Isolate*`; callers must still
+//!   ensure the isolate is alive and the current thread holds the isolate lock
 //! - [`Local<'a, T>`] - Stack-allocated handle to a V8 value, tied to a `HandleScope`
 //! - [`Global<T>`] - Persistent handle that outlives `HandleScope`s
 //!
@@ -86,7 +87,9 @@ pub mod ffi {
         unsafe fn wrappable_invoke_trace(wrappable: &Wrappable, visitor: *mut GcVisitor);
 
         /// Called from C++ `Wrappable::jsgGetMemoryName`.
-        /// Returns the resource's class name for heap snapshots, or "" if unavailable.
+        /// Returns the NUL-terminated class name for heap snapshots as a `rust::Str` view
+        /// into a `'static` string literal. The C++ side constructs a `kj::StringPtr`
+        /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
     }
 
@@ -1597,7 +1600,10 @@ unsafe fn wrappable_invoke_get_name(wrappable: &ffi::Wrappable) -> &'static str 
         let Some(trait_ptr) = ffi::TraitObjectPtr::from_wrappable(wrappable) else {
             return "";
         };
-        trait_ptr.as_gc_ref().memory_name()
+        // memory_name() returns a &'static CStr (a compile-time NUL-terminated
+        // literal). Convert to &str so CXX can pass it as rust::Str. The C++
+        // side uses .data()/.size() directly as a kj::StringPtr — no copy.
+        trait_ptr.as_gc_ref().memory_name().to_str().unwrap_or("")
     }
 }
 

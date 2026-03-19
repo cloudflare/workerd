@@ -196,10 +196,17 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let invocation = if has_self {
         quote! {
             let this = args.this();
-            // SAFETY: V8 dispatched through this type's FunctionTemplate, so the
-            // receiver is guaranteed to be a wrapped instance of Self. The &mut is
-            // sound because V8 is single-threaded and no other Rust code can alias
-            // the resource during the callback.
+            // SAFETY: `v8::Signature` (passed to `FunctionTemplate::New` in
+            // `create_resource_template`) enforces that V8 only dispatches this
+            // callback when `this` is an instance of the resource's own
+            // `FunctionTemplate`. If the caller destructures the method and calls
+            // it with a wrong receiver (e.g. `const {abort} = ac; abort()`), V8
+            // throws a `TypeError: Illegal invocation` *before* reaching this
+            // code. Given that guarantee, `from_js` / `resolve_resource` perform
+            // a belt-and-suspenders `TypeId` check; the `.expect` panics
+            // (aborting the isolate) rather than triggering UB on a mismatch.
+            // The `&mut` is sound because V8 is single-threaded and no other
+            // Rust code can alias the resource during the callback.
             let self_: &mut Self = unsafe {
                 let wrappable = jsg::v8::WrappableRc::from_js(lock.isolate(), this)
                     .expect("receiver is not a Rust-wrapped resource");
@@ -221,11 +228,17 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #[automatically_derived]
         #[expect(clippy::undocumented_unsafe_blocks)]
         extern "C" fn #callback_name(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
-            let mut lock = unsafe { jsg::Lock::from_args(args) };
-            let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
-            #(#unwraps)*
-            #invocation
-            #result_handling
+            // Raw pointers are not `UnwindSafe` by default, but the pointer is
+            // valid for the entire duration of this callback (V8 guarantees
+            // this) and V8 is single-threaded, so there is no aliasing hazard
+            // on unwind. `AssertUnwindSafe` is therefore correct here.
+            jsg::abort_on_panic(::std::panic::AssertUnwindSafe(|| {
+                let mut lock = unsafe { jsg::Lock::from_args(args) };
+                let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
+                #(#unwraps)*
+                #invocation
+                #result_handling
+            }));
         }
     }
     .into()
@@ -273,8 +286,14 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #(#trace_statements)*
             }
 
-            fn memory_name(&self) -> &'static str {
-                #name_str
+            fn memory_name(&self) -> &'static ::std::ffi::CStr {
+                // from_bytes_with_nul on a concat!(name, "\0") literal is a
+                // compile-time constant expression — the compiler folds the
+                // unwrap and emits a direct pointer into the read-only data
+                // segment. The C++ side constructs a kj::StringPtr directly
+                // from data()+size() with no allocation.
+                ::std::ffi::CStr::from_bytes_with_nul(concat!(#name_str, "\0").as_bytes())
+                    .unwrap()
             }
         }
     };
@@ -536,6 +555,81 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 
 /// Scans an impl block for a `#[jsg_constructor]` attribute and generates the
 /// constructor callback registration. Returns `None` if no constructor is defined.
+/// Validates that a `#[jsg_constructor]` method has the right shape and returns
+/// a compile-error token stream if it doesn't.
+fn validate_constructor(method: &syn::ImplItemFn) -> Option<quote::__private::TokenStream> {
+    let has_self = method
+        .sig
+        .inputs
+        .iter()
+        .any(|arg| matches!(arg, FnArg::Receiver(_)));
+    if has_self {
+        return Some(quote! {
+            compile_error!("#[jsg_constructor] must be a static method (no self receiver)");
+        });
+    }
+
+    let returns_self = matches!(&method.sig.output,
+        syn::ReturnType::Type(_, ty) if matches!(&**ty,
+            syn::Type::Path(p) if p.path.is_ident("Self")
+        )
+    );
+    if !returns_self {
+        return Some(quote! {
+            compile_error!("#[jsg_constructor] must return Self");
+        });
+    }
+
+    None
+}
+
+/// Extracts constructor argument unwrap statements and argument expressions.
+fn extract_constructor_params(
+    method: &syn::ImplItemFn,
+) -> (
+    bool,
+    Vec<quote::__private::TokenStream>,
+    Vec<quote::__private::TokenStream>,
+) {
+    let params: Vec<_> = method
+        .sig
+        .inputs
+        .iter()
+        .filter_map(|arg| {
+            if let FnArg::Typed(pat_type) = arg {
+                Some((*pat_type.ty).clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let has_lock_param = params.first().is_some_and(is_lock_ref);
+    let js_arg_offset = usize::from(has_lock_param);
+
+    let (unwraps, arg_exprs) = params
+        .iter()
+        .enumerate()
+        .skip(js_arg_offset)
+        .map(|(i, ty)| {
+            let js_index = i - js_arg_offset;
+            let var = syn::Ident::new(&format!("arg{js_index}"), method.sig.ident.span());
+            let unwrap = quote! {
+                let #var = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        lock.throw_exception(&e);
+                        return;
+                    }
+                };
+            };
+            (unwrap, quote! { #var })
+        })
+        .unzip();
+
+    (has_lock_param, unwraps, arg_exprs)
+}
+
 fn generate_constructor_registration(
     impl_block: &ItemImpl,
     self_ty: &syn::Type,
@@ -560,73 +654,17 @@ fn generate_constructor_registration(
     constructors
         .into_iter()
         .map(|method| {
+            if let Some(err) = validate_constructor(method) {
+                return err;
+            }
+
             let rust_method_name = &method.sig.ident;
             let callback_name = syn::Ident::new(
                 &format!("{rust_method_name}_constructor_callback"),
                 rust_method_name.span(),
             );
 
-            // Constructor must NOT have a self receiver.
-            let has_self = method
-                .sig
-                .inputs
-                .iter()
-                .any(|arg| matches!(arg, FnArg::Receiver(_)));
-            if has_self {
-                return quote! {
-                    compile_error!("#[jsg_constructor] must be a static method (no self receiver)");
-                };
-            }
-
-            // Constructor must return Self.
-            let returns_self = matches!(&method.sig.output,
-                syn::ReturnType::Type(_, ty) if matches!(&**ty,
-                    syn::Type::Path(p) if p.path.is_ident("Self")
-                )
-            );
-            if !returns_self {
-                return quote! {
-                    compile_error!("#[jsg_constructor] must return Self");
-                };
-            }
-
-            // Extract parameters (same pattern as jsg_method).
-            let params: Vec<_> = method
-                .sig
-                .inputs
-                .iter()
-                .filter_map(|arg| {
-                    if let FnArg::Typed(pat_type) = arg {
-                        Some((*pat_type.ty).clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            let has_lock_param = params.first().is_some_and(is_lock_ref);
-            let js_arg_offset = usize::from(has_lock_param);
-
-            let (unwraps, arg_exprs): (Vec<_>, Vec<_>) = params
-            .iter()
-            .enumerate()
-            .skip(js_arg_offset)
-            .map(|(i, ty)| {
-                let js_index = i - js_arg_offset;
-                let var = syn::Ident::new(&format!("arg{js_index}"), method.sig.ident.span());
-                let unwrap = quote! {
-                    let #var = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            lock.throw_exception(&e);
-                            return;
-                        }
-                    };
-                };
-                (unwrap, quote! { #var })
-            })
-            .unzip();
-
+            let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
             let lock_arg = if has_lock_param {
                 quote! { &mut lock, }
             } else {
@@ -639,15 +677,21 @@ fn generate_constructor_registration(
                         unsafe extern "C" fn #callback_name(
                             info: *mut jsg::v8::ffi::FunctionCallbackInfo,
                         ) {
-                            // SAFETY: info is a valid V8 FunctionCallbackInfo from the constructor call.
-                            let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(info) };
-                            let mut lock = unsafe { jsg::Lock::from_args(info) };
+                            // See the comment in the method callback above:
+                            // `AssertUnwindSafe` is correct because the pointer
+                            // is valid for the entire callback and V8 is
+                            // single-threaded.
+                            jsg::abort_on_panic(::std::panic::AssertUnwindSafe(|| {
+                                // SAFETY: info is a valid V8 FunctionCallbackInfo from the constructor call.
+                                let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(info) };
+                                let mut lock = unsafe { jsg::Lock::from_args(info) };
 
-                            #(#unwraps)*
+                                #(#unwraps)*
 
-                            let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
-                            let rc = jsg::Rc::new(resource);
-                            rc.attach_to_this(&mut args);
+                                let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
+                                let rc = jsg::Rc::new(resource);
+                                rc.attach_to_this(&mut args);
+                            }));
                         }
                         #callback_name
                     },

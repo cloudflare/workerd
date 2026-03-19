@@ -278,8 +278,11 @@ impl<R: Resource> GarbageCollected for Weak<R> {
     /// No-op: weak references don't keep the target alive and have no GC edges to trace.
     fn trace(&self, _visitor: &mut v8::GcVisitor) {}
 
-    fn memory_name(&self) -> &'static str {
-        R::class_name()
+    fn memory_name(&self) -> &'static std::ffi::CStr {
+        // jsgGetMemoryName is only called on live Wrappables, never on Weak<R>.
+        // Delegate to the concrete R via a live upgrade. In the (unreachable)
+        // case where the referent is already gone, return an empty string.
+        self.weak.upgrade().as_deref().map_or(c"", R::memory_name)
     }
 }
 

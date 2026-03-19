@@ -58,10 +58,6 @@ class Wrappable: public ::workerd::jsg::Wrappable {
   kj::StringPtr jsgGetMemoryName() const override;
   size_t jsgGetMemorySelfSize() const override;
 
-  // Cached memory name from Rust GarbageCollected::get_name().
-  // Populated lazily by jsgGetMemoryName().
-  mutable kj::Maybe<kj::String> memoryName;
-
   // Returns a new kj::Rc reference to this Wrappable.
   kj::Rc<Wrappable> toRc() {
     return addRefToThis();
