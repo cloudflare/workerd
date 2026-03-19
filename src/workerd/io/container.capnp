@@ -47,11 +47,47 @@ interface Container @0x9aaceefc06523bca {
 
     labels @5 :List(Label);
     # Optional key-value metadata labels for metrics/observability.
+
+    snapshots @6 :List(SnapshotRestoreParams);
+    # Directory snapshots to restore before the container starts.
   }
 
   struct Label {
     name @0 :Text;
     value @1 :Text;
+  }
+
+  struct SnapshotRestoreParams {
+    snapshot @0 :DirectorySnapshot;
+    # The snapshot to restore.
+
+    mountPoint @1 :Text;
+    # Where to mount the snapshot in the container filesystem.
+    # If empty, the snapshot is restored to its original directory.
+  }
+
+  struct DirectorySnapshot {
+    # Opaque handle to a directory snapshot.
+
+    id @0 :Text;
+    # Unique identifier of the snapshot.
+
+    size @1 :UInt64;
+    # Snapshot size, in bytes.
+
+    dir @2 :Text;
+    # Path of the snapshotted directory.
+
+    name @3 :Text;
+    # Optional human-friendly name. Empty string means not set.
+  }
+
+  struct SnapshotDirectoryParams {
+    dir @0 :Text;
+    # Directory path to snapshot.
+
+    name @1 :Text;
+    # Optional human-friendly name. Empty string means not set.
   }
 
   monitor @2 () -> (exitCode: Int32);
@@ -142,4 +178,7 @@ interface Container @0x9aaceefc06523bca {
 
 
   # TODO: setEgressTcp
+
+  snapshotDirectory @10 SnapshotDirectoryParams -> (snapshot :DirectorySnapshot);
+  # Creates a snapshot for a directory in the running container.
 }

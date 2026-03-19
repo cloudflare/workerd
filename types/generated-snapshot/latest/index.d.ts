@@ -3767,12 +3767,23 @@ interface Container {
   interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
   interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
 }
+interface ContainerDirectorySnapshot {
+  id: string;
+  size: number;
+  dir: string;
+  name?: string;
+}
+interface ContainerSnapshotRestoreParams {
+  snapshot: ContainerDirectorySnapshot;
+  mountPoint?: string;
+}
 interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
   labels?: Record<string, string>;
+  snapshots?: ContainerSnapshotRestoreParams[];
 }
 /**
  * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.

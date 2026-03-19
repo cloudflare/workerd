@@ -38,6 +38,60 @@ const server = createServer(function (req, res) {
     return;
   }
 
+  // Write a file inside the container (for snapshot testing)
+  if (req.url.startsWith('/write-file')) {
+    const url = new URL(req.url, 'http://localhost');
+    const filePath = url.searchParams.get('path');
+    if (!filePath) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.write('Missing "path" query param');
+      res.end();
+      return;
+    }
+    const fs = require('fs');
+    const path = require('path');
+    let body = '';
+    req.on('data', (chunk) => (body += chunk));
+    req.on('end', () => {
+      try {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, body);
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.write('ok');
+        res.end();
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.write(err.message);
+        res.end();
+      }
+    });
+    return;
+  }
+
+  // Read a file inside the container (for snapshot testing)
+  if (req.url.startsWith('/read-file')) {
+    const url = new URL(req.url, 'http://localhost');
+    const filePath = url.searchParams.get('path');
+    if (!filePath) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.write('Missing "path" query param');
+      res.end();
+      return;
+    }
+    const fs = require('fs');
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.write(content);
+      res.end();
+    } catch (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.write(err.message);
+      res.end();
+    }
+    return;
+  }
+
   if (req.url === '/intercept') {
     const targetHost = req.headers['x-host'] || '11.0.0.1';
     fetch(`http://${targetHost}`)

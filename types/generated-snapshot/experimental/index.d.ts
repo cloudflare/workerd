@@ -3889,6 +3889,23 @@ interface Container {
   interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
   interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
+  snapshotDirectory(
+    options: ContainerDirectorySnapshotOptions,
+  ): Promise<ContainerDirectorySnapshot>;
+}
+interface ContainerDirectorySnapshot {
+  id: string;
+  size: number;
+  dir: string;
+  name?: string;
+}
+interface ContainerDirectorySnapshotOptions {
+  dir: string;
+  name?: string;
+}
+interface ContainerSnapshotRestoreParams {
+  snapshot: ContainerDirectorySnapshot;
+  mountPoint?: string;
 }
 interface ContainerStartupOptions {
   entrypoint?: string[];
@@ -3896,6 +3913,7 @@ interface ContainerStartupOptions {
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
   labels?: Record<string, string>;
+  snapshots?: ContainerSnapshotRestoreParams[];
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
