@@ -1,0 +1,20 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# C++ header exposing the AutogateKey enum and is_enabled() wrapper.
+# Include this from C++ code that needs to call through to Rust's AutogateKey.
+wd_cc_library(
+    name = "ffi-hdr",
+    hdrs = ["ffi.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//src/workerd/util:autogate"],
+)
+
+wd_rust_crate(
+    name = "autogate",
+    visibility = ["//visibility:public"],
+    deps = [
+        # Provides workerd_autogate_is_enabled with C linkage (in autogate.c++).
+        "//src/workerd/util:autogate",
+    ],
+)

@@ -1,4 +1,5 @@
 mod arrays;
+mod autogate;
 mod eval;
 mod function;
 mod jsg_oneof;

@@ -14,6 +14,8 @@ pub mod modules;
 pub mod v8;
 mod wrappable;
 
+pub use autogate::Autogate;
+pub use autogate::AutogateKey;
 pub use feature_flags::FeatureFlags;
 pub use v8::BigInt64Array;
 pub use v8::BigUint64Array;

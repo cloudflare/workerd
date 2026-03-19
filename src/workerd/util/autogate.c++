@@ -17,24 +17,11 @@ kj::Maybe<Autogate> globalAutogate;
 
 kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
-    case AutogateKey::TEST_WORKERD:
-      return "test-workerd"_kj;
-    case AutogateKey::V8_FAST_API:
-      return "v8-fast-api"_kj;
-    case AutogateKey::STREAMING_TAIL_WORKER:
-      return "streaming-tail-worker"_kj;
-    case AutogateKey::TAIL_STREAM_REFACTOR:
-      return "tail-stream-refactor"_kj;
-    case AutogateKey::RUST_BACKED_NODE_DNS:
-      return "rust-backed-node-dns"_kj;
-    case AutogateKey::RPC_USE_EXTERNAL_PUSHER:
-      return "rpc-use-external-pusher"_kj;
-    case AutogateKey::WASM_SHUTDOWN_SIGNAL_SHIM:
-      return "wasm-shutdown-signal-shim"_kj;
-    case AutogateKey::ENABLE_FAST_TEXTENCODER:
-      return "enable-fast-textencoder"_kj;
-    case AutogateKey::ENABLE_DRAINING_READ_ON_STANDARD_STREAMS:
-      return "enable-draining-read-on-standard-streams"_kj;
+#define WD_AUTOGATE_CASE(name, kebab)                                                              \
+  case AutogateKey::name:                                                                          \
+    return kj::StringPtr(kebab, sizeof(kebab) - 1);
+    WD_AUTOGATE_KEYS(WD_AUTOGATE_CASE)
+#undef WD_AUTOGATE_CASE
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
@@ -111,3 +98,10 @@ void Autogate::initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gat
 }
 
 }  // namespace workerd::util
+
+// C linkage entry point for src/rust/autogate/ffi.rs.
+// The Rust #[repr(C)] AutogateKey enum is ABI-compatible with util::AutogateKey
+// (same int backing, same ordinals — enforced by the static_assert in ffi.h).
+extern "C" bool workerd_autogate_is_enabled(workerd::util::AutogateKey key) {
+  return workerd::util::Autogate::isEnabled(key);
+}

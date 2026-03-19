@@ -14,6 +14,7 @@ wd_rust_crate(
     visibility = ["//visibility:public"],
     deps = [
         ":ffi",
+        "//src/rust/autogate",
         "//src/workerd/io:compatibility-date_capnp_rust",
         "@crates_vendor//:capnp",
     ],

@@ -19,27 +19,42 @@ namespace workerd::util {
 // selective gate configs (with forceOff / toggle support).
 WD_STRONG_BOOL(IgnoreAllAutogatesEnv);
 
+// X-macro list of all autogate keys.
+//
+// Each entry is WD_AUTOGATE_KEY(ENUM_NAME, "kebab-case-name").
+// This list is the single source of truth — it drives:
+//   - The AutogateKey enum (below)
+//   - KJ_STRINGIFY (autogate.c++)
+//   - The Rust FFI constexpr accessors (src/rust/jsg/autogate/ffi.h)
+//
+// To add a gate: add one WD_AUTOGATE_KEY line here, then add a matching
+// method in src/rust/jsg/autogate/lib.rs.
+#define WD_AUTOGATE_KEYS(X)                                                                        \
+  X(TEST_WORKERD, "test-workerd")                                                                  \
+  X(V8_FAST_API, "v8-fast-api")                                                                    \
+  /* Enables support for the streaming tail worker. Note that this is currently also guarded
+     behind an experimental compat flag. */       \
+  X(STREAMING_TAIL_WORKER, "streaming-tail-worker")                                                \
+  /* Enable refactor used to consolidate the different tail worker stream implementations. */      \
+  X(TAIL_STREAM_REFACTOR, "tail-stream-refactor")                                                  \
+  /* Enable Rust-backed Node.js DNS implementation */                                              \
+  X(RUST_BACKED_NODE_DNS, "rust-backed-node-dns")                                                  \
+  /* Use ExternalPusher instead of StreamSink to handle streams in RPC. */                         \
+  X(RPC_USE_EXTERNAL_PUSHER, "rpc-use-external-pusher")                                            \
+  /* Enable the WebAssembly.instantiate shim that detects modules exporting __instance_signal /
+     __instance_terminated and registers them for receiving the CPU-limit shutdown signal. */    \
+  X(WASM_SHUTDOWN_SIGNAL_SHIM, "wasm-shutdown-signal-shim")                                        \
+  /* Enable fast TextEncoder implementation using simdutf */                                       \
+  X(ENABLE_FAST_TEXTENCODER, "enable-fast-textencoder")                                            \
+  /* Enable draining read on standard streams */                                                   \
+  X(ENABLE_DRAINING_READ_ON_STANDARD_STREAMS, "enable-draining-read-on-standard-streams")
+
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
-  TEST_WORKERD,
-  V8_FAST_API,
-  // Enables support for the streaming tail worker. Note that this is currently also guarded behind
-  // an experimental compat flag.
-  STREAMING_TAIL_WORKER,
-  // Enable refactor used to consolidate the different tail worker stream implementations.
-  TAIL_STREAM_REFACTOR,
-  // Enable Rust-backed Node.js DNS implementation
-  RUST_BACKED_NODE_DNS,
-  // Use ExternalPusher instead of StreamSink to handle streams in RPC.
-  RPC_USE_EXTERNAL_PUSHER,
-  // Enable the WebAssembly.instantiate shim that detects modules exporting __instance_signal /
-  // __instance_terminated and registers them for receiving the CPU-limit shutdown signal.
-  WASM_SHUTDOWN_SIGNAL_SHIM,
-  // Enable fast TextEncoder implementation using simdutf
-  ENABLE_FAST_TEXTENCODER,
-  // Enable draining read on standard streams
-  ENABLE_DRAINING_READ_ON_STANDARD_STREAMS,
-  NumOfKeys  // Reserved for iteration.
+#define WD_AUTOGATE_ENUM(name, _kebab) name,
+  WD_AUTOGATE_KEYS(WD_AUTOGATE_ENUM)
+#undef WD_AUTOGATE_ENUM
+      NumOfKeys  // Reserved for iteration.
 };
 
 // This class allows code changes to be rolled out independent of full binary releases. It enables
