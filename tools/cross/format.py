@@ -88,31 +88,34 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
     return any(file.match(glob) for glob in globs)
 
 
-def run_bazel_tool(
-    tool_name: str, args: list[str], build_target: str | None = None
-) -> subprocess.CompletedProcess:
-    # Use the formatter executable from bazel-bin
+def _ensure_bazel_tool(tool_name: str, build_target: str | None = None) -> Path:
+    """Ensure a bazel-built formatter tool exists and return its path."""
     tool_suffix = Path("build") / "deps" / "formatters" / tool_name
     internal_tool_path = BAZEL_BIN / "external" / "+dep_workerd+workerd" / tool_suffix
     workerd_tool_path = BAZEL_BIN / tool_suffix
 
     if internal_tool_path.exists():
-        return subprocess.run([internal_tool_path, *args], cwd=ROOT)
+        return internal_tool_path
     if workerd_tool_path.exists():
-        return subprocess.run([workerd_tool_path, *args], cwd=ROOT)
+        return workerd_tool_path
 
-    # Use the formatter targets in build/deps/formatters
+    # Tool not cached; build it once.
     if build_target is None:
         build_target = f"@workerd//build/deps/formatters:{tool_name}@rule"
     download_result = subprocess.run(["bazel", "build", build_target])
     if download_result.returncode != 0:
-        logging.error(f"Failed to download {tool_name}")
-        return download_result
+        raise RuntimeError(f"Failed to download {tool_name}")
 
     if internal_tool_path.exists():
-        return subprocess.run([internal_tool_path, *args], cwd=ROOT)
-    else:
-        return subprocess.run([workerd_tool_path, *args], cwd=ROOT)
+        return internal_tool_path
+    return workerd_tool_path
+
+
+def run_bazel_tool(
+    tool_name: str, args: list[str], build_target: str | None = None
+) -> subprocess.CompletedProcess:
+    tool_path = _ensure_bazel_tool(tool_name, build_target)
+    return subprocess.run([tool_path, *args], cwd=ROOT)
 
 
 def _run_parallel(
@@ -131,7 +134,10 @@ def _run_parallel(
 
 def clang_format(files: list[Path], check: bool = False) -> bool:
     cmd = ["--dry-run", "--Werror"] if check else ["-i"]
-    return _run_parallel(lambda args: run_bazel_tool("clang-format", args), files, cmd)
+    tool = _ensure_bazel_tool("clang-format")
+    return _run_parallel(
+        lambda args: subprocess.run([tool, *args], cwd=ROOT), files, cmd
+    )
 
 
 def prettier(files: list[Path], check: bool = False) -> bool:
