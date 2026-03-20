@@ -416,13 +416,12 @@ fn static_constant_coexists_with_methods() {
 }
 
 // =============================================================================
-// abort_on_panic tests
+// catch_panic tests
 // =============================================================================
 
 /// A resource whose `panic_now` method unconditionally panics.
-/// Used to verify that a panic inside a `#[jsg_method]` callback causes the
-/// process to abort (via `jsg::abort_on_panic`) rather than unwinding across
-/// the `extern "C"` boundary into C++.
+/// Used to verify that a panic inside a `#[jsg_method]` callback is caught and
+/// converted to a JavaScript exception rather than aborting the process.
 #[jsg_resource]
 struct PanicResource;
 
@@ -434,57 +433,40 @@ impl PanicResource {
     }
 }
 
-/// Helper invoked **only** as a subprocess (guarded by the env var
-/// `JSG_TEST_PANIC_SUBPROCESS=1`).  It registers `PanicResource`, calls
-/// `panicNow()` from JavaScript and expects the process to abort before
-/// returning from that call.
-///
-/// The outer test `method_panic_aborts_process` spawns this as a child
-/// and asserts the child exits abnormally.
+/// Verifies that a panic inside a `#[jsg_method]` callback is converted to a
+/// JavaScript internal error (matching the behavior of `KJ_ASSERT(false)` in
+/// C++ JSG handlers): the internal panic message is hidden from JS and the
+/// caller sees a generic `"internal error; reference = <id>"` message.
 #[test]
-fn subprocess_panic_helper() {
-    if std::env::var("JSG_TEST_PANIC_SUBPROCESS").as_deref() != Ok("1") {
-        // Not running as a subprocess — skip silently.
-        return;
-    }
-
+fn method_panic_becomes_js_internal_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(PanicResource);
         let wrapped = resource.to_js(lock);
         ctx.set_global("obj", wrapped);
 
-        // This call should never return — abort_on_panic terminates the process.
-        let _: Result<bool, _> = ctx.eval(lock, "obj.panicNow()");
+        // The panic should surface as a JS Error, not abort the process.
+        let is_error: Result<bool, _> = ctx.eval(
+            lock,
+            "try { obj.panicNow(); false } catch(e) { e instanceof Error }",
+        );
+        assert!(is_error.unwrap(), "panic should become a JS Error");
+
+        // The JS error message must contain "internal error" — the internal
+        // panic message must not be exposed to JavaScript.
+        let msg: Result<String, _> =
+            ctx.eval(lock, "try { obj.panicNow(); '' } catch(e) { e.message }");
+        let msg = msg.unwrap();
+        assert!(
+            msg.contains("internal error"),
+            "JS error message should say \"internal error\", got: {msg:?}"
+        );
+        assert!(
+            !msg.contains("intentional panic in jsg_method"),
+            "internal panic message must not be exposed to JS, got: {msg:?}"
+        );
         Ok(())
     });
-
-    // If we reach here the process did NOT abort — fail loudly.
-    panic!("expected process abort from panicking jsg_method, but execution continued");
-}
-
-/// Verifies that a panic inside a `#[jsg_method]` callback aborts the process
-/// rather than unwinding across the `extern "C"` boundary.
-///
-/// Spawns [`subprocess_panic_helper`] as a child process and asserts that the
-/// child exits with a non-zero / signal-terminated status.
-#[test]
-fn method_panic_aborts_process() {
-    let exe = std::env::current_exe().expect("could not get current test executable path");
-
-    let output = std::process::Command::new(&exe)
-        .args(["--test-thread-count=1", "subprocess_panic_helper"])
-        .env("JSG_TEST_PANIC_SUBPROCESS", "1")
-        // Suppress the child's panic output so the outer test log stays clean.
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .expect("failed to spawn subprocess");
-
-    assert!(
-        !output.status.success(),
-        "expected subprocess to exit abnormally (abort), but it exited successfully"
-    );
 }
 
 // =============================================================================

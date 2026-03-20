@@ -228,17 +228,14 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #[automatically_derived]
         #[expect(clippy::undocumented_unsafe_blocks)]
         extern "C" fn #callback_name(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
-            // Raw pointers are not `UnwindSafe` by default, but the pointer is
-            // valid for the entire duration of this callback (V8 guarantees
-            // this) and V8 is single-threaded, so there is no aliasing hazard
-            // on unwind. `AssertUnwindSafe` is therefore correct here.
-            jsg::abort_on_panic(::std::panic::AssertUnwindSafe(|| {
+            let mut lock = unsafe { jsg::Lock::from_args(args) };
+            jsg::catch_panic(&mut lock, || {
                 let mut lock = unsafe { jsg::Lock::from_args(args) };
                 let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
                 #(#unwraps)*
                 #invocation
                 #result_handling
-            }));
+            });
         }
     }
     .into()
@@ -802,11 +799,8 @@ fn generate_constructor_registration(
                         unsafe extern "C" fn #callback_name(
                             info: *mut jsg::v8::ffi::FunctionCallbackInfo,
                         ) {
-                            // See the comment in the method callback above:
-                            // `AssertUnwindSafe` is correct because the pointer
-                            // is valid for the entire callback and V8 is
-                            // single-threaded.
-                            jsg::abort_on_panic(::std::panic::AssertUnwindSafe(|| {
+                            let mut lock = unsafe { jsg::Lock::from_args(info) };
+                            jsg::catch_panic(&mut lock, || {
                                 // SAFETY: info is a valid V8 FunctionCallbackInfo from the constructor call.
                                 let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(info) };
                                 let mut lock = unsafe { jsg::Lock::from_args(info) };
@@ -816,7 +810,7 @@ fn generate_constructor_registration(
                                 let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
                                 let rc = jsg::Rc::new(resource);
                                 rc.attach_to_this(&mut args);
-                            }));
+                            });
                         }
                         #callback_name
                     },
