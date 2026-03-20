@@ -75,7 +75,6 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
   kj::Promise<void> setEgressHttp(SetEgressHttpContext context) override;
-  kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
@@ -112,6 +111,11 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // EgressHttpService handles CONNECT requests from proxy-anything sidecar
   friend class EgressHttpService;
 
+  struct Response {
+    kj::uint statusCode;
+    kj::String body;
+  };
+
   struct InspectResponse {
     bool isRunning;
   };
@@ -125,6 +129,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
     uint16_t ingressHostPort;
   };
 
+  // Docker API v1.50 helper methods
+  static kj::Promise<Response> dockerApiRequest(kj::Network& network,
+      kj::String dockerPath,
+      kj::HttpMethod method,
+      kj::String endpoint,
+      kj::Maybe<kj::String> body = kj::none);
   kj::Promise<InspectResponse> inspectContainer();
 
   kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
@@ -136,13 +146,6 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
   kj::Promise<void> destroyContainer();
-
-  // Docker volume management for snapshots
-  kj::Promise<void> createDockerVolume(kj::StringPtr volumeName);
-  kj::Promise<void> deleteDockerVolume(kj::StringPtr volumeName);
-  kj::Promise<kj::String> createTempContainerWithVolume(
-      kj::StringPtr volumeName, kj::StringPtr mountPath = "/mnt"_kj);
-  kj::Promise<void> deleteTempContainer(kj::String tempContainerId);
 
   // Sidecar container management (for egress proxy)
   // Inspect the sidecar container to retrieve the port to ingress to

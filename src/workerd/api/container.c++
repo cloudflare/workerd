@@ -8,8 +8,6 @@
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
-#include <cmath>
-
 namespace workerd::api {
 
 // =======================================================================================
@@ -58,72 +56,11 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
-  if (!flags.getWorkerdExperimental()) {
-    JSG_REQUIRE(options.snapshots == kj::none, Error,
-        "Container snapshot restore requires the 'experimental' compatibility flag.");
-  } else {
-    KJ_IF_SOME(snapshots, options.snapshots) {
-      auto list = req.initSnapshots(snapshots.size());
-      for (auto i: kj::indices(snapshots)) {
-        auto entry = list[i];
-        auto& restore = snapshots[i];
-        auto& snap = restore.snapshot;
-        double size = snap.size;
-        JSG_REQUIRE(std::isfinite(size) && size >= 0 &&
-                size <= static_cast<double>((1ull << 53) - 1) && std::floor(size) == size,
-            RangeError, "Snapshot size must be a non-negative integer <= Number.MAX_SAFE_INTEGER");
-        auto snapshotBuilder = entry.initSnapshot();
-        snapshotBuilder.setId(snap.id);
-        snapshotBuilder.setSize(static_cast<uint64_t>(size));
-        snapshotBuilder.setDir(snap.dir);
-        KJ_IF_SOME(name, snap.name) {
-          snapshotBuilder.setName(name);
-        }
-        KJ_IF_SOME(mp, restore.mountPoint) {
-          entry.setMountPoint(mp);
-        }
-      }
-    }
-  }
-
   req.setCompatibilityFlags(flags);
 
   IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
-}
-
-jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
-    jsg::Lock& js, DirectorySnapshotOptions options) {
-  JSG_REQUIRE(
-      running, Error, "snapshotDirectory() cannot be called on a container that is not running.");
-  JSG_REQUIRE(options.dir.size() > 0 && options.dir.startsWith("/"), TypeError,
-      "snapshotDirectory() requires an absolute directory path (starting with '/').");
-
-  auto req = rpcClient->snapshotDirectoryRequest();
-  req.setDir(options.dir);
-
-  KJ_IF_SOME(name, options.name) {
-    req.setName(name);
-  }
-
-  return IoContext::current()
-      .awaitIo(js, req.send())
-      .then(
-          js, [](jsg::Lock& js, capnp::Response<rpc::Container::SnapshotDirectoryResults> results) {
-    auto snapshot = results.getSnapshot();
-    jsg::Optional<kj::String> name = kj::none;
-    auto snapshotName = snapshot.getName();
-    if (snapshotName.size() > 0) {
-      name = kj::str(snapshotName);
-    }
-
-    JSG_REQUIRE(snapshot.getSize() <= (1ull << 53) - 1, RangeError,
-        "Snapshot size exceeds Number.MAX_SAFE_INTEGER");
-
-    return Container::DirectorySnapshot{kj::str(snapshot.getId()),
-      static_cast<double>(snapshot.getSize()), kj::str(snapshot.getDir()), kj::mv(name)};
-  });
 }
 
 jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {

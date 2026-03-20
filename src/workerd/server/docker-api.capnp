@@ -313,28 +313,6 @@ struct Docker {
     id @0 :Text $Json.name("Id");
     warning @1 :Text $Json.name("Warning");
   }
-
-  # Volume create request (POST /volumes/create)
-  struct VolumeCreateRequest {
-    name @0 :Text $Json.name("Name");
-    labels @1 :Json.Value $Json.name("Labels");
-  }
-
-  # Volume list filters query parameter (GET /volumes?filters=...)
-  struct VolumeListFilters {
-    name @0 :List(Text) $Json.name("name");
-  }
-
-  # Volume list response (GET /volumes)
-  struct VolumeListResponse {
-    volumes @0 :List(Volume) $Json.name("Volumes");
-    warnings @1 :List(Text) $Json.name("Warnings");
-
-    struct Volume {
-      name @0 :Text $Json.name("Name");
-      labels @1 :Json.Value $Json.name("Labels");
-    }
-  }
 }
 
 struct ProxyEverything {

@@ -12,7 +12,6 @@
 #include <workerd/jsg/url.h>
 #include <workerd/server/docker-api.capnp.h>
 #include <workerd/util/strings.h>
-#include <workerd/util/uuid.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
@@ -31,49 +30,6 @@ namespace {
 
 constexpr uint16_t SIDECAR_INGRESS_PORT = 39001;
 
-// Default limit for JSON API responses (16 MiB — Docker JSON responses are small).
-constexpr uint64_t MAX_JSON_RESPONSE_SIZE = 16ULL * 1024 * 1024;
-
-constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
-constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
-constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
-
-// Maximum size of a snapshot tar archive held in memory during snapshot create/restore.
-constexpr size_t MAX_SNAPSHOT_TAR_SIZE = 1ULL * 1024 * 1024 * 1024;  // 1 GiB
-
-static_assert(static_cast<double>(MAX_SNAPSHOT_TAR_SIZE) == MAX_SNAPSHOT_TAR_SIZE,
-    "MAX_SNAPSHOT_TAR_SIZE must be exactly representable as double");
-
-// Ensures the stale-volume check runs at most once per process.
-bool staleSnapshotVolumeCheckScheduled = false;
-
-// Strip trailing slashes from a path, preserving bare "/".
-kj::String normalizePath(kj::String path) {
-  while (path.size() > 1 && path[path.size() - 1] == '/') {
-    path = kj::str(path.first(path.size() - 1));
-  }
-  return kj::mv(path);
-}
-
-// Validate an absolute path for snapshot use (both creation dir and restore mount point).
-// Rejects relative paths, embedded null bytes, and path traversal components ("..").
-// Accepts "/" as a valid path.
-void validateAbsolutePath(kj::StringPtr path) {
-  JSG_REQUIRE(
-      path.size() > 0 && path[0] == '/', Error, "Snapshot path must be absolute, got: ", path);
-
-  JSG_REQUIRE(path.findFirst('\0') == kj::none, Error, "Snapshot path must not contain null bytes");
-
-  // "/" is valid (root). For longer paths, kj::Path::parse rejects ".." and other
-  // dangerous components, but throws a raw KJ exception. Wrap it for a user-friendly error.
-  if (path.size() > 1) {
-    KJ_IF_SOME(exc, kj::runCatchingExceptions([&]() { (void)kj::Path::parse(path.slice(1)); })) {
-      JSG_FAIL_REQUIRE(
-          Error, "Snapshot path contains invalid components: ", path, "; ", exc.getDescription());
-    }
-  }
-}
-
 struct ParsedAddress {
   kj::OneOf<kj::CidrRange, kj::String> destination;
   kj::Maybe<uint16_t> port;
@@ -82,16 +38,6 @@ struct ParsedAddress {
 struct HostAndPort {
   kj::String host;
   kj::Maybe<uint16_t> port;
-};
-
-struct DockerResponse {
-  kj::uint statusCode;
-  kj::String body;
-};
-
-struct DockerBinaryResponse {
-  kj::uint statusCode;
-  kj::Array<kj::byte> body;
 };
 
 // Strips a port suffix from a string, returning the host and port separately.
@@ -302,130 +248,6 @@ kj::StringPtr signalToString(uint32_t signal) {
       return "SIGKILL"_kj;
   }
 }
-
-// Shared Docker API HTTP helper. Connects to the Docker socket, sends a request with an
-// optional body, and reads the response as raw bytes.
-kj::Promise<DockerBinaryResponse> dockerApiRequestRaw(kj::Network& network,
-    kj::String dockerPath,
-    kj::HttpMethod method,
-    kj::String endpoint,
-    kj::Maybe<kj::ArrayPtr<const kj::byte>> body,
-    kj::StringPtr contentType,
-    uint64_t maxResponseSize) {
-  kj::HttpHeaderTable headerTable;
-  auto address = co_await network.parseAddress(dockerPath);
-  auto connection = co_await address->connect();
-  auto httpClient = kj::newHttpClient(headerTable, *connection).attach(kj::mv(connection));
-  kj::HttpHeaders headers(headerTable);
-  headers.setPtr(kj::HttpHeaderId::HOST, "localhost");
-
-  KJ_IF_SOME(requestBody, body) {
-    headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, contentType);
-    headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(requestBody.size()));
-
-    auto req = httpClient->request(method, endpoint, headers, requestBody.size());
-    {
-      auto stream = kj::mv(req.body);
-      co_await stream->write(requestBody);
-    }
-    auto response = co_await req.response;
-    auto result = co_await response.body->readAllBytes(maxResponseSize);
-    co_return DockerBinaryResponse{.statusCode = response.statusCode, .body = kj::mv(result)};
-  } else {
-    auto req = httpClient->request(method, endpoint, headers);
-    { auto stream = kj::mv(req.body); }
-    auto response = co_await req.response;
-    auto result = co_await response.body->readAllBytes(maxResponseSize);
-    co_return DockerBinaryResponse{.statusCode = response.statusCode, .body = kj::mv(result)};
-  }
-}
-
-kj::Promise<DockerResponse> dockerApiRequest(kj::Network& network,
-    kj::String dockerPath,
-    kj::HttpMethod method,
-    kj::String endpoint,
-    kj::Maybe<kj::String> body = kj::none) {
-  kj::Maybe<kj::ArrayPtr<const kj::byte>> bodyBytes;
-  KJ_IF_SOME(b, body) {
-    bodyBytes = b.asBytes();
-  }
-  auto raw = co_await dockerApiRequestRaw(network, kj::mv(dockerPath), method, kj::mv(endpoint),
-      bodyBytes, "application/json"_kj, MAX_JSON_RESPONSE_SIZE);
-  co_return DockerResponse{.statusCode = raw.statusCode, .body = kj::str(raw.body.asChars())};
-}
-
-kj::Promise<DockerBinaryResponse> dockerApiBinaryRequest(kj::Network& network,
-    kj::String dockerPath,
-    kj::HttpMethod method,
-    kj::String endpoint,
-    kj::Maybe<kj::Array<kj::byte>> body,
-    uint64_t maxResponseSize) {
-  kj::Maybe<kj::ArrayPtr<const kj::byte>> bodyBytes;
-  KJ_IF_SOME(b, body) {
-    bodyBytes = b.asPtr();
-  }
-  co_return co_await dockerApiRequestRaw(network, kj::mv(dockerPath), method, kj::mv(endpoint),
-      bodyBytes, "application/x-tar"_kj, maxResponseSize);
-}
-
-kj::String currentSnapshotVolumeTimestamp() {
-  return kj::str((kj::systemPreciseCalendarClock().now() - kj::UNIX_EPOCH) / kj::SECONDS);
-}
-
-kj::Maybe<int64_t> tryGetSnapshotCreatedAt(capnp::JsonValue::Reader labels) {
-  if (!labels.isObject()) {
-    return kj::none;
-  }
-
-  for (auto field: labels.getObject()) {
-    if (field.getName() != SNAPSHOT_VOLUME_CREATED_AT_LABEL) {
-      continue;
-    }
-
-    auto value = field.getValue();
-    if (!value.isString()) {
-      return kj::none;
-    }
-    return value.getString().tryParseAs<int64_t>();
-  }
-
-  return kj::none;
-}
-
-kj::Promise<void> warnAboutStaleSnapshotVolumes(kj::Network& network, kj::String dockerPath) {
-  capnp::JsonCodec codec;
-  codec.handleByAnnotation<docker_api::Docker::VolumeListFilters>();
-  capnp::MallocMessageBuilder filterMessage;
-  auto filters = filterMessage.initRoot<docker_api::Docker::VolumeListFilters>();
-  auto names = filters.initName(1);
-  names.set(0, SNAPSHOT_VOLUME_PREFIX);
-
-  auto response = co_await dockerApiRequest(network, kj::mv(dockerPath), kj::HttpMethod::GET,
-      kj::str("/volumes?filters=", kj::encodeUriComponent(codec.encode(filters))));
-  if (response.statusCode != 200) {
-    co_return;
-  }
-
-  auto message = decodeJsonResponse<docker_api::Docker::VolumeListResponse>(response.body);
-  auto root = message->getRoot<docker_api::Docker::VolumeListResponse>();
-  auto now = kj::systemPreciseCalendarClock().now();
-  kj::Vector<kj::String> staleVolumes;
-
-  for (auto volume: root.getVolumes()) {
-    KJ_IF_SOME(createdAtSeconds, tryGetSnapshotCreatedAt(volume.getLabels())) {
-      auto createdAt = kj::UNIX_EPOCH + createdAtSeconds * kj::SECONDS;
-      if (now - createdAt >= SNAPSHOT_STALE_AGE) {
-        staleVolumes.add(kj::str(volume.getName()));
-      }
-    }
-  }
-
-  if (!staleVolumes.empty()) {
-    KJ_LOG(WARNING, "the following snapshot volumes were created 30+ days ago and may be stale",
-        kj::strArray(staleVolumes, ", "));
-  }
-}
-
 }  // namespace
 
 ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
@@ -450,15 +272,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       waitUntilTasks(waitUntilTasks),
       pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
-      channelTokenHandler(channelTokenHandler) {
-  if (!staleSnapshotVolumeCheckScheduled) {
-    staleSnapshotVolumeCheckScheduled = true;
-    waitUntilTasks.add(warnAboutStaleSnapshotVolumes(network, kj::str(this->dockerPath))
-                           .catch_([](kj::Exception&& e) {
-      KJ_LOG(WARNING, "failed to inspect snapshot volumes for staleness", e);
-    }));
-  }
-}
+      channelTokenHandler(channelTokenHandler) {}
 
 ContainerClient::~ContainerClient() noexcept(false) {
   stopEgressListener();
@@ -791,6 +605,39 @@ void ContainerClient::stopEgressListener() {
   egressListenerTask = kj::none;
   egressHttpServer = kj::none;
   egressListenerStarted.store(false, std::memory_order_release);
+}
+
+kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Network& network,
+    kj::String dockerPath,
+    kj::HttpMethod method,
+    kj::String endpoint,
+    kj::Maybe<kj::String> body) {
+  kj::HttpHeaderTable headerTable;
+  auto address = co_await network.parseAddress(dockerPath);
+  auto connection = co_await address->connect();
+  auto httpClient = kj::newHttpClient(headerTable, *connection).attach(kj::mv(connection));
+  kj::HttpHeaders headers(headerTable);
+  headers.setPtr(kj::HttpHeaderId::HOST, "localhost");
+
+  KJ_IF_SOME(requestBody, body) {
+    headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
+    headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(requestBody.size()));
+
+    auto req = httpClient->request(method, endpoint, headers, requestBody.size());
+    {
+      auto body = kj::mv(req.body);
+      co_await body->write(requestBody.asBytes());
+    }
+    auto response = co_await req.response;
+    auto result = co_await response.body->readAllText();
+    co_return Response{.statusCode = response.statusCode, .body = kj::mv(result)};
+  } else {
+    auto req = httpClient->request(method, endpoint, headers);
+    { auto body = kj::mv(req.body); }
+    auto response = co_await req.response;
+    auto result = co_await response.body->readAllText();
+    co_return Response{.statusCode = response.statusCode, .body = kj::mv(result)};
+  }
 }
 
 kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer() {
@@ -1126,63 +973,6 @@ kj::Promise<void> ContainerClient::destroySidecarContainer() {
       "Destroying docker network sidecar container failed: ", response.statusCode, response.body);
 }
 
-kj::Promise<void> ContainerClient::createDockerVolume(kj::StringPtr volumeName) {
-  capnp::JsonCodec codec;
-  codec.handleByAnnotation<docker_api::Docker::VolumeCreateRequest>();
-  capnp::MallocMessageBuilder message;
-  auto req = message.initRoot<docker_api::Docker::VolumeCreateRequest>();
-  req.setName(volumeName);
-  auto labels = req.initLabels().initObject(1);
-  labels[0].setName(SNAPSHOT_VOLUME_CREATED_AT_LABEL);
-  labels[0].initValue().setString(currentSnapshotVolumeTimestamp());
-
-  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
-      kj::str("/volumes/create"), codec.encode(req));
-  // Docker returns 201 for new volumes and 200 for existing ones.
-  JSG_REQUIRE(response.statusCode == 201 || response.statusCode == 200, Error,
-      "Failed to create Docker volume '", volumeName, "': ", response.statusCode, " ",
-      response.body);
-}
-
-kj::Promise<void> ContainerClient::deleteDockerVolume(kj::StringPtr volumeName) {
-  auto response = co_await dockerApiRequest(
-      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::str("/volumes/", volumeName));
-  // 204 = deleted, 404 = not found (both are fine)
-  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
-      "Failed to delete Docker volume '", volumeName, "': ", response.statusCode, " ",
-      response.body);
-}
-
-kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
-    kj::StringPtr volumeName, kj::StringPtr mountPath) {
-  capnp::JsonCodec codec;
-  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
-  capnp::MallocMessageBuilder message;
-  auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(imageName);
-
-  auto hostConfig = jsonRoot.initHostConfig();
-  auto binds = hostConfig.initBinds(1);
-  binds.set(0, kj::str(volumeName, ":", mountPath));
-
-  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
-      kj::str("/containers/create"), codec.encode(jsonRoot));
-  JSG_REQUIRE(response.statusCode == 201, Error, "Failed to create temp container for volume '",
-      volumeName, "': ", response.statusCode, " ", response.body);
-
-  auto respMessage = decodeJsonResponse<docker_api::Docker::ContainerCreateResponse>(response.body);
-  auto respRoot = respMessage->getRoot<docker_api::Docker::ContainerCreateResponse>();
-  co_return kj::str(respRoot.getId());
-}
-
-kj::Promise<void> ContainerClient::deleteTempContainer(kj::String tempContainerId) {
-  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
-      kj::str("/containers/", tempContainerId, "?force=true"));
-  // 204 = deleted, 404 = not found (both are fine).
-  KJ_REQUIRE(response.statusCode == 204 || response.statusCode == 404,
-      "Failed to delete temp container", tempContainerId, response.statusCode, response.body);
-}
-
 ContainerClient::RpcTurn ContainerClient::getRpcTurn() {
   auto paf = kj::newPromiseAndFulfiller<void>();
   auto prev = mutationQueue.addBranch();
@@ -1246,66 +1036,6 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   co_await ensureSidecarStarted();
 
   co_await createContainer(entrypoint, environment, params);
-
-  if (params.hasSnapshots()) {
-    auto snapshotList = params.getSnapshots();
-    for (auto i: kj::zeroTo(snapshotList.size())) {
-      auto entry = snapshotList[i];
-      auto snapshot = entry.getSnapshot();
-      auto snapshotId = kj::str(snapshot.getId());
-      auto dir = kj::str(snapshot.getDir());
-
-      JSG_REQUIRE(
-          snapshotId.size() > 0 && snapshotId.size() <= 64, Error, "Invalid snapshot ID length");
-      for (auto c: snapshotId) {
-        JSG_REQUIRE((c >= 'a' && c <= 'f') || (c >= '0' && c <= '9') || c == '-', Error,
-            "Invalid snapshot ID: must contain only hex digits and hyphens");
-      }
-
-      const auto mountPointText = entry.getMountPoint();
-      const auto restoreDir =
-          normalizePath(mountPointText.size() > 0 ? kj::str(mountPointText) : kj::str(dir));
-      validateAbsolutePath(restoreDir);
-
-      auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
-
-      // The volume stores raw directory contents (no directory wrapper) at /mnt.
-      // Mount it at /mnt{restoreDir} so Docker creates the target directory hierarchy,
-      // then GET from the first path component to obtain a tar with the full path.
-      // Special case: restoreDir == "/" → mount at /mnt, GET with path=/mnt/. to
-      // avoid the extra mnt/ wrapper.
-      auto mountPath = restoreDir == "/" ? kj::str("/mnt") : kj::str("/mnt", restoreDir);
-
-      auto tempId = co_await createTempContainerWithVolume(volumeName, mountPath);
-      KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
-
-      kj::String archiveGetPath;
-      if (restoreDir == "/") {
-        archiveGetPath = kj::str("/containers/", tempId, "/archive?path=/mnt/.");
-      } else {
-        auto firstSeparator = restoreDir.slice(1).findFirst('/');
-        auto archiveRoot =
-            firstSeparator.map([&](size_t pos) {
-          return kj::str(restoreDir.slice(1, pos + 1));
-        }).orDefault(kj::str(restoreDir.slice(1)));
-        archiveGetPath = kj::str(
-            "/containers/", tempId, "/archive?path=/mnt/", kj::encodeUriComponent(archiveRoot));
-      }
-
-      auto tarResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
-          kj::HttpMethod::GET, kj::mv(archiveGetPath), kj::none, MAX_SNAPSHOT_TAR_SIZE);
-      JSG_REQUIRE(tarResponse.statusCode == 200, Error, "Failed to read snapshot '", snapshotId,
-          "' from volume '", volumeName, "': ", tarResponse.statusCode);
-
-      auto putResponse =
-          co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::PUT,
-              kj::str("/containers/", containerName, "/archive?path=%2F&noOverwriteDirNonDir=true"),
-              kj::mv(tarResponse.body), MAX_JSON_RESPONSE_SIZE);
-      JSG_REQUIRE(putResponse.statusCode == 200, Error, "Failed to restore snapshot '", snapshotId,
-          "' to '", restoreDir, "': ", putResponse.statusCode);
-    }
-  }
-
   co_await startContainer();
 
   containerStarted.store(true, std::memory_order_release);
@@ -1369,79 +1099,6 @@ kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutCont
   }));
 
   co_return;
-}
-
-kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext context) {
-  auto [ready, done] = getRpcTurn();
-  co_await ready;
-  KJ_DEFER(done->fulfill());
-
-  auto params = context.getParams();
-  auto dir = kj::str(params.getDir());
-  auto name = params.hasName() && params.getName().size() > 0
-      ? kj::Maybe<kj::String>(kj::str(params.getName()))
-      : kj::Maybe<kj::String>(kj::none);
-
-  JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error,
-      "snapshotDirectory() requires a running container.");
-
-  validateAbsolutePath(dir);
-  dir = normalizePath(kj::mv(dir));
-
-  auto snapshotId = randomUUID(kj::none);
-
-  // GET tar archive of the directory CONTENTS from the running container.
-  // The trailing "/." tells Docker to return contents without the directory wrapper,
-  // so the tar entries are relative to the directory (e.g., "hello/aaa.txt" instead
-  // of "data/hello/aaa.txt"). This decouples storage from the directory name,
-  // allowing restore to a different mount point.
-  // Append "/." to the path to get directory contents without the directory wrapper.
-  // For dir == "/", this is just "/."; for others, e.g. "/app/data" → "/app/data/.".
-  auto archivePath = dir == "/" ? kj::str("/.") : kj::str(dir, "/.");
-  auto tarResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
-      kj::HttpMethod::GET,
-      kj::str("/containers/", containerName, "/archive?path=", kj::encodeUriComponent(archivePath)),
-      kj::none, MAX_SNAPSHOT_TAR_SIZE);
-
-  if (tarResponse.statusCode == 404) {
-    JSG_FAIL_REQUIRE(Error, "snapshotDirectory(): directory not found in container: ", dir);
-  }
-  JSG_REQUIRE(tarResponse.statusCode == 200, Error,
-      "snapshotDirectory(): failed to read directory '", dir,
-      "' from container: ", tarResponse.statusCode);
-
-  auto tarSize = static_cast<uint64_t>(tarResponse.body.size());
-
-  // Create a Docker volume to store the snapshot contents. If anything after this
-  // fails, clean up the volume so we don't leak Docker resources on retries.
-  auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
-  co_await createDockerVolume(volumeName);
-  bool volumeCommitted = false;
-  KJ_DEFER(if (!volumeCommitted) {
-    waitUntilTasks.add(deleteDockerVolume(volumeName).catch_([](kj::Exception&&) {}));
-  });
-
-  // Store the contents tar in the volume via a temp container mounted at /mnt.
-  auto tempId = co_await createTempContainerWithVolume(volumeName);
-  KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
-
-  auto putResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
-      kj::HttpMethod::PUT, kj::str("/containers/", tempId, "/archive?path=/mnt"),
-      kj::mv(tarResponse.body), MAX_JSON_RESPONSE_SIZE);
-  JSG_REQUIRE(putResponse.statusCode == 200, Error,
-      "snapshotDirectory(): failed to store snapshot in volume '", volumeName,
-      "': ", putResponse.statusCode);
-
-  volumeCommitted = true;
-  KJ_LOG(INFO, "created snapshot volume", volumeName, dir, tarSize);
-
-  auto result = context.getResults().initSnapshot();
-  result.setId(snapshotId);
-  result.setSize(tarSize);
-  result.setDir(dir);
-  KJ_IF_SOME(n, name) {
-    result.setName(n);
-  }
 }
 
 kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
