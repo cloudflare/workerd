@@ -49,7 +49,7 @@ static_assert(static_cast<double>(MAX_SNAPSHOT_TAR_SIZE) == MAX_SNAPSHOT_TAR_SIZ
 constexpr size_t MAX_TAR_CONTENT_SIZE = 8ull * 1024 * 1024 * 1024;
 
 // Ensures the stale-volume check runs at most once per process.
-bool staleSnapshotVolumeCheckScheduled = false;
+std::atomic_bool staleSnapshotVolumeCheckScheduled = false;
 
 // Strip trailing slashes from a path, preserving bare "/".
 kj::String normalizePath(kj::String path) {
