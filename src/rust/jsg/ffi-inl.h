@@ -36,6 +36,20 @@ inline const v8::Local<T>& local_as_ref_from_ffi(const Local& value) {
   return *reinterpret_cast<const v8::Local<T>*>(ptr_void);
 }
 
+// MaybeLocal<T>
+// v8::MaybeLocal<T> is exactly one Local<T> field at offset 0, so it has the same
+// size and layout as ffi::Local (one pointer-sized word, zero means empty).
+static_assert(sizeof(v8::MaybeLocal<v8::Value>) == sizeof(MaybeLocal), "Size should match");
+static_assert(alignof(v8::MaybeLocal<v8::Value>) == alignof(MaybeLocal), "Alignment should match");
+
+template <typename T>
+inline MaybeLocal maybe_local_to_ffi(v8::MaybeLocal<T> value) {
+  size_t result;
+  auto ptr_void = reinterpret_cast<void*>(&result);
+  new (ptr_void) v8::MaybeLocal<T>(value);
+  return MaybeLocal{result};
+}
+
 // Global<T>
 //
 // ffi::Global stores only the strong v8::Global<v8::Value> in `ptr`.
