@@ -53,10 +53,12 @@ std::atomic_bool staleSnapshotVolumeCheckScheduled = false;
 
 // Strip trailing slashes from a path, preserving bare "/".
 kj::String normalizePath(kj::String path) {
-  while (path.size() > 1 && path[path.size() - 1] == '/') {
-    path = kj::str(path.first(path.size() - 1));
+  auto len = path.size();
+  while (len > 1 && path[len - 1] == '/') {
+    --len;
   }
-  return kj::mv(path);
+  if (len == path.size()) return kj::mv(path);
+  return kj::str(path.first(len));
 }
 
 // Validate an absolute path for snapshot use (both creation dir and restore mount point).
