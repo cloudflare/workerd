@@ -140,7 +140,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Docker volume management for snapshots
   kj::Promise<void> createDockerVolume(kj::StringPtr volumeName);
-  kj::Promise<void> deleteDockerVolume(kj::StringPtr volumeName);
+  kj::Promise<void> deleteDockerVolume(kj::String volumeName);
   kj::Promise<kj::String> createTempContainerWithVolume(
       kj::StringPtr volumeName, kj::StringPtr mountPath = "/mnt"_kj);
   kj::Promise<void> deleteTempContainer(kj::String tempContainerId);

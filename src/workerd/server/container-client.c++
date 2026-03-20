@@ -1308,7 +1308,7 @@ kj::Promise<void> ContainerClient::createDockerVolume(kj::StringPtr volumeName) 
       response.body);
 }
 
-kj::Promise<void> ContainerClient::deleteDockerVolume(kj::StringPtr volumeName) {
+kj::Promise<void> ContainerClient::deleteDockerVolume(kj::String volumeName) {
   auto response = co_await dockerApiRequest(
       network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::str("/volumes/", volumeName));
   // 204 = deleted, 404 = not found (both are fine)
@@ -1596,7 +1596,7 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   co_await createDockerVolume(volumeName);
   bool volumeCommitted = false;
   KJ_DEFER(if (!volumeCommitted) {
-    waitUntilTasks.add(deleteDockerVolume(volumeName).catch_([](kj::Exception&&) {}));
+    waitUntilTasks.add(deleteDockerVolume(kj::str(volumeName)).catch_([](kj::Exception&&) {}));
   });
 
   // Store the contents tar in the volume via a temp container mounted at /mnt.
