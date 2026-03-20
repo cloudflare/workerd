@@ -391,6 +391,79 @@ fn extract_optional_inner(ty: &Type) -> Option<(OptionalKind, &Type)> {
     None
 }
 
+/// Extracts the inner type `T` from `Cell<T>` or `std::cell::Cell<T>` if present.
+///
+/// Accepts both unqualified `Cell<T>` and fully-qualified `std::cell::Cell<T>`.
+fn extract_cell_inner(ty: &Type) -> Option<&Type> {
+    if let Type::Path(type_path) = ty {
+        let segments = &type_path.path.segments;
+
+        // `Cell<T>` — single segment.
+        let cell_seg = if segments.len() == 1 && segments[0].ident == "Cell" {
+            &segments[0]
+        // `std::cell::Cell<T>` — three segments.
+        } else if segments.len() == 3
+            && segments[0].ident == "std"
+            && segments[1].ident == "cell"
+            && segments[2].ident == "Cell"
+        {
+            &segments[2]
+        } else {
+            return None;
+        };
+
+        if let syn::PathArguments::AngleBracketed(args) = &cell_seg.arguments
+            && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+        {
+            return Some(inner);
+        }
+    }
+    None
+}
+
+/// Generates a trace statement for a field whose type is known to be a `Cell<T>`.
+///
+/// Because `GarbageCollected::trace` receives `&self`, `Cell<T>` fields cannot be
+/// accessed through normal Rust references (they require `&mut self` or `T: Copy`).
+/// We use `Cell::as_ptr` to obtain a raw pointer and dereference it for read-only
+/// access.  This is safe because:
+///
+/// - V8 GC tracing is always single-threaded within an isolate.
+/// - `trace` is never re-entrant on the same object during a single GC cycle.
+/// - We only *read* through the pointer; we never move or drop the value.
+fn generate_cell_trace_statement(
+    field_name: &syn::Ident,
+    cell_inner_ty: &Type,
+) -> Option<quote::__private::TokenStream> {
+    // Cell<jsg::Rc<T>> — direct strong reference inside a Cell.
+    if get_traceable_type(cell_inner_ty) == TraceableType::Ref {
+        return Some(quote! {
+            // SAFETY: trace() is single-threaded within a V8 isolate and never
+            // re-entrant.  We only read through the pointer; no mutation occurs.
+            unsafe { visitor.visit_ref(&*self.#field_name.as_ptr()); }
+        });
+    }
+
+    // Cell<Option<jsg::Rc<T>>> or Cell<jsg::Nullable<jsg::Rc<T>>>.
+    if let Some((kind, inner_ty)) = extract_optional_inner(cell_inner_ty)
+        && get_traceable_type(inner_ty) == TraceableType::Ref
+    {
+        let pattern = match kind {
+            OptionalKind::Option => quote! { Some(inner) },
+            OptionalKind::Nullable => quote! { jsg::Nullable::Some(inner) },
+        };
+        return Some(quote! {
+            // SAFETY: trace() is single-threaded within a V8 isolate and never
+            // re-entrant.  We only read through the pointer; no mutation occurs.
+            if let #pattern = unsafe { &*self.#field_name.as_ptr() } {
+                visitor.visit_ref(inner);
+            }
+        });
+    }
+
+    None
+}
+
 /// Generates trace statements for all traceable fields in a struct.
 fn generate_trace_statements(
     fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
@@ -400,6 +473,11 @@ fn generate_trace_statements(
         .filter_map(|field| {
             let field_name = field.ident.as_ref()?;
             let ty = &field.ty;
+
+            // Check if this field is wrapped in a `Cell<T>`.
+            if let Some(cell_inner_ty) = extract_cell_inner(ty) {
+                return generate_cell_trace_statement(field_name, cell_inner_ty);
+            }
 
             // Check if it's Option<Traceable> or Nullable<Traceable>
             if let Some((kind, inner_ty)) = extract_optional_inner(ty) {

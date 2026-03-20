@@ -11,6 +11,7 @@
 //! Note: Circular references through `Ref<T>` are NOT collected, matching the behavior
 //! of C++ `jsg::Rc<T>` which uses `kj::Own<T>` cross-references.
 
+use std::cell::Cell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -1065,6 +1066,270 @@ fn rc_native_object_dropped_on_minor_gc() {
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_minor_gc(lock);
         assert_eq!(NATIVE_STATE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Cell<T> tracing tests
+// =============================================================================
+
+static CELL_CHILD_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+#[jsg_resource]
+struct CellChild;
+
+impl Drop for CellChild {
+    fn drop(&mut self) {
+        CELL_CHILD_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl CellChild {}
+
+static CELL_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+/// Resource with a `Cell<jsg::Rc<T>>` field.
+#[jsg_resource]
+struct CellParent {
+    pub child: Cell<jsg::Rc<CellChild>>,
+}
+
+impl Drop for CellParent {
+    fn drop(&mut self) {
+        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl CellParent {}
+
+/// Resource with a `Cell<Option<jsg::Rc<T>>>` field.
+#[jsg_resource]
+struct CellOptionParent {
+    pub child: Cell<Option<jsg::Rc<CellChild>>>,
+}
+
+impl Drop for CellOptionParent {
+    fn drop(&mut self) {
+        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl CellOptionParent {}
+
+/// Resource with a `Cell<jsg::Nullable<jsg::Rc<T>>>` field.
+#[jsg_resource]
+struct CellNullableParent {
+    pub child: Cell<jsg::Nullable<jsg::Rc<CellChild>>>,
+}
+
+impl Drop for CellNullableParent {
+    fn drop(&mut self) {
+        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl CellNullableParent {}
+
+/// Resource using the fully-qualified `std::cell::Cell<jsg::Rc<T>>` syntax.
+#[jsg_resource]
+struct StdCellParent {
+    pub child: std::cell::Cell<jsg::Rc<CellChild>>,
+}
+
+impl Drop for StdCellParent {
+    fn drop(&mut self) {
+        CELL_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl StdCellParent {}
+
+/// `Cell<jsg::Rc<T>>` keeps the child alive through GC.
+#[test]
+fn cell_ref_keeps_child_alive_through_gc() {
+    CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
+    CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let child = jsg::Rc::new(CellChild);
+        let parent = jsg::Rc::new(CellParent {
+            child: Cell::new(child.clone()),
+        });
+        let wrapped = parent.clone().to_js(lock);
+        ctx.set_global("parent", wrapped);
+
+        // Drop all Rust refs.
+        std::mem::drop(child);
+        std::mem::drop(parent);
+
+        // Parent is JS-global-held; child is kept alive via Cell<Rc<T>> tracing.
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// `Cell<Option<jsg::Rc<T>>>` with `Some` keeps the child alive through GC.
+#[test]
+fn cell_option_ref_some_keeps_child_alive_through_gc() {
+    CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
+    CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let child = jsg::Rc::new(CellChild);
+        let parent = jsg::Rc::new(CellOptionParent {
+            child: Cell::new(Some(child.clone())),
+        });
+        let wrapped = parent.clone().to_js(lock);
+        ctx.set_global("parent", wrapped);
+
+        std::mem::drop(child);
+        std::mem::drop(parent);
+
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// `Cell<Option<jsg::Rc<T>>>` with `None` does not crash during GC.
+#[test]
+fn cell_option_ref_none_does_not_crash_during_gc() {
+    CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let parent = jsg::Rc::new(CellOptionParent {
+            child: Cell::new(None),
+        });
+        let wrapped = parent.clone().to_js(lock);
+        ctx.set_global("parent", wrapped);
+
+        std::mem::drop(parent);
+
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// `Cell<jsg::Nullable<jsg::Rc<T>>>` with `Nullable::Some` keeps child alive.
+#[test]
+fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
+    CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
+    CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let child = jsg::Rc::new(CellChild);
+        let parent = jsg::Rc::new(CellNullableParent {
+            child: Cell::new(jsg::Nullable::Some(child.clone())),
+        });
+        let wrapped = parent.clone().to_js(lock);
+        ctx.set_global("parent", wrapped);
+
+        std::mem::drop(child);
+        std::mem::drop(parent);
+
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// `Cell<jsg::Nullable<jsg::Rc<T>>>` with `Nullable::Null` does not crash during GC.
+#[test]
+fn cell_nullable_ref_null_does_not_crash_during_gc() {
+    CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let parent = jsg::Rc::new(CellNullableParent {
+            child: Cell::new(jsg::Nullable::Null),
+        });
+        let wrapped = parent.clone().to_js(lock);
+        ctx.set_global("parent", wrapped);
+
+        std::mem::drop(parent);
+
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// `std::cell::Cell<jsg::Rc<T>>` (fully-qualified path) keeps child alive through GC.
+#[test]
+fn std_cell_ref_keeps_child_alive_through_gc() {
+    CELL_CHILD_DROPS.store(0, Ordering::SeqCst);
+    CELL_PARENT_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let child = jsg::Rc::new(CellChild);
+        let parent = jsg::Rc::new(StdCellParent {
+            child: std::cell::Cell::new(child.clone()),
+        });
+        let wrapped = parent.clone().to_js(lock);
+        ctx.set_global("parent", wrapped);
+
+        std::mem::drop(child);
+        std::mem::drop(parent);
+
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(CELL_PARENT_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(CELL_CHILD_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
 }
