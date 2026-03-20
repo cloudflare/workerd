@@ -469,6 +469,9 @@ struct BuildRtti<Configuration, v8::Promise> {
 
 #define FOR_EACH_BUILTIN_TYPE(F, ...)                                                              \
   F(jsg::JsUint8Array, BuiltinType::Type::V8_UINT8_ARRAY)                                          \
+  F(jsg::JsArrayBuffer, BuiltinType::Type::V8_ARRAY_BUFFER)                                        \
+  F(jsg::JsArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                               \
+  F(jsg::JsBufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                     \
   F(jsg::BufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                       \
   F(kj::Date, BuiltinType::Type::KJ_DATE)                                                          \
   F(v8::ArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                                  \
@@ -536,7 +539,7 @@ struct BuildRtti<Configuration, jsg::Function<Fn>> {
     auto fn = builder.initFunction();
     using Traits = FunctionTraits<Fn>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(fn.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(fn.initArgs(std::tuple_size_v<Args>), rtti);
   }
 };
@@ -809,7 +812,7 @@ struct MembersBuilder {
 
     using Traits = FunctionTraits<decltype(Method)>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -819,7 +822,7 @@ struct MembersBuilder {
 
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(func.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(func.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -833,7 +836,7 @@ struct MembersBuilder {
 
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -845,7 +848,7 @@ struct MembersBuilder {
     method.setName(name);
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -857,7 +860,7 @@ struct MembersBuilder {
     method.setName(name);
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -869,7 +872,7 @@ struct MembersBuilder {
     method.setName(name);
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -881,7 +884,7 @@ struct MembersBuilder {
     method.setName(name);
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -960,7 +963,7 @@ struct BuildRtti<Configuration, T> {
     if constexpr (HasConstructor<T>) {
       auto constructor = members[membersBuilder.memberIndex++].initConstructor();
       using Traits = FunctionTraits<decltype(T::constructor)>;
-      using Args = typename Traits::ArgsTuple;
+      using Args = Traits::ArgsTuple;
       TupleRttiBuilder<Configuration, Args>::build(
           constructor.initArgs(std::tuple_size_v<Args>), rtti);
     }

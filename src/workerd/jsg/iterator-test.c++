@@ -192,16 +192,37 @@ struct GeneratorContext: public Object, public ContextGlobal {
     generator.next(js);
   }
 
+  void generatorReturnNotCallable(Lock& js, Generator<kj::String> generator) {
+    // Per the GetMethod spec, if the 'return' property exists on the iterator
+    // but is not callable, calling return_() should throw a TypeError.
+    generator.return_(js);
+  }
+
+  void asyncGeneratorReturnNotCallable(Lock& js, AsyncGenerator<kj::String> generator) {
+    // Per the GetMethod spec, if the 'return' property exists on the async iterator
+    // but is not callable, calling return_() should produce a rejected promise with
+    // a TypeError.
+    bool gotRejection = false;
+    generator.return_(js).catch_(js, [&gotRejection](jsg::Lock& js, jsg::Value exception) {
+      gotRejection = true;
+      return kj::Maybe<kj::String>(kj::none);
+    });
+    js.runMicrotasks();
+    KJ_ASSERT(gotRejection);
+  }
+
   JSG_RESOURCE_TYPE(GeneratorContext) {
     JSG_METHOD(generatorTest);
     JSG_METHOD(generatorErrorTest);
     JSG_METHOD(sequenceOfSequenceTest);
     JSG_METHOD(generatorWrongType);
+    JSG_METHOD(generatorReturnNotCallable);
     JSG_METHOD(asyncGeneratorTest);
     JSG_METHOD(asyncGeneratorErrorTest);
     JSG_METHOD(manualAsyncGeneratorTest);
     JSG_METHOD(manualAsyncGeneratorTestEarlyReturn);
     JSG_METHOD(manualAsyncGeneratorTestThrow);
+    JSG_METHOD(asyncGeneratorReturnNotCallable);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(GeneratorIsolate, GeneratorContext, GeneratorContext::Test);
@@ -224,6 +245,14 @@ KJ_TEST("Generator works") {
 
   e.expectEval("generatorWrongType(['a'])", "throws",
       "TypeError: Incorrect type: the provided value is not of type 'Test'.");
+
+  // Per the GetMethod spec, if the 'return' property exists but is not callable,
+  // calling return_() should throw a TypeError.
+  e.expectEval("var iter = { [Symbol.iterator]() { return this; }, "
+               "next() { return { value: 'a', done: false }; }, "
+               "return: 42 }; "
+               "generatorReturnNotCallable(iter)",
+      "throws", "TypeError: Property 'return' is not a function");
 }
 
 KJ_TEST("AsyncGenerator works") {
@@ -245,6 +274,96 @@ KJ_TEST("AsyncGenerator works") {
 
   // e.expectEval("manualAsyncGeneratorTestThrow(async function* foo() { yield 'a'; yield 'b'; }())",
   //     "undefined", "undefined");
+
+  // Per the GetMethod spec, if the 'return' property exists but is not callable,
+  // calling return_() should produce a rejected promise with a TypeError.
+  e.expectEval("var iter = { [Symbol.asyncIterator]() { return this; }, "
+               "next() { return Promise.resolve({ value: 'a', done: false }); }, "
+               "return: 42 }; "
+               "asyncGeneratorReturnNotCallable(iter)",
+      "undefined", "undefined");
+}
+
+// ======================================================================================
+// Test that JSG iterators respect TerminateExecution().
+//
+// When V8 builtins like Array.from() or spread syntax iterate a C++ iterator, the loop
+// runs entirely in C++ without JS back-edge interrupt checks. Without the termination
+// check in IteratorBase::nextImpl, the iterator would keep getting called indefinitely
+// after TerminateExecution(). See https://crbug.com/v8/14681 for the same class of bug
+// in Intl.Segmenter.
+
+struct CountingIterable: public Object {
+  int terminateAfter;
+
+  explicit CountingIterable(int terminateAfter): terminateAfter(terminateAfter) {}
+
+  struct IterState {
+    int current = 0;
+    int terminateAfter;
+  };
+
+  // After producing `terminateAfter` items, requests termination but keeps returning
+  // values. Without the termination check in nextImpl, the iterator would keep getting called.
+  static kj::Maybe<int> nextItem(Lock& js, IterState& state) {
+    if (state.current >= state.terminateAfter) {
+      js.requestTermination();
+    }
+    return state.current++;
+  }
+
+  JSG_ITERATOR(ValuesIterator, values, int, IterState, nextItem);
+
+  JSG_RESOURCE_TYPE(CountingIterable) {
+    JSG_ITERABLE(values);
+  }
+};
+
+Ref<CountingIterable::ValuesIterator> CountingIterable::values(Lock&) {
+  return alloc<ValuesIterator>(IterState{.current = 0, .terminateAfter = terminateAfter});
+}
+
+struct TerminationIteratorContext: public Object, public ContextGlobal {
+  Ref<CountingIterable> makeCountingIterable(Lock& js, int terminateAfter) {
+    return js.alloc<CountingIterable>(terminateAfter);
+  }
+
+  JSG_RESOURCE_TYPE(TerminationIteratorContext) {
+    JSG_METHOD(makeCountingIterable);
+    JSG_NESTED_TYPE(CountingIterable);
+  }
+};
+
+JSG_DECLARE_ISOLATE_TYPE(TerminationIteratorIsolate,
+    TerminationIteratorContext,
+    CountingIterable,
+    CountingIterable::ValuesIterator,
+    CountingIterable::ValuesIterator::Next);
+
+KJ_TEST("Iterator respects TerminateExecution via Array.from()") {
+  Evaluator<TerminationIteratorContext, TerminationIteratorIsolate> e(v8System);
+
+  e.getIsolate().runInLockScope([&](TerminationIteratorIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.newContext<TerminationIteratorContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      // Array.from() runs the iteration in a V8 Torque builtin without JS back-edge
+      // interrupt checks. The iterator calls TerminateExecution() after 5 items but
+      // keeps returning values. The check in nextImpl should stop the iteration.
+      v8::Local<v8::String> source =
+          jsg::v8Str(js.v8Isolate, "Array.from(makeCountingIterable(5))");
+      v8::Local<v8::Script> script = v8::Script::Compile(js.v8Context(), source).ToLocalChecked();
+
+      v8::TryCatch catcher(js.v8Isolate);
+      v8::Local<v8::Value> result;
+      bool completed = script->Run(js.v8Context()).ToLocal(&result);
+
+      // The script should not complete normally -- the termination check in
+      // nextImpl should throw. Without the fix, this would loop indefinitely.
+      KJ_EXPECT(!completed);
+      KJ_EXPECT(catcher.HasCaught());
+    });
+  });
 }
 
 }  // namespace

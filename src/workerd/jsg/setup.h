@@ -10,6 +10,7 @@
 #include "v8-platform-wrapper.h"
 
 #include <workerd/jsg/observer.h>
+#include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
 
 #include <v8-profiler.h>
@@ -102,9 +103,20 @@ class IsolateBase {
   virtual kj::Maybe<v8::Local<v8::Object>> deserialize(
       Lock& js, uint tag, Deserializer& deserializer) = 0;
 
-  // Immediately cancels JavaScript execution in this isolate, causing an uncatchable exception to
-  // be thrown. Safe to call across threads, without holding the lock.
+  // Calls V8's TerminateExecution(), cancelling JavaScript execution. Safe to call across
+  // threads, without holding the lock.
   void terminateExecution() const;
+
+  // Like terminateExecution(), but also sets a flag that C++ iterator callbacks can check.
+  // V8 builtins like Array.from() loop over C++ callbacks without JS back-edge interrupt
+  // checks, so V8's TerminateExecution() alone would be ignored until the iteration completes.
+  void requestTermination() {
+    terminationRequested = true;
+    terminateExecution();
+  }
+  bool isTerminationRequested() const {
+    return terminationRequested;
+  }
 
   using Logger = Lock::Logger;
   inline void setLoggerCallback(kj::Badge<Lock>, kj::Function<Logger>&& logger) {
@@ -133,6 +145,19 @@ class IsolateBase {
     return kj::none;
   }
 
+  // Requests an extra microtask checkpoint after the current one completes.
+  inline void requestExtraMicrotaskCheckpoint(kj::Badge<Lock>) {
+    extraMicrotaskCheckpointRequested = true;
+  }
+
+  // Returns true if an extra microtask checkpoint was requested since the last
+  // call, and clears the flag.
+  inline bool takeExtraMicrotaskCheckpointRequested(kj::Badge<Lock>) {
+    bool requested = extraMicrotaskCheckpointRequested;
+    extraMicrotaskCheckpointRequested = false;
+    return requested;
+  }
+
   inline void setAllowEval(kj::Badge<Lock>, bool allow) {
     if (alwaysAllowEval) return;
     evalAllowed = allow;
@@ -155,6 +180,10 @@ class IsolateBase {
     nodeJsProcessV2Enabled = enabled;
   }
 
+  inline void setRequireReturnsDefaultExportEnabled(kj::Badge<Lock>, bool enabled) {
+    requireReturnsDefaultExportEnabled = enabled;
+  }
+
   inline bool areWarningsLogged() const {
     return maybeLogger != kj::none;
   }
@@ -168,6 +197,10 @@ class IsolateBase {
 
   inline bool isNodeJsProcessV2Enabled() const {
     return nodeJsProcessV2Enabled;
+  }
+
+  inline bool isRequireReturnsDefaultExportEnabled() const {
+    return requireReturnsDefaultExportEnabled;
   }
 
   inline bool shouldSetToStringTag() const {
@@ -184,6 +217,14 @@ class IsolateBase {
 
   void enableSetImmutablePrototype() {
     shouldSetImmutablePrototypeFlag = true;
+  }
+
+  inline bool shouldUseSpecCompliantPropertyAttributes() const {
+    return specCompliantPropertyAttributesFlag;
+  }
+
+  void enableSpecCompliantPropertyAttributes() {
+    specCompliantPropertyAttributesFlag = true;
   }
 
   inline void disableTopLevelAwait() {
@@ -212,6 +253,10 @@ class IsolateBase {
 
   IsolateObserver& getObserver() {
     return *observer;
+  }
+
+  ExternalStringAllocator& getExternalStringAllocator() {
+    return *externalStringAllocator;
   }
 
   // Implementation of MemoryRetainer
@@ -339,12 +384,16 @@ class IsolateBase {
   bool asyncContextTrackingEnabled = false;
   bool nodeJsCompatEnabled = false;
   bool nodeJsProcessV2Enabled = false;
+  bool requireReturnsDefaultExportEnabled = false;
   bool setToStringTag = false;
   bool shouldSetImmutablePrototypeFlag = false;
+  bool specCompliantPropertyAttributesFlag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
+  bool extraMicrotaskCheckpointRequested = false;
+  bool terminationRequested = false;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;
@@ -410,6 +459,7 @@ class IsolateBase {
   explicit IsolateBase(V8System& system,
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer,
+      kj::Own<ExternalStringAllocator> externalStringAllocator,
       v8::IsolateGroup group);
   ~IsolateBase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
@@ -441,6 +491,7 @@ class IsolateBase {
 
   HeapTracer heapTracer;
   kj::Own<IsolateObserver> observer;
+  kj::Own<ExternalStringAllocator> externalStringAllocator;
 
   friend class Data;
   friend class Wrappable;
@@ -536,9 +587,14 @@ class Isolate: public IsolateBase {
       v8::IsolateGroup group,
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
+      kj::Own<ExternalStringAllocator> externalStringAllocator = defaultExternalStringAllocator(),
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
-      : IsolateBase(system, kj::mv(createParams), kj::mv(observer), group) {
+      : IsolateBase(system,
+            kj::mv(createParams),
+            kj::mv(observer),
+            kj::mv(externalStringAllocator),
+            group) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
@@ -553,7 +609,11 @@ class Isolate: public IsolateBase {
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
-      : IsolateBase(system, kj::mv(createParams), kj::mv(observer), v8::IsolateGroup::Create()) {
+      : IsolateBase(system,
+            kj::mv(createParams),
+            kj::mv(observer),
+            defaultExternalStringAllocator(),
+            v8::IsolateGroup::Create()) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
@@ -568,6 +628,7 @@ class Isolate: public IsolateBase {
             v8::IsolateGroup::GetDefault(),
             nullptr,
             kj::mv(observer),
+            defaultExternalStringAllocator(),
             kj::mv(createParams)) {}
 
   template <typename MetaConfiguration>

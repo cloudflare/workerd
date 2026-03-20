@@ -155,10 +155,6 @@ export default {
       'Fetch with GET and mode "cors" does not need an Origin header',
     ],
   },
-  'basic/request-private-network-headers.tentative.any.js': {
-    comment: 'We do not have forbidden headers',
-    omittedTests: true,
-  },
   'basic/request-referrer.any.js': {
     comment: 'Referrer is not implemented',
     omittedTests: true,
@@ -408,9 +404,21 @@ export default {
   },
   'headers/headers-structure.any.js': {},
 
-  'idlharness.any.js': {
-    comment: 'Implement IDL support in harness',
-    disabledTests: true,
+  'idlharness.https.any.js': {
+    comment:
+      'Workers expose globals differently than browsers - these interface tests fail',
+    expectedFailures: [
+      // Headers interface tests
+      /^Headers interface/,
+      // Request interface tests
+      /^Request interface/,
+      // Response interface tests
+      /^Response interface/,
+      // FetchLaterResult interface tests (not implemented)
+      /^FetchLaterResult interface/,
+      // Window interface tests (not applicable to workers)
+      /^Window interface/,
+    ],
   },
 
   'policies/csp-blocked.js': {
@@ -459,7 +467,6 @@ export default {
     comment: 'Keepalive is not implemented',
     disabledTests: true,
   },
-  'redirect/redirect-location-escape.tentative.any.js': {},
   'redirect/redirect-location.any.js': {
     comment:
       'Status is expected to be 0 in a browser to avoid leaking info. We do not implement CORS',

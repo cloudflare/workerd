@@ -63,15 +63,6 @@ class LolString {
     lol_html_str_free({chars.begin(), chars.size()});
   }
   KJ_DISALLOW_COPY(LolString);
-  LolString(LolString&& other): chars(other.chars) {
-    other.chars = nullptr;
-  }
-  LolString& operator=(LolString&& other) {
-    LolString old(kj::mv(*this));
-    chars = other.chars;
-    other.chars = nullptr;
-    return *this;
-  }
 
   kj::ArrayPtr<const char> asChars() const {
     return chars;
@@ -302,11 +293,11 @@ class Rewriter final: public WritableStreamSink {
   kj::Vector<kj::Own<RegisteredHandler>> registeredEndTagHandlers;
   // TODO(perf) Don't store Owns, same as `registeredHandlers` above.
 
-  template <typename T, typename CType = typename T::CType>
+  template <typename T, typename CType = T::CType>
   static lol_html_rewriter_directive_t thunk(CType* content, void* userdata);
-  template <typename T, typename CType = typename T::CType>
+  template <typename T, typename CType = T::CType>
   lol_html_rewriter_directive_t thunkImpl(CType* content, RegisteredHandler& registration);
-  template <typename T, typename CType = typename T::CType>
+  template <typename T, typename CType = T::CType>
   kj::Promise<void> thunkPromise(CType* content, RegisteredHandler& registration);
 
   // Eagerly free this handler. Should only be called if we're confident the handler will never be
@@ -451,54 +442,64 @@ const kj::FiberPool& getFiberPool() {
 
 kj::Promise<void> Rewriter::write(kj::ArrayPtr<const byte> buffer) {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  return getFiberPool().startFiber([this, buffer](kj::WaitScope& scope) {
-    maybeWaitScope = scope;
-    if (!isPoisoned()) {
-      // Cannot use `check()` because `finishWrite()` implements the error path.
-      auto rc = lol_html_rewriter_write(rewriter, buffer.asChars().begin(), buffer.size());
-      tryHandleCancellation(rc);
-      if (rc == -1) {
-        maybePoison(getLastError());
+  // Defer fiber creation until the event loop runs. If this promise is dropped synchronously
+  // (e.g. by Canceler::cancel() during PumpToReader destruction), no fiber is created, avoiding
+  // a KJ assertion failure when destroying an unfired fiber. Once the event loop processes this,
+  // the fiber is created and immediately fires (armDepthFirst), so cancellation works normally.
+  return kj::evalLater([this, buffer]() {
+    return getFiberPool().startFiber([this, buffer](kj::WaitScope& scope) {
+      maybeWaitScope = scope;
+      if (!isPoisoned()) {
+        // Cannot use `check()` because `finishWrite()` implements the error path.
+        auto rc = lol_html_rewriter_write(rewriter, buffer.asChars().begin(), buffer.size());
+        tryHandleCancellation(rc);
+        if (rc == -1) {
+          maybePoison(getLastError());
+        }
       }
-    }
-    return finishWrite();
+      return finishWrite();
+    });
   });
 }
 
 kj::Promise<void> Rewriter::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
-    maybeWaitScope = scope;
-    if (!isPoisoned()) {
-      for (auto bytes: pieces) {
-        auto chars = bytes.asChars();
-        // Cannot use `check()` because `finishWrite()` implements the error path.
-        auto rc = lol_html_rewriter_write(rewriter, chars.begin(), chars.size());
-        tryHandleCancellation(rc);
-        if (rc == -1) {
-          maybePoison(getLastError());
-          // A handler threw an exception; stop calling `lol_html_rewriter_write()`.
-          break;
+  return kj::evalLater([this, pieces]() {
+    return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
+      maybeWaitScope = scope;
+      if (!isPoisoned()) {
+        for (auto bytes: pieces) {
+          auto chars = bytes.asChars();
+          // Cannot use `check()` because `finishWrite()` implements the error path.
+          auto rc = lol_html_rewriter_write(rewriter, chars.begin(), chars.size());
+          tryHandleCancellation(rc);
+          if (rc == -1) {
+            maybePoison(getLastError());
+            // A handler threw an exception; stop calling `lol_html_rewriter_write()`.
+            break;
+          }
         }
       }
-    }
-    return finishWrite();
+      return finishWrite();
+    });
   });
 }
 
 kj::Promise<void> Rewriter::end() {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  return getFiberPool().startFiber([this](kj::WaitScope& scope) {
-    maybeWaitScope = scope;
-    if (!isPoisoned()) {
-      // Cannot use `check()` because `finishWrite()` implements the error path.
-      auto rc = lol_html_rewriter_end(rewriter);
-      tryHandleCancellation(rc);
-      if (rc == -1) {
-        maybePoison(getLastError());
+  return kj::evalLater([this]() {
+    return getFiberPool().startFiber([this](kj::WaitScope& scope) {
+      maybeWaitScope = scope;
+      if (!isPoisoned()) {
+        // Cannot use `check()` because `finishWrite()` implements the error path.
+        auto rc = lol_html_rewriter_end(rewriter);
+        tryHandleCancellation(rc);
+        if (rc == -1) {
+          maybePoison(getLastError());
+        }
       }
-    }
-    return finishWrite().then([this]() { return inner->end(); });
+      return finishWrite().then([this]() { return inner->end(); });
+    });
   });
 }
 
@@ -863,14 +864,28 @@ bool Element::hasAttribute(kj::String name) {
 }
 
 jsg::Ref<Element> Element::setAttribute(kj::String name, kj::String value) {
+  auto& implRef = checkToken(impl);
   check(lol_html_element_set_attribute(
-      &checkToken(impl).element, name.cStr(), name.size(), value.cStr(), value.size()));
+      &implRef.element, name.cStr(), name.size(), value.cStr(), value.size()));
+
+  // Mutating attributes may cause lol-html's internal Vec to reallocate, invalidating
+  // any live iterators' pointers. We must invalidate all outstanding iterators.
+  for (auto& iter: implRef.attributesIterators) {
+    iter->invalidate();
+  }
 
   return JSG_THIS;
 }
 
 jsg::Ref<Element> Element::removeAttribute(kj::String name) {
-  check(lol_html_element_remove_attribute(&checkToken(impl).element, name.cStr(), name.size()));
+  auto& implRef = checkToken(impl);
+  check(lol_html_element_remove_attribute(&implRef.element, name.cStr(), name.size()));
+
+  // Removing attributes may shift elements in lol-html's internal Vec (via retain()),
+  // invalidating any live iterators' pointers.
+  for (auto& iter: implRef.attributesIterators) {
+    iter->invalidate();
+  }
 
   return JSG_THIS;
 }
@@ -994,6 +1009,13 @@ jsg::Ref<Element::AttributesIterator> Element::AttributesIterator::self() {
 }
 
 Element::AttributesIterator::Next Element::AttributesIterator::next() {
+  // If the element's attributes were modified (via setAttribute/removeAttribute) while this
+  // iterator was live, the underlying lol-html iterator holds stale pointers into a potentially
+  // reallocated Vec. Continuing to iterate would be a use-after-free.
+  JSG_REQUIRE(!mutatedDuringIteration, Error,
+      "The attributes of this element have been modified during iteration. "
+      "You must create a new iterator after modifying attributes.");
+
   // NOTE: lol_html_attribute_t doesn't need to be freed.
   auto* attribute = lol_html_attributes_iterator_next(checkToken(impl));
   if (attribute == nullptr) {
@@ -1009,7 +1031,16 @@ Element::AttributesIterator::Next Element::AttributesIterator::next() {
   return {false, kj::arr(kj::str(name.asChars()), kj::str(value.asChars()))};
 }
 
+void Element::AttributesIterator::invalidate() {
+  mutatedDuringIteration = true;
+  // Also release the underlying lol-html iterator since it's no longer safe to use.
+  impl = kj::none;
+}
+
 void Element::AttributesIterator::htmlContentScopeEnd() {
+  // Clear the mutation flag so that after scope end, the "content token is no longer valid"
+  // error (from checkToken) takes precedence over the mutation error.
+  mutatedDuringIteration = false;
   impl = kj::none;
 }
 
@@ -1263,8 +1294,14 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
   //   after we know that nothing else (like invalid encoding) could cause an exception.
 
   // Drive and flush the parser asynchronously.
-  ioContext.addTask(ioContext.waitForDeferredProxy(
-      KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), true)));
+  ioContext.addTask(
+      ioContext
+          .waitForDeferredProxy(KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), true))
+          .catch_([](kj::Exception&& e) {
+    // Errors in pumpTo() are already propagated to the destination stream. We don't want to
+    // throw them from here since it'll cause an uncaught exception to be reported via taskFailed(),
+    // which would poison the IoContext even though the application may have handled the error.
+  }));
 
   // TODO(soon): EW-2025 Make Rewriter a proper wrapper object and put it in hidden property on the
   //   response so the GC can find the handlers which Rewriter co-owns.

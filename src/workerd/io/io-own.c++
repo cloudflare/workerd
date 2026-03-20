@@ -20,10 +20,13 @@ void DeleteQueue::scheduleDeletion(OwnedObject* object) const {
 }
 
 void DeleteQueue::scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& action) const {
-  KJ_IF_SOME(state, *crossThreadDeleteQueue.lockExclusive()) {
-    state.actions.add(kj::mv(action));
-    KJ_REQUIRE_NONNULL(state.crossThreadFulfiller)->fulfill();
-    return;
+  {
+    auto lock = crossThreadDeleteQueue.lockExclusive();
+    KJ_IF_SOME(state, *lock) {
+      state.actions.add(kj::mv(action));
+      KJ_REQUIRE_NONNULL(state.crossThreadFulfiller)->fulfill();
+      return;
+    }
   }
 
   // The queue was deleted, likely because the IoContext was destroyed and the

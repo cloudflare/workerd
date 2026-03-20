@@ -41,7 +41,14 @@ void HeapTracer::clearWrappers() {
 
   while (!wrappers.empty()) {
     // Don't freelist the shim because we're shutting down anyway.
-    wrappers.front().detachWrapper(false);
+    auto& wrappable = wrappers.front();
+    auto ownWrappable = wrappable.detachWrapper(false);
+    // Clear the isolate pointer so that any code that later tries to use it (e.g.,
+    // maybeDeferDestruction() or GcVisitor) will see that the isolate is gone and skip
+    // V8 operations. Without this, objects that outlive their isolate (like WebSockets
+    // stored in a HibernationManager) would have a dangling isolate pointer and crash
+    // when trying to check v8::Locker::IsLocked() or create V8 handles.
+    ownWrappable->isolate = nullptr;
   }
   clearFreelistedShims();
 }

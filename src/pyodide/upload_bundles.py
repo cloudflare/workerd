@@ -32,6 +32,14 @@ def cquery(rule):
     return res.stdout.strip()
 
 
+def bazel_mod_tidy():
+    res = subprocess.run(["bazel", "mod", "tidy"])
+    if res.returncode:
+        print(res.stdout)
+        print(res.stderr)
+        sys.exit(res.returncode)
+
+
 @cache
 def _bundle_version_info():
     with Path(cquery("@workerd//src/pyodide:bundle_version_info")).open() as f:
@@ -106,6 +114,7 @@ def update_python_metadata_bzl(bundles: list[BundleInfo]) -> None:
         )
 
     metadata_path.write_text(content)
+    bazel_mod_tidy()
 
 
 def print_info(info: BundleInfo) -> None:

@@ -20,6 +20,8 @@ from http import HTTPMethod, HTTPStatus
 from types import LambdaType
 from typing import Any, Never, Protocol, TypedDict, Unpack
 
+import _cloudflare_compat_flags
+
 # Get globals modules and import function from the entrypoint-helper
 import _pyodide_entrypoint_helper
 import js
@@ -316,6 +318,16 @@ def _manage_pyproxies():
 
 def _is_js_instance(val, js_cls_name):
     return hasattr(val, "constructor") and val.constructor.name == js_cls_name
+
+
+try:
+    import _cloudflare_compat_flags
+except ImportError:
+    _cloudflare_compat_flags = object()
+
+
+def get_compat_flag(flag: str) -> bool:
+    return getattr(_cloudflare_compat_flags, flag, False)
 
 
 def _to_js_headers(headers: Headers):
@@ -775,10 +787,26 @@ class Request:
         import http.client
 
         result = http.client.HTTPMessage()
+        if not get_compat_flag("python_request_headers_preserve_commas"):
+            for key, val in self.js_object.headers:
+                result[key] = val.strip()
 
-        for key, val in self.js_object.headers:
-            for subval in val.split(","):
-                result[key] = subval.strip()
+            return result
+
+        # With the exception of Set-Cookie, duplicate headers can and are combined with a comma
+        # in the JS Headers API. We do the same when returning the headers to Python.
+        #
+        # See https://httpwg.org/specs/rfc9110.html#rfc.section.5.3.
+        js_headers = self.js_object.headers
+        set_cookie_headers = js_headers.getSetCookie()
+        if set_cookie_headers:
+            for value in set_cookie_headers:
+                result.add_header("Set-Cookie", value.strip())
+
+        for key, val in js_headers:
+            if key.lower() == "set-cookie":
+                continue
+            result.add_header(key, val.strip())
 
         return result
 
@@ -1130,28 +1158,103 @@ class _WorkflowStepWrapper:
         self._js_step = js_step
         self._memoized_dependencies = {}
         self._in_flight = {}
+        self.step_closures = {}
 
-    def do(self, name, depends=None, concurrent=False, config=None):
+        # Assign the appropriate method based on compat flag
+        if _cloudflare_compat_flags.python_workflows_implicit_dependencies:
+            self.do = self._do_implicit
+        else:
+            self.do = self._do_legacy
+
+    def _do_legacy(self, name, depends=None, concurrent=False, config=None):
+        """Original signature - positional args allowed, explicit depends parameter."""
+        return self._create_step_decorator(
+            name=name,
+            depends=depends,
+            concurrent=concurrent,
+            config=config,
+            implicit=False,
+        )
+
+    def _do_implicit(self, name=None, *, concurrent=False, config=None):
+        """New signature - keyword-only args, dependencies resolved from param names."""
+        return self._create_step_decorator(
+            name=name,
+            depends=None,
+            concurrent=concurrent,
+            config=config,
+            implicit=True,
+        )
+
+    def _create_step_decorator(self, name, depends, concurrent, config, implicit):
+        """Shared decorator factory for both legacy and implicit modes."""
+
         def decorator(func):
-            async def wrapper():
-                if concurrent:
-                    results = await gather(
-                        *[self._resolve_dependency(dep) for dep in depends or []]
-                    )
-                else:
-                    results = [
-                        await self._resolve_dependency(dep) for dep in depends or []
-                    ]
-                python_results = [python_from_rpc(result) for result in results]
-                return await _do_call(self, name, config, func, *python_results)
+            step_name = func.__name__ if name is None else name
 
-            wrapper._step_name = name
+            async def wrapper():
+                results_future_list = self._build_dependency_list(
+                    func, depends, implicit
+                )
+                results = await self._gather_results(results_future_list, concurrent)
+                return await _do_call(self, step_name, config, func, *results)
+
+            wrapper._step_name = step_name
+            self.step_closures[step_name] = wrapper
             return wrapper
 
         return decorator
 
+    def _build_dependency_list(self, func, depends, implicit):
+        """Build the dependency list based on mode (implicit vs legacy)."""
+        sig = inspect.signature(func)
+        results_future_list = []
+
+        if implicit:
+            # Implicit mode: resolve dependencies from parameter names
+            for p in sig.parameters.values():
+                if p.name in self.step_closures:
+                    results_future_list.append(self.step_closures[p.name])
+                elif p.name == "ctx":
+                    results_future_list.append(p)
+                else:
+                    raise TypeError(f"Received unexpected parameter {p.name}")
+        else:
+            # Legacy mode: use explicit depends list, support ctx parameter
+            non_ctx_params = [p for p in sig.parameters.values() if p.name != "ctx"]
+
+            if depends is None and len(non_ctx_params) > 0:
+                raise TypeError(
+                    f"Step has {len(non_ctx_params)} non-ctx parameter(s) but no 'depends' list provided"
+                )
+
+            elif depends is not None and len(depends) != len(non_ctx_params):
+                raise TypeError(
+                    f"Step declares {len(non_ctx_params)} non-ctx parameter(s) but 'depends' has {len(depends)} item(s)"
+                )
+
+            curr = 0
+            for p in sig.parameters.values():
+                if p.name == "ctx":
+                    results_future_list.append(p)
+                else:
+                    results_future_list.append(depends[curr])
+                    curr += 1
+
+        return results_future_list
+
+    async def _gather_results(self, results_future_list, concurrent):
+        """Resolve dependencies concurrently or sequentially."""
+        if concurrent:
+            return await gather(
+                *[self._resolve_dependency(dep) for dep in results_future_list or []]
+            )
+        else:
+            return [
+                await self._resolve_dependency(dep) for dep in results_future_list or []
+            ]
+
     def sleep(self, *args, **kwargs):
-        # all types should be primitives - no need for explicit translation
         return self._js_step.sleep(*args, **kwargs)
 
     def sleep_until(self, name, timestamp):
@@ -1170,7 +1273,9 @@ class _WorkflowStepWrapper:
         )
 
     async def _resolve_dependency(self, dep):
-        if dep._step_name in self._memoized_dependencies:
+        if hasattr(dep, "name") and dep.name == "ctx":
+            return dep
+        elif dep._step_name in self._memoized_dependencies:
             return self._memoized_dependencies[dep._step_name]
         elif dep._step_name in self._in_flight:
             return await self._in_flight[dep._step_name]
@@ -1179,8 +1284,15 @@ class _WorkflowStepWrapper:
 
 
 async def _do_call(entrypoint, name, config, callback, *results):
-    async def _callback():
-        result = callback(*results)
+    async def _callback(ctx=None):
+        # deconstruct the actual ctx object
+        resolved_results = tuple(
+            python_from_rpc(ctx)
+            if isinstance(r, inspect.Parameter) and r.name == "ctx"
+            else r
+            for r in results
+        )
+        result = callback(*resolved_results)
 
         if inspect.iscoroutine(result):
             result = await result

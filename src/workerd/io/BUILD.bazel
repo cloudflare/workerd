@@ -34,6 +34,7 @@ wd_cc_library(
     # TODO(cleanup): Fix this.
     srcs = [
         "compatibility-date.c++",
+        "external-pusher.c++",
         "features.c++",
         "hibernation-manager.c++",
         "io-channels.c++",
@@ -47,6 +48,7 @@ wd_cc_library(
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "compatibility-date.h",
+        "external-pusher.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -57,17 +59,8 @@ wd_cc_library(
         "worker.h",
         "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
-    # global CPU-specific options are inconvenient to specify with bazel – just set the options we
-    # need for CRC32C in this target for now.
-    copts = select({
-        "@platforms//cpu:aarch64": [
-            "-mcrc",
-        ],
-        "@platforms//cpu:x86_64": [
-            "-msse4.2",
-        ],
-    }),
     implementation_deps = [
+        "//src/rust/jsg",
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
@@ -94,9 +87,11 @@ wd_cc_library(
         ":io-gate",
         ":io-helpers",
         ":limit-enforcer",
+        ":maximum-compatibility-date",
         ":observer",
-        ":supported-compatibility-date",
+        ":release-version",
         ":trace",
+        ":wasm-instantiate-shim",
         ":worker-interface",
         ":worker-source",
         "//src/rust/cxx-integration",
@@ -116,6 +111,7 @@ wd_cc_library(
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:small-set",
         "//src/workerd/util:sqlite",
+        "//src/workerd/util:state-machine",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
@@ -270,6 +266,7 @@ wd_cc_library(
     hdrs = ["io-gate.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":trace",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
     ],
@@ -277,7 +274,11 @@ wd_cc_library(
 
 wd_cc_library(
     name = "limit-enforcer",
-    hdrs = ["limit-enforcer.h"],
+    srcs = ["tracked-wasm-instance.c++"],
+    hdrs = [
+        "limit-enforcer.h",
+        "tracked-wasm-instance.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":outcome_capnp",
@@ -323,29 +324,48 @@ wd_cc_library(
 )
 
 genrule(
-    name = "trimmed-supported-compatibility-date-gen",
-    srcs = ["supported-compatibility-date.txt"],
-    outs = ["trimmed-supported-compatibility-date.txt"],
-    cmd = "tr -d '\n' < $(location supported-compatibility-date.txt) > $(location trimmed-supported-compatibility-date.txt)",
-    cmd_ps = "(Get-Content $(location supported-compatibility-date.txt) -Raw -Encoding Ascii).TrimEnd() | Set-Content $(location trimmed-supported-compatibility-date.txt) -NoNewLine -Encoding Ascii",
+    name = "trimmed-release-version-gen",
+    srcs = ["release-version.txt"],
+    outs = ["trimmed-release-version.txt"],
+    cmd = "tr -d '\n' < $(location release-version.txt) > $(location trimmed-release-version.txt)",
+    cmd_ps = "(Get-Content $(location release-version.txt) -Raw -Encoding Ascii).TrimEnd() | Set-Content $(location trimmed-release-version.txt) -NoNewLine -Encoding Ascii",
     visibility = ["//visibility:public"],
 )
 
-# Newest compatibility date that can safely be set using code compiled from this repo. Trying to
-# run a Worker with a newer compatibility date than this will fail.
-#
-# This should be updated to the current date on a regular basis. The reason this exists is so that
-# if you build an old version of the code and try to run a new Worker with it, you get an
-# appropriate error, rather than have the code run with the wrong compatibility mode.
+genrule(
+    name = "trimmed-maximum-compatibility-date-gen",
+    srcs = ["maximum-compatibility-date.txt"],
+    outs = ["trimmed-maximum-compatibility-date.txt"],
+    cmd = "tr -d '\n' < $(location maximum-compatibility-date.txt) > $(location trimmed-maximum-compatibility-date.txt)",
+    cmd_ps = "(Get-Content $(location maximum-compatibility-date.txt) -Raw -Encoding Ascii).TrimEnd() | Set-Content $(location trimmed-maximum-compatibility-date.txt) -NoNewLine -Encoding Ascii",
+    visibility = ["//visibility:public"],
+)
+
+# The date of this release. Used for the version string and the npm compatibilityDate export.
+wd_cc_embed(
+    name = "release-version",
+    src = ":trimmed-release-version.txt",
+    base_name = "release-version",
+)
+
+# Maximum compatibility date that can safely be set using code compiled from this repo. Set to
+# 7 days beyond the release date so that users can set their compat date to today even if
+# they're running a workerd release from a few days ago.
 #
 # Note that the production Cloudflare Workers upload API always accepts any date up to the current
 # date regardless of this constant, on the assumption that Cloudflare is always running the latest
 # version of the code. This constant is more to protect users who are self-hosting the runtime and
 # could be running an older version.
 wd_cc_embed(
-    name = "supported-compatibility-date",
-    src = ":trimmed-supported-compatibility-date.txt",
-    base_name = "supported-compatibility-date",
+    name = "maximum-compatibility-date",
+    src = ":trimmed-maximum-compatibility-date.txt",
+    base_name = "maximum-compatibility-date",
+)
+
+wd_cc_embed(
+    name = "wasm-instantiate-shim",
+    src = "wasm-instantiate-shim.js",
+    base_name = "wasm-instantiate-shim",
 )
 
 wd_capnp_library(src = "cdp.capnp")
@@ -378,6 +398,7 @@ wd_capnp_library(src = "frankenvalue.capnp")
 wd_capnp_library(
     src = "container.capnp",
     deps = [
+        ":compatibility-date_capnp",
         "@capnp-cpp//src/capnp/compat:byte-stream_capnp",
     ],
 )
@@ -406,11 +427,14 @@ kj_test(
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
+        "@sqlite3",
     ],
 )
 
 kj_test(
     src = "promise-wrapper-test.c++",
+    # Omitting coverage because it takes a really long time executing it.
+    tags = ["no-coverage"],
     deps = [
         ":io",
         ":promise-wrapper",
@@ -461,6 +485,37 @@ wd_test(
     src = "io-context-test.wd-test",
     args = ["--experimental"],
     data = ["io-context-test.js"],
+)
+
+kj_test(
+    src = "tracked-wasm-instance-test.c++",
+    deps = [
+        ":limit-enforcer",
+    ],
+)
+
+wd_test(
+    src = "tracked-wasm-instance-js-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tracked-wasm-instance-test.js",
+        "//src/workerd/io/wasm:signal-basic.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-edge.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-overflow.wasm",
+        "//src/workerd/io/wasm:signal-bounds-check-valid.wasm",
+        "//src/workerd/io/wasm:signal-decoy-memory.wasm",
+        "//src/workerd/io/wasm:signal-externref-memory.wasm",
+        "//src/workerd/io/wasm:signal-imported-memory.wasm",
+        "//src/workerd/io/wasm:signal-memory-reclaim.wasm",
+        "//src/workerd/io/wasm:signal-no-globals.wasm",
+        "//src/workerd/io/wasm:signal-partial-exports.wasm",
+        "//src/workerd/io/wasm:signal-preinit.wasm",
+        "//src/workerd/io/wasm:signal-terminated-only.wasm",
+    ],
+    # The WebAssembly.instantiate shim is behind the WASM_SHUTDOWN_SIGNAL_SHIM autogate,
+    # so this test only works when all autogates are enabled.
+    generate_all_compat_flags_variant = False,
+    generate_default_variant = False,
 )
 
 kj_test(

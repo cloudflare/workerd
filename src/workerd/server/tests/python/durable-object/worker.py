@@ -27,6 +27,13 @@ class DurableObjectExample(DurableObject, MixinTest):
         self.storage = state.storage
         self.alarm_triggered = False
 
+        # Test blockConcurrencyWhile in the constructor with a Python async callback.
+        # This is a common pattern for initializing DO state.
+        async def init_callback():
+            await self.storage.put("initialized", True)
+
+        self.ctx.blockConcurrencyWhile(init_callback)
+
     async def fetch(self, request):
         assert isinstance(request, Request)
 
@@ -54,6 +61,23 @@ class DurableObjectExample(DurableObject, MixinTest):
 
     def mutate_dict(self, my_dict):
         my_dict["foo"] = 42
+
+    async def test_block_concurrency_while(self):
+        # Verify the constructor's blockConcurrencyWhile ran successfully
+        initialized = await self.storage.get("initialized")
+        assert initialized, f"Expected True but got {initialized}"
+
+        # Test blockConcurrencyWhile with a Python async callback that returns a value.
+        async def my_callback():
+            await self.storage.put("blocked", "yes")
+            return 42
+
+        result = await self.ctx.blockConcurrencyWhile(my_callback)
+        assert result == 42, f"Expected 42 but got {result}"
+        blocked = await self.storage.get("blocked")
+        assert blocked == "yes", f"Expected 'yes' but got {blocked}"
+
+        return True
 
     async def test_self_call(self):
         test_dict = dict()
@@ -88,6 +112,8 @@ class Default(WorkerEntrypoint):
 
         arg_resp = await obj.args_method("test")
         assert arg_resp == "value from python test"
+
+        assert await obj.test_block_concurrency_while()
 
         assert await obj.test_self_call()
 

@@ -9,8 +9,7 @@ const unitTests :Workerd.Config = (
           (name = "worker.py", pythonModule = embed "existing_dedicated_fastapi.py"),
           %PYTHON_VENDORED_MODULES%
         ],
-        compatibilityDate = "2025-11-01",
-        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "disable_python_no_global_handlers"],
       )
     ),
   ],

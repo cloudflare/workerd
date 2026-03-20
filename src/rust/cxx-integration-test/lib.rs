@@ -134,11 +134,14 @@ fn pass_shared_struct_as_mut_ref(s: &mut ffi::SharedStruct) {
 
 unsafe fn pass_shared_struct_as_const_ptr(s: *const ffi::SharedStruct) -> i32 {
     assert!(!s.is_null());
+    // SAFETY: Null check above ensures s is valid; the SharedStruct is valid for reads.
     unsafe { (*s).a + (*s).b }
 }
 
 unsafe fn pass_shared_struct_as_mut_ptr(s: *mut ffi::SharedStruct) {
+    // SAFETY: Caller guarantees s is a valid, non-null mutable pointer.
     unsafe { (*s).a = 0 };
+    // SAFETY: Caller guarantees s is a valid, non-null mutable pointer.
     unsafe { (*s).b = 0 };
 }
 
@@ -180,7 +183,9 @@ fn get_str() -> &'static str {
     "rust_str"
 }
 
+// SAFETY: UsizeCallback is only accessed from the Tokio runtime thread after being moved there.
 unsafe impl Send for ffi::UsizeCallback {}
+// SAFETY: UsizeCallback is only accessed from one thread at a time via Pin<&mut>.
 unsafe impl Sync for ffi::UsizeCallback {}
 
 fn async_immediate(callback: Pin<&'static mut ffi::UsizeCallback>) {
@@ -205,6 +210,7 @@ mod tests {
     fn asan_stack_buffer_overflow() {
         expect_signal!(Signal::SIGABRT, {
             let xs = [0, 1, 2, 3];
+            // SAFETY: Intentional out-of-bounds access to trigger ASAN detection.
             let _y = unsafe { *xs.as_ptr().offset(4) };
         });
     }

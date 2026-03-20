@@ -3,7 +3,9 @@
 #include <workerd/api/basics.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/jsg/url.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
@@ -169,7 +171,37 @@ class MessageChannel final: public jsg::Object {
   jsg::Ref<MessagePort> port2;
 };
 
+// Module that exposes MessageChannel and MessagePort for internal use by
+// built-in modules like node:worker_threads without requiring the global
+// expose_global_message_channel compat flag.
+class MessageChannelModule final: public jsg::Object {
+ public:
+  MessageChannelModule() = default;
+  MessageChannelModule(jsg::Lock&, const jsg::Url&) {}
+
+  JSG_RESOURCE_TYPE(MessageChannelModule) {
+    JSG_NESTED_TYPE(MessageChannel);
+    JSG_NESTED_TYPE(MessagePort);
+  }
+};
+
+template <class Registry>
+void registerMessageChannelModule(Registry& registry, auto featureFlags) {
+  registry.template addBuiltinModule<MessageChannelModule>(
+      "cloudflare-internal:messagechannel", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+}
+
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> getInternalMessageChannelModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+  static const auto kSpecifier = "cloudflare-internal:messagechannel"_url;
+  builder.addObject<MessageChannelModule, TypeWrapper>(kSpecifier);
+  return builder.finish();
+}
+
 }  // namespace workerd::api
 
 #define EW_MESSAGECHANNEL_ISOLATE_TYPES                                                            \
-  api::MessagePort, api::MessageChannel, api::MessagePort::PostMessageOptions
+  api::MessagePort, api::MessageChannel, api::MessagePort::PostMessageOptions,                     \
+      api::MessageChannelModule

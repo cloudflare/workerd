@@ -7,5 +7,6 @@ wd_test(
     data = ["test.js"],
     tags = [
         "requires-container-engine",
+        "requires-network",  # Accesses unix://var/run/docker.sock
     ],
 )

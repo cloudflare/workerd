@@ -71,6 +71,14 @@ struct ReadResult {
   }
 };
 
+// Result type for draining read operations. Always returns bytes, even for value streams.
+// Used by DrainingReader for optimized pipe-to operations with vectored writes.
+// This is a C++ only type - not exposed to JavaScript.
+struct DrainingReadResult {
+  kj::Array<kj::Array<kj::byte>> chunks;  // Multiple byte arrays for vectored writes
+  bool done = false;                      // True if stream is closed/closing
+};
+
 struct StreamQueuingStrategy {
   using SizeAlgorithm = uint64_t(v8::Local<v8::Value>);
 
@@ -287,12 +295,12 @@ class ReadableStreamSource {
 };
 
 struct PipeToOptions {
-  jsg::Optional<bool> preventClose;
   jsg::Optional<bool> preventAbort;
   jsg::Optional<bool> preventCancel;
+  jsg::Optional<bool> preventClose;
   jsg::Optional<jsg::Ref<AbortSignal>> signal;
 
-  JSG_STRUCT(preventClose, preventAbort, preventCancel, signal);
+  JSG_STRUCT(preventAbort, preventCancel, preventClose, signal);
   JSG_STRUCT_TS_OVERRIDE(StreamPipeOptions);
 
   // An additional, internal only property that is used to indicate
@@ -303,12 +311,19 @@ struct PipeToOptions {
 };
 
 namespace StreamStates {
-struct Closed {};
+struct Closed {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+};
 using Errored = jsg::Value;
 struct Erroring {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "erroring"_kj;
   jsg::Value reason;
 
   Erroring(jsg::Value reason): reason(kj::mv(reason)) {}
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(reason);
+  }
 };
 }  // namespace StreamStates
 
@@ -490,6 +505,23 @@ class ReadableStreamController {
   // are provided and the stream is not byte-oriented, the operation will return a rejected promise.
   virtual kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) = 0;
+
+  // Performs a draining read operation that:
+  // 1. Drains all currently buffered data from the queue
+  // 2. Pumps the controller for synchronously available data (respecting pull promise state)
+  // 3. Returns bytes even for value streams (converting ArrayBuffer/ArrayBufferView/string)
+  // 4. Has mutual exclusion with regular reads - returns rejected promise if pending regular reads
+  // 5. Returns done: true with final data when stream is closing
+  //
+  // This is a C++ only API (not exposed to JavaScript) intended for optimized pipe operations.
+  // Returns kj::none if the stream is locked in a way that prevents the read.
+  //
+  // The maxRead parameter provides a soft limit on how much data to read. Both the initial
+  // buffer drain and subsequent synchronous pump attempts stop when the total bytes read
+  // reaches maxRead (after finishing the current item). This prevents unbounded memory
+  // accumulation when a fast producer outpaces a slow consumer.
+  virtual kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(
+      jsg::Lock& js, size_t maxRead = kj::maxValue) = 0;
 
   // The pipeTo implementation fully consumes the stream by directing all of its data at the
   // destination. Controllers should try to be as efficient as possible here. For instance, if
@@ -758,13 +790,18 @@ kj::Own<WritableStreamController> newWritableStreamInternalController(IoContext&
     kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
-struct Unlocked {};
-struct Locked {};
+struct Unlocked {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "unlocked"_kj;
+};
+struct Locked {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "locked"_kj;
+};
 
 // When a reader is locked to a ReadableStream, a ReaderLock instance
 // is used internally to represent the locked state in the ReadableStreamController.
 class ReaderLocked {
  public:
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "reader-locked"_kj;
   ReaderLocked(ReadableStreamController::Reader& reader,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
@@ -817,6 +854,7 @@ class ReaderLocked {
 // is used internally to represent the locked state in the WritableStreamController.
 class WriterLocked {
  public:
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "writer-locked"_kj;
   WriterLocked(WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
@@ -881,7 +919,7 @@ void maybeResolvePromise(
 }
 
 inline void maybeResolvePromise(
-    jsg::Lock& js, kj::Maybe<typename jsg::Promise<void>::Resolver>& maybeResolver) {
+    jsg::Lock& js, kj::Maybe<jsg::Promise<void>::Resolver>& maybeResolver) {
   KJ_IF_SOME(resolver, maybeResolver) {
     resolver.resolve(js);
     maybeResolver = kj::none;

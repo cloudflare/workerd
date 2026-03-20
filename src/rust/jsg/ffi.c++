@@ -1,5 +1,6 @@
 #include "ffi.h"
 
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -10,6 +11,40 @@
 using namespace kj_rs;
 
 namespace workerd::rust::jsg {
+
+#define DEFINE_TYPED_ARRAY_NEW(name, v8_type, elem_type)                                           \
+  Local local_new_##name(Isolate* isolate, const elem_type* data, size_t length) {                 \
+    auto backingStore = v8::ArrayBuffer::NewBackingStore(isolate, length * sizeof(elem_type));     \
+    memcpy(backingStore->Data(), data, length * sizeof(elem_type));                                \
+    auto arrayBuffer = v8::ArrayBuffer::New(isolate, std::move(backingStore));                     \
+    return to_ffi(v8::v8_type::New(arrayBuffer, 0, length));                                       \
+  }
+
+#define DEFINE_TYPED_ARRAY_UNWRAP(name, v8_type, elem_type)                                        \
+  ::rust::Vec<elem_type> unwrap_##name(Isolate* isolate, Local value) {                            \
+    auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));                                         \
+    KJ_REQUIRE(v8Val->Is##v8_type());                                                              \
+    auto typed = v8Val.As<v8::v8_type>();                                                          \
+    ::rust::Vec<elem_type> result;                                                                 \
+    result.reserve(typed->Length());                                                               \
+    auto data = reinterpret_cast<elem_type*>(                                                      \
+        static_cast<uint8_t*>(typed->Buffer()->Data()) + typed->ByteOffset());                     \
+    for (size_t i = 0; i < typed->Length(); i++) {                                                 \
+      result.push_back(data[i]);                                                                   \
+    }                                                                                              \
+    return result;                                                                                 \
+  }
+
+#define DEFINE_TYPED_ARRAY_GET(name, v8_type, elem_type)                                           \
+  elem_type local_##name##_get(Isolate* isolate, const Local& array, size_t index) {               \
+    auto typed = local_as_ref_from_ffi<v8::v8_type>(array);                                        \
+    KJ_REQUIRE(index < typed->Length(), "index out of bounds");                                    \
+    auto data = reinterpret_cast<elem_type*>(                                                      \
+        static_cast<uint8_t*>(typed->Buffer()->Data()) + typed->ByteOffset());                     \
+    return data[index];                                                                            \
+  }
+
+// =============================================================================
 
 // Local<T>
 void local_drop(Local value) {
@@ -37,9 +72,24 @@ Local local_new_string(Isolate* isolate, ::rust::Str value) {
   return to_ffi(kj::mv(val));
 }
 
+Local local_new_boolean(Isolate* isolate, bool value) {
+  v8::Local<v8::Boolean> val = v8::Boolean::New(isolate, value);
+  return to_ffi(kj::mv(val));
+}
+
 Local local_new_object(Isolate* isolate) {
   v8::Local<v8::Object> object = v8::Object::New(isolate);
   return to_ffi(kj::mv(object));
+}
+
+Local local_new_null(Isolate* isolate) {
+  v8::Local<v8::Primitive> null = v8::Null(isolate);
+  return to_ffi(kj::mv(null));
+}
+
+Local local_new_undefined(Isolate* isolate) {
+  v8::Local<v8::Primitive> undefined = v8::Undefined(isolate);
+  return to_ffi(kj::mv(undefined));
 }
 
 bool local_eq(const Local& lhs, const Local& rhs) {
@@ -52,6 +102,112 @@ bool local_has_value(const Local& val) {
 
 bool local_is_string(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsString();
+}
+
+bool local_is_boolean(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBoolean();
+}
+
+bool local_is_number(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNumber();
+}
+
+bool local_is_null(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNull();
+}
+
+bool local_is_undefined(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUndefined();
+}
+
+bool local_is_null_or_undefined(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNullOrUndefined();
+}
+
+bool local_is_object(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsObject();
+}
+
+bool local_is_native_error(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsNativeError();
+}
+
+bool local_is_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsArray();
+}
+
+bool local_is_uint8_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUint8Array();
+}
+
+bool local_is_uint16_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUint16Array();
+}
+
+bool local_is_uint32_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsUint32Array();
+}
+
+bool local_is_int8_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsInt8Array();
+}
+
+bool local_is_int16_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsInt16Array();
+}
+
+bool local_is_int32_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsInt32Array();
+}
+
+bool local_is_float32_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsFloat32Array();
+}
+
+bool local_is_float64_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsFloat64Array();
+}
+
+bool local_is_bigint64_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigInt64Array();
+}
+
+bool local_is_biguint64_array(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigUint64Array();
+}
+
+bool local_is_array_buffer(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsArrayBuffer();
+}
+
+bool local_is_array_buffer_view(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsArrayBufferView();
+}
+
+bool local_is_function(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsFunction();
+}
+
+::rust::String local_type_of(Isolate* isolate, const Local& val) {
+  auto v8Val = local_as_ref_from_ffi<v8::Value>(val);
+  v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
+  v8::String::Utf8Value utf8(isolate, typeStr);
+  return ::rust::String(*utf8, utf8.length());
+}
+
+// Local<Function>
+Local local_function_call(
+    Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
+  auto context = isolate->GetCurrentContext();
+  auto fn = local_as_ref_from_ffi<v8::Function>(function);
+  auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
+
+  v8::LocalVector<v8::Value> v8Args(isolate, args.size());
+  for (size_t i = 0; i < args.size(); i++) {
+    v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
+  }
+
+  return to_ffi(::workerd::jsg::check(fn->Call(context, receiver, v8Args.size(), v8Args.data())));
 }
 
 // Local<Object>
@@ -83,6 +239,39 @@ kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object
   return to_ffi(kj::mv(result));
 }
 
+// Local<Array>
+Local local_new_array(Isolate* isolate, size_t length) {
+  return to_ffi(v8::Array::New(isolate, length));
+}
+
+uint32_t local_array_length(Isolate* isolate, const Local& array) {
+  return local_as_ref_from_ffi<v8::Array>(array)->Length();
+}
+
+Local local_array_get(Isolate* isolate, const Local& array, uint32_t index) {
+  auto context = isolate->GetCurrentContext();
+  auto v8Array = local_as_ref_from_ffi<v8::Array>(array);
+  return to_ffi(::workerd::jsg::check(v8Array->Get(context, index)));
+}
+
+void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value) {
+  auto context = isolate->GetCurrentContext();
+  auto v8Array = local_as_ref_from_ffi<v8::Array>(array);
+  ::workerd::jsg::check(v8Array->Set(context, index, local_from_ffi<v8::Value>(kj::mv(value))));
+}
+
+// TypedArray creation functions
+DEFINE_TYPED_ARRAY_NEW(uint8_array, Uint8Array, uint8_t)
+DEFINE_TYPED_ARRAY_NEW(uint16_array, Uint16Array, uint16_t)
+DEFINE_TYPED_ARRAY_NEW(uint32_array, Uint32Array, uint32_t)
+DEFINE_TYPED_ARRAY_NEW(int8_array, Int8Array, int8_t)
+DEFINE_TYPED_ARRAY_NEW(int16_array, Int16Array, int16_t)
+DEFINE_TYPED_ARRAY_NEW(int32_array, Int32Array, int32_t)
+DEFINE_TYPED_ARRAY_NEW(float32_array, Float32Array, float)
+DEFINE_TYPED_ARRAY_NEW(float64_array, Float64Array, double)
+DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
+DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
+
 // Wrappers
 Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_t drop_callback) {
   auto self = reinterpret_cast<void*>(resource);
@@ -111,23 +300,95 @@ Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_
   return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
 }
 
+bool unwrap_boolean(Isolate* isolate, Local value) {
+  return local_from_ffi<v8::Value>(kj::mv(value))->ToBoolean(isolate)->Value();
+}
+
+double unwrap_number(Isolate* isolate, Local value) {
+  return ::workerd::jsg::check(
+      local_from_ffi<v8::Value>(kj::mv(value))->ToNumber(isolate->GetCurrentContext()))
+      ->Value();
+}
+
 size_t unwrap_resource(Isolate* isolate, Local value) {
   auto v8_obj = local_from_ffi<v8::Object>(kj::mv(value));
   KJ_ASSERT(v8_obj->GetAlignedPointerFromInternalField(
-                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX) ==
+                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+                static_cast<v8::EmbedderDataTypeTag>(
+                    ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX)) ==
       const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG));
   return reinterpret_cast<size_t>(v8_obj->GetAlignedPointerFromInternalField(
-      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 }
 
-// Global<T>
+// TypedArray unwrap functions
+DEFINE_TYPED_ARRAY_UNWRAP(uint8_array, Uint8Array, uint8_t)
+DEFINE_TYPED_ARRAY_UNWRAP(uint16_array, Uint16Array, uint16_t)
+DEFINE_TYPED_ARRAY_UNWRAP(uint32_array, Uint32Array, uint32_t)
+DEFINE_TYPED_ARRAY_UNWRAP(int8_array, Int8Array, int8_t)
+DEFINE_TYPED_ARRAY_UNWRAP(int16_array, Int16Array, int16_t)
+DEFINE_TYPED_ARRAY_UNWRAP(int32_array, Int32Array, int32_t)
+DEFINE_TYPED_ARRAY_UNWRAP(float32_array, Float32Array, float)
+DEFINE_TYPED_ARRAY_UNWRAP(float64_array, Float64Array, double)
+DEFINE_TYPED_ARRAY_UNWRAP(bigint64_array, BigInt64Array, int64_t)
+DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 
+// Uses V8's Array::Iterate() which is faster than indexed access.
+// Returns Global handles because Local handles get reused during iteration.
+::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value) {
+  auto context = isolate->GetCurrentContext();
+  auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
+
+  KJ_REQUIRE(v8Val->IsArray(), "Value must be an array");
+  auto arr = v8Val.As<v8::Array>();
+
+  struct Data {
+    Isolate* isolate;
+    ::rust::Vec<Global>* result;
+  };
+
+  ::rust::Vec<Global> result;
+  Data data{isolate, &result};
+
+  auto iterateResult = arr->Iterate(context,
+      [](uint32_t index, v8::Local<v8::Value> element,
+          void* userData) -> v8::Array::CallbackResult {
+    auto* d = static_cast<Data*>(userData);
+    d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
+    return v8::Array::CallbackResult::kContinue;
+  },
+      &data);
+
+  KJ_REQUIRE(iterateResult.IsJust(), "Iteration failed");
+  return result;
+}
+
+// Local<TypedArray>
+size_t local_typed_array_length(Isolate* isolate, const Local& array) {
+  return local_as_ref_from_ffi<v8::TypedArray>(array)->Length();
+}
+
+// TypedArray element getter functions
+DEFINE_TYPED_ARRAY_GET(uint8_array, Uint8Array, uint8_t)
+DEFINE_TYPED_ARRAY_GET(uint16_array, Uint16Array, uint16_t)
+DEFINE_TYPED_ARRAY_GET(uint32_array, Uint32Array, uint32_t)
+DEFINE_TYPED_ARRAY_GET(int8_array, Int8Array, int8_t)
+DEFINE_TYPED_ARRAY_GET(int16_array, Int16Array, int16_t)
+DEFINE_TYPED_ARRAY_GET(int32_array, Int32Array, int32_t)
+DEFINE_TYPED_ARRAY_GET(float32_array, Float32Array, float)
+DEFINE_TYPED_ARRAY_GET(float64_array, Float64Array, double)
+DEFINE_TYPED_ARRAY_GET(bigint64_array, BigInt64Array, int64_t)
+DEFINE_TYPED_ARRAY_GET(biguint64_array, BigUint64Array, uint64_t)
+
+// Global<T>
 void global_drop(Global value) {
   global_from_ffi<v8::Value>(kj::mv(value));
 }
 
-Global global_clone(const Global& value) {
-  return Global{.ptr = value.ptr};
+Global global_clone(Isolate* isolate, const Global& value) {
+  auto& original = global_as_ref_from_ffi<v8::Value>(value);
+  return to_ffi(v8::Global<v8::Value>(isolate, original));
 }
 
 Local global_to_local(Isolate* isolate, const Global& value) {
@@ -146,7 +407,7 @@ void global_make_weak(Isolate* isolate, Global* value, size_t data, WeakCallback
 }
 
 // FunctionCallbackInfo
-v8::Isolate* fci_get_isolate(FunctionCallbackInfo* args) {
+Isolate* fci_get_isolate(FunctionCallbackInfo* args) {
   return args->GetIsolate();
 }
 
@@ -166,7 +427,7 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
   args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
-Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor) {
+Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor) {
   // Construct lazily.
   v8::EscapableHandleScope scope(isolate);
 
@@ -239,14 +500,38 @@ Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
     prototype->Set(name, functionTemplate);
   }
 
+  for (const auto& constant: descriptor.static_constants) {
+    auto name = ::workerd::jsg::check(v8::String::NewFromUtf8(
+        isolate, constant.name.data(), v8::NewStringType::kInternalized, constant.name.size()));
+    auto value = v8::Number::New(isolate, constant.value);
+
+    // Per Web IDL, constants are {writable: false, enumerable: true, configurable: false}.
+    auto attrs = ::workerd::jsg::getSpecCompliantPropertyAttributes(isolate)
+        ? static_cast<v8::PropertyAttribute>(
+              v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontDelete)
+        : v8::PropertyAttribute::ReadOnly;
+    constructor->Set(name, value, attrs);
+    prototype->Set(name, value, attrs);
+  }
+
   auto result = scope.Escape(constructor);
   return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
 }
 
+// FunctionTemplate
+Local function_template_get_function(Isolate* isolate, const Global& tmpl) {
+  auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
+  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
+  auto function = ::workerd::jsg::check(local_tmpl->GetFunction(isolate->GetCurrentContext()));
+  return to_ffi(kj::mv(function));
+}
+
+// Realm
 Realm* realm_from_isolate(Isolate* isolate) {
-  auto realm = ::workerd::jsg::getAlignedPointerFromEmbedderData<Realm>(
-      isolate->GetCurrentContext(), ::workerd::jsg::ContextPointerSlot::RUST_REALM);
-  return &KJ_ASSERT_NONNULL(realm);
+  auto* realm =
+      static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
+  KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
+  return realm;
 }
 
 // Errors
@@ -262,10 +547,10 @@ Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::S
       return to_ffi(v8::Exception::SyntaxError(message));
     case ExceptionType::TypeError:
       return to_ffi(v8::Exception::TypeError(message));
-    case ExceptionType::Error:
-      return to_ffi(v8::Exception::Error(message));
     default:
-      KJ_UNREACHABLE;
+      // DOM-style exceptions (OperationError, DataError, etc.) and Error fall back to Error.
+      // TODO(soon): Use js.domException() to create proper DOMException objects.
+      return to_ffi(v8::Exception::Error(message));
   }
 }
 

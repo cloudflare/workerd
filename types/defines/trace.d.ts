@@ -140,6 +140,17 @@ interface Log {
   readonly message: object;
 }
 
+interface DroppedEventsDiagnostic {
+  readonly diagnosticsType: "droppedEvents";
+  readonly count: number;
+}
+
+interface StreamDiagnostic {
+  readonly type: 'streamDiagnostic';
+  // To add new diagnostic types, define a new interface and add it to this union type.
+  readonly diagnostic: DroppedEventsDiagnostic;
+}
+
 // This marks the worker handler return information.
 // This is separate from Outcome because the worker invocation can live for a long time after
 // returning. For example - Websockets that return an http upgrade response but then continue
@@ -167,6 +178,7 @@ type EventType =
   | DiagnosticChannelEvent
   | Exception
   | Log
+  | StreamDiagnostic
   | Return
   | Attributes;
 
@@ -183,7 +195,7 @@ interface SpanContext {
   // For Hibernate and Mark this would be the span under which they were emitted.
   // spanId is not set ONLY if:
   //  1. This is an Onset event
-  //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+  //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
   readonly spanId?: string;
 }
 

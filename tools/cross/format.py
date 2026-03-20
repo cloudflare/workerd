@@ -2,13 +2,14 @@
 
 import json
 import logging
+import os
 import subprocess
 from argparse import ArgumentParser, Namespace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from sys import exit
-from typing import Optional
+from typing import Callable, Optional
 
 # This file is symlinked into the internal repo as tools/format.py, so the root may be two levels up
 # or three.
@@ -87,37 +88,56 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
     return any(file.match(glob) for glob in globs)
 
 
-def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProcess:
-    # Use the formatter executable from bazel-bin
+def _ensure_bazel_tool(tool_name: str, build_target: str | None = None) -> Path:
+    """Ensure a bazel-built formatter tool exists and return its path."""
     tool_suffix = Path("build") / "deps" / "formatters" / tool_name
-    internal_tool_path = BAZEL_BIN / "external" / "workerd" / tool_suffix
+    internal_tool_path = BAZEL_BIN / "external" / "+dep_workerd+workerd" / tool_suffix
     workerd_tool_path = BAZEL_BIN / tool_suffix
 
     if internal_tool_path.exists():
-        return subprocess.run([internal_tool_path, *args], cwd=ROOT)
+        return internal_tool_path
     if workerd_tool_path.exists():
-        return subprocess.run([workerd_tool_path, *args], cwd=ROOT)
+        return workerd_tool_path
 
-    # Use the new formatter targets in build/deps/formatters
-    build_target = f"@workerd//build/deps/formatters:{tool_name}@rule"
+    # Tool not cached; build it once.
+    if build_target is None:
+        build_target = f"@workerd//build/deps/formatters:{tool_name}@rule"
     download_result = subprocess.run(["bazel", "build", build_target])
     if download_result.returncode != 0:
-        logging.error(f"Failed to download {tool_name}")
-        return download_result
+        raise RuntimeError(f"Failed to download {tool_name}")
 
     if internal_tool_path.exists():
-        return subprocess.run([internal_tool_path, *args], cwd=ROOT)
-    else:
-        return subprocess.run([workerd_tool_path, *args], cwd=ROOT)
+        return internal_tool_path
+    return workerd_tool_path
+
+
+def run_bazel_tool(
+    tool_name: str, args: list[str], build_target: str | None = None
+) -> subprocess.CompletedProcess:
+    tool_path = _ensure_bazel_tool(tool_name, build_target)
+    return subprocess.run([tool_path, *args], cwd=ROOT)
+
+
+def _run_parallel(
+    run_fn: Callable, files: list[Path], cmd: list, max_workers: int = 16
+) -> bool:
+    """Split files across parallel invocations of run_fn(cmd + chunk)."""
+    n_workers = min(os.cpu_count() or 1, len(files), max_workers)
+    if n_workers <= 1:
+        return run_fn(cmd + files).returncode == 0
+
+    chunks = [files[i::n_workers] for i in range(n_workers)]
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        results = list(pool.map(lambda chunk: run_fn(cmd + chunk), chunks))
+    return all(r.returncode == 0 for r in results)
 
 
 def clang_format(files: list[Path], check: bool = False) -> bool:
-    if check:
-        cmd = ["--dry-run", "--Werror"]
-    else:
-        cmd = ["-i"]
-    result = run_bazel_tool("clang-format", cmd + files)
-    return result.returncode == 0
+    cmd = ["--dry-run", "--Werror"] if check else ["-i"]
+    tool = _ensure_bazel_tool("clang-format")
+    return _run_parallel(
+        lambda args: subprocess.run([tool, *args], cwd=ROOT), files, cmd
+    )
 
 
 def prettier(files: list[Path], check: bool = False) -> bool:
@@ -126,13 +146,24 @@ def prettier(files: list[Path], check: bool = False) -> bool:
     if not PRETTIER.exists():
         subprocess.run(["bazel", "build", "//:node_modules/prettier"])
     cmd = [PRETTIER, "--log-level=warn", "--check" if check else "--write"]
-    result = subprocess.run(cmd + files, cwd=ROOT)
-    return result.returncode == 0
+    return _run_parallel(
+        lambda args: subprocess.run(args, cwd=ROOT), files, cmd, max_workers=8
+    )
 
 
 def buildifier(files: list[Path], check: bool = False) -> bool:
     cmd = ["--mode=check" if check else "--mode=fix"]
     result = run_bazel_tool("buildifier", cmd + files)
+    return result.returncode == 0
+
+
+def rustfmt(files: list[Path], check: bool = False) -> bool:
+    if not files:
+        return True
+    cmd = ["--edition", "2024"]
+    if check:
+        cmd.append("--check")
+    result = run_bazel_tool("rustfmt", cmd + files)
     return result.returncode == 0
 
 
@@ -201,6 +232,7 @@ FORMATTERS = {
     "prettier": prettier,
     "ruff": ruff,
     "buildifier": buildifier,
+    "rustfmt": rustfmt,
 }
 
 
@@ -235,6 +267,20 @@ def main() -> None:
 
     with (Path(__file__).parent / "format.json").open() as fp:
         configs = json.load(fp, object_hook=lambda o: FormatConfig(**o))
+
+    # Ensure all required tools are downloaded before running formatters in
+    # parallel.  Otherwise a slow `bazel build` for a missing tool races with
+    # the other formatters and its output gets interleaved.
+    needed_formatters = set()
+    for config in configs:
+        matched = filter_files_by_globs(
+            files, Path(config.directory), config.globs, config.excludes
+        )
+        if matched:
+            needed_formatters.add(config.formatter)
+    for name in needed_formatters:
+        if name in ("clang-format", "buildifier", "ruff", "rustfmt"):
+            _ensure_bazel_tool(name)
 
     all_ok = True
 

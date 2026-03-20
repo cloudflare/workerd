@@ -1,6 +1,27 @@
-import { DurableObject } from 'cloudflare:workers';
+import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import assert from 'node:assert';
 import { scheduler } from 'node:timers/promises';
+
+// 5s timeout for some of the requests going to the container.
+// We can get to have a stack trace with an
+// abort signal.
+const DEFAULT_TIMEOUT_DURATION = 10_000;
+
+// Use a unique DO name per test invocation because different test flavors may
+// run concurrently, and this avoids them accidentally sharing the same object.
+function getRandomDurableObjectName(name) {
+  return `${name}-${crypto.randomUUID()}`;
+}
+
+// **IMPORTANT NOTE**
+//
+// When writing a test, don't forget to call waitUntilContainerIsHealthy
+// before testing the behaviour with your container.
+//
+// Don't forget to call monitor() after calling start(), as there
+// is an issue with not calling monitor() in Durable Objects where
+// we might lose track of the container lifetime.
+//
 
 export class DurableObjectExample extends DurableObject {
   async testExitCode() {
@@ -12,21 +33,67 @@ export class DurableObjectExample extends DurableObject {
     }
     assert.strictEqual(container.running, false);
 
-    // Start container with valid configuration
-    await container.start({
-      entrypoint: ['node', 'nonexistant.js'],
-    });
+    // Start container with invalid entrypoint
+    {
+      container.start({
+        entrypoint: ['node', 'nonexistant.js'],
+      });
 
-    let exitCode = undefined;
-    await container.monitor().catch((err) => {
-      exitCode = err.exitCode;
-    });
+      let exitCode = undefined;
+      await container.monitor().catch((err) => {
+        exitCode = err.exitCode;
+      });
 
-    assert.strictEqual(typeof exitCode, 'number');
-    assert.notEqual(0, exitCode);
+      assert.strictEqual(typeof exitCode, 'number');
+      assert.notEqual(0, exitCode);
+    }
+
+    // Start container with valid entrypoint and stop it
+    {
+      container.start();
+
+      await scheduler.wait(500);
+
+      let exitCode = undefined;
+      const monitor = container.monitor().catch((err) => {
+        exitCode = err.exitCode;
+      });
+      await container.destroy();
+      await monitor;
+
+      assert.strictEqual(typeof exitCode, 'number');
+      assert.equal(137, exitCode);
+    }
   }
 
   async testBasics() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    // Start container with valid configuration
+    container.start({
+      env: { A: 'B', C: 'D', L: 'F' },
+      enableInternet: true,
+    });
+
+    const monitor = container.monitor().catch((_err) => {});
+
+    await this.waitUntilContainerIsHealthy();
+
+    await container.destroy();
+
+    await monitor;
+    assert.strictEqual(container.running, false);
+  }
+
+  async testSetInactivityTimeout(timeout) {
     const container = this.ctx.container;
     if (container.running) {
       let monitor = container.monitor().catch((_err) => {});
@@ -35,74 +102,41 @@ export class DurableObjectExample extends DurableObject {
     }
     assert.strictEqual(container.running, false);
 
-    // Start container with valid configuration
-    await container.start({
-      env: { A: 'B', C: 'D', L: 'F' },
-      enableInternet: true,
-    });
-
-    const monitor = container.monitor().catch((_err) => {});
-
-    // Test HTTP requests to container
-    {
-      let resp;
-      // The retry count here is arbitrary. Can increase it if necessary.
-      const maxRetries = 6;
-      for (let i = 1; i <= maxRetries; i++) {
-        try {
-          resp = await container
-            .getTcpPort(8080)
-            .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
-          break;
-        } catch (e) {
-          if (!e.message.includes('container port not found')) {
-            throw e;
-          }
-          console.info(
-            `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
-          );
-          console.info(e);
-          if (i === maxRetries) {
-            console.error(
-              `Failed to connect to container ${container.id}. Retried ${i} times`
-            );
-            throw e;
-          }
-          await scheduler.wait(1000);
-        }
-      }
-
-      assert.equal(resp.status, 200);
-      assert.equal(resp.statusText, 'OK');
-      assert.strictEqual(await resp.text(), 'Hello World!');
-    }
-    await container.destroy();
-    await monitor;
-    assert.strictEqual(container.running, false);
-  }
-
-  async leaveRunning() {
-    // Start container and leave it running
-    const container = this.ctx.container;
-    if (!container.running) {
-      await container.start({
-        entrypoint: ['leave-running'],
-      });
-    }
+    container.start();
 
     assert.strictEqual(container.running, true);
-  }
 
-  async checkRunning() {
-    // Check container was started using leaveRunning()
-    const container = this.ctx.container;
+    // Wait for container to be running
+    await scheduler.wait(500);
 
-    // Let's guard in case the test assumptions are wrong.
-    if (!container.running) {
-      return;
+    try {
+      await container.setInactivityTimeout(0);
+    } catch (err) {
+      assert.strictEqual(err.name, 'TypeError');
+      assert.match(
+        err.message,
+        /setInactivityTimeout\(\) cannot be called with a durationMs <= 0/
+      );
     }
 
-    await container.destroy();
+    if (timeout > 0) {
+      await container.setInactivityTimeout(timeout);
+    }
+  }
+
+  async start() {
+    assert.strictEqual(this.ctx.container.running, false);
+    this.ctx.container.start();
+    assert.strictEqual(this.ctx.container.running, true);
+
+    // Wait for container to be running
+    await scheduler.wait(500);
+  }
+
+  // Assert that the container is running
+  async expectRunning(running) {
+    assert.strictEqual(this.ctx.container.running, running);
+    await this.ctx.container.destroy();
   }
 
   async abort() {
@@ -116,7 +150,6 @@ export class DurableObjectExample extends DurableObject {
 
     const aborted = await this.ctx.storage.get('aborted');
     assert.strictEqual(!!this.ctx.container, true);
-    // assert.strictEqual(this.ctx.container.running, true);
     if (aborted) {
       await this.ctx.storage.put('aborted-confirmed', true);
     }
@@ -130,7 +163,7 @@ export class DurableObjectExample extends DurableObject {
 
   async startAlarm(start, ms) {
     if (start && !this.ctx.container.running) {
-      await this.ctx.container.start();
+      this.ctx.container.start();
     }
     await this.ctx.storage.setAlarm(Date.now() + ms);
   }
@@ -148,44 +181,23 @@ export class DurableObjectExample extends DurableObject {
     const { container } = this.ctx;
 
     if (!container.running) {
-      await container.start({
+      container.start({
         env: { WS_ENABLED: 'true' },
         enableInternet: true,
       });
     }
 
-    // Wait for container to be ready with retry loop
-    let res;
-    // The retry count here is arbitrary. Can increase it if necessary.
-    const maxRetries = 6;
-    for (let i = 1; i <= maxRetries; i++) {
-      try {
-        res = await container.getTcpPort(8080).fetch('http://foo/ws', {
-          headers: {
-            Upgrade: 'websocket',
-            Connection: 'Upgrade',
-            'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
-            'Sec-WebSocket-Version': '13',
-          },
-        });
-        break;
-      } catch (e) {
-        if (!e.message.includes('container port not found')) {
-          throw e;
-        }
-        console.info(
-          `Retrying getTcpPort(8080) for the ${i} time due to an error ${e.message}`
-        );
-        console.info(e);
-        if (i === maxRetries) {
-          console.error(
-            `Failed to connect to container for WebSocket ${container.id}. Retried ${i} times`
-          );
-          throw e;
-        }
-        await scheduler.wait(1000);
-      }
-    }
+    await this.waitUntilContainerIsHealthy();
+
+    const res = await container.getTcpPort(8080).fetch('http://foo/ws', {
+      headers: {
+        Upgrade: 'websocket',
+        Connection: 'Upgrade',
+        'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
+        'Sec-WebSocket-Version': '13',
+      },
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+    });
 
     // Should get WebSocket upgrade response
     assert.strictEqual(res.status, 101);
@@ -219,6 +231,506 @@ export class DurableObjectExample extends DurableObject {
   getStatus() {
     return this.ctx.container.running;
   }
+
+  async waitUntilContainerIsHealthy() {
+    const container = this.ctx.container;
+    {
+      let resp;
+      // The retry count here is arbitrary. Can increase it if necessary.
+      const maxRetries = 15;
+      for (let i = 1; i <= maxRetries; i++) {
+        try {
+          resp = await container.getTcpPort(8080).fetch('http://foo/bar/baz', {
+            method: 'POST',
+            body: 'hello',
+            signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+          });
+          break;
+        } catch (e) {
+          if (!e.message.includes('Container is not listening to port 8080')) {
+            console.error(
+              'Error querying getTcpPort().fetch() that is not related to the container not listening yet',
+              e.message
+            );
+
+            throw e;
+          }
+
+          if (i === maxRetries) {
+            console.error(
+              `Failed to connect to container ${container.id}. Retried ${i} times`
+            );
+            throw e;
+          }
+
+          await scheduler.wait(500);
+        }
+      }
+
+      assert.equal(resp.status, 200);
+      assert.equal(resp.statusText, 'OK');
+      assert.strictEqual(await resp.text(), 'Hello World!');
+    }
+  }
+
+  async fetchIntercept(host) {
+    return await this.ctx.container
+      .getTcpPort(8080)
+      .fetch('http://foo/intercept', {
+        headers: { 'x-host': host },
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+  }
+
+  async expectIntercept(host, expectedStatus, expectedBody) {
+    const response = await this.fetchIntercept(host);
+    assert.equal(response.status, expectedStatus);
+    assert.equal(await response.text(), expectedBody);
+  }
+
+  async testPortNotListening() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start();
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    await assert.rejects(
+      container.getTcpPort(8081).fetch('http://foo/bar', {
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      }),
+      /Container is not listening to port 8081/
+    );
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testPidNamespace() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({
+      enableInternet: true,
+    });
+
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const resp = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/pid-namespace', {
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+
+    assert.equal(resp.status, 200);
+    const data = await resp.json();
+
+    await container.destroy();
+    await monitor;
+    assert.strictEqual(container.running, false);
+
+    return data;
+  }
+
+  async testSetEgressHttpWithInternet() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    container.start({ enableInternet: true });
+
+    await this.waitUntilContainerIsHealthy();
+
+    await container.interceptOutboundHttp(
+      'googlefakedomain.com',
+      this.ctx.exports.TestService({ props: { id: 2 } })
+    );
+
+    await this.expectIntercept(
+      'googlefakedomain.com',
+      200,
+      'hello binding: 2 http://googlefakedomain.com/'
+    );
+
+    await this.expectIntercept(
+      'googlefakedomainother.com',
+      500,
+      'googlefakedomainother.com fetch failed'
+    );
+
+    await container.interceptAllOutboundHttp(
+      this.ctx.exports.TestService({ props: { id: 5 } })
+    );
+
+    await this.expectIntercept(
+      'google.com',
+      200,
+      'hello binding: 5 http://google.com/'
+    );
+  }
+
+  async testSetEgressHttpNoInternet() {
+    const container = this.ctx.container;
+
+    if (!container.running) container.start();
+
+    // wait for container to be available
+    await this.waitUntilContainerIsHealthy();
+
+    await container.interceptOutboundHttp(
+      'google.com',
+      this.ctx.exports.TestService({ props: { id: 2 } })
+    );
+
+    await this.expectIntercept(
+      'google.com',
+      200,
+      'hello binding: 2 http://google.com/'
+    );
+
+    // This should fail as there is no hostname that matches it.
+    await this.expectIntercept('google2.com', 500, 'google2.com fetch failed');
+
+    await container.interceptOutboundHttp(
+      'google2.com',
+      this.ctx.exports.TestService({ props: { id: 4 } })
+    );
+
+    await this.expectIntercept(
+      'google.com',
+      200,
+      'hello binding: 2 http://google.com/'
+    );
+    await this.expectIntercept(
+      'google2.com',
+      200,
+      'hello binding: 4 http://google2.com/'
+    );
+
+    // From now on, all hostnames resolve to Workerd.
+    await container.interceptAllOutboundHttp(
+      this.ctx.exports.TestService({ props: { id: 6 } })
+    );
+
+    await this.expectIntercept(
+      'google.com',
+      200,
+      'hello binding: 2 http://google.com/'
+    );
+
+    await this.expectIntercept(
+      'google2.com',
+      200,
+      'hello binding: 4 http://google2.com/'
+    );
+
+    await this.expectIntercept(
+      'google3.com',
+      200,
+      'hello binding: 6 http://google3.com/'
+    );
+
+    await this.expectIntercept(
+      '1.1.1.1',
+      200,
+      'hello binding: 6 http://1.1.1.1/'
+    );
+
+    await this.expectIntercept('1.1.1.1:90', 500, '1.1.1.1:90 fetch failed');
+    await this.expectIntercept(
+      'google.com:9000',
+      500,
+      'google.com:9000 fetch failed'
+    );
+  }
+
+  async testSetEgressHttp() {
+    const container = this.ctx.container;
+
+    // Set up egress TCP mapping to route requests to the binding
+    // We can configure this even before the container starts.
+    await container.interceptOutboundHttp(
+      '1.2.3.4',
+      this.ctx.exports.TestService({ props: { id: 1234 } })
+    );
+
+    if (!container.running) container.start();
+
+    // Keep container alive after abort();
+    container.monitor().catch((err) => {
+      console.error('Container exited with an error:', err.message);
+    });
+
+    // wait for container to be available
+    await this.waitUntilContainerIsHealthy();
+
+    // Set up egress TCP mapping to route requests to the binding
+    // This registers the binding's channel token with the container runtime
+    await container.interceptOutboundHttp(
+      '11.0.0.1:9999',
+      this.ctx.exports.TestService({ props: { id: 1 } })
+    );
+
+    await container.interceptOutboundHttp(
+      '11.0.0.2:9999',
+      this.ctx.exports.TestService({ props: { id: 2 } })
+    );
+
+    // we catch all http requests to port 80
+    await container.interceptAllOutboundHttp(
+      this.ctx.exports.TestService({ props: { id: 3 } })
+    );
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '1.2.3.4:80' },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 1234 http://1.2.3.4/'
+      );
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.1:9999' },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 1 http://11.0.0.1:9999/'
+      );
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.2:9999' },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 2 http://11.0.0.2:9999/'
+      );
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '15.0.0.2:80' },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 3 http://15.0.0.2/');
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '[111::]:80' },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), 'hello binding: 3 http://[111::]/');
+    }
+
+    {
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': 'google.com/hello/world' },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 3 http://google.com/hello/world'
+      );
+    }
+
+    // test we can set another TestService
+    await container.interceptAllOutboundHttp(
+      this.ctx.exports.TestService({ props: { id: 1212 } })
+    );
+
+    {
+      // We preserved the order...
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '11.0.0.2:9999' },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 2 http://11.0.0.2:9999/'
+      );
+    }
+
+    {
+      // and we updated the id, even for existing connections
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '15.0.0.2:80' },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 1212 http://15.0.0.2/'
+      );
+    }
+
+    {
+      // and we updated the id for new connections
+      const response = await container
+        .getTcpPort(8080)
+        .fetch('http://foo/intercept', {
+          headers: { 'x-host': '15.0.0.55:80' },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+        });
+      assert.equal(response.status, 200);
+      assert.equal(
+        await response.text(),
+        'hello binding: 1212 http://15.0.0.55/'
+      );
+    }
+  }
+
+  async testInterceptWebSocket() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+    // Set up egress mapping to route WebSocket requests to the binding
+    await container.interceptOutboundHttp(
+      '11.0.0.1:9999',
+      this.ctx.exports.TestService({ props: { id: 42 } })
+    );
+
+    // Start container with WebSocket proxy mode enabled
+    container.start({
+      env: { WS_ENABLED: 'true', WS_PROXY_TARGET: '11.0.0.1:9999' },
+    });
+
+    container.monitor().catch((_err) => {});
+
+    // Wait for container to be available
+    await this.waitUntilContainerIsHealthy();
+
+    assert.strictEqual(container.running, true);
+
+    // Connect to container's /ws endpoint which proxies to the intercepted address
+    // Flow: DO -> container:8080/ws -> container connects to 11.0.0.1:9999/ws
+    //       -> sidecar intercepts -> workerd -> TestService worker binding
+    const res = await container.getTcpPort(8080).fetch('http://foo/ws', {
+      headers: {
+        Upgrade: 'websocket',
+        Connection: 'Upgrade',
+        'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
+        'Sec-WebSocket-Version': '13',
+      },
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+    });
+
+    // Should get WebSocket upgrade response
+    assert.strictEqual(res.status, 101);
+    assert.strictEqual(res.headers.get('upgrade'), 'websocket');
+    assert.strictEqual(!!res.webSocket, true);
+
+    const ws = res.webSocket;
+    ws.binaryType = 'arraybuffer';
+    ws.accept();
+
+    // Listen for response
+    const { promise, resolve, reject } = Promise.withResolvers();
+
+    ws.addEventListener(
+      'message',
+      (event) => {
+        resolve(event.data);
+      },
+      { once: true }
+    );
+
+    const timeout = setTimeout(() => {
+      reject(new Error('Websocket message not received within 5 seconds'));
+    }, 5_000);
+
+    // Send a test message - should go through the whole chain and come back
+    ws.send('Hello through intercept!');
+
+    // Should receive response from TestService binding with id 42
+    const response = new TextDecoder().decode(await promise);
+    clearTimeout(timeout);
+    assert.strictEqual(response, 'Binding 42: Hello through intercept!');
+
+    ws.close();
+    await container.destroy();
+  }
+}
+
+export class TestService extends WorkerEntrypoint {
+  fetch(request) {
+    // Check if this is a WebSocket upgrade request
+    const upgradeHeader = request.headers.get('Upgrade');
+    if (upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') {
+      // Handle WebSocket upgrade
+      const [client, server] = Object.values(new WebSocketPair());
+
+      server.binaryType = 'arraybuffer';
+      server.accept();
+
+      server.addEventListener('message', (event) => {
+        // Echo back with binding id prefix
+        server.send(
+          `Binding ${this.ctx.props.id}: ${new TextDecoder().decode(event.data)}`
+        );
+      });
+
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+      });
+    }
+
+    // Regular HTTP request
+    return new Response(
+      'hello binding: ' + this.ctx.props.id + ' ' + request.url
+    );
+  }
 }
 
 export class DurableObjectExample2 extends DurableObjectExample {}
@@ -228,7 +740,7 @@ export const testStatus = {
   async test(_ctrl, env) {
     for (const CONTAINER of [env.MY_CONTAINER, env.MY_DUPLICATE_CONTAINER]) {
       for (const name of ['testStatus', 'testStatus2']) {
-        const id = CONTAINER.idFromName(name);
+        const id = CONTAINER.idFromName(getRandomDurableObjectName(name));
         const stub = CONTAINER.get(id);
         assert.strictEqual(await stub.getStatus(), false);
       }
@@ -240,7 +752,7 @@ export const testStatus = {
 export const testBasics = {
   async test(_ctrl, env) {
     for (const CONTAINER of [env.MY_CONTAINER, env.MY_DUPLICATE_CONTAINER]) {
-      const id = CONTAINER.idFromName('testBasics');
+      const id = CONTAINER.idFromName(getRandomDurableObjectName('testBasics'));
       const stub = CONTAINER.get(id);
       await stub.testBasics();
     }
@@ -250,46 +762,43 @@ export const testBasics = {
 // Test exit code monitor functionality
 export const testExitCode = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName('testExitCode');
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testExitCode')
+    );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testExitCode();
-  },
-};
-
-// Test container persistence across durable object instances
-export const testAlreadyRunning = {
-  async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName('testAlreadyRunning');
-    let stub = env.MY_CONTAINER.get(id);
-
-    await stub.leaveRunning();
-
-    await assert.rejects(() => stub.abort(), {
-      name: 'Error',
-      message: 'Application called abort() to reset Durable Object.',
-    });
-
-    // Recreate stub to get a new instance
-    stub = env.MY_CONTAINER.get(id);
-    await stub.checkRunning();
   },
 };
 
 // Test WebSocket functionality
 export const testWebSockets = {
   async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName('testWebsockets');
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testWebsockets')
+    );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testWs();
   },
 };
 
-// // Test alarm functionality with containers
+export const testPortNotListening = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testPortNotListening')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testPortNotListening();
+  },
+};
+
+// Test alarm functionality with containers
 export const testAlarm = {
   async test(_ctrl, env) {
     // Test that we can recover the use_containers flag correctly in setAlarm
     // after a DO has been evicted
-    const id = env.MY_CONTAINER.idFromName('testAlarm');
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testAlarm')
+    );
     let stub = env.MY_CONTAINER.get(id);
 
     // Start immediate alarm
@@ -302,6 +811,8 @@ export const testAlarm = {
       retries++;
     }
 
+    await scheduler.wait(50);
+
     // Set alarm for future and abort
     await stub.startAlarm(false, 1000);
 
@@ -311,10 +822,155 @@ export const testAlarm = {
       // Expected to throw
     }
 
-    // Wait for alarm to run after abort
-    await scheduler.wait(1500);
+    stub = env.MY_CONTAINER.get(id);
+    let confirmed = false;
+    for (let i = 0; i < 50 && !confirmed; i++) {
+      try {
+        await stub.checkAlarmAbortConfirmation();
+        confirmed = true;
+      } catch (e) {
+        assert.match(
+          e.message,
+          /Abort confirmation did not get inserted/,
+          `Unexpected error while polling for alarm: ${e.message}`
+        );
+
+        await scheduler.wait(100);
+      }
+    }
+    if (!confirmed) {
+      await stub.checkAlarmAbortConfirmation();
+    }
+  },
+};
+
+export const testContainerShutdown = {
+  async test(_, env) {
+    const name = getRandomDurableObjectName('testContainerShutdown');
+
+    {
+      const stub = env.MY_CONTAINER.getByName(name);
+      await stub.start();
+      await assert.rejects(() => stub.abort(), {
+        name: 'Error',
+        message: 'Application called abort() to reset Durable Object.',
+      });
+    }
+
+    // Wait for the container to be shutdown after the DO aborts
+    await scheduler.wait(500);
+
+    {
+      const stub = env.MY_CONTAINER.getByName(name);
+
+      // Container should not be running after DO exited
+      await stub.expectRunning(false);
+    }
+  },
+};
+
+export const testSetInactivityTimeout = {
+  async test(_ctrl, env) {
+    const name = getRandomDurableObjectName('testSetInactivityTimeout');
+
+    {
+      const stub = env.MY_CONTAINER.getByName(name);
+
+      await stub.testSetInactivityTimeout(10_000);
+
+      await assert.rejects(() => stub.abort(), {
+        name: 'Error',
+        message: 'Application called abort() to reset Durable Object.',
+      });
+    }
+
+    // Here we wait to ensure that if setInactivityTimeout *doesn't* work, the
+    // container has enough time to shutdown after the DO is aborted. If we
+    // don't wait then ctx.container.running will always be true, even without
+    // setInactivityTimeout, because the container won't have stoped yet.
+    await scheduler.wait(500);
+
+    {
+      const stub = env.MY_CONTAINER.getByName(name);
+
+      // Container should still be running after DO exited
+      await stub.expectRunning(true);
+    }
+  },
+};
+
+// Test PID namespace isolation behavior
+// When containers_pid_namespace is ENABLED, the container has its own isolated PID namespace.
+// We verify this by checking that PID 1 in the container's namespace is the container's
+// init process, not the host's init process (systemd, launchd, etc.).
+export const testPidNamespace = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testPidNamespace')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    const data = await stub.testPidNamespace();
+
+    // When using an isolated PID namespace, PID 1 should be the container's entrypoint
+    // (a bash script that runs node), not the host's init process (systemd, launchd, init).
+    assert.match(
+      data.init,
+      /container-client-test/,
+      `Expected PID 1 to be the container entrypoint, but got: ${data.init}`
+    );
+  },
+};
+
+// Test setEgressHttp hostname functionality with internet (check we can establish
+// outbound with others).
+export const testSetEgressHttpWithInternet = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSetEgressHttpWithInternet')
+    );
+    let stub = env.MY_CONTAINER.get(id);
+    await stub.testSetEgressHttpWithInternet();
+  },
+};
+
+// Test setEgressHttp hostname functionality with no internet
+export const testSetEgressHttpNoInternet = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSetEgressHttpNoInternet')
+    );
+    let stub = env.MY_CONTAINER.get(id);
+    await stub.testSetEgressHttpNoInternet();
+  },
+};
+
+// Test setEgressHttp functionality - registers a binding's channel token with the container
+export const testSetEgressHttp = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSetEgressHttp')
+    );
+    let stub = env.MY_CONTAINER.get(id);
+    await stub.testSetEgressHttp();
+    try {
+      // test we recover from aborts
+      await stub.abort();
+    } catch {}
 
     stub = env.MY_CONTAINER.get(id);
-    await stub.checkAlarmAbortConfirmation();
+    // should work idempotent
+    await stub.testSetEgressHttp();
+  },
+};
+
+// Test WebSocket through interceptOutboundHttp - DO -> container -> worker binding via WebSocket
+export const testInterceptWebSocket = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testInterceptWebSocket')
+    );
+
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testInterceptWebSocket();
   },
 };

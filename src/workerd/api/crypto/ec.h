@@ -36,7 +36,7 @@ class Ec final {
   SubtleCrypto::JsonWebKey toJwk(
       KeyType keyType, kj::StringPtr curveName) const KJ_WARN_UNUSED_RESULT;
 
-  jsg::BufferSource getRawPublicKey(jsg::Lock& js) const KJ_WARN_UNUSED_RESULT;
+  jsg::JsArrayBuffer getRawPublicKey(jsg::Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const;
 

@@ -148,10 +148,6 @@ def wd_rust_crate(
         crate_features = crate_features,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,
-        experimental_use_cc_common_link = select({
-            "@platforms//os:windows": 0,
-            "//conditions:default": 1,
-        }),
     )
 
     if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 interface ENV {
   HOME: string;
   [k: string]: string;
@@ -10,6 +14,7 @@ interface PyodideConfig {
   indexURL?: string;
   _makeSnapshot?: boolean;
   lockFileURL: '';
+  enableRunUntilComplete: boolean;
 }
 
 type SerializedHiwireValue = { path: string[] } | { serialized: any } | null;
@@ -39,6 +44,9 @@ interface API {
   serializeHiwireState(serializer: (obj: any) => any): SnapshotConfig;
   pyVersionTuple: [number, number, number];
   scheduleCallback: (callback: () => void, timeout: number) => void;
+  // Callback invoked when Pyodide encounters a fatal error. Setting this allows
+  // the runtime to handle fatal errors (e.g., by condemning the isolate).
+  on_fatal?: (error: any) => void;
 }
 
 interface LDSO {
@@ -134,4 +142,9 @@ interface Module {
   Py_EmscriptenSignalBuffer: Uint8Array;
   _Py_EMSCRIPTEN_SIGNAL_HANDLING: number;
   ___memory_base: WebAssembly.Global<'i32'>;
+  compileModuleFromReadOnlyFS: (
+    Module: Module,
+    path: string
+  ) => WebAssembly.Module;
+  findLibraryFS: (libName: string, rpath: any) => string;
 }

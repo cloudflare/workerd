@@ -52,6 +52,22 @@ export const Network: typeof _Network = {
   loadingFailed(_params: _Network.LoadingFailedEventDataType): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Network.loadingFailed');
   },
+  webSocketHandshakeResponseReceived(
+    _params: _Network.WebSocketHandshakeResponseReceivedEventDataType
+  ): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED(
+      'Network.webSocketHandshakeResponseReceived'
+    );
+  },
+  webSocketClosed(_params: _Network.WebSocketClosedEventDataType): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketClosed');
+  },
+  webSocketCreated(_params: _Network.WebSocketCreatedEventDataType): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.webSocketCreated');
+  },
+  dataSent(_params: unknown): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataSent');
+  },
 };
 
 export class Session extends EventEmitter implements _Session {

@@ -18,7 +18,6 @@ const analyticsWorker :Workerd.Worker = (
       ),
     ],
   compatibilityFlags = ["experimental", "nodejs_compat"],
-  compatibilityDate = "2023-02-28",
   bindings = [ ( name = "main", service = "main" ) ]
 );
 
@@ -27,7 +26,6 @@ const mainWorker :Workerd.Worker = (
     (name = "worker", esModule = embed "analytics-engine-test.js"),
   ],
   compatibilityFlags = ["experimental", "nodejs_compat"],
-  compatibilityDate = "2023-02-28",
 
   bindings = [ ( name = "aebinding", analyticsEngine = "analytics") ]
 );

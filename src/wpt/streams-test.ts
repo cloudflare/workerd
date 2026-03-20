@@ -6,8 +6,29 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'idlharness.any.js': {
-    comment: 'Test file /resources/WebIDLParser.js not found.',
-    disabledTests: true,
+    comment:
+      'Some IDL operation/attribute tests still fail due to missing method .length or promise-returning signatures',
+    expectedFailures: [
+      'ReadableStream interface: operation cancel(optional any)',
+      'ReadableStream interface: operation pipeTo(WritableStream, optional StreamPipeOptions)',
+      'ReadableStreamDefaultReader interface: operation read()',
+      'ReadableStreamDefaultReader interface: attribute closed',
+      'ReadableStreamDefaultReader interface: operation cancel(optional any)',
+      'ReadableStreamBYOBReader interface: operation read(ArrayBufferView, optional ReadableStreamBYOBReaderReadOptions)',
+      'ReadableStreamBYOBReader interface: attribute closed',
+      'ReadableStreamBYOBReader interface: operation cancel(optional any)',
+      'ReadableStreamDefaultController interface: operation error(optional any)',
+      'ReadableByteStreamController interface: operation error(optional any)',
+      'WritableStream interface: operation abort(optional any)',
+      'WritableStream interface: operation close()',
+      'WritableStreamDefaultWriter interface: attribute closed',
+      'WritableStreamDefaultWriter interface: attribute ready',
+      'WritableStreamDefaultWriter interface: operation abort(optional any)',
+      'WritableStreamDefaultWriter interface: operation close()',
+      'WritableStreamDefaultWriter interface: operation write(optional any)',
+      'TransformStreamDefaultController interface: operation enqueue(optional any)',
+      'TransformStreamDefaultController interface: operation error(optional any)',
+    ],
   },
 
   'piping/abort.any.js': {
@@ -85,25 +106,11 @@ export default {
     ],
   },
   'piping/pipe-through.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      "pipeThrough should brand-check readable and not allow 'null'",
-      "pipeThrough should brand-check readable and not allow 'undefined'",
-      "pipeThrough should brand-check readable and not allow '0'",
-      "pipeThrough should brand-check readable and not allow 'NaN'",
-      "pipeThrough should brand-check readable and not allow 'true'",
-      "pipeThrough should brand-check readable and not allow 'ReadableStream'",
-      "pipeThrough should brand-check readable and not allow '[object ReadableStream]'",
-      "pipeThrough should brand-check writable and not allow 'null'",
-      "pipeThrough should brand-check writable and not allow 'undefined'",
-      "pipeThrough should brand-check writable and not allow '0'",
-      "pipeThrough should brand-check writable and not allow 'NaN'",
-      "pipeThrough should brand-check writable and not allow 'true'",
-      "pipeThrough should brand-check writable and not allow 'WritableStream'",
-      "pipeThrough should brand-check writable and not allow '[object WritableStream]'",
-      'pipeThrough should rethrow errors from accessing readable or writable',
-      'pipeThrough() should throw if readable/writable getters throw',
-    ],
+    comment: 'Windows has different property access order',
+    expectedFailures:
+      process.platform === 'win32'
+        ? ['pipeThrough() should throw if readable/writable getters throw']
+        : [],
   },
   'piping/then-interception.any.js': {
     comment:
@@ -113,19 +120,7 @@ export default {
       'tee should not be observable',
     ],
   },
-  'piping/throwing-options.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'pipeThrough should stop after getting preventAbort throws',
-      'pipeThrough should stop after getting preventCancel throws',
-      'pipeThrough should stop after getting preventClose throws',
-      'pipeThrough should stop after getting signal throws',
-      'pipeTo should stop after getting preventAbort throws',
-      'pipeTo should stop after getting preventCancel throws',
-      'pipeTo should stop after getting preventClose throws',
-      'pipeTo should stop after getting signal throws',
-    ],
-  },
+  'piping/throwing-options.any.js': {},
   'piping/transform-streams.any.js': {},
 
   'queuing-strategies-size-function-per-global.window.js': {
@@ -150,27 +145,9 @@ export default {
     ],
   },
 
-  'readable-byte-streams/bad-buffers-and-views.any.js': {
-    comment: 'See individual comments',
-    expectedFailures: [
-      "ReadableStream with byte source: respond() throws if the BYOB request's buffer has been detached (in the closed state)",
-      // TODO(conform): The spec expects us to throw here because the supplied view
-      // has a different offset. Instead, we allow it because the view is zero length
-      // and the controller has been closed (we do the close and zero length check)
-      // first.
-      // assert_throws_js(RangeError, () => c.byobRequest.respondWithNewView(view));
-      'ReadableStream with byte source: respondWithNewView() throws if the supplied view has a different offset (in the closed state)',
-      // TODO(conform): The spec expects this to be a RangeError
-      "ReadableStream with byte source: respondWithNewView() throws if the supplied view's buffer is zero-length (in the closed state)",
-      // TODO(conform): The spec expects this to be a RangeError
-      "ReadableStream with byte source: respondWithNewView() throws if the supplied view's buffer has a different length (in the closed state)",
-      // TODO(conform): We currently do not throw here since reading causes the
-      // view here to be zero length, which is allowed when the stream is closed.
-      //assert_throws_js(TypeError, () => c.byobRequest.respondWithNewView(view));
-      "ReadableStream with byte source: enqueue() throws if the BYOB request's buffer has been detached (in the closed state)",
-    ],
-  },
+  'readable-byte-streams/bad-buffers-and-views.any.js': {},
   'readable-byte-streams/construct-byob-request.any.js': {},
+  'readable-byte-streams/crashtests/tee-locked-stream.any.js': {},
   'readable-byte-streams/enqueue-with-detached-buffer.any.js': {},
   'readable-byte-streams/general.any.js': {
     comment: 'See individual comments',
@@ -328,7 +305,6 @@ export default {
   'readable-byte-streams/templated.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
-      'ReadableStream with byte source (empty): calling getReader with invalid arguments should throw appropriate errors',
       'ReadableStream with byte source (empty) BYOB reader: canceling via the reader should cause the reader to act closed',
     ],
   },
@@ -438,8 +414,6 @@ export default {
       // TODO(conform): The spec allows error to be called with no argument at all, treating
       // it as undefined, currently we require that undefined is passed explicitly.
       'ReadableStreamDefaultReader closed promise should be rejected with undefined if that is the error',
-      // TODO(conform): The spec expects this to be a TypeError, not a RangeError
-      'getReader() should call ToString() on mode',
     ],
   },
   'readable-streams/floating-point-total-queue-size.any.js': {
@@ -451,19 +425,7 @@ export default {
       'Floating point arithmetic must manifest near 0 (total ends up zero)',
     ],
   },
-  'readable-streams/from.any.js': {
-    comment: 'See comments on tests',
-    disabledTests: [
-      // A hanging promise was cancelled
-      'ReadableStream.from: cancel() rejects when return() rejects',
-      'ReadableStream.from: cancel() rejects when return() fulfills with a non-object',
-    ],
-    expectedFailures: [
-      // TODO(soon): This one is a bit pedantic. We ignore the case where return() is not
-      // a method whereas the spec expects us to return a rejected promise in this case.
-      'ReadableStream.from: cancel() rejects when return() is not a method',
-    ],
-  },
+  'readable-streams/from.any.js': {},
   'readable-streams/garbage-collection.any.js': {
     comment: 'See comments on individual tests',
     disabledTests: [
@@ -484,8 +446,6 @@ export default {
       "ReadableStream can't be constructed with garbage",
       // TODO(conform): We currently allow the empty type value
       "ReadableStream can't be constructed with an invalid type",
-      // TODO(conform): The spec expects a TypeError here, not a RangeError
-      'default ReadableStream getReader() should only accept mode:undefined',
       // TODO(conform): The spec expects us to call pull an extra time here despite. [Despite what? -NP]
       'ReadableStream: should pull after start, and after every read',
       // TODO(conform): The standard generally anticipates that the closed
@@ -581,7 +541,6 @@ export default {
       'ReadableStream reader (closed via cancel after getting reader): closed should fulfill with undefined',
     ],
     expectedFailures: [
-      'ReadableStream (empty): calling getReader with invalid arguments should throw appropriate errors',
       'ReadableStream reader (closed before getting reader): releasing the lock should cause closed to reject and change identity',
       'ReadableStream reader (closed after getting reader): releasing the lock should cause closed to reject and change identity',
       'ReadableStream reader (closed via cancel after getting reader): releasing the lock should cause closed to reject and change identity',
@@ -628,12 +587,8 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'readable.cancel() and a parallel writable.close() should reject if a transformer.cancel() calls controller.error()',
-      'closing the writable side should reject if a parallel transformer.cancel() throws',
       'writable.abort() and readable.cancel() should reject if a transformer.cancel() calls controller.error()',
-      'readable.cancel() should not call cancel() again when already called from writable.abort()',
-      'writable.close() should not call flush() when cancel() is already called from readable.cancel()',
       'writable.abort() should not call cancel() again when already called from readable.cancel()',
-      'readable.cancel() should not call cancel() when flush() is already called from writable.close()',
     ],
   },
   'transform-streams/errors.any.js': {
@@ -643,16 +598,11 @@ export default {
       'an exception from transform() should error the stream if terminate has been requested but not completed',
     ],
     expectedFailures: [
-      'when controller.error is followed by a rejection, the error reason should come from controller.error',
       'TransformStream constructor should throw when start does',
       'when strategy.size throws inside start(), the constructor should throw the same error',
       'when strategy.size calls controller.error() then throws, the constructor should throw the first error',
-      'it should be possible to error the readable between close requested and complete',
       'controller.error() should do nothing after a transformer method has thrown an exception',
-      'controller.error() should do nothing the second time it is called',
-      'abort should set the close reason for the writable when it happens before cancel during start, and cancel should reject',
       'controller.error() should close writable immediately after readable.cancel()',
-      'abort should set the close reason for the writable when it happens before cancel during underlying sink write, but cancel should still succeed',
       'erroring during write with backpressure should result in the write failing',
     ],
   },
@@ -669,12 +619,6 @@ export default {
       'specifying a defined readableType should throw',
       'specifying a defined writableType should throw',
       'terminate() should abort writable immediately after readable.cancel()',
-    ],
-  },
-  'transform-streams/invalid-realm.tentative.window.js': {
-    comment: 'document is not defined',
-    expectedFailures: [
-      'TransformStream: write in detached realm should succeed',
     ],
   },
   'transform-streams/lipfuzz.any.js': {},
@@ -723,8 +667,6 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'controller.error() after controller.terminate() with queued chunk should error the readable',
-      'controller.error() after controller.terminate() without queued chunk should do nothing',
-      'controller.terminate() inside flush() should not prevent writer.close() from succeeding',
     ],
   },
 
@@ -734,12 +676,9 @@ export default {
       "Aborting a WritableStream before it starts should cause the writer's unsettled ready promise to reject",
       "WritableStream if sink's abort throws, the promise returned by multiple writer.abort()s is the same and rejects",
       'when calling abort() twice on the same stream, both should give the same promise that fulfills with undefined',
-      'the abort signal is signalled synchronously - write',
       'Aborting a WritableStream causes any outstanding write() promises to be rejected with the reason supplied',
       'Aborting a WritableStream puts it in an errored state with the error passed to abort()',
-      'if a writer is created for a stream with a pending abort, its ready should be rejected with the abort error',
       'sink abort() should not be called if stream was erroring due to bad strategy before abort() was called',
-      "WritableStream if sink's abort throws, for an abort performed during a write, the promise returned by ws.abort() rejects",
       'writer.abort() while there is an in-flight write, and then finish the write with rejection',
       'writer.abort(), controller.error() while there is an in-flight write, and then finish the write',
       'writer.abort(), controller.error() while there is an in-flight close, and then finish the close',
@@ -759,37 +698,19 @@ export default {
     expectedFailures: [
       'start: errors in start cause WritableStream constructor to throw',
       'write: returning a rejected promise (second write) should cause writer write() and ready to reject',
-      'write: returning a promise that becomes rejected after the writer write() should cause writer write() and ready to reject',
     ],
   },
-  'writable-streams/byte-length-queuing-strategy.any.js': {
-    comment:
-      'TypeError: The value cannot be converted because it is not an integer.',
-    expectedFailures: [
-      'Closing a writable stream with in-flight writes below the high water mark delays the close call properly',
-    ],
-  },
-  'writable-streams/close.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'when close is called on a WritableStream in waiting state, ready promise should be fulfilled',
-      'releaseLock() should not change the result of sync close()',
-      'close() on an errored stream should reject',
-    ],
-  },
+  'writable-streams/byte-length-queuing-strategy.any.js': {},
+  'writable-streams/close.any.js': {},
   'writable-streams/constructor.any.js': {
     comment: 'These are mostly about validation of params',
     expectedFailures:
       process.platform === 'win32'
         ? [
-            'controller argument should be passed to start method',
             'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
-            "WritableStream can't be constructed with a defined type",
           ]
         : [
-            'controller argument should be passed to start method',
             'WritableStream should be writable and ready should fulfill immediately if the strategy does not apply backpressure',
-            "WritableStream can't be constructed with a defined type",
             'underlyingSink argument should be converted after queuingStrategy argument',
           ],
   },
@@ -800,45 +721,19 @@ export default {
     comment: 'Seems we should be using a double for queue size',
     expectedFailures: [
       'Floating point arithmetic must manifest near NUMBER.MAX_SAFE_INTEGER (total ends up positive)',
-      'Floating point arithmetic must manifest near 0 (total ends up positive, but clamped)',
       'Floating point arithmetic must manifest near 0 (total ends up positive, and not clamped)',
       'Floating point arithmetic must manifest near 0 (total ends up zero)',
     ],
   },
   'writable-streams/garbage-collection.any.js': {},
-  'writable-streams/general.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'desiredSize on a writer for an errored stream',
-      "WritableStream's strategy.size should not be called as a method",
-      'closed and ready on a released writer',
-      'ready promise should fire before closed on releaseLock',
-    ],
-  },
-  'writable-streams/properties.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'sink method write should be called with the right number of arguments',
-      "sink method write should be called even when it's located on the prototype chain",
-    ],
-  },
-  'writable-streams/reentrant-strategy.any.js': {
-    comment: 'A hanging Promise was canceled.',
-    disabledTests: true,
-  },
+  'writable-streams/general.any.js': {},
+  'writable-streams/properties.any.js': {},
+  'writable-streams/reentrant-strategy.any.js': {},
   'writable-streams/start.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
       "underlying sink's write or close should not be called if start throws",
-      'when start() rejects, writer promises should reject in standard order',
     ],
   },
-  'writable-streams/write.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'write() on a stream with HWM 0 should not cause the ready Promise to resolve',
-      'WritableStream should transition to waiting until write is acknowledged',
-      "when sink's write throws an error, the stream should become errored and the promise should reject",
-    ],
-  },
+  'writable-streams/write.any.js': {},
 } satisfies TestRunnerConfig;

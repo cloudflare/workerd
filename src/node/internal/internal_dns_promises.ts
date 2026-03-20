@@ -126,7 +126,7 @@ export class Resolver implements dns.Resolver {
     return resolveNs(name);
   }
 
-  esolvePtr(name: string): Promise<string[]> {
+  resolvePtr(name: string): Promise<string[]> {
     return resolvePtr(name);
   }
 

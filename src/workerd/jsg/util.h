@@ -25,6 +25,7 @@ class Isolate;
 namespace workerd::jsg {
 
 class Lock;
+class JsObject;
 
 using uint = unsigned int;
 
@@ -66,6 +67,7 @@ class JsExceptionThrown: public std::exception {
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
 bool getShouldSetToStringTag(v8::Isolate* isolate);
 bool getShouldSetImmutablePrototype(v8::Isolate* isolate);
+bool getSpecCompliantPropertyAttributes(v8::Isolate* isolate);
 
 kj::String fullyQualifiedTypeName(const std::type_info& type);
 kj::String typeName(const std::type_info& type);
@@ -301,7 +303,7 @@ struct RemoveMaybe_<kj::Maybe<T>> {
   using Type = T;
 };
 template <typename T>
-using RemoveMaybe = typename RemoveMaybe_<T>::Type;
+using RemoveMaybe = RemoveMaybe_<T>::Type;
 
 template <typename T>
 struct RemoveRvalueRef_ {
@@ -312,7 +314,7 @@ struct RemoveRvalueRef_<T&&> {
   using Type = T;
 };
 template <typename T>
-using RemoveRvalueRef = typename RemoveRvalueRef_<T>::Type;
+using RemoveRvalueRef = RemoveRvalueRef_<T>::Type;
 
 enum class JsgKind { RESOURCE, STRUCT, EXTENSION };
 
@@ -458,7 +460,7 @@ struct Detector<Default, kj::VoidSfinae<Op<Args...>>, Op, Args...> {
 
 // A typedef for `Op<Args...>` if that template is instantiable, otherwise `Default`.
 template <typename Default, template <typename...> class Op, typename... Args>
-using DetectedOr = typename _::Detector<Default, void, Op, Args...>::Type;
+using DetectedOr = _::Detector<Default, void, Op, Args...>::Type;
 
 // True if Op<Args...> is instantiable, false otherwise. This is basically the same as
 // std::experimental::is_detected from the library fundamentals TS v2.
@@ -491,6 +493,18 @@ concept StrictlyBool = kj::isSameType<T, bool>();
 // ======================================================================================
 
 class Lock;
+
+// Interface for allocating backing stores for v8 external string.
+class ExternalStringAllocator {
+ public:
+  virtual ~ExternalStringAllocator() = default;
+
+  virtual void* allocate(size_t size) = 0;
+  virtual void deallocate(void* ptr) = 0;
+};
+
+// Returns a singleton DefaultExternalStringAllocator.
+kj::Own<ExternalStringAllocator> defaultExternalStringAllocator();
 
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
@@ -537,11 +551,22 @@ struct Unimplemented {};
 using WontImplement = Unimplemented;
 
 // ======================================================================================
+// Module utilities
+
+// Creates a mutable copy of a module namespace object for CommonJS compatibility.
+// This is needed because ES module namespaces have read-only properties, but
+// CommonJS require() is expected to return objects with mutable properties.
+// This matches Node.js behavior when requiring an ESM module from CJS.
+// See: https://github.com/cloudflare/workerd/issues/5844
+JsObject createMutableModuleExports(Lock& js, JsObject moduleNamespace);
+
+// ======================================================================================
 // Node.js Compat
 
 kj::Maybe<kj::String> checkNodeSpecifier(kj::StringPtr specifier);
 bool isNodeJsCompatEnabled(jsg::Lock& js);
 bool isNodeJsProcessV2Enabled(jsg::Lock& js);
+bool isRequireReturnsDefaultExportEnabled(jsg::Lock& js);
 
 // The following counter is used to track the number of times a method is called.
 // This is mostly useful for validating/testing v8 fast api methods, but also for

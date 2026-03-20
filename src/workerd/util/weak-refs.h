@@ -90,8 +90,14 @@ class WeakRef final: public kj::Refcounted {
     return false;
   }
 
-  inline kj::Maybe<T&> tryGet() {
-    return maybeThing;
+  // Note: This is safe to call on a const WeakRef because the WeakRef doesn't own
+  // the target - it just observes it. The returned reference allows mutation of
+  // the target, which is intentional (the target's lifetime is managed elsewhere).
+  inline kj::Maybe<T&> tryGet() const {
+    KJ_IF_SOME(thing, maybeThing) {
+      return thing;
+    }
+    return kj::none;
   }
   inline kj::Own<WeakRef> addRef() {
     return kj::addRef(*this);

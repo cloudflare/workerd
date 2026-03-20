@@ -8,6 +8,7 @@
 #include <workerd/api/streams/writable.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/jsvalue.h>
 
 #include <openssl/base.h>  // for EVP_MD_CTX, X509
 
@@ -195,24 +196,21 @@ class CryptoKey: public jsg::Object {
     uint16_t modulusLength;
 
     // The RSA public exponent (in unsigned big-endian form)
-    jsg::BufferSource publicExponent;
+    jsg::JsRef<jsg::JsBufferSource> publicExponent;
 
     // The hash algorithm that is used with this key.
     jsg::Optional<KeyAlgorithm> hash;
 
     RsaKeyAlgorithm clone(jsg::Lock& js) const {
-      auto fixPublicExp = FeatureFlags::get(js).getCryptoPreservePublicExponent();
-
+      auto pe = publicExponent.getHandle(js);
+      auto data = pe.asArrayPtr();
       // Should only happen if the flag is enabled and an algorithm field is cloned twice.
-      if (fixPublicExp) {
-        // alloc will, by default create a Uint8Array.
-        auto expBack = jsg::BackingStore::alloc(js, publicExponent.size());
-        expBack.asArrayPtr().copyFrom(publicExponent.asArrayPtr());
-        return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
+      if (FeatureFlags::get(js).getCryptoPreservePublicExponent()) {
+        auto exp = jsg::JsUint8Array::create(js, data);
+        return {name, modulusLength, jsg::JsBufferSource(exp).addRef(js), hash};
       } else {
-        auto expBack = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, publicExponent.size());
-        expBack.asArrayPtr().copyFrom(publicExponent.asArrayPtr());
-        return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
+        auto exp = jsg::JsArrayBuffer::create(js, data);
+        return {name, modulusLength, jsg::JsBufferSource(exp).addRef(js), hash};
       }
     }
 
@@ -252,7 +250,7 @@ class CryptoKey: public jsg::Object {
   // by CryptoKey::Impl to provide the actual implementation.
   struct AsymmetricKeyDetails {
     jsg::Optional<uint32_t> modulusLength;
-    jsg::Optional<jsg::BufferSource> publicExponent;
+    jsg::Optional<jsg::JsRef<jsg::JsArrayBuffer>> publicExponent;
     // TODO(later): BoringSSL does not currently support getting the RSA-PSS
     // details for an RSA key. Once it does, we can update our impl and add
     // these fields.
@@ -359,10 +357,10 @@ class SubtleCrypto: public jsg::Object {
     kj::String name;
 
     // For AES: The initialization vector use. May be up to 2^64-1 bytes long.
-    jsg::Optional<jsg::BufferSource> iv;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> iv;
 
     // The additional authentication data to include.
-    jsg::Optional<jsg::BufferSource> additionalData;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> additionalData;
 
     // The desired length of the authentication tag. May be 0 - 128.
     // Note: the spec specifies this as a Web IDL byte (== signed char in C++), not an int, but JS
@@ -371,7 +369,7 @@ class SubtleCrypto: public jsg::Object {
 
     // The initial value of the counter block for AES-CTR.
     // https://www.w3.org/TR/WebCryptoAPI/#aes-ctr-params
-    jsg::Optional<jsg::BufferSource> counter;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> counter;
 
     // The length, in bits, of the rightmost part of the counter block that is incremented.
     // See above why we use int instead of int8_t.
@@ -379,7 +377,7 @@ class SubtleCrypto: public jsg::Object {
     jsg::Optional<int> length;
 
     // The optional label/application data to associate with the message (for RSA-OAEP)
-    jsg::Optional<jsg::BufferSource> label;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> label;
 
     JSG_STRUCT(name, iv, additionalData, tagLength, counter, length, label);
   };
@@ -417,7 +415,7 @@ class SubtleCrypto: public jsg::Object {
     jsg::Optional<int> modulusLength;
 
     // For RSA algorithms
-    jsg::Optional<jsg::BufferSource> publicExponent;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> publicExponent;
 
     // For AES algorithms or when name == "HMAC": The length in bits of the key.
     jsg::Optional<int> length;
@@ -459,7 +457,7 @@ class SubtleCrypto: public jsg::Object {
     kj::String name;
 
     // PBKDF2 parameters
-    jsg::Optional<jsg::BufferSource> salt;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> salt;
     jsg::Optional<int> iterations;
     jsg::Optional<kj::OneOf<kj::String, HashAlgorithm>> hash;
 
@@ -470,7 +468,7 @@ class SubtleCrypto: public jsg::Object {
 
     // Bit string that corresponds to the context and application specific context for the derived
     // keying material
-    jsg::Optional<jsg::BufferSource> info;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> info;
 
     JSG_STRUCT(name, salt, iterations, hash, $public, info);
   };
@@ -522,18 +520,18 @@ class SubtleCrypto: public jsg::Object {
   };
 
   using ImportKeyData = kj::OneOf<kj::Array<kj::byte>, JsonWebKey>;
-  using ExportKeyData = kj::OneOf<jsg::BufferSource, JsonWebKey>;
+  using ExportKeyData = kj::OneOf<jsg::JsRef<jsg::JsArrayBuffer>, JsonWebKey>;
 
-  jsg::Promise<jsg::BufferSource> encrypt(jsg::Lock& js,
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> encrypt(jsg::Lock& js,
       kj::OneOf<kj::String, EncryptAlgorithm> algorithm,
       const CryptoKey& key,
       kj::Array<const kj::byte> plainText);
-  jsg::Promise<jsg::BufferSource> decrypt(jsg::Lock& js,
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> decrypt(jsg::Lock& js,
       kj::OneOf<kj::String, EncryptAlgorithm> algorithm,
       const CryptoKey& key,
       kj::Array<const kj::byte> cipherText);
 
-  jsg::Promise<jsg::BufferSource> sign(jsg::Lock& js,
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> sign(jsg::Lock& js,
       kj::OneOf<kj::String, SignAlgorithm> algorithm,
       const CryptoKey& key,
       kj::Array<const kj::byte> data);
@@ -543,7 +541,7 @@ class SubtleCrypto: public jsg::Object {
       kj::Array<const kj::byte> signature,
       kj::Array<const kj::byte> data);
 
-  jsg::Promise<jsg::BufferSource> digest(jsg::Lock& js,
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> digest(jsg::Lock& js,
       kj::OneOf<kj::String, HashAlgorithm> algorithm,
       kj::Array<const kj::byte> data);
 
@@ -558,7 +556,7 @@ class SubtleCrypto: public jsg::Object {
       kj::OneOf<kj::String, ImportKeyAlgorithm> derivedKeyAlgorithm,
       bool extractable,
       kj::Array<kj::String> keyUsages);
-  jsg::Promise<jsg::BufferSource> deriveBits(jsg::Lock& js,
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> deriveBits(jsg::Lock& js,
       kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithm,
       const CryptoKey& baseKey,
       // The operation needs to be able to take both undefined and null
@@ -585,7 +583,7 @@ class SubtleCrypto: public jsg::Object {
 
   jsg::Promise<ExportKeyData> exportKey(jsg::Lock& js, kj::String format, const CryptoKey& key);
 
-  jsg::Promise<jsg::BufferSource> wrapKey(jsg::Lock& js,
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> wrapKey(jsg::Lock& js,
       kj::String format,
       const CryptoKey& key,
       const CryptoKey& wrappingKey,
@@ -602,7 +600,7 @@ class SubtleCrypto: public jsg::Object {
       const jsg::TypeHandler<JsonWebKey>& jwkHandler);
 
   // This is a non-standard extension based off Node.js' implementation of crypto.timingSafeEqual.
-  bool timingSafeEqual(jsg::BufferSource a, jsg::BufferSource b);
+  bool timingSafeEqual(jsg::JsBufferSource a, jsg::JsBufferSource b);
 
   JSG_RESOURCE_TYPE(SubtleCrypto) {
     JSG_METHOD(encrypt);
@@ -657,7 +655,7 @@ class DigestContext {
  public:
   virtual ~DigestContext() noexcept = default;
   virtual void write(kj::ArrayPtr<kj::byte> buffer) = 0;
-  virtual jsg::BufferSource close(jsg::Lock& js) = 0;
+  virtual jsg::JsArrayBuffer close(jsg::Lock& js) = 0;
 };
 
 class DigestStream: public WritableStream {
@@ -667,13 +665,12 @@ class DigestStream: public WritableStream {
 
   explicit DigestStream(kj::Own<WritableStreamController> controller,
       SubtleCrypto::HashAlgorithm algorithm,
-      jsg::Promise<jsg::BufferSource>::Resolver resolver,
-      jsg::Promise<jsg::BufferSource> promise);
+      jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>::Resolver resolver,
+      jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> promise);
 
   static jsg::Ref<DigestStream> constructor(jsg::Lock& js, Algorithm algorithm);
 
-  // The BufferSource returned will always be an ArrayBuffer here.
-  jsg::MemoizedIdentity<jsg::Promise<jsg::BufferSource>>& getDigest() {
+  jsg::MemoizedIdentity<jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>>& getDigest() {
     return promise;
   }
   void dispose(jsg::Lock& js);
@@ -703,14 +700,15 @@ class DigestStream: public WritableStream {
 
   struct Ready {
     SubtleCrypto::HashAlgorithm algorithm;
-    jsg::Promise<jsg::BufferSource>::Resolver resolver;
+    jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>::Resolver resolver;
     DigestContextPtr context;
-    Ready(SubtleCrypto::HashAlgorithm algorithm, jsg::Promise<jsg::BufferSource>::Resolver resolver)
+    Ready(SubtleCrypto::HashAlgorithm algorithm,
+        jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>::Resolver resolver)
         : algorithm(kj::mv(algorithm)),
           resolver(kj::mv(resolver)),
           context(initContext(this->algorithm)) {}
   };
-  jsg::MemoizedIdentity<jsg::Promise<jsg::BufferSource>> promise;
+  jsg::MemoizedIdentity<jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>> promise;
   kj::OneOf<Ready, StreamStates::Closed, StreamStates::Errored> state;
   uint64_t bytesWritten = 0;
 
@@ -730,7 +728,7 @@ class Crypto: public jsg::Object {
  public:
   Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
 
-  jsg::BufferSource getRandomValues(jsg::BufferSource buffer);
+  jsg::JsArrayBufferView getRandomValues(jsg::JsArrayBufferView buffer);
 
   kj::String randomUUID();
 

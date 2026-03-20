@@ -9,62 +9,28 @@ export const dgramTest = {
     strictEqual(typeof dgram.createSocket, 'function');
     strictEqual(typeof dgram.Socket, 'function');
 
-    // Test createSocket with string type - should throw ERR_METHOD_NOT_IMPLEMENTED after validation
-    throws(
-      () => {
-        dgram.createSocket('udp4');
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // Test createSocket with string type - should return Socket instance
+    const socket1 = dgram.createSocket('udp4');
+    ok(socket1 instanceof dgram.Socket);
 
-    throws(
-      () => {
-        dgram.createSocket('udp6');
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const socket2 = dgram.createSocket('udp6');
+    ok(socket2 instanceof dgram.Socket);
 
-    // Test createSocket with object type - should throw ERR_METHOD_NOT_IMPLEMENTED after validation
-    throws(
-      () => {
-        dgram.createSocket({ type: 'udp4' });
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // Test createSocket with object type - should return Socket instance
+    const socket3 = dgram.createSocket({ type: 'udp4' });
+    ok(socket3 instanceof dgram.Socket);
 
-    throws(
-      () => {
-        dgram.createSocket({ type: 'udp6' });
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const socket4 = dgram.createSocket({ type: 'udp6' });
+    ok(socket4 instanceof dgram.Socket);
 
-    // Test createSocket with callback - should throw ERR_METHOD_NOT_IMPLEMENTED after validation
-    throws(
-      () => {
-        dgram.createSocket('udp4', () => {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // Test createSocket with callback - should return Socket instance and register callback
+    const callback1 = () => {};
+    const socket5 = dgram.createSocket('udp4', callback1);
+    ok(socket5 instanceof dgram.Socket);
 
-    throws(
-      () => {
-        dgram.createSocket({ type: 'udp4' }, () => {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const callback2 = () => {};
+    const socket6 = dgram.createSocket({ type: 'udp4' }, callback2);
+    ok(socket6 instanceof dgram.Socket);
 
     // Test createSocket argument validation - type must be valid object
     throws(
@@ -122,44 +88,21 @@ export const dgramTest = {
       }
     );
 
-    // Test Socket constructor with string type - should throw ERR_METHOD_NOT_IMPLEMENTED after validation
-    throws(
-      () => {
-        new dgram.Socket('udp4');
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // Test Socket constructor with string type - should return Socket instance
+    const socket7 = new dgram.Socket('udp4');
+    ok(socket7 instanceof dgram.Socket);
 
-    throws(
-      () => {
-        new dgram.Socket('udp6');
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const socket8 = new dgram.Socket('udp6');
+    ok(socket8 instanceof dgram.Socket);
 
-    // Test Socket constructor with object type - should throw ERR_METHOD_NOT_IMPLEMENTED after validation
-    throws(
-      () => {
-        new dgram.Socket({ type: 'udp4' });
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // Test Socket constructor with object type - should return Socket instance
+    const socket9 = new dgram.Socket({ type: 'udp4' });
+    ok(socket9 instanceof dgram.Socket);
 
-    // Test Socket constructor with callback - should throw ERR_METHOD_NOT_IMPLEMENTED after validation
-    throws(
-      () => {
-        new dgram.Socket('udp4', () => {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // Test Socket constructor with callback - should return Socket instance and register callback
+    const callback3 = () => {};
+    const socket10 = new dgram.Socket('udp4', callback3);
+    ok(socket10 instanceof dgram.Socket);
 
     // Test Socket constructor argument validation
     throws(
@@ -225,223 +168,130 @@ export const dgramTest = {
     strictEqual(typeof dgram.Socket.prototype.getSendQueueSize, 'function');
     strictEqual(typeof dgram.Socket.prototype.getSendQueueCount, 'function');
 
-    // Test methods that throw ERR_METHOD_NOT_IMPLEMENTED
-    const mockThis = {};
+    // Test methods that are chainable (return this)
+    const testSocket = dgram.createSocket('udp4');
 
-    throws(
-      () => {
-        dgram.Socket.prototype.bind.call(mockThis);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const bindResult = testSocket.bind();
+    strictEqual(bindResult, testSocket);
 
-    throws(
-      () => {
-        dgram.Socket.prototype.bind.call(mockThis, 8080);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const bindResult2 = testSocket.bind(8080);
+    strictEqual(bindResult2, testSocket);
 
-    throws(
-      () => {
-        dgram.Socket.prototype.bind.call(mockThis, 8080, 'localhost');
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const bindResult3 = testSocket.bind(8080, 'localhost');
+    strictEqual(bindResult3, testSocket);
 
-    throws(
-      () => {
-        dgram.Socket.prototype.connect.call(mockThis, 8080);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // connect is a no-op, should not throw
+    testSocket.connect(8080);
+    testSocket.connect(8080, 'localhost');
 
-    throws(
-      () => {
-        dgram.Socket.prototype.connect.call(mockThis, 8080, 'localhost');
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // disconnect is a no-op, should not throw
+    testSocket.disconnect();
 
-    throws(
-      () => {
-        dgram.Socket.prototype.disconnect.call(mockThis);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // send is a no-op, should not throw
+    testSocket.send(Buffer.from('test'));
+    testSocket.send('test', 8080, 'localhost');
 
-    throws(
-      () => {
-        dgram.Socket.prototype.send.call(mockThis, Buffer.from('test'));
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // sendto is a no-op, should not throw
+    testSocket.sendto(Buffer.from('test'));
 
-    throws(
-      () => {
-        dgram.Socket.prototype.send.call(mockThis, 'test', 8080, 'localhost');
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    // close is chainable, should not throw
+    const closeResult = testSocket.close();
+    strictEqual(closeResult, testSocket);
 
-    throws(
-      () => {
-        dgram.Socket.prototype.sendto.call(mockThis, Buffer.from('test'));
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    throws(
-      () => {
-        dgram.Socket.prototype.close.call(mockThis);
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
-
-    throws(
-      () => {
-        dgram.Socket.prototype.close.call(mockThis, () => {});
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const closeResult2 = testSocket.close(() => {});
+    strictEqual(closeResult2, testSocket);
 
     // Test methods that return empty objects
-    const address = dgram.Socket.prototype.address.call(mockThis);
+    const testSocket2 = dgram.createSocket('udp4');
+
+    const address = testSocket2.address();
     strictEqual(typeof address, 'object');
     deepStrictEqual(address, {});
 
-    const remoteAddress = dgram.Socket.prototype.remoteAddress.call(mockThis);
+    const remoteAddress = testSocket2.remoteAddress();
     strictEqual(typeof remoteAddress, 'object');
     deepStrictEqual(remoteAddress, {});
 
     // Test methods that are no-ops (should not throw)
-    dgram.Socket.prototype.setBroadcast.call(mockThis, true);
-    dgram.Socket.prototype.setBroadcast.call(mockThis, false);
-    dgram.Socket.prototype.setBroadcast.call(mockThis, 'invalid');
+    const testSocket3 = dgram.createSocket('udp4');
 
-    dgram.Socket.prototype.setTTL.call(mockThis, 64);
-    dgram.Socket.prototype.setTTL.call(mockThis, 'invalid');
+    testSocket3.setBroadcast(true);
+    testSocket3.setBroadcast(false);
+    testSocket3.setBroadcast('invalid');
 
-    dgram.Socket.prototype.setMulticastTTL.call(mockThis, 1);
-    dgram.Socket.prototype.setMulticastTTL.call(mockThis, 'invalid');
+    testSocket3.setTTL(64);
+    testSocket3.setTTL('invalid');
 
-    dgram.Socket.prototype.setMulticastLoopback.call(mockThis, true);
-    dgram.Socket.prototype.setMulticastLoopback.call(mockThis, false);
-    dgram.Socket.prototype.setMulticastLoopback.call(mockThis, 'invalid');
+    testSocket3.setMulticastTTL(1);
+    testSocket3.setMulticastTTL('invalid');
 
-    dgram.Socket.prototype.setMulticastInterface.call(mockThis, '127.0.0.1');
-    dgram.Socket.prototype.setMulticastInterface.call(mockThis, 'invalid');
+    testSocket3.setMulticastLoopback(true);
+    testSocket3.setMulticastLoopback(false);
+    testSocket3.setMulticastLoopback('invalid');
 
-    dgram.Socket.prototype.addMembership.call(mockThis, '224.0.0.1');
-    dgram.Socket.prototype.addMembership.call(
-      mockThis,
-      '224.0.0.1',
-      '127.0.0.1'
-    );
-    dgram.Socket.prototype.addMembership.call(mockThis, 'invalid', 'invalid');
+    testSocket3.setMulticastInterface('127.0.0.1');
+    testSocket3.setMulticastInterface('invalid');
 
-    dgram.Socket.prototype.dropMembership.call(mockThis, '224.0.0.1');
-    dgram.Socket.prototype.dropMembership.call(
-      mockThis,
-      '224.0.0.1',
-      '127.0.0.1'
-    );
-    dgram.Socket.prototype.dropMembership.call(mockThis, 'invalid', 'invalid');
+    testSocket3.addMembership('224.0.0.1');
+    testSocket3.addMembership('224.0.0.1', '127.0.0.1');
+    testSocket3.addMembership('invalid', 'invalid');
 
-    dgram.Socket.prototype.addSourceSpecificMembership.call(
-      mockThis,
-      '127.0.0.1',
-      '224.0.0.1'
-    );
-    dgram.Socket.prototype.addSourceSpecificMembership.call(
-      mockThis,
+    testSocket3.dropMembership('224.0.0.1');
+    testSocket3.dropMembership('224.0.0.1', '127.0.0.1');
+    testSocket3.dropMembership('invalid', 'invalid');
+
+    testSocket3.addSourceSpecificMembership('127.0.0.1', '224.0.0.1');
+    testSocket3.addSourceSpecificMembership(
       '127.0.0.1',
       '224.0.0.1',
       '127.0.0.1'
     );
-    dgram.Socket.prototype.addSourceSpecificMembership.call(
-      mockThis,
-      'invalid',
-      'invalid',
-      'invalid'
-    );
+    testSocket3.addSourceSpecificMembership('invalid', 'invalid', 'invalid');
 
-    dgram.Socket.prototype.dropSourceSpecificMembership.call(
-      mockThis,
-      '127.0.0.1',
-      '224.0.0.1'
-    );
-    dgram.Socket.prototype.dropSourceSpecificMembership.call(
-      mockThis,
+    testSocket3.dropSourceSpecificMembership('127.0.0.1', '224.0.0.1');
+    testSocket3.dropSourceSpecificMembership(
       '127.0.0.1',
       '224.0.0.1',
       '127.0.0.1'
     );
-    dgram.Socket.prototype.dropSourceSpecificMembership.call(
-      mockThis,
-      'invalid',
-      'invalid',
-      'invalid'
-    );
+    testSocket3.dropSourceSpecificMembership('invalid', 'invalid', 'invalid');
 
-    dgram.Socket.prototype.setRecvBufferSize.call(mockThis, 1024);
-    dgram.Socket.prototype.setRecvBufferSize.call(mockThis, 'invalid');
+    testSocket3.setRecvBufferSize(1024);
+    testSocket3.setRecvBufferSize('invalid');
 
-    dgram.Socket.prototype.setSendBufferSize.call(mockThis, 1024);
-    dgram.Socket.prototype.setSendBufferSize.call(mockThis, 'invalid');
+    testSocket3.setSendBufferSize(1024);
+    testSocket3.setSendBufferSize('invalid');
 
     // Test methods that return this
-    const refResult = dgram.Socket.prototype.ref.call(mockThis);
-    strictEqual(refResult, mockThis);
+    const testSocket4 = dgram.createSocket('udp4');
 
-    const unrefResult = dgram.Socket.prototype.unref.call(mockThis);
-    strictEqual(unrefResult, mockThis);
+    const refResult = testSocket4.ref();
+    strictEqual(refResult, testSocket4);
+
+    const unrefResult = testSocket4.unref();
+    strictEqual(unrefResult, testSocket4);
 
     // Test methods that return numbers
-    const recvBufferSize =
-      dgram.Socket.prototype.getRecvBufferSize.call(mockThis);
+    const testSocket5 = dgram.createSocket('udp4');
+
+    const recvBufferSize = testSocket5.getRecvBufferSize();
     strictEqual(recvBufferSize, 0);
 
-    const sendBufferSize =
-      dgram.Socket.prototype.getSendBufferSize.call(mockThis);
+    const sendBufferSize = testSocket5.getSendBufferSize();
     strictEqual(sendBufferSize, 0);
 
-    const sendQueueSize =
-      dgram.Socket.prototype.getSendQueueSize.call(mockThis);
+    const sendQueueSize = testSocket5.getSendQueueSize();
     strictEqual(sendQueueSize, 0);
 
-    const sendQueueCount =
-      dgram.Socket.prototype.getSendQueueCount.call(mockThis);
+    const sendQueueCount = testSocket5.getSendQueueCount();
     strictEqual(sendQueueCount, 0);
 
     // Test Symbol.asyncDispose method exists and is a no-op
     strictEqual(typeof dgram.Socket.prototype[Symbol.asyncDispose], 'function');
 
     // Test asyncDispose returns a Promise
-    const disposeResult =
-      dgram.Socket.prototype[Symbol.asyncDispose].call(mockThis);
+    const testSocket6 = dgram.createSocket('udp4');
+    const disposeResult = testSocket6[Symbol.asyncDispose]();
     ok(disposeResult instanceof Promise);
 
     // Verify the promise resolves to undefined
@@ -455,20 +305,14 @@ export const dgramTest = {
     strictEqual(dgram.default.Socket, dgram.Socket);
 
     // Test createSocket with more complex options
-    throws(
-      () => {
-        dgram.createSocket({
-          type: 'udp4',
-          reuseAddr: true,
-          ipv6Only: false,
-          recvBufferSize: 1024,
-          sendBufferSize: 1024,
-        });
-      },
-      {
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      }
-    );
+    const socket11 = dgram.createSocket({
+      type: 'udp4',
+      reuseAddr: true,
+      ipv6Only: false,
+      recvBufferSize: 1024,
+      sendBufferSize: 1024,
+    });
+    ok(socket11 instanceof dgram.Socket);
 
     // Test edge cases with validation
     throws(

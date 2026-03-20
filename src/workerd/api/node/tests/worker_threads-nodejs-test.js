@@ -125,8 +125,13 @@ export const testWorkerProperties = {
 
 export const testMessageChannelAndPort = {
   async test() {
-    strictEqual(MessageChannel, globalThis.MessageChannel);
-    strictEqual(MessagePort, globalThis.MessagePort);
+    // Only check reference equality if the global MessageChannel is exposed.
+    // The node:worker_threads module now imports from cloudflare-internal:messagechannel
+    // so it works independently of the expose_global_message_channel compat flag.
+    if (typeof globalThis.MessageChannel !== 'undefined') {
+      strictEqual(MessageChannel, globalThis.MessageChannel);
+      strictEqual(MessagePort, globalThis.MessagePort);
+    }
 
     const channel = new MessageChannel();
     ok(channel instanceof MessageChannel);

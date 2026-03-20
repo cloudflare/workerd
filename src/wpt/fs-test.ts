@@ -100,11 +100,6 @@ export default {
     comment: 'We do not yet implement sync access handles',
     disabledTests: ['Attempt to create a sync access handle.'],
   },
-  'FileSystemFileHandle-cross-primitive-locking.https.tentative.worker.js': {
-    comment:
-      'The importScripts utility is not implemented in our test hardness',
-    disabledTests: true,
-  },
   'FileSystemFileHandle-getFile.https.any.js': {
     comment: '...',
     expectedFailures: [
@@ -144,44 +139,6 @@ export default {
       'move(dir, name) can overwrite an existing file',
       'FileSystemFileHandles are references, not paths',
     ],
-  },
-  'FileSystemFileHandle-sync-access-handle-back-forward-cache.https.tentative.window.js':
-    {
-      comment: 'We currently do not implement sync access handles',
-      disabledTests: true,
-    },
-  'FileSystemFileHandle-sync-access-handle-lock-modes.https.tentative.worker.js':
-    {
-      comment: 'We currently do not implement sync access handles',
-      disabledTests: true,
-    },
-  'FileSystemFileHandle-writable-file-stream-back-forward-cache.https.tentative.window.js':
-    {
-      comment:
-        'The test harness requires a method getCodeAtPath that is not currently implemented in our test harness.',
-      disabledTests: true,
-    },
-  'FileSystemFileHandle-writable-file-stream-lock-modes.https.tentative.worker.js':
-    {
-      comment: 'We currently do not implement lock modes',
-      disabledTests: true,
-    },
-  'FileSystemObserver-sync-access-handle.https.tentative.worker.js': {
-    comment:
-      'We currently do not implement sync access handles or FileSystemObserver',
-    disabledTests: true,
-  },
-  'FileSystemObserver-unsupported-global.https.tentative.any.js': {
-    comment: 'We do not implement FileSystemObserver',
-    disabledTests: true,
-  },
-  'FileSystemObserver-writable-file-stream.https.tentative.any.js': {
-    comment: 'We do not implement FileSystemObserver',
-    disabledTests: true,
-  },
-  'FileSystemObserver.https.tentative.any.js': {
-    comment: 'FileSystemObserver is not implemented in workers',
-    disabledTests: true,
   },
   'FileSystemSyncAccessHandle-close.https.worker.js': {
     comment: 'We currently do not implement sync access handles',
@@ -227,9 +184,24 @@ export default {
     ],
   },
   'idlharness.https.any.js': {
-    comment: 'The WebIDLParser.js is not found',
-    // TODO(node-fs): Revisit this
-    disabledTests: true,
+    comment:
+      'Remaining IDL failures: prototype chain issues, operation .length mismatches',
+    expectedFailures: [
+      'FileSystemHandle interface: operation isSameEntry(FileSystemHandle)',
+      'FileSystemFileHandle interface: existence and properties of interface object',
+      'FileSystemFileHandle interface: operation getFile()',
+      'FileSystemFileHandle interface: operation createWritable(optional FileSystemCreateWritableOptions)',
+      'FileSystemDirectoryHandle interface: existence and properties of interface object',
+      'FileSystemDirectoryHandle interface: operation getFileHandle(USVString, optional FileSystemGetFileOptions)',
+      'FileSystemDirectoryHandle interface: operation getDirectoryHandle(USVString, optional FileSystemGetDirectoryOptions)',
+      'FileSystemDirectoryHandle interface: operation removeEntry(USVString, optional FileSystemRemoveOptions)',
+      'FileSystemDirectoryHandle interface: operation resolve(FileSystemHandle)',
+      'FileSystemWritableFileStream interface: existence and properties of interface object',
+      'FileSystemWritableFileStream interface: operation write(FileSystemWriteChunkType)',
+      'FileSystemWritableFileStream interface: operation seek(unsigned long long)',
+      'FileSystemWritableFileStream interface: operation truncate(unsigned long long)',
+      'StorageManager interface: operation getDirectory()',
+    ],
   },
   'opaque-origin.https.window.js': {
     comment: 'Not relevant to workers',

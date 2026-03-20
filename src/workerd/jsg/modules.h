@@ -150,6 +150,12 @@ class ModuleRegistry {
     // For source phase imports - stores the module source object (e.g., WebAssembly.Module)
     kj::Maybe<V8Ref<v8::Object>> maybeModuleSourceObject;
 
+    // Cache for mutable module exports wrapper when require_returns_default_export flag is enabled.
+    // Used to ensure require() returns the same mutable object for the same module.
+    // This enables frameworks like Next.js to patch built-in module exports.
+    // See: https://github.com/cloudflare/workerd/issues/5844
+    mutable kj::Maybe<V8Ref<v8::Object>> maybeMutableExports;
+
     ModuleInfo(jsg::Lock& js,
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
@@ -394,7 +400,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       ResolveOption option = ResolveOption::DEFAULT,
       ResolveMethod method = ResolveMethod::IMPORT,
       kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) override {
-    using Key = typename Entry::Key;
+    using Key = Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
         return entry->module(js, observer, referrer, method);
@@ -495,7 +501,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     // internal modules. If the worker bundle provided an override for the
     // built-in module, then the built-in was never registered and won't
     // be found.
-    using Key = typename Entry::Key;
+    using Key = Entry::Key;
     auto resolveOption = ModuleRegistry::ResolveOption::DEFAULT;
     if (entries.find(Key(referrer, Type::BUNDLE)) != kj::none) {
       // The referrer is found in the module bundle, so we use the default.
@@ -622,7 +628,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   };
 
   struct SpecifierHashCallbacks {
-    using Key = typename Entry::Key;
+    using Key = Entry::Key;
 
     const Key keyForRow(const kj::Own<Entry>& row) const {
       return Key(row->specifier, row->type);

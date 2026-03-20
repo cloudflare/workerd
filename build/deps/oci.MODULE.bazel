@@ -1,7 +1,4 @@
 # rules_oci and rules_multirun are used to build Docker images
-bazel_dep(name = "rules_oci", version = "2.2.7")
-bazel_dep(name = "rules_multirun", version = "0.13.0")
-
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 
 # Base image for container-client-test. This is the smallest container image
@@ -15,4 +12,13 @@ oci.pull(
         "linux/arm64/v8",
     ],
 )
-use_repo(oci, "node_25_slim", "node_25_slim_linux_amd64", "node_25_slim_linux_arm64_v8")
+oci.pull(
+    name = "proxy_everything",
+    digest = "sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8",
+    image = "docker.io/cloudflare/proxy-everything",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ],
+)
+use_repo(oci, "node_25_slim", "node_25_slim_linux_amd64", "node_25_slim_linux_arm64_v8", "proxy_everything", "proxy_everything_linux_amd64", "proxy_everything_linux_arm64")

@@ -59,6 +59,69 @@ class TestConnectResponse: public kj::HttpService::ConnectResponse {
   }
 };
 
+KJ_TEST("get header by id round-trip through Rust") {
+  // Register a custom header and a second one we'll leave unset.
+  kj::HttpHeaderTable::Builder builder;
+  auto customId = builder.add("X-Custom-Header");
+  auto absentId = builder.add("X-Absent-Header");
+  auto table = builder.build();
+
+  kj::HttpHeaders headers(*table);
+  headers.setPtr(customId, "hello-from-cpp");
+
+  // Also set a builtin header to test that path.
+  headers.setPtr(kj::HttpHeaderId::HOST, "example.com");
+
+  // Round-trip: C++ -> Rust (get_header_value_via_id) -> C++ (get_header_by_id shim) -> value.
+  {
+    auto maybe = kj::rust::tests::get_header_value_via_id(headers, customId);
+    KJ_IF_SOME(value, maybe) {
+      auto strValue = kj::StringPtr(reinterpret_cast<const char*>(value.data()), value.size());
+      KJ_EXPECT(strValue == "hello-from-cpp", strValue);
+    } else {
+      KJ_FAIL_EXPECT("expected Some for custom header, got None");
+    }
+  }
+
+  // Absent header should return None.
+  {
+    auto maybe = kj::rust::tests::get_header_value_via_id(headers, absentId);
+    KJ_EXPECT(maybe == kj::none, "expected None for absent header");
+  }
+
+  // Builtin header via HttpHeaderId.
+  {
+    auto maybe = kj::rust::tests::get_header_value_via_id(headers, kj::HttpHeaderId::HOST);
+    KJ_IF_SOME(value, maybe) {
+      auto strValue = kj::StringPtr(reinterpret_cast<const char*>(value.data()), value.size());
+      KJ_EXPECT(strValue == "example.com", strValue);
+    } else {
+      KJ_FAIL_EXPECT("expected Some for HOST header, got None");
+    }
+  }
+}
+
+KJ_TEST("assert header ids present via ArrayPtr round-trip through Rust") {
+  kj::HttpHeaderTable::Builder builder;
+  auto custom1 = builder.add("X-First");
+  auto custom2 = builder.add("X-Second");
+  auto table = builder.build();
+
+  kj::HttpHeaders headers(*table);
+  headers.setPtr(custom1, "value1");
+  headers.setPtr(custom2, "value2");
+  headers.setPtr(kj::HttpHeaderId::HOST, "example.com");
+
+  // Build an array of pointers from our HttpHeaderIds, simulating what you'd get from
+  // kj::ArrayPtr<const kj::HttpHeaderId> — CXX can't pass opaque types in slices directly,
+  // so we pass pointers instead.
+  const kj::HttpHeaderId* const idPtrs[] = {&custom1, &custom2, &kj::HttpHeaderId::HOST};
+  rust::Slice<const kj::HttpHeaderId* const> idSlice(idPtrs, 3);
+
+  // The Rust side wraps each pointer in HttpHeaderIdRef and asserts all are present.
+  kj::rust::tests::assert_header_ids_present(headers, idSlice);
+}
+
 KJ_TEST("http connect settings") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);

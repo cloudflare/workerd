@@ -66,7 +66,7 @@ KJ_TEST("AES-KW key wrap") {
         params = {};
         params.name = kj::str("AES-KW");
 
-        auto unwrapped = aesKey->unwrapKey(js, kj::mv(params), wrapped);
+        auto unwrapped = aesKey->unwrapKey(js, kj::mv(params), wrapped.asArrayPtr().asConst());
 
         KJ_EXPECT(unwrapped.asArrayPtr() == keyMaterial);
 
@@ -74,7 +74,8 @@ KJ_TEST("AES-KW key wrap") {
         params = {};
         params.name = kj::str("AES-KW");
         wrapped.asArrayPtr()[5] += 1;
-        KJ_EXPECT_THROW_MESSAGE("[24 == -1]", aesKey->unwrapKey(js, kj::mv(params), wrapped));
+        KJ_EXPECT_THROW_MESSAGE(
+            "[24 == -1]", aesKey->unwrapKey(js, kj::mv(params), wrapped.asArrayPtr().asConst()));
       }
     });
   });
@@ -109,13 +110,11 @@ KJ_TEST("AES-CTR key wrap") {
   static constexpr auto getEnc = [](jsg::Lock& js) {
     static constexpr auto kRaw =
         "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F\x10"_kjb;
-    auto backing = jsg::BackingStore::alloc(js, 16);
-    auto buffersource = jsg::BufferSource(js, kj::mv(backing));
-    buffersource.asArrayPtr().copyFrom(kRaw);
+    auto counter = jsg::JsUint8Array::create(js, kRaw);
 
     return SubtleCrypto::EncryptAlgorithm{
       .name = kj::str("AES-CTR"),
-      .counter = kj::mv(buffersource),
+      .counter = jsg::JsBufferSource(counter).addRef(js),
       .length = 5,
     };
   };
@@ -142,15 +141,16 @@ KJ_TEST("AES-CTR key wrap") {
         return subtle.wrapKey(js, kj::str("raw"), *toWrap, *wrappingKey, getEnc(js), *jwkHandler);
       })
           .then(js,
-              [&](jsg::Lock&, jsg::BufferSource wrapped) {
-        auto data = kj::heapArray(wrapped.asArrayPtr());
+              [&](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> wrapped) {
+        auto data = wrapped.getHandle(js).copy();
         return subtle.unwrapKey(js, kj::str("raw"), kj::mv(data), *wrappingKey, getEnc(js),
             getImportKeyAlg(), true, kj::arr(kj::str("encrypt")), *jwkHandler);
       })
           .then(js, [&](jsg::Lock& js, jsg::Ref<CryptoKey> unwrapped) {
         return subtle.exportKey(js, kj::str("raw"), *unwrapped);
-      }).then(js, [&](jsg::Lock&, api::SubtleCrypto::ExportKeyData roundTrippedKeyMaterial) {
-        KJ_ASSERT(roundTrippedKeyMaterial.get<jsg::BufferSource>() == KEY_DATA);
+      }).then(js, [&](jsg::Lock& js, api::SubtleCrypto::ExportKeyData roundTrippedKeyMaterial) {
+        auto& buf = roundTrippedKeyMaterial.get<jsg::JsRef<jsg::JsArrayBuffer>>();
+        KJ_ASSERT(buf.getHandle(js).asArrayPtr() == KEY_DATA);
         completed = true;
       });
 

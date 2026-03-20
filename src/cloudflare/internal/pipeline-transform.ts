@@ -87,7 +87,9 @@ type PipelineRecord = Record<string, unknown>;
 export class PipelineTransformImpl<
   I extends PipelineRecord,
   O extends PipelineRecord,
-> extends entrypoints.WorkerEntrypoint {
+>
+  extends entrypoints.WorkerEntrypoint
+{
   #batch?: Batch;
   #initalized: boolean = false;
 

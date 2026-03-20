@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# TODO(cleanup): This is a copy of an existing test in streams-test. Once the autogate is remvoed,
+# this separate test can be deleted.
+const unitTests :Workerd.Config = (
+  autogates = ["workerd-autogate-identity-transform-stream-use-state-machine"],
+  services = [
+    ( name = "identity-transform-stream-state-machine-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "identity-transform-stream-state-machine-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "streams_enable_constructors"],
+      )
+    ),
+  ],
+);

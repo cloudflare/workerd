@@ -9,6 +9,15 @@ vendored_py_wd_test("beautifulsoup4")
 
 vendored_py_wd_test(
     "python-workers-runtime-sdk",
+    feature_flags = ["enable_python_external_sdk"],
+)
+
+vendored_py_wd_test(
+    "python-workers-runtime-sdk-override",
+    feature_flags = ["disable_python_external_sdk"],
+    main_py_file = "python-workers-runtime-sdk.py",
+    test_template = "python-workers-runtime-sdk_vendor.wd-test",
+    vendored_package_name = "python-workers-runtime-sdk",
 )
 
 # vendored_py_wd_test("scipy")
@@ -32,3 +41,5 @@ vendored_py_wd_test(
     use_snapshot = "dedicated_fastapi",
     vendored_package_name = "fastapi",
 )
+
+exports_files(["generate_modules.py"])

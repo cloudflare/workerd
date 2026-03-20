@@ -28,8 +28,9 @@
 #include <kj/mutex.h>
 
 namespace v8 {
+class BackingStore;
 class Isolate;
-}
+}  // namespace v8
 
 namespace workerd {
 
@@ -43,7 +44,6 @@ class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
-class Socket;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class ExecutionContext;
@@ -95,6 +95,7 @@ struct EntrypointClasses {
 //   for a class name to end in "Instance". ("I have an instance of WorkerInstance...")
 class Worker: public kj::AtomicRefcounted {
  public:
+  using VersionInfo = Worker_VersionInfo;
   class Script;
   class Isolate;
   class Api;
@@ -161,7 +162,7 @@ class Worker: public kj::AtomicRefcounted {
           v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports)> compileBindings,
       IsolateObserver::StartType startType,
-      TraceParentContext spans,
+      SpanParent parentSpan,
       LockType lockType,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Duration&> startupTime = kj::none);
@@ -210,15 +211,6 @@ class Worker: public kj::AtomicRefcounted {
   kj::Promise<AsyncLock> takeAsyncLockWhenActorCacheReady(
       kj::Date now, Actor& actor, RequestObserver& request) const;
 
-  // Track a set of address->callback overrides for which the connect(address) behavior should be
-  // overridden via callbacks rather than using the default Socket connect() logic.
-  // This is useful for allowing generic client libraries to connect to private local services using
-  // just a provided address (rather than requiring them to support being passed a binding to call
-  // binding.connect() on).
-  using ConnectFn = kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)>;
-  void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
-  kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
-
   static void setupContext(
       jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions);
 
@@ -233,8 +225,6 @@ class Worker: public kj::AtomicRefcounted {
 
   struct Impl;
   kj::Own<Impl> impl;
-
-  kj::HashMap<kj::String, ConnectFn> connectOverrides;
 
   struct ActorClassInfo {
     EntrypointClass cls;
@@ -384,6 +374,14 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const;
   // Returns a reference to cpuLimitNearlyExceededCallback. Can't outlive the Isolate.
   kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
+
+  // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
+  // The signal offset is optional: when kj::none, the module will only receive the terminated
+  // flag but will not get the SIGXCPU warning. See TrackedWasmInstanceList::registerSignal().
+  void registerTrackedWasmInstance(jsg::Lock& js,
+      kj::Array<kj::byte> memory,
+      kj::Maybe<uint32_t> signalOffset,
+      uint32_t terminatedOffset) const;
 
   inline IsolateObserver& getMetrics() {
     return *metrics;
@@ -755,12 +753,16 @@ class Worker::Lock {
   // default handler. Returns null if this is not a modules-syntax worker (but `entrypointName`
   // must be null in that case).
   //
+  // `versionInfo` is used to populate `ctx.version` when enabled.
   // `props` is the value to place in `ctx.props`.
   //
   // If running in an actor, the name and props are ignored and the entrypoint originally used to
   // construct the actor is returned.
   kj::Maybe<kj::Own<api::ExportedHandler>> getExportedHandler(
-      kj::Maybe<kj::StringPtr> entrypointName, Frankenvalue props, kj::Maybe<Worker::Actor&> actor);
+      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<VersionInfo> versionInfo,
+      Frankenvalue props,
+      kj::Maybe<Worker::Actor&> actor);
 
   // Get the C++ object representing the global scope.
   api::ServiceWorkerGlobalScope& getGlobalScope();
@@ -895,6 +897,9 @@ class Worker::Actor final: public kj::Refcounted {
       Worker::Actor::Id id;
     };
 
+    // Returns the nesting depth of this facet. Root = 0, direct child of root = 1, etc.
+    virtual uint getDepth() const = 0;
+
     // These methods are C++ equivalents of the JavaScript ctx.facets API.
     virtual kj::Own<IoChannelFactory::ActorChannel> getFacet(
         kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) = 0;
@@ -918,7 +923,8 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t> hibernationEventType,
       kj::Maybe<rpc::Container::Client> container = kj::none,
-      kj::Maybe<FacetManager&> facetManager = kj::none);
+      kj::Maybe<FacetManager&> facetManager = kj::none,
+      kj::Maybe<ActorVersion> version = kj::none);
 
   ~Actor() noexcept(false);
 
@@ -1029,6 +1035,47 @@ class Worker::Actor final: public kj::Refcounted {
   friend class Worker;
 
   kj::Promise<void> ensureConstructedImpl(IoContext&, ActorClassInfo& info);
+};
+
+WD_STRONG_BOOL(PopulateVersionInfoMetadata);
+
+// Version information associated with a worker. These are made available through `ctx.version`.
+// This is also available through the preferred `Worker::VersionInfo` alias. `Worker_VersionInfo`
+// exists to allow for forward declaration in a couple of niche places.
+struct Worker_VersionInfo {
+  kj::String id;
+  kj::Maybe<kj::String> cohort;
+  kj::Maybe<kj::String> key;
+  kj::Maybe<kj::String> versionOverride;
+
+  Worker_VersionInfo clone() const {
+    return {
+      .id = kj::str(id),
+      .cohort = cohort.map([](const kj::String& s) { return kj::str(s); }),
+      .key = key.map([](const kj::String& s) { return kj::str(s); }),
+      .versionOverride = versionOverride.map([](const kj::String& s) { return kj::str(s); }),
+    };
+  }
+
+  jsg::JsValue toJs(jsg::Lock& js, PopulateVersionInfoMetadata populateVersionInfoMetadata) const {
+    auto version = js.obj();
+    if (populateVersionInfoMetadata) {
+      auto metadata = js.obj();
+      metadata.set(js, "id"_kj, js.str(id));
+      version.set(js, "metadata"_kj, metadata);
+    }
+    KJ_IF_SOME(someCohort, cohort) {
+      version.set(js, "cohort"_kj, js.str(someCohort));
+    }
+    KJ_IF_SOME(someKey, key) {
+      version.set(js, "key"_kj, js.str(someKey));
+    }
+    KJ_IF_SOME(someVersionOverride, versionOverride) {
+      version.set(js, "override"_kj, js.str(someVersionOverride));
+    }
+    version.recursivelyFreeze(js);
+    return version;
+  }
 };
 
 // =======================================================================================

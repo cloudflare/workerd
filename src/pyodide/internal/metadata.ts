@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 
@@ -47,8 +51,12 @@ export const TRANSITIVE_REQUIREMENTS =
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 
 export type CompatibilityFlags = MetadataReader.CompatibilityFlags;
-export const COMPATIBILITY_FLAGS: MetadataReader.CompatibilityFlags =
-  MetadataReader.getCompatibilityFlags();
+export const COMPATIBILITY_FLAGS: MetadataReader.CompatibilityFlags = {
+  // Compat flags returned from getCompatibilityFlags is immutable,
+  // but in Pyodide 0.26, we modify the JS object that is exposed to the Python through
+  // registerJsModule so we create a new object here by copying the values.
+  ...MetadataReader.getCompatibilityFlags(),
+};
 export const WORKFLOWS_ENABLED: boolean =
   !!COMPATIBILITY_FLAGS.python_workflows;
 const NO_GLOBAL_HANDLERS: boolean =
@@ -57,11 +65,10 @@ const FORCE_NEW_VENDOR_PATH: boolean =
   !!COMPATIBILITY_FLAGS.python_workers_force_new_vendor_path;
 export const IS_DEDICATED_SNAPSHOT_ENABLED: boolean =
   !!COMPATIBILITY_FLAGS.python_dedicated_snapshot;
-const EXTERNAL_SDK = !!COMPATIBILITY_FLAGS.enable_python_external_sdk;
+export const EXTERNAL_SDK = !!COMPATIBILITY_FLAGS.enable_python_external_sdk;
 
 export const LEGACY_GLOBAL_HANDLERS = !NO_GLOBAL_HANDLERS;
 export const LEGACY_VENDOR_PATH = !FORCE_NEW_VENDOR_PATH;
-export const LEGACY_INCLUDE_SDK = !EXTERNAL_SDK;
 export const CHECK_RNG_STATE = !!COMPATIBILITY_FLAGS.python_check_rng_state;
 
 export const setCpuLimitNearlyExceededCallback =

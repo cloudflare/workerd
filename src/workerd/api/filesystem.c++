@@ -6,6 +6,7 @@
 
 #include <workerd/api/node/exceptions.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/io/features.h>
 #include <workerd/jsg/setup.h>
 
 namespace workerd::api {
@@ -493,7 +494,7 @@ uint32_t FileSystemModule::write(
   auto& vfs = workerd::VirtualFileSystem::current(js);
 
   KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
-    static const auto getPosition = [](jsg::Lock& js, auto& opened, auto& file,
+    static const auto getPosition = [](jsg::Lock& js, auto opened, auto file,
                                         const WriteOptions& options) -> uint32_t {
       if (opened->append) {
         // If the file descriptor is opened in append mode, we ignore the position
@@ -509,7 +510,7 @@ uint32_t FileSystemModule::write(
     };
     KJ_SWITCH_ONEOF(opened->node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        auto pos = getPosition(js, opened, file, options);
+        auto pos = getPosition(js, opened.addRef(), file.addRef(), options);
         uint32_t total = 0;
         for (auto& buffer: data) {
           KJ_SWITCH_ONEOF(file->write(js, pos, buffer)) {
@@ -1142,7 +1143,7 @@ static constexpr int UV_DIRENT_LINK = 3;
 static constexpr int UV_DIRENT_CHAR = 6;
 void readdirImpl(jsg::Lock& js,
     const workerd::VirtualFileSystem& vfs,
-    kj::Rc<workerd::Directory>& dir,
+    kj::Rc<workerd::Directory> dir,
     const kj::Path& path,
     const FileSystemModule::ReadDirOptions& options,
     kj::Vector<FileSystemModule::DirEntHandle>& entries) {
@@ -1165,7 +1166,7 @@ void readdirImpl(jsg::Lock& js,
         });
 
         if (options.recursive) {
-          readdirImpl(js, vfs, dir, path.append(entry.key), options, entries);
+          readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
         }
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
@@ -1186,7 +1187,7 @@ void readdirImpl(jsg::Lock& js,
                 // Do nothing
               }
               KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-                readdirImpl(js, vfs, dir, path.append(entry.key), options, entries);
+                readdirImpl(js, vfs, dir.addRef(), path.append(entry.key), options, entries);
               }
               KJ_CASE_ONEOF(err, workerd::FsError) {
                 throwFsError(js, err, "readdir"_kj);
@@ -1209,7 +1210,7 @@ kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         kj::Vector<DirEntHandle> entries;
-        readdirImpl(js, vfs, dir, normalizedPath, options, entries);
+        readdirImpl(js, vfs, kj::mv(dir), normalizedPath, options, entries);
         return entries.releaseAsArray();
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -1679,6 +1680,20 @@ void cpImpl(jsg::Lock& js,
                       jsg::Url::EquivalenceOption::IGNORE_SEARCH |
                       jsg::Url::EquivalenceOption::NORMALIZE_PATH),
       Error, "Source and destination paths must not be the same"_kj);
+
+  // Cannot copy a directory to a subdirectory of itself. The pathnames are
+  // already normalized by jsg::Url (no .., //, or trailing slashes except root).
+  {
+    auto srcPath = src.getPathname();
+    auto destPath = dest.getPathname();
+    KJ_ASSERT(srcPath.size() > 0, "normalized URL pathname must not be empty");
+    auto srcPrefix = srcPath.back() == '/' ? kj::str(srcPath) : kj::str(srcPath, "/");
+    auto destStr = kj::StringPtr(destPath.begin(), destPath.size());
+    if (destStr.size() > srcPrefix.size() && destStr.startsWith(srcPrefix)) {
+      node::THROW_ERR_FS_CP_EINVAL(
+          js, kj::str("Cannot copy '", srcPath, "' to a subdirectory of itself, '", destPath, "'"));
+    }
+  }
 
   // Step 1: If deferenceSymlinks is true, the we will be following symbolic links. If
   // it is false, we won't be.
@@ -2338,7 +2353,7 @@ jsg::Promise<kj::Array<jsg::USVString>> FileSystemDirectoryHandle::resolve(
 namespace {
 kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileSystem& vfs,
     jsg::Lock& js,
-    kj::Rc<workerd::Directory>& inner,
+    kj::Rc<workerd::Directory> inner,
     const jsg::Url& parentLocator) {
   kj::Vector<jsg::Ref<FileSystemHandle>> entries;
   for (auto& entry: *inner.get()) {
@@ -2404,7 +2419,7 @@ jsg::Ref<FileSystemDirectoryHandle::EntryIterator> FileSystemDirectoryHandle::en
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         return js.alloc<EntryIterator>(
-            IteratorState(JSG_THIS, collectEntries(getVfs(), js, dir, getLocator())));
+            IteratorState(JSG_THIS, collectEntries(getVfs(), js, kj::mv(dir), getLocator())));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         JSG_FAIL_REQUIRE(DOMTypeMismatchError, "Not a directory");
@@ -2432,7 +2447,7 @@ jsg::Ref<FileSystemDirectoryHandle::KeyIterator> FileSystemDirectoryHandle::keys
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         return js.alloc<KeyIterator>(
-            IteratorState(JSG_THIS, collectEntries(getVfs(), js, dir, getLocator())));
+            IteratorState(JSG_THIS, collectEntries(getVfs(), js, kj::mv(dir), getLocator())));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         JSG_FAIL_REQUIRE(DOMTypeMismatchError, "Not a directory");
@@ -2461,7 +2476,7 @@ jsg::Ref<FileSystemDirectoryHandle::ValueIterator> FileSystemDirectoryHandle::va
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         return js.alloc<ValueIterator>(
-            IteratorState(JSG_THIS, collectEntries(getVfs(), js, dir, getLocator())));
+            IteratorState(JSG_THIS, collectEntries(getVfs(), js, kj::mv(dir), getLocator())));
       }
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         JSG_FAIL_REQUIRE(DOMTypeMismatchError, "Not a directory");
@@ -2502,7 +2517,7 @@ void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
         }
         callback.setReceiver(js.v8Ref(receiver));
 
-        for (auto& entry: collectEntries(getVfs(), js, dir, getLocator())) {
+        for (auto& entry: collectEntries(getVfs(), js, kj::mv(dir), getLocator())) {
           callback(js, jsg::USVString(kj::str(entry->getName(js))), entry.addRef(), JSG_THIS);
         }
         return;
@@ -2632,11 +2647,15 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
   auto stream =
       js.alloc<FileSystemWritableFileStream>(newWritableStreamJsController(), sharedState.addRef());
 
-  stream->getController().setup(js,
-      UnderlyingSink{.type = kj::str("bytes"),
-        .write =
-            [state = sharedState.addRef(), &deHandler, &dataHandler](
-                jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
+  UnderlyingSink sink;
+  // Per the WHATWG spec, the type property for WritableStream's underlying sink must be undefined.
+  // The "bytes" type is only valid for ReadableStream. When pedantic_wpt is not set, we preserve
+  // the legacy behavior of setting the type to "bytes".
+  if (!FeatureFlags::get(js).getPedanticWpt()) {
+    sink.type = kj::str("bytes");
+  }
+  sink.write = [state = sharedState.addRef(), &deHandler, &dataHandler](
+                   jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
     return js.tryCatch([&] {
       KJ_IF_SOME(unwrapped, dataHandler.tryUnwrap(js, chunk)) {
         return FileSystemWritableFileStream::writeImpl(
@@ -2645,15 +2664,13 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
       return js.rejectedPromise<void>(
           js.typeError("WritableStream received a value that is not writable"));
     }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  },
-        .abort =
-            [state = sharedState.addRef()](jsg::Lock& js, auto reason) mutable {
+  };
+  sink.abort = [state = sharedState.addRef()](jsg::Lock& js, auto reason) mutable {
     // When aborted, we just drop any of the written data on the floor.
     state->clear();
     return js.resolvedPromise();
-  },
-        .close =
-            [state = sharedState.addRef(), &deHandler](jsg::Lock& js) mutable {
+  };
+  sink.close = [state = sharedState.addRef(), &deHandler](jsg::Lock& js) mutable {
     KJ_DEFER(state->clear());
     return js.tryCatch([&] {
       KJ_IF_SOME(temp, state->temp) {
@@ -2694,8 +2711,8 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
       }
       return js.resolvedPromise();
     }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  }},
-      kj::none);
+  };
+  stream->getController().setup(js, kj::mv(sink), kj::none);
 
   return js.resolvedPromise(kj::mv(stream));
 }

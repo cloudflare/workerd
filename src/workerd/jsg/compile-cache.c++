@@ -20,7 +20,8 @@ void CompileCache::add(
 }
 
 kj::Maybe<CompileCache::Data&> CompileCache::find(kj::StringPtr key) const {
-  KJ_IF_SOME(value, cache.lockExclusive()->find(key)) {
+  auto lock = cache.lockExclusive();
+  KJ_IF_SOME(value, lock->find(key)) {
     if (value.data != nullptr) {
       return value;
     }

@@ -1,6 +1,7 @@
 import { defineConfig } from "eslint/config";
 import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import customRules from './custom-eslint-rules.mjs';
 
 /**
  * @returns {import('eslint/config').Config}
@@ -9,6 +10,14 @@ export function baseConfig() {
   return defineConfig([
     eslint.configs.recommended,
     ...tseslint.configs.strictTypeChecked,
+    {
+      plugins: {
+        workerd: customRules,
+      },
+      rules: {
+        'workerd/require-copyright-header': 'error',
+      },
+    },
     {
       languageOptions: {
         parserOptions: {

@@ -11,11 +11,6 @@ $Cxx.allowCancellation;
 
 struct Docker {
   # Docker API structures for container operations
-  struct PortBinding {
-    hostIp @0 :Text $Json.name("HostIp");
-    hostPort @1 :Text $Json.name("HostPort");
-  }
-
   struct LogConfig {
     type @0 :Text $Json.name("Type");
     config @1 :Json.Value $Json.name("Config");
@@ -162,6 +157,7 @@ struct Docker {
       cgroupParent @47 :Text $Json.name("CgroupParent");
       volumeDriver @48 :Text $Json.name("VolumeDriver");
       shmSize @49 :UInt32 $Json.name("ShmSize");
+      extraHosts @50 :List(Text) $Json.name("ExtraHosts"); # --add-host entries in "host:ip" format
 
     }
   }
@@ -285,5 +281,52 @@ struct Docker {
         response @0 :ContainerInspectResponse;
       }
     }
+  }
+
+  # Network inspection response (GET /networks/{id})
+  struct NetworkInspectResponse {
+    name @0 :Text $Json.name("Name");
+    id @1 :Text $Json.name("Id");
+    ipam @2 :IPAM $Json.name("IPAM");
+
+    struct IPAM {
+      driver @0 :Text $Json.name("Driver");
+      config @1 :List(IPAMConfig) $Json.name("Config");
+
+      struct IPAMConfig {
+        subnet @0 :Text $Json.name("Subnet");
+        gateway @1 :Text $Json.name("Gateway");
+      }
+    }
+  }
+
+  # Network create request (POST /networks/create)
+  # Equivalent to: docker network create -d bridge --ipv6 workerd-network
+  struct NetworkCreateRequest {
+    name @0 :Text $Json.name("Name");
+    driver @1 :Text $Json.name("Driver");  # "bridge", "overlay", etc.
+    enableIpv6 @2 :Bool $Json.name("EnableIPv6");
+  }
+
+  # Network create response
+  struct NetworkCreateResponse {
+    id @0 :Text $Json.name("Id");
+    warning @1 :Text $Json.name("Warning");
+  }
+}
+
+struct ProxyEverything {
+  struct Dns {
+    allowHostnames @0 :List(Text) $Json.name("allowHostnames");
+  }
+
+  struct Internet {
+    enabled @0 :Bool $Json.name("enabled");
+  }
+
+  struct Port {
+    port @0 :UInt16 $Json.name("port");
+    dns @1 :Dns $Json.name("dns");
+    internet @2 :Internet $Json.name("internet");
   }
 }

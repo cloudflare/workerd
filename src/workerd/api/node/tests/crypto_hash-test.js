@@ -324,3 +324,22 @@ export const hash_one_shot = {
     });
   },
 };
+
+export const HashCopyAfterDigest = {
+  async test() {
+    for (let i = 0; i < 50; i++) {
+      const hash = crypto.createHash('sha256');
+      hash.update('x' + i);
+
+      const kHandle = Object.getOwnPropertySymbols(hash).find(
+        (s) => s.toString() === 'Symbol(kHandle)'
+      );
+      const handle = hash[kHandle];
+      handle.digest();
+
+      assert.throws(() => hash.copy(), {
+        message: /already been finalized/,
+      });
+    }
+  },
+};

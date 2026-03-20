@@ -28,6 +28,8 @@ constexpr kj::StringPtr getMessage(NodeExceptionCode code, kj::StringPtr message
       return "File already exists";
     case NodeExceptionCode::ERR_FS_CP_DIR_TO_NON_DIR:
       return "Cannot copy directory to non-directory";
+    case NodeExceptionCode::ERR_FS_CP_EINVAL:
+      return "Invalid cp operation";
     case NodeExceptionCode::ERR_FS_CP_NON_DIR_TO_DIR:
       return "Cannot copy non-directory to directory";
     case NodeExceptionCode::ERR_FS_EISDIR:

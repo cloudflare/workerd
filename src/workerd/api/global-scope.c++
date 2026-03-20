@@ -284,18 +284,14 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     //   promise resolves in JavaScript space, so won't be canceled. So we need to track
     //   cancellation separately. We use a weird refcounted boolean.
     // TODO(cleanup): Is there something less ugly we can do here?
-    struct RefcountedBool: public kj::Refcounted {
-      bool value;
-      RefcountedBool(bool value): value(value) {}
-    };
-    auto canceled = kj::refcounted<RefcountedBool>(false);
+    auto canceled = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
 
     return ioContext
         .awaitJs(lock,
             promise.then(kj::implicitCast<jsg::Lock&>(lock),
                 ioContext.addFunctor(
                     [&response, allowWebSocket = headers.isWebSocket(),
-                        canceled = kj::addRef(*canceled), &headers, span = kj::mv(span)](
+                        canceled = canceled->addWrappedRef(), &headers, span = kj::mv(span)](
                         jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
@@ -304,7 +300,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       auto& context = IoContext::current();
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
-      if (canceled->value) {
+      if (*canceled) {
         // Oops, the client disconnected before the response was ready to send. `response` is
         // a dangling reference, let's not use it.
         return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
@@ -313,7 +309,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
             innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers)));
       }
     })))
-        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
+        .attach(
+            kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->getWrapped() = true; }))
         .then(
             [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {
@@ -438,7 +435,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
     }
   }
 
-  KJ_SWITCH_ONEOF(persistent.armAlarmHandler(scheduledTime, false, actorId)) {
+  auto currentTime = context.now();
+  KJ_SWITCH_ONEOF(persistent.armAlarmHandler(
+                      scheduledTime, context.getCurrentTraceSpan(), currentTime, false, actorId)) {
     KJ_CASE_ONEOF(armResult, ActorCacheInterface::RunAlarmHandler) {
       auto& handler = KJ_REQUIRE_NONNULL(exportedHandler);
       if (handler.alarm == kj::none) {
@@ -497,7 +496,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
 
         context.getMetrics().reportFailure(e);
 
-        auto description = e.getDescription();
+        auto description = kj::str(e.getDescription());  // because e is moved before this is used
         auto log = !jsg::isTunneledException(description) && !jsg::isDoNotLogException(description);
         auto isUserError = e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none;
 
@@ -628,6 +627,12 @@ kj::Promise<void> ServiceWorkerGlobalScope::setHibernatableEventTimeout(
 
 // TODO(cleanup): the hibernatable websocket handler functions here are largely identical – consider
 // folding them.
+//
+// Note: The hibernatable WebSocket message path passes kj::OneOf<kj::String, kj::Array<byte>>
+// directly to the webSocketMessage() handler, so binary data is always delivered as ArrayBuffer.
+// The WebSocket binaryType property (and the websocket_standard_binary_type compat flag) has no
+// effect here — this is by design for the Durable Object handler API, which bypasses the
+// normal WebSocket read loop and its Blob/ArrayBuffer dispatch logic.
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(IoContext& context,
     kj::OneOf<kj::String, kj::Array<byte>> message,
     kj::Maybe<uint32_t> eventTimeoutMs,
@@ -735,8 +740,19 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(jsg::Lock& js,
   };
 
   if (hasHandlers() || hasInspector()) {
+    unhandledRejections.setUseMicrotasksCompletedCallback(
+        FeatureFlags::get(js).getUnhandledRejectionAfterMicrotaskCheckpoint());
     unhandledRejections.report(js, event, kj::mv(promise), kj::mv(value));
   }
+}
+
+void ServiceWorkerGlobalScope::setConnectOverride(kj::String networkAddress, ConnectFn connectFn) {
+  connectOverrides.upsert(kj::mv(networkAddress), kj::mv(connectFn));
+}
+
+kj::Maybe<ServiceWorkerGlobalScope::ConnectFn&> ServiceWorkerGlobalScope::getConnectOverride(
+    kj::StringPtr networkAddress) {
+  return connectOverrides.find(networkAddress);
 }
 
 jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
@@ -927,8 +943,11 @@ jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
       // that set the bufferValue, we let's check again.
       return p.getHandle(js);
     }
-    auto def = module.get(js, "default"_kj);
-    auto obj = KJ_ASSERT_NONNULL(def.tryCast<jsg::JsObject>());
+    // When requireReturnsDefaultExport flag is enabled, resolveModule returns the
+    // default export directly. Otherwise it returns the module namespace.
+    auto obj = module.has(js, "default"_kj)
+        ? KJ_ASSERT_NONNULL(module.get(js, "default"_kj).tryCast<jsg::JsObject>())
+        : module;
     auto buffer = obj.get(js, "Buffer"_kj);
     JSG_REQUIRE(buffer.isFunction(), TypeError, "Invalid node:buffer implementation");
     bufferValue = jsg::JsRef(js, buffer);
@@ -969,7 +988,9 @@ jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
       // that set the processValue, we let's check again.
       return p.getHandle(js);
     }
-    auto def = module.get(js, "default"_kj);
+    // When requireReturnsDefaultExport flag is enabled, resolveInternalModule returns the
+    // default export directly. Otherwise it returns the module namespace.
+    auto def = module.has(js, "default"_kj) ? module.get(js, "default"_kj) : jsg::JsValue(module);
     JSG_REQUIRE(def.isObject(), TypeError, "Invalid node:process implementation");
     processValue = jsg::JsRef(js, def);
     return def;

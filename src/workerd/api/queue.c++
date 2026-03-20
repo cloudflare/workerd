@@ -26,6 +26,15 @@ static constexpr kj::StringPtr HDR_MSG_FORMAT = "X-Msg-Fmt"_kj;
 // Header for the message delivery delay.
 static constexpr kj::StringPtr HDR_MSG_DELAY = "X-Msg-Delay-Secs"_kj;
 
+auto buildQueueErrorMessage(
+    const kj::HttpClient::Response& response, const ThreadContext::HeaderIdBundle& headerIds) {
+  auto errorCode = response.headers->get(headerIds.cfQueuesErrorCode).orDefault("15000"_kj);
+  auto errorCause =
+      response.headers->get(headerIds.cfQueuesErrorCause).orDefault("Unknown Internal Error"_kj);
+
+  return kj::str(errorCause, " (", errorCode, ")");
+}
+
 kj::StringPtr validateContentType(kj::StringPtr contentType) {
   auto lowerCase = toLower(contentType);
   if (lowerCase == IncomingQueueMessage::ContentType::TEXT) {
@@ -211,19 +220,26 @@ kj::Promise<void> WorkerQueue::send(
   auto req = client->request(
       kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
 
-  static constexpr auto handleSend = [](auto req, auto serialized,
-                                         auto client) -> kj::Promise<void> {
+  const auto& headerIds = context.getHeaderIds();
+  const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
+
+  static constexpr auto handleSend = [](auto req, auto serialized, auto client, auto& headerIds,
+                                         bool exposeErrorCodes) -> kj::Promise<void> {
     co_await req.body->write(serialized.data);
     auto response = co_await req.response;
 
-    JSG_REQUIRE(
-        response.statusCode == 200, Error, kj::str("Queue send failed: ", response.statusText));
+    if (exposeErrorCodes) {
+      JSG_REQUIRE(response.statusCode == 200, Error, buildQueueErrorMessage(response, headerIds));
+    } else {
+      JSG_REQUIRE(
+          response.statusCode == 200, Error, kj::str("Queue send failed: ", response.statusText));
+    }
 
     // Read and discard response body, otherwise we might burn the HTTP connection.
     co_await response.body->readAllBytes().ignoreResult();
   };
 
-  return handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client))
+  return handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes)
       .attach(context.registerPendingEvent());
 };
 
@@ -324,18 +340,25 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
   auto req =
       client->request(kj::HttpMethod::POST, "https://fake-host/batch"_kjc, headers, body.size());
 
-  static constexpr auto handleWrite = [](auto req, auto body, auto client) -> kj::Promise<void> {
+  const auto& headerIds = context.getHeaderIds();
+  const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
+  static constexpr auto handleWrite = [](auto req, auto body, auto client, auto& headerIds,
+                                          bool exposeErrorCodes) -> kj::Promise<void> {
     co_await req.body->write(body.asBytes());
     auto response = co_await req.response;
 
-    JSG_REQUIRE(response.statusCode == 200, Error,
-        kj::str("Queue sendBatch failed: ", response.statusText));
+    if (exposeErrorCodes) {
+      JSG_REQUIRE(response.statusCode == 200, Error, buildQueueErrorMessage(response, headerIds));
+    } else {
+      JSG_REQUIRE(response.statusCode == 200, Error,
+          kj::str("Queue sendBatch failed: ", response.statusText));
+    }
 
     // Read and discard response body, otherwise we might burn the HTTP connection.
     co_await response.body->readAllBytes().ignoreResult();
   };
 
-  return handleWrite(kj::mv(req), kj::mv(body), kj::mv(client))
+  return handleWrite(kj::mv(req), kj::mv(body), kj::mv(client), headerIds, exposeErrorCodes)
       .attach(context.registerPendingEvent());
 };
 
@@ -530,7 +553,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
 
 }  // namespace
 
-kj::Maybe<tracing::EventInfo> QueueCustomEvent::getEventInfo() const {
+tracing::EventInfo QueueCustomEvent::getEventInfo() const {
   kj::String queueName;
   uint32_t batchSize;
   KJ_SWITCH_ONEOF(params) {
@@ -544,12 +567,13 @@ kj::Maybe<tracing::EventInfo> QueueCustomEvent::getEventInfo() const {
     }
   }
 
-  return tracing::EventInfo(tracing::QueueEventInfo(kj::mv(queueName), batchSize));
+  return tracing::QueueEventInfo(kj::mv(queueName), batchSize);
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   // This method has three main chunks of logic:
@@ -571,14 +595,16 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
   // 2. This is where we call into the worker's queue event handler
   auto runProm = context.run(
       [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
-          &metrics = incomingRequest->getMetrics(),
+          &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
           props = kj::mv(props)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
     auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),
         context.addObject(result), lock,
-        lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler);
+        lock.getExportedHandler(
+            entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()),
+        typeHandler);
     queueEvent->event = kj::mv(startResp.event);
     queueEvent->exportedHandlerProm = kj::mv(startResp.exportedHandlerProm);
     queueEvent->isServiceWorkerHandler = startResp.isServiceWorkerHandler;

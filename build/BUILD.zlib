@@ -5,6 +5,7 @@
 # than x86_64 or arm64
 
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 zlib_warnings = [
     "-Wno-incompatible-pointer-types",

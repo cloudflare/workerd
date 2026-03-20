@@ -1,6 +1,7 @@
 import inspector from 'node:inspector';
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
+import promises from 'node:inspector/promises';
 
 export const inspectorClose = {
   test() {
@@ -287,5 +288,12 @@ export const inspectorSessionInheritance = {
     for (const method of eventMethods) {
       assert.strictEqual(typeof proto[method], 'function');
     }
+  },
+};
+
+export const inspectorPromises = {
+  test() {
+    assert.strictEqual(typeof promises, 'object');
+    assert.strictEqual(typeof promises.Session, 'function');
   },
 };

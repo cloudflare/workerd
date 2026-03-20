@@ -21,7 +21,7 @@ namespace workerd::api::node {
 // ======================================================================================
 #pragma region KDF
 
-jsg::BufferSource CryptoImpl::getHkdf(jsg::Lock& js,
+jsg::JsArrayBuffer CryptoImpl::getHkdf(jsg::Lock& js,
     kj::String hash,
     kj::Array<const kj::byte> key,
     kj::Array<const kj::byte> salt,
@@ -47,7 +47,7 @@ jsg::BufferSource CryptoImpl::getHkdf(jsg::Lock& js,
   return JSG_REQUIRE_NONNULL(api::hkdf(js, length, digest, key, salt, info), Error, "Hkdf failed");
 }
 
-jsg::BufferSource CryptoImpl::getPbkdf(jsg::Lock& js,
+jsg::JsArrayBuffer CryptoImpl::getPbkdf(jsg::Lock& js,
     kj::Array<const kj::byte> password,
     kj::Array<const kj::byte> salt,
     uint32_t num_iterations,
@@ -72,7 +72,7 @@ jsg::BufferSource CryptoImpl::getPbkdf(jsg::Lock& js,
       api::pbkdf2(js, keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
 }
 
-jsg::BufferSource CryptoImpl::getScrypt(jsg::Lock& js,
+jsg::JsArrayBuffer CryptoImpl::getScrypt(jsg::Lock& js,
     kj::Array<const kj::byte> password,
     kj::Array<const kj::byte> salt,
     uint32_t N,
@@ -95,12 +95,12 @@ bool CryptoImpl::verifySpkac(kj::Array<const kj::byte> input) {
   return workerd::api::verifySpkac(input);
 }
 
-kj::Maybe<jsg::BufferSource> CryptoImpl::exportPublicKey(
+kj::Maybe<jsg::JsUint8Array> CryptoImpl::exportPublicKey(
     jsg::Lock& js, kj::Array<const kj::byte> input) {
   return workerd::api::exportPublicKey(js, input);
 }
 
-kj::Maybe<jsg::BufferSource> CryptoImpl::exportChallenge(
+kj::Maybe<jsg::JsUint8Array> CryptoImpl::exportChallenge(
     jsg::Lock& js, kj::Array<const kj::byte> input) {
   return workerd::api::exportChallenge(js, input);
 }
@@ -109,7 +109,7 @@ kj::Maybe<jsg::BufferSource> CryptoImpl::exportChallenge(
 // ======================================================================================
 #pragma region Primes
 
-jsg::BufferSource CryptoImpl::randomPrime(jsg::Lock& js,
+jsg::JsArrayBuffer CryptoImpl::randomPrime(jsg::Lock& js,
     uint32_t size,
     bool safe,
     jsg::Optional<kj::Array<kj::byte>> add_buf,
@@ -144,11 +144,11 @@ int CryptoImpl::HmacHandle::update(kj::Array<kj::byte> data) {
   return 1;  // This just always returns 1 no matter what.
 }
 
-jsg::BufferSource CryptoImpl::HmacHandle::digest(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::HmacHandle::digest(jsg::Lock& js) {
   return ctx.digest(js);
 }
 
-jsg::BufferSource CryptoImpl::HmacHandle::oneshot(jsg::Lock& js,
+jsg::JsUint8Array CryptoImpl::HmacHandle::oneshot(jsg::Lock& js,
     kj::String algorithm,
     CryptoImpl::HmacHandle::KeyParam key,
     kj::Array<kj::byte> data) {
@@ -184,7 +184,7 @@ int CryptoImpl::HashHandle::update(kj::Array<kj::byte> data) {
   return 1;
 }
 
-jsg::BufferSource CryptoImpl::HashHandle::digest(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::HashHandle::digest(jsg::Lock& js) {
   return ctx.digest(js);
 }
 
@@ -197,7 +197,7 @@ void CryptoImpl::HashHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) con
   tracker.trackFieldWithSize("digest", ctx.size());
 }
 
-jsg::BufferSource CryptoImpl::HashHandle::oneshot(
+jsg::JsUint8Array CryptoImpl::HashHandle::oneshot(
     jsg::Lock& js, kj::String algorithm, kj::Array<kj::byte> data, kj::Maybe<uint32_t> xofLen) {
   HashContext ctx(algorithm, xofLen);
   ctx.update(data);
@@ -232,28 +232,28 @@ void CryptoImpl::DiffieHellmanHandle::setPublicKey(kj::Array<kj::byte> key) {
   dh.setPublicKey(key);
 }
 
-jsg::BufferSource CryptoImpl::DiffieHellmanHandle::getPublicKey(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::getPublicKey(jsg::Lock& js) {
   return dh.getPublicKey(js);
 }
 
-jsg::BufferSource CryptoImpl::DiffieHellmanHandle::getPrivateKey(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::getPrivateKey(jsg::Lock& js) {
   return dh.getPrivateKey(js);
 }
 
-jsg::BufferSource CryptoImpl::DiffieHellmanHandle::getGenerator(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::getGenerator(jsg::Lock& js) {
   return dh.getGenerator(js);
 }
 
-jsg::BufferSource CryptoImpl::DiffieHellmanHandle::getPrime(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::getPrime(jsg::Lock& js) {
   return dh.getPrime(js);
 }
 
-jsg::BufferSource CryptoImpl::DiffieHellmanHandle::computeSecret(
+jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::computeSecret(
     jsg::Lock& js, kj::Array<kj::byte> key) {
   return dh.computeSecret(js, key);
 }
 
-jsg::BufferSource CryptoImpl::DiffieHellmanHandle::generateKeys(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::generateKeys(jsg::Lock& js) {
   return dh.generateKeys(js);
 }
 
@@ -266,7 +266,7 @@ int CryptoImpl::DiffieHellmanHandle::getVerifyError() {
 #pragma region SignVerify
 
 namespace {
-jsg::BackingStore signFinal(jsg::Lock& js,
+jsg::JsUint8Array signFinal(jsg::Lock& js,
     ncrypto::EVPMDCtxPointer&& mdctx,
     const ncrypto::EVPKeyPointer& pkey,
     int padding,
@@ -279,7 +279,7 @@ jsg::BackingStore signFinal(jsg::Lock& js,
   auto data = mdctx.digestFinal(mdctx.getExpectedSize());
   JSG_REQUIRE(data, Error, "Failed to generate digest");
 
-  auto sig = jsg::BackingStore::alloc<v8::Uint8Array>(js, pkey.size());
+  auto sig = jsg::JsUint8Array::create(js, pkey.size());
   ncrypto::Buffer<kj::byte> sig_buf{
     .data = sig.asArrayPtr().begin(),
     .len = sig.size(),
@@ -301,16 +301,16 @@ jsg::BackingStore signFinal(jsg::Lock& js,
   JSG_REQUIRE(pkctx.signInto(data, &sig_buf), Error, "Failed to generate signature");
 
   if (sig_buf.len < sig.size()) {
-    sig.limit(sig_buf.len);
+    return sig.slice(js, sig_buf.len);
   }
 
-  return kj::mv(sig);
+  return sig;
 }
 
 bool verifyFinal(jsg::Lock& js,
     ncrypto::EVPMDCtxPointer&& mdctx,
     const ncrypto::EVPKeyPointer& pkey,
-    const jsg::BufferSource& signature,
+    jsg::JsBufferSource& signature,
     int padding,
     jsg::Optional<int> pss_salt_len) {
 
@@ -348,13 +348,13 @@ bool verifyFinal(jsg::Lock& js,
   return pkctx.verify(sig, data);
 }
 
-jsg::BackingStore convertSignatureToP1363(
-    jsg::Lock& js, const ncrypto::EVPKeyPointer& pkey, jsg::BackingStore&& signature) {
+jsg::JsUint8Array convertSignatureToP1363(
+    jsg::Lock& js, const ncrypto::EVPKeyPointer& pkey, jsg::JsUint8Array&& signature) {
   auto maybeRs = pkey.getBytesOfRS();
   if (!maybeRs.has_value()) return kj::mv(signature);
   unsigned int n = maybeRs.value();
 
-  auto ret = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 2 * n);
+  auto ret = jsg::JsUint8Array::create(js, 2 * n);
 
   ncrypto::Buffer<const unsigned char> sig_buffer{
     .data = signature.asArrayPtr().begin(),
@@ -365,20 +365,20 @@ jsg::BackingStore convertSignatureToP1363(
     return kj::mv(signature);
   }
 
-  return kj::mv(ret);
+  return ret;
 }
 
-jsg::BackingStore convertSignatureToDER(
-    jsg::Lock& js, const ncrypto::EVPKeyPointer& pkey, jsg::BackingStore&& backing) {
+jsg::JsUint8Array convertSignatureToDER(
+    jsg::Lock& js, const ncrypto::EVPKeyPointer& pkey, jsg::JsUint8Array&& signature) {
   auto maybeRs = pkey.getBytesOfRS();
-  if (!maybeRs.has_value()) return kj::mv(backing);
+  if (!maybeRs.has_value()) return kj::mv(signature);
   unsigned int n = maybeRs.value();
 
-  if (backing.size() != 2 * n) {
-    return jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
+  if (signature.size() != 2 * n) {
+    return jsg::JsUint8Array::create(js, 0);
   }
 
-  const kj::byte* sig_data = backing.asArrayPtr().begin();
+  const kj::byte* sig_data = signature.asArrayPtr().begin();
 
   auto asn1_sig = ncrypto::ECDSASigPointer::New();
   JSG_REQUIRE(asn1_sig, Error, "Internal error generating signature");
@@ -391,12 +391,10 @@ jsg::BackingStore convertSignatureToDER(
 
   auto buf = asn1_sig.encode();
   if (buf.len <= 0) [[unlikely]] {
-    return jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
+    return jsg::JsUint8Array::create(js, 0);
   }
 
-  auto ret = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, buf.len);
-  ret.asArrayPtr().copyFrom(kj::ArrayPtr<kj::byte>(buf.data, buf.len));
-  return kj::mv(ret);
+  return jsg::JsUint8Array::create(js, kj::ArrayPtr<kj::byte>(buf.data, buf.len));
 }
 
 const EVP_MD* maybeGetDigest(jsg::Optional<kj::String>& maybeAlgorithm) {
@@ -424,7 +422,7 @@ jsg::Ref<CryptoImpl::SignHandle> CryptoImpl::SignHandle::constructor(
   return js.alloc<SignHandle>(kj::mv(mdctx));
 }
 
-void CryptoImpl::SignHandle::update(jsg::Lock& js, jsg::BufferSource data) {
+void CryptoImpl::SignHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
   ncrypto::ClearErrorOnReturn clear_error_on_return;
   JSG_REQUIRE(ctx, Error, "Signing context has already been finalized");
   auto ptr = data.asArrayPtr();
@@ -435,7 +433,7 @@ void CryptoImpl::SignHandle::update(jsg::Lock& js, jsg::BufferSource data) {
   JSG_REQUIRE(ctx.digestUpdate(buf), Error, "Failed to update signing context");
 }
 
-jsg::BufferSource CryptoImpl::SignHandle::sign(jsg::Lock& js,
+jsg::JsUint8Array CryptoImpl::SignHandle::sign(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
     jsg::Optional<int> rsaPadding,
     jsg::Optional<int> pssSaltLength,
@@ -448,18 +446,18 @@ jsg::BufferSource CryptoImpl::SignHandle::sign(jsg::Lock& js,
 
   // There's a bug in ncrypto that doesn't clear the EVPMDCtxPointer when
   // moved with kj::mv so instead we release and wrap again.
-  auto backing = signFinal(js, ncrypto::EVPMDCtxPointer(ctx.release()), pkey,
+  auto sig = signFinal(js, ncrypto::EVPMDCtxPointer(ctx.release()), pkey,
       rsaPadding.orDefault(pkey.getDefaultSignPadding()), pssSaltLength);
 
   KJ_IF_SOME(enc, dsaSigEnc) {
     static constexpr unsigned kP1363 = 1;
     JSG_REQUIRE(enc <= kP1363 && enc >= 0, Error, "Invalid DSA signature encoding");
     if (enc == kP1363) {
-      backing = convertSignatureToP1363(js, pkey, kj::mv(backing));
+      sig = convertSignatureToP1363(js, pkey, kj::mv(sig));
     }
   }
 
-  return jsg::BufferSource(js, kj::mv(backing));
+  return sig;
 }
 
 CryptoImpl::VerifyHandle::VerifyHandle(ncrypto::EVPMDCtxPointer ctx)
@@ -478,7 +476,7 @@ jsg::Ref<CryptoImpl::VerifyHandle> CryptoImpl::VerifyHandle::constructor(
   return js.alloc<VerifyHandle>(kj::mv(mdctx));
 }
 
-void CryptoImpl::VerifyHandle::update(jsg::Lock& js, jsg::BufferSource data) {
+void CryptoImpl::VerifyHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
   ncrypto::ClearErrorOnReturn clear_error_on_return;
   JSG_REQUIRE(ctx, Error, "Verification context has already been finalized");
   auto ptr = data.asArrayPtr();
@@ -491,7 +489,7 @@ void CryptoImpl::VerifyHandle::update(jsg::Lock& js, jsg::BufferSource data) {
 
 bool CryptoImpl::VerifyHandle::verify(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
-    jsg::BufferSource signature,
+    jsg::JsBufferSource signature,
     jsg::Optional<int> rsaPadding,
     jsg::Optional<int> maybeSaltLen,
     jsg::Optional<int> dsaSigEnc) {
@@ -503,24 +501,26 @@ bool CryptoImpl::VerifyHandle::verify(jsg::Lock& js,
 
   JSG_REQUIRE(!pkey.isOneShotVariant(), Error, "Unsupported operation for this key");
 
-  auto clonedSignature = signature.clone(js);
+  auto sigCopy = jsg::JsUint8Array::create(js, signature.asArrayPtr());
+
   KJ_IF_SOME(enc, dsaSigEnc) {
     static constexpr unsigned kP1363 = 1;
     JSG_REQUIRE(enc <= kP1363 && enc >= 0, Error, "Invalid DSA signature encoding");
     if (enc == kP1363) {
-      clonedSignature =
-          jsg::BufferSource(js, convertSignatureToDER(js, pkey, clonedSignature.detach(js)));
+      sigCopy = convertSignatureToDER(js, pkey, kj::mv(sigCopy));
     }
   }
 
-  return verifyFinal(js, ncrypto::EVPMDCtxPointer(ctx.release()), pkey, clonedSignature,
+  auto sigSource = jsg::JsBufferSource(sigCopy);
+
+  return verifyFinal(js, ncrypto::EVPMDCtxPointer(ctx.release()), pkey, sigSource,
       rsaPadding.orDefault(pkey.getDefaultSignPadding()), maybeSaltLen);
 }
 
-jsg::BufferSource CryptoImpl::signOneShot(jsg::Lock& js,
+jsg::JsUint8Array CryptoImpl::signOneShot(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
     jsg::Optional<kj::String> algorithm,
-    jsg::BufferSource data,
+    jsg::JsBufferSource data,
     jsg::Optional<int> rsaPadding,
     jsg::Optional<int> pssSaltLength,
     jsg::Optional<int> dsaSigEnc) {
@@ -547,26 +547,25 @@ jsg::BufferSource CryptoImpl::signOneShot(jsg::Lock& js,
   };
 
   ncrypto::DataPointer sig = mdctx.signOneShot(buf);
-  kj::ArrayPtr<kj::byte> sigPtr(sig.get<kj::byte>(), sig.size());
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sig.size());
-  backing.asArrayPtr().copyFrom(sigPtr);
+  auto sigBuf =
+      jsg::JsUint8Array::create(js, kj::ArrayPtr<const kj::byte>(sig.get<kj::byte>(), sig.size()));
 
   KJ_IF_SOME(enc, dsaSigEnc) {
     static constexpr unsigned kP1363 = 1;
     JSG_REQUIRE(enc <= kP1363 && enc >= 0, Error, "Invalid DSA signature encoding");
     if (enc == kP1363) {
-      backing = convertSignatureToP1363(js, pkey, kj::mv(backing));
+      sigBuf = convertSignatureToP1363(js, pkey, kj::mv(sigBuf));
     }
   }
 
-  return jsg::BufferSource(js, kj::mv(backing));
+  return sigBuf;
 }
 
 bool CryptoImpl::verifyOneShot(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
     jsg::Optional<kj::String> algorithm,
-    jsg::BufferSource data,
-    jsg::BufferSource signature,
+    jsg::JsBufferSource data,
+    jsg::JsBufferSource signature,
     jsg::Optional<int> rsaPadding,
     jsg::Optional<int> pssSaltLength,
     jsg::Optional<int> dsaSigEnc) {
@@ -590,13 +589,13 @@ bool CryptoImpl::verifyOneShot(jsg::Lock& js,
   JSG_REQUIRE(
       mdctx.verifyInit(pkey, md).has_value(), Error, "Failed to initialize verification context");
 
-  auto clonedSignature = signature.clone(js);
+  auto sigCopy = jsg::JsUint8Array::create(js, signature.asArrayPtr());
+
   KJ_IF_SOME(enc, dsaSigEnc) {
     static constexpr unsigned kP1363 = 1;
     JSG_REQUIRE(enc <= kP1363 && enc >= 0, Error, "Invalid DSA signature encoding");
     if (enc == kP1363) {
-      clonedSignature =
-          jsg::BufferSource(js, convertSignatureToDER(js, pkey, clonedSignature.detach(js)));
+      sigCopy = convertSignatureToDER(js, pkey, kj::mv(sigCopy));
     }
   }
 
@@ -606,8 +605,8 @@ bool CryptoImpl::verifyOneShot(jsg::Lock& js,
   };
 
   ncrypto::Buffer<const kj::byte> sig{
-    .data = clonedSignature.asArrayPtr().begin(),
-    .len = clonedSignature.size(),
+    .data = sigCopy.asArrayPtr().begin(),
+    .len = sigCopy.size(),
   };
 
   return mdctx.verify(buf, sig);
@@ -686,15 +685,16 @@ bool passAuthTagToOpenSSL(ncrypto::CipherCtxPointer& ctx, kj::ArrayPtr<const kj:
 }
 }  // namespace
 
-CryptoImpl::CipherHandle::CipherHandle(CipherMode mode,
+CryptoImpl::CipherHandle::CipherHandle(jsg::Lock& js,
+    CipherMode mode,
     ncrypto::CipherCtxPointer ctx,
     jsg::Ref<CryptoKey> key,
-    jsg::BufferSource iv,
+    jsg::JsBufferSource iv,
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo)
     : mode(mode),
       ctx(kj::mv(ctx)),
       key(kj::mv(key)),
-      iv(kj::mv(iv)),
+      iv(iv.addRef(js)),
       maybeAuthInfo(kj::mv(maybeAuthInfo)) {}
 
 jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::construct(jsg::Lock& js,
@@ -702,7 +702,7 @@ jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::construct(jsg::Lock
     kj::StringPtr algorithm,
     ncrypto::Cipher cipher,
     jsg::Ref<CryptoKey> key,
-    jsg::BufferSource iv,
+    jsg::JsBufferSource iv,
     jsg::Optional<uint32_t> maybeAuthTagLength) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
@@ -746,10 +746,11 @@ jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::construct(jsg::Lock
   JSG_REQUIRE(ctx.init(ncrypto::Cipher(), encrypt, keyData.begin(), iv.asArrayPtr().begin()), Error,
       "Failed to initialize cipher/cipher context");
 
-  return js.alloc<CipherHandle>(mode, kj::mv(ctx), kj::mv(key), kj::mv(iv), kj::mv(maybeAuthInfo));
+  return js.alloc<CipherHandle>(
+      js, mode, kj::mv(ctx), kj::mv(key), kj::mv(iv), kj::mv(maybeAuthInfo));
 }
 
-jsg::BufferSource CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::BufferSource data) {
+jsg::JsUint8Array CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
 
   JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
   JSG_REQUIRE(data.size() <= INT_MAX, Error, "Data too large");
@@ -765,7 +766,8 @@ jsg::BufferSource CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::BufferSou
 
   if (mode == CipherMode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
     authTagPassed = true;
-    auto& tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+    auto& tagRef = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+    auto tag = tagRef.getHandle(js);
     JSG_REQUIRE(
         passAuthTagToOpenSSL(ctx, tag.asArrayPtr().asConst()), Error, "Failed to set auth tag");
   }
@@ -784,18 +786,18 @@ jsg::BufferSource CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::BufferSou
     JSG_FAIL_REQUIRE(Error, "Failed to process data");
   }
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, buf_len);
+  auto buf = jsg::JsUint8Array::create(js, buf_len);
   buffer.data = data.asArrayPtr().begin();
   buffer.len = data.size();
-  bool r = ctx.update(buffer, backing.asArrayPtr().begin(), &buf_len);
+  bool r = ctx.update(buffer, buf.asArrayPtr().begin(), &buf_len);
 
-  if (buf_len != backing.size()) {
-    JSG_REQUIRE(buf_len < backing.size(), Error, "Invalid buffer length");
-    auto newBacking = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, buf_len);
+  if (buf_len != buf.size()) {
+    JSG_REQUIRE(buf_len < buf.size(), Error, "Invalid buffer length");
+    auto newBuf = jsg::JsUint8Array::create(js, buf_len);
     if (buf_len > 0) {
-      newBacking.asArrayPtr().copyFrom(backing.asArrayPtr().slice(0, buf_len));
+      newBuf.asArrayPtr().copyFrom(buf.asArrayPtr().first(buf_len));
     }
-    backing = kj::mv(newBacking);
+    buf = kj::mv(newBuf);
   }
 
   // When in CCM mode, EVP_CipherUpdate will fail if the authentication tag is
@@ -804,21 +806,22 @@ jsg::BufferSource CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::BufferSou
     pendingAuthFailed = true;
   }
 
-  return jsg::BufferSource(js, kj::mv(backing));
+  return buf;
 }
 
-jsg::BufferSource CryptoImpl::CipherHandle::final(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::CipherHandle::final(jsg::Lock& js) {
   JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
 
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   int ctxMode = ctx.getMode();
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, ctx.getBlockSize());
+  auto buf = jsg::JsUint8Array::create(js, ctx.getBlockSize());
 
   if (mode == CipherMode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
     authTagPassed = true;
-    auto& tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+    auto& tagRef = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+    auto tag = tagRef.getHandle(js);
     JSG_REQUIRE(
         passAuthTagToOpenSSL(ctx, tag.asArrayPtr().asConst()), Error, "Failed to set auth tag");
   }
@@ -832,18 +835,18 @@ jsg::BufferSource CryptoImpl::CipherHandle::final(jsg::Lock& js) {
   bool ok;
   if (mode == CipherMode::DECIPHER && ctxMode == EVP_CIPH_CCM_MODE) {
     ok = !pendingAuthFailed;
-    backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
+    buf = jsg::JsUint8Array::create(js, 0);
   } else {
-    int out_len = backing.size();
-    ok = ctx.update({}, backing.asArrayPtr().begin(), &out_len, true);
+    int out_len = buf.size();
+    ok = ctx.update({}, buf.asArrayPtr().begin(), &out_len, true);
 
-    if (out_len != backing.size()) {
-      JSG_REQUIRE(out_len < backing.size(), Error, "Invalid buffer length");
-      auto newBacking = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, out_len);
+    if (out_len != buf.size()) {
+      JSG_REQUIRE(out_len < buf.size(), Error, "Invalid buffer length");
+      auto newBuf = jsg::JsUint8Array::create(js, out_len);
       if (out_len > 0) {
-        newBacking.asArrayPtr().copyFrom(backing.asArrayPtr().slice(0, out_len));
+        newBuf.asArrayPtr().copyFrom(buf.asArrayPtr().first(out_len));
       }
-      backing = kj::mv(newBacking);
+      buf = kj::mv(newBuf);
     }
 
     if (ok && mode == CipherMode::CIPHER && isAuthenticatedMode(ctx)) {
@@ -854,20 +857,20 @@ jsg::BufferSource CryptoImpl::CipherHandle::final(jsg::Lock& js) {
       if (info.auth_tag_len == kNoAuthTagLength) {
         info.auth_tag_len = 16;
       }
-      auto authTagBacking = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, info.auth_tag_len);
-      ok = ctx.getAeadTag(info.auth_tag_len, authTagBacking.asArrayPtr().begin());
-      maybeAuthTag = jsg::BufferSource(js, kj::mv(authTagBacking));
+      auto tag = jsg::JsUint8Array::create(js, info.auth_tag_len);
+      ok = ctx.getAeadTag(info.auth_tag_len, tag.asArrayPtr().begin());
+      maybeAuthTag = jsg::JsBufferSource(tag).addRef(js);
     }
   }
 
   JSG_REQUIRE(ok, Error, "Authentication failed");
 
   ctx.reset();
-  return jsg::BufferSource(js, kj::mv(backing));
+  return buf;
 }
 
 void CryptoImpl::CipherHandle::setAAD(
-    jsg::Lock& js, jsg::BufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength) {
+    jsg::Lock& js, jsg::JsBufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength) {
 
   JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
   JSG_REQUIRE(isAuthenticatedMode(ctx), Error, "Cipher does not support authenticated mode");
@@ -889,7 +892,8 @@ void CryptoImpl::CipherHandle::setAAD(
 
     if (mode == CipherMode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
       authTagPassed = true;
-      auto& tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+      auto& tagRef = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+      auto tag = tagRef.getHandle(js);
       JSG_REQUIRE(
           passAuthTagToOpenSSL(ctx, tag.asArrayPtr().asConst()), Error, "Failed to set auth tag");
     }
@@ -915,7 +919,7 @@ void CryptoImpl::CipherHandle::setAutoPadding(jsg::Lock& js, bool autoPadding) {
   JSG_REQUIRE(ctx.setPadding(autoPadding), Error, "Failed to set autopadding");
 }
 
-void CryptoImpl::CipherHandle::setAuthTag(jsg::Lock& js, jsg::BufferSource authTag) {
+void CryptoImpl::CipherHandle::setAuthTag(jsg::Lock& js, jsg::JsBufferSource authTag) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
   JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
   JSG_REQUIRE(isAuthenticatedMode(ctx), Error, "Cipher does not support authenticated mode");
@@ -942,20 +946,21 @@ void CryptoImpl::CipherHandle::setAuthTag(jsg::Lock& js, jsg::BufferSource authT
   info.auth_tag_len = authTag.size();
 
   // We defensively copy the auth tag here to prevent modification.
-  maybeAuthTag = authTag.copy(js);
+  auto tagCopy = jsg::JsUint8Array::create(js, authTag.asArrayPtr());
+  maybeAuthTag = jsg::JsBufferSource(static_cast<v8::Local<v8::Value>>(tagCopy)).addRef(js);
 }
 
-jsg::BufferSource CryptoImpl::CipherHandle::getAuthTag(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::CipherHandle::getAuthTag(jsg::Lock& js) {
   JSG_REQUIRE(!ctx, Error, "Auth tag is only available once cipher context has been finalized");
   JSG_REQUIRE(mode == CipherMode::CIPHER, Error, "Getting the auth tag is only support for cipher");
 
-  KJ_IF_SOME(tag, maybeAuthTag) {
+  KJ_IF_SOME(ref, maybeAuthTag) {
     KJ_DEFER(maybeAuthTag = kj::none);
-    return kj::mv(tag);
+    auto tag = ref.getHandle(js);
+    return jsg::JsUint8Array::create(js, tag.asArrayPtr());
   }
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsUint8Array::create(js, 0);
 }
 
 namespace {
@@ -1007,17 +1012,18 @@ CryptoImpl::AeadHandle::AuthenticatedInfo initAuthenticated(ncrypto::Aead& aead,
 }
 }  // namespace
 
-CryptoImpl::AeadHandle::AeadHandle(CipherMode mode,
+CryptoImpl::AeadHandle::AeadHandle(jsg::Lock& js,
+    CipherMode mode,
     ncrypto::Aead aead,
     ncrypto::AeadCtxPointer ctx,
     jsg::Ref<CryptoKey> key,
-    jsg::BufferSource iv,
+    jsg::JsBufferSource iv,
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo)
     : mode(mode),
       aead(aead),
       ctx(kj::mv(ctx)),
       key(kj::mv(key)),
-      iv(kj::mv(iv)),
+      iv(iv.addRef(js)),
       maybeAuthInfo(kj::mv(maybeAuthInfo)) {}
 
 jsg::Ref<CryptoImpl::AeadHandle> CryptoImpl::AeadHandle::construct(jsg::Lock& js,
@@ -1025,7 +1031,7 @@ jsg::Ref<CryptoImpl::AeadHandle> CryptoImpl::AeadHandle::construct(jsg::Lock& js
     kj::StringPtr algorithm,
     ncrypto::Aead aead,
     jsg::Ref<CryptoKey> key,
-    jsg::BufferSource iv,
+    jsg::JsBufferSource iv,
     jsg::Optional<uint32_t> maybeAuthTagLength) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
@@ -1056,10 +1062,10 @@ jsg::Ref<CryptoImpl::AeadHandle> CryptoImpl::AeadHandle::construct(jsg::Lock& js
       aead, ctx, encrypt, algorithm, iv.size(), maybeAuthTagLength.orDefault(kNoAuthTagLength));
 
   return js.alloc<AeadHandle>(
-      mode, aead, kj::mv(ctx), kj::mv(key), kj::mv(iv), kj::mv(maybeAuthInfo));
+      js, mode, aead, kj::mv(ctx), kj::mv(key), kj::mv(iv), kj::mv(maybeAuthInfo));
 }
 
-jsg::BufferSource CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::BufferSource data) {
+jsg::JsUint8Array CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
   JSG_REQUIRE(!updated, Error, "update() can only be invoked once on an AEAD");
   JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
   JSG_REQUIRE(data.size() <= INT_MAX, Error, "Data too large");
@@ -1082,14 +1088,16 @@ jsg::BufferSource CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::BufferSourc
     .len = data.size(),
   };
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, data.size());
+  auto buf = jsg::JsUint8Array::create(js, data.size());
 
-  ncrypto::Buffer<unsigned char> outBuf = {
-    .data = backing.asArrayPtr().begin(), .len = data.size()};
-  ncrypto::Buffer<const unsigned char> ivBuf = {.data = iv.asArrayPtr().begin(), .len = iv.size()};
+  ncrypto::Buffer<unsigned char> outBuf = {.data = buf.asArrayPtr().begin(), .len = data.size()};
+  auto ivHandle = iv.getHandle(js);
+  ncrypto::Buffer<const unsigned char> ivBuf = {
+    .data = ivHandle.asArrayPtr().begin(), .len = ivHandle.size()};
   ncrypto::Buffer<const unsigned char> aadBuf;
 
-  KJ_IF_SOME(aad, maybeAad) {
+  KJ_IF_SOME(aadRef, maybeAad) {
+    auto aad = aadRef.getHandle(js);
     aadBuf = {.data = aad.asArrayPtr().begin(), .len = aad.size()};
   }
 
@@ -1104,15 +1112,15 @@ jsg::BufferSource CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::BufferSourc
       info.auth_tag_len = 16;
     }
 
-    auto authTagBacking = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, info.auth_tag_len);
+    auto tag = jsg::JsUint8Array::create(js, info.auth_tag_len);
 
     ncrypto::Buffer<unsigned char> tagBuf = {
-      .data = authTagBacking.asArrayPtr().begin(), .len = info.auth_tag_len};
+      .data = tag.asArrayPtr().begin(), .len = info.auth_tag_len};
 
     r = ctx.encrypt(buffer, outBuf, tagBuf, ivBuf, aadBuf);
-    maybeAuthTag = jsg::BufferSource(js, kj::mv(authTagBacking));
+    maybeAuthTag = jsg::JsBufferSource(tag).addRef(js);
   } else {
-    auto& tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+    auto tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided").getHandle(js);
 
     ncrypto::Buffer<const unsigned char> tagBuf = {
       .data = tag.asArrayPtr().begin(), .len = tag.size()};
@@ -1123,24 +1131,23 @@ jsg::BufferSource CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::BufferSourc
 
   JSG_REQUIRE(r, Error, "Authentication failed");
   // EVP_AEAD operations always return an output of the same size as the input
-  KJ_REQUIRE(outBuf.len == backing.size(), "Invalid output length for AEAD operation");
+  KJ_REQUIRE(outBuf.len == buf.size(), "Invalid output length for AEAD operation");
   updated = true;
-  return jsg::BufferSource(js, kj::mv(backing));
+  return buf;
 }
 
-jsg::BufferSource CryptoImpl::AeadHandle::final(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::AeadHandle::final(jsg::Lock& js) {
   // There is no finalization operation in the EVP_AEAD API.
   // Just return an empty value and clean up.
   JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
 
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
   ctx.reset();
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsUint8Array::create(js, 0);
 }
 
 void CryptoImpl::AeadHandle::setAAD(
-    jsg::Lock& js, jsg::BufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength) {
+    jsg::Lock& js, jsg::JsBufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength) {
   // In EVP_AEAD, the AAD is handled at the same time as the update.
   // Just save the value until update() is called.
 
@@ -1165,7 +1172,9 @@ void CryptoImpl::AeadHandle::setAAD(
     }
   }
 
-  maybeAad = aad.copy(js);
+  // Defensively copy the AAD data.
+  auto aadCopy = jsg::JsUint8Array::create(js, aad.asArrayPtr());
+  maybeAad = jsg::JsBufferSource(static_cast<v8::Local<v8::Value>>(aadCopy)).addRef(js);
 }
 
 void CryptoImpl::AeadHandle::setAutoPadding(jsg::Lock&, bool) {
@@ -1173,7 +1182,7 @@ void CryptoImpl::AeadHandle::setAutoPadding(jsg::Lock&, bool) {
   JSG_FAIL_REQUIRE(Error, "Setting autopadding is not supported on AEADs");
 }
 
-void CryptoImpl::AeadHandle::setAuthTag(jsg::Lock& js, jsg::BufferSource authTag) {
+void CryptoImpl::AeadHandle::setAuthTag(jsg::Lock& js, jsg::JsBufferSource authTag) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
   JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
   JSG_REQUIRE(
@@ -1199,20 +1208,21 @@ void CryptoImpl::AeadHandle::setAuthTag(jsg::Lock& js, jsg::BufferSource authTag
   info.auth_tag_len = authTag.size();
 
   // We defensively copy the auth tag here to prevent modification.
-  maybeAuthTag = authTag.copy(js);
+  auto tagCopy = jsg::JsUint8Array::create(js, authTag.asArrayPtr());
+  maybeAuthTag = jsg::JsBufferSource(static_cast<v8::Local<v8::Value>>(tagCopy)).addRef(js);
 }
 
-jsg::BufferSource CryptoImpl::AeadHandle::getAuthTag(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::AeadHandle::getAuthTag(jsg::Lock& js) {
   JSG_REQUIRE(!ctx, Error, "Auth tag is only available once cipher context has been finalized");
   JSG_REQUIRE(mode == CipherMode::CIPHER, Error, "Getting the auth tag is only support for cipher");
 
-  KJ_IF_SOME(tag, maybeAuthTag) {
+  KJ_IF_SOME(ref, maybeAuthTag) {
     KJ_DEFER(maybeAuthTag = kj::none);
-    return kj::mv(tag);
+    auto tag = ref.getHandle(js);
+    return jsg::JsUint8Array::create(js, tag.asArrayPtr());
   }
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsUint8Array::create(js, 0);
 }
 
 kj::OneOf<jsg::Ref<CryptoImpl::CipherHandle>, jsg::Ref<CryptoImpl::AeadHandle>> CryptoImpl::
@@ -1220,7 +1230,7 @@ kj::OneOf<jsg::Ref<CryptoImpl::CipherHandle>, jsg::Ref<CryptoImpl::AeadHandle>> 
         kj::uint mode,
         kj::String algorithm,
         jsg::Ref<CryptoKey> key,
-        jsg::BufferSource iv,
+        jsg::JsBufferSource iv,
         jsg::Optional<uint32_t> maybeAuthTagLength) {
   CipherMode cipherMode = static_cast<CipherMode>(mode);
 
@@ -1245,9 +1255,9 @@ using EVP_PKEY_cipher_t = int(
     EVP_PKEY_CTX* ctx, unsigned char* out, size_t* outlen, const unsigned char* in, size_t inlen);
 
 template <EVP_PKEY_cipher_t cipher>
-jsg::BufferSource Cipher(jsg::Lock& js,
+jsg::JsUint8Array Cipher(jsg::Lock& js,
     ncrypto::EVPKeyCtxPointer&& ctx,
-    const jsg::BufferSource& buffer,
+    jsg::JsBufferSource& buffer,
     const CryptoImpl::PublicPrivateCipherOptions& options) {
 
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
@@ -1268,7 +1278,8 @@ jsg::BufferSource Cipher(jsg::Lock& js,
         "Failed to set the mgf1 digest");
   }
 
-  KJ_IF_SOME(label, options.oaepLabel) {
+  KJ_IF_SOME(labelRef, options.oaepLabel) {
+    auto label = labelRef.getHandle(js);
     // The ctx takes ownership of the data buffer so we have to copy.
     auto data = ncrypto::DataPointer::Alloc(label.size());
     kj::ArrayPtr<kj::byte> dataPtr(data.get<kj::byte>(), data.size());
@@ -1284,28 +1295,27 @@ jsg::BufferSource Cipher(jsg::Lock& js,
       Error, "Failed to determine output size");
 
   if (len == 0) {
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-    return jsg::BufferSource(js, kj::mv(backing));
+    return jsg::JsUint8Array::create(js, 0);
   }
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, len);
-  JSG_REQUIRE(cipher(ctx.get(), backing.asArrayPtr().begin(), &len, buffer.asArrayPtr().begin(),
+  auto buf = jsg::JsUint8Array::create(js, len);
+  JSG_REQUIRE(cipher(ctx.get(), buf.asArrayPtr().begin(), &len, buffer.asArrayPtr().begin(),
                   buffer.size()) == 1,
       Error, "Failed to cipher/decipher");
 
-  if (len < backing.size()) {
-    auto newBacking = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, len);
-    newBacking.asArrayPtr().copyFrom(backing.asArrayPtr().slice(0, len));
-    backing = kj::mv(newBacking);
+  if (len < buf.size()) {
+    auto newBuf = jsg::JsUint8Array::create(js, len);
+    newBuf.asArrayPtr().copyFrom(buf.asArrayPtr().first(len));
+    buf = kj::mv(newBuf);
   }
 
-  return jsg::BufferSource(js, kj::mv(backing));
+  return buf;
 }
 }  // namespace
 
-jsg::BufferSource CryptoImpl::publicEncrypt(jsg::Lock& js,
+jsg::JsUint8Array CryptoImpl::publicEncrypt(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
-    jsg::BufferSource buffer,
+    jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
   auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
   JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
@@ -1314,9 +1324,9 @@ jsg::BufferSource CryptoImpl::publicEncrypt(jsg::Lock& js,
   return Cipher<EVP_PKEY_encrypt>(js, kj::mv(ctx), buffer, options);
 }
 
-jsg::BufferSource CryptoImpl::privateDecrypt(jsg::Lock& js,
+jsg::JsUint8Array CryptoImpl::privateDecrypt(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
-    jsg::BufferSource buffer,
+    jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
   auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
   JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
@@ -1325,9 +1335,9 @@ jsg::BufferSource CryptoImpl::privateDecrypt(jsg::Lock& js,
   return Cipher<EVP_PKEY_decrypt>(js, kj::mv(ctx), buffer, options);
 }
 
-jsg::BufferSource CryptoImpl::publicDecrypt(jsg::Lock& js,
+jsg::JsUint8Array CryptoImpl::publicDecrypt(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
-    jsg::BufferSource buffer,
+    jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
   auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
   JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
@@ -1339,9 +1349,9 @@ jsg::BufferSource CryptoImpl::publicDecrypt(jsg::Lock& js,
         .oaepHash = kj::String(),
       });
 }
-jsg::BufferSource CryptoImpl::privateEncrypt(jsg::Lock& js,
+jsg::JsUint8Array CryptoImpl::privateEncrypt(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
-    jsg::BufferSource buffer,
+    jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
   auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
   JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
@@ -1472,7 +1482,7 @@ kj::ArrayPtr<kj::StringPtr> CryptoImpl::getCiphers() {
 #pragma region ECDH
 
 namespace {
-ncrypto::ECPointPointer bufferToPoint(const EC_GROUP* group, jsg::BufferSource& buf) {
+ncrypto::ECPointPointer bufferToPoint(const EC_GROUP* group, jsg::JsBufferSource& buf) {
   JSG_REQUIRE(buf.size() <= INT32_MAX, Error, "buffer is too big");
 
   auto pub = ncrypto::ECPointPointer::New(group);
@@ -1494,18 +1504,17 @@ point_conversion_form_t getFormat(kj::StringPtr format) {
   JSG_FAIL_REQUIRE(Error, "Invalid ECDH public key format");
 }
 
-jsg::BufferSource ecPointToBuffer(
+jsg::JsUint8Array ecPointToBuffer(
     jsg::Lock& js, const EC_GROUP* group, const EC_POINT* point, point_conversion_form_t form) {
   size_t len = EC_POINT_point2oct(group, point, form, nullptr, 0, nullptr);
   JSG_REQUIRE(len != 0, Error, "Failed to get public key length");
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, len);
+  auto buf = jsg::JsUint8Array::create(js, len);
 
-  len =
-      EC_POINT_point2oct(group, point, form, backing.asArrayPtr().begin(), backing.size(), nullptr);
+  len = EC_POINT_point2oct(group, point, form, buf.asArrayPtr().begin(), buf.size(), nullptr);
   JSG_REQUIRE(len != 0, Error, "Failed to get public key");
 
-  return jsg::BufferSource(js, kj::mv(backing));
+  return buf;
 }
 
 bool isKeyValidForCurve(const EC_GROUP* group, const ncrypto::BignumPointer& private_key) {
@@ -1536,8 +1545,8 @@ jsg::Ref<CryptoImpl::ECDHHandle> CryptoImpl::ECDHHandle::constructor(
   return js.alloc<CryptoImpl::ECDHHandle>(kj::mv(key));
 }
 
-jsg::BufferSource CryptoImpl::ECDHHandle::computeSecret(
-    jsg::Lock& js, jsg::BufferSource otherPublicKey) {
+jsg::JsUint8Array CryptoImpl::ECDHHandle::computeSecret(
+    jsg::Lock& js, jsg::JsBufferSource otherPublicKey) {
 
   ncrypto::ClearErrorOnReturn clear_error_on_return;
 
@@ -1549,12 +1558,12 @@ jsg::BufferSource CryptoImpl::ECDHHandle::computeSecret(
   int field_size = EC_GROUP_get_degree(group_);
   size_t out_len = (field_size + 7) / 8;
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, out_len);
+  auto buf = jsg::JsUint8Array::create(js, out_len);
 
-  JSG_REQUIRE(ECDH_compute_key(backing.asArrayPtr().begin(), out_len, pub, key_.get(), nullptr),
-      Error, "Failed to compute ECDH key");
+  JSG_REQUIRE(ECDH_compute_key(buf.asArrayPtr().begin(), out_len, pub, key_.get(), nullptr), Error,
+      "Failed to compute ECDH key");
 
-  return jsg::BufferSource(js, kj::mv(backing));
+  return buf;
 }
 
 void CryptoImpl::ECDHHandle::generateKeys() {
@@ -1562,18 +1571,17 @@ void CryptoImpl::ECDHHandle::generateKeys() {
   JSG_REQUIRE(key_.generate(), Error, "Failed to generate keys");
 }
 
-jsg::BufferSource CryptoImpl::ECDHHandle::getPrivateKey(jsg::Lock& js) {
+jsg::JsUint8Array CryptoImpl::ECDHHandle::getPrivateKey(jsg::Lock& js) {
   auto b = key_.getPrivateKey();
   JSG_REQUIRE(b != nullptr, Error, "Failed to get ECDH private key");
-  auto backing =
-      jsg::BackingStore::alloc<v8::ArrayBuffer>(js, ncrypto::BignumPointer::GetByteCount(b));
-  JSG_REQUIRE(backing.size() ==
-          ncrypto::BignumPointer::EncodePaddedInto(b, backing.asArrayPtr().begin(), backing.size()),
+  auto buf = jsg::JsUint8Array::create(js, ncrypto::BignumPointer::GetByteCount(b));
+  JSG_REQUIRE(buf.size() ==
+          ncrypto::BignumPointer::EncodePaddedInto(b, buf.asArrayPtr().begin(), buf.size()),
       Error, "Failed to encode the private key");
-  return jsg::BufferSource(js, kj::mv(backing));
+  return buf;
 }
 
-jsg::BufferSource CryptoImpl::ECDHHandle::getPublicKey(jsg::Lock& js, kj::String format) {
+jsg::JsUint8Array CryptoImpl::ECDHHandle::getPublicKey(jsg::Lock& js, kj::String format) {
   const auto group = key_.getGroup();
   const auto pub = key_.getPublicKey();
   JSG_REQUIRE(pub != nullptr, Error, "Failed to get ECDH public key");
@@ -1581,7 +1589,7 @@ jsg::BufferSource CryptoImpl::ECDHHandle::getPublicKey(jsg::Lock& js, kj::String
   return ecPointToBuffer(js, group, pub, form);
 }
 
-void CryptoImpl::ECDHHandle::setPrivateKey(jsg::Lock& js, jsg::BufferSource key) {
+void CryptoImpl::ECDHHandle::setPrivateKey(jsg::Lock& js, jsg::JsBufferSource key) {
 
   JSG_REQUIRE(key.size() <= INT32_MAX, Error, "key is too big");
 
@@ -1615,14 +1623,13 @@ void CryptoImpl::ECDHHandle::setPrivateKey(jsg::Lock& js, jsg::BufferSource key)
   group_ = key_.getGroup();
 }
 
-jsg::BufferSource CryptoImpl::ECDHHandle::convertKey(
-    jsg::Lock& js, jsg::BufferSource key, kj::String curveName, kj::String format) {
+jsg::JsUint8Array CryptoImpl::ECDHHandle::convertKey(
+    jsg::Lock& js, jsg::JsBufferSource key, kj::String curveName, kj::String format) {
   ncrypto::ClearErrorOnReturn clear_error_on_return;
 
   JSG_REQUIRE(key.size() <= INT32_MAX, Error, "key is too big");
   if (key.size() == 0) {
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-    return jsg::BufferSource(js, kj::mv(backing));
+    return jsg::JsUint8Array::create(js, 0);
   }
 
   int nid = OBJ_sn2nid(curveName.begin());

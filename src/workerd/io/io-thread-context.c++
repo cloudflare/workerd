@@ -17,13 +17,16 @@ ThreadContext::HeaderIdBundle::HeaderIdBundle(kj::HttpHeaderTable::Builder& buil
       cfBlobMetadataSize(builder.add("CF-R2-Metadata-Size")),
       cfBlobRequest(builder.add("CF-R2-Request")),
       authorization(builder.add("Authorization")),
+      cfQueuesErrorCode(builder.add("CF-Queues-Error-Code")),
+      cfQueuesErrorCause(builder.add("CF-Queues-Error-Cause")),
       secWebSocketProtocol(builder.add("Sec-WebSocket-Protocol")),
       userAgent(builder.add("User-Agent")),
       contentType(builder.add("Content-Type")),
       contentLength(builder.add("Content-Length")),
       accept(builder.add("Accept")),
       acceptEncoding(builder.add("Accept-Encoding")),
-      cfRay(builder.add("CF-Ray")) {}
+      cfRay(builder.add("CF-Ray")),
+      origin(builder.add("Origin")) {}
 
 ThreadContext::ThreadContext(kj::Timer& timer,
     kj::EntropySource& entropySource,

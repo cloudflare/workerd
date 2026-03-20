@@ -224,7 +224,7 @@ class MemoryTracker final {
       kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
   template <typename T,
-      typename test = typename std::enable_if_t<std::numeric_limits<T>::is_specialized, bool>,
+      typename test = std::enable_if_t<std::numeric_limits<T>::is_specialized, bool>,
       typename dummy = bool>
   inline void trackField(kj::StringPtr edgeName,
       const kj::Array<T>& value,
@@ -242,7 +242,7 @@ class MemoryTracker final {
       const kj::HashMap<Key, Value>& value,
       kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
-  template <MemoryRetainer T, typename Iterator = typename T::const_iterator>
+  template <MemoryRetainer T, typename Iterator = T::const_iterator>
   inline void trackField(kj::StringPtr edgeName,
       const T& value,
       kj::Maybe<kj::StringPtr> nodeName = kj::none,

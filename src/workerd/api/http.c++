@@ -8,6 +8,7 @@
 #include "headers.h"
 #include "queue.h"
 #include "sockets.h"
+#include "streams/readable-source.h"
 #include "system-streams.h"
 #include "util.h"
 #include "worker-rpc.h"
@@ -18,7 +19,6 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -72,52 +72,6 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
 // normalize capitalization of all registered headers, and http-over-capnp also loses
 // capitalization). So, it's certainly not worth it to try to keep the original capitalization
 // across serialization.
-
-namespace {
-
-class BodyBufferInputStream final: public ReadableStreamSource {
- public:
-  BodyBufferInputStream(Body::Buffer buffer)
-      : unread(buffer.view),
-        ownBytes(kj::mv(buffer.ownBytes)) {}
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    if (unread != nullptr) {
-      size_t amount = kj::min(maxBytes, unread.size());
-      memcpy(buffer, unread.begin(), amount);
-      unread = unread.slice(amount, unread.size());
-      return amount;
-    }
-
-    return static_cast<size_t>(0);
-  }
-
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-    if (encoding == StreamEncoding::IDENTITY) {
-      return unread.size();
-    } else {
-      // Who knows what the compressed size will be?
-      return kj::none;
-    }
-  }
-
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    if (unread != nullptr) {
-      auto data = unread;
-      unread = nullptr;
-      co_await output.write(data);
-      if (end) co_await output.end();
-    }
-
-    co_return;
-  }
-
- private:
-  kj::ArrayPtr<const byte> unread;
-  kj::OneOf<kj::Own<Body::RefcountedBytes>, jsg::Ref<Blob>> ownBytes;
-};
-
-}  // namespace
 
 Body::Buffer Body::Buffer::clone(jsg::Lock& js) {
   Buffer result;
@@ -201,19 +155,15 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
 
   auto buf = buffer.clone(js);
 
-  if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
-    auto memStream = newMemoryInputStream(buf.view, kj::heap(kj::mv(buf.ownBytes)));
-    auto rs = newSystemStream(kj::mv(memStream), StreamEncoding::IDENTITY);
+  // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
+  // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
+  // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
+  // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
+  // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
+  auto rs = streams::newMemorySource(buf.view, kj::heap(kj::mv(buf.ownBytes)));
 
-    return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
-      kj::mv(contentType)};
-  } else {
-    // TODO(cleanup): Remove once the Autogate is removed.
-    auto bodyStream = kj::heap<BodyBufferInputStream>(kj::mv(buf));
-
-    return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream)), kj::mv(buffer),
-      kj::mv(contentType)};
-  }
+  return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
+    kj::mv(contentType)};
 }
 
 Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
@@ -223,14 +173,16 @@ Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
             headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(ct));
-          } else if (MimeType::FORM_DATA == ct) {
-            // Custom content-type request/responses with FormData are broken since they require a
-            // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
-            IoContext::current().logWarning(
-                "A FormData body was provided with a custom Content-Type header when constructing "
-                "a Request or Response object. This will prevent the recipient of the Request or "
-                "Response from being able to parse the body. Consider omitting the custom "
-                "Content-Type header.");
+          } else KJ_IF_SOME(parsed, MimeType::tryParse(ct)) {
+            if (MimeType::FORM_DATA == parsed) {
+              // Custom content-type request/responses with FormData are broken since they require a
+              // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
+              IoContext::current().logWarning(
+                  "A FormData body was provided with a custom Content-Type header when constructing "
+                  "a Request or Response object. This will prevent the recipient of the Request or "
+                  "Response from being able to parse the body. Consider omitting the custom "
+                  "Content-Type header.");
+            }
           }
         }
         return kj::mv(i.impl);
@@ -260,15 +212,14 @@ void Body::rewindBody(jsg::Lock& js) {
 
   KJ_IF_SOME(i, impl) {
     auto bufferCopy = KJ_ASSERT_NONNULL(i.buffer).clone(js);
-    if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
-      auto memStream = newMemoryInputStream(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
-      auto rs = newSystemStream(kj::mv(memStream), StreamEncoding::IDENTITY);
-      i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs));
-    } else {
-      // TODO(cleanup): Remove once the Autogate is removed.
-      auto bodyStream = kj::heap<BodyBufferInputStream>(kj::mv(bufferCopy));
-      i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream));
-    }
+
+    // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
+    // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
+    // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
+    // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
+    // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
+    auto rs = streams::newMemorySource(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
+    i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs));
   }
 }
 
@@ -321,7 +272,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
       // search-and-replace across your whole site and you forgot that it'll apply to images too.
       // When running in the fiddle, let's warn the developer if they do this.
       auto& context = IoContext::current();
-      if (context.isInspectorEnabled()) {
+      if (context.hasWarningHandler()) {
         KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
           maybeWarnIfNotText(js, type);
         }
@@ -740,7 +691,7 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
     case CacheMode::NOSTORE:
       if (obj.has(js, "cacheTtl")) {
         jsg::JsValue oldTtl = obj.get(js, "cacheTtl");
-        JSG_REQUIRE(oldTtl == js.num(NOCACHE_TTL), TypeError,
+        JSG_REQUIRE(oldTtl.strictEquals(js.num(NOCACHE_TTL)), TypeError,
             kj::str("CacheTtl: ", oldTtl, ", is not compatible with cache: ",
                 getCacheModeName(cacheMode).orDefault("none"_kj), " header."));
       } else {
@@ -1108,7 +1059,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
           "Response with null body status (101, 204, 205, or 304) cannot have a body.");
 
       auto& context = IoContext::current();
-      if (context.isInspectorEnabled()) {
+      if (context.hasWarningHandler()) {
         context.logWarning(kj::str("Constructing a Response with a null body status (", statusCode,
             ") and a non-null, "
             "zero-length body. This is technically incorrect, and we recommend you update your "
@@ -1513,12 +1464,6 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   //   requires a significant rewrite of the code below. It'll probably get simpler, though?
   kj::Own<kj::HttpClient> client = asHttpClient(kj::mv(clientWithTracing.client));
 
-  if (util::Autogate::Autogate::isEnabled(util::AutogateKey::FETCH_REQUEST_MEMORY_ADJUSTMENT)) {
-    // fetch requests use a lot of unaccounted c++ memory, so we simply adjust memory usage by some
-    // arbitrary amount to protect against OOMs.
-    client = client.attach(js.getExternalMemoryAdjustment(3 * 1024));
-  }
-
   kj::HttpHeaders headers(ioContext.getHeaderTable());
   jsRequest->shallowCopyHeadersTo(headers);
 
@@ -1606,7 +1551,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
           }
           return js.resolvedPromise(makeHttpResponse(js, jsRequest->getMethodEnum(),
               kj::mv(urlList), response.statusCode, response.statusText, *response.headers,
-              newNullInputStream(), js.alloc<WebSocket>(kj::mv(webSocket)),
+              newNullInputStream(), js.alloc<WebSocket>(js, kj::mv(webSocket)),
               jsRequest->getResponseBodyEncoding(), kj::mv(signal)));
         }
       }
@@ -2372,23 +2317,19 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       // For channels, create trace context
-      auto userSpan = ioContext.makeUserTraceSpan(operationName.clone());
-      auto traceSpan = ioContext.makeTraceSpan(operationName.clone());
-      auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      auto userSpan = ioContext.makeUserTraceSpan(operationName.clone());
-      auto traceSpan = ioContext.makeTraceSpan(operationName.clone());
-      auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-        return channel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+        return channel->startRequest({.cfBlobJson = kj::mv(cfStr), .parentSpan = tracing.getInternalSpanParent()});
       }, {
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
-        .operationName = kj::mv(operationName),
+        .existingTraceContext = traceContext,
       });
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }

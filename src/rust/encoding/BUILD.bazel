@@ -1,0 +1,11 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "encoding",
+    cxx_bridge_src = "lib.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx-integration",
+        "@crates_vendor//:encoding_rs",
+    ],
+)

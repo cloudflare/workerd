@@ -13,16 +13,17 @@ namespace workerd::api {
 namespace {
 jsg::JsRef<jsg::JsRegExp> compileRegex(
     jsg::Lock& js, const jsg::UrlPattern::Component& component, bool ignoreCase) {
-  return js.tryCatch([&] {
+  JSG_TRY(js) {
     jsg::Lock::RegExpFlags flags = jsg::Lock::RegExpFlags::kUNICODE;
     if (ignoreCase) {
       flags = static_cast<jsg::Lock::RegExpFlags>(
           flags | static_cast<int>(jsg::Lock::RegExpFlags::kIGNORE_CASE));
     }
     return jsg::JsRef<jsg::JsRegExp>(js, js.regexp(component.getRegex(), flags));
-  }, [&](auto reason) -> jsg::JsRef<jsg::JsRegExp> {
+  }
+  JSG_CATCH(_) {
     JSG_FAIL_REQUIRE(TypeError, "Invalid regular expression syntax.");
-  });
+  }
 }
 
 jsg::Ref<URLPattern> create(jsg::Lock& js, jsg::UrlPattern pattern) {
@@ -49,19 +50,20 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(jsg::Lock& js,
   using Groups = jsg::Dict<kj::String, kj::String>;
 
   KJ_IF_SOME(array, regex.getHandle(js)(js, input)) {
-    // Starting at 1 here looks a bit odd but it is intentional. The result of the regex
-    // is an array and we're skipping the first element.
-    uint32_t index = 1;
-    uint32_t length = array.size();
-    kj::Vector<Groups::Field> fields(length - 1);
+    // Per the URLPattern spec, we iterate over nameList rather than the regex
+    // result array. The regex may contain more capturing groups than there are
+    // named parts (e.g. when a part's value itself contains capturing groups
+    // like "(?<foo>x)"), so using the regex array length would cause an
+    // out-of-bounds access on nameList.
+    uint32_t length = nameList.size();
+    kj::Vector<Groups::Field> fields(length);
 
-    while (index < length) {
-      auto value = array.get(js, index);
+    for (uint32_t index = 0; index < length; index++) {
+      auto value = array.get(js, index + 1);
       fields.add(Groups::Field{
-        .name = kj::str(nameList[index - 1]),
+        .name = kj::str(nameList[index]),
         .value = value.isUndefined() ? kj::String() : kj::str(value),
       });
-      index++;
     }
 
     return URLPattern::URLPatternComponentResult{

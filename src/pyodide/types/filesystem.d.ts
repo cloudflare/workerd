@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 interface Reader {
   read: (offset: number, dest: Uint8Array) => number;
 }
@@ -18,17 +22,35 @@ interface TarFSInfo {
 declare type MetadataDirInfo = Map<string, MetadataFSInfo>;
 declare type MetadataFSInfo = MetadataDirInfo | number; // file infos are numbers and dir infos are maps
 
+interface FSLookupResult<Info> {
+  node: FSNode<Info>;
+}
+
 interface FS {
   mkdir: (dirname: string) => void;
   mkdirTree: (dirname: string) => void;
-  writeFile: (fname: string, contents: Uint8Array, options: object) => void;
-  readFile: (fname: string) => Uint8Array;
+  writeFile: (
+    fname: string,
+    contents: Uint8Array | string,
+    options?: { canOwn: boolean }
+  ) => void;
+  readFile: (fname: string, options?: { encoding?: string }) => Uint8Array;
   mount(fs: object, options: { info?: any }, path: string): void;
   createNode<Info>(
     parent: FSNode<Info> | null,
     name: string,
     mode: number
   ): FSNode<Info>;
+  lookupPath<Info>(path: string): FSLookupResult<Info>;
+  open<Info>(nodeOrPath: FSNode<Info> | string, flags?: number): FSStream<Info>;
+  read<Info>(
+    stream: FSStream<Info>,
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number
+  ): number;
+  close<Info>(stream: FSStream<Info>): void;
   isFile: (mode: number) => boolean;
   readdir: (path: string) => string[];
   genericErrors: { 44: Error };
@@ -86,6 +108,10 @@ interface FSStreamOps<Info> {
   ) => number;
 }
 
+interface FSMount {
+  type: EmscriptenFS<any>;
+}
+
 interface FSNode<Info> {
   id: number;
   usedBytes: number;
@@ -93,6 +119,7 @@ interface FSNode<Info> {
   modtime: number;
   node_ops: FSNodeOps<Info>;
   stream_ops: FSStreamOps<Info>;
+  mount: FSMount;
   info: Info;
   contentsOffset?: number | undefined;
   tree?: MetadataDirInfo;

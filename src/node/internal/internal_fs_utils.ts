@@ -74,11 +74,22 @@ export type FilePath = string | URL | Buffer;
 import type {
   MakeDirectoryOptions,
   OpenDirOptions,
-  ReadSyncOptions,
-  RmDirOptions,
+  ReadOptions,
+  RmDirOptions as NodeRmDirOptions,
   RmOptions,
   WriteFileOptions,
 } from 'node:fs';
+
+// Extended RmDirOptions that includes deprecated properties we still support
+// eslint-disable-next-line @typescript-eslint/no-deprecated
+export type RmDirOptions = NodeRmDirOptions & {
+  /** @deprecated Use `fs.rm()` with `recursive` option instead */
+  maxRetries?: number | undefined;
+  /** @deprecated Use `fs.rm()` with `recursive` option instead */
+  recursive?: boolean | undefined;
+  /** @deprecated Use `fs.rm()` with `recursive` option instead */
+  retryDelay?: number | undefined;
+};
 
 export type ValidEncoding = BufferEncoding | 'buffer' | null;
 
@@ -524,7 +535,7 @@ export function validateWriteFileArgs(
 export function validateReadArgs(
   fd: number,
   buffer: NodeJS.ArrayBufferView,
-  offsetOrOptions: ReadSyncOptions | number | null,
+  offsetOrOptions: ReadOptions | number | null,
   length: number | undefined,
   position: Position | undefined
 ): { fd: number; buffer: Buffer[]; length: number; position: Position } {

@@ -17,8 +17,23 @@ class Fetcher;
 
 namespace workerd::server {
 
-// Holds the I/O state for a debug port connection.
-struct DebugPortConnectionState {
+// Holds the I/O state for a debug port connection: the TCP stream, capnp RPC client,
+// and debug port capability. Refcounted to support deferred proxying - response bodies
+// and WebSockets are proxied through the capnp connection, so it must stay alive until
+// they're fully consumed. See WorkerdBootstrapSubrequestChannel::startRequest().
+class DebugPortConnectionState: public kj::Refcounted {
+ public:
+  DebugPortConnectionState(kj::Own<kj::AsyncIoStream> connection,
+      kj::Own<capnp::TwoPartyClient> rpcClient,
+      rpc::WorkerdDebugPort::Client debugPort)
+      : connection(kj::mv(connection)),
+        rpcClient(kj::mv(rpcClient)),
+        debugPort(kj::mv(debugPort)) {}
+
+  kj::Own<DebugPortConnectionState> addRef() {
+    return kj::addRef(*this);
+  }
+
   kj::Own<kj::AsyncIoStream> connection;
   kj::Own<capnp::TwoPartyClient> rpcClient;
   rpc::WorkerdDebugPort::Client debugPort;
@@ -30,26 +45,31 @@ struct DebugPortConnectionState {
 class WorkerdDebugPortClient: public jsg::Object {
  public:
   // Create a WorkerdDebugPortClient with an established connection.
+  // Takes an IoOwn reference to the connection state.
   explicit WorkerdDebugPortClient(IoOwn<DebugPortConnectionState> state): state(kj::mv(state)) {}
 
   // Get access to a stateless entrypoint on the remote workerd instance.
+  // Uses Cap'n Proto pipelining to return a Fetcher synchronously — the actual
+  // RPC resolution is deferred until the Fetcher is first used (e.g. fetch()).
   //
   // @param service - The service name in the remote workerd process
   // @param entrypoint - The entrypoint name to access (if omitted, uses the default handler)
   // @param props - Optional props to pass to the entrypoint
-  // @returns A Promise<Fetcher> that can be used to invoke the entrypoint
-  jsg::Promise<jsg::Ref<api::Fetcher>> getEntrypoint(jsg::Lock& js,
+  // @returns A Fetcher that lazily resolves on first use
+  jsg::Ref<api::Fetcher> getEntrypoint(jsg::Lock& js,
       kj::String service,
       jsg::Optional<kj::String> entrypoint,
       jsg::Optional<jsg::JsRef<jsg::JsObject>> props);
 
   // Get access to an actor (Durable Object) stub on the remote workerd instance.
+  // Uses Cap'n Proto pipelining to return a Fetcher synchronously — the actual
+  // RPC resolution is deferred until the Fetcher is first used (e.g. fetch()).
   //
   // @param service - The service name in the remote workerd process
   // @param entrypoint - The entrypoint/class name to access
   // @param actorId - The actor ID (hex string for DOs, plain string for ephemeral)
-  // @returns A Promise<Fetcher> that can be used to invoke the actor
-  jsg::Promise<jsg::Ref<api::Fetcher>> getActor(
+  // @returns A Fetcher that lazily resolves on first use
+  jsg::Ref<api::Fetcher> getActor(
       jsg::Lock& js, kj::String service, kj::String entrypoint, kj::String actorId);
 
   JSG_RESOURCE_TYPE(WorkerdDebugPortClient) {
@@ -59,9 +79,9 @@ class WorkerdDebugPortClient: public jsg::Object {
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE({
       getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
-          service: string, entrypoint?: string, props?: Record<string, unknown>): Promise<Fetcher<T>>;
+          service: string, entrypoint?: string, props?: Record<string, unknown>): Fetcher<T>;
       getActor<T extends Rpc.DurableObjectBranded | undefined>(
-          service: string, entrypoint: string, actorId: string): Promise<Fetcher<T>>;
+          service: string, entrypoint: string, actorId: string): Fetcher<T>;
     });
   }
 
@@ -77,10 +97,13 @@ class WorkerdDebugPortConnector: public jsg::Object {
   WorkerdDebugPortConnector() = default;
 
   // Connect to a remote workerd debug port at the given address.
+  // Returns synchronously using kj::newPromisedStream() to defer the TCP connection.
+  // Cap'n Proto pipelining ensures that all subsequent RPC calls (getEntrypoint, getActor)
+  // are queued until the connection is established.
   //
   // @param address - The address of the remote workerd debug port (e.g., "localhost:1234")
-  // @returns A Promise<WorkerdDebugPortClient> that can be used to access the remote instance
-  jsg::Promise<jsg::Ref<WorkerdDebugPortClient>> connect(jsg::Lock& js, kj::String address);
+  // @returns A WorkerdDebugPortClient that lazily connects on first use
+  jsg::Ref<WorkerdDebugPortClient> connect(jsg::Lock& js, kj::String address);
 
   JSG_RESOURCE_TYPE(WorkerdDebugPortConnector) {
     JSG_METHOD(connect);

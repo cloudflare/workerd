@@ -273,6 +273,9 @@ kj::String KJ_STRINGIFY(const TailEvent::Event& event) {
     KJ_CASE_ONEOF(log, Log) {
       return kj::str("Log");
     }
+    KJ_CASE_ONEOF(streamDiag, StreamDiagnosticsEvent) {
+      return kj::str("StreamDiagnosticsEvent(droppedEvents: ", streamDiag.droppedEventsCount, ")");
+    }
     KJ_CASE_ONEOF(ret, Return) {
       return kj::str("Return");
     }
@@ -533,6 +536,34 @@ DiagnosticChannelEvent DiagnosticChannelEvent::clone() const {
   return DiagnosticChannelEvent(timestamp, kj::str(channel), kj::heapArray<kj::byte>(message));
 }
 
+StreamDiagnosticsEvent::StreamDiagnosticsEvent(uint32_t droppedEventsCount)
+    : droppedEventsCount(droppedEventsCount) {}
+
+StreamDiagnosticsEvent::StreamDiagnosticsEvent(rpc::Trace::StreamDiagnosticsEvent::Reader reader) {
+  auto diagnosticReader = reader.getDiagnostic();
+  switch (diagnosticReader.which()) {
+    case rpc::Trace::StreamDiagnosticsEvent::Diagnostic::UNDEFINED:
+      KJ_FAIL_ASSERT("received invalid diagnostics event");
+      break;
+    case rpc::Trace::StreamDiagnosticsEvent::Diagnostic::DROPPED_EVENTS:
+      auto droppedEvents = diagnosticReader.getDroppedEvents();
+      droppedEventsCount = droppedEvents.getCount();
+      KJ_DASSERT(droppedEventsCount > 0);
+      break;
+  }
+}
+
+void StreamDiagnosticsEvent::copyTo(rpc::Trace::StreamDiagnosticsEvent::Builder builder) const {
+  KJ_DASSERT(droppedEventsCount > 0);
+  auto diagnosticBuilder = builder.initDiagnostic();
+  auto droppedEventsBuilder = diagnosticBuilder.initDroppedEvents();
+  droppedEventsBuilder.setCount(droppedEventsCount);
+}
+
+StreamDiagnosticsEvent StreamDiagnosticsEvent::clone() const {
+  return StreamDiagnosticsEvent(droppedEventsCount);
+}
+
 HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(Type type): type(type) {}
 
 HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
@@ -722,6 +753,13 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
     }
   }
 
+  KJ_IF_SOME(tags, tailAttributes) {
+    auto list = builder.initTailAttributes(tags.size());
+    for (auto i: kj::indices(tags)) {
+      tags[i].copyTo(list[i]);
+    }
+  }
+
   KJ_IF_SOME(e, entrypoint) {
     builder.setEntrypoint(e);
   }
@@ -826,6 +864,10 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
 
   if (auto tags = reader.getScriptTags(); tags.size() > 0) {
     scriptTags = KJ_MAP(tag, tags) { return kj::str(tag); };
+  }
+
+  if (auto tags = reader.getTailAttributes(); tags.size() > 0) {
+    tailAttributes = KJ_MAP(tag, tags) { return tracing::Attribute(tag); };
   }
 
   if (reader.hasEntrypoint()) {
@@ -1156,8 +1198,8 @@ kj::Maybe<kj::Array<kj::String>> getScriptTagsFromReader(const rpc::Trace::Onset
   if (reader.hasScriptTags()) {
     auto tags = reader.getScriptTags();
     kj::Vector<kj::String> scriptTags(tags.size());
-    for (size_t i = 0; i < tags.size(); i++) {
-      scriptTags.add(kj::str(tags[i]));
+    for (const auto& tag: tags) {
+      scriptTags.add(kj::str(tag));
     }
     return kj::Maybe(scriptTags.releaseAsArray());
   }
@@ -1339,8 +1381,8 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<Attribute> attrs(listReader.size());
-      for (size_t n = 0; n < listReader.size(); n++) {
-        attrs.add(Attribute(listReader[n]));
+      for (const auto& reader: listReader) {
+        attrs.add(Attribute(reader));
       }
       return attrs.releaseAsArray();
     }
@@ -1355,6 +1397,9 @@ TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& rea
     }
     case rpc::Trace::TailEvent::Event::LOG: {
       return Log(event.getLog());
+    }
+    case rpc::Trace::TailEvent::Event::STREAM_DIAGNOSTICS: {
+      return StreamDiagnosticsEvent(event.getStreamDiagnostics());
     }
   }
   KJ_UNREACHABLE;
@@ -1396,6 +1441,9 @@ void TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(log, Log) {
       log.copyTo(eventBuilder.initLog());
     }
+    KJ_CASE_ONEOF(streamDiag, StreamDiagnosticsEvent) {
+      streamDiag.copyTo(eventBuilder.initStreamDiagnostics());
+    }
     KJ_CASE_ONEOF(ret, Return) {
       ret.copyTo(eventBuilder.initReturn());
     }
@@ -1432,6 +1480,9 @@ TailEvent TailEvent::clone() const {
       }
       KJ_CASE_ONEOF(log, Log) {
         return log.clone();
+      }
+      KJ_CASE_ONEOF(streamDiag, StreamDiagnosticsEvent) {
+        return streamDiag.clone();
       }
       KJ_CASE_ONEOF(ret, Return) {
         return ret.clone();
@@ -1476,19 +1527,41 @@ CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
   }
 }
 
-CompleteSpan CompleteSpan::clone() const {
-  CompleteSpan copy(spanId, parentSpanId, operationName.clone(), startTime, endTime);
-  copy.tags.reserve(tags.size());
-  for (auto& tag: tags) {
-    copy.tags.insert(tag.key.clone(), spanTagClone(tag.value));
-  }
-  return copy;
+SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
+    : spanId(reader.getSpanId()),
+      parentSpanId(reader.getParentSpanId()),
+      operationName(kj::str(reader.getOperationName())),
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {}
+
+void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
+  builder.setOperationName(operationName.asPtr());
+  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setSpanId(spanId);
+  builder.setParentSpanId(parentSpanId);
 }
 
-kj::String CompleteSpan::toString() const {
-  return kj::str("CompleteSpan: ", operationName,
-      kj::strArray(
-          KJ_MAP(tag, tags) { return kj::str("(", tag.key, ", ", tag.value, ")"); }, ", "));
+SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
+    : spanId(reader.getSpanId()),
+      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
+  auto tagsParam = reader.getTags();
+  tags.reserve(tagsParam.size());
+  for (auto tagParam: tagsParam) {
+    tags.insert(kj::ConstString(kj::heapString(tagParam.getKey())),
+        deserializeTagValue(tagParam.getValue()));
+  }
+}
+
+void SpanEndData::copyTo(rpc::SpanEndData::Builder builder) const {
+  builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setSpanId(spanId);
+
+  auto tagsParam = builder.initTags(tags.size());
+  auto i = 0;
+  for (auto& tag: tags) {
+    auto tagParam = tagsParam[i++];
+    tagParam.setKey(tag.key.asPtr());
+    serializeTagValue(tagParam.initValue(), tag.value);
+  }
 }
 }  // namespace tracing
 
@@ -1500,7 +1573,8 @@ SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
   KJ_IF_SOME(obs, observer) {
     // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created, we
     // should be able to fold this virtual call and just get the timestamp directly.
-    span.emplace(kj::mv(operationName), startTime.orDefault(obs->getTime()));
+    kj::Date time = startTime.orDefault([&]() { return obs->getTime(); });
+    span.emplace(kj::mv(operationName), time);
     this->observer = kj::mv(obs);
   }
 }
@@ -1598,6 +1672,9 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
 }
 
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
+  if (!isObserved()) {
+    return;
+  }
   // Fast path (without string allocations) if only some spans are observed.
   if (!span.isObserved()) {
     userSpan.setTag(kj::mv(key), kj::mv(value));

@@ -37,9 +37,9 @@ const kScheduler = Symbol.for('kScheduler');
 type OnCancelCallback = (() => void) | undefined;
 
 export async function setTimeout<T = void>(
-  delay: number | undefined,
+  delay?: number,
   value?: T,
-  options: { signal?: AbortSignal; ref?: boolean } = {}
+  options: { signal?: AbortSignal | undefined; ref?: boolean | undefined } = {}
 ): Promise<T> {
   if (delay !== undefined) {
     validateNumber(delay, 'delay');
@@ -84,9 +84,9 @@ export async function setTimeout<T = void>(
   return promise;
 }
 
-export async function setImmediate<T>(
+export async function setImmediate<T = void>(
   value?: T,
-  options: { signal?: AbortSignal; ref?: boolean } = {}
+  options: { signal?: AbortSignal | undefined; ref?: boolean | undefined } = {}
 ): Promise<T> {
   validateObject(options, 'options');
 
@@ -130,8 +130,11 @@ export async function setImmediate<T>(
 export async function* setInterval<T = void>(
   delay?: number,
   value?: T,
-  options: { signal?: AbortSignal; ref?: boolean } = {}
-): AsyncGenerator<T> {
+  options: {
+    signal?: AbortSignal | undefined;
+    ref?: boolean | undefined;
+  } = {}
+): AsyncGenerator<T, undefined> {
   if (delay !== undefined) {
     validateNumber(delay, 'delay');
   }

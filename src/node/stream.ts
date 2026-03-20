@@ -60,12 +60,12 @@ export {
 
 // @ts-expect-error TS2322 Type incompatibility between internal and Node.js stream types
 Stream.addAbortSignal = addAbortSignal;
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 Stream.compose = compose;
 Stream.destroy = destroy;
 // @ts-expect-error TS2741 __promisify__ is missing.
 Stream.finished = finished;
 Stream.isReadable = isReadable;
+// @ts-expect-error TS2322 Type incompatibility between internal and Node.js stream types
 Stream.isWritable = isWritable;
 Stream.isErrored = isErrored;
 Stream.isDisturbed = isDisturbed;

@@ -20,7 +20,6 @@ oci_image(
     name = "image",
     base = "@node_25_slim",
     cmd = ["/{}/app".format(package_name())],
-    exposed_ports = ["8080"],
     tags = [
         "no-remote",
         "requires-container-engine",
@@ -38,5 +37,12 @@ oci_load(
     name = "load",
     image = ":image",
     repo_tags = ["cloudflare/workerd/container-client-test:latest"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load-proxy-everything",
+    image = "@proxy_everything",
+    repo_tags = ["cloudflare/proxy-everything:main"],
     visibility = ["//visibility:public"],
 )

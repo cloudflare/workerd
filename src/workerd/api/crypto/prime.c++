@@ -8,7 +8,7 @@
 
 namespace workerd::api {
 
-jsg::BufferSource randomPrime(jsg::Lock& js,
+jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
     uint32_t size,
     bool safe,
     kj::Maybe<kj::ArrayPtr<kj::byte>> add_buf,
@@ -78,8 +78,9 @@ jsg::BufferSource randomPrime(jsg::Lock& js,
         .add = kj::mv(add),
         .rem = kj::mv(rem),
       })) {
-    return JSG_REQUIRE_NONNULL(
+    auto buf = JSG_REQUIRE_NONNULL(
         bignumToArrayPadded(js, *prime.get()), Error, "Error while generating prime");
+    return jsg::JsArrayBuffer::create(js, buf.asArrayPtr());
   }
 
   JSG_FAIL_REQUIRE(Error, "Error while generating prime");

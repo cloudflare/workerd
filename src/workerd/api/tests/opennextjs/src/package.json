@@ -1,0 +1,21 @@
+{
+  "name": "opennextjs-ssr-test",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "build-with-opennext": "opennextjs-cloudflare build",
+    "bundle-with-wrangler": "wrangler deploy --dry-run --outdir=dist"
+  },
+  "dependencies": {
+    "@opennextjs/cloudflare": "1.16.3",
+    "next": "16.1.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "wrangler": "4.63.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.2"
+  }
+}

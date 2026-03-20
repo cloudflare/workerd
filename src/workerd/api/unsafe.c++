@@ -3,6 +3,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/script.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 
@@ -201,6 +202,10 @@ jsg::Promise<void> UnsafeModule::abortAllDurableObjects(jsg::Lock& js) {
   // We used to perform the abort asynchronously, but that became no longer necessary when
   // `Worker::Actor`'s destructor stopped requiring taking the isolate lock.
   return js.resolvedPromise();
+}
+
+bool UnsafeModule::isTestAutogateEnabled() {
+  return util::Autogate::isEnabled(util::AutogateKey::TEST_WORKERD);
 }
 
 #ifdef WORKERD_FUZZILLI

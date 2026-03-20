@@ -46,6 +46,7 @@ import {
 } from 'node:assert';
 
 import { mock } from 'node:test';
+import util from 'node:util';
 
 import { default as assert } from 'node:assert';
 
@@ -239,6 +240,31 @@ export const test_deep_equal_errors = {
         }
       );
     }
+  },
+};
+
+export const test_check_proxies = {
+  test() {
+    const arrProxy = new Proxy([1, 2], {});
+    deepStrictEqual(arrProxy, [1, 2]);
+    const defaultMsgStartFull = `${start}\n${actExp}`;
+    const tmp = util.inspect.defaultOptions;
+    util.inspect.defaultOptions = { showProxy: true };
+    throws(() => deepStrictEqual(arrProxy, [1, 2, 3]), {
+      message:
+        `${defaultMsgStartFull}\n\n` + '+ Proxy([ 1, 2 ])\n' + '- [ 1, 2, 3 ]',
+    });
+    util.inspect.defaultOptions = tmp;
+
+    const invalidTrap = new Proxy([1, 2, 3], {
+      ownKeys() {
+        return [];
+      },
+    });
+    throws(() => deepStrictEqual(invalidTrap, [1, 2, 3]), {
+      name: 'TypeError',
+      message: "'ownKeys' on proxy: trap result did not include 'length'",
+    });
   },
 };
 

@@ -180,7 +180,11 @@ class JsBase {
   operator v8::Local<v8::Value>() const {
     return inner;
   }
-  operator v8::Local<T>() const {
+  // Only provide the typed conversion when T is not already v8::Value,
+  // to avoid a duplicate operator signature (e.g. for JsBufferSource).
+  operator v8::Local<T>() const
+    requires(!kj::isSameType<T, v8::Value>())
+  {
     return inner;
   }
   operator JsValue() const {
@@ -228,12 +232,22 @@ class JsArray final: public JsBase<v8::Array, JsArray> {
 
 class JsArrayBuffer final: public JsBase<v8::ArrayBuffer, JsArrayBuffer> {
  public:
-  kj::ArrayPtr<kj::byte> asArrayPtr() {
-    v8::Local<v8::ArrayBuffer> inner = *this;
-    void* data = inner->GetBackingStore()->Data();
-    size_t length = inner->ByteLength();
-    return kj::ArrayPtr(static_cast<kj::byte*>(data), length);
-  }
+  static JsArrayBuffer create(Lock& js, size_t length);
+
+  // Allocate and copy data from the given ArrayPtr in a single step.
+  static JsArrayBuffer create(Lock& js, kj::ArrayPtr<const kj::byte> data);
+
+  static JsArrayBuffer create(Lock& js, std::unique_ptr<v8::BackingStore> backingStore);
+
+  JsArrayBuffer slice(Lock& js, size_t newLength) const;
+
+  kj::ArrayPtr<kj::byte> asArrayPtr();
+  kj::ArrayPtr<const kj::byte> asArrayPtr() const;
+
+  size_t size() const;
+
+  // Return a copy of this buffer's data as a kj::Array.
+  kj::Array<kj::byte> copy();
 
   using JsBase<v8::ArrayBuffer, JsArrayBuffer>::JsBase;
 };
@@ -244,26 +258,88 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
   kj::ArrayPtr<T> asArrayPtr() {
     v8::Local<v8::ArrayBufferView> inner = *this;
     auto buf = inner->Buffer();
-    T* data = static_cast<T*>(buf->Data()) + inner->ByteOffset();
-    size_t length = inner->ByteLength();
-    return kj::ArrayPtr(data, length);
+    if (buf->WasDetached()) [[unlikely]] {
+      return nullptr;
+    }
+    auto byteLength = inner->ByteLength();
+    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + inner->ByteOffset());
+    return kj::ArrayPtr(data, byteLength / sizeof(T));
   }
+
+  size_t size() const;
+
+  // Returns true if the underlying view is an integer-typed TypedArray
+  // (e.g. Uint8Array, Int32Array, BigUint64Array) as opposed to a float-typed
+  // TypedArray or DataView.
+  bool isIntegerType() const;
 
   using JsBase<v8::ArrayBufferView, JsArrayBufferView>::JsBase;
 };
 
 class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
  public:
+  static JsUint8Array create(Lock& js, size_t length);
+
+  // Allocate and copy data from the given ArrayPtr in a single step.
+  static JsUint8Array create(Lock& js, kj::ArrayPtr<const kj::byte> data);
+
+  // Create a Uint8Array view over the given ArrayBuffer.
+  static JsUint8Array create(Lock& js, JsArrayBuffer& buffer);
+
+  static JsUint8Array create(
+      Lock& js, std::unique_ptr<v8::BackingStore> backingStore, size_t byteOffset, size_t length);
+
+  JsUint8Array slice(Lock& js, size_t newLength) const;
+
   template <typename T = kj::byte>
   kj::ArrayPtr<T> asArrayPtr() {
     v8::Local<v8::Uint8Array> inner = *this;
     auto buf = inner->Buffer();
-    T* data = static_cast<T*>(buf->Data()) + inner->ByteOffset();
-    size_t length = inner->ByteLength();
-    return kj::ArrayPtr(data, length);
+    if (buf->WasDetached()) [[unlikely]] {
+      return nullptr;
+    }
+    auto byteLength = inner->ByteLength();
+    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + inner->ByteOffset());
+    return kj::ArrayPtr(data, byteLength / sizeof(T));
   }
 
+  kj::ArrayPtr<const kj::byte> asArrayPtr() const;
+
+  size_t size() const;
+
+  // Return a copy of this buffer's data as a kj::Array.
+  kj::Array<kj::byte> copy();
+
   using JsBase<v8::Uint8Array, JsUint8Array>::JsBase;
+};
+
+// A lightweight wrapper for ArrayBuffer | ArrayBufferView (the Web IDL "BufferSource"
+// type). Unlike jsg::BufferSource, this does NOT maintain a BackingStore, does NOT
+// support detach, and is stack-only. Use JsRef<JsBufferSource> for persistent storage.
+//
+// This type is based on v8::Value (not a specific V8 type) because there is no single
+// V8 type that represents both ArrayBuffer and ArrayBufferView. It is NOT included in
+// JS_TYPE_CLASSES; instead, JsValue::tryCast and JsValueWrapper handle it specially.
+class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
+ public:
+  JsBufferSource(JsArrayBuffer& buffer): JsBase(static_cast<v8::Local<v8::Value>>(buffer)) {}
+  JsBufferSource(JsUint8Array& buffer): JsBase(static_cast<v8::Local<v8::Value>>(buffer)) {}
+  JsBufferSource(JsArrayBufferView& buffer): JsBase(static_cast<v8::Local<v8::Value>>(buffer)) {}
+
+  kj::ArrayPtr<kj::byte> asArrayPtr();
+
+  size_t size() const;
+
+  // Returns true if the underlying value is an integer-typed TypedArray.
+  bool isIntegerType() const;
+
+  bool isArrayBuffer() const;
+  bool isArrayBufferView() const;
+
+  // Return a copy of this buffer's data as a kj::Array.
+  kj::Array<kj::byte> copy();
+
+  using JsBase<v8::Value, JsBufferSource>::JsBase;
 };
 
 class JsString final: public JsBase<v8::String, JsString> {
@@ -277,6 +353,7 @@ class JsString final: public JsBase<v8::String, JsString> {
   int hashCode() const;
 
   bool isFlat() const;
+  bool isOneByte(Lock& js) const KJ_WARN_UNUSED_RESULT;
   bool containsOnlyOneByte() const;
 
   bool operator==(const JsString& other) const;
@@ -304,6 +381,12 @@ class JsString final: public JsBase<v8::String, JsString> {
     // The number of elements (e.g. char, byte, uint16_t) written to the buffer.
     size_t written;
   };
+
+  // Copy string contents into a provided buffer (off-heap memory).
+  //
+  // IMPORTANT: This method does NOT flatten the V8 string or hold V8 heap locks. It safely
+  // copies data out of V8's heap into your buffer. This makes it safe to use before calling
+  // GC-triggering operations like Lock::allocBackingStore().
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<char> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
@@ -522,6 +605,12 @@ inline kj::Maybe<T> JsValue::tryCast() const {
   }
   JS_TYPE_CLASSES(V)
 #undef V
+  // JsBufferSource is not in JS_TYPE_CLASSES because there is no
+  // v8::Value::IsBufferSource() method. Handle it explicitly.
+  else if constexpr (kj::isSameType<T, JsBufferSource>()) {
+    if (!inner->IsArrayBuffer() && !inner->IsArrayBufferView()) return kj::none;
+    return T(inner);
+  }
   else {
     return kj::none;
   }
@@ -530,7 +619,8 @@ inline kj::Maybe<T> JsValue::tryCast() const {
 template <typename T>
 inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
   if (!value.isExternal()) return kj::none;
-  return kj::Maybe<T&>(*static_cast<T*>(value.inner.As<v8::External>()->Value()));
+  return kj::Maybe<T&>(
+      *static_cast<T*>(value.inner.As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault)));
 }
 
 template <typename T>
@@ -741,6 +831,22 @@ struct JsValueWrapper {
   TYPES_TO_WRAP(V)
 #undef V
 
+  // Manual wrap overloads for JsBufferSource which is not in JS_TYPE_CLASSES.
+  // The underlying V8 type is v8::Value since BufferSource spans both
+  // ArrayBuffer and ArrayBufferView.
+  v8::Local<v8::Value> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      JsBufferSource value) {
+    return value;
+  }
+  v8::Local<v8::Value> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      JsRef<JsBufferSource> value) {
+    return value.getHandle(js);
+  }
+
   template <JsValueType T>
   kj::Maybe<T> tryUnwrap(Lock& js,
       v8::Local<v8::Context> context,
@@ -908,7 +1014,7 @@ inline JsMap Lock::map() {
 }
 
 inline JsValue Lock::external(void* ptr) {
-  return JsValue(v8::External::New(v8Isolate, ptr));
+  return JsValue(v8::External::New(v8Isolate, ptr, v8::kExternalPointerTypeTagDefault));
 }
 
 inline JsValue Lock::error(kj::StringPtr message) {
@@ -983,6 +1089,10 @@ inline void JsObject::delete_(Lock& js, kj::StringPtr name) {
 
 inline int JsString::length(jsg::Lock& js) const {
   return inner->Length();
+}
+
+inline bool JsString::isOneByte(jsg::Lock& js) const {
+  return inner->IsOneByte();
 }
 
 inline size_t JsString::utf8Length(jsg::Lock& js) const {

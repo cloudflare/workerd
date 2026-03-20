@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 declare namespace MetadataReader {
   export interface CompatibilityFlags {
     python_workflows?: boolean;
@@ -6,6 +10,7 @@ declare namespace MetadataReader {
     python_dedicated_snapshot?: boolean;
     enable_python_external_sdk?: boolean;
     python_check_rng_state?: boolean;
+    python_workflows_implicit_dependencies?: boolean;
   }
 
   const isWorkerd: () => boolean;

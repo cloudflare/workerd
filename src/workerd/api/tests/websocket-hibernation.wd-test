@@ -8,7 +8,6 @@ const config :Workerd.Config = (
 );
 
 const mainWorker :Workerd.Worker = (
-  compatibilityDate = "2023-12-18",
   compatibilityFlags = ["experimental", "nodejs_compat"],
 
   modules = [

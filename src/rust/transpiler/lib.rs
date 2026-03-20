@@ -1,12 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use swc_core::common::SourceMap;
-use swc_core::common::errors::DiagnosticBuilder;
-use swc_core::common::errors::Emitter;
-use swc_core::common::errors::HANDLER;
-use swc_core::common::errors::Handler;
-use swc_core::common::errors::Level;
+use swc_common::SourceMap;
+use swc_common::errors::DiagnosticBuilder;
+use swc_common::errors::Emitter;
+use swc_common::errors::HANDLER;
+use swc_common::errors::Handler;
+use swc_common::errors::Level;
 
 use crate::ffi::Output;
 

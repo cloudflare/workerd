@@ -1,7 +1,7 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_rust//crate_universe:defs.bzl", "crates_vendor", "render_config")
+load("@rules_rust//crate_universe:defs.bzl", "crate", "crates_vendor", "render_config")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
 load("cargo.bzl", "PACKAGES")
 
@@ -58,6 +58,14 @@ CARGO_BAZEL = select({
 # To repin crates: bazel run //rust-deps:crates_vendor -- --repin
 crates_vendor(
     name = "crates_vendor",
+    annotations = {
+        # Provide access to lol-html header, without depending on the entire module.
+        "lol_html_c_api": [crate.annotation(
+            extra_aliased_targets = {
+                "lol_html_c_api_include_lol_html_h": "include/lol_html.h",
+            },
+        )],
+    },
     cargo_bazel = CARGO_BAZEL,
     cargo_lockfile = "//deps/rust:Cargo.lock",
     generate_binaries = True,
@@ -77,9 +85,7 @@ crates_vendor(
     ],
 )
 
-# Windows build fixes due to rust libraries missing symbols:
-# https://github.com/bazelbuild/rules_rust/blob/144d34fd/ffi/cc/global_allocator_library/BUILD.bazel#L3
-# `empty_lib` static library will bring all the symbols in.
+# Adds missing symbols following Rust mangling change, plus missing system library on Windows.
 cc_library(
     name = "runtime",
     linkopts = select({
@@ -108,9 +114,4 @@ rust_static_library(
     },
     stamp = -1,  # default to bazel --stamp flag
     tags = ["manual"],
-)
-
-cc_library(
-    name = "allocator",
-    visibility = ["//visibility:public"],
 )

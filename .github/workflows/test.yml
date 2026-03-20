@@ -33,10 +33,10 @@ jobs:
       matrix:
         os:
           [
-            { name: linux, arch: X64, image: ubuntu-22.04 },
-            { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm },
-            { name: macOS, arch: ARM64, image: macos-15 },
-            { name: windows, arch: X64, image: windows-2025 },
+            { name: linux, arch: X64, image: ubuntu-22.04-16core },
+            { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm-16core },
+            { name: macOS, arch: ARM64, image: macos-15-xlarge, use_lld: true },
+            { name: windows, arch: X64, image: windows-2025-16core },
           ]
         config: [
             # Default build: no suffix or additional bazel arguments
@@ -46,7 +46,7 @@ jobs:
           ]
         include:
           # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
-          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04-16core }
             config: { suffix: -asan }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
           # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
@@ -55,17 +55,17 @@ jobs:
           # - os:     { name : windows, image : windows-2025 }
           #   config: { suffix: -debug, bazel-args: --config=windows_dbg }
         exclude:
-          - os: { name: windows, arch: X64, image: windows-2025 }
+          - os: { name: windows, arch: X64, image: windows-2025-16core }
             config: { suffix: -debug }
           # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
           # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the
           # debug configuration.
-          - os: { name: macOS, arch: ARM64 ,image: macos-15 }
+          - os: { name: macOS, arch: ARM64, image: macos-15-xlarge }
             config: { suffix: -debug }
-          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04-16core }
             config: { suffix: -debug }
             # linux release is handled by separate test-linux job
-          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04-16core }
             config: { suffix: '' }
       fail-fast: false
     name: test (${{ matrix.os.name }}, ${{ matrix.os.image}}${{matrix.config.suffix != '' && format(', {0}', matrix.config.suffix) || ''}})
@@ -76,6 +76,7 @@ jobs:
       arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
       extra_bazel_args: '--config=ci-test --config=ci-${{matrix.os.name}}${{matrix.config.suffix}}'
+      macos_use_lld: ${{ matrix.os.use_lld || false }}
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
@@ -84,11 +85,11 @@ jobs:
   test-linux:
     uses: ./.github/workflows/_bazel.yml
     with:
-      image: ubuntu-22.04
+      image: ubuntu-22.04-16core
       os_name: linux
       arch_name: 'X64'
       suffix: ''
-      extra_bazel_args: '--config=ci-test --config=ci-linux'
+      extra_bazel_args: '--config=ci-test --config=ci-linux --config=wpt-report'
       upload_test_logs: true
       upload_binary: true
       build_container_images: true
@@ -99,7 +100,7 @@ jobs:
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:
-      extra_bazel_args: '--config=lint --config=clang-tidy --config=ci-test --config=ci-linux'
+      extra_bazel_args: '--config=lint --config=clang-tidy --config=ci-test --config=ci-linux-common'
       run_tests: false
       parse_headers: true
     secrets:
@@ -107,19 +108,19 @@ jobs:
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
 
   check-snapshot:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           show-progress: false
       - name: Cache
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         # Use same cache and build configuration as release build, this allows us to keep download
         # sizes small and generate types with optimization enabled, should be slightly faster.
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
       - name: build types
@@ -138,7 +139,7 @@ jobs:
             cat types.diff
             echo EOF
           } >> "$GITHUB_ENV"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         id: artifact-upload-step
         with:
           name: generated-snapshot
@@ -169,26 +170,26 @@ jobs:
   workers-sdk-test:
     needs: [test-linux, check-snapshot]
     name: Run workers-sdk tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     steps:
       - name: Checkout workers-sdk
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: cloudflare/workers-sdk
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           # Match workers-sdk node version
-          node-version: 20.19.1
+          node-version: 20.19.6
           cache: 'pnpm'
       - name: Install workers-sdk dependencies
         run: pnpm install
 
       - name: Download workerd binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: linux-X64-binary
           path: /tmp
@@ -197,7 +198,7 @@ jobs:
         run: chmod +x /tmp/workerd
 
       - name: Download generated types
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: generated-snapshot
           path: /tmp/test-types
@@ -244,6 +245,6 @@ jobs:
     needs: [test-linux]
     uses: ./.github/workflows/_wpt.yml
     with:
-      image: 'ubuntu-22.04'
+      image: 'ubuntu-22.04-16core'
       logs_artifact: 'test-logs-linux-X64.zip'
       report_artifact: 'wpt-report-linux-X64.json'

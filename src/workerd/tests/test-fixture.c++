@@ -57,7 +57,7 @@ class DummyErrorHandler final: public kj::TaskSet::ErrorHandler {
 struct MockTimerChannel final: public TimerChannel {
   void syncTime() override {}
 
-  kj::Date now() override {
+  kj::Date now(kj::Maybe<kj::Date>) override {
     return kj::systemPreciseCalendarClock().now();
   }
 
@@ -70,6 +70,33 @@ struct MockTimerChannel final: public TimerChannel {
   }
 };
 
+// A TimerChannel implementation that uses real timers from the KJ event loop.
+// Useful for tests that need actual timer functionality (e.g., benchmarks with
+// simulated I/O delays).
+struct RealTimerChannel final: public TimerChannel {
+  explicit RealTimerChannel(kj::Timer& timer): timer(timer) {}
+
+  void syncTime() override {}
+
+  kj::Date now(kj::Maybe<kj::Date>) override {
+    return kj::systemPreciseCalendarClock().now();
+  }
+
+  kj::Promise<void> atTime(kj::Date when) override {
+    auto nowTime = kj::systemPreciseCalendarClock().now();
+    if (when <= nowTime) {
+      return kj::READY_NOW;
+    }
+    return timer.afterDelay(when - nowTime);
+  }
+
+  kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
+    return timer.afterDelay(t);
+  }
+
+  kj::Timer& timer;
+};
+
 struct DummyIoChannelFactory final: public IoChannelFactory {
   DummyIoChannelFactory(TimerChannel& timer): timer(timer) {}
 
@@ -77,8 +104,9 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
     KJ_FAIL_ASSERT("no subrequests");
   }
 
-  kj::Own<SubrequestChannel> getSubrequestChannel(
-      uint channel, kj::Maybe<Frankenvalue> props) override {
+  kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
+      kj::Maybe<Frankenvalue> props,
+      kj::Maybe<VersionRequest> versionRequest) override {
     KJ_FAIL_ASSERT("no subrequests");
   }
 
@@ -104,7 +132,9 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
-      SpanParent parentSpan) override {
+      ActorRoutingMode routingMode,
+      SpanParent parentSpan,
+      kj::Maybe<ActorVersion> version) override {
     KJ_FAIL_REQUIRE("no actor channels");
   }
 
@@ -223,6 +253,12 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   bool hasExcessivelyExceededHeapLimit() const override {
     return false;
   }
+  const TrackedWasmInstanceList& getTrackedWasmInstances() const override {
+    return trackedWasmInstances;
+  }
+
+ private:
+  TrackedWasmInstanceList trackedWasmInstances;
 };
 
 struct MockErrorReporter final: public Worker::ValidationErrorReporter {
@@ -318,7 +354,10 @@ TestFixture::TestFixture(SetupParams&& params)
       io(params.waitScope == kj::none ? kj::Maybe(kj::setupAsyncIo())
                                       : kj::Maybe<kj::AsyncIoContext>(kj::none)),
       timer(kj::heap<MockTimer>()),
-      timerChannel(kj::heap<MockTimerChannel>()),
+      timerChannel(params.useRealTimers && io != kj::none
+              ? kj::Own<TimerChannel>(
+                    kj::heap<RealTimerChannel>(KJ_ASSERT_NONNULL(io).provider->getTimer()))
+              : kj::Own<TimerChannel>(kj::heap<MockTimerChannel>())),
       entropySource(kj::heap<MockEntropySource>()),
       threadContextHeaderBundle(headerTableBuilder),
       httpOverCapnpFactory(byteStreamFactory,
@@ -365,7 +404,7 @@ TestFixture::TestFixture(SetupParams&& params)
             // no bindings, nothing to do
           },
           IsolateObserver::StartType::COLD,
-          TraceParentContext(nullptr, nullptr), /* spans */
+          SpanParent(nullptr),
           Worker::LockType(Worker::Lock::TakeSynchronously(kj::none)))),
       errorHandler(kj::heap<DummyErrorHandler>()),
       waitUntilTasks(*errorHandler),
@@ -439,7 +478,10 @@ TestFixture::Response TestFixture::runRequest(
   runInIoContext([&](const TestFixture::Environment& env) {
     auto& globalScope = env.lock.getGlobalScope();
     return globalScope.request(method, url, requestHeaders, *requestBody, response, "{}"_kj,
-        env.lock, env.lock.getExportedHandler(kj::none, {}, kj::none), /* abortSignal */ kj::none);
+        env.lock,
+        env.lock.getExportedHandler(/*entryPointName=*/kj::none, /*versionInfo=*/kj::none,
+            /*props=*/{}, /*actor=*/kj::none),
+        /*abortSignal=*/kj::none);
   });
 
   return {.statusCode = response.statusCode, .body = response.body->str()};

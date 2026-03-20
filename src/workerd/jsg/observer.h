@@ -36,6 +36,11 @@ struct ResolveObserver {
     // Like builtin, but it's a module that is *only* resolvable from a builtin
     // (like the `node-internal:...` modules)
     BUILTIN_ONLY,
+    // Resolves only user-importable built-in modules (the kBuiltin bundle),
+    // excluding both worker bundle modules and internal-only modules. Used
+    // by user-facing APIs like process.getBuiltinModule() that must not
+    // expose internal modules or return user bundle overrides.
+    PUBLIC_BUILTIN,
   };
 
   enum class Source {

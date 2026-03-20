@@ -9,12 +9,15 @@
 
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/strings.h>
 
 #include <unicode/ucnv.h>
 #include <unicode/utf8.h>
+#include <v8.h>
 
-#include <algorithm>
+#include <kj/array.h>
+#include <kj/string.h>
 
 namespace workerd::api {
 
@@ -274,6 +277,9 @@ Encoding getEncodingForLabel(kj::StringPtr label) {
 #undef V
   return Encoding::INVALID;
 }
+
+constexpr int MAX_SIZE_FOR_STACK_ALLOC = 4096;
+
 }  // namespace
 
 const kj::Array<const kj::byte> TextDecoder::EMPTY =
@@ -282,7 +288,13 @@ const TextDecoder::DecodeOptions TextDecoder::DEFAULT_OPTIONS = TextDecoder::Dec
 
 kj::Maybe<IcuDecoder> IcuDecoder::create(Encoding encoding, bool fatal, bool ignoreBom) {
   UErrorCode status = U_ZERO_ERROR;
-  UConverter* inner = ucnv_open(getEncodingId(encoding).cStr(), &status);
+  // Per the WHATWG encoding spec (section 10.1.1), GBK's decoder is gb18030's decoder.
+  // https://encoding.spec.whatwg.org/#gbk-decoder
+  // We can't change getEncodingId() itself because it is also used for the TextDecoder.encoding
+  // getter, which must still return "gbk" for GBK.
+  auto icuEncoding =
+      encoding == Encoding::Gbk ? getEncodingId(Encoding::Gb18030) : getEncodingId(encoding);
+  UConverter* inner = ucnv_open(icuEncoding.cStr(), &status);
   JSG_REQUIRE(U_SUCCESS(status), RangeError, "Invalid or unsupported encoding");
 
   if (fatal) {
@@ -312,8 +324,6 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
     KJ_UNREACHABLE;
   };
 
-  const auto isUsAscii = [](const auto& b) { return b <= 0x7f; };
-
   KJ_DEFER({
     if (flush) reset();
   });
@@ -323,7 +333,8 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
   // conversions are being handled by v8 directly rather than by the ICU converter).
   if (buffer.size() > 0 && ucnv_toUCountPending(inner.get(), &status) == 0) {
     KJ_ASSERT(U_SUCCESS(status));
-    if (encoding == Encoding::Utf8 && std::all_of(buffer.begin(), buffer.end(), isUsAscii)) {
+    if (encoding == Encoding::Utf8 &&
+        simdutf::validate_ascii(buffer.asChars().begin(), buffer.size())) {
       // This is a fast-path option for UTF-8 that can be taken when there
       // are no buffered inputs and the non-empty input buffer contains only
       // codepoints <= 0x7f. This path is safe because with ASCII range codepoints
@@ -343,8 +354,15 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
       // is true the converter state will be cleared, and if the last code
       // unit is not a lead surrogate, we won't have to worry about possibly
       // splitting a valid surrogate pair.
-      auto ptr = reinterpret_cast<const char16_t*>(buffer.begin());
-      auto data = kj::ArrayPtr<const char16_t>(ptr, buffer.size() / 2);
+
+      // The input buffer may be at an odd byte offset (e.g. a Uint8Array view
+      // at offset 3 into an ArrayBuffer), which makes reinterpret_cast to
+      // char16_t* undefined behavior due to alignment violation. Copy into an
+      // aligned buffer to avoid this.
+      auto bufSize = buffer.size() / 2;
+      kj::SmallArray<char16_t, 256> aligned(bufSize);
+      aligned.asBytes().copyFrom(buffer.first(bufSize * 2));
+      auto data = aligned.asPtr();
 
       if (flush || !U_IS_SURROGATE_LEAD(data[data.size() - 1])) {
         bool omitInitialBom = false;
@@ -355,9 +373,9 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
 
         auto slice = data.slice(omitInitialBom ? 1 : 0, data.size());
 
-        // If pedanticWpt flag is enabled, then we follow the spec and fix invalid
-        // surrogates on the UTF-16 input.
-        if (slice.size() == 0 || !FeatureFlags::get(js).getPedanticWpt()) {
+        // If textDecoderReplaceSurrogates flag is enabled, then we follow the spec
+        // and fix invalid surrogates on the UTF-16 input.
+        if (slice.size() == 0 || !FeatureFlags::get(js).getTextDecoderReplaceSurrogates()) {
           return js.str(slice);
         }
 
@@ -385,7 +403,7 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
   status = U_ZERO_ERROR;
   auto limit = 2 * maxCharSize() *
       (!flush ? buffer.size()
-              : std::max(buffer.size(),
+              : kj::max(buffer.size(),
                     static_cast<size_t>(ucnv_toUCountPending(inner.get(), &status))));
 
   KJ_STACK_ARRAY(UChar, result, limit, 512, 4096);
@@ -408,11 +426,6 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
   return js.str(result.slice(omitInitialBom ? 1 : 0, length));
 }
 
-kj::Maybe<jsg::JsString> AsciiDecoder::decode(
-    jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush) {
-  return js.str(buffer);
-}
-
 void IcuDecoder::reset() {
   bomSeen = false;
   return ucnv_reset(inner.get());
@@ -420,7 +433,7 @@ void IcuDecoder::reset() {
 
 Decoder& TextDecoder::getImpl() {
   KJ_SWITCH_ONEOF(decoder) {
-    KJ_CASE_ONEOF(dec, AsciiDecoder) {
+    KJ_CASE_ONEOF(dec, LegacyDecoder) {
       return dec;
     }
     KJ_CASE_ONEOF(dec, IcuDecoder) {
@@ -443,13 +456,31 @@ jsg::Ref<TextDecoder> TextDecoder::constructor(jsg::Lock& js,
 
   KJ_IF_SOME(label, maybeLabel) {
     encoding = getEncodingForLabel(label);
-    JSG_REQUIRE(encoding != Encoding::Replacement && encoding != Encoding::X_User_Defined &&
-            encoding != Encoding::INVALID,
-        RangeError, errorMessage(label));
+    JSG_REQUIRE(encoding != Encoding::Replacement && encoding != Encoding::INVALID, RangeError,
+        errorMessage(label));
   }
 
-  if (encoding == Encoding::Windows_1252) {
-    return js.alloc<TextDecoder>(AsciiDecoder(), options);
+  switch (encoding) {
+    case Encoding::Big5:
+    case Encoding::Euc_Jp:
+    case Encoding::Euc_Kr:
+    case Encoding::Gb18030:
+    case Encoding::Gbk:
+    case Encoding::Iso2022_Jp:
+    case Encoding::Shift_Jis: {
+      // If the feature flag is disabled, we use the ICU decoder.
+      if (!FeatureFlags::get(js).getTextDecoderCjkDecoder()) {
+        break;
+      }
+
+      // We fallthrough to LegacyDecoder in order to avoid breaking changes.
+      [[fallthrough]];
+    }
+    case Encoding::X_User_Defined:
+    case Encoding::Windows_1252:
+      return js.alloc<TextDecoder>(LegacyDecoder(encoding, DecoderFatal(options.fatal)), options);
+    default:
+      break;
   }
 
   return js.alloc<TextDecoder>(
@@ -474,7 +505,7 @@ jsg::JsString TextDecoder::decode(jsg::Lock& js,
 kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
     jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush) {
   KJ_SWITCH_ONEOF(decoder) {
-    KJ_CASE_ONEOF(dec, AsciiDecoder) {
+    KJ_CASE_ONEOF(dec, LegacyDecoder) {
       return dec.decode(js, buffer, flush);
     }
     KJ_CASE_ONEOF(dec, IcuDecoder) {
@@ -491,34 +522,261 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();
 }
 
-namespace {
-TextEncoder::EncodeIntoResult encodeIntoImpl(
-    jsg::Lock& js, jsg::JsString input, jsg::BufferSource& buffer) {
-  auto result = input.writeInto(
-      js, buffer.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-  return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(result.read),
-    .written = static_cast<int>(result.written),
-  };
+jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
+  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
+    auto str = input.orDefault(js.str());
+    auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
+        "Cannot allocate space for TextEncoder.encode");
+    [[maybe_unused]] auto result = str.writeInto(
+        js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+    KJ_DASSERT(result.written == view.size());
+    return jsg::JsUint8Array(view.getHandle(js).As<v8::Uint8Array>());
+  }
+
+  jsg::JsString str = input.orDefault(js.str());
+
+  size_t utf8_length = 0;
+  auto length = str.length(js);
+
+#ifdef KJ_DEBUG
+  bool wasAlreadyFlat = str.isFlat();
+  KJ_DEFER({ KJ_ASSERT(wasAlreadyFlat || !str.isFlat()); });
+#endif
+
+  // Note: writeInto() doesn't flatten the string - it calls writeTo() which chains through
+  // Write2 -> WriteV2 -> WriteHelperV2 -> String::WriteToFlat.
+  // This means we may read from multiple string segments, but that's fine for our use case.
+
+  if (str.isOneByte(js)) {
+    // Use off-heap allocation for intermediate Latin-1 buffer to avoid wasting V8 heap space
+    // and potentially triggering GC. Stack allocation for small strings, heap for large.
+    kj::SmallArray<kj::byte, MAX_SIZE_FOR_STACK_ALLOC> latin1Buffer(length);
+
+    [[maybe_unused]] auto writeResult = str.writeInto(js, latin1Buffer.asPtr());
+    KJ_DASSERT(
+        writeResult.written == length, "writeInto must completely overwrite the backing buffer");
+
+    utf8_length = simdutf::utf8_length_from_latin1(
+        reinterpret_cast<const char*>(latin1Buffer.begin()), length);
+
+    auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
+    if (utf8_length == length) {
+      // ASCII fast path: no conversion needed, Latin-1 is same as UTF-8 for ASCII
+      kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), length).copyFrom(latin1Buffer);
+    } else {
+      [[maybe_unused]] auto written =
+          simdutf::convert_latin1_to_utf8(reinterpret_cast<const char*>(latin1Buffer.begin()),
+              length, reinterpret_cast<char*>(backingStore->Data()));
+      KJ_DASSERT(utf8_length == written);
+    }
+    return jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, utf8_length);
+  }
+
+  // Use off-heap allocation for intermediate UTF-16 buffer to avoid wasting V8 heap space
+  // and potentially triggering GC. Stack allocation for small strings, heap for large.
+  // Stack allocation for small strings, heap for large.
+  kj::SmallArray<uint16_t, MAX_SIZE_FOR_STACK_ALLOC> utf16Buffer(length);
+
+  [[maybe_unused]] auto writeResult = str.writeInto(js, utf16Buffer.asPtr());
+  KJ_DASSERT(
+      writeResult.written == length, "writeInto must completely overwrite the backing buffer");
+
+  auto data = reinterpret_cast<char16_t*>(utf16Buffer.begin());
+  auto lengthResult = simdutf::utf8_length_from_utf16_with_replacement(data, length);
+  utf8_length = lengthResult.count;
+
+  if (lengthResult.error == simdutf::SURROGATE) {
+    // If there are surrogates there may be unpaired surrogates. Fix them.
+    simdutf::to_well_formed_utf16(data, length, data);
+  } else {
+    KJ_DASSERT(lengthResult.error == simdutf::SUCCESS);
+  }
+
+  auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
+  [[maybe_unused]] auto written =
+      simdutf::convert_utf16_to_utf8(data, length, reinterpret_cast<char*>(backingStore->Data()));
+  KJ_DASSERT(written == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
+
+  return jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, utf8_length);
 }
+
+namespace {
+
+constexpr bool isSurrogatePair(uint16_t lead, uint16_t trail) {
+  // We would like to use simdutf::trim_partial_utf16, but it's not guaranteed
+  // to work right on invalid UTF-16. Hence, we need this method to check for
+  // surrogate pairs and correctly trim utf16 chunks.
+  return (lead & 0xfc00) == 0xd800 && (trail & 0xfc00) == 0xdc00;
+}
+
+// Ignores surrogates conservatively.
+constexpr size_t simpleUtfEncodingLength(uint16_t c) {
+  return 1 + (c >= 0x80) + (c >= 0x400);
+}
+
+// Find how many UTF-16 or Latin1 code units fit when converted to UTF-8.
+// May conservatively underestimate the largest number of code units we can fit
+// because of undetected surrogate pairs on boundaries.
+// Works even on malformed UTF-16.
+template <typename Char>
+size_t findBestFit(const Char* data, size_t length, size_t bufferSize) {
+  size_t pos = 0;
+  size_t utf8Accumulated = 0;
+  // The SIMD is more efficient with a size that's a little over a multiple of 16.
+  constexpr size_t CHUNK = 257;
+  // The max number of UTF-8 output bytes per input code unit.
+  constexpr bool UTF16 = sizeof(Char) == 2;
+  constexpr size_t MAX_FACTOR = UTF16 ? 3 : 2;
+
+  // Our initial guess at how much the number of elements expands in the
+  // conversion to UTF-8.
+  double expansion = 1.15;
+
+  while (pos < length && utf8Accumulated < bufferSize) {
+    size_t remainingInput = length - pos;
+    size_t spaceRemaining = bufferSize - utf8Accumulated;
+    KJ_DASSERT(expansion >= 1.15);
+
+    // We estimate how many characters are likely to fit in the buffer, but
+    // only try for CHUNK characters at a time to minimize the worst case
+    // waste of time if we guessed too high.
+    size_t guaranteedToFit = spaceRemaining / MAX_FACTOR;
+    if (guaranteedToFit >= remainingInput) {
+      // Don't even bother checking any more, it's all going to fit.  Hitting
+      // this halfway through is also a good reason to limit the CHUNK size.
+      return length;
+    }
+    size_t likelyToFit = kj::min(static_cast<size_t>(spaceRemaining / expansion), CHUNK);
+    size_t fitEstimate = kj::max(1, kj::max(guaranteedToFit, likelyToFit));
+    size_t chunkSize = kj::min(remainingInput, fitEstimate);
+    if (chunkSize == 1) break;  // Not worth running this complicated stuff one char at a time.
+    // No div-by-zero because remainingInput and fitEstimate are at least 1.
+    KJ_DASSERT(chunkSize >= 1);
+
+    size_t chunkUtf8Len;
+    if constexpr (UTF16) {
+      chunkUtf8Len = simdutf::utf8_length_from_utf16_with_replacement(data + pos, chunkSize).count;
+    } else {
+      chunkUtf8Len = simdutf::utf8_length_from_latin1(data + pos, chunkSize);
+    }
+
+    if (utf8Accumulated + chunkUtf8Len > bufferSize) {
+      // Our chosen chunk didn't fit in the rest of the output buffer.
+      KJ_DASSERT(chunkSize > guaranteedToFit);
+      // Since it didn't fit we adjust our expansion guess upwards.
+      expansion = kj::max(expansion * 1.1, (chunkUtf8Len * 1.1) / chunkSize);
+    } else {
+      // Use successful length calculation to adjust our expansion estimate.
+      expansion = kj::max(1.15, (chunkUtf8Len * 1.1) / chunkSize);
+      pos += chunkSize;
+      utf8Accumulated += chunkUtf8Len;
+    }
+  }
+  // Do the last few code units in a simpler way.
+  while (pos < length && utf8Accumulated < bufferSize) {
+    size_t extra = simpleUtfEncodingLength(data[pos]);
+    if (utf8Accumulated + extra > bufferSize) break;
+    pos++;
+    utf8Accumulated += extra;
+  }
+  if (UTF16 && pos != 0 && pos != length && isSurrogatePair(data[pos - 1], data[pos])) {
+    // We ended on a leading surrogate which has a matching trailing surrogate in the next
+    // position.  In order to make progress when the bufferSize is tiny we try to include it.
+    if (utf8Accumulated < bufferSize) {
+      pos++;  // We had one more byte, so we can include the pair, UTF-8 encoding 3->4.
+    } else {
+      pos--;  // Don't chop the pair in half.
+    }
+  }
+  return pos;
+}
+
 }  // namespace
 
-jsg::BufferSource TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
-  auto str = input.orDefault(js.str());
-  auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
-      "Cannot allocate space for TextEncoder.encode");
-  [[maybe_unused]] auto result = encodeIntoImpl(js, str, view);
-  KJ_DASSERT(result.written == view.size());
-  return kj::mv(view);
+// Test helpers used by encoding-test.c++ to verify findBestFit behavior.
+namespace test {
+
+size_t bestFit(const char* str, size_t bufferSize) {
+  return findBestFit(str, strlen(str), bufferSize);
 }
+
+size_t bestFit(const char16_t* str, size_t bufferSize) {
+  size_t length = 0;
+  while (str[length] != 0) length++;
+  return findBestFit(str, length, bufferSize);
+}
+
+}  // namespace test
 
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     jsg::Lock& js, jsg::JsString input, jsg::JsUint8Array buffer) {
-  auto result = input.writeInto(
-      js, buffer.asArrayPtr<char>(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+  if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
+    auto result = input.writeInto(
+        js, buffer.asArrayPtr<char>(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+    return TextEncoder::EncodeIntoResult{
+      .read = static_cast<int>(result.read),
+      .written = static_cast<int>(result.written),
+    };
+  }
+
+  auto outputBuf = buffer.asArrayPtr<char>();
+  size_t bufferSize = outputBuf.size();
+
+  size_t read = 0;
+  size_t written = 0;
+  {
+    // Scope for the view - we can't do anything that might cause a V8 GC!
+    v8::String::ValueView view(js.v8Isolate, input);
+    size_t length = view.length();
+
+    if (view.is_one_byte()) {
+      auto data = reinterpret_cast<const char*>(view.data8());
+      simdutf::result result =
+          simdutf::validate_ascii_with_errors(data, kj::min(length, bufferSize));
+      written = read = result.count;
+      auto outAddr = outputBuf.begin();
+      kj::arrayPtr(outAddr, read).copyFrom(kj::arrayPtr(data, read));
+      outAddr += read;
+      data += read;
+      length -= read;
+      bufferSize -= read;
+      if (length != 0 && bufferSize != 0) {
+        size_t rest = findBestFit(data, length, bufferSize);
+        if (rest != 0) {
+          KJ_DASSERT(simdutf::utf8_length_from_latin1(data, rest) <= bufferSize);
+          written += simdutf::convert_latin1_to_utf8(data, rest, outAddr);
+          read += rest;
+        }
+      }
+    } else {
+      auto data = reinterpret_cast<const char16_t*>(view.data16());
+      read = findBestFit(data, length, bufferSize);
+      if (read != 0) {
+        KJ_DASSERT(
+            simdutf::utf8_length_from_utf16_with_replacement(data, read).count <= bufferSize);
+        simdutf::result result =
+            simdutf::convert_utf16_to_utf8_with_errors(data, read, outputBuf.begin());
+        if (result.error == simdutf::SUCCESS) {
+          written = result.count;
+        } else {
+          // Oh, no, there are unpaired surrogates.  This is hopefully rare.
+          kj::SmallArray<char16_t, MAX_SIZE_FOR_STACK_ALLOC> conversionBuffer(read);
+          simdutf::to_well_formed_utf16(data, read, conversionBuffer.begin());
+          written =
+              simdutf::convert_utf16_to_utf8(conversionBuffer.begin(), read, outputBuf.begin());
+        }
+      }
+    }
+  }
+  KJ_DASSERT(written <= outputBuf.size());
+  // V8's String::kMaxLenth is a lot less than a maximal int so this is fine.
+  using RInt = decltype(TextEncoder::EncodeIntoResult::read);
+  using WInt = decltype(TextEncoder::EncodeIntoResult::written);
+  KJ_DASSERT(0 <= read && read <= std::numeric_limits<RInt>::max());
+  KJ_DASSERT(0 <= written && written <= std::numeric_limits<WInt>::max());
   return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(result.read),
-    .written = static_cast<int>(result.written),
+    .read = static_cast<RInt>(read),
+    .written = static_cast<WInt>(written),
   };
 }
 

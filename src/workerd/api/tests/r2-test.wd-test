@@ -11,8 +11,7 @@ const unitTests :Workerd.Config = (
           ( name = "BUCKET", r2Bucket = "r2-test" ),
           ( name = "SERVICE", service = "r2-test" ),
         ],
-        compatibilityDate = "2023-07-24",
-        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "streams_enable_constructors", "r2_list_honor_include", "disable_fast_jsg_struct"],
         streamingTails = ["tail"],
       )
     ),
@@ -20,7 +19,7 @@ const unitTests :Workerd.Config = (
   ],
   extensions = [ (
     modules = [
-      ( name = "test:instumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
+      ( name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
     ]
   ) ]
 );
@@ -29,6 +28,5 @@ const tailWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "r2-instrumentation-test.js")
   ],
-  compatibilityDate = "2024-10-14",
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "disable_fast_jsg_struct"],
 );

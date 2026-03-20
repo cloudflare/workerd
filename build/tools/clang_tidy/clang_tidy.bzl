@@ -57,6 +57,7 @@ def _clang_tidy_aspect_impl(target, ctx):
     includes = compilation_context.includes.to_list()
     quote_includes = compilation_context.quote_includes.to_list()
     system_includes = compilation_context.system_includes.to_list()
+    external_includes = compilation_context.external_includes.to_list()
     headers = compilation_context.headers
 
     # disable clang tidy if no-clang-tidy tag is defined.
@@ -83,6 +84,10 @@ def _clang_tidy_aspect_impl(target, ctx):
         quote_includes = depset(
             quote_includes,
             transitive = [dep.quote_includes for dep in deps],
+        )
+        external_includes = depset(
+            external_includes,
+            transitive = [dep.external_includes for dep in deps],
         )
         headers = depset(
             headers.to_list(),
@@ -130,6 +135,7 @@ def _clang_tidy_aspect_impl(target, ctx):
         args.add_all(includes, before_each = "-I")
         args.add_all(quote_includes, before_each = "-iquote")
         args.add_all(system_includes, before_each = "-isystem")
+        args.add_all(external_includes, before_each = "-isystem")
 
         args.add_all(toolchain_flags)
 

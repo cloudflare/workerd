@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import {
   adjustSysPath,
@@ -8,6 +12,7 @@ import {
   maybeRestoreSnapshot,
   finalizeBootstrap,
   isRestoringSnapshot,
+  type CustomSerializedObjects,
 } from 'pyodide-internal:snapshot';
 import {
   entropyMountFiles,
@@ -20,7 +25,7 @@ import {
   LEGACY_VENDOR_PATH,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
-import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
+import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
 
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
@@ -31,6 +36,7 @@ import { default as SetupEmscripten } from 'internal:setup-emscripten';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import {
+  PythonUserError,
   PythonWorkersInternalError,
   reportError,
   unreachable,
@@ -38,6 +44,8 @@ import {
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
+import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
+import { PyodideVersion } from 'pyodide-internal:const';
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -47,7 +55,7 @@ import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
  */
 function prepareWasmLinearMemory(
   Module: Module,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper
+  customSerializedObjects: CustomSerializedObjects
 ): void {
   maybeRestoreSnapshot(Module);
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
@@ -60,8 +68,8 @@ function prepareWasmLinearMemory(
     // the /session/metadata path is added.
     adjustSysPath(Module);
   }
-  if (Module.API.version !== '0.26.0a2') {
-    finalizeBootstrap(Module, pyodide_entrypoint_helper);
+  if (Module.API.version !== PyodideVersion.V0_26_0a2) {
+    finalizeBootstrap(Module, customSerializedObjects);
   }
 }
 
@@ -150,7 +158,7 @@ function makeSetTimeout(Module: Module): typeof setTimeout {
 }
 
 function getSignalClockAddr(Module: Module): number {
-  if (Module.API.version !== '0.28.2') {
+  if (Module.API.version !== PyodideVersion.V0_28_2) {
     throw new PythonWorkersInternalError(
       'getSignalClockAddr only supported in 0.28.2'
     );
@@ -170,10 +178,10 @@ function getSignalClockAddr(Module: Module): number {
 function setupRuntimeSignalHandling(Module: Module): void {
   Module.Py_EmscriptenSignalBuffer = new Uint8Array(1);
   const version = Module.API.version;
-  if (version === '0.26.0a2') {
+  if (version === PyodideVersion.V0_26_0a2) {
     return;
   }
-  if (version === '0.28.2') {
+  if (version === PyodideVersion.V0_28_2) {
     // The callback sets signal_clock to 0 and signal_handling to 1. It has to be in C++ because we
     // don't hold the isolate lock when we call it. JS code would be:
     //
@@ -193,7 +201,7 @@ function setupRuntimeSignalHandling(Module: Module): void {
 const SIGXCPU = 24;
 
 export function clearSignals(Module: Module): void {
-  if (Module.API.version === '0.28.2') {
+  if (Module.API.version === PyodideVersion.V0_28_2) {
     // In case the previous request was aborted, make sure that:
     // 1. a sigint is waiting in the signal buffer
     // 2. signal handling is off
@@ -201,21 +209,43 @@ export function clearSignals(Module: Module): void {
     // We will turn signal handling on as part of triggering the interrupt, having it on otherwise
     // just wastes cycles.
     Module.Py_EmscriptenSignalBuffer[0] = SIGXCPU;
-    Module.HEAPU32[getSignalClockAddr(Module)] = 1;
+    Module.HEAPU32[getSignalClockAddr(Module) / 4] = 1;
     Module.HEAPU32[Module._Py_EMSCRIPTEN_SIGNAL_HANDLING / 4] = 0;
   }
+}
+
+function compileModuleFromReadOnlyFS(
+  Module: Module,
+  path: string
+): WebAssembly.Module {
+  const { node } = Module.FS.lookupPath(path);
+  // Get the trusted read function from our private Map, not from the node
+  // or filesystem object (which could have been tampered with by user code)
+  const trustedRead = getTrustedReadFunc(node);
+  if (!trustedRead) {
+    throw new PythonUserError(
+      'Can only load shared libraries from read only file systems.'
+    );
+  }
+  const stat = node.node_ops.getattr(node);
+  const buffer = new Uint8Array(stat.size);
+  // Create a minimal stream object and read using trusted read function
+  const stream = { node, position: 0 };
+  trustedRead(stream, buffer, 0, stat.size, 0);
+  return UnsafeEval.newWasmModule(buffer);
 }
 
 export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
   indexURL: string,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper
+  customSerializedObjects: CustomSerializedObjects
 ): Pyodide {
   try {
     const Module = enterJaegerSpan('instantiate_emscripten', () =>
       SetupEmscripten.getModule()
     );
+    Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
     Module.API.config.jsglobals = globalThis;
     if (isWorkerd) {
       Module.API.config.indexURL = indexURL;
@@ -238,18 +268,18 @@ export function loadPyodide(
     });
 
     enterJaegerSpan('prepare_wasm_linear_memory', () => {
-      prepareWasmLinearMemory(Module, pyodide_entrypoint_helper);
+      prepareWasmLinearMemory(Module, customSerializedObjects);
     });
 
-    maybeCollectSnapshot(Module, pyodide_entrypoint_helper);
+    maybeCollectSnapshot(Module, customSerializedObjects);
     // Mount worker files after doing snapshot upload so we ensure that data from the files is never
     // present in snapshot memory.
     mountWorkerFiles(Module);
 
-    if (Module.API.version === '0.26.0a2') {
+    if (Module.API.version === PyodideVersion.V0_26_0a2) {
       // Finish setting up Pyodide's ffi so we can use the nice Python interface
       // In newer versions we already did this in prepareWasmLinearMemory.
-      finalizeBootstrap(Module, pyodide_entrypoint_helper);
+      finalizeBootstrap(Module, customSerializedObjects);
     }
     const pyodide = Module.API.public_api;
 
@@ -268,6 +298,13 @@ export function loadPyodide(
     );
     setupPythonSearchPath(pyodide);
     setupRuntimeSignalHandling(Module);
+    Module.API.on_fatal = (error: unknown): void => {
+      try {
+        FatalReporter.reportFatal(String(error));
+      } catch (_e) {
+        FatalReporter.reportFatal('Internal error reporting fatal error');
+      }
+    };
     return pyodide;
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception

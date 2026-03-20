@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "buffer-indexof-odd-offset-ucs2-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "buffer-indexof-odd-offset-ucs2-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"]
+      )
+    ),
+  ],
+);

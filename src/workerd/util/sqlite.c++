@@ -83,6 +83,93 @@ kj::String namedErrorCode(int errorCode) {
 #undef LITERAL
 }
 
+// Maps extended error codes to their symbolic names.
+// See https://www.sqlite.org/rescode.html#extended_result_code_list.
+kj::Maybe<kj::String> namedExtendedErrorCode(int extendedErrorCode) {
+#define LITERAL(name)                                                                              \
+  case name:                                                                                       \
+    return kj::str(#name);
+  switch (extendedErrorCode) {
+    LITERAL(SQLITE_ABORT_ROLLBACK)
+    LITERAL(SQLITE_AUTH_USER)
+    LITERAL(SQLITE_BUSY_RECOVERY)
+    LITERAL(SQLITE_BUSY_SNAPSHOT)
+    LITERAL(SQLITE_BUSY_TIMEOUT)
+    LITERAL(SQLITE_CANTOPEN_CONVPATH)
+    LITERAL(SQLITE_CANTOPEN_DIRTYWAL)
+    LITERAL(SQLITE_CANTOPEN_FULLPATH)
+    LITERAL(SQLITE_CANTOPEN_ISDIR)
+    LITERAL(SQLITE_CANTOPEN_NOTEMPDIR)
+    LITERAL(SQLITE_CANTOPEN_SYMLINK)
+    LITERAL(SQLITE_CONSTRAINT_CHECK)
+    LITERAL(SQLITE_CONSTRAINT_COMMITHOOK)
+    LITERAL(SQLITE_CONSTRAINT_DATATYPE)
+    LITERAL(SQLITE_CONSTRAINT_FOREIGNKEY)
+    LITERAL(SQLITE_CONSTRAINT_FUNCTION)
+    LITERAL(SQLITE_CONSTRAINT_NOTNULL)
+    LITERAL(SQLITE_CONSTRAINT_PINNED)
+    LITERAL(SQLITE_CONSTRAINT_PRIMARYKEY)
+    LITERAL(SQLITE_CONSTRAINT_ROWID)
+    LITERAL(SQLITE_CONSTRAINT_TRIGGER)
+    LITERAL(SQLITE_CONSTRAINT_UNIQUE)
+    LITERAL(SQLITE_CONSTRAINT_VTAB)
+    LITERAL(SQLITE_CORRUPT_INDEX)
+    LITERAL(SQLITE_CORRUPT_SEQUENCE)
+    LITERAL(SQLITE_CORRUPT_VTAB)
+    LITERAL(SQLITE_ERROR_MISSING_COLLSEQ)
+    LITERAL(SQLITE_ERROR_RETRY)
+    LITERAL(SQLITE_ERROR_SNAPSHOT)
+    LITERAL(SQLITE_IOERR_ACCESS)
+    LITERAL(SQLITE_IOERR_AUTH)
+    LITERAL(SQLITE_IOERR_BEGIN_ATOMIC)
+    LITERAL(SQLITE_IOERR_BLOCKED)
+    LITERAL(SQLITE_IOERR_CHECKRESERVEDLOCK)
+    LITERAL(SQLITE_IOERR_CLOSE)
+    LITERAL(SQLITE_IOERR_COMMIT_ATOMIC)
+    LITERAL(SQLITE_IOERR_CONVPATH)
+    LITERAL(SQLITE_IOERR_CORRUPTFS)
+    LITERAL(SQLITE_IOERR_DATA)
+    LITERAL(SQLITE_IOERR_DELETE)
+    LITERAL(SQLITE_IOERR_DELETE_NOENT)
+    LITERAL(SQLITE_IOERR_DIR_CLOSE)
+    LITERAL(SQLITE_IOERR_DIR_FSYNC)
+    LITERAL(SQLITE_IOERR_FSTAT)
+    LITERAL(SQLITE_IOERR_FSYNC)
+    LITERAL(SQLITE_IOERR_GETTEMPPATH)
+    LITERAL(SQLITE_IOERR_LOCK)
+    LITERAL(SQLITE_IOERR_MMAP)
+    LITERAL(SQLITE_IOERR_NOMEM)
+    LITERAL(SQLITE_IOERR_RDLOCK)
+    LITERAL(SQLITE_IOERR_READ)
+    LITERAL(SQLITE_IOERR_ROLLBACK_ATOMIC)
+    LITERAL(SQLITE_IOERR_SEEK)
+    LITERAL(SQLITE_IOERR_SHMLOCK)
+    LITERAL(SQLITE_IOERR_SHMMAP)
+    LITERAL(SQLITE_IOERR_SHMOPEN)
+    LITERAL(SQLITE_IOERR_SHMSIZE)
+    LITERAL(SQLITE_IOERR_SHORT_READ)
+    LITERAL(SQLITE_IOERR_TRUNCATE)
+    LITERAL(SQLITE_IOERR_UNLOCK)
+    LITERAL(SQLITE_IOERR_VNODE)
+    LITERAL(SQLITE_IOERR_WRITE)
+    LITERAL(SQLITE_LOCKED_SHAREDCACHE)
+    LITERAL(SQLITE_LOCKED_VTAB)
+    LITERAL(SQLITE_NOTICE_RECOVER_ROLLBACK)
+    LITERAL(SQLITE_NOTICE_RECOVER_WAL)
+    LITERAL(SQLITE_OK_LOAD_PERMANENTLY)
+    LITERAL(SQLITE_READONLY_CANTINIT)
+    LITERAL(SQLITE_READONLY_CANTLOCK)
+    LITERAL(SQLITE_READONLY_DBMOVED)
+    LITERAL(SQLITE_READONLY_DIRECTORY)
+    LITERAL(SQLITE_READONLY_RECOVERY)
+    LITERAL(SQLITE_READONLY_ROLLBACK)
+    LITERAL(SQLITE_WARNING_AUTOINDEX)
+    default:
+      return kj::none;
+  }
+#undef LITERAL
+}
+
 constexpr size_t RA_MAX_METRICS_QUERY_SIZE = 1024;
 
 kj::String dbErrorMessage(int errorCode, sqlite3* db) {
@@ -91,6 +178,12 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
     msg = kj::strTree(kj::mv(msg), " at offset ", offset);
   }
   msg = kj::strTree(kj::mv(msg), ": ", namedErrorCode(errorCode));
+  int extendedCode = sqlite3_extended_errcode(db);
+  if (extendedCode != errorCode) {
+    KJ_IF_SOME(extendedName, namedExtendedErrorCode(extendedCode)) {
+      msg = kj::strTree(kj::mv(msg), " (extended: ", extendedName, ")");
+    }
+  }
   return msg.flatten();
 }
 
@@ -508,7 +601,8 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
     KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
       // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
       // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-      SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath.toString().cStr(), &db, flags, nullptr));
+      SQLITE_CALL_NODB(
+          sqlite3_open_v2(rootedPath.toNativeString(true).cStr(), &db, flags, nullptr));
     } else {
       SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db, flags, vfs.getName().cStr()));
     }
@@ -516,8 +610,8 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
     KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
       // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
       // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-      SQLITE_CALL_NODB(
-          sqlite3_open_v2(rootedPath.toString().cStr(), &db, SQLITE_OPEN_READONLY, nullptr));
+      SQLITE_CALL_NODB(sqlite3_open_v2(
+          rootedPath.toNativeString(true).cStr(), &db, SQLITE_OPEN_READONLY, nullptr));
     } else {
       SQLITE_CALL_NODB(
           sqlite3_open_v2(path.toString().cStr(), &db, SQLITE_OPEN_READONLY, vfs.getName().cStr()));
@@ -565,8 +659,10 @@ void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
     kj::StringPtr errorMessage,
     kj::Maybe<const kj::Exception&> maybeException) {
   KJ_IF_SOME(code, errorCode) {
-    if (code == SQLITE_FULL || code == SQLITE_IOERR || code == SQLITE_BUSY ||
-        code == SQLITE_NOMEM || code == SQLITE_INTERRUPT) {
+    // Only errors listed in https://www.sqlite.org/lang_transaction.html#response_to_errors_within_a_transaction
+    // should be considered here as SQLITE auto rollbacks the transaction when we hit these errors
+    if (code == SQLITE_FULL || code == SQLITE_IOERR || code == SQLITE_NOMEM ||
+        code == SQLITE_INTERRUPT) {
 
       sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
       // We are in a transaction

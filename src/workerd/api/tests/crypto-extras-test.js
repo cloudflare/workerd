@@ -253,3 +253,174 @@ export const aesCounterOverflowTest = {
     ok(crypto.subtle.timingSafeEqual(counter, counter2));
   },
 };
+
+// Test that RSA JWK import with partially invalid fields throws a proper error
+// without leaking memory. The valid n/e/d fields cause BIGNUM allocations; the
+// invalid p field (bad base64) triggers a throw. Under ASAN this verifies the
+// BIGNUMs allocated for n/e/d are properly freed on the error path.
+export const rsaJwkPartialImportFailure = {
+  async test() {
+    // A minimal RSA-2048 JWK with valid n, e, d but invalid CRT parameters.
+    // The n/e/d values are from a real key (public, not sensitive).
+    const jwk = {
+      kty: 'RSA',
+      // Valid base64url-encoded values for n and e (from an RSA-2048 test key)
+      n:
+        'sXchDaQebHnPiGvhGPEUBYNmRREkfWAz4CZV0FxTwtQq6R51mJk8qnnU_6DE_XJr' +
+        'T2JVNPB-bIXGFNnMLPOsTf5Q4r9Ks3h3S3tPzFqSd9Cjv0eRe-ZhWBYFkl-bLE1h' +
+        'ZGnmtQ--KfAiMvAtYNfRJwKL9cSKpGQTmqY6_0IbUqbZ0dXf_5D4rKCiZaQj-lTbm' +
+        'Eifn5JeRKnA2VY4dQvVQKhoQp_dEFwjOLGPOJ3yJhAFRrtFI3tzH7jSLNz2FA9gHk' +
+        'LaPrGxWF-bSNqlegYCr8CATCNfCAt9lDbCCHJiB5TQ5B-R40gM-y_M44zzX9nbZuA' +
+        'rSkBjQ',
+      e: 'AQAB',
+      d:
+        'VFCWOqXr8nvZNyaaJLXEnFBR3W45lj0nSjpUGSH-wOjK4p5_FDRlaL-eRa-VQvwjJ' +
+        '38BRJk9_0dKJPCMcuFVlj-B0FNpZ_gkBGC-jlLfCq3SBjRFBasVUR5vh4GGe_pFD3p' +
+        '0RWjwwl_6yPb_cCeI4XP4kK4JEWndHjvNmBcZI6PU0Lc_8-Fb_Z0-BTN3BA0DBkFS' +
+        'GCQN7G4dCdNQ3Onn3y2JBXB-pYlFkiHyR0j0o_GFoH_GE-WxQb7q0PjkNV-sMFQ8' +
+        '0ql44vEPg0Z8bZ0d1g_j8_Z3PuKCPJxJ6T3IGHPV1D-kBJyBvjJ-rlKr4XQ6XqvAp' +
+        'XWPQ',
+      // Invalid base64 in CRT parameters — should cause import to throw
+      p: '!!!not-valid-base64!!!',
+      q: '!!!not-valid-base64!!!',
+      dp: '!!!not-valid-base64!!!',
+      dq: '!!!not-valid-base64!!!',
+      qi: '!!!not-valid-base64!!!',
+    };
+
+    let threw = false;
+    try {
+      await crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+        true,
+        ['sign']
+      );
+    } catch (e) {
+      threw = true;
+      // Should get an error about invalid base64, not crash or silently succeed
+      ok(e instanceof Error, 'Expected an Error');
+    }
+    ok(threw, 'Import should have thrown for invalid CRT parameters');
+
+    // Also test with valid n/e but invalid d (earlier failure point)
+    const jwk2 = {
+      kty: 'RSA',
+      n: jwk.n,
+      e: jwk.e,
+      d: '!!!not-valid-base64!!!',
+      p: '!!!not-valid-base64!!!',
+      q: '!!!not-valid-base64!!!',
+      dp: '!!!not-valid-base64!!!',
+      dq: '!!!not-valid-base64!!!',
+      qi: '!!!not-valid-base64!!!',
+    };
+
+    threw = false;
+    try {
+      await crypto.subtle.importKey(
+        'jwk',
+        jwk2,
+        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+        true,
+        ['sign']
+      );
+    } catch (e) {
+      threw = true;
+      ok(e instanceof Error, 'Expected an Error');
+    }
+    ok(threw, 'Import should have thrown for invalid private exponent');
+  },
+};
+
+// Test that operations on detached ArrayBuffers return empty results instead of
+// crashing. This exercises the WasDetached() checks in JsArrayBuffer, JsUint8Array,
+// JsArrayBufferView, and JsBufferSource.
+export const detachedBufferHandling = {
+  async test() {
+    // Create a buffer, detach it by transferring, then use it with crypto APIs.
+    const buf = new ArrayBuffer(16);
+    const view = new Uint8Array(buf);
+
+    // Detach by transferring to a new ArrayBuffer via structuredClone
+    structuredClone(buf, { transfer: [buf] });
+
+    // buf is now detached — byteLength should be 0
+    strictEqual(buf.byteLength, 0);
+
+    // getRandomValues should handle the detached view gracefully
+    let threw = false;
+    try {
+      crypto.getRandomValues(view);
+    } catch (e) {
+      threw = true;
+    }
+    // The detached buffer has 0 length, which should be accepted (0 <= 65536)
+    // but the view reports 0 bytes so getRandomValues is effectively a no-op.
+    // Either succeeding with 0 bytes or throwing is acceptable behavior.
+
+    // timingSafeEqual with detached buffers
+    const detachedBuf2 = new ArrayBuffer(0);
+    ok(
+      crypto.subtle.timingSafeEqual(detachedBuf2, new ArrayBuffer(0)),
+      'Empty buffers should be timing-safe equal'
+    );
+
+    // Verify that encrypt with a detached IV throws rather than crashing
+    const key = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 128 },
+      false,
+      ['encrypt']
+    );
+    const detachedIv = new ArrayBuffer(12);
+    structuredClone(detachedIv, { transfer: [detachedIv] });
+    threw = false;
+    try {
+      await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: detachedIv },
+        key,
+        new ArrayBuffer(0)
+      );
+    } catch (e) {
+      threw = true;
+    }
+    ok(threw, 'Encrypt with detached IV should throw');
+  },
+};
+
+// Test that EC JWK import with mismatched public/private key components is rejected.
+// EC_KEY_check_key validates that the private key d corresponds to the public key (x, y).
+export const ecJwkKeyConsistencyCheck = {
+  async test() {
+    // Generate a valid P-256 key pair to get real x, y values
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+    const validJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+
+    // Corrupt the private key d while keeping x, y valid.
+    // This creates an inconsistency: d does not correspond to (x, y).
+    const corruptedJwk = {
+      ...validJwk,
+      d: validJwk.d.split('').reverse().join(''),
+    };
+
+    let threw = false;
+    try {
+      await crypto.subtle.importKey(
+        'jwk',
+        corruptedJwk,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        true,
+        ['sign']
+      );
+    } catch (e) {
+      threw = true;
+      ok(e instanceof Error, 'Expected an Error');
+    }
+    ok(threw, 'Import should have thrown for inconsistent EC JWK private key');
+  },
+};

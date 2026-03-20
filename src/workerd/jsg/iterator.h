@@ -66,8 +66,16 @@ class Generator final {
   }
 
   // If nothing is returned, the generator is complete.
+  // Per GetMethod spec (https://262.ecma-international.org/#sec-getmethod), if the 'return'
+  // property exists but is not callable, we throw a TypeError.
   kj::Maybe<T> return_(Lock& js, kj::Maybe<T> maybeValue = kj::none) {
     KJ_IF_SOME(active, maybeActive) {
+      // Per GetMethod spec: if property exists but is not callable, throw TypeError
+      if (active.returnExistsButNotCallable) {
+        maybeActive = kj::none;
+        JSG_FAIL_REQUIRE(TypeError, "Property 'return' is not a function");
+      }
+
       KJ_IF_SOME(returnFn, active.maybeReturn) {
         return js.tryCatch([&] {
           auto result = returnFn(js, kj::mv(maybeValue));
@@ -118,13 +126,35 @@ class Generator final {
     kj::Maybe<NextSignature> maybeNext;
     kj::Maybe<ReturnSignature> maybeReturn;
     kj::Maybe<ThrowSignature> maybeThrow;
+    // Per GetMethod spec (https://262.ecma-international.org/#sec-getmethod), if the
+    // 'return' property exists but is not callable, we should throw a TypeError.
+    // We track this state to defer the error to when return_() is actually called.
+    bool returnExistsButNotCallable = false;
 
     template <typename TypeWrapper>
     Active(Lock& js, JsObject object, TypeWrapper*)
         : maybeNext(tryGetGeneratorFunction<NextSignature, TypeWrapper>(js, object, "next"_kj)),
-          maybeReturn(
-              tryGetGeneratorFunction<ReturnSignature, TypeWrapper>(js, object, "return"_kj)),
+          // maybeReturn is initialized in the constructor body — see below.
           maybeThrow(tryGetGeneratorFunction<ThrowSignature, TypeWrapper>(js, object, "throw"_kj)) {
+      // Per the GetMethod spec (https://262.ecma-international.org/#sec-getmethod):
+      //   1. If the property value is undefined or null, the method is absent — not an error.
+      //   2. If the property value exists but is not callable, throw a TypeError.
+      //   3. If the property value is callable, use it.
+      //
+      // tryGetGeneratorFunction() calls object.get() then tryUnwrap(), which returns
+      // kj::none for both cases (1) and (2) since tryUnwrap just checks IsFunction().
+      // To distinguish them we need access to the raw property value, so we inline the
+      // lookup here rather than calling tryGetGeneratorFunction(). This also avoids a
+      // second property lookup that could trigger observable side effects from getters
+      // or return a different value on each access.
+      auto returnVal = object.get(js, "return"_kj);
+      if (!returnVal.isNullOrUndefined()) {
+        maybeReturn =
+            TypeWrapper::from(js.v8Isolate)
+                .tryUnwrap(js, js.v8Context(), returnVal, static_cast<ReturnSignature*>(nullptr),
+                    kj::Maybe<v8::Local<v8::Object>>(object));
+        returnExistsButNotCallable = (maybeReturn == kj::none);
+      }
     }
     Active(Active&&) = default;
     Active& operator=(Active&&) = default;
@@ -205,8 +235,17 @@ class AsyncGenerator final {
   }
 
   // If nothing is returned, the generator is complete.
+  // Per GetMethod spec (https://262.ecma-international.org/#sec-getmethod), if the 'return'
+  // property exists but is not callable, we throw a TypeError.
   Promise<kj::Maybe<T>> return_(Lock& js, kj::Maybe<T> maybeValue = kj::none) {
     KJ_IF_SOME(active, maybeActive) {
+      // Per GetMethod spec: if property exists but is not callable, throw TypeError
+      if (active.returnExistsButNotCallable) {
+        maybeActive = kj::none;
+        return js.rejectedPromise<kj::Maybe<T>>(
+            js.typeError("Property 'return' is not a function"_kj));
+      }
+
       KJ_IF_SOME(return_, active.maybeReturn) {
         auto& selfRef = KJ_ASSERT_NONNULL(maybeSelfRef);
         return js.tryCatch([&] {
@@ -217,17 +256,13 @@ class AsyncGenerator final {
             }
             return js.resolvedPromise(kj::mv(result.value));
           }, [ref = selfRef.addRef()](Lock& js, Value exception) {
-            Promise<kj::Maybe<T>> retPromise = nullptr;
-            if (ref->runIfAlive([&](AsyncGenerator& self) {
-              retPromise = self.throw_(js, kj::mv(exception));
-            })) {
-              return kj::mv(retPromise);
-            }
+            // Per spec, rejections from return() should be propagated directly
+            ref->runIfAlive([&](AsyncGenerator& self) { self.maybeActive = kj::none; });
             return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
           });
         }, [&](Value exception) {
           maybeActive = kj::none;
-          return throw_(js, kj::mv(exception));
+          return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
         });
       }
       maybeActive = kj::none;
@@ -276,13 +311,34 @@ class AsyncGenerator final {
     kj::Maybe<NextSignature> maybeNext;
     kj::Maybe<ReturnSignature> maybeReturn;
     kj::Maybe<ThrowSignature> maybeThrow;
+    // Per GetMethod spec, if property exists but is not callable, we should throw TypeError.
+    // We track this state to defer the error to when return_() is actually called.
+    bool returnExistsButNotCallable = false;
 
     template <typename TypeWrapper>
     Active(Lock& js, JsObject object, TypeWrapper*)
         : maybeNext(tryGetGeneratorFunction<NextSignature, TypeWrapper>(js, object, "next"_kj)),
-          maybeReturn(
-              tryGetGeneratorFunction<ReturnSignature, TypeWrapper>(js, object, "return"_kj)),
+          // maybeReturn is initialized in the constructor body — see below.
           maybeThrow(tryGetGeneratorFunction<ThrowSignature, TypeWrapper>(js, object, "throw"_kj)) {
+      // Per the GetMethod spec (https://262.ecma-international.org/#sec-getmethod):
+      //   1. If the property value is undefined or null, the method is absent — not an error.
+      //   2. If the property value exists but is not callable, throw a TypeError.
+      //   3. If the property value is callable, use it.
+      //
+      // tryGetGeneratorFunction() calls object.get() then tryUnwrap(), which returns
+      // kj::none for both cases (1) and (2) since tryUnwrap just checks IsFunction().
+      // To distinguish them we need access to the raw property value, so we inline the
+      // lookup here rather than calling tryGetGeneratorFunction(). This also avoids a
+      // second property lookup that could trigger observable side effects from getters
+      // or return a different value on each access.
+      auto returnVal = object.get(js, "return"_kj);
+      if (!returnVal.isNullOrUndefined()) {
+        maybeReturn =
+            TypeWrapper::from(js.v8Isolate)
+                .tryUnwrap(js, js.v8Context(), returnVal, static_cast<ReturnSignature*>(nullptr),
+                    kj::Maybe<v8::Local<v8::Object>>(object));
+        returnExistsButNotCallable = (maybeReturn == kj::none);
+      }
     }
     Active(Active&&) = default;
     Active& operator=(Active&&) = default;
@@ -673,6 +729,17 @@ class IteratorBase: public Object {
 
   Next nextImpl(Lock& js, NextSignature nextFunc) {
     KJ_IF_SOME(value, nextFunc(js, state)) {
+      // When V8 builtins like Array.from() or spread syntax iterate a C++ iterator,
+      // the loop runs in C++ without JS back-edge interrupt checks. If
+      // TerminateExecution() was called (e.g. by the near-heap-limit callback), the
+      // interrupt won't be processed until V8 next checks the stack guard, which may
+      // never happen in the builtin loop. Check for a termination request here and
+      // throw a JS exception so V8 sees it on the callback return path.
+      // See https://crbug.com/v8/14681 for the same class of bug in Intl.Segmenter.
+      if (js.isTerminationRequested()) {
+        js.v8Isolate->ThrowError(v8Str(js.v8Isolate, "Isolate terminated (OOM?)"_kj));
+        throw JsExceptionThrown();
+      }
       return Next{.done = false, .value = kj::mv(value)};
     }
     return Next{
@@ -815,7 +882,7 @@ class AsyncIteratorBase: public Object {
 
   void pushCurrent(Lock& js, Promise<void> promise) {
     auto& inner = state.template get<InnerState>();
-    inner.impl.pushCurrent(promise.whenResolved(js).then(js, [this, self = JSG_THIS](Lock& js) {
+    auto result = promise.whenResolved(js).then(js, [this, self = JSG_THIS](Lock& js) {
       // If state is Finished, then there's nothing we need to do here.
       KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
         inner.impl.popCurrent();
@@ -826,7 +893,11 @@ class AsyncIteratorBase: public Object {
         inner.impl.popCurrent();
       }
       return js.rejectedPromise<void>(kj::mv(value));
-    }));
+    });
+    // The error is already propagated through the promise returned by nextImpl/returnImpl.
+    // Mark as handled so the internally-held promise does not trigger unhandledrejection.
+    result.markAsHandled(js);
+    inner.impl.pushCurrent(kj::mv(result));
   }
 
   Promise<Next> nextImpl(Lock& js, NextSignature nextFunc) {

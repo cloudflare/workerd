@@ -47,8 +47,4 @@ def wd_rust_proc_macro(
         } | test_env,
         tags = test_tags,
         deps = test_deps,
-        experimental_use_cc_common_link = select({
-            "@platforms//os:windows": 0,
-            "//conditions:default": 1,
-        }),
     )

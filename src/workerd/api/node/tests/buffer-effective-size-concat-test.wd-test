@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "buffer-effective-size-concat-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "buffer-effective-size-concat-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"]
+      )
+    ),
+  ],
+);

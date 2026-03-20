@@ -4,8 +4,10 @@
 
 #include <kj/common.h>
 #include <kj/map.h>
+#include <kj/mutex.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
+#include <kj/thread.h>
 
 namespace workerd::fallback {
 
@@ -51,16 +53,57 @@ enum class Version {
 using ModuleOrRedirect =
     kj::Maybe<kj::OneOf<kj::String, kj::Own<server::config::Worker::Module::Reader>>>;
 
-// Tries to resolve the module using the fallback service.
-// If a string is returned, the fallback service redirected us to resolve a
-// different module whose specifier is given by the returned string. Otherwise,
-// the fallback service returns a module configuration object.
-ModuleOrRedirect tryResolve(Version version,
-    ImportType type,
-    kj::StringPtr address,
-    kj::StringPtr specifier,
-    kj::StringPtr rawSpecifier,
-    kj::StringPtr referrer,
-    const kj::HashMap<kj::StringPtr, kj::StringPtr>& attributes);
+// A persistent client for the fallback service that uses a single background
+// thread with a long-lived HTTP client for all module resolution requests.
+// This avoids creating a new OS thread, DNS lookup, and TCP connection for
+// each request, which can exhaust ephemeral ports when many modules are
+// resolved concurrently (e.g. running many test files with vitest-pool-workers).
+//
+// IMPORTANT: This class supports only one caller at a time. tryResolve() will
+// assert if called concurrently. Module resolution in workerd is single-threaded
+// per isolate/registry so this is safe in practice.
+class FallbackServiceClient {
+ public:
+  explicit FallbackServiceClient(kj::String address);
+  ~FallbackServiceClient() noexcept(false);
+
+  KJ_DISALLOW_COPY_AND_MOVE(FallbackServiceClient);
+
+  ModuleOrRedirect tryResolve(Version version,
+      ImportType type,
+      kj::StringPtr specifier,
+      kj::StringPtr rawSpecifier,
+      kj::StringPtr referrer,
+      const kj::HashMap<kj::StringPtr, kj::StringPtr>& attributes);
+
+ private:
+  // Shared state between the calling thread and the background thread.
+  // Access is serialized through kj::MutexGuarded.
+  struct SharedState {
+    // Request fields - valid only when hasRequest is true.
+    // These contain non-owning references into the caller's stack frame,
+    // which is safe because the caller blocks until responseReady is set.
+    Version version = Version::V1;
+    ImportType type = ImportType::IMPORT;
+    kj::StringPtr specifier;
+    kj::StringPtr rawSpecifier;
+    kj::StringPtr referrer;
+    const kj::HashMap<kj::StringPtr, kj::StringPtr>* attributes = nullptr;
+    bool hasRequest = false;
+
+    // Response field - valid only when responseReady is true.
+    ModuleOrRedirect response;
+    bool responseReady = false;
+
+    // Set to true to signal the background thread to exit.
+    bool shutdown = false;
+  };
+
+  kj::String ownedAddress;
+  kj::MutexGuarded<SharedState> state;
+  kj::Thread thread;
+
+  void threadMain();
+};
 
 }  // namespace workerd::fallback

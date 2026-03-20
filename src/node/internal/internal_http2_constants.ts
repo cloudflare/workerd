@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 // More beautiful numbers
 const NGHTTP2_ERR_FRAME_SIZE_ERROR = -522;
 const NGHTTP2_SESSION_SERVER = 0;

@@ -16,65 +16,46 @@ namespace workerd::api {
 
 ReaderImpl::ReaderImpl(ReadableStreamController::Reader& reader)
     : ioContext(tryGetIoContext()),
-      reader(reader) {}
+      reader(reader),
+      state(ReaderState::create<Initial>()) {}
 
 ReaderImpl::~ReaderImpl() noexcept(false) {
-  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
-    stream->getController().releaseReader(reader, kj::none);
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
+    attached.stream->getController().releaseReader(reader, kj::none);
   }
 }
 
 void ReaderImpl::attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) {
   KJ_ASSERT(state.is<Initial>());
-  state = controller.addRef();
+  state.transitionTo<Attached>(controller.addRef());
   this->closedPromise = kj::mv(closedPromise);
 }
 
 void ReaderImpl::detach() {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(i, Initial) {
-      // Do nothing in this case.
-      return;
-    }
-    KJ_CASE_ONEOF(stream, Attached) {
-      state.init<StreamStates::Closed>();
-      return;
-    }
-    KJ_CASE_ONEOF(c, StreamStates::Closed) {
-      // Do nothing in this case.
-      return;
-    }
-    KJ_CASE_ONEOF(r, Released) {
-      // Do nothing in this case.
-      return;
-    }
+  // Only transition from Attached to Closed.
+  // All other states (Initial, Closed, Released) are no-ops.
+  if (state.isActive()) {
+    state.transitionTo<Closed>();
   }
-  KJ_UNREACHABLE;
 }
 
 jsg::Promise<void> ReaderImpl::cancel(
     jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(i, Initial) {
-      KJ_FAIL_ASSERT("this reader was never attached");
-    }
-    KJ_CASE_ONEOF(stream, Attached) {
-      // In some edge cases, this reader is the last thing holding a strong
-      // reference to the stream. Calling cancel might cause the readers strong
-      // reference to be cleared, so let's make sure we keep a reference to
-      // the stream at least until the call to cancel completes.
-      auto ref = stream.addRef();
-      return stream->getController().cancel(js, maybeReason);
-    }
-    KJ_CASE_ONEOF(r, Released) {
-      return js.rejectedPromise<void>(
-          js.v8TypeError("This ReadableStream reader has been released."_kj));
-    }
-    KJ_CASE_ONEOF(c, StreamStates::Closed) {
-      return js.resolvedPromise();
-    }
+  assertAttachedOrTerminal();
+  if (state.is<Released>()) {
+    return js.rejectedPromise<void>(
+        js.v8TypeError("This ReadableStream reader has been released."_kj));
   }
-  KJ_UNREACHABLE;
+  if (state.is<Closed>()) {
+    return js.resolvedPromise();
+  }
+  auto& attached = state.requireActiveUnsafe();
+  // In some edge cases, this reader is the last thing holding a strong
+  // reference to the stream. Calling cancel might cause the readers strong
+  // reference to be cleared, so let's make sure we keep a reference to
+  // the stream at least until the call to cancel completes.
+  auto ref = attached.stream.addRef();
+  return attached.stream->getController().cancel(js, maybeReason);
 }
 
 jsg::MemoizedIdentity<jsg::Promise<void>>& ReaderImpl::getClosed() {
@@ -90,79 +71,60 @@ void ReaderImpl::lockToStream(jsg::Lock& js, ReadableStream& stream) {
 
 jsg::Promise<ReadResult> ReaderImpl::read(
     jsg::Lock& js, kj::Maybe<ReadableStreamController::ByobOptions> byobOptions) {
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(i, Initial) {
-      KJ_FAIL_ASSERT("this reader was never attached");
-    }
-    KJ_CASE_ONEOF(stream, Attached) {
-      KJ_IF_SOME(options, byobOptions) {
-        // Per the spec, we must perform these checks before disturbing the stream.
-        size_t atLeast = options.atLeast.orDefault(1);
-
-        if (options.byteLength == 0) {
-          return js.rejectedPromise<ReadResult>(
-              js.v8TypeError("You must call read() on a \"byob\" reader with a positive-sized "
-                             "TypedArray object."_kj));
-        }
-        if (atLeast == 0) {
-          return js.rejectedPromise<ReadResult>(js.v8TypeError(
-              kj::str("Requested invalid minimum number of bytes to read (", atLeast, ").")));
-        }
-        if (atLeast > options.byteLength) {
-          return js.rejectedPromise<ReadResult>(js.v8TypeError(kj::str("Minimum bytes to read (",
-              atLeast, ") exceeds size of buffer (", options.byteLength, ").")));
-        }
-
-        jsg::BufferSource source(js, options.bufferView.getHandle(js));
-        options.atLeast = atLeast * source.getElementSize();
-      }
-
-      return KJ_ASSERT_NONNULL(stream->getController().read(js, kj::mv(byobOptions)));
-    }
-    KJ_CASE_ONEOF(r, Released) {
-      return js.rejectedPromise<ReadResult>(
-          js.v8TypeError("This ReadableStream reader has been released."_kj));
-    }
-    KJ_CASE_ONEOF(c, StreamStates::Closed) {
-      return js.rejectedPromise<ReadResult>(
-          js.v8TypeError("This ReadableStream has been closed."_kj));
-    }
+  assertAttachedOrTerminal();
+  if (state.is<Released>()) {
+    return js.rejectedPromise<ReadResult>(
+        js.v8TypeError("This ReadableStream reader has been released."_kj));
   }
-  KJ_UNREACHABLE;
+  if (state.is<Closed>()) {
+    return js.rejectedPromise<ReadResult>(
+        js.v8TypeError("This ReadableStream has been closed."_kj));
+  }
+  auto& attached = state.requireActiveUnsafe();
+  KJ_IF_SOME(options, byobOptions) {
+    // Per the spec, we must perform these checks before disturbing the stream.
+    size_t atLeast = options.atLeast.orDefault(1);
+
+    if (options.byteLength == 0) {
+      return js.rejectedPromise<ReadResult>(
+          js.v8TypeError("You must call read() on a \"byob\" reader with a positive-sized "
+                         "TypedArray object."_kj));
+    }
+    if (atLeast == 0) {
+      return js.rejectedPromise<ReadResult>(js.v8TypeError(
+          kj::str("Requested invalid minimum number of bytes to read (", atLeast, ").")));
+    }
+    if (atLeast > options.byteLength) {
+      return js.rejectedPromise<ReadResult>(js.v8TypeError(kj::str("Minimum bytes to read (",
+          atLeast, ") exceeds size of buffer (", options.byteLength, ").")));
+    }
+
+    jsg::BufferSource source(js, options.bufferView.getHandle(js));
+    options.atLeast = atLeast * source.getElementSize();
+  }
+
+  return KJ_ASSERT_NONNULL(attached.stream->getController().read(js, kj::mv(byobOptions)));
 }
 
 void ReaderImpl::releaseLock(jsg::Lock& js) {
   // TODO(soon): Releasing the lock should cancel any pending reads. This is a recent
   // modification to the spec that we have not yet implemented.
-  KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(i, Initial) {
-      KJ_FAIL_ASSERT("this reader was never attached");
-    }
-    KJ_CASE_ONEOF(stream, Attached) {
-      // In some edge cases, this reader is the last thing holding a strong
-      // reference to the stream. Calling releaseLock might cause the readers strong
-      // reference to be cleared, so let's make sure we keep a reference to
-      // the stream at least until the call to releaseLock completes.
-      auto ref = stream.addRef();
-      stream->getController().releaseReader(reader, js);
-      state.init<Released>();
-      return;
-    }
-    KJ_CASE_ONEOF(c, StreamStates::Closed) {
-      // Do nothing in this case.
-      return;
-    }
-    KJ_CASE_ONEOF(r, Released) {
-      // Do nothing in this case.
-      return;
-    }
+  assertAttachedOrTerminal();
+  // Closed and Released states are no-ops.
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
+    // In some edge cases, this reader is the last thing holding a strong
+    // reference to the stream. Calling releaseLock might cause the readers strong
+    // reference to be cleared, so let's make sure we keep a reference to
+    // the stream at least until the call to releaseLock completes.
+    auto ref = attached.stream.addRef();
+    attached.stream->getController().releaseReader(reader, js);
+    state.transitionTo<Released>();
   }
-  KJ_UNREACHABLE;
 }
 
 void ReaderImpl::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_SOME(readable, state.tryGet<Attached>()) {
-    visitor.visit(readable);
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
+    visitor.visit(attached.stream);
   }
   visitor.visit(closedPromise);
 }
@@ -290,6 +252,134 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 // ======================================================================================
+// DrainingReader implementation
+
+DrainingReader::DrainingReader(): ioContext(tryGetIoContext()) {}
+
+DrainingReader::~DrainingReader() noexcept(false) {
+  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
+    stream->getController().releaseReader(*this, kj::none);
+  }
+}
+
+kj::Maybe<kj::Own<DrainingReader>> DrainingReader::create(jsg::Lock& js, ReadableStream& stream) {
+  if (stream.isLocked()) {
+    return kj::none;
+  }
+  auto reader = kj::heap<DrainingReader>();
+  if (!stream.getController().lockReader(js, *reader)) {
+    return kj::none;
+  }
+  return kj::mv(reader);
+}
+
+void DrainingReader::attach(
+    ReadableStreamController& controller, jsg::Promise<void> closedPromise) {
+  KJ_ASSERT(state.is<Initial>());
+  state = controller.addRef();
+  this->closedPromise = kj::mv(closedPromise);
+}
+
+void DrainingReader::detach() {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      return;
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      state.init<StreamStates::Closed>();
+      return;
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return;
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js, size_t maxRead) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      KJ_FAIL_ASSERT("this reader was never attached");
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      auto& controller = stream->getController();
+      KJ_IF_SOME(result, controller.drainingRead(js, maxRead)) {
+        return kj::mv(result);
+      }
+      return js.rejectedPromise<DrainingReadResult>(
+          js.v8TypeError("Unable to perform draining read on this stream."_kj));
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return js.rejectedPromise<DrainingReadResult>(
+          js.v8TypeError("This ReadableStream reader has been released."_kj));
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return js.resolvedPromise(DrainingReadResult{
+        .chunks = kj::Array<kj::Array<kj::byte>>(),
+        .done = true,
+      });
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<void> DrainingReader::cancel(
+    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      KJ_FAIL_ASSERT("this reader was never attached");
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      auto ref = stream.addRef();
+      return stream->getController().cancel(js, maybeReason);
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return js.rejectedPromise<void>(
+          js.v8TypeError("This ReadableStream reader has been released."_kj));
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return js.resolvedPromise();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void DrainingReader::releaseLock(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(i, Initial) {
+      KJ_FAIL_ASSERT("this reader was never attached");
+    }
+    KJ_CASE_ONEOF(stream, Attached) {
+      auto ref = stream.addRef();
+      stream->getController().releaseReader(*this, js);
+      state.init<Released>();
+      return;
+    }
+    KJ_CASE_ONEOF(c, StreamStates::Closed) {
+      return;
+    }
+    KJ_CASE_ONEOF(r, Released) {
+      return;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+bool DrainingReader::isAttached() const {
+  return state.is<Attached>();
+}
+
+void DrainingReader::visitForGc(jsg::GcVisitor& visitor) {
+  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
+    visitor.visit(stream);
+  }
+  visitor.visit(closedPromise);
+}
+
+// ======================================================================================
 
 ReadableStream::ReadableStream(IoContext& ioContext, kj::Own<ReadableStreamSource> source)
     : ReadableStream(newReadableStreamInternalController(ioContext, kj::mv(source))) {}
@@ -352,7 +442,7 @@ ReadableStream::Reader ReadableStream::getReader(
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(mode, o.mode) {
       JSG_REQUIRE(
-          mode == "byob", RangeError, "mode must be undefined or 'byob' in call to getReader().");
+          mode == "byob", TypeError, "mode must be undefined or 'byob' in call to getReader().");
       // No need to check that the ReadableStream implementation is a byte stream: the first
       // invocation of read() will do that for us and throw if necessary. Also, we should really
       // just support reading non-byte streams with BYOB readers.
@@ -385,14 +475,12 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
 
   auto options = kj::mv(maybeOptions).orDefault({});
   options.pipeThrough = true;
+  // The lambda intentionally captures self as a visitable reference, ensuring
+  // JSG_THIS stays alive until the pipe promise resolves.
   controller.pipeTo(js, destination, kj::mv(options))
       .then(js,
           JSG_VISITABLE_LAMBDA(
-              (self = JSG_THIS), (self), (jsg::Lock& js) { return js.resolvedPromise(); }),
-          JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self),
-              (jsg::Lock& js, auto&& exception) {
-                return js.rejectedPromise<void>(kj::mv(exception));
-              }))
+              (self = JSG_THIS), (self), (jsg::Lock& js) { return js.resolvedPromise(); }))
       .markAsHandled(js);
   return kj::mv(transform.readable);
 }
@@ -455,11 +543,16 @@ jsg::Promise<void> ReadableStream::returnFunction(
     if (!state.preventCancel) {
       auto promise = reader->cancel(js, value.map([&](jsg::Value& v) { return v.getHandle(js); }));
       reader->releaseLock(js);
-      return promise.then(js,
+      auto result = promise.then(js,
           JSG_VISITABLE_LAMBDA((reader = kj::mv(reader)), (reader), (jsg::Lock& js) {
             // Ensure that the reader is not garbage collected until the cancel promise resolves.
             return js.resolvedPromise();
           }));
+      // When the stream is already errored, cancel() returns a rejected promise
+      // that propagates through the .then() chain. Mark it as handled so V8 does
+      // not fire unhandledrejection events during iterator teardown.
+      result.markAsHandled(js);
+      return kj::mv(result);
     }
 
     reader->releaseLock(js);
@@ -512,12 +605,28 @@ jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
     } else if ((value)->IsArrayBufferView()) {
       auto view = value.As<v8::ArrayBufferView>();
       return view->ByteLength();
+    } else {
+      // Per the WHATWG Streams spec, ByteLengthQueuingStrategy.size should return
+      // GetV(chunk, "byteLength"), which means getting the byteLength property
+      // from any object, not just ArrayBuffer/ArrayBufferView.
+      KJ_IF_SOME(obj, jsg::JsValue(value).tryCast<jsg::JsObject>()) {
+        auto byteLength = obj.get(js, "byteLength"_kj);
+        KJ_IF_SOME(num, byteLength.tryCast<jsg::JsNumber>()) {
+          KJ_IF_SOME(val, num.value(js)) {
+            return static_cast<uint32_t>(val);
+          }
+        }
+      }
     }
   }
   return kj::none;
 }
 
 namespace {
+
+// TODO(cleanup): These classes have been copied to external-pusher.c++. The copies here can be
+//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
+//   StreamSink-related code. For now I'm not trying to avoid duplication.
 
 // HACK: We need as async pipe, like kj::newOneWayPipe(), except supporting explicit end(). So we
 //   wrap the two ends of the pipe in special adapters that track whether end() was called.
@@ -676,18 +785,37 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   StreamEncoding encoding = controller.getPreferredEncoding();
   auto expectedLength = controller.tryGetLength(encoding);
 
-  auto streamCap = externalHandler->writeStream(
-      [encoding, expectedLength](rpc::JsValue::External::Builder builder) mutable {
-    auto rs = builder.initReadableStream();
-    rs.setEncoding(encoding);
-    KJ_IF_SOME(l, expectedLength) {
-      rs.getExpectedLength().setKnown(l);
+  capnp::ByteStream::Client streamCap = [&]() {
+    KJ_IF_SOME(pusher, externalHandler->getExternalPusher()) {
+      auto req = pusher.pushByteStreamRequest(capnp::MessageSize{2, 0});
+      KJ_IF_SOME(el, expectedLength) {
+        req.setLengthPlusOne(el + 1);
+      }
+      auto pipeline = req.sendForPipeline();
+
+      externalHandler->write([encoding, expectedLength, source = pipeline.getSource()](
+                                 rpc::JsValue::External::Builder builder) mutable {
+        auto rs = builder.initReadableStream();
+        rs.setStream(kj::mv(source));
+        rs.setEncoding(encoding);
+      });
+
+      return pipeline.getSink();
+    } else {
+      return externalHandler
+          ->writeStream(
+              [encoding, expectedLength](rpc::JsValue::External::Builder builder) mutable {
+        auto rs = builder.initReadableStream();
+        rs.setEncoding(encoding);
+        KJ_IF_SOME(l, expectedLength) {
+          rs.getExpectedLength().setKnown(l);
+        }
+      }).castAs<capnp::ByteStream>();
     }
-  });
+  }();
 
   kj::Own<capnp::ExplicitEndOutputStream> kjStream =
-      ioctx.getByteStreamFactory().capnpToKjExplicitEnd(
-          kj::mv(streamCap).castAs<capnp::ByteStream>());
+      ioctx.getByteStreamFactory().capnpToKjExplicitEnd(kj::mv(streamCap));
 
   auto sink = newSystemStream(kj::mv(kjStream), encoding, ioctx);
 
@@ -718,21 +846,25 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
 
   auto& ioctx = IoContext::current();
 
-  kj::Maybe<uint64_t> expectedLength;
-  auto el = rs.getExpectedLength();
-  if (el.isKnown()) {
-    expectedLength = el.getKnown();
+  kj::Own<kj::AsyncInputStream> in;
+  if (rs.hasStream()) {
+    in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
+  } else {
+    kj::Maybe<uint64_t> expectedLength;
+    auto el = rs.getExpectedLength();
+    if (el.isKnown()) {
+      expectedLength = el.getKnown();
+    }
+
+    auto pipe = kj::newOneWayPipe(expectedLength);
+
+    auto endedFlag = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
+
+    auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), kj::addRef(*endedFlag));
+    in = kj::heap<ExplicitEndInputPipeAdapter>(kj::mv(pipe.in), kj::mv(endedFlag), expectedLength);
+
+    externalHandler->setLastStream(ioctx.getByteStreamFactory().kjToCapnp(kj::mv(out)));
   }
-
-  auto pipe = kj::newOneWayPipe(expectedLength);
-
-  auto endedFlag = kj::refcounted<kj::RefcountedWrapper<bool>>(false);
-
-  auto out = kj::heap<ExplicitEndOutputPipeAdapter>(kj::mv(pipe.out), kj::addRef(*endedFlag));
-  auto in =
-      kj::heap<ExplicitEndInputPipeAdapter>(kj::mv(pipe.in), kj::mv(endedFlag), expectedLength);
-
-  externalHandler->setLastStream(ioctx.getByteStreamFactory().kjToCapnp(kj::mv(out)));
 
   return js.alloc<ReadableStream>(ioctx,
       kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
@@ -747,8 +879,8 @@ size_t ReaderImpl::jsgGetMemorySelfSize() const {
 }
 
 void ReaderImpl::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
-    tracker.trackField("stream", stream);
+  KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
+    tracker.trackField("stream", attached.stream);
   }
   tracker.trackField("closedPromise", closedPromise);
 }

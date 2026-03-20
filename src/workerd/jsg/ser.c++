@@ -360,6 +360,12 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
     JSG_FAIL_REQUIRE(TypeError, "Object is not transferable");
   }
 
+  // SharedArrayBuffers are not transferable. Per the HTML spec, attempting to
+  // transfer a SharedArrayBuffer (or a view backed by one) must throw a
+  // DataCloneError. We must check before calling Detach(), which would trigger
+  // a fatal V8 CHECK failure on non-detachable buffers.
+  JSG_REQUIRE(arrayBuffer->IsDetachable(), DOMDataCloneError, "Object is not transferable.");
+
   uint32_t n;
   for (n = 0; n < arrayBuffers.size(); n++) {
     // If the ArrayBuffer has already been added, we do not want to try adding it again.

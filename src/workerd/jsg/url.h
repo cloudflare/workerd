@@ -108,7 +108,7 @@ class Url final {
   // Given this URL, returns a struct that is a basename and a base Url pair
   // such that base.tryResolve(basename) is equivalent to this URL. Query
   // parameters and fragments are not preserved.
-  Relative getRelative(RelativeOption option = RelativeOption::DEFAULT) const KJ_LIFETIMEBOUND;
+  Relative getRelative(RelativeOption option = RelativeOption::DEFAULT) const;
 
   // Returns the parent URL of this URL, which is the URL with the last path component
   // removed and the trailing slash removed if it exists. For instance, if the URL is

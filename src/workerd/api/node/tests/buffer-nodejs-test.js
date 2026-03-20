@@ -147,6 +147,29 @@ export const invalidEncodingForToString = {
   },
 };
 
+export const toStringWithUndefinedEncoding = {
+  test(ctrl, env, ctx) {
+    // Test that Buffer.toString with undefined encoding defaults to utf8
+    const buf = Buffer.from('hello world');
+    strictEqual(buf.toString(undefined), 'hello world');
+    strictEqual(buf.toString(undefined), buf.toString('utf8'));
+
+    // Test with UTF-8 characters
+    const utf8Buf = Buffer.from('¡hέlló wôrld!');
+    strictEqual(utf8Buf.toString(undefined), '¡hέlló wôrld!');
+    strictEqual(utf8Buf.toString(undefined), utf8Buf.toString('utf8'));
+
+    // Test with start and end parameters
+    const sliceBuf = Buffer.from('hello world');
+    strictEqual(sliceBuf.toString(undefined, 0, 5), 'hello');
+    strictEqual(sliceBuf.toString(undefined, 6), 'world');
+    strictEqual(
+      sliceBuf.toString(undefined, 0, 5),
+      sliceBuf.toString('utf8', 0, 5)
+    );
+  },
+};
+
 export const zeroLengthBuffers = {
   test(ctrl, env, ctx) {
     Buffer.from('');
@@ -5996,6 +6019,18 @@ export const transcodeTest = {
       strictEqual(dest.toString(), orig.toString());
     }
 
+    // Test utf16le to ascii/latin1 output length
+    {
+      const input = Buffer.from('AAA', 'utf16le');
+      strictEqual(input.length, 6);
+      const asciiOutput = transcode(input, 'utf16le', 'ascii');
+      strictEqual(asciiOutput.length, 3);
+      deepStrictEqual(asciiOutput, Buffer.from('AAA', 'ascii'));
+      const latin1Output = transcode(input, 'utf16le', 'latin1');
+      strictEqual(latin1Output.length, 3);
+      deepStrictEqual(latin1Output, Buffer.from('AAA', 'latin1'));
+    }
+
     {
       const utf8 = Buffer.from('€'.repeat(4000), 'utf8');
       const ucs2 = Buffer.from('€'.repeat(4000), 'ucs2');
@@ -6065,6 +6100,50 @@ export const transcodeTest = {
       transcode(Buffer.from([0x80]), 'utf8', 'utf8'),
       Buffer.from([0xef, 0xbf, 0xbd])
     );
+  },
+};
+
+// TranscodeFromUTF16 should not over-allocate the output buffer.
+// Regression test for a bug where `limit * sizeof(char16_t)` doubled the
+// allocation and `destPtr.size()` passed char16_t element count instead of
+// byte count to ucnv_fromUChars.
+export const transcodeFromUTF16BufferSizeTest = {
+  test() {
+    const utf16 = Buffer.from('Hello', 'utf16le');
+    const latin1 = transcode(utf16, 'utf16le', 'latin1');
+    strictEqual(latin1.length, 5);
+    strictEqual(latin1.buffer.byteLength, latin1.length);
+  },
+};
+
+// Invalid UTF-8 input to transcode('utf8', 'utf16le') should produce
+// "Unable to transcode buffer", not an internal assertion mismatch.
+// Regression test for a bug where JSG_REQUIRE(actual == expected) threw
+// before the `if (actual == 0) return kj::none` path could be reached.
+export const transcodeUTF8ToUTF16InvalidInputTest = {
+  test() {
+    throws(
+      () =>
+        transcode(
+          Buffer.from([0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x80]),
+          'utf8',
+          'utf16le'
+        ),
+      { message: /Unable to transcode buffer/ }
+    );
+  },
+};
+
+// TranscodeFromUTF16 should reject odd-byte UTF-16LE input, matching
+// the guard that TranscodeUTF8FromUTF16 already has.
+// Regression test for a bug where `source.size() / sizeof(char16_t)`
+// silently dropped the trailing byte.
+export const transcodeFromUTF16OddByteInputTest = {
+  test() {
+    const oddInput = Buffer.from([0x41, 0x00, 0x42]);
+    throws(() => transcode(oddInput, 'utf16le', 'utf8'));
+    throws(() => transcode(oddInput, 'utf16le', 'latin1'));
+    throws(() => transcode(oddInput, 'utf16le', 'ascii'));
   },
 };
 

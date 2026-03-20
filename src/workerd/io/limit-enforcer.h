@@ -5,10 +5,12 @@
 #pragma once
 
 #include <workerd/io/outcome.capnp.h>
+#include <workerd/io/tracked-wasm-instance.h>
 
 #include <v8-isolate.h>
 
 #include <kj/async.h>   // For Promise
+#include <kj/debug.h>   // For KJ_REQUIRE
 #include <kj/memory.h>  // for Own
 #include <kj/one-of.h>  // for OneOf
 #include <kj/time.h>    // for Duration
@@ -97,6 +99,11 @@ class IsolateLimitEnforcer: public kj::Refcounted {
   }
 
   virtual bool hasExcessivelyExceededHeapLimit() const = 0;
+
+  // Returns the TrackedWasmInstanceList for this isolate. Subclasses own the list and provide
+  // it here. The returned object provides lock-guarded mutation methods and a read-only accessor
+  // for signal-handler use.
+  virtual const TrackedWasmInstanceList& getTrackedWasmInstances() const = 0;
 
   // Inserts a custom mark event named `name` into this isolate's perf event data stream. At
   // present, this is only implemented internally. Call this function from various APIs to be able

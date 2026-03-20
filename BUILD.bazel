@@ -26,15 +26,6 @@ alias(
     visibility = ["//visibility:public"],
 )
 
-# For convenience, less typing than the full label:
-# (assuming working directory is the root of the repository)
-#   bazel run format
-alias(
-    name = "format",
-    actual = "//build/deps/formatters:format",
-    tags = ["manual"],
-)
-
 npm_link_all_packages(name = "node_modules")
 
 npm_link_package(
@@ -78,6 +69,29 @@ platform(
         "@platforms//os:macos",
         "@platforms//cpu:x86_64",
     ],
+)
+
+# Detect whether we use Linux/macOS/either, used to configure whether tcmalloc/perfetto should be
+# used.
+config_setting(
+    name = "is_linux",
+    constraint_values = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "is_macos",
+    constraint_values = ["@platforms//os:macos"],
+    visibility = ["//visibility:public"],
+)
+
+selects.config_setting_group(
+    name = "is_unix",
+    match_any = [
+        ":is_linux",
+        ":is_macos",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 # bazel enables the --ffunction-sections, --gc-sections flags used to remove dead code by default

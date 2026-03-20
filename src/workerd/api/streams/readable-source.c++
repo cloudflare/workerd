@@ -1,10 +1,12 @@
 #include "readable-source.h"
 
+#include "common.h"
 #include "writable-sink.h"
 
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/state-machine.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/string-buffer.h>
 #include <workerd/util/strong-bool.h>
@@ -12,7 +14,6 @@
 #include <kj/async-io.h>
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
-#include <kj/one-of.h>
 
 #include <bit>
 
@@ -232,27 +233,48 @@ class InputStreamFromProducer final: public kj::AsyncInputStream {
   kj::Maybe<uint64_t> expectedLength;
 };
 
+struct Closed {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+};
+
+struct Open {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "open"_kj;
+  kj::Own<kj::AsyncInputStream> stream;
+};
+
+// State machine for tracking readable source lifecycle:
+//   Open -> Closed (normal close after EOF or pumpTo)
+//   Open -> kj::Exception (error via cancel() or read failure)
+// Closed is terminal, kj::Exception is implicitly terminal via ErrorState.
+using ReadableSourceState = StateMachine<TerminalStates<Closed>,
+    ErrorState<kj::Exception>,
+    ActiveState<Open>,
+    Open,
+    Closed,
+    kj::Exception>;
+
 // A base class for ReadableSource implementations that provides default
 // implementations of some methods.
 class ReadableSourceImpl: public ReadableSource {
  public:
   ReadableSourceImpl(kj::Own<kj::AsyncInputStream> input,
       rpc::StreamEncoding encoding = rpc::StreamEncoding::IDENTITY)
-      : state(kj::mv(input)),
+      : state(ReadableSourceState::create<Open>(kj::mv(input))),
         encoding(encoding) {}
   ReadableSourceImpl(kj::Exception reason)
-      : state(kj::mv(reason)),
+      : state(ReadableSourceState::create<kj::Exception>(kj::mv(reason))),
         encoding(rpc::StreamEncoding::IDENTITY) {}
-  ReadableSourceImpl(): state(Closed()), encoding(rpc::StreamEncoding::IDENTITY) {}
+  ReadableSourceImpl()
+      : state(ReadableSourceState::create<Closed>()),
+        encoding(rpc::StreamEncoding::IDENTITY) {}
   KJ_DISALLOW_COPY_AND_MOVE(ReadableSourceImpl);
   virtual ~ReadableSourceImpl() noexcept(false) {
     canceler.cancel(KJ_EXCEPTION(DISCONNECTED, "stream was dropped"));
   }
 
-  kj::Promise<size_t> readInner(
-      kj::Own<kj::AsyncInputStream>& inner, kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) {
+  kj::Promise<size_t> readInner(Open& open, kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) {
     try {
-      auto& stream = setStream(ensureIdentityEncoding(kj::mv(inner)));
+      auto& stream = setStream(ensureIdentityEncoding(kj::mv(open.stream)));
       minBytes = kj::max(minBytes, 1u);
       auto amount = co_await readImpl(stream, buffer, minBytes);
       if (amount < minBytes) {
@@ -260,30 +282,22 @@ class ReadableSourceImpl: public ReadableSource {
       }
       co_return amount;
     } catch (...) {
-      auto exception = kj::getCaughtExceptionAsKj();
-      setErrored(kj::cp(exception));
-      kj::throwFatalException(kj::mv(exception));
+      handleOperationException();
     }
   }
 
   kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) override {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        kj::throwFatalException(kj::cp(errored));
-      }
-      KJ_CASE_ONEOF(_, Closed) {
-        co_return 0;
-      }
-      KJ_CASE_ONEOF(inner, kj::Own<kj::AsyncInputStream>) {
-        KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being read");
-        co_return co_await canceler.wrap(readInner(inner, buffer, minBytes));
-        // If the source is dropped while a read is in progress, the canceler will
-        // trigger and abort the read. In such cases, we don't want to wrap this
-        // await in a try catch because it isn't safe to continue using the stream
-        // as it may no longer exist.
-      }
+    throwIfErrored();
+    if (state.is<Closed>()) {
+      co_return 0;
     }
-    KJ_UNREACHABLE;
+    auto& open = state.requireActiveUnsafe();
+    KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being read");
+    co_return co_await canceler.wrap(readInner(open, buffer, minBytes));
+    // If the source is dropped while a read is in progress, the canceler will
+    // trigger and abort the read. In such cases, we don't want to wrap this
+    // await in a try catch because it isn't safe to continue using the stream
+    // as it may no longer exist.
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(
@@ -295,85 +309,71 @@ class ReadableSourceImpl: public ReadableSource {
       kj::throwFatalException(KJ_EXCEPTION(FAILED, "jsg.Error: Stream is already being read"));
     }
 
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(inner, kj::Own<kj::AsyncInputStream>) {
-        // Ownership of the underlying inner stream is transferred to the pump operation,
-        // where it will be either fully consumed or errored out. In either case, this
-        // ReadableSource becomes closed and no longer usable once pumpTo() is called.
-        // Critically... it is important that just because the ReadableSource is closed here
-        // does NOT mean that the underlying stream has been fully consumed.
-        auto stream = kj::mv(inner);
-        setClosed();
-
-        if (output.getEncoding() != getEncoding()) {
-          // The target encoding is different from our current encoding.
-          // Let's ensure that our side is in identity encoding. The destination stream will
-          // take care of itself.
-          stream = ensureIdentityEncoding(kj::mv(stream));
-        } else {
-          // Since the encodings match, we can tell the output stream that it doesn't need to
-          // do any of the encoding work since we'll be providing data in the expected encoding.
-          KJ_ASSERT(getEncoding() == output.disownEncodingResponsibility());
-        }
-
-        // Note that because we are transferring ownership of the stream to the pump operation,
-        // and the pump itself should not rely on the ReadableSource for any state, it is
-        // safe to drop the ReadableSource once the pump operation begins.
-        co_return co_await pumpImpl(kj::mv(stream), output, end);
-      }
-      KJ_CASE_ONEOF(closed, Closed) {
-        if (end) {
-          co_await output.end();
-        }
-        co_return;
-      }
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        output.abort(kj::cp(errored));
-        throwFatalException(kj::mv(errored));
-      }
+    KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
+      output.abort(kj::cp(errored));
+      kj::throwFatalException(kj::cp(errored));
     }
-    KJ_UNREACHABLE;
+
+    if (state.is<Closed>()) {
+      if (end) {
+        co_await output.end();
+      }
+      co_return;
+    }
+
+    auto& open = state.requireActiveUnsafe();
+    // Ownership of the underlying inner stream is transferred to the pump operation,
+    // where it will be either fully consumed or errored out. In either case, this
+    // ReadableSource becomes closed and no longer usable once pumpTo() is called.
+    // Critically... it is important that just because the ReadableSource is closed here
+    // does NOT mean that the underlying stream has been fully consumed.
+    auto stream = kj::mv(open.stream);
+    setClosed();
+
+    if (output.getEncoding() != getEncoding()) {
+      // The target encoding is different from our current encoding.
+      // Let's ensure that our side is in identity encoding. The destination stream will
+      // take care of itself.
+      stream = ensureIdentityEncoding(kj::mv(stream));
+    } else {
+      // Since the encodings match, we can tell the output stream that it doesn't need to
+      // do any of the encoding work since we'll be providing data in the expected encoding.
+      KJ_ASSERT(getEncoding() == output.disownEncodingResponsibility());
+    }
+
+    // Note that because we are transferring ownership of the stream to the pump operation,
+    // and the pump itself should not rely on the ReadableSource for any state, it is
+    // safe to drop the ReadableSource once the pump operation begins.
+    co_return co_await pumpImpl(kj::mv(stream), output, end);
   }
 
   kj::Maybe<size_t> tryGetLength(rpc::StreamEncoding encoding) override {
     if (encoding == rpc::StreamEncoding::IDENTITY) {
-      KJ_IF_SOME(active, state.tryGet<kj::Own<kj::AsyncInputStream>>()) {
-        return active->tryGetLength();
+      KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
+        return open.stream->tryGetLength();
       }
     }
     return kj::none;
   }
 
   kj::Promise<kj::Array<const kj::byte>> readAllBytes(size_t limit) override {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(_, Closed) {
-        co_return kj::Array<const kj::byte>();
-      }
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        kj::throwFatalException(kj::cp(errored));
-      }
-      KJ_CASE_ONEOF(_, kj::Own<kj::AsyncInputStream>) {
-        AllReader reader(*this, limit);
-        co_return co_await reader.readAllBytes();
-      }
+    throwIfErrored();
+    if (state.is<Closed>()) {
+      co_return kj::Array<const kj::byte>();
     }
-    KJ_UNREACHABLE;
+    // Must be active
+    AllReader reader(*this, limit);
+    co_return co_await reader.readAllBytes();
   }
 
   kj::Promise<kj::String> readAllText(size_t limit) override {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(_, Closed) {
-        co_return kj::String();
-      }
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        kj::throwFatalException(kj::cp(errored));
-      }
-      KJ_CASE_ONEOF(_, kj::Own<kj::AsyncInputStream>) {
-        AllReader reader(*this, limit);
-        co_return co_await reader.readAllText();
-      }
+    throwIfErrored();
+    if (state.is<Closed>()) {
+      co_return kj::String();
     }
-    KJ_UNREACHABLE;
+    // Must be active
+    AllReader reader(*this, limit);
+    co_return co_await reader.readAllText();
   }
 
   void cancel(kj::Exception reason) override {
@@ -382,33 +382,32 @@ class ReadableSourceImpl: public ReadableSource {
   }
 
   Tee tee(size_t limit) override {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        return Tee{
-          .branch1 = newErroredReadableSource(kj::cp(errored)),
-          .branch2 = newErroredReadableSource(kj::cp(errored)),
-        };
-      }
-      KJ_CASE_ONEOF(_, Closed) {
-        return Tee{
-          .branch1 = newClosedReadableSource(),
-          .branch2 = newClosedReadableSource(),
-        };
-      }
-      KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncInputStream>) {
-        KJ_DEFER(state.init<Closed>());
-        KJ_IF_SOME(tee, tryTee(limit)) {
-          return kj::mv(tee);
-        }
-
-        auto tee = kj::newTee(kj::mv(stream), limit);
-        return Tee{
-          .branch1 = newReadableSource(wrapTeeBranch(kj::mv(tee.branches[0]))),
-          .branch2 = newReadableSource(wrapTeeBranch(kj::mv(tee.branches[1]))),
-        };
-      }
+    KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
+      return Tee{
+        .branch1 = newErroredReadableSource(kj::cp(errored)),
+        .branch2 = newErroredReadableSource(kj::cp(errored)),
+      };
     }
-    KJ_UNREACHABLE;
+
+    if (state.is<Closed>()) {
+      return Tee{
+        .branch1 = newClosedReadableSource(),
+        .branch2 = newClosedReadableSource(),
+      };
+    }
+
+    auto& open = state.requireActiveUnsafe();
+    KJ_IF_SOME(result, tryTee(limit)) {
+      setClosed();
+      return kj::mv(result);
+    }
+
+    auto teeResult = kj::newTee(kj::mv(open.stream), limit);
+    setClosed();
+    return Tee{
+      .branch1 = newReadableSource(wrapTeeBranch(kj::mv(teeResult.branches[0]))),
+      .branch2 = newReadableSource(wrapTeeBranch(kj::mv(teeResult.branches[1]))),
+    };
   }
 
   rpc::StreamEncoding getEncoding() override {
@@ -416,7 +415,19 @@ class ReadableSourceImpl: public ReadableSource {
   }
 
  protected:
-  struct Closed {};
+  // Throws the stored exception if in error state.
+  void throwIfErrored() {
+    KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
+      kj::throwFatalException(kj::cp(exception));
+    }
+  }
+
+  // Handles exceptions from read operations: stores the error and rethrows.
+  [[noreturn]] void handleOperationException() {
+    auto exception = kj::getCaughtExceptionAsKj();
+    setErrored(kj::cp(exception));
+    kj::throwFatalException(kj::mv(exception));
+  }
 
   // Implementations really should override this to provide encoding support!
   virtual kj::Own<kj::AsyncInputStream> ensureIdentityEncoding(
@@ -433,21 +444,21 @@ class ReadableSourceImpl: public ReadableSource {
     return kj::none;
   }
 
-  kj::OneOf<kj::Own<kj::AsyncInputStream>, Closed, kj::Exception>& getState() {
+  ReadableSourceState& getState() {
     return state;
   }
 
   void setClosed() {
-    state.init<Closed>();
+    state.transitionTo<Closed>();
   }
 
   void setErrored(kj::Exception reason) {
-    state = kj::mv(reason);
+    state.forceTransitionTo<kj::Exception>(kj::mv(reason));
   }
 
   kj::AsyncInputStream& setStream(kj::Own<kj::AsyncInputStream> stream) {
     auto& inner = *stream;
-    state = kj::mv(stream);
+    state.getUnsafe<Open>().stream = kj::mv(stream);
     return inner;
   }
 
@@ -456,7 +467,7 @@ class ReadableSourceImpl: public ReadableSource {
   }
 
  private:
-  kj::OneOf<kj::Own<kj::AsyncInputStream>, Closed, kj::Exception> state;
+  ReadableSourceState state;
   rpc::StreamEncoding encoding;
   kj::Canceler canceler;
 
@@ -655,110 +666,6 @@ class NoDeferredProxySource final: public ReadableSourceWrapper {
   IoContext& ioctx;
 };
 
-static const WarningAggregator::Key unusedStreamBranchKey;
-// A ReadableSource wrapper that emits a warning if it is never read from
-// before being destroyed. The warning aggregates multiple instances together and
-// prints a single warning message when the associated WarningAggregator is destroyed.
-// The message includes a stack trace of where each unused stream was created to
-// aid in debugging.
-class WarnIfUnusedStream final: public ReadableSourceWrapper {
- public:
-  class UnusedStreamWarningContext final: public WarningAggregator::WarningContext {
-   public:
-    UnusedStreamWarningContext(jsg::Lock& js): exception(jsg::JsRef(js, js.error(""_kjc))) {}
-
-    kj::String toString(jsg::Lock& js) override {
-      auto handle = exception.getHandle(js);
-      auto obj = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsObject>());
-      obj.set(js, "name"_kjc, js.strIntern("Unused stream created:"_kjc));
-      return obj.get(js, "stack"_kjc).toString(js);
-    }
-
-   private:
-    jsg::JsRef<jsg::JsValue> exception;
-  };
-
-  static kj::Own<WarningAggregator> createWarningAggregator(IoContext& context) {
-    return kj::atomicRefcounted<WarningAggregator>(
-        context, [](jsg::Lock& js, kj::Array<kj::Own<WarningAggregator::WarningContext>> warnings) {
-      StringBuffer<1024> message(1024);
-      if (warnings.size() > 1) {
-        message.append(
-            kj::str(warnings.size()), " ReadableStream branches were created but never consumed. ");
-      } else {
-        message.append("A ReadableStream branch was created but never consumed. ");
-      }
-      message.append("Such branches can be created, for instance, by calling the tee() "
-                     "method on a ReadableStream, or by calling the clone() method on a "
-                     "Request or Response object. If a branch is created but never consumed, "
-                     "it can force the runtime to buffer the entire body of the stream in "
-                     "memory, which may cause the Worker to exceed its memory limit and be "
-                     "terminated. To avoid this, ensure that all branches created are consumed.\n");
-
-      if (warnings.size() > 1) {
-        for (int n = 0; n < warnings.size(); n++) {
-          auto& warning = warnings[n];
-          message.append("\n ", kj::str(n + 1), ". ", warning->toString(js), "\n");
-        }
-      } else {
-        message.append("\n * ", warnings[0]->toString(js), "\n");
-      }
-      auto msg = message.toString();
-      js.logWarning(msg);
-    });
-  }
-
-  explicit WarnIfUnusedStream(jsg::Lock& js, kj::Own<ReadableSource> inner, IoContext& ioContext)
-      : ReadableSourceWrapper(kj::mv(inner)),
-        warningAggregator(ioContext.getWarningAggregator(unusedStreamBranchKey,
-            [](IoContext& context) { return createWarningAggregator(context); })),
-        warningContext(kj::heap<UnusedStreamWarningContext>(js)) {}
-
-  ~WarnIfUnusedStream() {
-    if (!wasRead) {
-      warningAggregator->add(kj::mv(warningContext));
-    }
-  }
-
-  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) override {
-    wasRead = true;
-    return ReadableSourceWrapper::read(buffer, minBytes);
-  }
-
-  kj::Promise<kj::Array<const kj::byte>> readAllBytes(size_t limit) override {
-    wasRead = true;
-    return ReadableSourceWrapper::readAllBytes(limit);
-  }
-
-  kj::Promise<kj::String> readAllText(size_t limit) override {
-    wasRead = true;
-    return ReadableSourceWrapper::readAllText(limit);
-  }
-
-  kj::Promise<DeferredProxy<void>> pumpTo(
-      WritableSink& output, EndAfterPump end = EndAfterPump::YES) override {
-    wasRead = true;
-    return ReadableSourceWrapper::pumpTo(output, end);
-  }
-
-  void cancel(kj::Exception reason) override {
-    wasRead = true;
-    return ReadableSourceWrapper::cancel(kj::mv(reason));
-  }
-
-  Tee tee(size_t limit) override {
-    wasRead = true;
-    return ReadableSourceWrapper::tee(limit);
-  }
-
- private:
-  kj::Own<WarningAggregator> warningAggregator;
-  kj::Own<UnusedStreamWarningContext> warningContext;
-  kj::Own<ReadableSource> inner;
-  // Used for tracking if this body was ever used.
-  bool wasRead = false;
-};
-
 // A ReadableSource implementation that lazily wraps an innner Gzip or Brotli
 // encoded AsyncInputStream when the first read() is called, or when pumpTo is called,
 // the encoding will be selectively and lazily applied to the inner stream.
@@ -800,8 +707,8 @@ class EncodedAsyncInputStream final: public ReadableSourceImpl {
     // Note that if we haven't called read() yet, then the inner stream is still
     // in its original encoding. If read() has been called, however, then the inner
     // stream will be wrapped and will be in identity encoding.
-    auto& inner = KJ_ASSERT_NONNULL(getState().tryGet<kj::Own<kj::AsyncInputStream>>());
-    auto tee = kj::newTee(kj::mv(inner), limit);
+    auto& open = KJ_ASSERT_NONNULL(getState().tryGetActiveUnsafe());
+    auto tee = kj::newTee(kj::mv(open.stream), limit);
     return Tee{
       .branch1 =
           kj::heap<EncodedAsyncInputStream>(wrapTeeBranch(kj::mv(tee.branches[0])), getEncoding()),
@@ -875,11 +782,6 @@ kj::Own<ReadableSource> newReadableSource(kj::Own<kj::AsyncInputStream> inner) {
   return kj::heap<ReadableSourceImpl>(kj::mv(inner));
 }
 
-kj::Own<ReadableSource> newWarnIfUnusedReadableSource(
-    jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableSource> inner) {
-  return kj::heap<WarnIfUnusedStream>(js, kj::mv(inner), ioContext);
-}
-
 kj::Own<ReadableSource> newEncodedReadableSource(
     rpc::StreamEncoding encoding, kj::Own<kj::AsyncInputStream> inner) {
   return kj::heap<EncodedAsyncInputStream>(kj::mv(inner), encoding);
@@ -887,6 +789,78 @@ kj::Own<ReadableSource> newEncodedReadableSource(
 
 kj::Own<kj::AsyncInputStream> wrapTeeBranch(kj::Own<kj::AsyncInputStream> branch) {
   return TeeErrorAdapter::wrap(kj::mv(branch));
+}
+
+// =======================================================================================
+// MemoryInputStream
+
+namespace {
+
+// A ReadableStreamSource backed by in-memory data that does NOT support deferred proxying.
+// This is critical when the backing memory may have V8 heap provenance - if we allowed
+// deferred proxying, the IoContext could complete and V8 GC could free the memory while
+// the deferred pump is still running, causing a use-after-free.
+//
+// TODO(soon): The expectation is that this will be update to implement ReadableSource instead
+// of ReadableStreamSource as we continue the transition.
+class MemoryInputStream final: public ReadableStreamSource {
+ public:
+  MemoryInputStream(kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing)
+      : unread(bytes),
+        backing(kj::mv(backing)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    size_t amount = kj::min(maxBytes, unread.size());
+    if (amount > 0) {
+      memcpy(buffer, unread.begin(), amount);
+      unread = unread.slice(amount, unread.size());
+    }
+    return amount;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (encoding == StreamEncoding::IDENTITY) {
+      return unread.size();
+    }
+    return kj::none;
+  }
+
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+    // Explicitly NOT using KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING here!
+    // The backing memory may be tied to V8 heap (e.g., jsg::BackingStore, Blob data),
+    // so we must complete all I/O before the IoContext can be released.
+    if (unread.size() > 0) {
+      auto data = unread;
+      unread = nullptr;
+      co_await output.write(data);
+    }
+    if (end) {
+      co_await output.end();
+    }
+    co_return;
+  }
+
+  void cancel(kj::Exception reason) override {
+    // Nothing to do - we're just reading from memory.
+    unread = nullptr;
+  }
+
+ private:
+  kj::ArrayPtr<const kj::byte> unread;
+  kj::Maybe<kj::Own<void>> backing;
+};
+
+}  // namespace
+
+kj::Own<ReadableStreamSource> newMemorySource(
+    kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> maybeBacking) {
+  KJ_IF_SOME(backing, maybeBacking) {
+    return kj::heap<MemoryInputStream>(bytes, kj::mv(backing));
+  }
+  // No backing provided - make a copy of the bytes.
+  auto copy = kj::heapArray<kj::byte>(bytes);
+  auto ptr = copy.asPtr();
+  return kj::heap<MemoryInputStream>(ptr, kj::heap(kj::mv(copy)));
 }
 
 }  // namespace workerd::api::streams

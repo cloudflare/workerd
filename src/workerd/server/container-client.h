@@ -5,21 +5,51 @@
 #pragma once
 
 #include <workerd/io/container.capnp.h>
+#include <workerd/io/io-channels.h>
+#include <workerd/server/channel-token.h>
+#include <workerd/server/docker-api.capnp.h>
 
 #include <capnp/compat/byte-stream.h>
+#include <capnp/compat/json.h>
 #include <capnp/list.h>
+#include <capnp/message.h>
+#include <kj/async-io.h>
 #include <kj/async.h>
+#include <kj/cidr.h>
 #include <kj/compat/http.h>
 #include <kj/map.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 
+#include <atomic>
+
 namespace workerd::server {
+
+// Decode a JSON string into a Cap'n Proto message of type T. The MallocMessageBuilder is
+// heap-allocated and returned as an owned pointer so that the decoded data outlives this
+// call. Callers must keep the returned message alive while accessing the root via
+// message->getRoot<T>(). A previous version allocated the builder on the stack and returned
+// a Builder (which is just a pointer into the message's arena); that caused every caller to
+// dereference freed memory after the function returned.
+template <typename T>
+kj::Own<capnp::MallocMessageBuilder> decodeJsonResponse(kj::StringPtr response) {
+  auto message = kj::heap<capnp::MallocMessageBuilder>();
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<T>();
+  auto jsonRoot = message->initRoot<T>();
+  codec.decode(response, jsonRoot);
+  return message;
+}
 
 // Docker-based implementation that implements the rpc::Container::Server interface
 // so it can be used as a rpc::Container::Client via kj::heap<ContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
 // it's talking to Docker instead of a real RPC service.
-class ContainerClient final: public rpc::Container::Server {
+//
+// ContainerClient is reference-counted to support actor reconnection with inactivity timeouts.
+// When setInactivityTimeout() is called, a timer holds a reference to prevent premature
+// destruction. The ContainerClient can be shared across multiple actor lifetimes
+class ContainerClient final: public rpc::Container::Server, public kj::Refcounted {
  public:
   ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       kj::Timer& timer,
@@ -27,7 +57,11 @@ class ContainerClient final: public rpc::Container::Server {
       kj::String dockerPath,
       kj::String containerName,
       kj::String imageName,
-      kj::TaskSet& waitUntilTasks);
+      kj::String containerEgressInterceptorImage,
+      kj::TaskSet& waitUntilTasks,
+      kj::Promise<void> pendingCleanup,
+      kj::Function<void(kj::Promise<void>)> cleanupCallback,
+      ChannelTokenHandler& channelTokenHandler);
 
   ~ContainerClient() noexcept(false);
 
@@ -40,15 +74,30 @@ class ContainerClient final: public rpc::Container::Server {
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override;
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
+  kj::Promise<void> setEgressHttp(SetEgressHttpContext context) override;
+
+  kj::Own<ContainerClient> addRef();
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
+  kj::HttpHeaderTable headerTable;
   kj::Timer& timer;
   kj::Network& network;
   kj::String dockerPath;
   kj::String containerName;
+  kj::String sidecarContainerName;
   kj::String imageName;
+
+  // Container egress interceptor image name (sidecar for egress proxy)
+  kj::String containerEgressInterceptorImage;
+
   kj::TaskSet& waitUntilTasks;
+
+  // Forked promise representing pending cleanup from a previous ContainerClient for the same
+  // container ID. status() co_awaits a branch so that Docker inspect only runs after any
+  // in-flight DELETE from the previous client has settled (either completed or been cancelled
+  // via containerCleanupCanceler, in which case the .catch_() resolves it immediately).
+  kj::ForkedPromise<void> pendingCleanup;
 
   static constexpr kj::StringPtr defaultEnv[] = {"CLOUDFLARE_COUNTRY_A2=XX"_kj,
     "CLOUDFLARE_DEPLOYMENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"_kj,
@@ -59,6 +108,9 @@ class ContainerClient final: public rpc::Container::Server {
   // Docker-specific Port implementation
   class DockerPort;
 
+  // EgressHttpService handles CONNECT requests from proxy-anything sidecar
+  friend class EgressHttpService;
+
   struct Response {
     kj::uint statusCode;
     kj::String body;
@@ -66,7 +118,15 @@ class ContainerClient final: public rpc::Container::Server {
 
   struct InspectResponse {
     bool isRunning;
-    kj::HashMap<uint16_t, uint16_t> ports;
+  };
+
+  struct IPAMConfigResult {
+    kj::String gateway;
+    kj::String subnet;
+  };
+
+  struct SidecarInspectResponse {
+    uint16_t ingressHostPort;
   };
 
   // Docker API v1.50 helper methods
@@ -76,12 +136,95 @@ class ContainerClient final: public rpc::Container::Server {
       kj::String endpoint,
       kj::Maybe<kj::String> body = kj::none);
   kj::Promise<InspectResponse> inspectContainer();
+
+  kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
+  kj::Promise<void> updateSidecarEgressConfig(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
-      kj::Maybe<capnp::List<capnp::Text>::Reader> environment);
+      kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
+      rpc::Container::StartParams::Reader params);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
   kj::Promise<void> destroyContainer();
+
+  // Sidecar container management (for egress proxy)
+  // Inspect the sidecar container to retrieve the port to ingress to
+  kj::Promise<kj::Maybe<SidecarInspectResponse>> inspectSidecar();
+  kj::Promise<void> createSidecarContainer(uint16_t egressPort, kj::String networkCidr);
+  kj::Promise<void> startSidecarContainer();
+  kj::Promise<void> destroySidecarContainer();
+  kj::Promise<void> monitorSidecarContainer();
+
+  // Cleanup callback invoked from the destructor. Receives the joined cleanup promise so
+  // ActorNamespace can wrap it with the canceler, store it for the next ContainerClient
+  // to await, and add a branch to waitUntilTasks to keep the cleanup tasks alive.
+  kj::Function<void(kj::Promise<void>)> cleanupCallback;
+
+  // For redeeming channel tokens received via setEgressHttp
+  ChannelTokenHandler& channelTokenHandler;
+
+  // Represents a parsed egress mapping. IP/CIDR mappings match all hostnames,
+  // while hostnameGlob mappings only match requests carrying a matching hostname.
+  struct EgressMapping {
+    kj::OneOf<kj::CidrRange, kj::String> destination;
+    uint16_t port;  // 0 means match all ports
+    kj::Own<workerd::IoChannelFactory::SubrequestChannel> channel;
+  };
+
+  kj::Vector<EgressMapping> egressMappings;
+
+  // Insert or replace an egress mapping. If a mapping with the same destination and port
+  // already exists, its channel is replaced; otherwise a new mapping is added.
+  void upsertEgressMapping(EgressMapping mapping);
+  kj::Vector<kj::String> getDnsAllowHostnames() const;
+
+  // Find a matching egress mapping for the given destination address (host:port format).
+  // Returns an addRef'd Own so the channel stays alive even if the mapping is later replaced.
+  kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> findEgressMapping(
+      kj::StringPtr destAddr, uint16_t defaultPort, kj::Maybe<kj::StringPtr> hostname);
+
+  // Whether general internet access is enabled for this container, when known.
+  kj::Maybe<bool> internetEnabled = kj::none;
+
+  std::atomic_bool containerStarted = false;
+  std::atomic_bool containerSidecarStarted = false;
+  std::atomic_bool egressListenerStarted = false;
+
+  kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
+  kj::Maybe<kj::Promise<void>> egressListenerTask;
+
+  uint16_t egressListenerPort = 0;
+  kj::Maybe<uint16_t> sidecarIngressHostPort;
+
+  // All mutating RPCs need to ask and wait on an RpcTurn before doing any mutations.
+  // monitor() is an exception. It waits for all pending mutating RPCs without joining
+  // the queue itself.
+  kj::ForkedPromise<void> mutationQueue = kj::Promise<void>(kj::READY_NOW).fork();
+
+  struct RpcTurn {
+    kj::Promise<void> ready;
+    kj::Own<kj::PromiseFulfiller<void>> done;
+  };
+  // Get a turn to run mutating RPC.
+  // Callers will receive a RpcTurn where they can wait and then resolve
+  // when they finish through a KJ defer.
+  RpcTurn getRpcTurn();
+
+  // Get the Docker bridge network gateway IP and subnet.
+  kj::Promise<IPAMConfigResult> getDockerBridgeIPAMConfig();
+  // Check if the Docker daemon has IPv6 enabled by inspecting the default bridge network's
+  // IPAM config for IPv6 subnets.
+  kj::Promise<bool> isDaemonIpv6Enabled();
+  // Start the egress listener on the given address. If port is 0, an OS-chosen port is used.
+  kj::Promise<uint16_t> startEgressListener(kj::String listenAddress, uint16_t port = 0);
+  void stopEgressListener();
+  // Ensure the egress listener is started exactly once.
+  // Uses egressListenerStarted as a guard. Called from setEgressHttp() and status().
+  // If port is non-zero, binds to that specific port (for reconnecting to an existing sidecar).
+  kj::Promise<void> ensureEgressListenerStarted(uint16_t port = 0);
+  // Ensure the egress listener and sidecar container are started exactly once.
+  // Uses containerSidecarStarted as a guard. Called from both start() and setEgressHttp().
+  kj::Promise<void> ensureSidecarStarted();
 };
 
 }  // namespace workerd::server

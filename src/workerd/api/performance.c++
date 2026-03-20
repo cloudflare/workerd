@@ -31,8 +31,8 @@ jsg::JsObject PerformanceMark::toJSON(jsg::Lock& js) {
   obj.set(js, "entryType"_kj, js.str(entryType));
   obj.set(js, "startTime"_kj, js.num(startTime));
   obj.set(js, "duration"_kj, js.num(duration));
-  KJ_IF_SOME(d, getDetail(js)) {
-    obj.set(js, "detail"_kj, d);
+  KJ_IF_SOME(d, detail) {
+    obj.set(js, "detail"_kj, d.getHandle(js));
   }
   return kj::mv(obj);
 }
@@ -43,8 +43,8 @@ jsg::JsObject PerformanceMeasure::toJSON(jsg::Lock& js) {
   obj.set(js, "entryType"_kj, js.str(entryType));
   obj.set(js, "startTime"_kj, js.num(startTime));
   obj.set(js, "duration"_kj, js.num(duration));
-  KJ_IF_SOME(d, getDetail(js)) {
-    obj.set(js, "detail"_kj, d);
+  KJ_IF_SOME(d, detail) {
+    obj.set(js, "detail"_kj, d.getHandle(js));
   }
   return kj::mv(obj);
 }
@@ -60,6 +60,28 @@ jsg::JsObject PerformanceEntry::toJSON(jsg::Lock& js) {
 
 jsg::JsObject PerformanceResourceTiming::toJSON(jsg::Lock& js) {
   JSG_FAIL_REQUIRE(Error, "PerformanceResourceTiming.toJSON is not implemented"_kj);
+}
+
+jsg::JsObject PerformanceNodeTiming::toJSON(jsg::Lock& js) {
+  auto obj = js.objNoProto();
+  obj.set(js, "name"_kj, js.str(name));
+  obj.set(js, "entryType"_kj, js.str(entryType));
+  obj.set(js, "startTime"_kj, js.num(startTime));
+  obj.set(js, "duration"_kj, js.num(duration));
+  obj.set(js, "nodeStart"_kj, js.num(0));
+  obj.set(js, "v8Start"_kj, js.num(0));
+  obj.set(js, "bootstrapComplete"_kj, js.num(0));
+  obj.set(js, "environment"_kj, js.num(0));
+  obj.set(js, "loopStart"_kj, js.num(0));
+  obj.set(js, "loopExit"_kj, js.num(0));
+  obj.set(js, "idleTime"_kj, js.num(0));
+  // Include uvMetricsInfo in the JSON representation
+  auto uvObj = js.objNoProto();
+  uvObj.set(js, "loopCount"_kj, js.num(0));
+  uvObj.set(js, "events"_kj, js.num(0));
+  uvObj.set(js, "eventsWaiting"_kj, js.num(0));
+  obj.set(js, "uvMetricsInfo"_kj, uvObj);
+  return kj::mv(obj);
 }
 
 void Performance::clearMarks(jsg::Optional<kj::String> name) {
@@ -190,57 +212,56 @@ jsg::Ref<PerformanceMark> Performance::mark(
 
 jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
     kj::String measureName,
-    kj::OneOf<PerformanceMeasure::Options, kj::String> measureOptionsOrStartMark,
+    jsg::Optional<kj::OneOf<PerformanceMeasure::Options, kj::String>> measureOptionsOrStartMark,
     jsg::Optional<kj::String> maybeEndMark) {
   isolateLimitEnforcer.markPerfEvent("performance_measure"_kjc);
-  double startTime = dateNow();
-  double endTime = startTime;
+  // Default: measure from timeOrigin (0) to now, per the Web Performance API spec.
+  double startTime = 0;
+  double endTime = dateNow();
 
-  KJ_SWITCH_ONEOF(measureOptionsOrStartMark) {
-    KJ_CASE_ONEOF(startMark, kj::String) {
-      auto startMarks = getEntriesByName(kj::str(startMark), kj::str("mark"));
-      if (startMarks.size() > 0) {
-        startTime = startMarks[0]->getStartTime();
-      }
+  KJ_IF_SOME(startOrOptions, measureOptionsOrStartMark) {
+    KJ_SWITCH_ONEOF(startOrOptions) {
+      KJ_CASE_ONEOF(startMark, kj::String) {
+        auto startMarks = getEntriesByName(kj::str(startMark), kj::str("mark"));
+        if (startMarks.size() > 0) {
+          startTime = startMarks[0]->getStartTime();
+        }
 
-      KJ_IF_SOME(endMark, maybeEndMark) {
-        auto endMarks = getEntriesByName(kj::str(endMark), kj::str("mark"));
-        if (endMarks.size() > 0) {
-          endTime = endMarks[0]->getStartTime();
+        KJ_IF_SOME(endMark, maybeEndMark) {
+          auto endMarks = getEntriesByName(kj::str(endMark), kj::str("mark"));
+          if (endMarks.size() > 0) {
+            endTime = endMarks[0]->getStartTime();
+          }
         }
       }
-    }
-    KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
-      KJ_IF_SOME(start, options.start) {
-        startTime = start;
-      }
+      KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
+        KJ_IF_SOME(start, options.start) {
+          startTime = start;
+        }
 
-      KJ_IF_SOME(end, options.end) {
-        endTime = end;
-      } else KJ_IF_SOME(duration, options.duration) {
-        endTime = startTime + duration;
+        KJ_IF_SOME(end, options.end) {
+          endTime = end;
+        } else KJ_IF_SOME(duration, options.duration) {
+          endTime = startTime + duration;
+        }
       }
     }
   }
 
-  uint32_t duration = endTime >= startTime ? endTime - startTime : 0;
+  double duration = endTime >= startTime ? endTime - startTime : 0;
   auto measure = js.alloc<PerformanceMeasure>(kj::mv(measureName), startTime, duration);
 
-  KJ_SWITCH_ONEOF(measureOptionsOrStartMark) {
-    KJ_CASE_ONEOF(startMark, kj::String) {
-      auto detailObj = js.objNoProto();
-      detailObj.set(js, "start", js.num(startTime));
-      detailObj.set(js, "end", js.num(endTime));
-      measure->detail = jsg::JsRef<jsg::JsObject>(js, detailObj);
-    }
-    KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
-      KJ_IF_SOME(d, options.detail) {
-        measure->detail = jsg::JsRef<jsg::JsObject>(js, d.getHandle(js));
-      } else {
-        auto detailObj = js.objNoProto();
-        detailObj.set(js, "start", js.num(startTime));
-        detailObj.set(js, "end", js.num(endTime));
-        measure->detail = jsg::JsRef<jsg::JsObject>(js, detailObj);
+  // Per the spec, detail defaults to null. Only set it if explicitly provided in options.
+  KJ_IF_SOME(startOrOptions, measureOptionsOrStartMark) {
+    KJ_SWITCH_ONEOF(startOrOptions) {
+      KJ_CASE_ONEOF(startMark, kj::String) {
+        // detail remains null when using string marks
+      }
+      KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
+        KJ_IF_SOME(d, options.detail) {
+          measure->detail = jsg::JsRef<jsg::JsObject>(js, d.getHandle(js));
+        }
+        // If options.detail is not provided, detail remains null
       }
     }
   }
@@ -250,7 +271,14 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
 }
 
 void Performance::setResourceTimingBufferSize(uint32_t size) {
-  JSG_FAIL_REQUIRE(Error, "Performance.setResourceTimingBufferSize is not implemented");
+  // No-op stub for compatibility. Resource timing is not applicable in the Workers context,
+  // but we avoid throwing so that isomorphic code calling this defensively does not break.
+}
+
+jsg::JsObject Performance::toJSON(jsg::Lock& js) {
+  auto obj = js.objNoProto();
+  obj.set(js, "timeOrigin"_kj, js.num(getTimeOrigin()));
+  return kj::mv(obj);
 }
 
 jsg::Ref<PerformanceObserver> PerformanceObserver::constructor(jsg::Lock& js, Callback callback) {
@@ -272,12 +300,23 @@ kj::ArrayPtr<const kj::StringPtr> PerformanceObserver::getSupportedEntryTypes() 
   return supportedEntryTypes.asPtr();
 }
 
-void Performance::eventLoopUtilization() {
-  JSG_FAIL_REQUIRE(Error, "Performance.eventLoopUtilization is not implemented");
+Performance::EventLoopUtilization Performance::eventLoopUtilization() {
+  // Return stub values - actual event loop utilization metrics are not available in workerd.
+  // This provides compatibility with code that expects Node.js-style performance APIs.
+  return EventLoopUtilization{
+    .idle = 0,
+    .active = 0,
+    .utilization = 0,
+  };
+}
+
+jsg::Ref<PerformanceNodeTiming> Performance::getNodeTiming(jsg::Lock& js) {
+  return js.alloc<PerformanceNodeTiming>();
 }
 
 void Performance::markResourceTiming() {
-  JSG_FAIL_REQUIRE(Error, "Performance.markResourceTiming is not implemented");
+  // No-op stub - resource timing is not applicable in the Workers context.
+  // This provides compatibility with code that expects this API to exist.
 }
 
 jsg::Function<void()> Performance::timerify(jsg::Lock& js, jsg::Function<void()> fn) {

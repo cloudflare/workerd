@@ -264,6 +264,391 @@ export declare abstract class BaseAiTranslation {
   postProcessedOutputs: AiTranslationOutput;
 }
 /**
+ * Workers AI support for OpenAI's Chat Completions API
+ */
+export type ChatCompletionContentPartText = {
+  type: "text";
+  text: string;
+};
+export type ChatCompletionContentPartImage = {
+  type: "image_url";
+  image_url: {
+    url: string;
+    detail?: "auto" | "low" | "high";
+  };
+};
+export type ChatCompletionContentPartInputAudio = {
+  type: "input_audio";
+  input_audio: {
+    /** Base64 encoded audio data. */
+    data: string;
+    format: "wav" | "mp3";
+  };
+};
+export type ChatCompletionContentPartFile = {
+  type: "file";
+  file: {
+    /** Base64 encoded file data. */
+    file_data?: string;
+    /** The ID of an uploaded file. */
+    file_id?: string;
+    filename?: string;
+  };
+};
+export type ChatCompletionContentPartRefusal = {
+  type: "refusal";
+  refusal: string;
+};
+export type ChatCompletionContentPart =
+  | ChatCompletionContentPartText
+  | ChatCompletionContentPartImage
+  | ChatCompletionContentPartInputAudio
+  | ChatCompletionContentPartFile;
+export type FunctionDefinition = {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+  strict?: boolean | null;
+};
+export type ChatCompletionFunctionTool = {
+  type: "function";
+  function: FunctionDefinition;
+};
+export type ChatCompletionCustomToolGrammarFormat = {
+  type: "grammar";
+  grammar: {
+    definition: string;
+    syntax: "lark" | "regex";
+  };
+};
+export type ChatCompletionCustomToolTextFormat = {
+  type: "text";
+};
+export type ChatCompletionCustomToolFormat = ChatCompletionCustomToolTextFormat | ChatCompletionCustomToolGrammarFormat;
+export type ChatCompletionCustomTool = {
+  type: "custom";
+  custom: {
+    name: string;
+    description?: string;
+    format?: ChatCompletionCustomToolFormat;
+  };
+};
+export type ChatCompletionTool = ChatCompletionFunctionTool | ChatCompletionCustomTool;
+export type ChatCompletionMessageFunctionToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    /** JSON-encoded arguments string. */
+    arguments: string;
+  };
+};
+export type ChatCompletionMessageCustomToolCall = {
+  id: string;
+  type: "custom";
+  custom: {
+    name: string;
+    input: string;
+  };
+};
+export type ChatCompletionMessageToolCall = ChatCompletionMessageFunctionToolCall | ChatCompletionMessageCustomToolCall;
+export type ChatCompletionToolChoiceFunction = {
+  type: "function";
+  function: {
+    name: string;
+  };
+};
+export type ChatCompletionToolChoiceCustom = {
+  type: "custom";
+  custom: {
+    name: string;
+  };
+};
+export type ChatCompletionToolChoiceAllowedTools = {
+  type: "allowed_tools";
+  allowed_tools: {
+    mode: "auto" | "required";
+    tools: Array<Record<string, unknown>>;
+  };
+};
+export type ChatCompletionToolChoiceOption =
+  | "none"
+  | "auto"
+  | "required"
+  | ChatCompletionToolChoiceFunction
+  | ChatCompletionToolChoiceCustom
+  | ChatCompletionToolChoiceAllowedTools;
+export type DeveloperMessage = {
+  role: "developer";
+  content:
+    | string
+    | Array<{
+        type: "text";
+        text: string;
+      }>;
+  name?: string;
+};
+export type SystemMessage = {
+  role: "system";
+  content:
+    | string
+    | Array<{
+        type: "text";
+        text: string;
+      }>;
+  name?: string;
+};
+/**
+ * Permissive merged content part used inside UserMessage arrays.
+ *
+ * Cabidela has a limitation where anyOf/oneOf with enum-based discrimination
+ * inside nested array items does not correctly match different branches for
+ * different array elements, so the schema uses a single merged object.
+ */
+export type UserMessageContentPart = {
+  type: "text" | "image_url" | "input_audio" | "file";
+  text?: string;
+  image_url?: {
+    url?: string;
+    detail?: "auto" | "low" | "high";
+  };
+  input_audio?: {
+    data?: string;
+    format?: "wav" | "mp3";
+  };
+  file?: {
+    file_data?: string;
+    file_id?: string;
+    filename?: string;
+  };
+};
+export type UserMessage = {
+  role: "user";
+  content: string | Array<UserMessageContentPart>;
+  name?: string;
+};
+export type AssistantMessageContentPart = {
+  type: "text" | "refusal";
+  text?: string;
+  refusal?: string;
+};
+export type AssistantMessage = {
+  role: "assistant";
+  content?: string | null | Array<AssistantMessageContentPart>;
+  refusal?: string | null;
+  name?: string;
+  audio?: {
+    id: string;
+  };
+  tool_calls?: Array<ChatCompletionMessageToolCall>;
+  function_call?: {
+    name: string;
+    arguments: string;
+  };
+};
+export type ToolMessage = {
+  role: "tool";
+  content:
+    | string
+    | Array<{
+        type: "text";
+        text: string;
+      }>;
+  tool_call_id: string;
+};
+export type FunctionMessage = {
+  role: "function";
+  content: string;
+  name: string;
+};
+export type ChatCompletionMessageParam =
+  | DeveloperMessage
+  | SystemMessage
+  | UserMessage
+  | AssistantMessage
+  | ToolMessage
+  | FunctionMessage;
+export type ChatCompletionsResponseFormatText = {
+  type: "text";
+};
+export type ChatCompletionsResponseFormatJSONObject = {
+  type: "json_object";
+};
+export type ResponseFormatJSONSchema = {
+  type: "json_schema";
+  json_schema: {
+    name: string;
+    description?: string;
+    schema?: Record<string, unknown>;
+    strict?: boolean | null;
+  };
+};
+export type ResponseFormat =
+  | ChatCompletionsResponseFormatText
+  | ChatCompletionsResponseFormatJSONObject
+  | ResponseFormatJSONSchema;
+export type ChatCompletionsStreamOptions = {
+  include_usage?: boolean;
+  include_obfuscation?: boolean;
+};
+export type PredictionContent = {
+  type: "content";
+  content:
+    | string
+    | Array<{
+        type: "text";
+        text: string;
+      }>;
+};
+export type AudioParams = {
+  voice:
+    | string
+    | {
+        id: string;
+      };
+  format: "wav" | "aac" | "mp3" | "flac" | "opus" | "pcm16";
+};
+export type WebSearchUserLocation = {
+  type: "approximate";
+  approximate: {
+    city?: string;
+    country?: string;
+    region?: string;
+    timezone?: string;
+  };
+};
+export type WebSearchOptions = {
+  search_context_size?: "low" | "medium" | "high";
+  user_location?: WebSearchUserLocation;
+};
+export type ChatTemplateKwargs = {
+  /** Whether to enable reasoning, enabled by default. */
+  enable_thinking?: boolean;
+  /** If false, preserves reasoning context between turns. */
+  clear_thinking?: boolean;
+};
+/** Shared optional properties used by both Prompt and Messages input branches. */
+export type ChatCompletionsCommonOptions = {
+  model?: string;
+  audio?: AudioParams;
+  frequency_penalty?: number | null;
+  logit_bias?: Record<string, unknown> | null;
+  logprobs?: boolean | null;
+  top_logprobs?: number | null;
+  max_tokens?: number | null;
+  max_completion_tokens?: number | null;
+  metadata?: Record<string, unknown> | null;
+  modalities?: Array<"text" | "audio"> | null;
+  n?: number | null;
+  parallel_tool_calls?: boolean;
+  prediction?: PredictionContent;
+  presence_penalty?: number | null;
+  reasoning_effort?: "low" | "medium" | "high" | null;
+  chat_template_kwargs?: ChatTemplateKwargs;
+  response_format?: ResponseFormat;
+  seed?: number | null;
+  service_tier?: "auto" | "default" | "flex" | "scale" | "priority" | null;
+  stop?: string | Array<string> | null;
+  store?: boolean | null;
+  stream?: boolean | null;
+  stream_options?: ChatCompletionsStreamOptions;
+  temperature?: number | null;
+  tool_choice?: ChatCompletionToolChoiceOption;
+  tools?: Array<ChatCompletionTool>;
+  top_p?: number | null;
+  user?: string;
+  web_search_options?: WebSearchOptions;
+  function_call?:
+    | "none"
+    | "auto"
+    | {
+        name: string;
+      };
+  functions?: Array<FunctionDefinition>;
+};
+export type PromptTokensDetails = {
+  cached_tokens?: number;
+  audio_tokens?: number;
+};
+export type CompletionTokensDetails = {
+  reasoning_tokens?: number;
+  audio_tokens?: number;
+  accepted_prediction_tokens?: number;
+  rejected_prediction_tokens?: number;
+};
+export type CompletionUsage = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  prompt_tokens_details?: PromptTokensDetails;
+  completion_tokens_details?: CompletionTokensDetails;
+};
+export type ChatCompletionTopLogprob = {
+  token: string;
+  logprob: number;
+  bytes: Array<number> | null;
+};
+export type ChatCompletionTokenLogprob = {
+  token: string;
+  logprob: number;
+  bytes: Array<number> | null;
+  top_logprobs: Array<ChatCompletionTopLogprob>;
+};
+export type ChatCompletionAudio = {
+  id: string;
+  /** Base64 encoded audio bytes. */
+  data: string;
+  expires_at: number;
+  transcript: string;
+};
+export type ChatCompletionUrlCitation = {
+  type: "url_citation";
+  url_citation: {
+    url: string;
+    title: string;
+    start_index: number;
+    end_index: number;
+  };
+};
+export type ChatCompletionResponseMessage = {
+  role: "assistant";
+  content: string | null;
+  refusal: string | null;
+  annotations?: Array<ChatCompletionUrlCitation>;
+  audio?: ChatCompletionAudio;
+  tool_calls?: Array<ChatCompletionMessageToolCall>;
+  function_call?: {
+    name: string;
+    arguments: string;
+  } | null;
+};
+export type ChatCompletionLogprobs = {
+  content: Array<ChatCompletionTokenLogprob> | null;
+  refusal?: Array<ChatCompletionTokenLogprob> | null;
+};
+export type ChatCompletionChoice = {
+  index: number;
+  message: ChatCompletionResponseMessage;
+  finish_reason: "stop" | "length" | "tool_calls" | "content_filter" | "function_call";
+  logprobs: ChatCompletionLogprobs | null;
+};
+export type ChatCompletionsPromptInput = {
+  prompt: string;
+} & ChatCompletionsCommonOptions;
+export type ChatCompletionsMessagesInput = {
+  messages: Array<ChatCompletionMessageParam>;
+} & ChatCompletionsCommonOptions;
+export type ChatCompletionsOutput = {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: Array<ChatCompletionChoice>;
+  usage?: CompletionUsage;
+  system_fingerprint?: string | null;
+  service_tier?: "auto" | "default" | "flex" | "scale" | "priority" | null;
+};
+/**
  * Workers AI support for OpenAI's Responses API
  * Reference: https://github.com/openai/openai-node/blob/master/src/resources/responses/responses.ts
  *
@@ -671,6 +1056,12 @@ export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | null;
 export type StreamOptions = {
   include_obfuscation?: boolean;
 };
+/** Marks keys from T that aren't in U as optional never */
+export type Without<T, U> = {
+  [P in Exclude<keyof T, keyof U>]?: never;
+};
+/** Either T or U, but not both (mutually exclusive) */
+export type XOR<T, U> = (T & Without<U, T>) | (U & Without<T, U>);
 export type Ai_Cf_Baai_Bge_Base_En_V1_5_Input =
   | {
       text: string | string[];
@@ -963,10 +1354,12 @@ export declare abstract class Base_Ai_Cf_Openai_Whisper_Tiny_En {
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Tiny_En_Output;
 }
 export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input {
-  /**
-   * Base64 encoded value of the audio data.
-   */
-  audio: string;
+  audio:
+    | string
+    | {
+        body?: object;
+        contentType?: string;
+      };
   /**
    * Supported tasks are 'translate' or 'transcribe'.
    */
@@ -984,9 +1377,33 @@ export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input {
    */
   initial_prompt?: string;
   /**
-   * The prefix it appended the the beginning of the output of the transcription and can guide the transcription result.
+   * The prefix appended to the beginning of the output of the transcription and can guide the transcription result.
    */
   prefix?: string;
+  /**
+   * The number of beams to use in beam search decoding. Higher values may improve accuracy at the cost of speed.
+   */
+  beam_size?: number;
+  /**
+   * Whether to condition on previous text during transcription. Setting to false may help prevent hallucination loops.
+   */
+  condition_on_previous_text?: boolean;
+  /**
+   * Threshold for detecting no-speech segments. Segments with no-speech probability above this value are skipped.
+   */
+  no_speech_threshold?: number;
+  /**
+   * Threshold for filtering out segments with high compression ratio, which often indicate repetitive or hallucinated text.
+   */
+  compression_ratio_threshold?: number;
+  /**
+   * Threshold for filtering out segments with low average log probability, indicating low confidence.
+   */
+  log_prob_threshold?: number;
+  /**
+   * Optional threshold (in seconds) to skip silent periods that may cause hallucinations.
+   */
+  hallucination_silence_threshold?: number;
 }
 export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output {
   transcription_info?: {
@@ -1130,11 +1547,11 @@ export interface Ai_Cf_Baai_Bge_M3_Input_Embedding_1 {
   truncate_inputs?: boolean;
 }
 export type Ai_Cf_Baai_Bge_M3_Output =
-  | Ai_Cf_Baai_Bge_M3_Ouput_Query
+  | Ai_Cf_Baai_Bge_M3_Output_Query
   | Ai_Cf_Baai_Bge_M3_Output_EmbeddingFor_Contexts
-  | Ai_Cf_Baai_Bge_M3_Ouput_Embedding
+  | Ai_Cf_Baai_Bge_M3_Output_Embedding
   | Ai_Cf_Baai_Bge_M3_AsyncResponse;
-export interface Ai_Cf_Baai_Bge_M3_Ouput_Query {
+export interface Ai_Cf_Baai_Bge_M3_Output_Query {
   response?: {
     /**
      * Index of the context in the request
@@ -1154,7 +1571,7 @@ export interface Ai_Cf_Baai_Bge_M3_Output_EmbeddingFor_Contexts {
    */
   pooling?: "mean" | "cls";
 }
-export interface Ai_Cf_Baai_Bge_M3_Ouput_Embedding {
+export interface Ai_Cf_Baai_Bge_M3_Output_Embedding {
   shape?: number[];
   /**
    * Embeddings of the requested text values
@@ -1259,7 +1676,7 @@ export interface Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Messages {
      */
     role?: string;
     /**
-     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     * The tool call id. If you don't know what to put here you can fall back to 000000001
      */
     tool_call_id?: string;
     content?:
@@ -1514,10 +1931,18 @@ export interface Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages {
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
     role: string;
-    /**
-     * The content of the message as a string.
-     */
-    content: string;
+    content:
+      | string
+      | {
+          /**
+           * Type of the content (text)
+           */
+          type?: string;
+          /**
+           * Text content
+           */
+          text?: string;
+        }[];
   }[];
   functions?: {
     name: string;
@@ -2171,7 +2596,7 @@ export interface Ai_Cf_Qwen_Qwq_32B_Messages {
      */
     role?: string;
     /**
-     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     * The tool call id. If you don't know what to put here you can fall back to 000000001
      */
     tool_call_id?: string;
     content?:
@@ -3514,10 +3939,18 @@ export interface Ai_Cf_Qwen_Qwen3_30B_A3B_Fp8_Messages {
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
     role: string;
-    /**
-     * The content of the message as a string.
-     */
-    content: string;
+    content:
+      | string
+      | {
+          /**
+           * Type of the content (text)
+           */
+          type?: string;
+          /**
+           * Text content
+           */
+          text?: string;
+        }[];
   }[];
   functions?: {
     name: string;
@@ -3726,10 +4159,18 @@ export interface Ai_Cf_Qwen_Qwen3_30B_A3B_Fp8_Messages_1 {
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
     role: string;
-    /**
-     * The content of the message as a string.
-     */
-    content: string;
+    content:
+      | string
+      | {
+          /**
+           * Type of the content (text)
+           */
+          type?: string;
+          /**
+           * Text content
+           */
+          text?: string;
+        }[];
   }[];
   functions?: {
     name: string;
@@ -4289,12 +4730,12 @@ export declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: ResponsesInput;
-  postProcessedOutputs: ResponsesOutput;
+  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: ResponsesInput;
-  postProcessedOutputs: ResponsesOutput;
+  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 export interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
   /**
@@ -4542,10 +4983,18 @@ export interface Ai_Cf_Aisingapore_Gemma_Sea_Lion_V4_27B_It_Messages {
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
     role: string;
-    /**
-     * The content of the message as a string.
-     */
-    content: string;
+    content:
+      | string
+      | {
+          /**
+           * Type of the content (text)
+           */
+          type?: string;
+          /**
+           * Text content
+           */
+          text?: string;
+        }[];
   }[];
   functions?: {
     name: string;
@@ -4757,10 +5206,18 @@ export interface Ai_Cf_Aisingapore_Gemma_Sea_Lion_V4_27B_It_Messages_1 {
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
     role: string;
-    /**
-     * The content of the message as a string.
-     */
-    content: string;
+    content:
+      | string
+      | {
+          /**
+           * Type of the content (text)
+           */
+          type?: string;
+          /**
+           * Text content
+           */
+          text?: string;
+        }[];
   }[];
   functions?: {
     name: string;
@@ -5310,6 +5767,66 @@ export declare abstract class Base_Ai_Cf_Deepgram_Aura_2_Es {
   inputs: Ai_Cf_Deepgram_Aura_2_Es_Input;
   postProcessedOutputs: Ai_Cf_Deepgram_Aura_2_Es_Output;
 }
+export interface Ai_Cf_Black_Forest_Labs_Flux_2_Dev_Input {
+  multipart: {
+    body?: object;
+    contentType?: string;
+  };
+}
+export interface Ai_Cf_Black_Forest_Labs_Flux_2_Dev_Output {
+  /**
+   * Generated image as Base64 string.
+   */
+  image?: string;
+}
+export declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_2_Dev {
+  inputs: Ai_Cf_Black_Forest_Labs_Flux_2_Dev_Input;
+  postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_2_Dev_Output;
+}
+export interface Ai_Cf_Black_Forest_Labs_Flux_2_Klein_4B_Input {
+  multipart: {
+    body?: object;
+    contentType?: string;
+  };
+}
+export interface Ai_Cf_Black_Forest_Labs_Flux_2_Klein_4B_Output {
+  /**
+   * Generated image as Base64 string.
+   */
+  image?: string;
+}
+export declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_4B {
+  inputs: Ai_Cf_Black_Forest_Labs_Flux_2_Klein_4B_Input;
+  postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_2_Klein_4B_Output;
+}
+export interface Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B_Input {
+  multipart: {
+    body?: object;
+    contentType?: string;
+  };
+}
+export interface Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B_Output {
+  /**
+   * Generated image as Base64 string.
+   */
+  image?: string;
+}
+export declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B {
+  inputs: Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B_Input;
+  postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B_Output;
+}
+export declare abstract class Base_Ai_Cf_Zai_Org_Glm_4_7_Flash {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+export declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
+export declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -5328,7 +5845,6 @@ export interface AiModels {
   "@hf/thebloke/zephyr-7b-beta-awq": BaseAiTextGeneration;
   "@hf/thebloke/openhermes-2.5-mistral-7b-awq": BaseAiTextGeneration;
   "@hf/thebloke/neural-chat-7b-v3-1-awq": BaseAiTextGeneration;
-  "@hf/thebloke/llamaguard-7b-awq": BaseAiTextGeneration;
   "@hf/thebloke/deepseek-coder-6.7b-base-awq": BaseAiTextGeneration;
   "@hf/thebloke/deepseek-coder-6.7b-instruct-awq": BaseAiTextGeneration;
   "@cf/deepseek-ai/deepseek-math-7b-instruct": BaseAiTextGeneration;
@@ -5395,6 +5911,12 @@ export interface AiModels {
   "@cf/deepgram/flux": Base_Ai_Cf_Deepgram_Flux;
   "@cf/deepgram/aura-2-en": Base_Ai_Cf_Deepgram_Aura_2_En;
   "@cf/deepgram/aura-2-es": Base_Ai_Cf_Deepgram_Aura_2_Es;
+  "@cf/black-forest-labs/flux-2-dev": Base_Ai_Cf_Black_Forest_Labs_Flux_2_Dev;
+  "@cf/black-forest-labs/flux-2-klein-4b": Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_4B;
+  "@cf/black-forest-labs/flux-2-klein-9b": Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B;
+  "@cf/zai-org/glm-4.7-flash": Base_Ai_Cf_Zai_Org_Glm_4_7_Flash;
+  "@cf/moonshotai/kimi-k2.5": Base_Ai_Cf_Moonshotai_Kimi_K2_5;
+  "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
 }
 export type AiOptions = {
   /**
@@ -5446,12 +5968,63 @@ export type AiModelsSearchObject = {
     value: string;
   }[];
 };
+export type ChatCompletionsBase = XOR<ChatCompletionsPromptInput, ChatCompletionsMessagesInput>;
+export type ChatCompletionsInput = XOR<
+  ChatCompletionsBase,
+  {
+    requests: ChatCompletionsBase[];
+  }
+>;
 export interface InferenceUpstreamError extends Error {}
 export interface AiInternalError extends Error {}
 export type AiModelListType = Record<string, any>;
 export declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
+
+  /**
+   * Access the AI Search API for managing AI-powered search instances.
+   *
+   * This is the new API that replaces AutoRAG with better namespace separation:
+   * - Account-level operations: `list()`, `create()`
+   * - Instance-level operations: `get(id).search()`, `get(id).chatCompletions()`, `get(id).delete()`
+   *
+   * @example
+   * ```typescript
+   * // List all AI Search instances
+   * const instances = await env.AI.aiSearch.list();
+   *
+   * // Search an instance
+   * const results = await env.AI.aiSearch.get('my-search').search({
+   *   messages: [{ role: 'user', content: 'What is the policy?' }],
+   *   ai_search_options: {
+   *     retrieval: { max_num_results: 10 }
+   *   }
+   * });
+   *
+   * // Generate chat completions with AI Search context
+   * const response = await env.AI.aiSearch.get('my-search').chatCompletions({
+   *   messages: [{ role: 'user', content: 'What is the policy?' }],
+   *   model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+   * });
+   * ```
+   */
+  aiSearch(): AiSearchAccountService;
+
+  /**
+   * @deprecated AutoRAG has been replaced by AI Search.
+   * Use `env.AI.aiSearch` instead for better API design and new features.
+   *
+   * Migration guide:
+   * - `env.AI.autorag().list()` → `env.AI.aiSearch.list()`
+   * - `env.AI.autorag('id').search({ query: '...' })` → `env.AI.aiSearch.get('id').search({ messages: [{ role: 'user', content: '...' }] })`
+   * - `env.AI.autorag('id').aiSearch(...)` → `env.AI.aiSearch.get('id').chatCompletions(...)`
+   *
+   * Note: The old API continues to work for backwards compatibility, but new projects should use AI Search.
+   *
+   * @see AiSearchAccountService
+   * @param autoragId Optional instance ID (omit for account-level operations)
+   */
   autorag(autoragId: string): AutoRAG;
   run<Name extends keyof AiModelList, Options extends AiOptions, InputOptions extends AiModelList[Name]["inputs"]>(
     model: Name,

@@ -5,6 +5,8 @@
 #include "impl.h"
 #include "kdf.h"
 
+#include <workerd/jsg/jsvalue.h>
+
 #include <ncrypto.h>
 
 namespace workerd::api {
@@ -34,19 +36,21 @@ class HkdfKey final: public CryptoKey::Impl {
   }
 
  private:
-  jsg::BufferSource deriveBits(jsg::Lock& js,
+  jsg::JsArrayBuffer deriveBits(jsg::Lock& js,
       SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> maybeLength) const override {
     kj::StringPtr hashName = api::getAlgorithmName(
         JSG_REQUIRE_NONNULL(algorithm.hash, TypeError, "Missing field \"hash\" in \"algorithm\"."));
     const EVP_MD* hashType = lookupDigestAlgorithm(hashName).second;
 
-    const auto& salt =
+    auto saltHandle =
         JSG_REQUIRE_NONNULL(algorithm.salt, TypeError, "Missing field \"salt\" in \"algorithm\".")
-            .asArrayPtr();
-    const auto& info =
+            .getHandle(js);
+    const auto& salt = saltHandle.asArrayPtr();
+    auto infoHandle =
         JSG_REQUIRE_NONNULL(algorithm.info, TypeError, "Missing field \"info\" in \"algorithm\".")
-            .asArrayPtr();
+            .getHandle(js);
+    const auto& info = infoHandle.asArrayPtr();
 
     uint32_t length = JSG_REQUIRE_NONNULL(
         maybeLength, DOMOperationError, "HKDF cannot derive a key with null length.");
@@ -81,7 +85,7 @@ class HkdfKey final: public CryptoKey::Impl {
 };
 }  // namespace
 
-kj::Maybe<jsg::BufferSource> hkdf(jsg::Lock& js,
+kj::Maybe<jsg::JsArrayBuffer> hkdf(jsg::Lock& js,
     size_t length,
     const EVP_MD* digest,
     kj::ArrayPtr<const kj::byte> key,
@@ -90,11 +94,11 @@ kj::Maybe<jsg::BufferSource> hkdf(jsg::Lock& js,
   // Because we want to be using the v8 sandbox, we need to allocate the result
   // buffer in the v8 isolate heap then generate the HKDF result into that.
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
-  auto buf = ToNcryptoBuffer(backing.asArrayPtr());
+  auto buf = jsg::JsArrayBuffer::create(js, length);
+  auto ncBuf = ToNcryptoBuffer(buf.asArrayPtr());
   if (ncrypto::hkdfInfo(digest, ToNcryptoBuffer(key), ToNcryptoBuffer(info), ToNcryptoBuffer(salt),
-          length, &buf)) {
-    return jsg::BufferSource(js, kj::mv(backing));
+          length, &ncBuf)) {
+    return kj::mv(buf);
   }
 
   return kj::none;

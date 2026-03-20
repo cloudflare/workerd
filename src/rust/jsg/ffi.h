@@ -32,19 +32,78 @@ Local local_clone(const Local& value);
 Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
 Local local_new_string(Isolate* isolate, ::rust::Str value);
+Local local_new_boolean(Isolate* isolate, bool value);
 Local local_new_object(Isolate* isolate);
+Local local_new_null(Isolate* isolate);
+Local local_new_undefined(Isolate* isolate);
+Local local_new_array(Isolate* isolate, size_t length);
+Local local_new_uint8_array(Isolate* isolate, const uint8_t* data, size_t length);
+Local local_new_uint16_array(Isolate* isolate, const uint16_t* data, size_t length);
+Local local_new_uint32_array(Isolate* isolate, const uint32_t* data, size_t length);
+Local local_new_int8_array(Isolate* isolate, const int8_t* data, size_t length);
+Local local_new_int16_array(Isolate* isolate, const int16_t* data, size_t length);
+Local local_new_int32_array(Isolate* isolate, const int32_t* data, size_t length);
+Local local_new_float32_array(Isolate* isolate, const float* data, size_t length);
+Local local_new_float64_array(Isolate* isolate, const double* data, size_t length);
+Local local_new_bigint64_array(Isolate* isolate, const int64_t* data, size_t length);
+Local local_new_biguint64_array(Isolate* isolate, const uint64_t* data, size_t length);
 bool local_eq(const Local& lhs, const Local& rhs);
 bool local_has_value(const Local& val);
 bool local_is_string(const Local& val);
+bool local_is_boolean(const Local& val);
+bool local_is_number(const Local& val);
+bool local_is_null(const Local& val);
+bool local_is_undefined(const Local& val);
+bool local_is_null_or_undefined(const Local& val);
+bool local_is_object(const Local& val);
+bool local_is_native_error(const Local& val);
+bool local_is_array(const Local& val);
+bool local_is_uint8_array(const Local& val);
+bool local_is_uint16_array(const Local& val);
+bool local_is_uint32_array(const Local& val);
+bool local_is_int8_array(const Local& val);
+bool local_is_int16_array(const Local& val);
+bool local_is_int32_array(const Local& val);
+bool local_is_float32_array(const Local& val);
+bool local_is_float64_array(const Local& val);
+bool local_is_bigint64_array(const Local& val);
+bool local_is_biguint64_array(const Local& val);
+bool local_is_array_buffer(const Local& val);
+bool local_is_array_buffer_view(const Local& val);
+bool local_is_function(const Local& val);
+::rust::String local_type_of(Isolate* isolate, const Local& val);
+
+// Local<Function>
+Local local_function_call(
+    Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key);
 kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
 
+// Local<Array>
+uint32_t local_array_length(Isolate* isolate, const Local& array);
+Local local_array_get(Isolate* isolate, const Local& array, uint32_t index);
+void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
+::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value);
+
+// Local<TypedArray>
+size_t local_typed_array_length(Isolate* isolate, const Local& array);
+uint8_t local_uint8_array_get(Isolate* isolate, const Local& array, size_t index);
+uint16_t local_uint16_array_get(Isolate* isolate, const Local& array, size_t index);
+uint32_t local_uint32_array_get(Isolate* isolate, const Local& array, size_t index);
+int8_t local_int8_array_get(Isolate* isolate, const Local& array, size_t index);
+int16_t local_int16_array_get(Isolate* isolate, const Local& array, size_t index);
+int32_t local_int32_array_get(Isolate* isolate, const Local& array, size_t index);
+float local_float32_array_get(Isolate* isolate, const Local& array, size_t index);
+double local_float64_array_get(Isolate* isolate, const Local& array, size_t index);
+int64_t local_bigint64_array_get(Isolate* isolate, const Local& array, size_t index);
+uint64_t local_biguint64_array_get(Isolate* isolate, const Local& array, size_t index);
+
 // Global<T>
 void global_drop(Global value);
-Global global_clone(const Global& value);
+Global global_clone(Isolate* isolate, const Global& value);
 Local global_to_local(Isolate* isolate, const Global& value);
 void global_make_weak(
     Isolate* isolate, Global* value, size_t /* void* */ data, WeakCallback callback);
@@ -54,10 +113,22 @@ Local wrap_resource(Isolate* isolate, size_t resource, const Global& tmpl, size_
 
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value);
+bool unwrap_boolean(Isolate* isolate, Local value);
+double unwrap_number(Isolate* isolate, Local value);
 size_t unwrap_resource(Isolate* isolate, Local value);
+::rust::Vec<uint8_t> unwrap_uint8_array(Isolate* isolate, Local value);
+::rust::Vec<uint16_t> unwrap_uint16_array(Isolate* isolate, Local value);
+::rust::Vec<uint32_t> unwrap_uint32_array(Isolate* isolate, Local value);
+::rust::Vec<int8_t> unwrap_int8_array(Isolate* isolate, Local value);
+::rust::Vec<int16_t> unwrap_int16_array(Isolate* isolate, Local value);
+::rust::Vec<int32_t> unwrap_int32_array(Isolate* isolate, Local value);
+::rust::Vec<float> unwrap_float32_array(Isolate* isolate, Local value);
+::rust::Vec<double> unwrap_float64_array(Isolate* isolate, Local value);
+::rust::Vec<int64_t> unwrap_bigint64_array(Isolate* isolate, Local value);
+::rust::Vec<uint64_t> unwrap_biguint64_array(Isolate* isolate, Local value);
 
 // FunctionCallbackInfo
-v8::Isolate* fci_get_isolate(FunctionCallbackInfo* args);
+Isolate* fci_get_isolate(FunctionCallbackInfo* args);
 Local fci_get_this(FunctionCallbackInfo* args);
 size_t fci_get_length(FunctionCallbackInfo* args);
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
@@ -76,7 +147,10 @@ inline void register_add_builtin_module(ModuleRegistry& registry,
   registry.addBuiltinModule(specifier, kj::mv(callback), moduleType);
 }
 
-Global create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor);
+Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor);
+
+// FunctionTemplate
+Local function_template_get_function(Isolate* isolate, const Global& tmpl);
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate);

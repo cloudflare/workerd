@@ -207,6 +207,10 @@ struct TunneledContext: public ContextGlobalObject {
       throwTunneledException(js.v8Isolate, tryCatch.Exception());
     }
   }
+  void throwHugeExternalString(jsg::Lock& js) {
+    kj::ArrayPtr<const char> fakeBuf(reinterpret_cast<const char*>(1), v8::String::kMaxLength + 1);
+    jsg::newExternalOneByteString(js, fakeBuf);
+  }
   void throwTunneledMacroTypeError() {
     JSG_FAIL_REQUIRE(TypeError, "thrown ", "from ", "throwTunneledMacroTypeError");
   }
@@ -259,6 +263,7 @@ struct TunneledContext: public ContextGlobalObject {
     JSG_METHOD(throwBadTunneledError);
     JSG_METHOD(throwBadTunneledErrorWithExpectation);
     JSG_METHOD(throwRetunneledTypeError);
+    JSG_METHOD(throwHugeExternalString);
     JSG_METHOD(throwTunneledMacroTypeError);
     JSG_METHOD(throwTunneledMacroTypeErrorWithExpectation);
     JSG_METHOD(throwTunneledMacroOperationError);
@@ -340,6 +345,7 @@ KJ_TEST("throw tunneled exception") {
 KJ_TEST("runTunnelingExceptions") {
   Evaluator<TunneledContext, TunneledIsolate> e(v8System);
   e.expectEval("throwRetunneledTypeError()", "throws", "TypeError: Dummy error message.");
+  e.expectEval("throwHugeExternalString()", "throws", "Error: String allocation failed");
 }
 
 KJ_TEST("isTunneledException") {

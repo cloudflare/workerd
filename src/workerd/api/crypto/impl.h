@@ -10,6 +10,7 @@
 #include "crypto.h"
 
 #include <workerd/api/util.h>
+#include <workerd/jsg/jsvalue.h>
 
 #include <ncrypto.h>
 #include <openssl/base.h>
@@ -146,20 +147,20 @@ class CryptoKey::Impl {
     return usages;
   }
 
-  virtual jsg::BufferSource encrypt(jsg::Lock& js,
+  virtual jsg::JsArrayBuffer encrypt(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> plainText) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The encrypt operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
-  virtual jsg::BufferSource decrypt(jsg::Lock& js,
+  virtual jsg::JsArrayBuffer decrypt(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> cipherText) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The decrypt operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
 
-  virtual jsg::BufferSource sign(jsg::Lock& js,
+  virtual jsg::JsArrayBuffer sign(jsg::Lock& js,
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The sign operation is not implemented for \"",
@@ -173,7 +174,7 @@ class CryptoKey::Impl {
         getAlgorithmName(), "\".");
   }
 
-  virtual jsg::BufferSource deriveBits(jsg::Lock& js,
+  virtual jsg::JsArrayBuffer deriveBits(jsg::Lock& js,
       SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> length) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError,
@@ -181,7 +182,7 @@ class CryptoKey::Impl {
         "\".");
   }
 
-  virtual jsg::BufferSource wrapKey(jsg::Lock& js,
+  virtual jsg::JsArrayBuffer wrapKey(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> unwrappedKey) const {
     // For many algorithms, wrapKey() is the same as encrypt(), so as a convenience the default
@@ -189,7 +190,7 @@ class CryptoKey::Impl {
     return encrypt(js, kj::mv(algorithm), unwrappedKey);
   }
 
-  virtual jsg::BufferSource unwrapKey(jsg::Lock& js,
+  virtual jsg::JsArrayBuffer unwrapKey(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> wrappedKey) const {
     // For many algorithms, unwrapKey() is the same as decrypt(), so as a convenience the default
@@ -210,7 +211,7 @@ class CryptoKey::Impl {
   // cipher and passphrase.
   // Rather than modify the existing exportKey API, we add this new variant to support the
   // Node.js implementation without risking breaking the Web Crypto impl.
-  virtual jsg::BufferSource exportKeyExt(jsg::Lock& js,
+  virtual jsg::JsUint8Array exportKeyExt(jsg::Lock& js,
       kj::StringPtr format,
       kj::StringPtr type,
       jsg::Optional<kj::String> cipher = kj::none,
@@ -236,7 +237,6 @@ class CryptoKey::Impl {
 
   virtual bool equals(const Impl& other) const = 0;
   virtual bool equals(const kj::Array<kj::byte>& other) const;
-  virtual bool equals(const jsg::BufferSource& other) const;
 
   virtual kj::StringPtr jsgGetMemoryName() const {
     return "CryptoKey::Impl";
@@ -335,12 +335,15 @@ const SslDisposer<T, sslFree> SslDisposer<T, sslFree>::INSTANCE;
 using UniqueBignum = std::unique_ptr<BIGNUM, void (*)(BIGNUM*)>;
 kj::Maybe<kj::Own<BIGNUM>> toBignum(kj::ArrayPtr<const kj::byte> data);
 BIGNUM* toBignumUnowned(kj::ArrayPtr<const kj::byte> data);
+// Like toBignumUnowned but returns a UniqueBignum for RAII. Use .release() to transfer
+// ownership to RSA_set0_key etc.
+UniqueBignum toBignumOwned(kj::ArrayPtr<const kj::byte> data);
 kj::Maybe<kj::Array<kj::byte>> bignumToArray(const BIGNUM& bignum);
 kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum);
 kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum, size_t paddedLength);
-kj::Maybe<jsg::BufferSource> bignumToArray(jsg::Lock& js, const BIGNUM& bignum);
-kj::Maybe<jsg::BufferSource> bignumToArrayPadded(jsg::Lock& js, const BIGNUM& bignum);
-kj::Maybe<jsg::BufferSource> bignumToArrayPadded(
+kj::Maybe<jsg::JsUint8Array> bignumToArray(jsg::Lock& js, const BIGNUM& bignum);
+kj::Maybe<jsg::JsUint8Array> bignumToArrayPadded(jsg::Lock& js, const BIGNUM& bignum);
+kj::Maybe<jsg::JsUint8Array> bignumToArrayPadded(
     jsg::Lock& js, const BIGNUM& bignum, size_t paddedLength);
 kj::Own<BIGNUM> newBignum();
 
@@ -443,8 +446,8 @@ ncrypto::Buffer<T> ToNcryptoBuffer(kj::ArrayPtr<T> array) {
 }
 
 kj::Maybe<kj::Array<kj::byte>> simdutfBase64UrlDecode(kj::StringPtr input);
-kj::Maybe<jsg::BufferSource> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr input);
-jsg::BufferSource simdutfBase64UrlDecodeChecked(
+kj::Maybe<jsg::JsUint8Array> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr input);
+jsg::JsUint8Array simdutfBase64UrlDecodeChecked(
     jsg::Lock& js, kj::StringPtr input, kj::StringPtr error);
 
 }  // namespace workerd::api

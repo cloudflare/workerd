@@ -9,6 +9,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/ring-buffer.h>
+#include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
@@ -132,9 +133,9 @@ class WritableStreamJsController;
 template <class Self>
 class ReadableImpl {
  public:
-  using Consumer = typename Self::QueueType::Consumer;
-  using Entry = typename Self::QueueType::Entry;
-  using StateListener = typename Self::QueueType::ConsumerImpl::StateListener;
+  using Consumer = Self::QueueType::Consumer;
+  using Entry = Self::QueueType::Entry;
+  using StateListener = Self::QueueType::ConsumerImpl::StateListener;
 
   ReadableImpl(UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
 
@@ -171,8 +172,18 @@ class ReadableImpl {
   // queue is below the watermark and we actually need data right now.
   void pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self);
 
+  // Like pullIfNeeded but bypasses the shouldCallPull() check. Used for draining reads
+  // which need to pull all available data regardless of backpressure settings.
+  void forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self);
+
   // True if the queue is current below the highwatermark.
   bool shouldCallPull();
+
+  // True if a pull is currently in progress (the pull promise is pending).
+  // Used by draining reads to determine if pumping completed synchronously.
+  bool isPulling() const {
+    return flags.pulling;
+  }
 
   // The consumer can be used to read from this readables queue so long as the queue
   // is open. The consumer instance may outlive the readable but will be put into
@@ -216,9 +227,20 @@ class ReadableImpl {
     }
   };
 
-  using Queue = typename Self::QueueType;
+  using Queue = Self::QueueType;
 
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Queue> state;
+  // State machine for ReadableImpl:
+  // Queue is the active state where the stream can accept data
+  // Closed and Errored are terminal states (cannot transition back to Queue)
+  //   Queue -> Closed (close() or doCancel() called)
+  //   Queue -> Errored (doError() called)
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<Queue>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      Queue>;
+  State state;
   Algorithms algorithms;
 
   size_t highWaterMark = 1;
@@ -357,7 +379,25 @@ class WritableImpl {
     }
   };
 
-  struct Writable {};
+  struct Writable {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "writable"_kj;
+  };
+
+  // State machine for WritableImpl:
+  // Writable is the active state where the stream can accept writes
+  // Erroring is a transitional state - waiting for in-flight ops before erroring
+  // Closed and Errored are terminal states
+  //   Writable -> Erroring (startErroring() called)
+  //   Writable -> Closed (finishInFlightClose() succeeds)
+  //   Erroring -> Errored (finishErroring() called)
+  //   Erroring -> Closed (finishInFlightClose() succeeds - close wins)
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<Writable>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      StreamStates::Erroring,
+      Writable>;
 
   // Sadly, we have to use a weak ref here rather than jsg::Ref. This is because
   // the jsg::Ref<WritableStream> (via its internal WritableStreamJsController)
@@ -367,8 +407,7 @@ class WritableImpl {
   // try tracing each other.
   kj::Maybe<kj::Own<WeakRef<WritableStream>>> owner;
   jsg::Ref<AbortSignal> signal;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, StreamStates::Erroring, Writable> state =
-      Writable();
+  State state = State::template create<Writable>();
   Algorithms algorithms;
 
   size_t highWaterMark = 1;
@@ -385,6 +424,7 @@ class WritableImpl {
     uint8_t started : 1 = 0;
     uint8_t starting : 1 = 0;
     uint8_t backpressure : 1 = 0;
+    uint8_t pedanticWpt : 1 = 0;
   };
   Flags flags{};
 
@@ -419,6 +459,15 @@ class ReadableStreamDefaultController: public jsg::Object {
   void error(jsg::Lock& js, v8::Local<v8::Value> reason);
 
   void pull(jsg::Lock& js);
+
+  // Like pull(), but bypasses backpressure checks. Used for draining reads
+  // which need to pull all available data regardless of highWaterMark.
+  void forcePull(jsg::Lock& js);
+
+  // True if a pull is currently in progress (the pull promise is pending).
+  bool isPulling() const {
+    return impl.isPulling();
+  }
 
   kj::Own<ValueQueue::Consumer> getConsumer(
       kj::Maybe<ValueQueue::ConsumerImpl::StateListener&> stateListener);
@@ -501,6 +550,9 @@ class ReadableStreamBYOBRequest: public jsg::Object {
     kj::Rc<WeakRef<ReadableByteStreamController>> controller;
     jsg::V8Ref<v8::Uint8Array> view;
 
+    size_t originalBufferByteLength;
+    size_t originalByteOffsetPlusBytesFilled;
+
     Impl(jsg::Lock& js,
         kj::Own<ByteQueue::ByobRequest> readRequest,
         kj::Rc<WeakRef<ReadableByteStreamController>> controller);
@@ -547,6 +599,15 @@ class ReadableByteStreamController: public jsg::Object {
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> getByobRequest(jsg::Lock& js);
 
   void pull(jsg::Lock& js);
+
+  // Like pull(), but bypasses backpressure checks. Used for draining reads
+  // which need to pull all available data regardless of highWaterMark.
+  void forcePull(jsg::Lock& js);
+
+  // True if a pull is currently in progress (the pull promise is pending).
+  bool isPulling() const {
+    return impl.isPulling();
+  }
 
   kj::Own<ByteQueue::Consumer> getConsumer(
       kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener);
@@ -597,14 +658,23 @@ class WritableStreamDefaultController: public jsg::Object {
 
   void error(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
-  ssize_t getDesiredSize();
+  kj::Maybe<ssize_t> getDesiredSize();
 
   jsg::Ref<AbortSignal> getSignal();
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
 
+  // Returns true if the stream is in the erroring state. Unlike the overload
+  // that takes a lock, this method does not require a lock since it doesn't
+  // return the error reason.
+  bool isErroring() const;
+
   bool isStarted() {
     return impl.flags.started;
+  }
+
+  bool hasBackpressure() {
+    return impl.flags.backpressure;
   }
 
   void setup(jsg::Lock& js, UnderlyingSink underlyingSink, StreamQueuingStrategy queuingStrategy);
@@ -690,6 +760,11 @@ class TransformStreamDefaultController: public jsg::Object {
     kj::Maybe<jsg::Function<Transformer::CancelAlgorithm>> cancel;
 
     kj::Maybe<jsg::Promise<void>> maybeFinish = kj::none;
+    // This flag is set to true at the start of a finish operation (close/cancel/abort)
+    // before the algorithm runs. This is needed because emplace() evaluates its argument
+    // before setting maybeFinish, so if the algorithm calls another finish operation
+    // synchronously, maybeFinish wouldn't be set yet.
+    bool finishStarted = false;
 
     Algorithms() {};
     Algorithms(Algorithms&& other) = default;
@@ -715,6 +790,8 @@ class TransformStreamDefaultController: public jsg::Object {
 
   kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();
   kj::Maybe<WritableStreamJsController&> tryGetWritableController();
+
+  kj::Maybe<jsg::Value> getReadableErrorState(jsg::Lock& js);
 
   // Currently, JS-backed transform streams only support value-oriented streams.
   // In the future, that may change and this will need to become a kj::OneOf

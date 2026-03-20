@@ -574,6 +574,10 @@ class AbortTriggerRpcClient final {
 
 namespace {
 // The jsrpc handler that receives aborts from the remote and triggers them locally
+//
+// TODO(cleanup): This class has been copied to external-pusher.c++. The copy here can be
+//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
+//   StreamSink-related code. For now I'm not trying to avoid duplication.
 class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
  public:
   AbortTriggerRpcServer(kj::Own<kj::PromiseFulfiller<void>> fulfiller,
@@ -858,15 +862,28 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     return;
   }
 
-  auto streamCap = externalHandler
-                       ->writeStream([&](rpc::JsValue::External::Builder builder) mutable {
-    builder.setAbortTrigger();
-  }).castAs<rpc::AbortTrigger>();
+  auto triggerCap = [&]() -> rpc::AbortTrigger::Client {
+    KJ_IF_SOME(pusher, externalHandler->getExternalPusher()) {
+      auto pipeline = pusher.pushAbortSignalRequest(capnp::MessageSize{2, 0}).sendForPipeline();
+
+      externalHandler->write(
+          [signal = pipeline.getSignal()](rpc::JsValue::External::Builder builder) mutable {
+        builder.setAbortSignal(kj::mv(signal));
+      });
+
+      return pipeline.getTrigger();
+    } else {
+      return externalHandler
+          ->writeStream([&](rpc::JsValue::External::Builder builder) mutable {
+        builder.setAbortTrigger();
+      }).castAs<rpc::AbortTrigger>();
+    }
+  }();
 
   auto& ioContext = IoContext::current();
   // Keep track of every AbortSignal cloned from this one.
   // If this->triggerAbort(...) is called, each rpcClient will be informed.
-  rpcClients.add(ioContext.addObject(kj::heap<AbortTriggerRpcClient>(kj::mv(streamCap))));
+  rpcClients.add(ioContext.addObject(kj::heap<AbortTriggerRpcClient>(kj::mv(triggerCap))));
 }
 
 jsg::Ref<AbortSignal> AbortSignal::deserialize(
@@ -890,20 +907,31 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
     return js.alloc<AbortSignal>(/* exception */ kj::none, /* maybeReason */ kj::none, flag);
   }
 
-  auto reader = externalHandler->read();
-  KJ_REQUIRE(reader.isAbortTrigger(), "external table slot type does't match serialization tag");
-
   // The AbortSignalImpl will receive any remote triggerAbort requests and fulfill the promise with the reason for abort
 
   auto signal = js.alloc<AbortSignal>(/* exception */ kj::none, /* maybeReason */ kj::none, flag);
 
-  auto paf = kj::newPromiseAndFulfiller<void>();
-  auto pendingReason = IoContext::current().addObject(kj::refcounted<PendingReason>());
+  auto& ioctx = IoContext::current();
 
-  externalHandler->setLastStream(
-      kj::heap<AbortTriggerRpcServer>(kj::mv(paf.fulfiller), kj::addRef(*pendingReason)));
-  signal->rpcAbortPromise = IoContext::current().addObject(kj::heap(kj::mv(paf.promise)));
-  signal->pendingReason = kj::mv(pendingReason);
+  auto reader = externalHandler->read();
+  if (reader.isAbortTrigger()) {
+    // Old-style StreamSink.
+    // TODO(cleanup): Remove this once the ExternalPusher autogate has rolled out.
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto pendingReason = ioctx.addObject(kj::refcounted<PendingReason>());
+
+    externalHandler->setLastStream(
+        kj::heap<AbortTriggerRpcServer>(kj::mv(paf.fulfiller), kj::addRef(*pendingReason)));
+    signal->rpcAbortPromise = ioctx.addObject(kj::heap(kj::mv(paf.promise)));
+    signal->pendingReason = kj::mv(pendingReason);
+  } else {
+    KJ_REQUIRE(reader.isAbortSignal(), "external table slot type does't match serialization tag");
+
+    auto resolvedSignal = ioctx.getExternalPusher()->unwrapAbortSignal(reader.getAbortSignal());
+
+    signal->rpcAbortPromise = ioctx.addObject(kj::heap(kj::mv(resolvedSignal.signal)));
+    signal->pendingReason = ioctx.addObject(kj::mv(resolvedSignal.reason));
+  }
 
   return signal;
 }
@@ -1042,15 +1070,22 @@ kj::Promise<void> Scheduler::wait(
 
   auto& global =
       jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(context, context->Global());
-  global.setTimeoutInternal([fulfiller = IoContext::current().addObject(kj::mv(paf.fulfiller))](
-                                jsg::Lock& lock) mutable { fulfiller->fulfill(); },
-      delay);
+  auto timeoutId = global.setTimeoutInternal(
+      [fulfiller = IoContext::current().addObject(kj::mv(paf.fulfiller))](jsg::Lock& lock) mutable {
+    fulfiller->fulfill();
+  }, delay);
 
   auto promise = kj::mv(paf.promise);
 
   KJ_IF_SOME(options, maybeOptions) {
     KJ_IF_SOME(s, options.signal) {
       promise = s->wrap(js, kj::mv(promise));
+      // When the signal aborts and the canceler drops the promise, clear the underlying
+      // timeout to free the quota slot. clearTimeoutImpl is a no-op if the timeout has
+      // already fired, so this is safe on the normal completion path as well.
+      promise = promise.attach(kj::defer([timeoutId, &ioContext = IoContext::current()]() {
+        ioContext.clearTimeoutImpl(TimeoutId::fromNumber(timeoutId));
+      }));
     }
   }
 

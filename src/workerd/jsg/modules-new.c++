@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Copyright (c) 2017-2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
@@ -24,6 +24,17 @@ kj::Maybe<const Module&> checkModule(const ResolveContext& context, const Module
   }
   return module;
 };
+
+// If the specifier is "node:process", returns the appropriate internal module
+// URL based on the enable_nodejs_process_v2 flag. Otherwise returns kj::none.
+kj::Maybe<const Url&> maybeRedirectNodeProcess(Lock& js, kj::ArrayPtr<const char> spec) {
+  if (spec == "node:process"_kjb.asChars()) {
+    static const auto publicProcess = "node-internal:public_process"_url;
+    static const auto legacyProcess = "node-internal:legacy_process"_url;
+    return isNodeJsProcessV2Enabled(js) ? publicProcess : legacyProcess;
+  }
+  return kj::none;
+}
 
 kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec) {
   // Source files in workers end up being converted to UTF-8 bytes, so if the specifier
@@ -107,6 +118,7 @@ class EsModule final: public Module {
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
 
     auto options = v8::ScriptCompiler::CompileOptions::kNoCompileOptions;
+    bool cacheWasRejected = false;
 
     v8::Local<v8::Module> module;
     {
@@ -150,6 +162,7 @@ class EsModule final: public Module {
           // investigation but is not critical.
           LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module was rejected");
           observer.onCompileCacheRejected(js.v8Isolate);
+          cacheWasRejected = true;
         }
       }
 
@@ -161,17 +174,28 @@ class EsModule final: public Module {
       }
     }
 
+    // If the cached data was rejected, clear it so subsequent isolates don't
+    // repeatedly check stale data. We then fall through to regenerate the cache
+    // below. In practice this is exceedingly unlikely since V8 version changes
+    // are the primary cause of cache rejection and we don't change V8 versions
+    // within a single binary, but we handle it for correctness.
+    if (cacheWasRejected) {
+      auto lock = cachedData.lockExclusive();
+      *lock = kj::none;
+    }
+
     // If options is still kNoCompileOptions at this point, it means that we did not
-    // find any cached data for this module, or the cached data was rejected. In the
-    // case it was rejected, we just move on. If there is no cached data, we try
-    // generating it and store it. Multiple threads can end up lining up here to
-    // acquire the lock and generate the cache. We'll test to see if the cached
-    // data is still empty once the lock is acquired, and if it is not, we'll skip
-    // generation.
+    // find any cached data for this module, or the cached data was rejected. In
+    // either case, we try generating it and store it. Multiple threads can end up
+    // lining up here to acquire the lock and generate the cache. We'll test to see
+    // if the cached data is still empty once the lock is acquired, and if it is
+    // not, we'll skip generation.
     if (options == v8::ScriptCompiler::CompileOptions::kNoCompileOptions) {
       auto lock = cachedData.lockExclusive();
       if (*lock == kj::none) {
         if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {
+          // Using the technically private kj::_::HeapDisposer to wrap the V8-allocated
+          // CachedData in a kj::Own. This pattern has precedent in io-own.h.
           kj::Own<v8::ScriptCompiler::CachedData> cached(
               ptr, kj::_::HeapDisposer<v8::ScriptCompiler::CachedData>::instance);
           *lock = kj::mv(cached);
@@ -261,7 +285,7 @@ class SyntheticModule final: public Module {
     }
 
     ModuleNamespace ns(module, namedExports);
-    if (!const_cast<SyntheticModule*>(this)->callback(js, id(), ns, observer)) {
+    if (!callback(js, id(), ns, observer)) {
       // An exception should already be scheduled with the isolate
       return v8::MaybeLocal<v8::Value>();
     }
@@ -292,7 +316,11 @@ class SyntheticModule final: public Module {
     return actuallyEvaluate(js, module, observer);
   }
 
-  ModuleBundle::BundleBuilder::EvaluateCallback callback;
+  // Marked mutable because kj::Function::operator() is non-const, but evaluation
+  // callbacks are conceptually const — they produce new JS objects each time without
+  // modifying the module's logical state. The callback is only ever invoked while
+  // holding the isolate lock, so concurrent mutation is not a concern.
+  mutable ModuleBundle::BundleBuilder::EvaluateCallback callback;
   kj::Array<kj::String> namedExports;
 };
 
@@ -449,8 +477,6 @@ class IsolateModuleRegistry final {
   // like the CommonJS require. Returns the instantiated/evaluated module namespace.
   // If an empty v8::MaybeLocal is returned and the default option is given, then an
   // exception has been scheduled.
-  // Note that this returns the module namespace object. In CommonJS, the require()
-  // function will actually return the default export from the module namespace object.
   v8::MaybeLocal<v8::Object> require(
       Lock& js, const ResolveContext& context, RequireOption option = RequireOption::DEFAULT) {
     static constexpr auto evaluate = [](Lock& js, Entry& entry, const Url& id,
@@ -511,7 +537,7 @@ class IsolateModuleRegistry final {
         }
         case v8::Promise::kPending: {
           // The module evaluation could not complete in a single drain of the
-          // microtask queue. This means we've got a pending promise somwwhere
+          // microtask queue. This means we've got a pending promise somewhere
           // that is being awaited preventing the module from being ready to
           // go. We can't have that! Throw! Throw!
           JSG_FAIL_REQUIRE(Error, kTopLevelAwaitError, " Specifier: \"", id, "\".");
@@ -521,13 +547,11 @@ class IsolateModuleRegistry final {
     };
 
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Object> {
-      if (context.normalizedSpecifier == "node:process"_url) {
-        static const auto publicProcess = "node-internal:public_process"_url;
-        static const auto legacyProcess = "node-internal:legacy_process"_url;
+      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, context.normalizedSpecifier.getHref())) {
         ResolveContext newContext{
           .type = ResolveContext::Type::BUILTIN_ONLY,
           .source = context.source,
-          .normalizedSpecifier = isNodeJsProcessV2Enabled(js) ? publicProcess : legacyProcess,
+          .normalizedSpecifier = processUrl,
           .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
           .rawSpecifier = context.rawSpecifier,
         };
@@ -793,21 +817,10 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
       }
 
       // Handle process module redirection based on enable_nodejs_process_v2 flag
-      if (spec == "node:process") {
-        auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
-                                                        : "node-internal:legacy_process"_kj;
-        KJ_IF_SOME(url, referrer.tryResolve(processSpec)) {
-          auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-          ResolveContext context = {
-            .type = ResolveContext::Type::BUILTIN_ONLY,
-            .source = ResolveContext::Source::DYNAMIC_IMPORT,
-            .normalizedSpecifier = normalized,
-            .referrerNormalizedSpecifier = referrer,
-            .rawSpecifier = processSpec,
-          };
-          return registry.dynamicResolve(
-              js, kj::mv(normalized), kj::mv(referrer), processSpec, isSourcePhase);
-        }
+      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, spec.asPtr())) {
+        auto processSpec = kj::str(processUrl.getHref());
+        return registry.dynamicResolve(
+            js, processUrl.clone(), kj::mv(referrer), processSpec, isSourcePhase);
       }
 
       KJ_IF_SOME(url, referrer.tryResolve(spec.asPtr())) {
@@ -910,21 +923,17 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
 
     // Handle process module redirection based on enable_nodejs_process_v2 flag
     if constexpr (!IsSourcePhase) {
-      if (spec == "node:process") {
-        auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
-                                                        : "node-internal:legacy_process"_kj;
-        KJ_IF_SOME(url, referrerUrl.tryResolve(processSpec)) {
-          auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-          ResolveContext resolveContext = {
-            .type = ResolveContext::Type::BUILTIN_ONLY,
-            .source = ResolveContext::Source::STATIC_IMPORT,
-            .normalizedSpecifier = normalized,
-            .referrerNormalizedSpecifier = referrerUrl,
-            .rawSpecifier = processSpec,
-          };
+      KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, spec.asPtr())) {
+        auto processSpec = kj::str(processUrl.getHref());
+        ResolveContext resolveContext = {
+          .type = ResolveContext::Type::BUILTIN_ONLY,
+          .source = ResolveContext::Source::STATIC_IMPORT,
+          .normalizedSpecifier = processUrl,
+          .referrerNormalizedSpecifier = referrerUrl,
+          .rawSpecifier = processSpec.asPtr(),
+        };
 
-          return registry.resolve(js, resolveContext);
-        }
+        return registry.resolve(js, resolveContext);
       }
     }
 
@@ -992,7 +1001,9 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
 }
 
 // The fallback module bundle calls a single resolve callback to resolve all modules
-// it is asked to resolve. Instances must be thread-safe.
+// it is asked to resolve. Thread safety is provided by the ModuleRegistry's
+// MutexGuarded<Impl> exclusive lock — all calls to lookup() are made while
+// holding that lock.
 class FallbackModuleBundle final: public ModuleBundle {
  public:
   FallbackModuleBundle(Builder::ResolveCallback&& callback)
@@ -1066,7 +1077,8 @@ class FallbackModuleBundle final: public ModuleBundle {
 };
 
 // The static module bundle maintains an internal table of specifiers to resolve callbacks
-// in memory. Instances must be thread-safe.
+// in memory. Thread safety is provided by the ModuleRegistry's MutexGuarded<Impl>
+// exclusive lock — all calls to lookup() are made while holding that lock.
 class StaticModuleBundle final: public ModuleBundle {
  public:
   StaticModuleBundle(Type type,
@@ -1137,9 +1149,14 @@ kj::Own<ModuleBundle> ModuleBundle::newFallbackBundle(Builder::ResolveCallback c
   return kj::heap<FallbackModuleBundle>(kj::mv(callback));
 }
 
-void ModuleBundle::getBuiltInBundleFromCapnp(
-    BuiltinBuilder& builder, Bundle::Reader bundle, BuiltInBundleOptions options) {
-  auto filter = ([&] {
+void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Reader bundle) {
+  getBuiltInBundleFromCapnp(builder, bundle, [](workerd::jsg::Module::Reader) { return true; });
+}
+
+void ModuleBundle::getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
+    Bundle::Reader bundle,
+    kj::Function<bool(workerd::jsg::Module::Reader)> filter) {
+  auto typeFilter = ([&] {
     switch (builder.type()) {
       case Module::Type::BUILTIN:
         return ModuleType::BUILTIN;
@@ -1154,7 +1171,7 @@ void ModuleBundle::getBuiltInBundleFromCapnp(
   })();
 
   for (auto module: bundle.getModules()) {
-    if (module.getType() == filter) {
+    if (module.getType() == typeFilter && filter(module)) {
       auto id = KJ_ASSERT_NONNULL(Url::tryParse(module.getName()));
       switch (module.which()) {
         case workerd::jsg::Module::SRC: {
@@ -1342,6 +1359,19 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
   return *this;
 }
 
+ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
+    kj::StringPtr name, kj::Array<const char> source, Module::Flags flags) {
+  const auto url = processModuleName(name, bundleBase);
+  add(url,
+      [url = url.clone(), source = kj::mv(source), flags, type = type()](
+          const ResolveContext& context) mutable
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, kj::mv(source), flags);
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
+  });
+  return *this;
+}
+
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(
     kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) {
   const auto url = processModuleName(name, bundleBase);
@@ -1444,9 +1474,7 @@ kj::Maybe<jsg::Promise<Value>> ModuleRegistry::evaluateImpl(jsg::Lock& js,
     v8::Local<v8::Module> v8Module,
     const CompilationObserver& observer) const {
   KJ_IF_SOME(callback, maybeEvalCallback) {
-    // Evil const_cast ok here because the callback itself is not mutated.
-    auto& c = const_cast<EvalCallback&>(callback);
-    return c(js, module, v8Module, observer);
+    return callback(js, module, v8Module, observer);
   }
   return kj::none;
 }
@@ -1539,7 +1567,16 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
       MODULE_LOOKUP(context, kBuiltinOnly);
       break;
     }
+    case ResolveContext::Type::PUBLIC_BUILTIN: {
+      // For public built-in resolution, we only use builtin bundles.
+      // This excludes both worker bundle modules and internal-only modules,
+      // returning only built-ins that are normally importable by user code.
+      MODULE_LOOKUP(context, kBuiltin);
+      break;
+    }
   }
+
+#undef MODULE_LOOKUP
 
   return kj::none;
 }
@@ -1549,7 +1586,7 @@ kj::Maybe<const Module&> ModuleRegistry::lookup(const ResolveContext& context) c
   auto metrics =
       observer.onResolveModule(context.normalizedSpecifier, context.type, context.source);
 
-  // While multiple threads may be holing references to the registry, only one thread
+  // While multiple threads may be holding references to the registry, only one thread
   // at a time may resolve a module. Resolving a module may involve mutating internal
   // state (e.g. caching) so we lock here. Fortunately, module resolution should be
   // fast, especially with caching, so this lock should be held only briefly.
@@ -1701,25 +1738,29 @@ kj::ArrayPtr<const kj::StringPtr> Module::ModuleNamespace::getNamedExports() con
 Module::EvaluateCallback Module::newTextModuleHandler(kj::ArrayPtr<const char> data) {
   return [data](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver&) -> bool {
-    return js.tryCatch([&] { return ns.setDefault(js, js.str(data)); }, [&](Value exception) {
+    JSG_TRY(js) {
+      return ns.setDefault(js, js.str(data));
+    }
+    JSG_CATCH(exception) {
       js.v8Isolate->ThrowException(exception.getHandle(js));
       return false;
-    });
+    }
   };
 }
 
 Module::EvaluateCallback Module::newDataModuleHandler(kj::ArrayPtr<const kj::byte> data) {
   return [data](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver&) -> bool {
-    return js.tryCatch([&] {
+    JSG_TRY(js) {
       auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, data.size());
       backing.asArrayPtr().copyFrom(data);
       auto buffer = jsg::BufferSource(js, kj::mv(backing));
       return ns.setDefault(js, JsValue(buffer.getHandle(js)));
-    }, [&](Value exception) {
+    }
+    JSG_CATCH(exception) {
       js.v8Isolate->ThrowException(exception.getHandle(js));
       return false;
-    });
+    }
   };
 }
 

@@ -24,7 +24,7 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   }
 
   if (FeatureFlags::get(js).getNewModuleRegistry()) {
-    KJ_IF_SOME(mod, js.resolveInternalModule(specifier)) {
+    KJ_IF_SOME(mod, js.resolvePublicBuiltinModule(specifier)) {
       return mod;
     }
     return js.undefined();
@@ -33,7 +33,14 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   auto registry = jsg::ModuleRegistry::from(js);
   if (registry == nullptr) return js.undefined();
 
-  // Handle process module redirection based on enable_nodejs_process_v2 flag
+  // getBuiltinModule is a user-facing API that must only return modules that
+  // are normally importable by user code. Default to BUILTIN_ONLY which only
+  // resolves user-importable built-ins, not internal-only modules.
+  auto resolveOption = jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY;
+
+  // Handle process module redirection based on enable_nodejs_process_v2 flag.
+  // This is a special case where we need to redirect to an internal module,
+  // so we escalate to INTERNAL_ONLY only for this specific redirect.
   if (isNode && specifier == "node:process") {
     auto featureFlags = FeatureFlags::get(js);
     if (featureFlags.getEnableNodeJsProcessV2()) {
@@ -41,14 +48,10 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
     } else {
       specifier = kj::str("node-internal:legacy_process");
     }
+    resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
   }
 
   auto path = kj::Path::parse(specifier);
-
-  // Use INTERNAL_ONLY for node-internal: modules, BUILTIN_ONLY for others
-  auto resolveOption = specifier.startsWith("node-internal:")
-      ? jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY
-      : jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY;
 
   KJ_IF_SOME(info,
       registry->resolve(js, path, kj::none, resolveOption,

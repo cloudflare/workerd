@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-no-auto-allocate-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "streams-no-auto-allocate-test.js")
+        ],
+        compatibilityFlags = [
+          "experimental",
+          "nodejs_compat",
+          "streams_enable_constructors",
+          "streams_no_default_auto_allocate_chunk_size",
+        ],
+      )
+    ),
+  ],
+);

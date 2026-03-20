@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Copyright (c) 2017-2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
@@ -402,13 +402,17 @@ class Module {
       const CompilationObserver& observer) KJ_WARN_UNUSED_RESULT;
 
   // Some modules may need to protect against being evaluated recursively. The
-  // EvaluatingScope class makes it possible to guard against that, throwing an
-  // error if there's already an active evaluation happening.
-  class EvaluatingScope final {
+  // EvaluateOnce class makes it possible to guard against that, returning false
+  // if evaluation has already been started. Once setEvaluating() returns true,
+  // subsequent calls will always return false — this is single-use by design
+  // (CJS modules should only be evaluated once).
+  class EvaluateOnce final {
    public:
-    EvaluatingScope() = default;
-    KJ_DISALLOW_COPY_AND_MOVE(EvaluatingScope);
-    bool enterEvaluationScope() {
+    EvaluateOnce() = default;
+    KJ_DISALLOW_COPY_AND_MOVE(EvaluateOnce);
+
+    // On the first call, this returns true. On subsequent calls, it returns false.
+    bool setEvaluating() {
       if (evaluating) return false;
       evaluating = true;
       return true;
@@ -426,13 +430,13 @@ class Module {
   template <typename T, typename TypeWrapper>
   static EvaluateCallback newCjsStyleModuleHandler(
       kj::StringPtr source, kj::StringPtr name) KJ_WARN_UNUSED_RESULT {
-    return [source, name, evaluatingScope = kj::heap<EvaluatingScope>()](Lock& js, const Url& id,
+    return [source, name, evaluateOnce = kj::heap<EvaluateOnce>()](Lock& js, const Url& id,
                const Module::ModuleNamespace& ns,
                const CompilationObserver& observer) mutable -> bool {
       return js.tryCatch([&] {
         // A CJS module can only be evaluated once. Return early if evaluation
         // has already been started.
-        if (!evaluatingScope->enterEvaluationScope()) {
+        if (!evaluateOnce->setEvaluating()) {
           return true;
         }
         auto& wrapper = TypeWrapper::from(js.v8Isolate);
@@ -547,6 +551,13 @@ class ModuleBundle {
         kj::ArrayPtr<const char> code,
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
 
+    // Overload that takes ownership of the source data. Use this when the
+    // source buffer may not outlive the module registry (e.g. transpiled
+    // TypeScript where the backing rust::String has shorter lifetime).
+    BundleBuilder& addEsmModule(kj::StringPtr name,
+        kj::Array<const char> code,
+        Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
+
     BundleBuilder& addWasmModule(
         kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) KJ_LIFETIMEBOUND;
 
@@ -596,13 +607,14 @@ class ModuleBundle {
   static kj::Own<ModuleBundle> newFallbackBundle(
       Builder::ResolveCallback callback) KJ_WARN_UNUSED_RESULT;
 
-  enum class BuiltInBundleOptions {
-    NONE = 0,
-  };
+  static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder, Bundle::Reader bundle);
 
+  // Overload that accepts a per-module filter predicate. Only modules for which
+  // the filter returns true are added to the builder. This is used for per-module
+  // feature flag gating (e.g., individual node:* modules behind compat flags).
   static void getBuiltInBundleFromCapnp(BuiltinBuilder& builder,
       Bundle::Reader bundle,
-      BuiltInBundleOptions options = BuiltInBundleOptions::NONE);
+      kj::Function<bool(::workerd::jsg::Module::Reader)> filter);
 
   KJ_DISALLOW_COPY_AND_MOVE(ModuleBundle);
 
@@ -632,17 +644,6 @@ class ModuleBundle {
  private:
   Type type_;
 };
-
-constexpr ModuleBundle::BuiltInBundleOptions operator|(
-    const ModuleBundle::BuiltInBundleOptions& a, const ModuleBundle::BuiltInBundleOptions& b) {
-  return static_cast<ModuleBundle::BuiltInBundleOptions>(
-      static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
-}
-constexpr ModuleBundle::BuiltInBundleOptions operator&(
-    const ModuleBundle::BuiltInBundleOptions& a, const ModuleBundle::BuiltInBundleOptions& b) {
-  return static_cast<ModuleBundle::BuiltInBundleOptions>(
-      static_cast<uint8_t>(a) & static_cast<uint8_t>(b));
-}
 
 // A ModuleRegistry is a collection of zero or more ModuleBundles.
 // Importantly, the ModuleRegistry is immutable once created and
@@ -759,7 +760,10 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   const ResolveObserver& observer;
   const jsg::Url& bundleBase;
   kj::MutexGuarded<Impl> impl;
-  kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
+  // Marked mutable because kj::Function::operator() is non-const, but the eval
+  // callback is conceptually const — it is only ever invoked while holding the
+  // isolate lock, so concurrent mutation is not a concern.
+  mutable kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
   kj::Own<capnp::SchemaLoader> schemaLoader;
 
   struct ModuleRef {

@@ -100,8 +100,13 @@ class UnsafeModule: public jsg::Object {
   UnsafeModule(jsg::Lock&, const jsg::Url&) {}
   jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);
 
+  // Returns true if the TEST_WORKERD autogate is enabled.
+  // This is used to verify that the all-autogates test variant is working correctly.
+  bool isTestAutogateEnabled();
+
   JSG_RESOURCE_TYPE(UnsafeModule) {
     JSG_METHOD(abortAllDurableObjects);
+    JSG_METHOD(isTestAutogateEnabled);
   }
 };
 
@@ -170,6 +175,23 @@ kj::Own<jsg::modules::ModuleBundle> getExternalUnsafeModuleBundle(auto featureFl
 
   static const auto kUnsafeSpecifier = "workerd:unsafe"_url;
   builder.addObject<UnsafeModule, TypeWrapper>(kUnsafeSpecifier);
+
+#ifdef WORKERD_FUZZILLI
+  {
+    static const auto kStdinSpecifier = "workerd:stdin"_url;
+    builder.addSynthetic(kStdinSpecifier,
+        jsg::modules::Module::newJsgObjectModuleHandler<Stdin, TypeWrapper>(
+            [](jsg::Lock& js) { return js.alloc<Stdin>(); }));
+  }
+
+  if (featureFlags.getWorkerdExperimental()) {
+    static const auto kFuzzilliSpecifier = "workerd:fuzzilli"_url;
+    builder.addSynthetic(kFuzzilliSpecifier,
+        jsg::modules::Module::newJsgObjectModuleHandler<Fuzzilli, TypeWrapper>(
+            [](jsg::Lock& js) { return js.alloc<Fuzzilli>(); }));
+  }
+#endif
+
   return builder.finish();
 }
 }  // namespace workerd::api

@@ -2,9 +2,21 @@ load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    src = "settimeout-test.wd-test",
+    args = ["--experimental"],
+    data = ["settimeout-test.js"],
+)
+
+wd_test(
     src = "actor-alarms-delete-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-delete-test.js"],
+)
+
+wd_test(
+    src = "delete-all-deletes-alarm-test.wd-test",
+    args = ["--experimental"],
+    data = ["delete-all-deletes-alarm-test.js"],
 )
 
 wd_test(
@@ -43,6 +55,7 @@ wd_test(
         "jsrpc-timing-test.js",
         "jsrpc-timing-test-tail.js",
     ],
+    tags = ["no-coverage"],
 )
 
 # Test for a worker that can log to itself using the isTracer parameter
@@ -100,7 +113,10 @@ wd_test(
 wd_test(
     src = "queue-test.wd-test",
     args = ["--experimental"],
-    data = ["queue-test.js"],
+    data = [
+        "queue-error-codes-test.js",
+        "queue-test.js",
+    ],
 )
 
 wd_test(
@@ -120,10 +136,11 @@ wd_test(
 )
 
 wd_test(
-    size = "large",
+    size = "enormous",
     src = "sql-test.wd-test",
     args = ["--experimental"],
     data = [
+        "instrumentation-tail-worker.js",
         "sql-test.js",
         "sql-test-tail.js",
     ],
@@ -224,6 +241,12 @@ wd_test(
 )
 
 wd_test(
+    src = "encoding-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["encoding-streams-test.js"],
+)
+
+wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
     data = ["events-test.js"],
@@ -247,11 +270,42 @@ wd_test(
     data = ["form-data-test.js"],
 )
 
+# TODO(soon): Re-enable once it is determined why this test is failing
+# consistently in CI on Windows in all variant
+# wd_test(
+#     src = "form-data-test-ts.wd-test",
+#     args = ["--experimental"],
+#     data = ["form-data-test-ts.ts"],
+# )
+
+wd_test(
+    src = "warnings-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "warnings-tail.js",
+        "warnings-test.js",
+    ],
+)
+
 wd_test(
     size = "large",
     src = "global-scope-test.wd-test",
     args = ["--experimental"],
     data = ["global-scope-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "unhandled-rejection-test.wd-test",
+    args = ["--experimental"],
+    data = ["unhandled-rejection-test.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "decompression-stream-unhandled-rejection-test.wd-test",
+    args = ["--experimental"],
+    data = ["decompression-stream-unhandled-rejection-test.js"],
 )
 
 wd_test(
@@ -273,6 +327,12 @@ wd_test(
     src = "js-rpc-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-test.js"],
+)
+
+wd_test(
+    src = "js-rpc-params-ownership-test.wd-test",
+    args = ["--experimental"],
+    data = ["js-rpc-params-ownership-test.js"],
 )
 
 wd_test(
@@ -330,15 +390,140 @@ wd_test(
 )
 
 wd_test(
+    src = "compression-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["compression-streams-test.js"],
+)
+
+wd_test(
+    src = "transform-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["transform-streams-test.js"],
+)
+
+wd_test(
+    src = "pipe-streams-test.wd-test",
+    args = ["--experimental"],
+    data = ["pipe-streams-test.js"],
+)
+
+wd_test(
+    src = "streams-r2-patterns-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-r2-patterns-test.js"],
+)
+
+wd_test(
+    src = "streams-respond-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-respond-test.js"],
+)
+
+wd_test(
+    src = "streams-no-auto-allocate-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-no-auto-allocate-test.js"],
+)
+
+wd_test(
+    src = "streams-js-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-js-test.js"],
+)
+
+wd_test(
+    src = "streams-iocontext-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-iocontext-test.js"],
+)
+
+wd_test(
+    src = "streams-backpressure-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-backpressure-test.js"],
+)
+
+wd_test(
+    src = "streams-error-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-error-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-byob-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byob-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-tee-edge-cases-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-tee-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-async-iterator-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-async-iterator-test.js"],
+)
+
+wd_test(
     src = "unsafe-test.wd-test",
     args = ["--experimental"],
     data = ["unsafe-test.js"],
+)
+
+# Test that verifies autogates are ENABLED - only runs in @all-autogates variant
+wd_test(
+    src = "autogate-enabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["autogate-enabled-test.js"],
+    generate_all_compat_flags_variant = False,
+    generate_default_variant = False,
+)
+
+# Test that verifies autogates are DISABLED - only runs in default variant
+wd_test(
+    src = "autogate-disabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["autogate-disabled-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+# Test that verifies compat flags are ENABLED - only runs in @all-compat-flags variant
+wd_test(
+    src = "compat-flag-enabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["compat-flag-enabled-test.js"],
+    generate_all_autogates_variant = False,
+    generate_default_variant = False,
+)
+
+# Test that verifies compat flags are DISABLED - only runs in default variant
+wd_test(
+    src = "compat-flag-disabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["compat-flag-disabled-test.js"],
+    generate_all_autogates_variant = False,
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
     src = "url-test.wd-test",
     args = ["--experimental"],
     data = ["url-test.js"],
+)
+
+wd_test(
+    src = "websocket-allow-half-open-test.wd-test",
+    args = ["--experimental"],
+    data = ["websocket-allow-half-open-test.js"],
+)
+
+wd_test(
+    src = "websocket-constructor-test.wd-test",
+    args = ["--experimental"],
+    data = ["websocket-constructor-test.js"],
 )
 
 wd_test(
@@ -410,6 +595,31 @@ wd_test(
 )
 
 wd_test(
+    src = "new-module-registry-ts-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-ts-test.js",
+        "new-module-registry-ts-test-helper.ts",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-dns-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-dns-test.js",
+    ],
+)
+
+wd_test(
+    src = "new-module-registry-node-filter-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "new-module-registry-node-filter-test.js",
+    ],
+)
+
+wd_test(
     src = "cross-context-promise-test.wd-test",
     args = ["--experimental"],
     data = ["cross-context-promise-test.js"],
@@ -425,6 +635,7 @@ wd_test(
     src = "no-to-string-tag-test.wd-test",
     args = ["--experimental"],
     data = ["no-to-string-tag-test.js"],
+    generate_all_compat_flags_variant = False,
 )
 
 wd_test(
@@ -498,6 +709,7 @@ wd_test(
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
+    tags = ["requires-network"],
 )
 
 wd_test(
@@ -571,4 +783,41 @@ wd_test(
     src = "headers-immutable-prototype-test.wd-test",
     args = ["--experimental"],
     data = ["headers-immutable-prototype-test.js"],
+)
+
+wd_test(
+    src = "identity-transform-stream-state-machine-test.wd-test",
+    args = ["--experimental"],
+    data = ["identity-transform-stream-state-machine-test.js"],
+)
+
+wd_test(
+    src = "response-used-body-test.wd-test",
+    args = ["--experimental"],
+    data = ["response-used-body-test.js"],
+)
+
+wd_test(
+    src = "buffer-indexof-odd-offset-ucs2-test.wd-test",
+    data = ["buffer-indexof-odd-offset-ucs2-test.js"],
+)
+
+wd_test(
+    src = "textdecoder-utf16-odd-offset-test.wd-test",
+    data = ["textdecoder-utf16-odd-offset-test.js"],
+)
+
+wd_test(
+    src = "byob-reader-resize-pending-read-test.wd-test",
+    data = ["byob-reader-resize-pending-read-test.js"],
+)
+
+wd_test(
+    src = "pipe-write-special-buffer-test.wd-test",
+    data = ["pipe-write-special-buffer-test.js"],
+)
+
+wd_test(
+    src = "htmlrewriter-transform-cancel-test.wd-test",
+    data = ["htmlrewriter-transform-cancel-test.js"],
 )

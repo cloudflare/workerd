@@ -1,33 +1,43 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return  */
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import {
-  beforeRequest,
-  loadPyodide,
-  clearSignals,
-} from 'pyodide-internal:python';
+import { patch_env_helper } from 'pyodide-internal:envHelpers';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
-import { patchLoadPackage } from 'pyodide-internal:setupPackages';
-import {
-  IS_WORKERD,
-  LOCKFILE,
-  TRANSITIVE_REQUIREMENTS,
-  MAIN_MODULE_NAME,
-  WORKERD_INDEX_URL,
-  SHOULD_SNAPSHOT_TO_DISK,
-  WORKFLOWS_ENABLED,
-  LEGACY_GLOBAL_HANDLERS,
-  LEGACY_INCLUDE_SDK,
-} from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import {
-  PythonWorkersInternalError,
+  COMPATIBILITY_FLAGS,
+  IS_WORKERD,
+  LEGACY_GLOBAL_HANDLERS,
+  EXTERNAL_SDK,
+  LOCKFILE,
+  MAIN_MODULE_NAME,
+  SHOULD_SNAPSHOT_TO_DISK,
+  TRANSITIVE_REQUIREMENTS,
+  WORKERD_INDEX_URL,
+  WORKFLOWS_ENABLED,
+} from 'pyodide-internal:metadata';
+import {
+  beforeRequest,
+  clearSignals,
+  loadPyodide,
+} from 'pyodide-internal:python';
+import { patchLoadPackage } from 'pyodide-internal:setupPackages';
+import {
+  LOADED_SNAPSHOT_TYPE,
+  maybeCollectDedicatedSnapshot,
+} from 'pyodide-internal:snapshot';
+import {
   PythonUserError,
+  PythonWorkersInternalError,
   reportError,
 } from 'pyodide-internal:util';
-import { LOADED_SNAPSHOT_TYPE } from 'pyodide-internal:snapshot';
-import { patch_env_helper } from 'pyodide-internal:envHelpers';
+import { PyodideVersion } from 'pyodide-internal:const';
+export { createImportProxy } from 'pyodide-internal:serializeJsModule';
 
 type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
 
@@ -72,7 +82,6 @@ export type PyodideEntrypointHelper = {
   patchWaitUntil: typeof patchWaitUntil;
   patch_env_helper: (patch: unknown) => Generator<void>;
 };
-import { maybeCollectDedicatedSnapshot } from 'pyodide-internal:snapshot';
 
 // Function to import JavaScript modules from Python
 let _pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
@@ -86,16 +95,14 @@ function get_pyodide_entrypoint_helper(): PyodideEntrypointHelper {
   return _pyodide_entrypoint_helper;
 }
 
-export function setDoAnImport(
-  func: (mod: string) => Promise<any>,
-  cloudflareWorkersModule: any,
-  cloudflareSocketsModule: any,
+export async function setDoAnImport(
+  doAnImport: (mod: string) => Promise<any>,
   workerEntrypoint: any
-): void {
+): Promise<void> {
   _pyodide_entrypoint_helper = {
-    doAnImport: func,
-    cloudflareWorkersModule,
-    cloudflareSocketsModule,
+    doAnImport,
+    cloudflareWorkersModule: await doAnImport('cloudflare:workers'),
+    cloudflareSocketsModule: await doAnImport('cloudflare:sockets'),
     workerEntrypoint,
     patchWaitUntil,
     patch_env_helper,
@@ -130,7 +137,7 @@ async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
     );
   }
   const mainModuleName = MAIN_MODULE_NAME.slice(0, -3);
-  if (pyodide.version === '0.26.0a2') {
+  if (pyodide.version === PyodideVersion.V0_26_0a2) {
     return pyodide.pyimport(mainModuleName);
   } else {
     return await pyodide._module.API.pyodide_base.pyimport_impl.callPromising(
@@ -146,12 +153,10 @@ async function getPyodide(): Promise<Pyodide> {
       return pyodidePromise;
     }
     pyodidePromise = (async function (): Promise<Pyodide> {
-      const pyodide = loadPyodide(
-        IS_WORKERD,
-        LOCKFILE,
-        WORKERD_INDEX_URL,
-        get_pyodide_entrypoint_helper()
-      );
+      const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL, {
+        pyodide_entrypoint_helper: get_pyodide_entrypoint_helper(),
+        cloudflare_compat_flags: COMPATIBILITY_FLAGS,
+      });
       await setupPatches(pyodide);
       return pyodide;
     })();
@@ -192,8 +197,26 @@ async function applyPatch(pyodide: Pyodide, patchName: string): Promise<void> {
 }
 
 async function injectWorkersApi(pyodide: Pyodide): Promise<void> {
+  if (EXTERNAL_SDK) {
+    pyodide.FS.mkdir(`${pyodide.FS.sitePackages}/workers`);
+    const template = [
+      `err = ModuleNotFoundError("No module named '$MODNAME'", name="$MODNAME")`,
+      `err.add_note("You need to update to workers-py >= 1.90 or to pass disable_python_external_sdk")`,
+      `raise err`,
+    ].join('\n');
+    pyodide.FS.writeFile(
+      `${pyodide.FS.sitePackages}/workers/__init__.py`,
+      template.replaceAll('$MODNAME', 'workers')
+    );
+    pyodide.FS.writeFile(
+      `${pyodide.FS.sitePackages}/asgi.py`,
+      template.replaceAll('$MODNAME', 'asgi')
+    );
+    return;
+  }
+
   const sitePackages = pyodide.FS.sitePackages;
-  if (pyodide.version === '0.26.0a2') {
+  if (pyodide.version === PyodideVersion.V0_26_0a2) {
     // Inject at cloudflare.workers for backwards compatibility
     pyodide.FS.mkdirTree(`${sitePackages}/cloudflare/workers`);
     await injectSitePackagesModule(
@@ -239,10 +262,10 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
       get_pyodide_entrypoint_helper()
     );
 
+    pyodide.registerJsModule('_cloudflare_compat_flags', COMPATIBILITY_FLAGS);
+
     // Inject modules that enable JS features to be used idiomatically from Python.
-    if (LEGACY_INCLUDE_SDK) {
-      await injectWorkersApi(pyodide);
-    }
+    await injectWorkersApi(pyodide);
 
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
@@ -250,7 +273,7 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     }
     // Other than the oldest version of httpx, we apply the patch at the build step.
     if (
-      pyodide._module.API.version === '0.26.0a2' &&
+      pyodide._module.API.version === PyodideVersion.V0_26_0a2 &&
       TRANSITIVE_REQUIREMENTS.has('httpx')
     ) {
       await applyPatch(pyodide, 'httpx');
@@ -611,10 +634,11 @@ export async function initPython(): Promise<PythonInitResult> {
 
   // Collect a dedicated snapshot at the very end.
   const pyodide = await getPyodide();
-  maybeCollectDedicatedSnapshot(
-    pyodide._module,
-    get_pyodide_entrypoint_helper()
-  );
+  const customSerializedObjects = {
+    pyodide_entrypoint_helper: get_pyodide_entrypoint_helper(),
+    cloudflare_compat_flags: COMPATIBILITY_FLAGS,
+  };
+  maybeCollectDedicatedSnapshot(pyodide._module, customSerializedObjects);
 
   return { handlers, pythonEntrypointClasses, makeEntrypointClass };
 }

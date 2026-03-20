@@ -120,3 +120,58 @@ export const serFailureTest = {
     await promise;
   },
 };
+
+export const DiagChannelSubscribeDuringPublish = {
+  async test() {
+    const ch = channel('test-publish');
+    let callCount = 0;
+    let duringPublishCallCount = 0;
+
+    for (let i = 0; i < 32; i++) {
+      ch.subscribe(() => {
+        callCount++;
+      });
+    }
+
+    ch.subscribe(() => {
+      callCount++;
+      for (let i = 0; i < 64; i++) {
+        ch.subscribe(() => {
+          duringPublishCallCount++;
+        });
+      }
+    });
+
+    for (let i = 0; i < 16; i++) {
+      ch.subscribe(() => {
+        callCount++;
+      });
+    }
+
+    ch.publish({ data: 'trigger' });
+
+    strictEqual(callCount, 49);
+    strictEqual(duringPublishCallCount, 0);
+  },
+};
+
+export const DiagChannelUnbindDuringRunStores = {
+  async test() {
+    const ch = channel('test');
+    const als = new AsyncLocalStorage();
+    let transformCallCount = 0;
+
+    ch.bindStore(als, (msg) => {
+      transformCallCount++;
+      ch.unbindStore(als);
+      return msg;
+    });
+
+    const result = ch.runStores({}, () => 'done');
+    strictEqual(result, 'done');
+    strictEqual(transformCallCount, 1);
+
+    ch.runStores({}, () => {});
+    strictEqual(transformCallCount, 1);
+  },
+};

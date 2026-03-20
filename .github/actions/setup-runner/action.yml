@@ -23,6 +23,8 @@ runs:
           libclang-rt-19-dev \
           llvm-19
         sudo ln -s /usr/bin/llvm-symbolizer-19 /usr/bin/llvm-symbolizer
+        sudo ln -s /usr/bin/llvm-profdata-19 /usr/bin/llvm-profdata
+        sudo ln -s /usr/bin/llvm-cov-19 /usr/bin/llvm-cov
         echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
         echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
         echo "build:linux --linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
@@ -33,7 +35,12 @@ runs:
       shell: pwsh
       if: runner.os == 'Windows'
       # Set a custom output root directory to avoid long file name issues.
+      # TODO(cleanup): According to https://github.com/actions/runner-images/blob/win25/20251216.149/images/windows/scripts/build/Configure-DeveloperMode.ps1#L13,
+      # this should already be set on the build image, but prior testing indicated CI speedups with
+      # it, check if it is actually having any effect.
       run: |
+        # Enable Developer Mode to allow Bazel to create real symlinks
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
         git config --global core.symlinks true
         git config --show-scope --show-origin core.symlinks
         git config --system core.longpaths true

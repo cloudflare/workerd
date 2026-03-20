@@ -3,14 +3,13 @@ using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     (name = "py", worker = .pyWorker),
+    (name = "pyOld", worker = .pyWorkerOld),
     (name = "js", worker = .jsWorker),
   ],
 );
 
 const pyWorker :Workerd.Worker = (
-  compatibilityDate = "2025-03-04",
-
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "python_workflows_implicit_dependencies"],
 
   modules = [
     (name = "workflow.py", pythonModule = embed "workflow.py"),
@@ -21,10 +20,20 @@ const pyWorker :Workerd.Worker = (
   ],
 );
 
-const jsWorker :Workerd.Worker = (
-  compatibilityDate = "2025-03-04",
+const pyWorkerOld :Workerd.Worker = (
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "no_python_workflows_implicit_dependencies"],
 
-  compatibilityFlags = ["nodejs_compat"],
+  modules = [
+    (name = "workflow-old.py", pythonModule = embed "workflow-old.py"),
+  ],
+
+  bindings = [
+    (name = "PythonWorkflowDepends", service = (name = "pyOld", entrypoint = "PythonWorkflowDepends")),
+  ],
+);
+
+const jsWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat", "rpc"],
 
   modules = [
     (name = "worker", esModule = embed "worker.js"),
@@ -32,5 +41,6 @@ const jsWorker :Workerd.Worker = (
 
   bindings = [
     (name = "PythonWorkflow", service = (name = "py", entrypoint = "WorkflowEntrypointExample")),
+    (name = "PythonWorkflowDepends", service = (name = "pyOld", entrypoint = "PythonWorkflowDepends")),
   ],
 );

@@ -17,6 +17,7 @@ namespace workerd {
 
 class Frankenvalue;
 class IoContext_IncomingRequest;
+struct Worker_VersionInfo;
 
 // An interface representing the services made available by a worker/pipeline to handle a
 // request.
@@ -115,6 +116,7 @@ class WorkerInterface: public kj::HttpService {
     // for this event.
     virtual kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
         kj::Maybe<kj::StringPtr> entrypointName,
+        kj::Maybe<Worker_VersionInfo> versionInfo,
         Frankenvalue props,
         kj::TaskSet& waitUntilTasks) = 0;
 
@@ -132,10 +134,7 @@ class WorkerInterface: public kj::HttpService {
     virtual uint16_t getType() = 0;
 
     // Get event info for tracing.
-    // Return none if this event type doesn't need tracing.
-    virtual kj::Maybe<tracing::EventInfo> getEventInfo() const {
-      return kj::none;
-    }
+    virtual tracing::EventInfo getEventInfo() const = 0;
 
     // If the CustomEvent fails before any of the other methods are called, this may be invoked
     // to report the failure reason.

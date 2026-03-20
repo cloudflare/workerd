@@ -824,28 +824,28 @@ class Request final: public Body {
             constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
             clone(): Request<CfHostMetadata, Cf>;
             cache?: "no-store" | "no-cache" | "reload";
-            get cf(): Cf | undefined;
+            cf?: Cf;
           });
         } else if (flags.getCacheNoCache()) {
           JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
             constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
             clone(): Request<CfHostMetadata, Cf>;
             cache?: "no-store" | "no-cache";
-            get cf(): Cf | undefined;
+            cf?: Cf;
           });
         } else {
           JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
             constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
             clone(): Request<CfHostMetadata, Cf>;
             cache?: "no-store";
-            get cf(): Cf | undefined;
+            cf?: Cf;
           });
         }
       } else {
         JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
           constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
           clone(): Request<CfHostMetadata, Cf>;
-          get cf(): Cf | undefined;
+          cf?: Cf;
         });
       }
 

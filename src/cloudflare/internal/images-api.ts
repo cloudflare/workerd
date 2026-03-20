@@ -244,11 +244,67 @@ function isDrawTransformer(input: unknown): input is DrawTransformer {
   return input instanceof DrawTransformer;
 }
 
-class ImagesBindingImpl implements ImagesBinding {
-  readonly #fetcher: Fetcher;
+interface ServiceEntrypointStub {
+  details(imageId: string): Promise<ImageMetadata | null>;
+  image(imageId: string): Promise<ReadableStream<Uint8Array> | null>;
+  upload(
+    image: ReadableStream<Uint8Array> | ArrayBuffer,
+    options?: ImageUploadOptions
+  ): Promise<ImageMetadata>;
+  update(imageId: string, options: ImageUpdateOptions): Promise<ImageMetadata>;
+  delete(imageId: string): Promise<boolean>;
+  list(options?: ImageListOptions): Promise<ImageList>;
+}
 
-  constructor(fetcher: Fetcher) {
+class HostedImagesBindingImpl implements HostedImagesBinding {
+  readonly #fetcher: ServiceEntrypointStub;
+
+  constructor(fetcher: ServiceEntrypointStub) {
     this.#fetcher = fetcher;
+  }
+
+  async details(imageId: string): Promise<ImageMetadata | null> {
+    return this.#fetcher.details(imageId);
+  }
+
+  async image(imageId: string): Promise<ReadableStream<Uint8Array> | null> {
+    return this.#fetcher.image(imageId);
+  }
+
+  async upload(
+    image: ReadableStream<Uint8Array> | ArrayBuffer,
+    options?: ImageUploadOptions
+  ): Promise<ImageMetadata> {
+    return this.#fetcher.upload(image, options);
+  }
+
+  async update(
+    imageId: string,
+    options: ImageUpdateOptions
+  ): Promise<ImageMetadata> {
+    return this.#fetcher.update(imageId, options);
+  }
+
+  async delete(imageId: string): Promise<boolean> {
+    return this.#fetcher.delete(imageId);
+  }
+
+  async list(options?: ImageListOptions): Promise<ImageList> {
+    return this.#fetcher.list(options);
+  }
+}
+
+class ImagesBindingImpl implements ImagesBinding {
+  readonly #fetcher: Fetcher & ServiceEntrypointStub;
+  readonly #hosted: HostedImagesBinding;
+
+  constructor(fetcher: Fetcher & ServiceEntrypointStub) {
+    this.#fetcher = fetcher;
+    this.#hosted = new HostedImagesBindingImpl(fetcher);
+  }
+
+  get hosted(): HostedImagesBinding {
+    return this.#hosted;
   }
 
   async info(
@@ -356,5 +412,5 @@ async function throwErrorIfErrorResponse(
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): ImagesBinding {
-  return new ImagesBindingImpl(env.fetcher);
+  return new ImagesBindingImpl(env.fetcher as Fetcher & ServiceEntrypointStub);
 }

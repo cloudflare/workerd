@@ -4,6 +4,7 @@
 
 #include "sockets.h"
 
+#include "global-scope.h"
 #include "streams/standard.h"
 #include "system-streams.h"
 
@@ -156,7 +157,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
 
   auto refcountedConnection = kj::refcountedWrapper(kj::mv(connection));
   // Initialize the readable/writable streams with the readable/writable sides of an AsyncIoStream.
-  auto sysStreams = newSystemMultiStream(refcountedConnection->addWrappedRef(), ioContext);
+  auto sysStreams = newSystemMultiStream(*refcountedConnection, ioContext);
   auto readable = js.alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
   auto allowHalfOpen = getAllowHalfOpen(options);
   kj::Maybe<jsg::Promise<void>> eofPromise;
@@ -233,7 +234,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
     // Support calling into arbitrary callbacks for any registered "magic" addresses for which
     // custom connect() logic is needed. Note that these overrides should only apply to calls of the
     // global connect() method, not for fetcher->connect(), hence why we check for them here.
-    KJ_IF_SOME(fn, ioContext.getCurrentLock().getWorker().getConnectOverride(addressStr)) {
+    KJ_IF_SOME(fn, ioContext.getCurrentLock().getGlobalScope().getConnectOverride(addressStr)) {
       return fn(js);
     }
     actualFetcher =
@@ -301,12 +302,17 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
     // Forcibly abort the readable/writable streams.
     auto cancelPromise = readable->getController().cancel(js, kj::none);
     auto abortPromise = writable->getController().abort(js, kj::none);
+
     // The below is effectively `Promise.all(cancelPromise, abortPromise)`
     return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
       return kj::mv(abortPromise);
     });
   })
       .then(js, [this](jsg::Lock& js) {
+    // Destroy the connection stream to close the connection.
+    { auto _ = kj::mv(connectionData); }
+    connectionData = kj::none;
+
     resolveFulfiller(js, kj::none);
     return js.resolvedPromise();
   }).catch_(js, [this](jsg::Lock& js, jsg::Value err) { errorHandler(js, kj::mv(err)); });
@@ -315,7 +321,8 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
   JSG_REQUIRE(
       secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
-  // TODO: Track closed state of socket properly and assert that it hasn't been closed here.
+  JSG_REQUIRE(connectionData != kj::none, TypeError,
+      "The connection was closed before startTls could be started.");
   JSG_REQUIRE(domain != nullptr, TypeError, "startTls can only be called once.");
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
@@ -332,22 +339,22 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   auto secureStreamPromise = context.awaitJs(js,
       writable->flush(js).then(js,
           // The openedResolver is a jsg::Promise::Resolver. It should be gc visited here in
-          // case the opened promise is resolves captures a circular references to itself in
+          // case the opened promise it resolves captures a circular references to itself in
           // JavaScript (which is most likely). This prevents a possible memory leak.
           // We also capture a strong reference to the original Socket instance that is being
           // upgraded in order to prevent it from being GC'd while we are waiting for the
           // flush to complete. While it is unlikely to be GC'd while we are waiting because
           // the user code *likely* is holding a active reference to it at this point, we
           // don't want to take any chances. This prevents a possible UAF.
-          JSG_VISITABLE_LAMBDA((self = JSG_THIS, domain = kj::heapString(domain),
-                                   tlsOptions = kj::mv(tlsOptions), tlsStarter = kj::mv(tlsStarter),
-                                   openedResolver = openedPrPair.resolver.addRef(js),
-                                   remoteAddress = kj::str(remoteAddress)),
+          JSG_VISITABLE_LAMBDA(
+              (self = JSG_THIS, domain = kj::heapString(domain), tlsOptions = kj::mv(tlsOptions),
+                  openedResolver = openedPrPair.resolver.addRef(js),
+                  remoteAddress = kj::str(remoteAddress)),
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
                 self->writable->detach(js);
-                self->readable = self->readable->detach(js, true);
+                self->readable->detach(js, true);
 
                 // We should set this before closedResolver.resolve() in order to give the user
                 // the option to check if the closed promise is resolved due to upgrade or not.
@@ -363,12 +370,14 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 } else {
                 }  // Needed to avoid compiler error/warning
 
-                // All non-secure sockets should have a tlsStarter. Though since tlsStarter is an
-                // IoOwn, if the request's IoContext has ended then `tlsStarter` will be null. This
-                // can happen if the flush operation is taking a particularly long time (EW-8538),
-                // so we throw a JSG error if that's the case.
-                JSG_REQUIRE(*tlsStarter != kj::none, TypeError,
-                    "The request has finished before startTls completed.");
+                // All non-secure sockets should have `connectionData` with a `tlsStarter`.
+                // Though since it's inside an IoOwn, if the request's IoContext has ended
+                // then `connectionData` will be null. This can happen if the flush operation is taking
+                // a particularly long time (EW-8538), so we throw a JSG error if that's the case.
+                auto& connData = JSG_REQUIRE_NONNULL(self->connectionData, TypeError,
+                    "The connection was closed before startTls completed.");
+
+                auto& tlsStarter = connData->tlsStarter;
 
                 // Fork the starter promise because we need to create two separate things waiting
                 // on it below. The first is resolving the openedResolver with a JS promise that
@@ -387,9 +396,13 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                   };
                 }));
 
+                // Move the stream out of the plain text socket, to ensure the stream is properly
+                // destroyed when the socket is closed.
+                kj::Own<kj::AsyncIoStream> stream = connData->connectionStream->addWrappedRef();
+                self->connectionData = kj::none;
+
                 auto secureStream = forkedPromise.addBranch().then(
-                    [stream = self->connectionStream->addWrappedRef()]() mutable
-                    -> kj::Own<kj::AsyncIoStream> { return kj::mv(stream); });
+                    [stream = kj::mv(stream)]() mutable { return kj::mv(stream); });
 
                 return kj::newPromisedStream(kj::mv(secureStream));
               })));
@@ -423,6 +436,13 @@ void Socket::handleProxyStatus(
       if (isDefaultFetchPort) {
         msg = kj::str(msg, ". It looks like you might be trying to connect to a HTTP-based service",
             " — consider using fetch instead");
+      } else if (remoteAddress.contains(".hyperdrive.local"_kj)) {
+        // No attempts to connect to Hyperdrive should end up here, since they go through the other
+        // version of handleProxyStatus. If they end up here somehow, log about it to get some
+        // context that can aid in debugging.
+        LOG_WARNING_PERIODICALLY(
+            "attempt to connect to Hyperdrive failed to trigger connectOverride", remoteAddress,
+            status.statusCode, status.statusText);
       }
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {
@@ -519,13 +539,23 @@ jsg::Ref<Socket> SocketsModule::connect(
 }
 
 kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
+  // Set this so that if `close` is called after this, that no closure steps are taken and instead
+  // the `close` is a no-op.
+  isClosing = true;
+
   // We do not care if the socket was disturbed, we require the user to ensure the socket is not
   // being used.
   writable->detach(js);
   readable->detach(js, true);
 
+  // Move the stream out of the socket, to ensure the stream is properly destroyed when the
+  // caller is done with it.
+  auto& dataConn = JSG_REQUIRE_NONNULL(
+      connectionData, TypeError, "The socket connection is closed or was already taken.");
+  auto wrapper = dataConn->connectionStream->addWrappedRef();
+  connectionData = kj::none;
   closedResolver.resolve(js);
-  return connectionStream->addWrappedRef();
+  return wrapper;
 }
 
 // Implementation of the custom factory for creating WorkerInterface instances from a socket

@@ -13,7 +13,6 @@ const selfLoggerWorker :Workerd.Worker = (
   bindings = [
     ( name = "SERVICE", service = "self-logger" ),
   ],
-  compatibilityDate = "2024-10-14",
   compatibilityFlags = ["nodejs_compat"],
   tails = ["self-logger"],
 );

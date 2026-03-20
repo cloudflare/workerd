@@ -9,16 +9,36 @@ use std::rc::Rc;
 
 use kj_rs::KjMaybe;
 
+pub mod feature_flags;
 pub mod modules;
 pub mod v8;
+mod wrappable;
+
+pub use feature_flags::FeatureFlags;
+pub use v8::BigInt64Array;
+pub use v8::BigUint64Array;
+pub use v8::Float32Array;
+pub use v8::Float64Array;
+pub use v8::Int8Array;
+pub use v8::Int16Array;
+pub use v8::Int32Array;
+pub use v8::Uint8Array;
+pub use v8::Uint16Array;
+pub use v8::Uint32Array;
 pub use v8::ffi::ExceptionType;
+pub use wrappable::FromJS;
+pub use wrappable::ToJS;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 mod ffi {
     extern "Rust" {
         type Realm;
+
+        /// Create a fully-initialized Realm with feature flags.
+        /// `feature_flags_data` is canonical (single-segment, no segment table) Cap'n Proto
+        /// bytes produced by `capnp::canonicalize()` on the C++ side.
         #[expect(clippy::unnecessary_box_returns)]
-        unsafe fn realm_create(isolate: *mut Isolate) -> Box<Realm>;
+        unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
     }
 
     unsafe extern "C++" {
@@ -35,10 +55,11 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
     let mut descriptor = v8::ffi::ResourceDescriptor {
-        name: R::class_name().into(),
+        name: R::class_name().to_owned(),
         constructor: KjMaybe::None,
         methods: Vec::new(),
         static_methods: Vec::new(),
+        static_constants: Vec::new(),
     };
 
     for m in R::members() {
@@ -50,7 +71,7 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
             }
             Member::Method { name, callback } => {
                 descriptor.methods.push(v8::ffi::MethodDescriptor {
-                    name: name.to_owned(),
+                    name,
                     callback: callback as usize,
                 });
             }
@@ -63,8 +84,17 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
                 descriptor
                     .static_methods
                     .push(v8::ffi::StaticMethodDescriptor {
-                        name: name.to_owned(),
+                        name,
                         callback: callback as usize,
+                    });
+            }
+            Member::StaticConstant { name, value } => {
+                let ConstantValue::Number(number_value) = value;
+                descriptor
+                    .static_constants
+                    .push(v8::ffi::StaticConstantDescriptor {
+                        name,
+                        value: number_value,
                     });
             }
         }
@@ -76,8 +106,10 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
 pub fn create_resource_constructor<R: Resource>(
     lock: &mut Lock,
 ) -> v8::Global<v8::FunctionTemplate> {
+    // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
     unsafe {
-        v8::ffi::create_resource_template(lock.isolate(), &get_resource_descriptor::<R>()).into()
+        v8::ffi::create_resource_template(lock.isolate().as_ffi(), &get_resource_descriptor::<R>())
+            .into()
     }
 }
 
@@ -106,21 +138,23 @@ pub unsafe fn wrap_resource<'a, R: Resource + 'a, RT: ResourceTemplate>(
             resource.get_state().this = Ref::into_raw(resource.clone()).cast();
             resource.get_state().drop_fn = Some(drop_fn);
 
+            // SAFETY: Lock guarantees the isolate is locked; the resource pointer and constructor are valid.
             let instance: v8::Local<'a, v8::Value> = unsafe {
                 v8::Local::from_ffi(
                     lock.isolate(),
                     v8::ffi::wrap_resource(
-                        lock.isolate(),
+                        lock.isolate().as_ffi(),
                         resource.get_state().this as usize,
                         constructor.as_ffi_ref(),
                         drop_fn as usize,
                     ),
                 )
             };
+            // SAFETY: Lock guarantees the isolate is locked; the instance is a valid V8 object.
             unsafe {
                 resource
                     .get_state()
-                    .attach_wrapper(lock.get_realm(), instance.clone().into());
+                    .attach_wrapper(lock.realm(), instance.clone().into());
             }
             instance
         }
@@ -131,51 +165,436 @@ pub fn unwrap_resource<'a, R: Resource>(
     lock: &'a mut Lock,
     value: v8::Local<v8::Value>,
 ) -> &'a mut R {
-    let ptr = unsafe { v8::ffi::unwrap_resource(lock.isolate(), value.into_ffi()) as *mut R };
+    // SAFETY: The isolate is locked and value wraps a valid resource pointer.
+    let ptr =
+        unsafe { v8::ffi::unwrap_resource(lock.isolate().as_ffi(), value.into_ffi()) as *mut R };
+    // SAFETY: The pointer was stored by wrap_resource and points to a valid R.
     unsafe { &mut *ptr }
 }
 
-pub struct Error {
-    pub name: v8::ffi::ExceptionType,
-    pub message: String,
-}
-
-impl Error {
-    pub fn new(name: v8::ffi::ExceptionType, message: String) -> Self {
-        Self { name, message }
-    }
-
-    /// # Safety
-    /// The caller must ensure the isolate is valid and that the exception is thrown within the
-    /// correct isolate/context.
-    pub unsafe fn as_exception<'a>(
-        &self,
-        isolate: *mut v8::ffi::Isolate,
-    ) -> v8::Local<'a, v8::Value> {
-        unsafe {
-            v8::Local::from_ffi(
-                isolate,
-                v8::ffi::exception_create(isolate, self.name, &self.message),
-            )
+impl From<&str> for ExceptionType {
+    fn from(value: &str) -> Self {
+        match value {
+            "OperationError" => Self::OperationError,
+            "DataError" => Self::DataError,
+            "DataCloneError" => Self::DataCloneError,
+            "InvalidAccessError" => Self::InvalidAccessError,
+            "InvalidStateError" => Self::InvalidStateError,
+            "InvalidCharacterError" => Self::InvalidCharacterError,
+            "NotSupportedError" => Self::NotSupportedError,
+            "SyntaxError" => Self::SyntaxError,
+            "TimeoutError" => Self::TimeoutError,
+            "TypeMismatchError" => Self::TypeMismatchError,
+            "AbortError" => Self::AbortError,
+            "NotFoundError" => Self::NotFoundError,
+            "TypeError" => Self::TypeError,
+            "RangeError" => Self::RangeError,
+            "ReferenceError" => Self::ReferenceError,
+            _ => Self::Error,
         }
     }
 }
 
-impl Default for Error {
-    fn default() -> Self {
+#[derive(Debug, Clone)]
+pub struct Error {
+    pub name: ExceptionType,
+    pub message: String,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.name, self.message)
+    }
+}
+
+/// Generates constructor methods for each `ExceptionType` variant.
+/// e.g., `new_type_error("message")` creates an Error with `ExceptionType::TypeError`
+macro_rules! impl_error_constructors {
+    ($($variant:ident => $fn_name:ident),* $(,)?) => {
+        impl Error {
+            $(
+                pub fn $fn_name(message: impl Into<String>) -> Self {
+                    Self {
+                        name: ExceptionType::$variant,
+                        message: message.into(),
+                    }
+                }
+            )*
+        }
+    };
+}
+
+impl_error_constructors! {
+    OperationError => new_operation_error,
+    DataError => new_data_error,
+    DataCloneError => new_data_clone_error,
+    InvalidAccessError => new_invalid_access_error,
+    InvalidStateError => new_invalid_state_error,
+    InvalidCharacterError => new_invalid_character_error,
+    NotSupportedError => new_not_supported_error,
+    SyntaxError => new_syntax_error,
+    TimeoutError => new_timeout_error,
+    TypeMismatchError => new_type_mismatch_error,
+    AbortError => new_abort_error,
+    NotFoundError => new_not_found_error,
+    TypeError => new_type_error,
+    Error => new_error,
+    RangeError => new_range_error,
+    ReferenceError => new_reference_error,
+}
+
+impl FromJS for Error {
+    type ResultType = Self;
+
+    /// Creates an Error from a V8 value (typically an exception).
+    ///
+    /// If the value is a native error, extracts the name and message properties.
+    /// Otherwise, converts the value to a string for the message.
+    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+        if value.is_native_error() {
+            let obj: v8::Local<v8::Object> = value.into();
+
+            let name = obj
+                .get(lock, "name")
+                .and_then(|v| String::from_js(lock, v).ok());
+
+            let message = obj
+                .get(lock, "message")
+                .and_then(|v| String::from_js(lock, v).ok())
+                .unwrap_or_else(|| "Unknown error".to_owned());
+
+            Ok(Self {
+                name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
+                message,
+            })
+        } else {
+            Err(Self::new_type_error("Unknown error"))
+        }
+    }
+}
+
+impl Error {
+    pub fn new(name: &str, message: &str) -> Self {
         Self {
-            name: v8::ffi::ExceptionType::Error,
-            message: "An unknown error occurred".to_owned(),
+            name: ExceptionType::from(name),
+            message: message.to_owned(),
+        }
+    }
+
+    /// Creates a V8 exception from this error.
+    pub fn to_local<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
+        // SAFETY: isolate is valid; exception_create returns a valid Local handle.
+        unsafe {
+            v8::Local::from_ffi(
+                isolate,
+                v8::ffi::exception_create(isolate.as_ffi(), self.name, &self.message),
+            )
         }
     }
 }
 
 impl From<ParseIntError> for Error {
     fn from(err: ParseIntError) -> Self {
-        Self::new(
-            v8::ffi::ExceptionType::TypeError,
-            format!("Failed to parse integer: {err}"),
-        )
+        Self::new_range_error(format!("Failed to parse integer: {err}"))
+    }
+}
+
+/// A wrapper type that prevents automatic type coercion when unwrapping from JavaScript.
+///
+/// JavaScript automatically coerces types in certain contexts. For instance, when a JavaScript
+/// API expects a string, calling it with the value `null` will result in the null being coerced
+/// into the string value `"null"`.
+///
+/// `NonCoercible<T>` can be used to disable automatic type coercion in APIs. For instance,
+/// `NonCoercible<String>` can be used to accept a value only if the input is already a string.
+/// If the input is the value `null`, then an error is thrown rather than silently coercing to
+/// `"null"`.
+///
+/// # Supported Types
+///
+/// Any type implementing the [`Type`] trait can be used with `NonCoercible<T>`. Built-in
+/// implementations include:
+///
+/// - `NonCoercible<String>` - only accepts JavaScript strings
+/// - `NonCoercible<bool>` - only accepts JavaScript booleans
+/// - `NonCoercible<Number>` - only accepts JavaScript numbers
+///
+/// # Example
+///
+/// ```ignore
+/// use jsg::NonCoercible;
+///
+/// // This function will only accept actual strings, not values that can be coerced to strings
+/// #[jsg_method]
+/// pub fn process_string(&self, param: NonCoercible<String>) -> Result<(), Error> {
+///     let s: &String = param.as_ref();
+///     // or use Deref: let s: &str = &*param;
+///     // ...
+/// }
+/// ```
+///
+/// # Important Notes
+///
+/// Using `NonCoercible<T>` runs counter to Web IDL and general JavaScript API conventions.
+/// In nearly all cases, APIs should allow coercion to occur and should deal with the coerced
+/// input accordingly to avoid being a source of user confusion. Only use `NonCoercible` if
+/// you have a good reason to disable coercion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonCoercible<T> {
+    value: T,
+}
+
+impl<T> NonCoercible<T> {
+    /// Creates a new `NonCoercible` wrapper around the given value.
+    pub fn new(value: T) -> Self {
+        Self { value }
+    }
+
+    /// Consumes the wrapper and returns the inner value.
+    pub fn into_inner(self) -> T {
+        self.value
+    }
+}
+
+impl<T> From<T> for NonCoercible<T> {
+    fn from(value: T) -> Self {
+        Self::new(value)
+    }
+}
+
+impl<T> AsRef<T> for NonCoercible<T> {
+    fn as_ref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> Deref for NonCoercible<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+/// A wrapper type for JavaScript numbers (IEEE 754 double-precision floats).
+///
+/// `Number` represents JavaScript's `number` type, which is always a 64-bit
+/// floating-point value. This wrapper type is used instead of raw `f64` to
+/// distinguish between JavaScript numbers and Rust's `f64` type used for
+/// `Float64Array` elements.
+///
+/// # Usage
+///
+/// Use `Number` when you need to accept or return JavaScript numbers in your API:
+///
+/// ```ignore
+/// use jsg::Number;
+///
+/// #[jsg_method]
+/// pub fn add(&self, a: Number, b: Number) -> Number {
+///     Number::new(a.value() + b.value())
+/// }
+/// ```
+///
+/// # Type Mapping
+///
+/// | Rust Type | JavaScript Type |
+/// |-----------|-----------------|
+/// | `jsg::Number` | `number` |
+/// | `f64` | Used for `Float64Array` elements |
+/// | `Vec<f64>` | `Float64Array` |
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+pub struct Number {
+    value: f64,
+}
+
+impl Number {
+    /// The largest integer that can be represented exactly in JavaScript (2^53 - 1).
+    ///
+    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER)
+    pub const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0; // 2^53 - 1
+
+    /// The smallest integer that can be represented exactly in JavaScript (-(2^53 - 1)).
+    ///
+    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_SAFE_INTEGER)
+    pub const MIN_SAFE_INTEGER: f64 = -9_007_199_254_740_991.0; // -(2^53 - 1)
+
+    /// Creates a new `Number` from an `f64` value.
+    #[inline]
+    pub fn new(value: f64) -> Self {
+        Self { value }
+    }
+
+    /// Returns the underlying `f64` value.
+    #[inline]
+    pub fn value(&self) -> f64 {
+        self.value
+    }
+
+    /// Consumes the wrapper and returns the inner `f64` value.
+    #[inline]
+    pub fn into_inner(self) -> f64 {
+        self.value
+    }
+
+    /// Determines whether the value is a finite number.
+    ///
+    /// Returns `true` if the value is finite (not `Infinity`, `-Infinity`, or `NaN`).
+    ///
+    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isFinite)
+    #[inline]
+    pub fn is_finite(&self) -> bool {
+        self.value.is_finite()
+    }
+
+    /// Determines whether the value is an integer.
+    ///
+    /// Returns `true` if the value is finite and has no fractional part.
+    ///
+    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger)
+    #[inline]
+    #[expect(clippy::float_cmp)] // Exact comparison is correct here - we want trunc(x) == x
+    pub fn is_integer(&self) -> bool {
+        self.value.is_finite() && self.value.trunc() == self.value
+    }
+
+    /// Determines whether the value is `NaN`.
+    ///
+    /// This is more robust than the global `isNaN()` because it doesn't coerce
+    /// the value to a number first.
+    ///
+    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isNaN)
+    #[inline]
+    pub fn is_nan(&self) -> bool {
+        self.value.is_nan()
+    }
+
+    /// Determines whether the value is a safe integer.
+    ///
+    /// A safe integer is an integer that:
+    /// - Can be exactly represented as an IEEE-754 double precision number
+    /// - Has an IEEE-754 representation that cannot be the result of rounding any other integer
+    ///
+    /// Safe integers range from -(2^53 - 1) to 2^53 - 1, inclusive.
+    ///
+    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger)
+    #[inline]
+    pub fn is_safe_integer(&self) -> bool {
+        self.is_integer()
+            && self.value >= Self::MIN_SAFE_INTEGER
+            && self.value <= Self::MAX_SAFE_INTEGER
+    }
+}
+
+impl From<f64> for Number {
+    fn from(value: f64) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<Number> for f64 {
+    fn from(num: Number) -> Self {
+        num.value
+    }
+}
+
+impl From<i32> for Number {
+    fn from(value: i32) -> Self {
+        Self::new(f64::from(value))
+    }
+}
+
+impl From<u32> for Number {
+    fn from(value: u32) -> Self {
+        Self::new(f64::from(value))
+    }
+}
+
+impl std::fmt::Display for Number {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+/// A wrapper type that accepts `null`, `undefined`, or a value of type `T`.
+///
+/// `Nullable<T>` is similar to `Option<T>` but also accepts `undefined` as a null-ish value.
+/// This is useful for JavaScript APIs where both `null` and `undefined` represent
+/// the absence of a value.
+///
+/// # Behavior
+///
+/// - `null` → `Nullable::Null`
+/// - `undefined` → `Nullable::Undefined`
+/// - `T` → `Nullable::Some(T)`
+///
+/// # Example
+///
+/// ```ignore
+/// use jsg::Nullable;
+///
+/// #[jsg_method]
+/// pub fn process(&self, value: Nullable<String>) -> Result<(), Error> {
+///     match value {
+///         Nullable::Some(s) => println!("Got value: {}", s),
+///         Nullable::Null => println!("Got null"),
+///         Nullable::Undefined => println!("Got undefined"),
+///     }
+///     Ok(())
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Nullable<T> {
+    Some(T),
+    Null,
+    Undefined,
+}
+
+impl<T> Nullable<T> {
+    /// Returns `true` if the nullable contains a value.
+    pub fn is_some(&self) -> bool {
+        matches!(self, Self::Some(_))
+    }
+
+    /// Returns `true` if the nullable is `Null`.
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    /// Returns `true` if the nullable is `Undefined`.
+    pub fn is_undefined(&self) -> bool {
+        matches!(self, Self::Undefined)
+    }
+
+    /// Returns `true` if the nullable is `Null` or `Undefined`.
+    pub fn is_null_or_undefined(&self) -> bool {
+        matches!(self, Self::Null | Self::Undefined)
+    }
+
+    /// Returns a reference to the contained value, or `None` if null or undefined.
+    pub fn as_ref(&self) -> Option<&T> {
+        match self {
+            Self::Some(v) => Some(v),
+            Self::Null | Self::Undefined => None,
+        }
+    }
+}
+
+impl<T> From<Option<T>> for Nullable<T> {
+    fn from(opt: Option<T>) -> Self {
+        match opt {
+            Some(v) => Self::Some(v),
+            None => Self::Null,
+        }
+    }
+}
+
+impl<T> From<Nullable<T>> for Option<T> {
+    fn from(nullable: Nullable<T>) -> Self {
+        match nullable {
+            Nullable::Some(v) => Some(v),
+            Nullable::Null | Nullable::Undefined => None,
+        }
     }
 }
 
@@ -185,33 +604,41 @@ impl From<ParseIntError> for Error {
 /// perform V8 operations like creating objects, wrapping values, and accessing the Realm.
 /// This is analogous to `jsg::Lock` in C++ JSG.
 pub struct Lock {
-    isolate: *mut v8::ffi::Isolate,
+    isolate: v8::IsolatePtr,
 }
 
 impl Lock {
     /// # Safety
     /// The caller must ensure that `args` is a valid pointer to `FunctionCallbackInfo`.
     pub unsafe fn from_args(args: *mut v8::ffi::FunctionCallbackInfo) -> Self {
-        unsafe { Self::from_isolate(v8::ffi::fci_get_isolate(args)) }
+        // SAFETY: fci_get_isolate returns the isolate from a valid FunctionCallbackInfo.
+        unsafe { Self::from_isolate_ptr(v8::ffi::fci_get_isolate(args)) }
     }
 
-    /// # Safety
-    /// The caller must ensure that `isolate` is a valid pointer to an `Isolate`.
-    pub unsafe fn from_isolate(isolate: *mut v8::ffi::Isolate) -> Self {
-        Self { isolate }
-    }
-
-    /// Returns a raw pointer to the isolate.
+    /// Creates a Lock from a raw isolate pointer.
     ///
     /// # Safety
-    /// The caller must ensure the pointer is not used after the Lock is dropped and that all
-    /// V8 API calls using this pointer are made while holding the isolate lock.
-    pub unsafe fn isolate(&mut self) -> *mut v8::ffi::Isolate {
+    /// The caller must ensure that `isolate` is a valid pointer to an `Isolate`.
+    pub unsafe fn from_isolate_ptr(isolate: *mut v8::ffi::Isolate) -> Self {
+        Self {
+            // SAFETY: Caller guarantees the isolate pointer is valid.
+            isolate: unsafe { v8::IsolatePtr::from_ffi(isolate) },
+        }
+    }
+
+    /// Returns the isolate associated with this lock.
+    pub fn isolate(&self) -> v8::IsolatePtr {
         self.isolate
     }
 
     pub fn new_object<'a>(&mut self) -> v8::Local<'a, v8::Object> {
-        unsafe { v8::Local::from_ffi(self.isolate(), v8::ffi::local_new_object(self.isolate())) }
+        // SAFETY: The isolate is locked and a HandleScope is active.
+        unsafe {
+            v8::Local::from_ffi(
+                self.isolate(),
+                v8::ffi::local_new_object(self.isolate().as_ffi()),
+            )
+        }
     }
 
     pub fn await_io<F, C, I, R>(self, _fut: F, _callback: C) -> Result<R>
@@ -222,8 +649,31 @@ impl Lock {
         todo!()
     }
 
-    fn get_realm(&mut self) -> &mut Realm {
-        unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate()) }
+    pub(crate) fn realm(&mut self) -> &mut Realm {
+        // SAFETY: The isolate is locked; realm_from_isolate returns a valid Realm pointer.
+        unsafe { &mut *crate::ffi::realm_from_isolate(self.isolate().as_ffi()) }
+    }
+
+    /// Returns the current worker's compatibility flags reader.
+    ///
+    /// ```ignore
+    /// if lock.feature_flags().get_node_js_compat() {
+    ///     // Node.js compatibility behavior
+    /// }
+    /// ```
+    pub fn feature_flags(&mut self) -> compatibility_date_capnp::compatibility_flags::Reader<'_> {
+        self.realm().feature_flags.reader()
+    }
+
+    /// Throws an error as a V8 exception.
+    pub fn throw_exception(&mut self, err: &Error) {
+        // SAFETY: The isolate is locked and the exception local handle is valid.
+        unsafe {
+            v8::ffi::isolate_throw_exception(
+                self.isolate().as_ffi(),
+                err.to_local(self.isolate()).into_ffi(),
+            );
+        }
     }
 }
 
@@ -244,6 +694,7 @@ impl<T: Resource> Deref for Ref<T> {
 
     fn deref(&self) -> &Self::Target {
         let ptr = self.val.get();
+        // SAFETY: UnsafeCell::get returns a valid pointer; Ref ensures single-thread access.
         unsafe { &*ptr }
     }
 }
@@ -251,6 +702,7 @@ impl<T: Resource> Deref for Ref<T> {
 impl<T: Resource> DerefMut for Ref<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let ptr = self.val.get();
+        // SAFETY: UnsafeCell::get returns a valid pointer; Ref ensures single-thread access.
         unsafe { &mut *ptr }
     }
 }
@@ -275,6 +727,7 @@ impl<T: Resource> Ref<T> {
     /// - The pointer is properly aligned and points to a valid `T` instance
     pub unsafe fn from_raw(this: *mut T) -> Self {
         Self {
+            // SAFETY: Caller guarantees the pointer was created by Ref::into_raw.
             val: unsafe { Rc::from_raw(this.cast::<UnsafeCell<T>>()) },
         }
     }
@@ -288,24 +741,65 @@ impl<T: Resource> Clone for Ref<T> {
     }
 }
 
+/// Provides metadata about Rust types exposed to JavaScript.
+///
+/// This trait provides type information used for error messages, memory tracking,
+/// and type validation (for `NonCoercible<T>`). The actual conversion logic is in
+/// `ToJS` (Rust → JS) and `FromJS` (JS → Rust).
+///
 /// TODO: Implement `memory_info(jsg::MemoryTracker)`
-pub trait Type {
+pub trait Type: Sized {
+    /// The JavaScript class name for this type (used in error messages).
     fn class_name() -> &'static str;
+
     /// Same as jsgGetMemoryName
     fn memory_name() -> &'static str {
         std::any::type_name::<Self>()
     }
+
     /// Same as jsgGetMemorySelfSize
-    fn memory_self_size() -> usize
-    where
-        Self: Sized,
-    {
+    fn memory_self_size() -> usize {
         std::mem::size_of::<Self>()
     }
-    /// Wraps this struct as a JavaScript value by deep-copying its fields.
-    fn wrap<'a, 'b>(&self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a;
+
+    /// Returns true if the V8 value is exactly this type (no coercion).
+    /// Used by `NonCoercible<T>` to reject values that would require coercion.
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool;
+}
+
+/// Represents a constant value that can be exposed to JavaScript.
+pub enum ConstantValue {
+    Number(f64),
+}
+
+macro_rules! impl_constant_value_from_lossless {
+    ($($t:ty),*) => {
+        $(
+            impl From<$t> for ConstantValue {
+                fn from(v: $t) -> Self {
+                    Self::Number(f64::from(v))
+                }
+            }
+        )*
+    };
+}
+
+impl_constant_value_from_lossless!(i8, i16, i32, u8, u16, u32, f32, f64);
+
+// i64/u64 can lose precision in f64 (52-bit mantissa), but JavaScript numbers are
+// always f64 so this is inherent to the language boundary.
+impl From<i64> for ConstantValue {
+    #[expect(clippy::cast_precision_loss)]
+    fn from(v: i64) -> Self {
+        Self::Number(v as f64)
+    }
+}
+
+impl From<u64> for ConstantValue {
+    #[expect(clippy::cast_precision_loss)]
+    fn from(v: u64) -> Self {
+        Self::Number(v as f64)
+    }
 }
 
 pub enum Member {
@@ -313,17 +807,21 @@ pub enum Member {
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
     },
     Method {
-        name: &'static str,
+        name: String,
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
     },
     Property {
-        name: &'static str,
+        name: String,
         getter_callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
         setter_callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
     },
     StaticMethod {
-        name: &'static str,
+        name: String,
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
+    },
+    StaticConstant {
+        name: String,
+        value: ConstantValue,
     },
 }
 
@@ -338,7 +836,7 @@ pub struct ResourceState {
     pub this: *mut c_void,
     pub drop_fn: Option<unsafe extern "C" fn(*mut v8::ffi::Isolate, *mut c_void)>,
     pub strong_wrapper: Option<v8::Global<v8::Object>>,
-    pub isolate: *mut v8::ffi::Isolate,
+    pub isolate: Option<v8::IsolatePtr>,
 }
 
 impl Default for ResourceState {
@@ -347,7 +845,7 @@ impl Default for ResourceState {
             this: std::ptr::null_mut(),
             drop_fn: None,
             strong_wrapper: None,
-            isolate: std::ptr::null_mut(),
+            isolate: None,
         }
     }
 }
@@ -367,15 +865,17 @@ impl ResourceState {
         assert!(self.strong_wrapper.is_none());
 
         self.strong_wrapper = Some(object.into());
-        self.isolate = realm.get_isolate();
+        self.isolate = Some(realm.isolate());
 
         realm.add_resource(NonNull::from(&mut *self));
 
         let Some(wrapper) = self.strong_wrapper.as_mut() else {
             unreachable!("This should not happen")
         };
+        let isolate = self.isolate.expect("isolate should be set");
+        // SAFETY: The isolate is valid, self.this is a valid resource pointer stored during wrapping.
         unsafe {
-            wrapper.make_weak(self.isolate, self.this, Self::weak_callback);
+            wrapper.make_weak(isolate, self.this, Self::weak_callback);
         }
     }
 
@@ -434,6 +934,7 @@ pub trait Struct: Type {}
 /// - The resource has not already been dropped
 pub unsafe fn drop_resource<R: Resource>(_isolate: *mut ffi::Isolate, this: *mut c_void) {
     let this = this.cast::<R>();
+    // SAFETY: Caller guarantees this pointer was created by Ref::into_raw and hasn't been freed.
     let this = unsafe { Ref::from_raw(this) };
     drop(this);
 }
@@ -449,15 +950,19 @@ pub unsafe fn drop_resource<R: Resource>(_isolate: *mut ffi::Isolate, this: *mut
 /// `Drop` iterates all tracked resources and calls their drop functions to reconstruct and
 /// free any leaked `Ref<R>` values for wrappers not yet collected by V8's GC.
 pub struct Realm {
-    isolate: *mut v8::ffi::Isolate,
+    isolate: v8::IsolatePtr,
     resources: Vec<*mut ResourceState>,
+    /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
+    feature_flags: FeatureFlags,
 }
 
 impl Realm {
-    pub fn new(isolate: *mut v8::ffi::Isolate) -> Self {
+    /// Creates a new Realm with its feature flags.
+    pub fn new(isolate: v8::IsolatePtr, feature_flags: FeatureFlags) -> Self {
         Self {
             isolate,
             resources: Vec::new(),
+            feature_flags,
         }
     }
 
@@ -465,7 +970,7 @@ impl Realm {
         self.resources.push(resource.as_ptr());
     }
 
-    pub fn get_isolate(&self) -> *mut v8::ffi::Isolate {
+    pub fn isolate(&self) -> v8::IsolatePtr {
         self.isolate
     }
 }
@@ -473,7 +978,8 @@ impl Realm {
 impl Drop for Realm {
     fn drop(&mut self) {
         debug_assert!(
-            unsafe { v8::ffi::isolate_is_locked(self.isolate) },
+            // SAFETY: The isolate pointer is valid during Realm's lifetime.
+            unsafe { self.isolate.is_locked() },
             "Realm must be dropped while holding the isolate lock"
         );
 
@@ -483,6 +989,7 @@ impl Drop for Realm {
         // in ResourceState.this. If strong_wrapper is still Some, the V8 object
         // wasn't GC'd, so we must manually drop the leaked Ref by calling drop_fn.
         for resource_ptr in &self.resources {
+            // SAFETY: resource_ptr is valid; we only access it before calling drop_fn which frees it.
             unsafe {
                 let resource_state = &**resource_ptr;
                 // Only drop if the wrapper hasn't been collected by V8's GC
@@ -492,7 +999,8 @@ impl Drop for Realm {
                 {
                     // Note: Do not access resource_state after drop_fn returns, as
                     // ResourceState is embedded inside the Resource which is now freed.
-                    drop_fn(resource_state.isolate, resource_state.this);
+                    let isolate = resource_state.isolate.expect("isolate should be set");
+                    drop_fn(isolate.as_ffi(), resource_state.this);
                 }
             }
         }
@@ -501,25 +1009,8 @@ impl Drop for Realm {
 }
 
 #[expect(clippy::unnecessary_box_returns)]
-unsafe fn realm_create(isolate: *mut v8::ffi::Isolate) -> Box<Realm> {
-    Box::new(Realm::new(isolate))
-}
-
-/// Handles a result by setting the return value or throwing an error.
-///
-/// # Safety
-/// The caller must ensure V8 operations are performed within the correct isolate/context.
-pub unsafe fn handle_result<T: Type, E: std::fmt::Display>(
-    lock: &mut Lock,
-    args: &mut v8::FunctionCallbackInfo,
-    result: Result<T, E>,
-) {
-    match result {
-        Ok(result) => args.set_return_value(result.wrap(lock)),
-        Err(err) => {
-            // TODO(soon): Make sure to use jsg::Error trait here and dynamically call proper method to throw the error.
-            let description = err.to_string();
-            unsafe { v8::ffi::isolate_throw_error(lock.isolate(), &description) };
-        }
-    }
+unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]) -> Box<Realm> {
+    let feature_flags = FeatureFlags::from_bytes(feature_flags_data);
+    // SAFETY: Caller guarantees the isolate pointer is valid.
+    unsafe { Box::new(Realm::new(v8::IsolatePtr::from_ffi(isolate), feature_flags)) }
 }

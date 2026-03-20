@@ -275,7 +275,7 @@ static_assert(std::size(COMMON_HEADER_NAMES) == (Headers::MAX_COMMON_HEADER_ID +
 
 void maybeWarnIfBadHeaderString(kj::StringPtr name, kj::StringPtr str) {
   KJ_IF_SOME(context, IoContext::tryCurrent()) {
-    if (context.isInspectorEnabled()) {
+    if (context.hasWarningHandler()) {
       if (!simdutf::validate_ascii(str.begin(), str.size())) {
         // The string contains non-ASCII characters. While any 8-bit value is technically valid
         // in HTTP headers, we encode header strings as UTF-8, so we want to warn the user that
@@ -602,7 +602,7 @@ void Headers::setUnguarded(jsg::Lock& js, kj::String name, kj::String value) {
       return;
     }
     KJ_CASE_ONEOF(n, kj::String) {
-      using Ret = typename decltype(uncommonHeaders)::Entry;
+      using Ret = decltype(uncommonHeaders)::Entry;
       auto& header = uncommonHeaders.findOrCreate(n, [&] -> Ret {
         kj::Maybe<kj::String> maybeName;
         if (name != n) {
@@ -659,7 +659,7 @@ void Headers::appendUnguarded(jsg::Lock& js, kj::String name, kj::String value) 
       KJ_IF_SOME(existing, uncommonHeaders.find(n)) {
         existing->values.add(kj::mv(value));
       } else {
-        using Ret = typename decltype(uncommonHeaders)::Entry;
+        using Ret = decltype(uncommonHeaders)::Entry;
         auto& header = uncommonHeaders.findOrCreate(n, [&] -> Ret {
           kj::Maybe<kj::String> maybeName;
           if (name != n) {

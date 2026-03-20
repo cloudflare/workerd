@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { AiInternalError } from 'cloudflare-internal:ai-api';
 import type { GatewayOptions } from 'cloudflare-internal:aig-api';
 import base64 from 'cloudflare-internal:base64';
@@ -13,6 +17,7 @@ export type MarkdownDocument = {
 
 export type ConversionResponse =
   | {
+      id: string;
       name: string;
       mimeType: string;
       format: 'markdown';
@@ -20,6 +25,7 @@ export type ConversionResponse =
       data: string;
     }
   | {
+      id: string;
       name: string;
       mimeType: string;
       format: 'error';
@@ -38,6 +44,8 @@ export type EmbeddedImageConversionOptions = ImageConversionOptions & {
 export type ConversionOptions = {
   html?: {
     images?: EmbeddedImageConversionOptions & { convertOGImage?: boolean };
+    hostname?: string;
+    cssSelector?: string;
   };
   docx?: {
     images?: EmbeddedImageConversionOptions;

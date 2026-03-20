@@ -37,7 +37,7 @@ template <typename TypeWrapper>
 kj::Own<jsg::modules::ModuleBundle> getExternalRttiModuleBundle(auto featureFlags) {
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
-  static const auto kSpecifier = "internal:rtti"_url;
+  static const auto kSpecifier = "workerd:rtti"_url;
   builder.addObject<RTTIModule, TypeWrapper>(kSpecifier);
   return builder.finish();
 }

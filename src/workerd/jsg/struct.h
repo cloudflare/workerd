@@ -156,7 +156,7 @@ struct TypeTuple {
 template <typename Self,
     typename T,
     typename FieldWrapperTuple,
-    typename Indices = typename FieldWrapperTuple::Indexes>
+    typename Indices = FieldWrapperTuple::Indexes>
 class StructWrapper;
 
 // TypeWrapper mixin for struct types (application-defined C++ structs declared with a

@@ -9,7 +9,6 @@ const unitTests :Workerd.Config = (
           (name = "a/b/c",
            esModule = "import * as assert from 'node:assert'; await import('node:buffer'); export default assert;"),
         ],
-        compatibilityDate = "2023-01-15",
         compatibilityFlags = ["nodejs_compat"]
       )
     ),

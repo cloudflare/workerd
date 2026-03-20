@@ -3,7 +3,7 @@ import {
   invocationPromises,
   spans,
   testTailHandler,
-} from 'test:instumentation-tail';
+} from 'test:instrumentation-tail';
 
 // Use shared instrumentation test tail worker
 export default testTailHandler;
@@ -23,14 +23,16 @@ export const test = {
       { name: 'durable_object_storage_deleteAlarm', closed: true },
       { name: 'durable_object_storage_transaction', closed: true },
       { name: 'durable_object_storage_sync', closed: true },
-      { name: 'durable_object_subrequest', closed: true },
+      {
+        name: 'durable_object_subrequest',
+        closed: true,
+        objectId:
+          'aa299662980ce671dbcb09a5d7ab26ab30e45465bcd12f263f2bdd7d5edd804a',
+      },
     ];
 
     await Promise.allSettled(invocationPromises);
-    let received = Array.from(spans.values()).filter(
-      (span) => span.name !== 'jsRpcSession'
-    );
+    let received = Array.from(spans.values());
     assert.deepStrictEqual(received, expected);
-    return new Response('');
   },
 };

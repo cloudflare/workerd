@@ -54,6 +54,15 @@
               },
               "extra_strip_prefix": {
                 "type": "string"
+              },
+              "use_bazel_dep": {
+                "type": "boolean"
+              },
+              "repo_name": {
+                "type": "string"
+              },
+              "use_module_bazel_from_bcr": {
+                "type": "string"
               }
             },
             "required": [
@@ -118,6 +127,15 @@
               },
               "downloaded_file_path": {
                 "type": "string"
+              },
+              "use_bazel_dep": {
+                "type": "boolean"
+              },
+              "repo_name": {
+                "type": "string"
+              },
+              "use_module_bazel_from_bcr": {
+                "type": "string"
               }
             },
             "required": [
@@ -163,6 +181,12 @@
                 "additionalProperties": {
                   "type": "string"
                 }
+              },
+              "use_bazel_dep": {
+                "type": "boolean"
+              },
+              "repo_name": {
+                "type": "string"
               }
             },
             "required": [
@@ -192,6 +216,25 @@
               "type",
               "name",
               "build_file"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "bazel_dep"
+              },
+              "name": {
+                "type": "string"
+              },
+              "freeze_version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "name"
             ],
             "additionalProperties": false
           }

@@ -9,7 +9,7 @@
 
 namespace workerd::api {
 
-kj::Maybe<jsg::BufferSource> scrypt(jsg::Lock& js,
+kj::Maybe<jsg::JsArrayBuffer> scrypt(jsg::Lock& js,
     size_t length,
     uint32_t N,
     uint32_t r,
@@ -18,11 +18,11 @@ kj::Maybe<jsg::BufferSource> scrypt(jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> pass,
     kj::ArrayPtr<const kj::byte> salt) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
-  auto buf = ToNcryptoBuffer(backing.asArrayPtr());
-  if (ncrypto::scryptInto(
-          ToNcryptoBuffer(pass.asChars()), ToNcryptoBuffer(salt), N, r, p, maxmem, length, &buf)) {
-    return jsg::BufferSource(js, kj::mv(backing));
+  auto buf = jsg::JsArrayBuffer::create(js, length);
+  auto ncBuf = ToNcryptoBuffer(buf.asArrayPtr());
+  if (ncrypto::scryptInto(ToNcryptoBuffer(pass.asChars()), ToNcryptoBuffer(salt), N, r, p, maxmem,
+          length, &ncBuf)) {
+    return kj::mv(buf);
   }
   return kj::none;
 }

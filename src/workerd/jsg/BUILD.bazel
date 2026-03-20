@@ -21,7 +21,6 @@ wd_cc_library(
         ":jsg-core",
         ":memory-tracker",
         ":url",
-        "//src/rust/jsg",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",

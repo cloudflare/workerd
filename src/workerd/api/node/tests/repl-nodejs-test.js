@@ -42,7 +42,7 @@ export const replREPLServer = {
   test() {
     assert.throws(() => new repl.REPLServer(), {
       code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      message: /Interface/,
+      message: /REPLServer/,
     });
     assert.strictEqual(typeof repl.REPLServer, 'function');
   },

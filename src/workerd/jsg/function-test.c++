@@ -191,10 +191,76 @@ struct FunctionContext: public ContextGlobalObject {
     });
   }
 
+  kj::String testTryCatch2(Lock& js, jsg::Function<int()> thrower) {
+    // Here we prove that the macro is if-else friendly.
+    if (true) JSG_TRY(js) {
+        return kj::str(thrower(js));
+      }
+    JSG_CATCH(exception) {
+      auto handle = exception.getHandle(js);
+      return kj::str("caught: ", handle);
+    }
+    else {
+      KJ_UNREACHABLE;
+    }
+  }
+
+  kj::String testTryCatchWithOptions(Lock& js, jsg::Function<void()> thrower) {
+    // Test that JSG_CATCH can accept ExceptionToJsOptions.
+    JSG_TRY(js) {
+      thrower(js);
+      return kj::str("no exception");
+    }
+    JSG_CATCH(exception, {.ignoreDetail = true}) {
+      auto handle = exception.getHandle(js);
+      return kj::str("caught with options: ", handle);
+    }
+  }
+
+  kj::String testNestedTryCatchInnerCatches(Lock& js, jsg::Function<void()> thrower) {
+    // Test nested JSG_TRY/JSG_CATCH where inner catches, outer doesn't see exception.
+    JSG_TRY(js) {
+      kj::String innerResult;
+      JSG_TRY(js) {
+        thrower(js);
+        innerResult = kj::str("inner: no exception");
+      }
+      JSG_CATCH(innerException) {
+        innerResult = kj::str("inner caught: ", innerException.getHandle(js));
+      }
+      return kj::str("outer: no exception, ", innerResult);
+    }
+    JSG_CATCH(outerException) {
+      return kj::str("outer caught: ", outerException.getHandle(js));
+    }
+  }
+
+  kj::String testNestedTryCatchOuterCatches(Lock& js, jsg::Function<void()> thrower) {
+    // Test nested JSG_TRY/JSG_CATCH where inner rethrows, outer catches.
+    JSG_TRY(js) {
+      JSG_TRY(js) {
+        thrower(js);
+        return kj::str("inner: no exception");
+      }
+      JSG_CATCH(innerException) {
+        // Rethrow so outer can catch
+        js.throwException(kj::mv(innerException));
+      }
+      return kj::str("outer: no exception");
+    }
+    JSG_CATCH(outerException) {
+      return kj::str("outer caught: ", outerException.getHandle(js));
+    }
+  }
+
   JSG_RESOURCE_TYPE(FunctionContext) {
     JSG_METHOD(test);
     JSG_METHOD(test2);
     JSG_METHOD(testTryCatch);
+    JSG_METHOD(testTryCatch2);
+    JSG_METHOD(testTryCatchWithOptions);
+    JSG_METHOD(testNestedTryCatchInnerCatches);
+    JSG_METHOD(testNestedTryCatchOuterCatches);
 
     JSG_READONLY_PROTOTYPE_PROPERTY(square, getSquare);
     JSG_READONLY_PROTOTYPE_PROPERTY(gcLambda, getGcLambda);
@@ -220,6 +286,57 @@ KJ_TEST("jsg::Function<T>") {
 
   e.expectEval("testTryCatch(() => { return 123; })", "string", "123");
   e.expectEval("testTryCatch(() => { throw new Error('foo'); })", "string", "caught: Error: foo");
+
+  e.expectEval("testTryCatch2(() => { return 123; })", "string", "123");
+  e.expectEval("testTryCatch2(() => { throw new Error('foo'); })", "string", "caught: Error: foo");
+
+  e.expectEval("testTryCatchWithOptions(() => {})", "string", "no exception");
+  e.expectEval("testTryCatchWithOptions(() => { throw new Error('bar'); })", "string",
+      "caught with options: Error: bar");
+
+  // Nested JSG_TRY/JSG_CATCH tests
+  e.expectEval("testNestedTryCatchInnerCatches(() => {})", "string",
+      "outer: no exception, inner: no exception");
+  e.expectEval("testNestedTryCatchInnerCatches(() => { throw new Error('inner'); })", "string",
+      "outer: no exception, inner caught: Error: inner");
+
+  e.expectEval("testNestedTryCatchOuterCatches(() => {})", "string", "inner: no exception");
+  e.expectEval("testNestedTryCatchOuterCatches(() => { throw new Error('rethrown'); })", "string",
+      "outer caught: Error: rethrown");
+}
+
+KJ_TEST("JSG_TRY/JSG_CATCH with TerminateExecution") {
+  Evaluator<FunctionContext, FunctionIsolate> e(v8System);
+
+  // TerminateExecution should propagate through JSG_CATCH without being caught.
+  // The Evaluator's run() method will detect the termination and throw.
+  KJ_EXPECT_THROW_MESSAGE("TerminateExecution() was called", e.run([](auto& js) {
+    // Test single-level JSG_TRY/JSG_CATCH with TerminateExecution
+    JSG_TRY(js) {
+      js.terminateExecutionNow();
+    }
+    JSG_CATCH(exception) {
+      (void)exception;
+      KJ_FAIL_ASSERT("TerminateExecution was caught by JSG_CATCH");
+    }
+  }));
+
+  KJ_EXPECT_THROW_MESSAGE("TerminateExecution() was called", e.run([](auto& js) {
+    // Test nested JSG_TRY/JSG_CATCH with TerminateExecution - should propagate through both
+    JSG_TRY(js) {
+      JSG_TRY(js) {
+        js.terminateExecutionNow();
+      }
+      JSG_CATCH(innerException) {
+        (void)innerException;
+        KJ_FAIL_ASSERT("TerminateExecution was caught by inner JSG_CATCH");
+      }
+    }
+    JSG_CATCH(outerException) {
+      (void)outerException;
+      KJ_FAIL_ASSERT("TerminateExecution was caught by outer JSG_CATCH");
+    }
+  }));
 }
 
 }  // namespace

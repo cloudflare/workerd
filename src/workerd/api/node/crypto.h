@@ -8,8 +8,9 @@
 #include <workerd/api/crypto/digest.h>
 #include <workerd/api/crypto/x509.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/jsvalue.h>
 
-#include <ncrypto.h>
+#include <ncrypto/aead.h>
 
 namespace workerd::api::node {
 
@@ -26,12 +27,12 @@ class CryptoImpl final: public jsg::Object {
 
     void setPrivateKey(kj::Array<kj::byte> key);
     void setPublicKey(kj::Array<kj::byte> key);
-    jsg::BufferSource getPublicKey(jsg::Lock& js);
-    jsg::BufferSource getPrivateKey(jsg::Lock& js);
-    jsg::BufferSource getGenerator(jsg::Lock& js);
-    jsg::BufferSource getPrime(jsg::Lock& js);
-    jsg::BufferSource computeSecret(jsg::Lock& js, kj::Array<kj::byte> key);
-    jsg::BufferSource generateKeys(jsg::Lock& js);
+    jsg::JsUint8Array getPublicKey(jsg::Lock& js);
+    jsg::JsUint8Array getPrivateKey(jsg::Lock& js);
+    jsg::JsUint8Array getGenerator(jsg::Lock& js);
+    jsg::JsUint8Array getPrime(jsg::Lock& js);
+    jsg::JsUint8Array computeSecret(jsg::Lock& js, kj::Array<kj::byte> key);
+    jsg::JsUint8Array generateKeys(jsg::Lock& js);
     int getVerifyError();
 
     JSG_RESOURCE_TYPE(DiffieHellmanHandle) {
@@ -53,11 +54,11 @@ class CryptoImpl final: public jsg::Object {
 
   jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(jsg::Lock& js, kj::String name);
 
-  jsg::BufferSource statelessDH(
+  jsg::JsUint8Array statelessDH(
       jsg::Lock& js, jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey);
 
   // Primes
-  jsg::BufferSource randomPrime(jsg::Lock& js,
+  jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
       uint32_t size,
       bool safe,
       jsg::Optional<kj::Array<kj::byte>> add,
@@ -71,12 +72,12 @@ class CryptoImpl final: public jsg::Object {
 
     static jsg::Ref<HashHandle> constructor(
         jsg::Lock& js, kj::String algorithm, kj::Maybe<uint32_t> xofLen);
-    static jsg::BufferSource oneshot(
+    static jsg::JsUint8Array oneshot(
         jsg::Lock&, kj::String algorithm, kj::Array<kj::byte> data, kj::Maybe<uint32_t> xofLen);
 
     jsg::Ref<HashHandle> copy(jsg::Lock& js, kj::Maybe<uint32_t> xofLen);
     int update(kj::Array<kj::byte> data);
-    jsg::BufferSource digest(jsg::Lock& js);
+    jsg::JsUint8Array digest(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(HashHandle) {
       JSG_METHOD(update);
@@ -102,11 +103,11 @@ class CryptoImpl final: public jsg::Object {
 
     // Efficiently implement one-shot HMAC that avoids multiple calls
     // across the C++/JS boundary.
-    static jsg::BufferSource oneshot(
+    static jsg::JsUint8Array oneshot(
         jsg::Lock& js, kj::String algorithm, KeyParam key, kj::Array<kj::byte> data);
 
     int update(kj::Array<kj::byte> data);
-    jsg::BufferSource digest(jsg::Lock& js);
+    jsg::JsUint8Array digest(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(HmacHandle) {
       JSG_METHOD(update);
@@ -121,7 +122,7 @@ class CryptoImpl final: public jsg::Object {
   };
 
   // Hkdf
-  jsg::BufferSource getHkdf(jsg::Lock& js,
+  jsg::JsArrayBuffer getHkdf(jsg::Lock& js,
       kj::String hash,
       kj::Array<const kj::byte> key,
       kj::Array<const kj::byte> salt,
@@ -129,7 +130,7 @@ class CryptoImpl final: public jsg::Object {
       uint32_t length);
 
   // Pbkdf2
-  jsg::BufferSource getPbkdf(jsg::Lock& js,
+  jsg::JsArrayBuffer getPbkdf(jsg::Lock& js,
       kj::Array<const kj::byte> password,
       kj::Array<const kj::byte> salt,
       uint32_t num_iterations,
@@ -137,7 +138,7 @@ class CryptoImpl final: public jsg::Object {
       kj::String name);
 
   // Scrypt
-  jsg::BufferSource getScrypt(jsg::Lock& js,
+  jsg::JsArrayBuffer getScrypt(jsg::Lock& js,
       kj::Array<const kj::byte> password,
       kj::Array<const kj::byte> salt,
       uint32_t N,
@@ -188,10 +189,11 @@ class CryptoImpl final: public jsg::Object {
   };
 
   struct CreateAsymmetricKeyOptions {
-    kj::OneOf<jsg::BufferSource, SubtleCrypto::JsonWebKey, jsg::Ref<api::CryptoKey>> key;
+    kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, SubtleCrypto::JsonWebKey, jsg::Ref<api::CryptoKey>>
+        key;
     kj::String format;
     jsg::Optional<kj::String> type;
-    jsg::Optional<jsg::BufferSource> passphrase;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> passphrase;
     // The passphrase is only used for private keys. The format, type, and passphrase
     // options are only used if the key is a kj::Array<kj::byte>.
     JSG_STRUCT(key, format, type, passphrase);
@@ -200,7 +202,7 @@ class CryptoImpl final: public jsg::Object {
   CryptoImpl() = default;
   CryptoImpl(jsg::Lock&, const jsg::Url&) {}
 
-  kj::OneOf<kj::String, jsg::BufferSource, SubtleCrypto::JsonWebKey> exportKey(
+  kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> exportKey(
       jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options);
 
   bool equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey);
@@ -208,7 +210,7 @@ class CryptoImpl final: public jsg::Object {
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js, jsg::Ref<CryptoKey> key);
   kj::StringPtr getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key);
 
-  jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, jsg::BufferSource keyData);
+  jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData);
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   static kj::Maybe<const ncrypto::EVPKeyPointer&> tryGetKey(jsg::Ref<CryptoKey>& key);
@@ -242,7 +244,7 @@ class CryptoImpl final: public jsg::Object {
   };
 
   struct DhKeyPairOptions {
-    kj::OneOf<jsg::BufferSource, uint32_t, kj::String> primeOrGroup;
+    kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, uint32_t, kj::String> primeOrGroup;
     jsg::Optional<uint32_t> generator;
     JSG_STRUCT(primeOrGroup, generator);
   };
@@ -259,8 +261,8 @@ class CryptoImpl final: public jsg::Object {
     SignHandle(ncrypto::EVPMDCtxPointer ctx);
     static jsg::Ref<SignHandle> constructor(jsg::Lock& js, kj::String algorithm);
 
-    void update(jsg::Lock& js, jsg::BufferSource data);
-    jsg::BufferSource sign(jsg::Lock& js,
+    void update(jsg::Lock& js, jsg::JsBufferSource data);
+    jsg::JsUint8Array sign(jsg::Lock& js,
         jsg::Ref<CryptoKey> key,
         jsg::Optional<int> rsaPadding,
         jsg::Optional<int> pssSaltLength,
@@ -279,10 +281,10 @@ class CryptoImpl final: public jsg::Object {
     VerifyHandle(ncrypto::EVPMDCtxPointer ctx);
     static jsg::Ref<VerifyHandle> constructor(jsg::Lock& js, kj::String algorithm);
 
-    void update(jsg::Lock& js, jsg::BufferSource data);
+    void update(jsg::Lock& js, jsg::JsBufferSource data);
     bool verify(jsg::Lock& js,
         jsg::Ref<CryptoKey> key,
-        jsg::BufferSource signature,
+        jsg::JsBufferSource signature,
         jsg::Optional<int> rsaPadding,
         jsg::Optional<int> pssSaltLength,
         jsg::Optional<int> dsaSigEnc);
@@ -296,18 +298,18 @@ class CryptoImpl final: public jsg::Object {
     ncrypto::EVPMDCtxPointer ctx;
   };
 
-  jsg::BufferSource signOneShot(jsg::Lock& js,
+  jsg::JsUint8Array signOneShot(jsg::Lock& js,
       jsg::Ref<CryptoKey> key,
       jsg::Optional<kj::String> algorithm,
-      jsg::BufferSource data,
+      jsg::JsBufferSource data,
       jsg::Optional<int> rsaPadding,
       jsg::Optional<int> pssSaltLength,
       jsg::Optional<int> dsaSigEnc);
   bool verifyOneShot(jsg::Lock& js,
       jsg::Ref<CryptoKey> key,
       jsg::Optional<kj::String> algorithm,
-      jsg::BufferSource data,
-      jsg::BufferSource signature,
+      jsg::JsBufferSource data,
+      jsg::JsBufferSource signature,
       jsg::Optional<int> rsaPadding,
       jsg::Optional<int> pssSaltLength,
       jsg::Optional<int> dsaSigEnc);
@@ -321,10 +323,11 @@ class CryptoImpl final: public jsg::Object {
       unsigned int max_message_size = INT_MAX;
     };
 
-    CipherHandle(CipherMode mode,
+    CipherHandle(jsg::Lock& js,
+        CipherMode mode,
         ncrypto::CipherCtxPointer ctx,
         jsg::Ref<CryptoKey> key,
-        jsg::BufferSource iv,
+        jsg::JsBufferSource iv,
         kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
 
     static jsg::Ref<CipherHandle> construct(jsg::Lock& js,
@@ -332,15 +335,16 @@ class CryptoImpl final: public jsg::Object {
         kj::StringPtr algorithm,
         ncrypto::Cipher cipher,
         jsg::Ref<CryptoKey> key,
-        jsg::BufferSource iv,
+        jsg::JsBufferSource iv,
         jsg::Optional<uint32_t> maybeAuthTagLength);
 
-    jsg::BufferSource update(jsg::Lock& js, jsg::BufferSource data);
-    jsg::BufferSource final(jsg::Lock& js);
-    void setAAD(jsg::Lock& js, jsg::BufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength);
+    jsg::JsUint8Array update(jsg::Lock& js, jsg::JsBufferSource data);
+    jsg::JsUint8Array final(jsg::Lock& js);
+    void setAAD(
+        jsg::Lock& js, jsg::JsBufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength);
     void setAutoPadding(jsg::Lock& js, bool autoPadding);
-    void setAuthTag(jsg::Lock& js, jsg::BufferSource authTag);
-    jsg::BufferSource getAuthTag(jsg::Lock& js);
+    void setAuthTag(jsg::Lock& js, jsg::JsBufferSource authTag);
+    jsg::JsUint8Array getAuthTag(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(CipherHandle) {
       JSG_METHOD(update);
@@ -355,8 +359,8 @@ class CryptoImpl final: public jsg::Object {
     CipherMode mode;
     ncrypto::CipherCtxPointer ctx;
     jsg::Ref<CryptoKey> key;
-    jsg::BufferSource iv;
-    kj::Maybe<jsg::BufferSource> maybeAuthTag;
+    jsg::JsRef<jsg::JsBufferSource> iv;
+    kj::Maybe<jsg::JsRef<jsg::JsBufferSource>> maybeAuthTag;
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo;
     bool authTagPassed = false;
     bool pendingAuthFailed = false;
@@ -397,11 +401,12 @@ class CryptoImpl final: public jsg::Object {
       unsigned int max_message_size = INT_MAX;
     };
 
-    AeadHandle(CipherMode mode,
+    AeadHandle(jsg::Lock& js,
+        CipherMode mode,
         ncrypto::Aead aead,
         ncrypto::AeadCtxPointer ctx,
         jsg::Ref<CryptoKey> key,
-        jsg::BufferSource iv,
+        jsg::JsBufferSource iv,
         kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
 
     static jsg::Ref<AeadHandle> construct(jsg::Lock& js,
@@ -409,15 +414,16 @@ class CryptoImpl final: public jsg::Object {
         kj::StringPtr algorithm,
         ncrypto::Aead aead,
         jsg::Ref<CryptoKey> key,
-        jsg::BufferSource iv,
+        jsg::JsBufferSource iv,
         jsg::Optional<uint32_t> maybeAuthTagLength);
 
-    jsg::BufferSource update(jsg::Lock& js, jsg::BufferSource data);
-    jsg::BufferSource final(jsg::Lock& js);
-    void setAAD(jsg::Lock& js, jsg::BufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength);
+    jsg::JsUint8Array update(jsg::Lock& js, jsg::JsBufferSource data);
+    jsg::JsUint8Array final(jsg::Lock& js);
+    void setAAD(
+        jsg::Lock& js, jsg::JsBufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength);
     void setAutoPadding(jsg::Lock&, bool);
-    void setAuthTag(jsg::Lock& js, jsg::BufferSource authTag);
-    jsg::BufferSource getAuthTag(jsg::Lock& js);
+    void setAuthTag(jsg::Lock& js, jsg::JsBufferSource authTag);
+    jsg::JsUint8Array getAuthTag(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(AeadHandle) {
       JSG_METHOD(update);
@@ -433,10 +439,10 @@ class CryptoImpl final: public jsg::Object {
     ncrypto::Aead aead;
     ncrypto::AeadCtxPointer ctx;
     jsg::Ref<CryptoKey> key;
-    jsg::BufferSource iv;
-    kj::Maybe<jsg::BufferSource> maybeAuthTag;
+    jsg::JsRef<jsg::JsBufferSource> iv;
+    kj::Maybe<jsg::JsRef<jsg::JsBufferSource>> maybeAuthTag;
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo;
-    kj::Maybe<jsg::BufferSource> maybeAad;
+    kj::Maybe<jsg::JsRef<jsg::JsBufferSource>> maybeAad;
     bool updated = false;
   };
 
@@ -444,31 +450,31 @@ class CryptoImpl final: public jsg::Object {
       kj::uint mode,
       kj::String algorithm,
       jsg::Ref<CryptoKey> key,
-      jsg::BufferSource iv,
+      jsg::JsBufferSource iv,
       jsg::Optional<uint32_t> maybeAuthTagLength);
 
   struct PublicPrivateCipherOptions {
     int padding;
     kj::String oaepHash;
-    jsg::Optional<jsg::BufferSource> oaepLabel;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> oaepLabel;
     JSG_STRUCT(padding, oaepHash, oaepLabel);
   };
 
-  jsg::BufferSource publicEncrypt(jsg::Lock& js,
+  jsg::JsUint8Array publicEncrypt(jsg::Lock& js,
       jsg::Ref<CryptoKey> key,
-      jsg::BufferSource buffer,
+      jsg::JsBufferSource buffer,
       PublicPrivateCipherOptions options);
-  jsg::BufferSource publicDecrypt(jsg::Lock& js,
+  jsg::JsUint8Array publicDecrypt(jsg::Lock& js,
       jsg::Ref<CryptoKey> key,
-      jsg::BufferSource buffer,
+      jsg::JsBufferSource buffer,
       PublicPrivateCipherOptions options);
-  jsg::BufferSource privateEncrypt(jsg::Lock& js,
+  jsg::JsUint8Array privateEncrypt(jsg::Lock& js,
       jsg::Ref<CryptoKey> key,
-      jsg::BufferSource buffer,
+      jsg::JsBufferSource buffer,
       PublicPrivateCipherOptions options);
-  jsg::BufferSource privateDecrypt(jsg::Lock& js,
+  jsg::JsUint8Array privateDecrypt(jsg::Lock& js,
       jsg::Ref<CryptoKey> key,
-      jsg::BufferSource buffer,
+      jsg::JsBufferSource buffer,
       PublicPrivateCipherOptions options);
 
   struct CipherInfo {
@@ -495,8 +501,8 @@ class CryptoImpl final: public jsg::Object {
 
   // SPKAC
   bool verifySpkac(kj::Array<const kj::byte> input);
-  kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
-  kj::Maybe<jsg::BufferSource> exportChallenge(jsg::Lock& js, kj::Array<const kj::byte> input);
+  kj::Maybe<jsg::JsUint8Array> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
+  kj::Maybe<jsg::JsUint8Array> exportChallenge(jsg::Lock& js, kj::Array<const kj::byte> input);
 
   // ECDH
   class ECDHHandle final: public jsg::Object {
@@ -504,14 +510,14 @@ class CryptoImpl final: public jsg::Object {
     ECDHHandle(ncrypto::ECKeyPointer key);
     static jsg::Ref<ECDHHandle> constructor(jsg::Lock& js, kj::String curveName);
 
-    static jsg::BufferSource convertKey(
-        jsg::Lock& js, jsg::BufferSource key, kj::String curveName, kj::String format);
+    static jsg::JsUint8Array convertKey(
+        jsg::Lock& js, jsg::JsBufferSource key, kj::String curveName, kj::String format);
 
-    jsg::BufferSource computeSecret(jsg::Lock& js, jsg::BufferSource otherPublicKey);
+    jsg::JsUint8Array computeSecret(jsg::Lock& js, jsg::JsBufferSource otherPublicKey);
     void generateKeys();
-    jsg::BufferSource getPrivateKey(jsg::Lock& js);
-    jsg::BufferSource getPublicKey(jsg::Lock& js, kj::String format);
-    void setPrivateKey(jsg::Lock& js, jsg::BufferSource key);
+    jsg::JsUint8Array getPrivateKey(jsg::Lock& js);
+    jsg::JsUint8Array getPublicKey(jsg::Lock& js, kj::String format);
+    void setPrivateKey(jsg::Lock& js, jsg::JsBufferSource key);
 
     JSG_RESOURCE_TYPE(ECDHHandle) {
       JSG_STATIC_METHOD(convertKey);

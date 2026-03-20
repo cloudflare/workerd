@@ -31,6 +31,7 @@ js_binary(
         ":types_lib",
     ],
     entry_point = "scripts/build-types.js",
+    tags = ["manual"],
 )
 
 js_run_binary(
@@ -43,6 +44,9 @@ js_run_binary(
     ],
     out_dirs = ["definitions"],
     silent_on_success = False,  # Always enable logging for debugging
+    # Exclude from wildcard builds (//...) - type generation is expensive and only needed
+    # for the check-snapshot job which explicitly builds //types.
+    tags = ["manual"],
     tool = ":build_types_bin",
     visibility = ["//visibility:public"],
 )
@@ -54,6 +58,7 @@ js_binary(
     ],
     entry_point = "scripts/build-worker.js",
     node_options = ["--enable-source-maps"],
+    tags = ["manual"],
 )
 
 js_run_binary(
@@ -72,6 +77,8 @@ js_run_binary(
         exclude = ["src/cli/**/*"],
     ),
     outs = ["dist/index.mjs"],
+    # Only used by //types:types which is also manual
+    tags = ["manual"],
     tool = ":build_worker_bin",
 )
 

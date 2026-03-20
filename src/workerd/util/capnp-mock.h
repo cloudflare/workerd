@@ -137,7 +137,7 @@ class MockServer: public kj::Refcounted {
   template <typename T>
   struct Pair {
     kj::Own<MockServer> mock;
-    typename T::Client client;
+    T::Client client;
   };
 
   template <typename T>

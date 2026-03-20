@@ -1021,6 +1021,44 @@ KJ_TEST("SQLite failed statement reset") {
   KJ_EXPECT(db.run("SELECT COUNT(*) FROM things").getInt(0) == 4);
 }
 
+KJ_TEST("SQLite extended error codes in messages") {
+  // Verify that error messages include named extended error codes when they differ from the
+  // primary error code.
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(R"(
+    CREATE TABLE things (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL
+    );
+  )");
+
+  db.run("INSERT INTO things VALUES (1, 'alice')");
+
+  // UNIQUE/PRIMARY KEY constraint: extended code should be SQLITE_CONSTRAINT_PRIMARYKEY.
+  KJ_EXPECT_THROW_MESSAGE(
+      "(extended: SQLITE_CONSTRAINT_PRIMARYKEY)", db.run("INSERT INTO things VALUES (1, 'bob')"));
+
+  // NOT NULL constraint: extended code should be SQLITE_CONSTRAINT_NOTNULL.
+  KJ_EXPECT_THROW_MESSAGE(
+      "(extended: SQLITE_CONSTRAINT_NOTNULL)", db.run("INSERT INTO things VALUES (2, NULL)"));
+
+  // Errors where extended == primary should NOT have a parenthesized suffix.
+  // SQLITE_ERROR for "no such table" has no extended variant.
+  try {
+    db.run("SELECT * FROM nonexistent");
+    KJ_FAIL_ASSERT("expected exception");
+  } catch (kj::Exception& e) {
+    auto desc = e.getDescription();
+
+    KJ_EXPECT(desc.contains("SQLITE_ERROR"), desc);
+    // The message should NOT have a parenthesized extended code like "(SQLITE_ERROR_...)".
+    KJ_EXPECT(!desc.contains("(SQLITE_ERROR_"), desc);
+  }
+}
+
 class MockRollbackCallback {
  public:
   kj::Function<void()> create() {

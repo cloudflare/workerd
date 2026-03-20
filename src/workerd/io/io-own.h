@@ -41,7 +41,7 @@ constexpr bool isIoOwn() {
   return RemoveIoOwn_<T>::is;
 }
 template <typename T>
-using RemoveIoOwn = typename RemoveIoOwn_<T>::Type;
+using RemoveIoOwn = RemoveIoOwn_<T>::Type;
 
 struct OwnedObject {
   kj::Maybe<kj::Own<OwnedObject>> next;

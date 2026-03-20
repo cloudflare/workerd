@@ -234,11 +234,16 @@ KJ_TEST("can't use builtin as prototype") {
   e.expectEval("function JsType() {}\n"
                "JsType.prototype = new NumberBox(123);\n"
                "new JsType().value",
-      "throws", kIllegalInvocation);
+      "number", "123");
+  e.expectEval("function JsType() {}\n"
+               "JsType.prototype = new NumberBox(123);\n"
+               "let t = new JsType();\n"
+               "Reflect.get(JsType.prototype, 'value', t)\n",
+      "number", "123");
   e.expectEval("function JsType() {}\n"
                "JsType.prototype = new ExtendedNumberBox(123, 'foo');\n"
                "new JsType().value",
-      "throws", kIllegalInvocation);
+      "number", "123");
   e.expectEval("function JsType() {}\n"
                "JsType.prototype = this;\n"
                "new JsType().getContextProperty()",
@@ -396,6 +401,9 @@ KJ_TEST("Named interceptor") {
   Evaluator<InterceptContext, InterceptIsolate> e(v8System);
   e.expectEval("p = new ProxyImpl; p.bar", "number", "123");
   e.expectEval("p = new ProxyImpl; Reflect.has(p, 'foo')", "boolean", "true");
+  e.expectEval("p = new ProxyImpl; p.hasOwnProperty('foo')", "boolean", "false");
+  e.expectEval(
+      "p = new ProxyImpl; Object.getOwnPropertyDescriptor(p, 'foo')", "undefined", "undefined");
   e.expectEval("p = new ProxyImpl; Reflect.has(p, 'bar')", "boolean", "true");
   e.expectEval("p = new ProxyImpl; Reflect.has(p, 'baz')", "boolean", "false");
   e.expectEval("p = new ProxyImpl; p.abc", "throws", "TypeError: boom");

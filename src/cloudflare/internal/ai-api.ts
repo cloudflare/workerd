@@ -11,8 +11,12 @@ import {
   type MarkdownDocument,
 } from 'cloudflare-internal:to-markdown-api';
 
+type AiSearchService = object;
+
 interface Fetcher {
   fetch: typeof fetch;
+  aiSearch: () => AiSearchService;
+  gateway: (gatewayId: string) => AiGateway;
 }
 
 interface AiError {
@@ -415,12 +419,19 @@ export class Ai {
     return service.transform(files, options);
   }
 
-  gateway(gatewayId: string): AiGateway {
+  gateway(gatewayId: string, options?: { beta?: boolean }): AiGateway {
+    if (options?.beta === true) {
+      return this.#fetcher.gateway(gatewayId);
+    }
     return new AiGateway(this.#fetcher, gatewayId);
   }
 
   autorag(autoragId?: string): AutoRAG {
     return new AutoRAG(this.#fetcher, autoragId);
+  }
+
+  aiSearch(): AiSearchService {
+    return this.#fetcher.aiSearch();
   }
 }
 

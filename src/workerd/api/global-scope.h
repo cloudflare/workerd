@@ -17,6 +17,7 @@
 #include <workerd/api/fuzzilli.h>
 #endif
 
+#include <workerd/io/features.h>
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
 
@@ -193,11 +194,24 @@ class TestController: public jsg::Object {
 class ExecutionContext: public jsg::Object {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
+      : ExecutionContext(js, kj::mv(exports), /*props=*/js.obj(), /*versionInfo=*/kj::none) {}
+
+  ExecutionContext(jsg::Lock& js,
+      jsg::JsValue exports,
+      jsg::JsValue props,
+      kj::Maybe<Worker::VersionInfo> versionInfo)
       : exports(js, exports),
-        props(js, js.obj()) {}
-  ExecutionContext(jsg::Lock& js, jsg::JsValue exports, jsg::JsValue props)
-      : exports(js, exports),
-        props(js, props) {}
+        props(js, props) {
+    auto featureFlags = FeatureFlags::get(js);
+    if (featureFlags.getEnableVersionApi()) {
+      version = kj::mv(versionInfo).map([&js, &featureFlags](auto v) {
+        return jsg::JsRef{js,
+          v.toJs(js,
+              featureFlags.getEnableCtxVersionMetadata() ? PopulateVersionInfoMetadata::YES
+                                                         : PopulateVersionInfoMetadata::NO)};
+      });
+    }
+  }
 
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
@@ -214,6 +228,17 @@ class ExecutionContext: public jsg::Object {
     return props.getHandle(js);
   }
 
+  jsg::JsValue getVersion(jsg::Lock& js) {
+    // TODO(soon): We should be able to assert for `version != kj::none` in the constructor when the
+    //   `enable_version_api` compat flag is enabled, but currently dynamic workers and "reusable
+    //   `ctx` object instantiation" do not pass information to populate `ctx.version` with,
+    //   `ctx.version` is currently optional so we can return undefined for now.
+    KJ_IF_SOME(someVersion, version) {
+      return someVersion.getHandle(js);
+    }
+    return js.undefined();
+  }
+
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
@@ -221,6 +246,9 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
+    if (flags.getEnableVersionApi()) {
+      JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
+    }
 
     if (flags.getWorkerdExperimental()) {
       // TODO(soon): Before making this generally available we need to:
@@ -236,28 +264,57 @@ class ExecutionContext: public jsg::Object {
       JSG_METHOD(abort);
     }
 
+    // TODO(soon): This is getting unwieldy.
     if (flags.getEnableCtxExports()) {
-      JSG_TS_OVERRIDE(<Props = unknown> {
-        readonly props: Props;
-        readonly exports: Cloudflare.Exports;
-      });
+      if (flags.getEnableVersionApi()) {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+          readonly exports: Cloudflare.Exports;
+          readonly version?: {
+            readonly metadata?: { readonly id: string; };
+            readonly cohort?: string;
+            readonly key?: string;
+            readonly override?: string;
+          };
+        });
+      } else {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+          readonly exports: Cloudflare.Exports;
+        });
+      }
     } else {
-      JSG_TS_OVERRIDE(<Props = unknown> {
-        readonly props: Props;
-      });
+      if (flags.getEnableVersionApi()) {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+          readonly version?: {
+            readonly metadata?: { readonly id: string; };
+            readonly cohort?: string;
+            readonly key?: string;
+            readonly override?: string;
+          };
+        });
+      } else {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+        });
+      }
     }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("props", props);
+    tracker.trackField("version", version);
   }
 
  private:
   jsg::JsRef<jsg::JsValue> exports;
   jsg::JsRef<jsg::JsValue> props;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> version;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(props);
+    visitor.visit(version);
   }
 };
 
@@ -348,27 +405,27 @@ struct ExportedHandler {
   // include it in type definitions.
 
   JSG_STRUCT_TS_DEFINE(
-    type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
-    type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTailStreamHandler<Env = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
-    type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTestHandler<Env = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
+    type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown, Props = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext<Props>) => Response | Promise<Response>;
+    type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTraceHandler<Env = unknown, Props = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext<Props>) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+    type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerQueueHandler<Env = unknown, Message = unknown, Props = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTestHandler<Env = unknown, Props = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
   );
-  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown> {
-    email?: EmailExportedHandler<Env>;
-    fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
-    tail?: ExportedHandlerTailHandler<Env>;
-    trace?: ExportedHandlerTraceHandler<Env>;
-    tailStream?: ExportedHandlerTailStreamHandler<Env>;
-    scheduled?: ExportedHandlerScheduledHandler<Env>;
+  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown, Props = unknown> {
+    email?: EmailExportedHandler<Env, Props>;
+    fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
+    tail?: ExportedHandlerTailHandler<Env, Props>;
+    trace?: ExportedHandlerTraceHandler<Env, Props>;
+    tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
+    scheduled?: ExportedHandlerScheduledHandler<Env, Props>;
     alarm: never;
     webSocketMessage: never;
     webSocketClose: never;
     webSocketError: never;
-    queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage>;
-    test?: ExportedHandlerTestHandler<Env>;
+    queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
+    test?: ExportedHandlerTestHandler<Env, Props>;
   });
   // Make `env` parameter generic
 
@@ -512,6 +569,15 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::V8Ref<v8::Promise> promise,
       jsg::Value value);
 
+  // Track a set of address->callback overrides for which the connect(address) behavior should be
+  // overridden via callbacks rather than using the default Socket connect() logic.
+  // This is useful for allowing generic client libraries to connect to private local services using
+  // just a provided address (rather than requiring them to support being passed a binding to call
+  // binding.connect() on).
+  using ConnectFn = kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)>;
+  void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
+  kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
+
   // ---------------------------------------------------------------------------
   // JS API
 
@@ -610,6 +676,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
     JSG_NESTED_TYPE(DOMException);
     JSG_NESTED_TYPE(WorkerGlobalScope);
+    if (flags.getSpecCompliantPropertyAttributes()) {
+      // EventTarget is also declared on WorkerGlobalScope, but V8's
+      // FunctionTemplate::Inherit() does not propagate instance-template
+      // properties.  Redeclare here so it becomes an own property of globalThis.
+      JSG_NESTED_TYPE(EventTarget);
+    }
 
     JSG_METHOD(btoa);
     JSG_METHOD(atob);
@@ -763,7 +835,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(HTMLRewriter);
 
     // Performance API
-    if (flags.getEnableGlobalPerformanceClasses()) {
+    if (flags.getEnableGlobalPerformanceClasses() || flags.getEnableNodeJsPerfHooksModule()) {
       JSG_NESTED_TYPE(Performance);
       JSG_NESTED_TYPE(PerformanceEntry);
       JSG_NESTED_TYPE(PerformanceMark);
@@ -917,6 +989,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> processValue;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
   kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
+  kj::HashMap<kj::String, ConnectFn> connectOverrides;
 
   // Global properties such as scheduler, crypto, caches, self, and origin should
   // be monkeypatchable / mutable at the global scope.

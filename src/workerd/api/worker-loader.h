@@ -127,8 +127,12 @@ class WorkerLoader: public jsg::Object {
   jsg::Ref<WorkerStub> get(
       jsg::Lock& js, kj::Maybe<kj::String> name, jsg::Function<jsg::Promise<WorkerCode>()> getCode);
 
+  // Shortcut for `get(null, () => code)`.
+  jsg::Ref<WorkerStub> load(jsg::Lock& js, WorkerCode code);
+
   JSG_RESOURCE_TYPE(WorkerLoader) {
     JSG_METHOD(get);
+    JSG_METHOD(load);
 
     JSG_TS_ROOT();
   }
@@ -136,6 +140,11 @@ class WorkerLoader: public jsg::Object {
  private:
   uint channel;
   CompatibilityDateValidation compatDateValidation;
+
+  static DynamicWorkerSource toDynamicWorkerSource(jsg::Lock& js,
+      IoContext& ioctx,
+      CompatibilityDateValidation compatDateValidation,
+      WorkerCode code);
 
   static Worker::Script::Source extractSource(jsg::Lock& js, WorkerCode& code);
   static kj::Own<CompatibilityFlags::Reader> extractCompatFlags(

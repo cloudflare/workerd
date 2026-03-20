@@ -30,7 +30,9 @@ def _cc_ast_dump_impl(ctx):
         user_compile_flags = ["-Wno-unused-command-line-argument", "-Xclang", "-ast-dump=json", "-fsyntax-only"] + ctx.fragments.cpp.copts + ctx.fragments.cpp.cxxopts,
         include_directories = cc_info.compilation_context.includes,
         quote_include_directories = cc_info.compilation_context.quote_includes,
-        system_include_directories = cc_info.compilation_context.system_includes,
+        # we need to pass external_includes, but there is no equivalent parameter in
+        # create_compile_variables – pass alongside system_includes.
+        system_include_directories = depset(transitive = [cc_info.compilation_context.system_includes, cc_info.compilation_context.external_includes]),
         framework_include_directories = cc_info.compilation_context.framework_includes,
         preprocessor_defines = cc_info.compilation_context.defines,
     )

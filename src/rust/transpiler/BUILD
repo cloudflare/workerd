@@ -6,7 +6,7 @@ wd_rust_crate(
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/cxx-integration",
-        "@crates_vendor//:swc_core",
+        "@crates_vendor//:swc_common",
         "@crates_vendor//:swc_ts_fast_strip",
         "@crates_vendor//:thiserror",
     ],

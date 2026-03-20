@@ -8,8 +8,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "leak-fetch-test.js")
         ],
-        compatibilityDate = "2025-06-15",
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
         bindings = [
           (name = "subrequest", service = "leak-fetch-test")
         ]

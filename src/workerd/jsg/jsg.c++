@@ -219,6 +219,10 @@ void Lock::setNodeJsProcessV2Enabled() {
   IsolateBase::from(v8Isolate).setNodeJsProcessV2Enabled({}, true);
 }
 
+void Lock::setRequireReturnsDefaultExportEnabled() {
+  IsolateBase::from(v8Isolate).setRequireReturnsDefaultExportEnabled({}, true);
+}
+
 void Lock::setThrowOnUnrecognizedImportAssertion() {
   IsolateBase::from(v8Isolate).setThrowOnUnrecognizedImportAssertion();
 }
@@ -237,6 +241,10 @@ void Lock::setToStringTag() {
 
 void Lock::setImmutablePrototype() {
   IsolateBase::from(v8Isolate).enableSetImmutablePrototype();
+}
+
+void Lock::setSpecCompliantPropertyAttributes() {
+  IsolateBase::from(v8Isolate).enableSpecCompliantPropertyAttributes();
 }
 
 void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
@@ -286,6 +294,33 @@ bool Lock::v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name) {
 
 void Lock::runMicrotasks() {
   v8Isolate->PerformMicrotaskCheckpoint();
+
+  auto& isolate = IsolateBase::from(v8Isolate);
+  // We only expect at most a handful of extra checkpoints. Keep a generous cap
+  // to flush cascaded microtasks but prevent a potential busy loop.
+  static constexpr uint MAX_EXTRA_MICROTASK_CHECKPOINTS = 64;
+  for (uint i = 0; i < MAX_EXTRA_MICROTASK_CHECKPOINTS; ++i) {
+    if (!isolate.takeExtraMicrotaskCheckpointRequested({})) {
+      return;
+    }
+    v8Isolate->PerformMicrotaskCheckpoint();
+  }
+
+  if (isolate.takeExtraMicrotaskCheckpointRequested({})) {
+    KJ_LOG(WARNING, "extra microtask checkpoint limit reached", MAX_EXTRA_MICROTASK_CHECKPOINTS);
+  }
+}
+
+void Lock::requestExtraMicrotaskCheckpoint() {
+  IsolateBase::from(v8Isolate).requestExtraMicrotaskCheckpoint({});
+}
+
+void Lock::requestTermination() {
+  IsolateBase::from(v8Isolate).requestTermination();
+}
+
+bool Lock::isTerminationRequested() const {
+  return IsolateBase::from(v8Isolate).isTerminationRequested();
 }
 
 void Lock::terminateNextExecution() {
@@ -333,6 +368,13 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   return jsg::JsObject(module.getHandle(*this).As<v8::Object>());
 }
 
+kj::Maybe<JsObject> Lock::resolvePublicBuiltinModule(kj::StringPtr specifier) {
+  auto& isolate = IsolateBase::from(v8Isolate);
+  KJ_ASSERT(isolate.isUsingNewModuleRegistry());
+  return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
+      *this, specifier, jsg::modules::ResolveContext::Type::PUBLIC_BUILTIN);
+}
+
 kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requireEsm) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
@@ -366,14 +408,12 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
     // making such a change, and that's us, and we're not.
     KJ_ASSERT(v8::Locker::IsLocked(target));
 
-    // TODO(cleanup): This is deprecated, but the replacement, v8::ExternalMemoryAccounter,
-    //   explicitly requires that the adjustment returns to zero before it is destroyed. That
-    //   isn't what we want, because we explicitly want external memory to be allowed to live
-    //   beyond the isolate in some cases. Perhaps we need to patch V8 to un-deprecate
-    //   AdjustAmountOfExternalAllocatedMemory(), or directly expose the underlying
-    //   AdjustAmountOfExternalAllocatedMemoryImpl(), which is what ExternalMemoryAccounter
-    //   uses anyway.
-    target->AdjustAmountOfExternalAllocatedMemory(amount);
+    // We use AdjustAmountOfExternalAllocatedMemoryImpl() instead of ExternalMemoryAccounter
+    // because we explicitly want external memory to be allowed to live beyond the isolate
+    // in some cases. The Impl variant bypasses the destructor check that
+    // ExternalMemoryAccounter enforces (requiring adjustment to return to zero).
+    // See patches/v8/0031-Expose-AdjustAmountOfExternalAllocatedMemoryImpl.patch
+    target->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
   } else {
     // We don't hold the isolate lock. Instead, record the adjustment to be applied the next time
     // the isolate lock is acquired.
@@ -389,7 +429,7 @@ void ExternalMemoryTarget::adjustNow(Lock& js, ssize_t amount) const {
   }
 #endif
   if (amount == 0) return;
-  js.v8Isolate->AdjustAmountOfExternalAllocatedMemory(amount);
+  js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
 }
 
 void ExternalMemoryTarget::detach() const {
@@ -403,7 +443,7 @@ ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) cons
 void ExternalMemoryTarget::applyDeferredMemoryUpdate() const {
   int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
   if (amount != 0) {
-    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemory(amount);
+    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
   }
 }
 
@@ -580,5 +620,33 @@ MemoryProtectionKeyScope::PkeyScope::~PkeyScope() {
   pkey_set(key, saved);
 }
 #endif
+
+namespace _ {
+
+JsgCatchScope::JsgCatchScope(Lock& js): js(js) {
+  tryCatchHolder.emplace(js.v8Isolate);
+}
+
+void JsgCatchScope::catchException(ExceptionToJsOptions options) {
+  // Be sure to release our TryCatch on the way out.
+  KJ_DEFER(tryCatchHolder = kj::none);
+
+  auto& tryCatch = KJ_ASSERT_NONNULL(tryCatchHolder).tryCatch;
+
+  // Same logic as that found in `jsg::Lock::tryCatch()`.
+  try {
+    throw;
+  } catch (JsExceptionThrown&) {
+    if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+      tryCatch.ReThrow();
+      throw;
+    }
+    caughtException.emplace(js.v8Isolate, tryCatch.Exception());
+  } catch (kj::Exception& e) {
+    caughtException.emplace(js.exceptionToJs(kj::mv(e), options));
+  }
+}
+
+}  // namespace _
 
 }  // namespace workerd::jsg

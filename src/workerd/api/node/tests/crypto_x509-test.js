@@ -347,6 +347,37 @@ export const test_ok = {
 //   }
 // };
 
+// Verify that invalid certificate data throws a user-facing error (not an internal error).
+export const test_invalid_cert = {
+  test() {
+    // Completely invalid data
+    throws(() => new X509Certificate('not a certificate'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    // Invalid base64 in PEM wrapper
+    throws(
+      () =>
+        new X509Certificate(
+          '-----BEGIN CERTIFICATE-----\n!!!invalid!!!\n-----END CERTIFICATE-----'
+        ),
+      {
+        code: 'ERR_INVALID_ARG_VALUE',
+      }
+    );
+
+    // Empty buffer
+    throws(() => new X509Certificate(Buffer.alloc(0)), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    // Random bytes (not a valid DER or PEM certificate)
+    throws(() => new X509Certificate(Buffer.from([0x01, 0x02, 0x03])), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+  },
+};
+
 // Ref: https://github.com/unjs/unenv/pull/310
 export const shouldImportCertificate = {
   test() {

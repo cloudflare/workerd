@@ -56,7 +56,7 @@ class Converter final {
   kj::Own<UConverter> conv_;
 };
 
-jsg::BufferSource transcode(
+jsg::JsUint8Array transcode(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding);
 
 }  // namespace i18n

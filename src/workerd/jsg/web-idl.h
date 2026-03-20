@@ -8,6 +8,7 @@
 // Type traits and concepts to help us map between C++ and Web IDL types.
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/meta.h>
 
 #include <kj/array.h>
 #include <kj/common.h>
@@ -37,7 +38,7 @@ template <typename T>
 concept IsRef = RefTraits_<T>::isRef;
 
 template <IsRef T>
-using RefType = typename RefTraits_<T>::Type;
+using RefType = RefTraits_<T>::Type;
 
 // =======================================================================================
 // Optional type detection

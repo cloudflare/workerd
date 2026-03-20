@@ -326,6 +326,18 @@ export const structuredClone = {
   },
 };
 
+export const SabStructuredCloneTransfer = {
+  async test() {
+    // Can't structureClone a a SharedArrayBuffer with transfer.
+    const sab = new SharedArrayBuffer(64);
+    const view = new Uint8Array(sab);
+
+    throws(() => globalThis.structuredClone(view, { transfer: [view] }), {
+      name: 'DataCloneError',
+    });
+  },
+};
+
 export const base64 = {
   test() {
     function format_value(elem) {

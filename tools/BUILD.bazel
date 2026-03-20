@@ -1,10 +1,13 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config")
 load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 
 js_library(
     name = "base-eslint",
-    srcs = ["base.eslint.config.mjs"],
+    srcs = [
+        "base.eslint.config.mjs",
+        "custom-eslint-rules.mjs",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//:node_modules/@eslint/js",
@@ -15,9 +18,34 @@ js_library(
     ],
 )
 
+js_test(
+    name = "custom-eslint-rules-test",
+    size = "small",
+    data = [
+        ":base-eslint",
+    ],
+    entry_point = "custom-eslint-rules.test.mjs",
+    tags = ["js-test"],
+)
+
 ts_config(
     name = "base-tsconfig",
     src = "base.tsconfig.json",
+    visibility = ["//visibility:public"],
+)
+
+native_binary(
+    name = "wasm-tools",
+    src = select(
+        {
+            "@bazel_tools//src/conditions:linux_x86_64": "@wasm_tools_linux_x64//:wasm-tools",
+            "@bazel_tools//src/conditions:linux_aarch64": "@wasm_tools_linux_arm64//:wasm-tools",
+            "@bazel_tools//src/conditions:darwin_arm64": "@wasm_tools_macos_arm64//:wasm-tools",
+            "@bazel_tools//src/conditions:darwin_x86_64": "@wasm_tools_macos_x64//:wasm-tools",
+            "@bazel_tools//src/conditions:windows_x64": "@wasm_tools_windows_x64//:wasm-tools.exe",
+        },
+    ),
+    out = "wasm-tools",
     visibility = ["//visibility:public"],
 )
 
@@ -27,7 +55,7 @@ native_binary(
         {
             "@bazel_tools//src/conditions:linux_x86_64": "@clang_tidy_linux_amd64//file:downloaded",
             "@bazel_tools//src/conditions:linux_aarch64": "@clang_tidy_linux_arm64//file:downloaded",
-            "@bazel_tools//src/conditions:darwin_arm64": "@clang_tidy_macos_arm64//file:downloaded",
+            "@bazel_tools//src/conditions:darwin_arm64": "@clang_tidy_darwin_arm64//file:downloaded",
             "@bazel_tools//src/conditions:windows_x64": "@clang_tidy_windows_amd64//file:downloaded",
         },
     ),

@@ -9,24 +9,39 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.h>
 
+#include <kj/memory.h>
+
 namespace workerd::server {
 
 namespace {
-// A SubrequestChannel that wraps a WorkerdBootstrap capability.
-// This allows us to make requests to a remote worker via the debug port.
+// A SubrequestChannel that makes requests to a remote worker via the debug port.
+//
+// The connection ref is attached to WorkerInterfaces returned by startRequest().
+// For HTTP fetch, the response body/WebSocket gets this attached (deferred proxying),
+// ensuring the connection stays alive as long as the response is in use.
 class WorkerdBootstrapSubrequestChannel final: public IoChannelFactory::SubrequestChannel {
  public:
   WorkerdBootstrapSubrequestChannel(rpc::WorkerdBootstrap::Client bootstrap,
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-      capnp::ByteStreamFactory& byteStreamFactory)
+      capnp::ByteStreamFactory& byteStreamFactory,
+      kj::Own<DebugPortConnectionState> connectionState)
       : bootstrap(kj::mv(bootstrap)),
         httpOverCapnpFactory(httpOverCapnpFactory),
-        byteStreamFactory(byteStreamFactory) {}
+        byteStreamFactory(byteStreamFactory),
+        connectionState(kj::mv(connectionState)) {}
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    auto dispatcher = bootstrap.startEventRequest().send().getDispatcher();
-    return kj::heap<RpcWorkerInterface>(
-        httpOverCapnpFactory, byteStreamFactory, kj::mv(dispatcher));
+    // Pass cfBlobJson as an RPC parameter on startEvent so the server can include it
+    // in SubrequestMetadata when creating the WorkerInterface.
+    auto req = bootstrap.startEventRequest();
+    KJ_IF_SOME(cf, metadata.cfBlobJson) {
+      req.setCfBlobJson(cf);
+    }
+    auto dispatcher = req.send().getDispatcher();
+    // Attach connection ref for deferred proxying - the HTTP response body/WebSocket
+    // will get this WorkerInterface attached, keeping the connection alive.
+    return kj::heap<RpcWorkerInterface>(httpOverCapnpFactory, byteStreamFactory, kj::mv(dispatcher))
+        .attach(connectionState->addRef());
   }
 
   void requireAllowsTransfer() override {
@@ -37,19 +52,23 @@ class WorkerdBootstrapSubrequestChannel final: public IoChannelFactory::Subreque
   rpc::WorkerdBootstrap::Client bootstrap;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
+  kj::Own<DebugPortConnectionState> connectionState;
 };
 
-jsg::Ref<api::Fetcher> wrapBootstrapAsFetcher(
-    jsg::Lock& js, IoContext& context, rpc::WorkerdBootstrap::Client bootstrap) {
+jsg::Ref<api::Fetcher> wrapBootstrapAsFetcher(jsg::Lock& js,
+    IoContext& context,
+    rpc::WorkerdBootstrap::Client bootstrap,
+    kj::Own<DebugPortConnectionState> connectionState) {
   kj::Own<IoChannelFactory::SubrequestChannel> subrequestChannel =
-      kj::refcounted<WorkerdBootstrapSubrequestChannel>(
-          kj::mv(bootstrap), context.getHttpOverCapnpFactory(), context.getByteStreamFactory());
+      kj::refcounted<WorkerdBootstrapSubrequestChannel>(kj::mv(bootstrap),
+          context.getHttpOverCapnpFactory(), context.getByteStreamFactory(),
+          kj::mv(connectionState));
   return js.alloc<api::Fetcher>(
       context.addObject(kj::mv(subrequestChannel)), api::Fetcher::RequiresHostAndProtocol::NO);
 }
 }  // namespace
 
-jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getEntrypoint(jsg::Lock& js,
+jsg::Ref<api::Fetcher> WorkerdDebugPortClient::getEntrypoint(jsg::Lock& js,
     kj::String service,
     jsg::Optional<kj::String> entrypoint,
     jsg::Optional<jsg::JsRef<jsg::JsObject>> props) {
@@ -64,13 +83,14 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getEntrypoint(jsg::
     Frankenvalue::fromJs(js, p.getHandle(js)).toCapnp(req.initProps());
   }
 
-  return context.awaitIo(
-      js, req.send(), [&context](jsg::Lock& js, auto result) -> jsg::Ref<api::Fetcher> {
-    return wrapBootstrapAsFetcher(js, context, result.getEntrypoint());
-  });
+  // Use Cap'n Proto pipelining: extract the entrypoint capability from the in-flight
+  // RPC response without waiting for it to resolve. The capability is a lazy proxy that
+  // only triggers the actual network round-trip when first used (e.g. fetch()).
+  auto bootstrap = req.send().getEntrypoint();
+  return wrapBootstrapAsFetcher(js, context, kj::mv(bootstrap), state->addRef());
 }
 
-jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getActor(
+jsg::Ref<api::Fetcher> WorkerdDebugPortClient::getActor(
     jsg::Lock& js, kj::String service, kj::String entrypoint, kj::String actorId) {
   auto& context = IoContext::current();
 
@@ -79,31 +99,27 @@ jsg::Promise<jsg::Ref<api::Fetcher>> WorkerdDebugPortClient::getActor(
   req.setEntrypoint(entrypoint);
   req.setActorId(actorId);
 
-  return context.awaitIo(
-      js, req.send(), [&context](jsg::Lock& js, auto result) -> jsg::Ref<api::Fetcher> {
-    return wrapBootstrapAsFetcher(js, context, result.getActor());
-  });
+  // Use Cap'n Proto pipelining: extract the actor capability from the in-flight
+  // RPC response without waiting for it to resolve.
+  auto bootstrap = req.send().getActor();
+  return wrapBootstrapAsFetcher(js, context, kj::mv(bootstrap), state->addRef());
 }
 
-jsg::Promise<jsg::Ref<WorkerdDebugPortClient>> WorkerdDebugPortConnector::connect(
+jsg::Ref<WorkerdDebugPortClient> WorkerdDebugPortConnector::connect(
     jsg::Lock& js, kj::String address) {
   auto& context = IoContext::current();
   auto connectPromise =
       context.getIoChannelFactory().getWorkerdDebugPortNetwork().parseAddress(address).then(
           [](kj::Own<kj::NetworkAddress> addr) { return addr->connect(); });
 
-  return context.awaitIo(js, kj::mv(connectPromise),
-      [&context](jsg::Lock& js,
-          kj::Own<kj::AsyncIoStream> connection) -> jsg::Ref<WorkerdDebugPortClient> {
-    auto rpcClient = kj::heap<capnp::TwoPartyClient>(*connection);
-    auto debugPort = rpcClient->bootstrap().castAs<rpc::WorkerdDebugPort>();
-    auto state = kj::heap<DebugPortConnectionState>(DebugPortConnectionState{
-      .connection = kj::mv(connection),
-      .rpcClient = kj::mv(rpcClient),
-      .debugPort = kj::mv(debugPort),
-    });
-    return js.alloc<WorkerdDebugPortClient>(context.addObject(kj::mv(state)));
-  });
+  // Use kj::newPromisedStream() to get an AsyncIoStream immediately. The actual TCP
+  // connection is deferred — Cap'n Proto pipelining queues all RPC calls until connected.
+  auto stream = kj::newPromisedStream(kj::mv(connectPromise));
+  auto rpcClient = kj::heap<capnp::TwoPartyClient>(*stream);
+  auto debugPort = rpcClient->bootstrap().castAs<rpc::WorkerdDebugPort>();
+  auto state = kj::refcounted<DebugPortConnectionState>(
+      kj::mv(stream), kj::mv(rpcClient), kj::mv(debugPort));
+  return js.alloc<WorkerdDebugPortClient>(context.addObject(kj::mv(state)));
 }
 
 }  // namespace workerd::server

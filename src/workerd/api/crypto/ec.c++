@@ -84,7 +84,7 @@ SubtleCrypto::JsonWebKey Ec::toJwk(KeyType keyType, kj::StringPtr curveName) con
   return jwk;
 }
 
-jsg::BufferSource Ec::getRawPublicKey(jsg::Lock& js) const {
+jsg::JsArrayBuffer Ec::getRawPublicKey(jsg::Lock& js) const {
   JSG_REQUIRE_NONNULL(group, InternalDOMOperationError, "No elliptic curve group in this key",
       tryDescribeOpensslErrors());
   auto publicKey = getPublicKey();
@@ -112,10 +112,7 @@ jsg::BufferSource Ec::getRawPublicKey(jsg::Lock& js) const {
   JSG_REQUIRE(1 == CBB_finish(&cbb, &raw, &raw_len), InternalDOMOperationError,
       "Failed to finish CBB", internalDescribeOpensslErrors());
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, raw_len);
-  auto src = kj::arrayPtr(raw, raw_len);
-  backing.asArrayPtr().copyFrom(src);
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsArrayBuffer::create(js, kj::arrayPtr(raw, raw_len));
 }
 
 CryptoKey::AsymmetricKeyDetails Ec::getAsymmetricKeyDetail(jsg::Lock& js) const {
@@ -175,7 +172,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
         "algorithms for historical reasons.)"));
   }
 
-  jsg::BufferSource deriveBits(jsg::Lock& js,
+  jsg::JsArrayBuffer deriveBits(jsg::Lock& js,
       SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> resultBitLength) const override final {
     JSG_REQUIRE(keyAlgorithm.name == "ECDH", DOMNotSupportedError,
@@ -279,12 +276,10 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
       sharedSecret.back() &= mask;
     }
 
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sharedSecret.size());
-    backing.asArrayPtr().copyFrom(sharedSecret);
-    return jsg::BufferSource(js, kj::mv(backing));
+    return jsg::JsArrayBuffer::create(js, sharedSecret.asPtr());
   }
 
-  jsg::BufferSource signatureSslToWebCrypto(
+  jsg::JsArrayBuffer signatureSslToWebCrypto(
       jsg::Lock& js, kj::ArrayPtr<kj::byte> signature) const override {
     // An EC signature is two big integers "r" and "s". WebCrypto wants us to just concatenate both
     // integers, using a constant size of each that depends on the curve size. OpenSSL wants to
@@ -330,23 +325,23 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
     KJ_ASSERT(s.size() <= rsSize);
 
     // Construct WebCrypto format.
-    auto out = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, rsSize * 2);
+    auto out = jsg::JsArrayBuffer::create(js, rsSize * 2);
+    auto outPtr = out.asArrayPtr();
 
     // We're dealing with big-endian, so we have to align the copy to the right. This is exactly
     // why big-endian is the wrong endian.
-    memcpy(out.asArrayPtr().begin() + rsSize - r.size(), r.begin(), r.size());
-    memcpy(out.asArrayPtr().end() - s.size(), s.begin(), s.size());
-    return jsg::BufferSource(js, kj::mv(out));
+    outPtr.slice(rsSize - r.size(), rsSize).copyFrom(r);
+    outPtr.slice(rsSize * 2 - s.size(), rsSize * 2).copyFrom(s);
+    return out;
   }
 
-  jsg::BufferSource signatureWebCryptoToSsl(
+  jsg::JsArrayBuffer signatureWebCryptoToSsl(
       jsg::Lock& js, kj::ArrayPtr<const kj::byte> signature) const override {
     requireSigningAbility();
 
     if (signature.size() != rsSize * 2) {
       // The signature is the wrong size. Return an empty signature, which will be judged invalid.
-      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-      return jsg::BufferSource(js, kj::mv(backing));
+      return jsg::JsArrayBuffer::create(js, 0);
     }
 
     auto r = signature.first(rsSize);
@@ -362,7 +357,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 
     size_t bodySize = 4 + padR + padS + r.size() + s.size();
     size_t resultSize = 2 + bodySize + (bodySize >= 128);
-    auto result = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, resultSize);
+    auto result = jsg::JsArrayBuffer::create(js, resultSize);
 
     kj::byte* pos = result.asArrayPtr().begin();
     *pos++ = 0x30;
@@ -387,7 +382,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 
     KJ_ASSERT(pos == result.asArrayPtr().end());
 
-    return jsg::BufferSource(js, kj::mv(result));
+    return result;
   }
 
   static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateElliptic(jsg::Lock& js,
@@ -415,7 +410,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
     return ec.toJwk(getTypeEnum(), kj::str(keyAlgorithm.namedCurve));
   }
 
-  jsg::BufferSource exportRaw(jsg::Lock& js) const override final {
+  jsg::JsArrayBuffer exportRaw(jsg::Lock& js) const override final {
     JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
         "Raw export of elliptic curve keys is only allowed for public keys.");
     return JSG_REQUIRE_NONNULL(Ec::tryGetEc(getEvpPkey()), InternalDOMOperationError,
@@ -671,6 +666,9 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
         tryDescribeOpensslErrors());
   }
 
+  JSG_REQUIRE(1 == EC_KEY_check_key(ecKey.get()), DOMDataError, "Invalid EC key in JSON Web Key",
+      tryDescribeOpensslErrors());
+
   auto evpPkey = OSSL_NEW(EVP_PKEY);
   JSG_REQUIRE(1 == EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()), DOMOperationError,
       "Error importing EC key", tryDescribeOpensslErrors());
@@ -846,7 +844,7 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     KJ_UNIMPLEMENTED();
   }
 
-  jsg::BufferSource sign(jsg::Lock& js,
+  jsg::JsArrayBuffer sign(jsg::Lock& js,
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data) const override {
     JSG_REQUIRE(getTypeEnum() == KeyType::PRIVATE, DOMInvalidAccessError,
@@ -858,7 +856,7 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     // inconsistent with the broader WebCrypto standard. Filed an issue with the standard for
     // clarification: https://github.com/tQsW/webcrypto-curve25519/issues/7
 
-    auto signature = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, ED25519_SIGNATURE_LEN);
+    auto signature = jsg::JsArrayBuffer::create(js, ED25519_SIGNATURE_LEN);
     size_t signatureLength = signature.size();
 
     // NOTE: Even though there's a ED25519_sign/ED25519_verify methods, they don't actually seem to
@@ -877,7 +875,7 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     JSG_REQUIRE(signatureLength == signature.size(), InternalDOMOperationError,
         "Unexpected change in size signing Ed25519", signatureLength);
 
-    return jsg::BufferSource(js, kj::mv(signature));
+    return signature;
   }
 
   bool verify(jsg::Lock& js,
@@ -909,7 +907,7 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     return !!result;
   }
 
-  jsg::BufferSource deriveBits(jsg::Lock& js,
+  jsg::JsArrayBuffer deriveBits(jsg::Lock& js,
       SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> resultBitLength) const override final {
     JSG_REQUIRE(getAlgorithmName() == "X25519", DOMNotSupportedError,
@@ -983,9 +981,7 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
       sharedSecret.back() &= mask;
     }
 
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sharedSecret.size());
-    backing.asArrayPtr().copyFrom(sharedSecret);
-    return jsg::BufferSource(js, kj::mv(backing));
+    return jsg::JsArrayBuffer::create(js, sharedSecret.asPtr());
   }
 
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const override {
@@ -1040,16 +1036,17 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
       KJ_ASSERT(privateKeyLen == 32, privateKeyLen);
 
       jwk.d = fastEncodeBase64Url(kj::arrayPtr(rawPrivateKey, privateKeyLen));
+      OPENSSL_cleanse(rawPrivateKey, sizeof(rawPrivateKey));
     }
 
     return jwk;
   }
 
-  jsg::BufferSource exportRaw(jsg::Lock& js) const override final {
+  jsg::JsArrayBuffer exportRaw(jsg::Lock& js) const override final {
     JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError, "Raw export of ",
         getAlgorithmName(), " keys is only allowed for public keys.");
 
-    auto raw = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, ED25519_PUBLIC_KEY_LEN);
+    auto raw = jsg::JsArrayBuffer::create(js, ED25519_PUBLIC_KEY_LEN);
     size_t exportedLength = raw.size();
 
     JSG_REQUIRE(
@@ -1060,7 +1057,7 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     JSG_REQUIRE(exportedLength == raw.size(), InternalDOMOperationError,
         "Unexpected change in size", raw.size(), exportedLength);
 
-    return jsg::BufferSource(js, kj::mv(raw));
+    return raw;
   }
 };
 
@@ -1075,6 +1072,7 @@ CryptoKeyPair generateKeyImpl(jsg::Lock& js,
   uint8_t rawPublicKey[keySize] = {0};
   uint8_t rawPrivateKey[keySize * 2] = {0};
   KeypairInit(rawPublicKey, rawPrivateKey);
+  KJ_DEFER(OPENSSL_cleanse(rawPrivateKey, sizeof(rawPrivateKey)));
 
   // The private key technically also contains the public key. Why does the keypair function bother
   // writing out the public key to a separate buffer?

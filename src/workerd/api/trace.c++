@@ -111,13 +111,24 @@ jsg::Optional<kj::Array<kj::String>> getTraceScriptTags(const Trace& trace) {
   }
 }
 
-template <typename Enum>
-kj::String enumToStr(const Enum& var) {
-  // TODO(cleanup): Port this to capnproto.
-  auto enums = capnp::Schema::from<Enum>().getEnumerants();
-  uint i = static_cast<uint>(var);
-  KJ_ASSERT(i < enums.size(), "invalid enum value");
-  return kj::str(enums[i].getProto().getName());
+TraceItem::TailAttributeValue getTraceTailAttributeValue(const tracing::Attribute& tag) {
+  KJ_REQUIRE(tag.value.size() == 1, "tail attributes must contain exactly one value");
+
+  KJ_SWITCH_ONEOF(tag.value[0]) {
+    KJ_CASE_ONEOF(boolean, bool) {
+      return TraceItem::TailAttributeValue(boolean);
+    }
+    KJ_CASE_ONEOF(number, double) {
+      return TraceItem::TailAttributeValue(number);
+    }
+    KJ_CASE_ONEOF(integer, int64_t) {
+      return TraceItem::TailAttributeValue(static_cast<double>(integer));
+    }
+    KJ_CASE_ONEOF(string, kj::ConstString) {
+      return TraceItem::TailAttributeValue(kj::str(string));
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
@@ -200,9 +211,11 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       scriptVersion(getTraceScriptVersion(trace)),
       dispatchNamespace(mapCopyString(trace.dispatchNamespace)),
       scriptTags(getTraceScriptTags(trace)),
+      tailAttributes(trace.tailAttributes.map(
+          [](auto& tags) { return KJ_MAP(tag, tags) { return tag.clone(); }; })),
       durableObjectId(mapCopyString(trace.durableObjectId)),
-      executionModel(enumToStr(trace.executionModel)),
-      outcome(enumToStr(trace.outcome)),
+      executionModel(kj::str(trace.executionModel)),
+      outcome(kj::str(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
       wallTime(trace.wallTime / kj::MILLISECONDS),
       truncated(trace.truncated) {}
@@ -277,6 +290,20 @@ jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
 jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
   return scriptTags.map(
       [](kj::Array<kj::String>& tags) { return KJ_MAP(t, tags) -> kj::StringPtr { return t; }; });
+}
+
+jsg::Optional<jsg::Dict<TraceItem::TailAttributeValue>> TraceItem::getTailAttributes() {
+  return tailAttributes.map([](kj::Array<tracing::Attribute>& tags) {
+    return jsg::Dict<TraceItem::TailAttributeValue>{
+      .fields =
+          KJ_MAP(tag, tags) {
+      return jsg::Dict<TraceItem::TailAttributeValue>::Field{
+        .name = kj::str(tag.name),
+        .value = getTraceTailAttributeValue(tag),
+      };
+    },
+    };
+  });
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getDurableObjectId() {
@@ -601,6 +628,7 @@ jsg::Ref<TraceMetrics> UnsafeTraceMetrics::fromTrace(jsg::Lock& js, jsg::Ref<Tra
 namespace {
 kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::ArrayPtr<kj::Own<Trace>> traces) {
   // Mark the request as delivered because we're about to run some JS.
@@ -623,10 +651,11 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   try {
     co_await context.run(
         [&context, nonEmptyTraces = nonEmptyTraces.asPtr(), entrypointName = kj::mv(entrypointName),
-            props = kj::mv(props)](Worker::Lock& lock) mutable {
+            versionInfo = kj::mv(versionInfo), props = kj::mv(props)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
-      auto handler = lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor());
+      auto handler = lock.getExportedHandler(
+          entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor());
       return lock.getGlobalScope().sendTraces(nonEmptyTraces, lock, handler);
     });
   } catch (kj::Exception& e) {
@@ -648,17 +677,18 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
 }
 }  // namespace
 
-kj::Maybe<tracing::EventInfo> TraceCustomEvent::getEventInfo() const {
-  return tracing::EventInfo(tracing::TraceEventInfo(traces));
+tracing::EventInfo TraceCustomEvent::getEventInfo() const {
+  return tracing::TraceEventInfo(traces);
 }
 
 auto TraceCustomEvent::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) -> kj::Promise<Result> {
   // Don't bother to wait around for the handler to run, just hand it off to the waitUntil tasks.
   waitUntilTasks.add(sendTracesToExportedHandler(
-      kj::mv(incomingRequest), entrypointNamePtr, kj::mv(props), traces));
+      kj::mv(incomingRequest), entrypointNamePtr, kj::mv(versionInfo), kj::mv(props), traces));
 
   // Reporting a proper outcome and return event here would be nice, but for that we'd need to await
   // running the tail handler...
@@ -736,6 +766,16 @@ void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_IF_SOME(tags, scriptTags) {
     for (const auto& tag: tags) {
       tracker.trackField("scriptTag", tag);
+    }
+  }
+  KJ_IF_SOME(tags, tailAttributes) {
+    for (const auto& tag: tags) {
+      tracker.trackFieldWithSize("tailAttributeName", tag.name.size());
+      for (const auto& value: tag.value) {
+        KJ_IF_SOME(string, value.tryGet<kj::ConstString>()) {
+          tracker.trackFieldWithSize("tailAttributeValue", string.size());
+        }
+      }
     }
   }
   tracker.trackField("outcome", outcome);

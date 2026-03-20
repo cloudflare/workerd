@@ -60,7 +60,7 @@ type D1UpstreamFailure = {
   results?: never;
   error: string;
   success: false;
-  meta: D1Meta & Record<string, unknown>;
+  meta?: never;
 };
 
 type D1RowsColumns<T = unknown> = D1Response & {
@@ -386,40 +386,42 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       span.setAttribute('db.query.text', query);
       span.setAttribute('cloudflare.binding.type', 'D1');
 
+      // TODO: splitting by lines is overly simplification because a single line
+      // can contain multiple statements (ex: `select 1; select 2;`).
+      // Also, a statement can span multiple lines...
+      // Either, we should do a more reasonable job to split the query into multiple statements
+      // like we do in the D1 codebase or we report a simpler error without the line number.
       const lines = query.trim().split('\n');
       const _exec = await this._send('/execute', lines, [], 'NONE', span);
       const exec = Array.isArray(_exec) ? _exec : [_exec];
 
-      addAggregatedD1MetaToSpan(
-        span,
-        exec.map((e) => e.meta)
-      );
+      let duration = 0;
+      const metas: D1Meta[] = [];
+      for (let i = 0; i < exec.length; i++) {
+        const res = exec[i];
+        if (!res?.success) {
+          span.setAttribute('error.type', `Error in line ${i + 1}`);
+          throw new Error(
+            `D1_EXEC_ERROR: Error in line ${i + 1}: ${lines[i]}${res?.error ? `: ${res.error}` : ''}`,
+            {
+              cause: new Error(
+                `Error in line ${i + 1}: ${lines[i]}${res?.error ? `: ${res.error}` : ''}`
+              ),
+            }
+          );
+        }
 
-      const error = exec
-        .map((r) => {
-          return r.error ? 1 : 0;
-        })
-        .indexOf(1);
-      if (error !== -1) {
-        span.setAttribute('error.type', `Error in line ${error + 1}`);
-        throw new Error(
-          `D1_EXEC_ERROR: Error in line ${error + 1}: ${lines[error]}: ${
-            exec[error]?.error
-          }`,
-          {
-            cause: new Error(
-              `Error in line ${error + 1}: ${lines[error]}: ${exec[error]?.error}`
-            ),
-          }
-        );
-      } else {
-        return {
-          count: exec.length,
-          duration: exec.reduce((p, c) => {
-            return p + c.meta['duration'];
-          }, 0),
-        };
+        duration += res.meta.duration;
+        metas.push(res.meta);
       }
+
+      if (metas.length) {
+        addAggregatedD1MetaToSpan(span, metas);
+      }
+      return {
+        count: exec.length,
+        duration,
+      };
     });
   }
 
@@ -712,12 +714,11 @@ function mapD1Result<T>(result: D1UpstreamResponse<T>): D1UpstreamResponse<T> {
   return result.error
     ? {
         success: false,
-        meta: result.meta,
         error: result.error,
       }
     : {
         success: true,
-        meta: result.meta,
+        meta: (result as D1UpstreamSuccess).meta,
         ...('results' in result ? { results: result.results } : {}),
       };
 }
@@ -731,7 +732,12 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
   }
 }
 
-function addAggregatedD1MetaToSpan(span: Span, metas: D1Meta[]): void {
+type PartialD1Meta = Partial<D1Meta> | undefined;
+
+function addAggregatedD1MetaToSpan(span: Span, metas: PartialD1Meta[]): void {
+  if (!metas.length) {
+    return;
+  }
   const aggregatedMeta = aggregateD1Meta(metas);
   addD1MetaToSpan(span, aggregatedMeta);
 }
@@ -764,7 +770,7 @@ function addD1MetaToSpan(span: Span, meta: D1Meta): void {
 // When a query is executing multiple statements, and we receive a D1Meta
 // for each statement, we need to aggregate the meta data before we annotate
 // the telemetry, with different rules for each field.
-function aggregateD1Meta(metas: D1Meta[]): D1Meta {
+function aggregateD1Meta(metas: PartialD1Meta[]): D1Meta {
   const aggregatedMeta: D1Meta = {
     duration: 0,
     size_after: 0,
@@ -776,12 +782,16 @@ function aggregateD1Meta(metas: D1Meta[]): D1Meta {
   };
 
   for (const meta of metas) {
-    aggregatedMeta.duration += meta.duration;
+    if (!meta) {
+      continue;
+    }
+
+    aggregatedMeta.duration += meta.duration ?? 0;
     // for size_after, we only want the last value
-    aggregatedMeta.size_after = meta.size_after;
-    aggregatedMeta.rows_read += meta.rows_read;
-    aggregatedMeta.rows_written += meta.rows_written;
-    aggregatedMeta.last_row_id = meta.last_row_id;
+    aggregatedMeta.size_after = meta.size_after ?? 0;
+    aggregatedMeta.rows_read += meta.rows_read ?? 0;
+    aggregatedMeta.rows_written += meta.rows_written ?? 0;
+    aggregatedMeta.last_row_id = meta.last_row_id ?? 0;
     if (meta.served_by_region) {
       aggregatedMeta.served_by_region = meta.served_by_region;
     }
@@ -799,7 +809,7 @@ function aggregateD1Meta(metas: D1Meta[]): D1Meta {
       aggregatedMeta.total_attempts =
         (aggregatedMeta.total_attempts ?? 0) + meta.total_attempts;
     }
-    aggregatedMeta.changes += meta.changes;
+    aggregatedMeta.changes += meta.changes ?? 0;
     if (meta.changed_db) {
       aggregatedMeta.changed_db = true;
     }

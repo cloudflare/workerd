@@ -34,11 +34,11 @@ namespace {
 // Web Crypto requires a separate key for each algorithm.
 class SecretKey final: public CryptoKey::Impl {
  public:
-  explicit SecretKey(jsg::BufferSource keyData)
+  explicit SecretKey(kj::Array<kj::byte> keyData)
       : Impl(true, CryptoKeyUsageSet::privateKeyMask() | CryptoKeyUsageSet::publicKeyMask()),
         keyData(kj::mv(keyData)) {}
   ~SecretKey() noexcept(false) {
-    keyData.setToZero();
+    OPENSSL_cleanse(keyData.begin(), keyData.size());
   }
 
   kj::StringPtr getAlgorithmName() const override {
@@ -52,20 +52,21 @@ class SecretKey final: public CryptoKey::Impl {
   }
 
   bool equals(const CryptoKey::Impl& other) const override final {
-    return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
+    if (this == &other) return true;
+    if (other.getType() != "secret"_kj) return false;
+    KJ_IF_SOME(o, kj::dynamicDowncastIfAvailable<const SecretKey>(other)) {
+      return equalsImpl(o.rawKeyData());
+    }
+    return false;
   }
 
   bool equalsImpl(kj::ArrayPtr<const kj::byte> other) const {
     return keyData.size() == other.size() &&
-        CRYPTO_memcmp(keyData.asArrayPtr().begin(), other.begin(), keyData.size()) == 0;
+        CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
   bool equals(const kj::Array<kj::byte>& other) const override final {
     return equalsImpl(other.asPtr());
-  }
-
-  bool equals(const jsg::BufferSource& other) const override final {
-    return equalsImpl(other.asArrayPtr());
   }
 
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final {
@@ -75,14 +76,12 @@ class SecretKey final: public CryptoKey::Impl {
     if (format == "jwk") {
       SubtleCrypto::JsonWebKey jwk;
       jwk.kty = kj::str("oct");
-      jwk.k = fastEncodeBase64Url(keyData.asArrayPtr());
+      jwk.k = fastEncodeBase64Url(keyData.asPtr());
       jwk.ext = true;
       return jwk;
     }
 
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, keyData.size());
-    backing.asArrayPtr().copyFrom(keyData.asArrayPtr());
-    return jsg::BufferSource(js, kj::mv(backing));
+    return jsg::JsArrayBuffer::create(js, keyData.asPtr()).addRef(js);
   }
 
   kj::StringPtr jsgGetMemoryName() const override {
@@ -92,19 +91,17 @@ class SecretKey final: public CryptoKey::Impl {
     return sizeof(SecretKey);
   }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
-    tracker.trackField("keyData", keyData);
+    tracker.trackFieldWithSize("keyData", keyData.size());
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) override {
-    visitor.visit(keyData);
-  }
+  void visitForGc(jsg::GcVisitor& visitor) override {}
 
   const kj::ArrayPtr<const kj::byte> rawKeyData() const {
-    return keyData.asArrayPtr().asConst();
+    return keyData.asPtr();
   }
 
  private:
-  jsg::BufferSource keyData;
+  kj::Array<kj::byte> keyData;
 };
 
 CryptoKey::AsymmetricKeyDetails getRsaKeyDetails(jsg::Lock& js, const ncrypto::EVPKeyPointer& key) {
@@ -117,10 +114,12 @@ CryptoKey::AsymmetricKeyDetails getRsaKeyDetails(jsg::Lock& js, const ncrypto::E
   // need to update this.
   KJ_ASSERT(!rsa.getPssParams().has_value());
 
+  auto pubExp = JSG_REQUIRE_NONNULL(
+      bignumToArrayPadded(js, *rsa.getPublicKey().e), Error, "Failed to extract public exponent");
+  auto ab = jsg::JsArrayBuffer::create(js, pubExp.asArrayPtr());
   return CryptoKey::AsymmetricKeyDetails{
     .modulusLength = key.bits(),
-    .publicExponent = JSG_REQUIRE_NONNULL(
-        bignumToArrayPadded(js, *rsa.getPublicKey().e), Error, "Failed to extract public exponent"),
+    .publicExponent = ab.addRef(js),
   };
 }
 
@@ -262,13 +261,13 @@ class AsymmetricKey final: public CryptoKey::Impl {
     return {};
   }
 
-  jsg::BufferSource exportKeyExt(jsg::Lock& js,
+  jsg::JsUint8Array exportKeyExt(jsg::Lock& js,
       kj::StringPtr format,
       kj::StringPtr type,
       jsg::Optional<kj::String> cipher = kj::none,
       jsg::Optional<kj::Array<kj::byte>> passphrase = kj::none) const override {
     if (!key) {
-      return JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, 0), Error, "Failed to export key");
+      return jsg::JsUint8Array::create(js, 0);
     }
 
     auto formatType = JSG_REQUIRE_NONNULL(trySelectKeyFormat(format), Error, "Invalid key format");
@@ -298,12 +297,9 @@ class AsymmetricKey final: public CryptoKey::Impl {
       BUF_MEM* mem = maybeBio.value;
       kj::ArrayPtr<kj::byte> source(reinterpret_cast<kj::byte*>(mem->data), mem->length);
       if (source.size() > 0) {
-        auto backing = jsg::BackingStore::alloc(js, source.size());
-        backing.asArrayPtr().copyFrom(source);
-        return jsg::BufferSource(js, kj::mv(backing));
+        return jsg::JsUint8Array::create(js, source);
       } else {
-        return JSG_REQUIRE_NONNULL(
-            jsg::BufferSource::tryAlloc(js, 0), Error, "Failed to export key");
+        return jsg::JsUint8Array::create(js, 0);
       }
     }
 
@@ -317,7 +313,10 @@ class AsymmetricKey final: public CryptoKey::Impl {
       return kj::mv(res);
     }
 
-    return exportKeyExt(js, format, "pkcs8"_kj);
+    // exportKeyExt returns JsUint8Array. We need to wrap it in a JsRef<JsArrayBuffer>
+    // since ExportKeyData is OneOf<JsRef<JsArrayBuffer>, JsonWebKey>.
+    return jsg::JsArrayBuffer::create(js, exportKeyExt(js, format, "pkcs8"_kj).asArrayPtr())
+        .addRef(js);
   }
 
   bool equals(const CryptoKey::Impl& other) const override final {
@@ -358,15 +357,29 @@ int getCurveFromName(kj::StringPtr name) {
 }
 }  // namespace
 
-kj::OneOf<kj::String, jsg::BufferSource, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
+kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
     jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options) {
   JSG_REQUIRE(key->getExtractable(), TypeError, "Unable to export non-extractable key");
   auto& opts = JSG_REQUIRE_NONNULL(options, TypeError, "Options must be an object");
 
   kj::StringPtr format = JSG_REQUIRE_NONNULL(opts.format, TypeError, "Missing format option");
+
+  auto convertExportKeyData = [&](SubtleCrypto::ExportKeyData&& exportData)
+      -> kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> {
+    KJ_SWITCH_ONEOF(exportData) {
+      KJ_CASE_ONEOF(buf, jsg::JsRef<jsg::JsArrayBuffer>) {
+        return buf.getHandle(js);
+      }
+      KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
+        return kj::mv(jwk);
+      }
+    }
+    KJ_UNREACHABLE;
+  };
+
   if (format == "jwk"_kj) {
     // When format is jwk, all other options are ignored.
-    return key->impl->exportKey(js, format);
+    return convertExportKeyData(key->impl->exportKey(js, format));
   }
 
   if (key->getType() == "secret"_kj) {
@@ -374,7 +387,7 @@ kj::OneOf<kj::String, jsg::BufferSource, SubtleCrypto::JsonWebKey> CryptoImpl::e
     // one of either "buffer" or "jwk". The "buffer" option correlates to the "raw"
     // format in Web Crypto. The "jwk" option is handled above.
     JSG_REQUIRE(format == "buffer"_kj, TypeError, "Invalid format for secret key export: ", format);
-    return key->impl->exportKey(js, "raw"_kj);
+    return convertExportKeyData(key->impl->exportKey(js, "raw"_kj));
   }
 
   kj::StringPtr type = JSG_REQUIRE_NONNULL(opts.type, TypeError, "Missing type option");
@@ -384,7 +397,8 @@ kj::OneOf<kj::String, jsg::BufferSource, SubtleCrypto::JsonWebKey> CryptoImpl::e
     // TODO(perf): As a later performance optimization, change this so that it doesn't copy.
     return kj::str(data.asArrayPtr().asChars());
   }
-  return kj::mv(data);
+  // exportKeyExt returns JsUint8Array; copy to ArrayBuffer for the Node.js TS layer.
+  return jsg::JsArrayBuffer::create(js, data.asArrayPtr());
 }
 
 bool CryptoImpl::equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey) {
@@ -415,17 +429,17 @@ kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey
   return found != mapping.end() ? found->second : name;
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, jsg::BufferSource keyData) {
+jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData) {
   // The keyData we receive here should be an exclusive copy of the key data.
   // It will have been copied on the JS side before being passed to this function.
-  // We do not detach the key data, however, because we want to ensure that it
-  // remains associated with the isolate for memory accounting purposes.
-  return js.alloc<CryptoKey>(kj::heap<SecretKey>(kj::mv(keyData)));
+  // We copy the raw bytes into a kj::Array for persistent storage.
+  return js.alloc<CryptoKey>(kj::heap<SecretKey>(keyData.copy()));
 }
 
 namespace {
-std::optional<ncrypto::EVPKeyPointer> tryParsingPrivate(
-    const CryptoImpl::CreateAsymmetricKeyOptions& options, const jsg::BufferSource& buffer) {
+std::optional<ncrypto::EVPKeyPointer> tryParsingPrivate(jsg::Lock& js,
+    const CryptoImpl::CreateAsymmetricKeyOptions& options,
+    kj::ArrayPtr<const kj::byte> buffer) {
   // As a private key the format can be either 'pem' or 'der',
   // while type can be one of `pkcs1`, `pkcs8`, or `sec1`.
   // The type is only required when format is 'der'.
@@ -443,14 +457,14 @@ std::optional<ncrypto::EVPKeyPointer> tryParsingPrivate(
   KJ_IF_SOME(passphrase, options.passphrase) {
     // TODO(later): Avoid using DataPointer for passphrase... so we
     // can avoid the copy...
-    auto dp = ncrypto::DataPointer::Alloc(passphrase.size());
+    auto passphrasePtr = passphrase.getHandle(js).asArrayPtr();
+    auto dp = ncrypto::DataPointer::Alloc(passphrasePtr.size());
     kj::ArrayPtr<kj::byte> ptr(dp.get<kj::byte>(), dp.size());
-    ptr.copyFrom(passphrase.asArrayPtr());
+    ptr.copyFrom(passphrasePtr);
     config.passphrase = kj::mv(dp);
   }
 
-  auto result =
-      ncrypto::EVPKeyPointer::TryParsePrivateKey(config, ToNcryptoBuffer(buffer.asArrayPtr()));
+  auto result = ncrypto::EVPKeyPointer::TryParsePrivateKey(config, ToNcryptoBuffer(buffer));
 
   if (result.has_value) return kj::mv(result.value);
   return std::nullopt;
@@ -466,11 +480,12 @@ jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
   // that can be used for multiple kinds of operations.
 
   KJ_SWITCH_ONEOF(options.key) {
-    KJ_CASE_ONEOF(buffer, jsg::BufferSource) {
+    KJ_CASE_ONEOF(bs, jsg::JsRef<jsg::JsBufferSource>) {
       JSG_REQUIRE(options.format == "pem"_kj || options.format == "der"_kj, TypeError,
           "Invalid format for private key creation");
 
-      if (auto maybePrivate = tryParsingPrivate(options, buffer)) {
+      auto bufferPtr = bs.getHandle(js).asArrayPtr();
+      if (auto maybePrivate = tryParsingPrivate(js, options, bufferPtr)) {
         return js.alloc<CryptoKey>(AsymmetricKey::NewPrivate(kj::mv(maybePrivate.value())));
       }
 
@@ -498,9 +513,11 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   KJ_SWITCH_ONEOF(options.key) {
-    KJ_CASE_ONEOF(buffer, jsg::BufferSource) {
+    KJ_CASE_ONEOF(bs, jsg::JsRef<jsg::JsBufferSource>) {
       JSG_REQUIRE(options.format == "pem"_kj || options.format == "der"_kj, TypeError,
           "Invalid format for public key creation");
+
+      auto bufferPtr = bs.getHandle(js).asArrayPtr();
 
       // As a public key the format can be either 'pem' or 'der',
       // while type can be one of either `pkcs1` or `spki`
@@ -520,8 +537,8 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
 
         ncrypto::EVPKeyPointer::PublicKeyEncodingConfig config(true, format, enc);
 
-        auto result = ncrypto::EVPKeyPointer::TryParsePublicKey(
-            config, ToNcryptoBuffer(buffer.asArrayPtr().asConst()));
+        auto result =
+            ncrypto::EVPKeyPointer::TryParsePublicKey(config, ToNcryptoBuffer(bufferPtr.asConst()));
 
         if (result.has_value) {
           return js.alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(result.value)));
@@ -529,7 +546,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
       }
 
       // Otherwise, let's try parsing as a private key...
-      if (auto maybePrivate = tryParsingPrivate(options, buffer)) {
+      if (auto maybePrivate = tryParsingPrivate(js, options, bufferPtr)) {
         return js.alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(maybePrivate.value())));
       }
 
@@ -770,8 +787,9 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions opti
 
       key_params = ncrypto::EVPKeyPointer::NewDH(kj::mv(dh));
     }
-    KJ_CASE_ONEOF(prime, jsg::BufferSource) {
-      ncrypto::BignumPointer bn(prime.asArrayPtr().begin(), prime.size());
+    KJ_CASE_ONEOF(prime, jsg::JsRef<jsg::JsBufferSource>) {
+      auto primePtr = prime.getHandle(js).asArrayPtr();
+      ncrypto::BignumPointer bn(primePtr.begin(), primePtr.size());
 
       auto bn_g = ncrypto::BignumPointer::New();
       JSG_REQUIRE(bn_g && bn_g.setWord(generator), Error, "Failed to set generator");
@@ -811,7 +829,7 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions opti
   };
 }
 
-jsg::BufferSource CryptoImpl::statelessDH(
+jsg::JsUint8Array CryptoImpl::statelessDH(
     jsg::Lock& js, jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey) {
   auto privateKeyAlg = privateKey->getAlgorithmName();
   auto publicKeyAlg = publicKey->getAlgorithmName();
@@ -824,10 +842,8 @@ jsg::BufferSource CryptoImpl::statelessDH(
     KJ_IF_SOME(pvtKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*privateKey->impl)) {
       auto data = ncrypto::DHPointer::stateless(pubKey, pvtKey);
       JSG_REQUIRE(data, Error, "Failed to derive shared diffie-hellman secret");
-      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, data.size());
-      kj::ArrayPtr<kj::byte> ptr(static_cast<kj::byte*>(data.get()), data.size());
-      backing.asArrayPtr().copyFrom(ptr);
-      return jsg::BufferSource(js, kj::mv(backing));
+      kj::ArrayPtr<const kj::byte> ptr(static_cast<const kj::byte*>(data.get()), data.size());
+      return jsg::JsUint8Array::create(js, ptr);
     }
   }
   JSG_FAIL_REQUIRE(Error, "Unsupported keys for stateless diffie-hellman");

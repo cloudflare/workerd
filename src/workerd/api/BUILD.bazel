@@ -1,4 +1,3 @@
-load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
@@ -248,6 +247,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
+        "//src/workerd/util:state-machine",
         "@nbytes",
     ],
 )
@@ -430,19 +430,29 @@ wd_cc_library(
 
 wd_cc_library(
     name = "encoding",
-    srcs = ["encoding.c++"],
-    hdrs = ["encoding.h"],
+    srcs = [
+        "encoding.c++",
+        "encoding-legacy.c++",
+    ],
+    hdrs = [
+        "encoding.h",
+        "encoding-legacy.h",
+        "encoding-shared.h",
+    ],
     implementation_deps = [
-        "//src/workerd/io:features",
         "//src/workerd/util:strings",
         "@simdutf",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":util",
+        "//src/rust/encoding",
         "//src/workerd/io:compatibility-date_capnp",
+        "//src/workerd/io:features",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
+        "@simdutf",
+        "@workerd-cxx//kj-rs",
     ],
 )
 
@@ -530,6 +540,19 @@ wd_cc_library(
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
+    ]
+]
+
+[
+    kj_test(
+        src = f,
+        deps = [
+            "//src/workerd/io",
+            "//src/workerd/io:promise-wrapper",
+            "//src/workerd/tests:test-fixture",
+        ],
+    )
+    for f in [
         "streams/queue-test.c++",
         "streams/standard-test.c++",
     ]
@@ -566,6 +589,22 @@ kj_test(
 )
 
 kj_test(
+    src = "streams-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "system-streams-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "actor-state-iocontext-test.c++",
     deps = [
         "//src/workerd/io",
@@ -583,6 +622,14 @@ kj_test(
         ":urlpattern-standard",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
+    ],
+)
+
+kj_test(
+    src = "encoding-test.c++",
+    deps = [
+        ":encoding",
+        "//src/workerd/io",
     ],
 )
 
@@ -644,6 +691,12 @@ wd_test(
     src = "streams/identitytransformstream-backpressure-test.wd-test",
     args = ["--experimental"],
     data = ["streams/identitytransformstream-backpressure-test.js"],
+)
+
+wd_test(
+    src = "streams/identitytransformstream-byob-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams/identitytransformstream-byob-test.js"],
 )
 
 wd_test(

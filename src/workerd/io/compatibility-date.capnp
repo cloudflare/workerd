@@ -1064,17 +1064,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsPerfHooksModule @122 :Bool
      $compatEnableFlag("enable_nodejs_perf_hooks_module")
      $compatDisableFlag("disable_nodejs_perf_hooks_module")
-     $experimental;
-     # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-01");
+     $impliedByAfterDate(name = "nodeJsCompat", date = "2026-03-17");
    # Enables the Node.js perf_hooks module. It is required to use this flag with
-   # nodejs_compat (or nodejs_compat_v2).
+   # nodejs_compat (or nodejs_compat_v2). This flag also implicitly enables the
+   # global Performance classes (PerformanceEntry, PerformanceMark, etc.).
 
   enableGlobalPerformanceClasses @123 :Bool
      $compatEnableFlag("enable_global_performance_classes")
      $compatDisableFlag("disable_global_performance_classes")
-     $experimental;
+     $impliedByAfterDate(name = "nodeJsCompat", date = "2026-03-17");
    # Enables PerformanceEntry, PerformanceMark, PerformanceMeasure, PerformanceResourceTiming,
    # PerformanceObserver and PerformanceObserverEntryList global classes.
+   # These are also implicitly enabled by enableNodeJsPerfHooksModule.
 
   enableNodeJsDomainModule @124 :Bool
     $compatEnableFlag("enable_nodejs_domain_module")
@@ -1086,16 +1087,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsV8Module @125 :Bool
     $compatEnableFlag("enable_nodejs_v8_module")
     $compatDisableFlag("disable_nodejs_v8_module")
-    $experimental;
-    # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-03-17");
   # Enables the Node.js non-functional stub v8 module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsTtyModule @126 :Bool
     $compatEnableFlag("enable_nodejs_tty_module")
     $compatDisableFlag("disable_nodejs_tty_module")
-    $experimental;
-    # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-03-17");
   # Enables the Node.js non-functional stub tty module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
 
@@ -1116,21 +1115,21 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsChildProcessModule @129 :Bool
     $compatEnableFlag("enable_nodejs_child_process_module")
     $compatDisableFlag("disable_nodejs_child_process_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-03-17");
   # Enables the Node.js non-functional stub child_process module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsWorkerThreadsModule @130 :Bool
     $compatEnableFlag("enable_nodejs_worker_threads_module")
     $compatDisableFlag("disable_nodejs_worker_threads_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-03-17");
   # Enables the Node.js non-functional stub worker_threads module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsStreamWrapModule @131 :Bool
     $compatEnableFlag("enable_nodejs_stream_wrap_module")
     $compatDisableFlag("disable_nodejs_stream_wrap_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub _stream_wrap module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1144,14 +1143,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsDgramModule @133 :Bool
     $compatEnableFlag("enable_nodejs_dgram_module")
     $compatDisableFlag("disable_nodejs_dgram_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub dgram module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsInspectorModule @134 :Bool
     $compatEnableFlag("enable_nodejs_inspector_module")
     $compatDisableFlag("disable_nodejs_inspector_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub inspector module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1165,21 +1164,21 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsReadlineModule @136 :Bool
     $compatEnableFlag("enable_nodejs_readline_module")
     $compatDisableFlag("disable_nodejs_readline_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-03-17");
   # Enables the Node.js non-functional stub readline module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsReplModule @137 :Bool
     $compatEnableFlag("enable_nodejs_repl_module")
     $compatDisableFlag("disable_nodejs_repl_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-03-17");
   # Enables the Node.js non-functional stub repl module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
   enableNodeJsSqliteModule @138 :Bool
     $compatEnableFlag("enable_nodejs_sqlite_module")
     $compatDisableFlag("disable_nodejs_sqlite_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-01-29");
   # Enables the Node.js non-functional stub sqlite module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
@@ -1192,7 +1191,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonExternalSDK @140 :Bool
     $compatEnableFlag("enable_python_external_sdk")
     $compatDisableFlag("disable_python_external_sdk")
-    $experimental;
+    $compatEnableDate("2026-04-21");
   # Don't include the Python sdk from the runtime, use a vendored copy.
 
   fastJsgStruct @141 :Bool
@@ -1229,7 +1228,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   fetchIterableTypeSupport @146 :Bool
     $compatEnableFlag("fetch_iterable_type_support")
-    $compatDisableFlag("no_fetch_iterable_type_support");
+    $compatDisableFlag("no_fetch_iterable_type_support")
+    $compatEnableDate("2026-02-19");
   # Enables passing sync and async iterables as the body of fetch Request or Response.
   # Previously, sync iterables like Arrays would be accepted but stringified, and async
   # iterables would be treated as regular objects and not iterated over at all. With this
@@ -1239,6 +1239,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # that allows this behavior and allows sync Generator and AsyncGenerator objects to be
   # included in kj::OneOf declarations safely with strings and other types. When enabled,
   # strings are ignored but Arrays will be treated as iterables and not stringified as before.
+  # Also see fetchIterableTypeSupportOverrideAdjustment.
 
   envModuleNullableSupport @147 :Bool
     $compatEnableFlag("env_module_nullable_support")
@@ -1282,4 +1283,223 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #
   # This feature exists for experimental use only, and will be removed once we have a properly
   # auditable and revocable storage mechanism.
+
+  rpcParamsDupStubs @152 :Bool
+    $compatEnableFlag("rpc_params_dup_stubs")
+    $compatDisableFlag("rpc_params_transfer_stubs")
+    $compatEnableDate("2026-01-20");
+  # Changes the ownership semantics of RPC stubs embedded in the parameters of an RPC call.
+  #
+  # When the RPC system was first introduced, RPC stubs that were embedded in the params or return
+  # value of some other call had their ownership transferred. That is, the original stub was
+  # implicitly disposed, with a duplicate stub being delivered to the destination.
+  #
+  # This turns out to compose poorly with another rule: in the callee, any stubs received in the
+  # params of a call are automatically disposed when the call returns. These two rules combine to
+  # mean that if you proxy a call -- i.e. the implementation of an RPC just makes another RPC call
+  # passing along the same params -- then any stubs in the params get disposed twice. Worse, if
+  # the eventual recipient of the stub wants to keep a duplicate past the end of the call, this
+  # may not work because the copy of the stub in the proxy layer gets disposed anyway, breaking the
+  # connection.
+  #
+  # For this reason, the pure-JS implementation of Cap'n Web switched to saying that stubs in params
+  # do NOT transfer ownership -- they are simply duplicated. This compat flag fixes the Workers
+  # Runtime built-in RPC to match Cap'n Web behavior.
+  #
+  # In particular, this fixes: https://github.com/cloudflare/capnweb/issues/110
+
+  enableNodejsGlobalTimers @153 :Bool
+    $compatEnableFlag("enable_nodejs_global_timers")
+    $compatDisableFlag("no_nodejs_global_timers")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2026-02-10");
+  # When enabled, setTimeout, setInterval, clearTimeout, and clearInterval
+  # are available on globalThis as Node.js-compatible versions from node:timers.
+  # setTimeout and setInterval return Timeout objects with methods like
+  # refresh(), ref(), unref(), and hasRef().
+  # This flag requires nodejs_compat or nodejs_compat_v2 to be enabled.
+
+  noAutoAllocateChunkSize @154 :Bool
+    $compatEnableFlag("streams_no_default_auto_allocate_chunk_size")
+    $compatDisableFlag("streams_auto_allocate_chunk_size_default")
+    $experimental;
+  # Per the WHATWG Streams spec, byte streams should only have autoAllocateChunkSize
+  # set when the user explicitly provides it. When not set, non-BYOB reads on byte
+  # streams won't have a byobRequest available in the pull() callback, and the
+  # underlying source must use controller.enqueue() to provide data instead.
+  #
+  # Our original implementation always defaulted autoAllocateChunkSize to 4096,
+  # which meant all byte stream reads behaved as BYOB reads. This flag enables
+  # the spec-compliant behavior where autoAllocateChunkSize is only set when
+  # explicitly provided by the user.
+  #
+  # Code relying on the old behavior that accesses controller.byobRequest without
+  # checking for null will break. To migrate, either:
+  # 1. Add a null check: if (controller.byobRequest) { ... }
+  # 2. Explicitly set autoAllocateChunkSize when creating the stream
+
+  pythonWorkflowsImplicitDeps @155 :Bool
+    $compatEnableFlag("python_workflows_implicit_dependencies")
+    $compatDisableFlag("no_python_workflows_implicit_dependencies")
+    $impliedByAfterDate(name = "pythonWorkers", date = "2026-02-25");
+  # replaces depends param on steps to an implicit approach with step callables passed as params
+  # these steps are called internally and act as dependencies
+
+  requireReturnsDefaultExport @156 :Bool
+    $compatEnableFlag("require_returns_default_export")
+    $compatDisableFlag("require_returns_namespace")
+    $compatEnableDate("2026-01-22");
+  # When enabled, require() will return the default export of a module if it exists.
+  # If the default export does not exist, it falls back to returning a mutable
+  # copy of the module namespace object. This matches the behavior that Node.js
+  # uses for require(esm) where the default export is returned when available.
+  # This flag is useful for frameworks like Next.js that expect to patch module exports.
+  #
+  # TODO(later): Once this is no longer experimental, this flag should be implied by
+  # exportCommonJsDefaultNamespace (or vice versa) for consistency.
+
+  pythonRequestHeadersPreserveCommas @157 :Bool
+    $compatEnableFlag("python_request_headers_preserve_commas")
+    $compatDisableFlag("disable_python_request_headers_preserve_commas")
+    $compatEnableDate("2026-02-17");
+  # Preserve commas in Python Request headers rather than treating them as separators,
+  # while still exposing multiple Set-Cookie headers as distinct values.
+
+  queueExposeErrorCodes @158 :Bool
+    $compatEnableFlag("queue_expose_error_codes")
+    $compatDisableFlag("no_queue_expose_error_codes")
+    $compatEnableDate("2026-03-12");
+  # When enabled, queue operations will include detailed error information (error code and cause)
+
+  textDecoderReplaceSurrogates @159 :Bool
+    $compatEnableFlag("text_decoder_replace_surrogates")
+    $compatDisableFlag("disable_text_decoder_replace_surrogates")
+    $compatEnableDate("2026-02-24")
+    $impliedByAfterDate(name = "pedanticWpt", date = "2026-02-24");
+  # When enabled, the UTF-16le TextDecoder will replace lone surrogates with U+FFFD
+  # (the Unicode replacement character) as required by the spec. Previously, lone
+  # surrogates were passed through unchanged, producing non-well-formed strings.
+
+  containersPidNamespace @160 :Bool
+    $compatEnableFlag("containers_pid_namespace")
+    $compatDisableFlag("no_containers_pid_namespace")
+    $compatEnableDate("2026-04-01");
+  # When enabled, containers attached to Durable Objects do NOT share the host PID namespace
+  # (they get their own isolated PID namespace). When disabled (the default), containers share
+  # the host PID namespace.
+
+  deleteAllDeletesAlarm @161 :Bool
+    $compatEnableFlag("delete_all_deletes_alarm")
+    $compatDisableFlag("delete_all_preserves_alarm")
+    $compatEnableDate("2026-02-24");
+  # When enabled, calling storage.deleteAll() on a Durable Object also deletes
+  # any scheduled alarm, in addition to deleting all stored key-value data.
+  #
+  # Previously, deleteAll() preserved the alarm state. This was surprising
+  # behavior since the intent of deleteAll() is to clear all state.
+
+  unhandledRejectionAfterMicrotaskCheckpoint @162 :Bool
+    $compatEnableFlag("unhandled_rejection_after_microtask_checkpoint")
+    $compatDisableFlag("no_unhandled_rejection_after_microtask_checkpoint")
+    $compatEnableDate("2026-03-03");
+  # When enabled, unhandledrejection processing is deferred until the microtask
+  # checkpoint completes, avoiding misfires on multi-tick promise chains.
+
+  textDecoderCjkDecoder @163 :Bool
+    $compatEnableFlag("text_decoder_cjk_decoder")
+    $compatDisableFlag("disable_text_decoder_cjk_decoder")
+    $compatEnableDate("2026-03-03");
+  # Enables the dedicated CJK TextDecoder implementation for overrides and
+  # Big5 lead-byte handling instead of the legacy ICU-only path.
+
+  websocketCloseReasonByteLimit @164 :Bool
+      $compatEnableFlag("websocket_close_reason_byte_limit")
+      $compatDisableFlag("no_websocket_close_reason_byte_limit")
+      $compatEnableDate("2026-03-03");
+  # When enabled, WebSocket close() throws a SyntaxError DOMException if the
+  # reason string exceeds 123 bytes when UTF-8 encoded, as required by the
+  # WHATWG WebSocket spec and RFC 6455 Section 5.5. Previously, workerd allowed
+  # arbitrarily long close reasons without validation.
+
+  enableVersionApi @165 :Bool
+    $compatEnableFlag("enable_version_api")
+    $experimental;
+  # Enables version-related APIs. This currently only enables the `version` option in loopback
+  # bindings to specify a requested version and exposes `ctx.version`. The behaviour of this flag
+  # will change in the future.
+
+  websocketBinaryTypeDefault @166 :Bool
+      $compatEnableFlag("websocket_standard_binary_type")
+      $compatDisableFlag("no_websocket_standard_binary_type")
+      $compatEnableDate("2026-03-17");
+  # Per the WHATWG WebSocket spec, the binaryType attribute defaults to "blob"
+  # and binary messages are delivered as Blob objects. Previously, workerd did
+  # not expose the binaryType property at all and always delivered binary
+  # messages as ArrayBuffer. When this flag is enabled, binaryType defaults to
+  # "blob" and binary messages are delivered as Blob. Workers that set
+  # binaryType to "arraybuffer" will continue to receive ArrayBuffer regardless
+  # of this flag.
+  #
+  # Note: This flag has no effect on the Durable Object hibernatable WebSocket
+  # message handler (webSocketMessage). That handler always receives binary data
+  # as ArrayBuffer, since it operates outside the normal WebSocket read loop.
+
+  writableStreamSpecCompliantWriter @167 :Bool
+      $compatEnableFlag("writable_stream_spec_compliant_writer")
+      $compatDisableFlag("no_writable_stream_spec_compliant_writer")
+      $compatEnableDate("2026-03-24");
+  # Fixes several WritableStream spec compliance issues around writer
+  # lock/release behavior.
+
+  encoderStreamSpecCompliantBackpressure @168 :Bool
+      $compatEnableFlag("encoder_stream_spec_compliant_backpressure")
+      $compatDisableFlag("no_encoder_stream_spec_compliant_backpressure")
+      $compatEnableDate("2026-03-24");
+  # Fixes TextEncoderStream and TextDecoderStream to use the correct readable
+  # side high water mark of 0 (per the WHATWG Encoding spec), instead of 1.
+  # With HWM=0 the readable side starts with backpressure, so writes correctly
+  # block until a reader pulls. Previously HWM defaulted to 1, which caused
+  # pull() to fire at startup, clearing backpressure before any write.
+
+  specCompliantPropertyAttributes @169 :Bool
+      $compatEnableFlag("spec_compliant_property_attributes")
+      $compatDisableFlag("no_spec_compliant_property_attributes")
+      $experimental;
+  # Fixes several Web IDL compliance issues on property attributes:
+  #  - Constructor .length reflects the number of required arguments instead
+  #    of always being 0.
+  #  - Method and static method .length reflects the number of required
+  #    arguments instead of always being 0.
+  #  - Getter .length is explicitly 0 and setter .length is 1.
+  #  - Getter .name is "get <name>" and setter .name is "set <name>" per the
+  #    Web IDL spec, instead of empty strings.
+  #  - Constants gain DontDelete (non-configurable) on both the constructor
+  #    and prototype, matching { writable: false, enumerable: true,
+  #    configurable: false } per Web IDL.
+  #  - Interface objects (nested types) become own properties of globalThis
+  #    with { writable: true, enumerable: false, configurable: true }, instead
+  #    of being inherited from the prototype chain.
+
+  workflowsPreserveNonRetryableErrorMessage @170 :Bool
+      $compatEnableFlag("workflows_preserve_non_retryable_error_message")
+      $experimental;
+  # When enabled, if a Workflow step throws a NonRetryableError, the error message
+  # and name are preserved on the thrown exception instead of being replaced with
+  # a generic "NonRetryableError" string.
+
+  webSocketAutoReplyToClose @171 :Bool
+    $compatEnableFlag("web_socket_auto_reply_to_close")
+    $compatDisableFlag("web_socket_manual_reply_to_close")
+    $compatEnableDate("2026-04-07");
+  # When enabled, a reciprocal Close frame is automatically sent through the
+  # outgoing message pump when a server-initiated close is received, and the
+  # WebSocket readyState is CLOSED (3) when the close event fires. Previously,
+  # no close reply was sent and readyState was CLOSING (2). The WebSocket spec
+  # requires readyState to be CLOSED when the close event is dispatched.
+
+  enableCtxVersionMetadata @172 :Bool
+    $compatEnableFlag("enable_ctx_version_metadata")
+    $experimental;
+  # When paired with `enable_version_api`, also exposes `ctx.version.metadata`. This is a separate
+  # flag as we haven't decided on the exact behaviour of `ctx.version.metadata`, but the rest of
+  # `ctx.version` is much more well defined. The behaviour of this flag will change in the future.
 }

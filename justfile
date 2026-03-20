@@ -56,7 +56,7 @@ stream-test *args:
 
 # e.g. just node-test zlib
 node-test test_name *args:
-  just stream-test //src/workerd/api/node/tests:{{test_name}}-nodejs-test {{args}}
+  just stream-test //src/workerd/api/node/tests:{{test_name}}-nodejs-test@ {{args}}
 
 # e.g. just wpt-test urlpattern
 wpt-test test_name:
@@ -77,14 +77,14 @@ new-wpt-test test_name:
   echo 'wpt_test(name = "{{test_name}}", config = "{{test_name}}-test.ts", wpt_directory = "@wpt//:{{test_name}}@module")' >> src/wpt/BUILD.bazel
 
   ./tools/cross/format.py
-  bazel test //src/wpt:{{test_name}} --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
+  bazel test //src/wpt:{{test_name}}@ --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
 
 # Specify the full Bazel target name for the test to be created.
 # e.g. just new-test //src/workerd/api/tests:v8-temporal-test
 new-test test_name:
   ./tools/unix/new-test.sh {{test_name}}
 
-format: rustfmt
+format:
   python3 tools/cross/format.py
 
 internal-pr:
@@ -97,9 +97,6 @@ update-deps prefix="":
 # equivalent to `cargo update`; use `workspace` or <package> to limit update scope
 update-rust package="full":
   bazel run //deps/rust:crates_vendor -- --repin {{package}}
-
-rustfmt:
-  bazel run @rules_rust//:rustfmt
 
 # example: just bench mimetype
 bench path:
@@ -121,10 +118,13 @@ generate-types:
 update-reported-node-version:
   python3 tools/update_node_version.py src/workerd/api/node/node-version.h
 
+update-opencode:
+  python3 tools/update_opencode_version.py
+
 # called by rust-analyzer discoverConfig (quiet recipe with no output)
+# rust-analyzer doesn't like stderr output, redirect it to /dev/null
 @_rust-analyzer:
   rm -rf ./rust-project.json
-  # rust-analyzer doesn't like stderr output, redirect it to /dev/null
   bazel run @rules_rust//tools/rust_analyzer:discover_bazel_rust_project 2>/dev/null
 
 create-external:
@@ -133,17 +133,20 @@ create-external:
 bench-all:
   bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label | xargs -I {} bazel run --config=benchmark {}
 
+lint: eslint
+
 eslint:
   just stream-test \
     //src/cloudflare:cloudflare@eslint \
     //src/node:node@eslint \
     //src/pyodide:pyodide_static@eslint \
-    //src/wpt:wpt-all@eslint \
+    //src/wpt:wpt-all@tsproject@eslint \
     //types:types_lib@eslint
 
+# Generate code coverage report (Linux only)
 coverage path="//...":
-  bazel coverage {{path}}
-  genhtml --branch-coverage --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
+  bazel coverage --config=coverage {{path}}
+  genhtml --branch-coverage --ignore-errors category --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
   open coverage/index.html
 
 profile path:

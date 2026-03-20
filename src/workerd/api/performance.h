@@ -40,7 +40,7 @@ namespace workerd::api {
 class PerformanceEntry: public jsg::Object {
  public:
   PerformanceEntry(
-      kj::String name, kj::LiteralStringConst entryType, double startTime, uint32_t duration)
+      kj::String name, kj::LiteralStringConst entryType, double startTime, double duration)
       : name(kj::mv(name)),
         entryType(kj::mv(entryType)),
         startTime(startTime),
@@ -55,7 +55,7 @@ class PerformanceEntry: public jsg::Object {
   double getStartTime() {
     return startTime;
   };
-  uint32_t getDuration() {
+  double getDuration() {
     return duration;
   };
 
@@ -67,13 +67,17 @@ class PerformanceEntry: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(startTime, getStartTime);
     JSG_READONLY_PROTOTYPE_PROPERTY(duration, getDuration);
     JSG_METHOD(toJSON);
+
+    JSG_TS_OVERRIDE({
+      toJSON(): object;
+    });
   }
 
  protected:
   kj::String name;
   kj::LiteralStringConst entryType;
   double startTime;
-  uint32_t duration;
+  double duration;
 };
 
 class PerformanceMark: public PerformanceEntry {
@@ -95,8 +99,11 @@ class PerformanceMark: public PerformanceEntry {
   static jsg::Ref<PerformanceMark> constructor(
       jsg::Lock& js, kj::String name, jsg::Optional<Options> maybeOptions);
 
-  jsg::Optional<jsg::JsObject> getDetail(jsg::Lock& js) {
-    return detail.map([&js](auto& val) { return val.getHandle(js); });
+  jsg::JsValue getDetail(jsg::Lock& js) {
+    KJ_IF_SOME(d, detail) {
+      return d.getHandle(js);
+    }
+    return js.null();
   }
 
   jsg::JsObject toJSON(jsg::Lock& js);
@@ -105,15 +112,99 @@ class PerformanceMark: public PerformanceEntry {
     JSG_INHERIT(PerformanceEntry);
     JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
     JSG_METHOD(toJSON);
+
+    JSG_TS_OVERRIDE({
+      toJSON(): object;
+    });
   }
 
  private:
   jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
 };
 
+// UvMetricsInfo represents libuv event loop metrics.
+// In workerd, this returns stub values since actual libuv metrics are not available.
+struct UvMetricsInfo {
+  double loopCount;
+  double events;
+  double eventsWaiting;
+
+  JSG_STRUCT(loopCount, events, eventsWaiting);
+};
+
+// PerformanceNodeTiming provides Node.js-specific timing information.
+// In workerd, this returns stub values since actual Node.js startup metrics are not applicable.
+// This class is only exposed when the Node.js perf_hooks compat flag is enabled.
+//
+// Spec: https://nodejs.org/api/perf_hooks.html#class-performancenodetiming
+class PerformanceNodeTiming: public PerformanceEntry {
+ public:
+  PerformanceNodeTiming(): PerformanceEntry(kj::str("node"), "node"_kjc, 0, 0) {}
+
+  static jsg::Ref<PerformanceNodeTiming> constructor() = delete;
+
+  // All timing values return 0 as stubs since Node.js startup metrics
+  // are not applicable in the Workers context.
+  double getNodeStart() {
+    return 0;
+  }
+  double getV8Start() {
+    return 0;
+  }
+  double getBootstrapComplete() {
+    return 0;
+  }
+  double getEnvironment() {
+    return 0;
+  }
+  double getLoopStart() {
+    return 0;
+  }
+  double getLoopExit() {
+    return 0;
+  }
+  double getIdleTime() {
+    return 0;
+  }
+
+  // uvMetricsInfo returns libuv event loop metrics.
+  // In workerd, this returns stub values since actual libuv metrics are not available.
+  // Spec: https://nodejs.org/api/perf_hooks.html#performancenodetiminguvmetricsinfo
+  UvMetricsInfo getUvMetricsInfo(jsg::Lock& js) {
+    return UvMetricsInfo{
+      .loopCount = 0,
+      .events = 0,
+      .eventsWaiting = 0,
+    };
+  }
+
+  jsg::JsObject toJSON(jsg::Lock& js);
+
+  // Node.js exposes these as instance properties (own properties on the object),
+  // not prototype properties. This matches Node.js behavior where:
+  //   Reflect.ownKeys(performance.nodeTiming) includes all these properties
+  //   Reflect.ownKeys(performance.nodeTiming.__proto__) only has constructor, toJSON
+  JSG_RESOURCE_TYPE(PerformanceNodeTiming) {
+    JSG_INHERIT(PerformanceEntry);
+    JSG_READONLY_INSTANCE_PROPERTY(nodeStart, getNodeStart);
+    JSG_READONLY_INSTANCE_PROPERTY(v8Start, getV8Start);
+    JSG_READONLY_INSTANCE_PROPERTY(bootstrapComplete, getBootstrapComplete);
+    JSG_READONLY_INSTANCE_PROPERTY(environment, getEnvironment);
+    JSG_READONLY_INSTANCE_PROPERTY(loopStart, getLoopStart);
+    JSG_READONLY_INSTANCE_PROPERTY(loopExit, getLoopExit);
+    JSG_READONLY_INSTANCE_PROPERTY(idleTime, getIdleTime);
+    JSG_READONLY_INSTANCE_PROPERTY(uvMetricsInfo, getUvMetricsInfo);
+    JSG_METHOD(toJSON);
+
+    JSG_TS_OVERRIDE({
+      toJSON(): object;
+    });
+  }
+};
+
 class PerformanceMeasure: public PerformanceEntry {
  public:
-  PerformanceMeasure(kj::String name, double startTime, uint32_t duration)
+  PerformanceMeasure(kj::String name, double startTime, double duration)
       : PerformanceEntry(kj::mv(name), "measure"_kjc, startTime, duration) {}
 
   friend class Performance;
@@ -122,7 +213,7 @@ class PerformanceMeasure: public PerformanceEntry {
     kj::String entryType;
     kj::String name;
     kj::OneOf<kj::Date, double> startTime;
-    uint32_t duration;
+    double duration;
     jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
 
     JSG_STRUCT(entryType, name, startTime, duration, detail);
@@ -131,14 +222,17 @@ class PerformanceMeasure: public PerformanceEntry {
   struct Options {
     jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
     jsg::Optional<double> start;
-    jsg::Optional<uint32_t> duration;
+    jsg::Optional<double> duration;
     jsg::Optional<double> end;
 
     JSG_STRUCT(detail, start, duration, end);
   };
 
-  jsg::Optional<jsg::JsObject> getDetail(jsg::Lock& js) {
-    return detail.map([&js](auto& val) { return val.getHandle(js); });
+  jsg::JsValue getDetail(jsg::Lock& js) {
+    KJ_IF_SOME(d, detail) {
+      return d.getHandle(js);
+    }
+    return js.null();
   }
 
   jsg::JsObject toJSON(jsg::Lock& js);
@@ -147,6 +241,10 @@ class PerformanceMeasure: public PerformanceEntry {
     JSG_INHERIT(PerformanceEntry);
     JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
     JSG_METHOD(toJSON);
+
+    JSG_TS_OVERRIDE({
+      toJSON(): object;
+    });
   }
 
  private:
@@ -155,7 +253,7 @@ class PerformanceMeasure: public PerformanceEntry {
 
 class PerformanceResourceTiming: public PerformanceEntry {
  public:
-  PerformanceResourceTiming(kj::String name, double startTime, uint32_t duration)
+  PerformanceResourceTiming(kj::String name, double startTime, double duration)
       : PerformanceEntry(kj::mv(name), "resource"_kjc, startTime, duration) {}
 
   uint32_t getConnectEnd() {
@@ -450,14 +548,36 @@ class Performance: public EventTarget {
   // - measure(measureName, measureOptions, endMark)
   jsg::Ref<PerformanceMeasure> measure(jsg::Lock& js,
       kj::String measureName,
-      kj::OneOf<PerformanceMeasure::Options, kj::String> measureOptionsOrStartMark,
-      jsg::Optional<kj::String> maybeEndMark);
+      jsg::Optional<kj::OneOf<PerformanceMeasure::Options, kj::String>> measureOptionsOrStartMark =
+          kj::none,
+      jsg::Optional<kj::String> maybeEndMark = kj::none);
 
   void setResourceTimingBufferSize(uint32_t size);
-  void eventLoopUtilization();
 
-  // In the browser, this function is not public.  However, it must be used inside fetch
-  // which is a Node.js dependency, not a internal module
+  jsg::JsObject toJSON(jsg::Lock& js);
+
+  // Node.js-specific performance extensions.
+  // These are provided as stubs for compatibility with code that expects Node.js APIs.
+
+  // EventLoopUtilization represents the utilization of the event loop.
+  // In workerd, we return stub values since actual event loop metrics are not available.
+  struct EventLoopUtilization {
+    double idle = 0;
+    double active = 0;
+    double utilization = 0;
+
+    JSG_STRUCT(idle, active, utilization);
+  };
+
+  EventLoopUtilization eventLoopUtilization();
+
+  // Returns the PerformanceNodeTiming object containing Node.js-specific timing metrics.
+  // In workerd, this returns stub values since Node.js startup metrics are not applicable.
+  jsg::Ref<PerformanceNodeTiming> getNodeTiming(jsg::Lock& js);
+
+  // In the browser, this function is not public. However, it must be used inside fetch
+  // which is a Node.js dependency, not an internal module.
+  // Returns void as a no-op stub since resource timing is not applicable in Workers.
   void markResourceTiming();
   jsg::Function<void()> timerify(jsg::Lock& js, jsg::Function<void()> fn);
 
@@ -481,13 +601,19 @@ class Performance: public EventTarget {
       JSG_METHOD(mark);
       JSG_METHOD(measure);
       JSG_METHOD(setResourceTimingBufferSize);
+      JSG_METHOD(toJSON);
     }
 
     if (flags.getEnableNodeJsPerfHooksModule()) {
+      JSG_READONLY_PROTOTYPE_PROPERTY(nodeTiming, getNodeTiming);
       JSG_METHOD(eventLoopUtilization);
       JSG_METHOD(markResourceTiming);
       JSG_METHOD(timerify);
     }
+
+    JSG_TS_OVERRIDE({
+      toJSON(): object;
+    });
   }
 
  private:
@@ -496,12 +622,13 @@ class Performance: public EventTarget {
 };
 
 #define EW_PERFORMANCE_ISOLATE_TYPES                                                               \
-  api::Performance, api::PerformanceMark, api::PerformanceMeasure, api::PerformanceMark::Options,  \
-      api::PerformanceMeasure::Options, api::PerformanceMeasure::Entry,                            \
-      api::PerformanceObserverEntryList, api::PerformanceEntry, api::PerformanceResourceTiming,    \
-      api::PerformanceObserver, api::PerformanceObserver::ObserveOptions,                          \
-      api::PerformanceObserver::CallbackOptions, api::EventCounts,                                 \
-      api::EventCounts::EntryIterator, api::EventCounts::EntryIterator::Next,                      \
+  api::Performance, api::Performance::EventLoopUtilization, api::PerformanceNodeTiming,            \
+      api::UvMetricsInfo, api::PerformanceMark, api::PerformanceMeasure,                           \
+      api::PerformanceMark::Options, api::PerformanceMeasure::Options,                             \
+      api::PerformanceMeasure::Entry, api::PerformanceObserverEntryList, api::PerformanceEntry,    \
+      api::PerformanceResourceTiming, api::PerformanceObserver,                                    \
+      api::PerformanceObserver::ObserveOptions, api::PerformanceObserver::CallbackOptions,         \
+      api::EventCounts, api::EventCounts::EntryIterator, api::EventCounts::EntryIterator::Next,    \
       api::EventCounts::KeyIterator, api::EventCounts::KeyIterator::Next,                          \
       api::EventCounts::ValueIterator, api::EventCounts::ValueIterator::Next
 

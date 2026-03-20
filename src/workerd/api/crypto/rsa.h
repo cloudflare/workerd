@@ -3,6 +3,8 @@
 #include "crypto.h"
 #include "keys.h"
 
+#include <workerd/jsg/jsvalue.h>
+
 #include <openssl/base.h>
 #include <openssl/evp.h>
 
@@ -28,11 +30,11 @@ class Rsa final {
     return d;
   }
 
-  jsg::BufferSource getPublicExponent(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+  jsg::JsUint8Array getPublicExponent(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const KJ_WARN_UNUSED_RESULT;
 
-  jsg::BufferSource sign(
+  jsg::JsArrayBuffer sign(
       jsg::Lock& js, kj::ArrayPtr<const kj::byte> data) const KJ_WARN_UNUSED_RESULT;
 
   static kj::Maybe<AsymmetricKeyData> fromJwk(
@@ -51,13 +53,13 @@ class Rsa final {
       KeyType keyType,
       kj::Maybe<CipherOptions> options = kj::none) const KJ_WARN_UNUSED_RESULT;
 
-  jsg::BufferSource toDer(jsg::Lock& js,
+  jsg::JsArrayBuffer toDer(jsg::Lock& js,
       KeyEncoding encoding,
       KeyType keyType,
       kj::Maybe<CipherOptions> options = kj::none) const KJ_WARN_UNUSED_RESULT;
 
   using EncryptDecryptFunction = decltype(EVP_PKEY_encrypt);
-  jsg::BufferSource cipher(jsg::Lock& js,
+  jsg::JsArrayBuffer cipher(jsg::Lock& js,
       EVP_PKEY_CTX* ctx,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data,

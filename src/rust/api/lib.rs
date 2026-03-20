@@ -25,8 +25,9 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry,
         "node-internal:dns",
+        // SAFETY: isolate is a valid pointer provided by V8 during module resolution.
         |isolate| unsafe {
-            let mut lock = jsg::Lock::from_isolate(isolate);
+            let mut lock = jsg::Lock::from_isolate_ptr(isolate);
             let dns_util = jsg::Ref::new(DnsUtil {
                 _state: ResourceState::default(),
             });
@@ -48,17 +49,18 @@ mod tests {
     #[test]
     fn test_wrap_resource_equality() {
         let harness = Harness::new();
-        harness.run_in_context(|isolate| unsafe {
-            let mut lock = jsg::Lock::from_isolate(isolate);
+        // SAFETY: Harness guarantees lock and context are valid within run_in_context.
+        harness.run_in_context(|lock, _ctx| unsafe {
             let dns_util = jsg::Ref::new(DnsUtil {
                 _state: ResourceState::default(),
             });
-            let mut dns_util_template = DnsUtilTemplate::new(&mut lock);
+            let mut dns_util_template = DnsUtilTemplate::new(lock);
 
-            let lhs = jsg::wrap_resource(&mut lock, dns_util.clone(), &mut dns_util_template);
-            let rhs = jsg::wrap_resource(&mut lock, dns_util, &mut dns_util_template);
+            let lhs = jsg::wrap_resource(lock, dns_util.clone(), &mut dns_util_template);
+            let rhs = jsg::wrap_resource(lock, dns_util, &mut dns_util_template);
 
             assert_eq!(lhs, rhs);
+            Ok(())
         });
     }
 }

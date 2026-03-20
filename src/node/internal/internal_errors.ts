@@ -556,6 +556,12 @@ export class ERR_BROTLI_INVALID_PARAM extends NodeRangeError {
   }
 }
 
+export class ERR_ZSTD_INVALID_PARAM extends NodeRangeError {
+  constructor(value: unknown) {
+    super('ERR_ZSTD_INVALID_PARAM', `${value} is not a valid Zstd parameter`);
+  }
+}
+
 export class ERR_ZLIB_INITIALIZATION_FAILED extends NodeError {
   constructor() {
     super('ERR_ZLIB_INITIALIZATION_FAILED', 'Initialization failed');

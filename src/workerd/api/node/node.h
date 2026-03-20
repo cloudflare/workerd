@@ -6,7 +6,6 @@
 
 #include <workerd/api/node/async-hooks.h>
 #include <workerd/api/node/buffer.h>
-#include <workerd/api/node/dns.h>
 #include <workerd/api/node/module.h>
 #include <workerd/api/node/process.h>
 #include <workerd/api/node/sqlite.h>
@@ -19,7 +18,6 @@
 #include <workerd/jsg/url.h>
 #include <workerd/rust/api/lib.rs.h>
 #include <workerd/rust/jsg/jsg.h>
-#include <workerd/util/autogate.h>
 
 #include <node/node.capnp.h>
 
@@ -87,12 +85,6 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
   }
 
 #undef V
-
-  // Only register C++ DnsUtil if Rust implementation is not enabled
-  if (!util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_DNS)) {
-    registry.template addBuiltinModule<DnsUtil>(
-        "node-internal:dns", workerd::jsg::ModuleRegistry::Type::INTERNAL);
-  }
 
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
@@ -216,10 +208,8 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     }
   }
 
-  if (util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_DNS)) {
-    ::workerd::rust::jsg::RustModuleRegistry r(registry);
-    ::workerd::rust::api::register_nodejs_modules(r);
-  }
+  ::workerd::rust::jsg::RustModuleRegistry r(registry);
+  ::workerd::rust::api::register_nodejs_modules(r);
 }
 
 template <class TypeWrapper>
@@ -234,12 +224,15 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
     NODEJS_MODULES_EXPERIMENTAL(V)
   }
 #undef V
-  // Only register C++ DnsUtil if Rust implementation is not enabled
-  if (!util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_DNS)) {
-    static const auto kDnsUtilSpecifier = "node-internal:dns"_url;
-    builder.addObject<DnsUtil, TypeWrapper>(kDnsUtilSpecifier);
-  }
   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE);
+
+  // Register Rust-implemented Node.js modules using the reusable adapter
+  // that bridges Rust ModuleCallback into BuiltinBuilder::addSynthetic.
+  {
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
+    ::workerd::rust::api::register_nodejs_modules(adapter);
+  }
+
   return builder.finish();
 }
 
@@ -247,7 +240,79 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
   if (isNodeJsCompatEnabled(featureFlags)) {
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE);
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
+        builder, NODE_BUNDLE, [&](jsg::Module::Reader module) -> bool {
+      if (isNodeJsCompatFsModule(module.getName())) {
+        return featureFlags.getEnableNodeJsFsModule();
+      }
+      if (isNodeHttpModule(module.getName())) {
+        return featureFlags.getEnableNodejsHttpModules();
+      }
+      if (isNodeHttpServerModule(module.getName())) {
+        return featureFlags.getEnableNodejsHttpServerModules();
+      }
+      if (isNodeOsModule(module.getName())) {
+        return featureFlags.getEnableNodeJsOsModule();
+      }
+      if (isNodeHttp2Module(module.getName())) {
+        return featureFlags.getEnableNodeJsHttp2Module();
+      }
+      if (isNodeConsoleModule(module.getName())) {
+        return featureFlags.getEnableNodeJsConsoleModule();
+      }
+      if (module.getName() == "node:vm") {
+        return featureFlags.getEnableNodeJsVmModule();
+      }
+      if (module.getName() == "node:perf_hooks") {
+        return featureFlags.getEnableNodeJsPerfHooksModule();
+      }
+      if (module.getName() == "node:domain") {
+        return featureFlags.getEnableNodeJsDomainModule();
+      }
+      if (module.getName() == "node:child_process") {
+        return featureFlags.getEnableNodeJsChildProcessModule();
+      }
+      if (module.getName() == "node:v8") {
+        return featureFlags.getEnableNodeJsV8Module();
+      }
+      if (module.getName() == "node:tty") {
+        return featureFlags.getEnableNodeJsTtyModule();
+      }
+      if (module.getName() == "node:punycode") {
+        return featureFlags.getEnableNodeJsPunycodeModule();
+      }
+      if (module.getName() == "node:cluster") {
+        return featureFlags.getEnableNodeJsClusterModule();
+      }
+      if (module.getName() == "node:worker_threads") {
+        return featureFlags.getEnableNodeJsWorkerThreadsModule();
+      }
+      if (module.getName() == "node:_stream_wrap") {
+        return featureFlags.getEnableNodeJsStreamWrapModule();
+      }
+      if (module.getName() == "node:wasi") {
+        return featureFlags.getEnableNodeJsWasiModule();
+      }
+      if (module.getName() == "node:dgram") {
+        return featureFlags.getEnableNodeJsDgramModule();
+      }
+      if (module.getName() == "node:inspector" || module.getName() == "node:inspector/promises") {
+        return featureFlags.getEnableNodeJsInspectorModule();
+      }
+      if (module.getName() == "node:trace_events") {
+        return featureFlags.getEnableNodeJsTraceEventsModule();
+      }
+      if (module.getName() == "node:readline" || module.getName() == "node:readline/promises") {
+        return featureFlags.getEnableNodeJsReadlineModule();
+      }
+      if (module.getName() == "node:repl") {
+        return featureFlags.getEnableNodeJsReplModule();
+      }
+      if (module.getName() == "node:sqlite") {
+        return featureFlags.getEnableNodeJsSqliteModule();
+      }
+      return true;
+    });
   } else if (featureFlags.getNodeJsAls()) {
     // The AsyncLocalStorage API can be enabled independently of the rest
     // of the nodejs_compat layer.
@@ -272,5 +337,5 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
   EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
-      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES,          \
-      EW_NODE_TIMERS_ISOLATE_TYPES, EW_NODE_SQLITE_ISOLATE_TYPES
+      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES,       \
+      EW_NODE_SQLITE_ISOLATE_TYPES

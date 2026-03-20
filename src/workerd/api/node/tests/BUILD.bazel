@@ -217,6 +217,13 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
+    src = "zlib-zstd-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-zstd-nodejs-test.js"],
+)
+
+wd_test(
     src = "module-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["module-nodejs-test.js"],
@@ -229,6 +236,12 @@ wd_test(
 )
 
 wd_test(
+    src = "module-require-mutable-exports-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-require-mutable-exports-test.js"],
+)
+
+wd_test(
     src = "process-exit-test.wd-test",
     args = ["--experimental"],
     data = ["process-exit-test.js"],
@@ -237,6 +250,12 @@ wd_test(
 wd_test(
     src = "process-nodejs-test.wd-test",
     data = ["process-nodejs-test.js"],
+)
+
+wd_test(
+    src = "process-getbuiltin-newmodreg-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-getbuiltin-newmodreg-test.js"],
 )
 
 wd_test(
@@ -366,6 +385,12 @@ wd_test(
 )
 
 wd_test(
+    src = "timers-global-override-test.wd-test",
+    args = ["--experimental"],
+    data = ["timers-global-override-test.js"],
+)
+
+wd_test(
     src = "async_hooks-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["async_hooks-nodejs-test.js"],
@@ -491,6 +516,7 @@ wd_test(
         "DEFAULT_HEADERS_EXIST_PORT",
         "REQUEST_ARGUMENTS_PORT",
         "HELLO_WORLD_SERVER_PORT",
+        "GZIP_SERVER_PORT",
     ],
 )
 
@@ -597,6 +623,12 @@ wd_test(
 )
 
 wd_test(
+    src = "fs-cp-into-subdirectory-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-cp-into-subdirectory-test.js"],
+)
+
+wd_test(
     src = "fs-readstream-test.wd-test",
     args = ["--experimental"],
     data = ["fs-readstream-test.js"],
@@ -690,4 +722,16 @@ wd_test(
     src = "trace-events-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["trace-events-nodejs-test.js"],
+)
+
+wd_test(
+    src = "buffer-effective-size-concat-test.wd-test",
+    args = ["--experimental"],
+    data = ["buffer-effective-size-concat-test.js"],
+)
+
+wd_test(
+    src = "als-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["als-gc-test.js"],
 )

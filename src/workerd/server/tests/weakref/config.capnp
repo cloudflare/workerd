@@ -15,7 +15,6 @@ const worker :Workerd.Worker = (
   modules = [
     ( name = "./index.mjs", esModule = embed "index.mjs" )
   ],
-  compatibilityDate = "2024-01-01",
   compatibilityFlags = ["enable_weak_ref"],
 );
 

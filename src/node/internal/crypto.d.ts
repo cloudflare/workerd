@@ -31,7 +31,7 @@ export interface CheckOptions {
 }
 
 export class X509Certificate {
-  static parse(data: ArrayBuffer | ArrayBufferView): X509Certificate;
+  static parse(data: ArrayBuffer | ArrayBufferView): X509Certificate | null;
   get subject(): string | undefined;
   get subjectAltName(): string | undefined;
   get infoAccess(): string | undefined;

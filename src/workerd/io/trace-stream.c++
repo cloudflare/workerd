@@ -24,12 +24,17 @@ namespace {
   V(CFJSON, "cfJson")                                                                              \
   V(CLOSE, "close")                                                                                \
   V(CODE, "code")                                                                                  \
+  V(COUNT, "count")                                                                                \
   V(CPUTIME, "cpuTime")                                                                            \
   V(CRON, "cron")                                                                                  \
   V(CUSTOM, "custom")                                                                              \
   V(DAEMONDOWN, "daemonDown")                                                                      \
+  V(DEBUG, "debug")                                                                                \
   V(DIAGNOSTICCHANNEL, "diagnosticChannel")                                                        \
+  V(DIAGNOSTIC, "diagnostic")                                                                      \
+  V(DIAGNOSTICSTYPE, "diagnosticsType")                                                            \
   V(DISPATCHNAMESPACE, "dispatchNamespace")                                                        \
+  V(DROPPEDEVENTS, "droppedEvents")                                                                \
   V(EMAIL, "email")                                                                                \
   V(ENTRYPOINT, "entrypoint")                                                                      \
   V(ERROR, "error")                                                                                \
@@ -75,6 +80,8 @@ namespace {
   V(SPANOPEN, "spanOpen")                                                                          \
   V(STACK, "stack")                                                                                \
   V(STATUSCODE, "statusCode")                                                                      \
+  V(STREAMDIAGEVENT, "streamDiagEvent")                                                            \
+  V(STREAMDIAGNOSTIC, "streamDiagnostic")                                                          \
   V(TAG, "tag")                                                                                    \
   V(TIMESTAMP, "timestamp")                                                                        \
   V(TRACEID, "traceId")                                                                            \
@@ -85,6 +92,7 @@ namespace {
   V(URL, "url")                                                                                    \
   V(VALUE, "value")                                                                                \
   V(WALLTIME, "wallTime")                                                                          \
+  V(WARN, "warn")                                                                                  \
   V(WASCLEAN, "wasClean")
 
 #define V(N, L) constexpr kj::LiteralStringConst N##_STR = L##_kjc;
@@ -318,19 +326,10 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
   KJ_UNREACHABLE;
 }
 
-template <typename Enum>
-kj::String enumToStr(const Enum& var) {
-  // TODO(cleanup): Port this to capnproto.
-  auto enums = capnp::Schema::from<Enum>().getEnumerants();
-  uint i = static_cast<uint>(var);
-  KJ_ASSERT(i < enums.size(), "invalid enum value");
-  return kj::str(enums[i].getProto().getName());
-}
-
 jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ONSET_STR));
-  obj.set(js, EXECUTIONMODEL_STR, cache.get(js, enumToStr(onset.workerInfo.executionModel)));
+  obj.set(js, EXECUTIONMODEL_STR, cache.get(js, kj::str(onset.workerInfo.executionModel)));
   obj.set(js, SPANID_STR, js.str(onset.spanId.toGoString()));
 
   KJ_IF_SOME(ns, onset.workerInfo.dispatchNamespace) {
@@ -468,7 +467,19 @@ jsg::JsValue ToJs(jsg::Lock& js, const Exception& ex, StringCache& cache) {
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const LogLevel& level, StringCache& cache) {
-  return cache.get(js, toLower(enumToStr<LogLevel>(level)));
+  switch (level) {
+    case LogLevel::DEBUG_:
+      return cache.get(js, DEBUG_STR);
+    case LogLevel::INFO:
+      return cache.get(js, INFO_STR);
+    case LogLevel::LOG:
+      return cache.get(js, LOG_STR);
+    case LogLevel::WARN:
+      return cache.get(js, WARN_STR);
+    case LogLevel::ERROR:
+      return cache.get(js, ERROR_STR);
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
@@ -477,6 +488,19 @@ jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
   // TODO(o11y): Check that we are always returning an object here
   obj.set(js, MESSAGE_STR, jsg::JsValue(js.parseJson(log.message).getHandle(js)));
+  return obj;
+}
+
+jsg::JsValue ToJs(jsg::Lock& js, const StreamDiagnosticsEvent& streamDiag, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, STREAMDIAGNOSTIC_STR));
+  // At present we only support the droppedEvents type.
+
+  // Handle droppedEvents
+  auto droppedEventsDiagnostic = js.obj();
+  droppedEventsDiagnostic.set(js, DIAGNOSTICSTYPE_STR, cache.get(js, DROPPEDEVENTS_STR));
+  droppedEventsDiagnostic.set(js, COUNT_STR, js.num(streamDiag.droppedEventsCount));
+  obj.set(js, DIAGNOSTIC_STR, kj::mv(droppedEventsDiagnostic));
   return obj;
 }
 
@@ -528,6 +552,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
     KJ_CASE_ONEOF(log, Log) {
       obj.set(js, EVENT_STR, ToJs(js, log, cache));
     }
+    KJ_CASE_ONEOF(diagEvent, StreamDiagnosticsEvent) {
+      obj.set(js, EVENT_STR, ToJs(js, diagEvent, cache));
+    }
     KJ_CASE_ONEOF(ret, Return) {
       obj.set(js, EVENT_STR, ToJs(js, ret, cache));
     }
@@ -564,6 +591,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
     KJ_CASE_ONEOF(_, Log) {
       return LOG_STR;
     }
+    KJ_CASE_ONEOF(_, StreamDiagnosticsEvent) {
+      return STREAMDIAGEVENT_STR;
+    }
     KJ_CASE_ONEOF(_, Return) {
       return RETURN_STR;
     }
@@ -578,10 +608,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
  public:
   TailStreamTarget(IoContext& ioContext,
       kj::Maybe<kj::StringPtr> entrypointNamePtr,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
       kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : weakIoContext(ioContext.getWeakRef()),
         entrypointNamePtr(kj::mv(entrypointNamePtr)),
+        versionInfo(kj::mv(versionInfo)),
         props(kj::mv(props)),
         doneFulfiller(kj::mv(doneFulfiller)) {}
 
@@ -693,8 +725,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         events.size() == 1 && events[0].event.is<Onset>(), "Expected only a single onset event");
     auto& event = events[0];
 
-    auto handler = KJ_REQUIRE_NONNULL(
-        lock.getExportedHandler(entrypointNamePtr, kj::mv(props), ioContext.getActor()),
+    auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointNamePtr,
+                                          kj::mv(versionInfo), kj::mv(props), ioContext.getActor()),
         "Failed to get handler to worker.");
     StringCache stringCache;
 
@@ -886,6 +918,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
   kj::Own<IoContext::WeakRef> weakIoContext;
   kj::Maybe<kj::StringPtr> entrypointNamePtr;
+  kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;
   // The done fulfiller is resolved when we receive the outcome event
   // or rejected if the capability is dropped before receiving the outcome
@@ -902,21 +935,22 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 };
 }  // namespace
 
-kj::Maybe<EventInfo> TailStreamCustomEvent::getEventInfo() const {
-  return EventInfo(TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
+EventInfo TailStreamCustomEvent::getEventInfo() const {
+  return TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(kj::heap<TailStreamTarget>(
-      ioContext, kj::mv(entrypointName), kj::mv(props), kj::mv(doneFulfiller)));
+  capFulfiller->fulfill(kj::heap<TailStreamTarget>(ioContext, kj::mv(entrypointName),
+      kj::mv(versionInfo), kj::mv(props), kj::mv(doneFulfiller)));
 
   donePromise = donePromise.attach(ioContext.registerPendingEvent());
 
@@ -999,7 +1033,7 @@ TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
     : inner(kj::mv(pending)),
       waitUntilTasks(waitUntilTasks) {}
 
-bool TailStreamWriter::reportImpl(TailEvent&& event) {
+bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
   // In reportImpl, our inner state must be active.
   auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Vector<kj::Own<Active>>>());
 
@@ -1025,13 +1059,35 @@ bool TailStreamWriter::reportImpl(TailEvent&& event) {
   bool isClosing = event.event.is<Outcome>();
   // Deliver the event to the queue and make sure we are processing.
   for (auto& active: actives) {
-    // Optimization: Elide copy for last tail worker, helpful for common case of only one STW
-    // being present.
-    if (&active == &actives.back()) {
-      active->queue.push(kj::mv(event));
+    // Only queue the event if we don't have an excessive queue size yet. Return and Outcome
+    // events are only provided once and thus won't be dropped.
+    if (active->queueSize < maxQueueSize || event.event.is<Outcome>() || event.event.is<Return>()) {
+      // When we get to the outcome, no more events will be dropped. Inject an internal diagnostics
+      // event indicating how many events were dropped if applicable.
+      if (event.event.is<Outcome>() && active->droppedEvents > 0) {
+        StreamDiagnosticsEvent diag(active->droppedEvents);
+        TailEvent diagTailEvent(event.spanContext.clone(), event.invocationId, event.timestamp,
+            event.sequence, kj::mv(diag));
+        active->queue.push(kj::mv(diagTailEvent));
+        // Increment the outcome sequence number to keep things consistent.
+        event.sequence++;
+      }
+
+      // Optimization: Elide copy for last tail worker, helpful for common case of only one STW
+      // being present.
+      if (&active == &actives.back()) {
+        active->queue.push(kj::mv(event));
+      } else {
+        active->queue.push(event.clone());
+      }
+      // Adjust estimated queue size based on size hint and an arbitrary amount for serialization
+      // overhead. As long as this estimate is reasonably accurate, we won't need to check the
+      // size again when serializing the message.
+      active->queueSize += tailSerializationOverhead + sizeHint;
     } else {
-      active->queue.push(event.clone());
+      active->droppedEvents++;
     }
+
     if (!active->pumping) {
       waitUntilTasks.add(pump(kj::addRef(*active)));
     }
@@ -1083,6 +1139,9 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
       auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
       auto eventsBuilder = builder.initEvents(current->queue.size());
       size_t n = 0;
+
+      // We're synchronously draining the queue – reset its size.
+      current->queueSize = 0;
       current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
 
       auto result = co_await builder.send();
@@ -1123,8 +1182,10 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
   return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks);
 }
 
-void TailStreamWriter::report(
-    const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
+void TailStreamWriter::report(const InvocationSpanContext& context,
+    TailEvent::Event&& event,
+    kj::Date timestamp,
+    size_t sizeHint) {
   // Becomes a no-op if a terminal event (close) has been reported, or if the stream closed due to
   // not receiving a well-formed event handler. We need to disambiguate these cases as the former
   // indicates an implementation error resulting in trailing events whereas the latter case is
@@ -1190,7 +1251,7 @@ void TailStreamWriter::report(
 
   // The state is determined to be closing when it receives a terminal event (tracing::Outcome),
   // or if there are no active tail workers left, we can close the internal state at that point.
-  if (reportImpl(kj::mv(tailEvent))) {
+  if (reportImpl(kj::mv(tailEvent), sizeHint)) {
     inner = Closed{};
   }
 }

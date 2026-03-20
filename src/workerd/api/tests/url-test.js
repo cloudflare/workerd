@@ -7228,3 +7228,21 @@ export const urlPatternFun = {
     new URLPattern(v4);
   },
 };
+
+export const urlPatternExecWithNestedRegexGroups = {
+  test() {
+    // Regression test: a pattern whose value contains its own capturing groups
+    // (e.g. a named group like (?<foo>x)) would cause an out-of-bounds access
+    // in execRegex because the regex match array is larger than the nameList.
+    // The unnamed regex group gets auto-named "0" by the URLPattern parser.
+    const pattern = new URLPattern({ pathname: '/:a/((?<foo>x))' });
+    const result = pattern.exec({ pathname: '/1/x' });
+    strictEqual(result !== null, true);
+
+    const groups = result.pathname.groups;
+    strictEqual(groups.a, '1');
+    strictEqual(groups['0'], 'x');
+    // Should only have the two named parts from the URL pattern (not regex named groups).
+    deepStrictEqual(Object.keys(groups), ['0', 'a']);
+  },
+};

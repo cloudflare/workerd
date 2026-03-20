@@ -31,19 +31,17 @@ kj::Maybe<uint> tryFromHexDigit(char c) {
   return kj::none;
 }
 
-jsg::BackingStore decodeHexTruncated(
+jsg::JsUint8Array decodeHexTruncated(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> text, bool strict = false) {
   // We do not use kj::decodeHex because we need to match Node.js'
   // behavior of truncating the response at the first invalid hex
   // pair as opposed to just marking that an error happened and
   // trying to continue with the decode.
   if (text.size() % 2 != 0) {
-    if (strict) {
-      JSG_FAIL_REQUIRE(TypeError, "The text is not valid hex");
-    }
+    JSG_REQUIRE(!strict, TypeError, "The text is not valid hex");
     text = text.first(text.size() - 1);
   }
-  auto vec = jsg::BackingStore::alloc<v8::Uint8Array>(js, text.size() / 2);
+  auto vec = jsg::JsUint8Array::create(js, text.size() / 2);
   auto ptr = vec.asArrayPtr();
   size_t len = 0;
 
@@ -52,24 +50,23 @@ jsg::BackingStore decodeHexTruncated(
     KJ_IF_SOME(d1, tryFromHexDigit(text[i])) {
       b = d1 << 4;
     } else {
-      if (strict) {
-        JSG_FAIL_REQUIRE(TypeError, "The text is not valid hex");
-      }
+      JSG_REQUIRE(!strict, TypeError, "The text is not valid hex");
       break;
     }
     KJ_IF_SOME(d2, tryFromHexDigit(text[i + 1])) {
       b |= d2;
     } else {
-      if (strict) {
-        JSG_FAIL_REQUIRE(TypeError, "The text is not valid hex");
-      }
+      JSG_REQUIRE(!strict, TypeError, "The text is not valid hex");
       break;
     }
     ptr[len++] = b;
   }
 
-  vec.limit(len);
-  return kj::mv(vec);
+  if (len == vec.size()) {
+    return vec;
+  }
+
+  return vec.slice(js, len);
 }
 
 uint32_t writeInto(jsg::Lock& js,
@@ -134,10 +131,12 @@ uint32_t writeInto(jsg::Lock& js,
   }
 }
 
-jsg::BackingStore decodeStringImpl(
+jsg::JsUint8Array decodeStringImpl(
     jsg::Lock& js, const jsg::JsString& string, Encoding encoding, bool strict = false) {
   auto length = string.length(js);
-  if (length == 0) return jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
+  if (length == 0) {
+    return jsg::JsUint8Array::create(js, 0);
+  }
 
   static constexpr jsg::JsString::WriteFlags options = jsg::JsString::REPLACE_INVALID_UTF8;
 
@@ -145,18 +144,18 @@ jsg::BackingStore decodeStringImpl(
     case Encoding::ASCII:
       // Fall-through
     case Encoding::LATIN1: {
-      auto dest = jsg::BackingStore::alloc<v8::Uint8Array>(js, length);
-      writeInto(js, dest, string, 0, dest.size(), Encoding::LATIN1);
+      auto dest = jsg::JsUint8Array::create(js, length);
+      writeInto(js, dest.asArrayPtr(), string, 0, dest.size(), Encoding::LATIN1);
       return kj::mv(dest);
     }
     case Encoding::UTF8: {
-      auto dest = jsg::BackingStore::alloc<v8::Uint8Array>(js, string.utf8Length(js));
-      writeInto(js, dest, string, 0, dest.size(), Encoding::UTF8);
+      auto dest = jsg::JsUint8Array::create(js, string.utf8Length(js));
+      writeInto(js, dest.asArrayPtr(), string, 0, dest.size(), Encoding::UTF8);
       return kj::mv(dest);
     }
     case Encoding::UTF16LE: {
-      auto dest = jsg::BackingStore::alloc<v8::Uint8Array>(js, length * sizeof(uint16_t));
-      writeInto(js, dest, string, 0, dest.size(), Encoding::UTF16LE);
+      auto dest = jsg::JsUint8Array::create(js, length * sizeof(uint16_t));
+      writeInto(js, dest.asArrayPtr(), string, 0, dest.size(), Encoding::UTF16LE);
       return kj::mv(dest);
     }
     case Encoding::BASE64:
@@ -168,12 +167,13 @@ jsg::BackingStore decodeStringImpl(
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
       auto result = string.writeInto(js, buf, options);
       auto len = result.written;
-      auto dest =
-          jsg::BackingStore::alloc<v8::Uint8Array>(js, nbytes::Base64DecodedSize(buf.begin(), len));
+      auto dest = jsg::JsUint8Array::create(js, nbytes::Base64DecodedSize(buf.begin(), len));
       len = nbytes::Base64Decode(
           dest.asArrayPtr<char>().begin(), dest.size(), buf.begin(), buf.size());
-      dest.limit(len);
-      return kj::mv(dest);
+      if (len < dest.size()) {
+        return dest.slice(js, len);
+      }
+      return dest;
     }
     case Encoding::HEX: {
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
@@ -191,11 +191,11 @@ uint32_t BufferUtil::byteLength(jsg::Lock& js, jsg::JsString str) {
 }
 
 int BufferUtil::compare(jsg::Lock& js,
-    jsg::BufferSource one,
-    jsg::BufferSource two,
+    jsg::JsUint8Array one,
+    jsg::JsUint8Array two,
     jsg::Optional<CompareOptions> maybeOptions) {
-  kj::ArrayPtr<kj::byte> ptrOne = one;
-  kj::ArrayPtr<kj::byte> ptrTwo = two;
+  kj::ArrayPtr<kj::byte> ptrOne = one.asArrayPtr();
+  kj::ArrayPtr<kj::byte> ptrTwo = two.asArrayPtr();
 
   // The options allow comparing subranges within the two inputs.
   KJ_IF_SOME(options, maybeOptions) {
@@ -224,13 +224,8 @@ int BufferUtil::compare(jsg::Lock& js,
   return result > 0 ? 1 : -1;
 }
 
-jsg::BufferSource BufferUtil::concat(
-    jsg::Lock& js, kj::Array<jsg::BufferSource> list, uint32_t length) {
-  if (length == 0) {
-    auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
-    return jsg::BufferSource(js, kj::mv(backing));
-  }
-
+jsg::JsUint8Array BufferUtil::concat(
+    jsg::Lock& js, kj::Array<jsg::JsUint8Array> list, uint32_t length) {
   // The Node.js Buffer.concat is interesting in that it doesn't just append
   // the buffers together as is. The length parameter is used to determine the
   // length of the result which can be lesser or greater than the actual
@@ -239,36 +234,41 @@ jsg::BufferSource BufferUtil::concat(
   // the result will be the combined buffers with the remaining space filled
   // with zeroes.
 
-  auto dest = jsg::BackingStore::alloc<v8::Uint8Array>(js, length);
-  auto view = dest.asArrayPtr();
+  JSG_REQUIRE(length <= v8::ArrayBuffer::kMaxByteLength, RangeError, "The length is too large");
 
-  for (auto& src: list) {
-    auto ptr = src.asArrayPtr();
-    if (src.size() == 0) continue;
-    // The amount to copy is the lesser of the remaining space in the destination or
-    // the size of the chunk we're copying.
-    auto amountToCopy = kj::min(src.size(), view.size());
-    view.first(amountToCopy).copyFrom(ptr.first(amountToCopy));
-    view = view.slice(amountToCopy);
-    // If there's no more space in the destination, we're done.
-    if (view == nullptr) {
-      return jsg::BufferSource(js, kj::mv(dest));
+  auto dest = jsg::JsUint8Array::create(js, length);
+  if (length > 0) {
+    auto view = dest.asArrayPtr();
+
+    for (auto& src: list) {
+      // JsUint8Array is a view directly on the v8::Uint8Array, so we don't
+      // really need to worry about whether the underlying ArrayBuffer is
+      // detached or resized, etc. The length is not cached.
+      auto ptr = src.asArrayPtr();
+      if (ptr.size() == 0) continue;
+      // The amount to copy is the lesser of the remaining space in the destination or
+      // the size of the chunk we're copying.
+      auto amountToCopy = kj::min(ptr.size(), view.size());
+      view.first(amountToCopy).copyFrom(ptr.first(amountToCopy));
+      view = view.slice(amountToCopy);
+      // If there's no more space in the destination, we're done.
+      if (view == nullptr) {
+        break;
+      }
     }
   }
 
-  // Fill any remaining space in the destination with zeroes.
-  view.fill(0);
-  return jsg::BufferSource(js, kj::mv(dest));
+  return dest;
 }
 
-jsg::BufferSource BufferUtil::decodeString(
+jsg::JsUint8Array BufferUtil::decodeString(
     jsg::Lock& js, jsg::JsString string, EncodingValue encoding) {
-  return jsg::BufferSource(js, decodeStringImpl(js, string, static_cast<Encoding>(encoding)));
+  return decodeStringImpl(js, string, static_cast<Encoding>(encoding));
 }
 
 void BufferUtil::fillImpl(jsg::Lock& js,
-    jsg::BufferSource buffer,
-    kj::OneOf<jsg::JsString, jsg::BufferSource> value,
+    jsg::JsUint8Array buffer,
+    kj::OneOf<jsg::JsString, jsg::JsUint8Array> value,
     uint32_t start,
     uint32_t end,
     jsg::Optional<EncodingValue> encoding) {
@@ -284,9 +284,9 @@ void BufferUtil::fillImpl(jsg::Lock& js,
         ptr.fill(0);
         return;
       }
-      ptr.fill(decoded);
+      ptr.fill(decoded.asArrayPtr());
     }
-    KJ_CASE_ONEOF(source, jsg::BufferSource) {
+    KJ_CASE_ONEOF(source, jsg::JsUint8Array) {
       if (source.size() == 0) {
         ptr.fill(0);
         return;
@@ -334,36 +334,45 @@ int32_t indexOfOffset(size_t length, int32_t offset, int32_t needle_length, bool
 
 jsg::Optional<uint32_t> indexOfBuffer(jsg::Lock& js,
     kj::ArrayPtr<kj::byte> hayStack,
-    jsg::BufferSource needle,
+    jsg::JsUint8Array needle,
     int32_t byteOffset,
     EncodingValue encoding,
     bool isForward) {
   auto enc = static_cast<Encoding>(encoding);
-  auto optOffset = indexOfOffset(hayStack.size(), byteOffset, needle.size(), isForward);
+  // Round down to the nearest multiple of 2 in case of UCS2.
+  auto hayStackLength = enc == Encoding::UTF16LE ? hayStack.size() & ~1 : hayStack.size();
+  auto optOffset = indexOfOffset(hayStackLength, byteOffset, needle.size(), isForward);
 
   if (needle.size() == 0) return optOffset;
-  if (hayStack.size() == 0 || optOffset <= -1 ||
-      (isForward && needle.size() + optOffset > hayStack.size()) ||
-      needle.size() > hayStack.size()) {
+  if (hayStackLength == 0 || optOffset <= -1 ||
+      (isForward && needle.size() + optOffset > hayStackLength) || needle.size() > hayStackLength) {
     return kj::none;
   }
-
-  auto result = hayStack.size();
+  auto result = hayStackLength;
   if (enc == Encoding::UTF16LE) {
-    if (hayStack.size() < 2 || needle.size() < 2) {
+    if (hayStackLength < 2 || needle.size() < 2) {
       return kj::none;
     }
-    result = SearchString(reinterpret_cast<const uint16_t*>(hayStack.asChars().begin()),
-        hayStack.size() / 2,
-        reinterpret_cast<const uint16_t*>(needle.asArrayPtr().asChars().begin()), needle.size() / 2,
-        optOffset / 2, isForward);
+    // Copy haystack and needle to aligned buffers to avoid undefined behavior
+    // from unaligned uint16_t access (the data pointer may have an odd byte offset).
+    auto hayStackU16Len = hayStackLength / 2;
+    kj::SmallArray<uint16_t, 1024> alignedHayStack(hayStackU16Len);
+    alignedHayStack.asBytes().copyFrom(hayStack.first(hayStackLength));
+
+    auto needleLen = needle.size() & ~1;
+    auto needleU16Len = needleLen / 2;
+    kj::SmallArray<uint16_t, 1024> alignedNeedle(needleU16Len);
+    alignedNeedle.asBytes().copyFrom(needle.asArrayPtr().first(needleLen));
+
+    result = SearchString(alignedHayStack.begin(), hayStackU16Len, alignedNeedle.begin(),
+        needleU16Len, optOffset / 2, isForward);
     result *= 2;
   } else {
     result = SearchString(hayStack.asBytes().begin(), hayStack.size(),
         needle.asArrayPtr().asBytes().begin(), needle.size(), optOffset, isForward);
   }
 
-  if (result == hayStack.size()) return kj::none;
+  if (result == hayStackLength) return kj::none;
 
   return result;
 }
@@ -395,11 +404,16 @@ jsg::Optional<uint32_t> indexOfString(jsg::Lock& js,
   auto result = hayStackLength;
 
   if (enc == Encoding::UTF16LE) {
-    if (hayStack.size() < 2 || decodedNeedle.size() < 2) {
+    if (hayStackLength < 2 || decodedNeedle.size() < 2) {
       return kj::none;
     }
-    result = SearchString(reinterpret_cast<const uint16_t*>(hayStack.asChars().begin()),
-        hayStack.size() / 2,
+    // Copy haystack to an aligned buffer to avoid undefined behavior from
+    // unaligned uint16_t access (the data pointer may have an odd byte offset).
+    auto hayStackU16Len = hayStackLength / 2;
+    kj::SmallArray<uint16_t, 1024> alignedHayStack(hayStackU16Len);
+    alignedHayStack.asBytes().copyFrom(hayStack.first(hayStackLength));
+
+    result = SearchString(alignedHayStack.begin(), hayStackU16Len,
         reinterpret_cast<const uint16_t*>(decodedNeedle.asArrayPtr<char>().begin()),
         decodedNeedle.size() / 2, optOffset / 2, isForward);
     result *= 2;
@@ -471,24 +485,25 @@ jsg::JsString toStringImpl(
 }  // namespace
 
 jsg::Optional<uint32_t> BufferUtil::indexOf(jsg::Lock& js,
-    jsg::BufferSource buffer,
-    kj::OneOf<jsg::JsString, jsg::BufferSource> value,
+    jsg::JsUint8Array buffer,
+    kj::OneOf<jsg::JsString, jsg::JsUint8Array> value,
     int32_t byteOffset,
     EncodingValue encoding,
     bool isForward) {
 
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(string, jsg::JsString) {
-      return indexOfString(js, buffer, string, byteOffset, encoding, isForward);
+      return indexOfString(js, buffer.asArrayPtr(), string, byteOffset, encoding, isForward);
     }
-    KJ_CASE_ONEOF(source, jsg::BufferSource) {
-      return indexOfBuffer(js, buffer, kj::mv(source), byteOffset, encoding, isForward);
+    KJ_CASE_ONEOF(source, jsg::JsUint8Array) {
+      return indexOfBuffer(
+          js, buffer.asArrayPtr(), kj::mv(source), byteOffset, encoding, isForward);
     }
   }
   KJ_UNREACHABLE;
 }
 
-void BufferUtil::swap(jsg::Lock& js, jsg::BufferSource buffer, int size) {
+void BufferUtil::swap(jsg::Lock& js, jsg::JsUint8Array buffer, int size) {
   if (buffer.size() <= 1) return;
   switch (size) {
     case 16: {
@@ -512,21 +527,22 @@ void BufferUtil::swap(jsg::Lock& js, jsg::BufferSource buffer, int size) {
 }
 
 jsg::JsString BufferUtil::toString(
-    jsg::Lock& js, jsg::BufferSource bytes, uint32_t start, uint32_t end, EncodingValue encoding) {
+    jsg::Lock& js, jsg::JsUint8Array bytes, uint32_t start, uint32_t end, EncodingValue encoding) {
   end = kj::min(bytes.size(), end);
   if (end <= start) return js.str();
-  return toStringImpl(js, bytes, start, end, static_cast<Encoding>(encoding));
+  return toStringImpl(js, bytes.asArrayPtr(), start, end, static_cast<Encoding>(encoding));
 }
 
 uint32_t BufferUtil::write(jsg::Lock& js,
-    jsg::BufferSource buffer,
+    jsg::JsUint8Array buffer,
     jsg::JsString string,
     uint32_t offset,
     uint32_t length,
     EncodingValue encoding) {
   length = kj::min(length, buffer.size() - offset);
   if (length == 0) return 0;
-  return writeInto(js, buffer, string, offset, length, static_cast<Encoding>(encoding));
+  return writeInto(
+      js, buffer.asArrayPtr(), string, offset, length, static_cast<Encoding>(encoding));
 }
 
 // ======================================================================================
@@ -603,43 +619,43 @@ jsg::JsString getBufferedString(jsg::Lock& js, kj::ArrayPtr<kj::byte> state) {
 }
 }  // namespace
 
-jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::BufferSource bytes, jsg::BufferSource state) {
+jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::JsUint8Array bytes, jsg::JsUint8Array state) {
   JSG_REQUIRE(state.size() == BufferUtil::kSize, TypeError, "Invalid StringDecoder");
-  auto enc = getEncoding(state);
+  auto bytesPtr = bytes.asArrayPtr();
+  auto statePtr = state.asArrayPtr();
+  auto enc = getEncoding(statePtr);
   if (enc == Encoding::ASCII || enc == Encoding::LATIN1 || enc == Encoding::HEX) {
     // For ascii, latin1, and hex, we can just use the regular
     // toString option since there will never be a case where
     // these have left-over characters.
-    return toStringImpl(js, bytes, 0, bytes.size(), enc);
+    return toStringImpl(js, bytesPtr, 0, bytesPtr.size(), enc);
   }
 
   jsg::JsString prepend = js.str();
   jsg::JsString body = js.str();
-  auto nread = bytes.size();
+  auto nread = bytesPtr.size();
 
   // If bytes is empty there's nothing to decode.
-  if (bytes.size() == 0) return js.str();
+  if (bytesPtr.size() == 0) return js.str();
 
-  auto data = bytes.asArrayPtr().begin();
+  auto data = bytesPtr.begin();
 
-  auto statePtr = state.asArrayPtr();
-  if (getMissingBytes(state) > 0) {
-    JSG_REQUIRE(
-        getMissingBytes(state) + getBufferedBytes(state) <= BufferUtil::kIncompleteCharactersEnd,
+  if (getMissingBytes(statePtr) > 0) {
+    JSG_REQUIRE(getMissingBytes(statePtr) + getBufferedBytes(statePtr) <=
+            BufferUtil::kIncompleteCharactersEnd,
         Error, "Invalid StringDecoder state");
     if (enc == Encoding::UTF8) {
       // For UTF-8, we need special treatment to align with the V8 decoder:
       // If an incomplete character is found at a chunk boundary, we use
       // its remainder and pass it to V8 as-is.
-      auto statePtr = state.asArrayPtr();
-      for (size_t i = 0; i < nread && i < getMissingBytes(state); ++i) {
+      for (size_t i = 0; i < nread && i < getMissingBytes(statePtr); ++i) {
         if ((data[i] & 0xC0) != 0x80) {
           // This byte is not a continuation byte even though it should have
           // been one. We stop decoding of the incomplete character at this
           // point (but still use the rest of the incomplete bytes from this
           // chunk) and assume that the new, unexpected byte starts a new one.
           statePtr[kMissingBytes] = 0;
-          memcpy(getIncompleteCharacterBuffer(state) + getBufferedBytes(state), data, i);
+          memcpy(getIncompleteCharacterBuffer(statePtr) + getBufferedBytes(statePtr), data, i);
           statePtr[kBufferedBytes] += i;
           data += i;
           nread -= i;
@@ -648,9 +664,9 @@ jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::BufferSource bytes, jsg::Bu
       }
     }
 
-    size_t found_bytes = std::min(nread, static_cast<size_t>(getMissingBytes(state)));
+    size_t found_bytes = std::min(nread, static_cast<size_t>(getMissingBytes(statePtr)));
     KJ_ASSERT(data != nullptr);
-    memcpy(getIncompleteCharacterBuffer(state) + getBufferedBytes(state), data, found_bytes);
+    memcpy(getIncompleteCharacterBuffer(statePtr) + getBufferedBytes(statePtr), data, found_bytes);
     // Adjust the two buffers.
     data += found_bytes;
     nread -= found_bytes;
@@ -658,9 +674,9 @@ jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::BufferSource bytes, jsg::Bu
     statePtr[kMissingBytes] -= found_bytes;
     statePtr[kBufferedBytes] += found_bytes;
 
-    if (getMissingBytes(state) == 0) {
+    if (getMissingBytes(statePtr) == 0) {
       // If no more bytes are missing, create a small string that we will later prepend.
-      prepend = getBufferedString(js, state);
+      prepend = getBufferedString(js, statePtr);
     }
   }
 
@@ -668,8 +684,8 @@ jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::BufferSource bytes, jsg::Bu
     body = prepend.length(js) ? prepend : js.str();
     prepend = js.str();
   } else {
-    JSG_REQUIRE(getMissingBytes(state) == 0, Error, "Invalid StringDecoder state");
-    JSG_REQUIRE(getBufferedBytes(state) == 0, Error, "Invalid StringDecoder state");
+    JSG_REQUIRE(getMissingBytes(statePtr) == 0, Error, "Invalid StringDecoder state");
+    JSG_REQUIRE(getBufferedBytes(statePtr) == 0, Error, "Invalid StringDecoder state");
 
     // See whether there is a character that we may have to cut off and
     // finish when receiving the next chunk.
@@ -709,7 +725,7 @@ jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::BufferSource bytes, jsg::Bu
             break;
           }
 
-          if (getBufferedBytes(state) >= getMissingBytes(state)) {
+          if (getBufferedBytes(statePtr) >= getMissingBytes(statePtr)) {
             // Received more or exactly as many trailing bytes than the lead
             // character would indicate. In the "==" case, we have valid
             // data and don't need to slice anything off;
@@ -734,14 +750,14 @@ jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::BufferSource bytes, jsg::Bu
       }
     } else if (enc == Encoding::BASE64 || enc == Encoding::BASE64URL) {
       statePtr[kBufferedBytes] = nread % 3;
-      if (statePtr[kBufferedBytes] > 0) statePtr[kMissingBytes] = 3 - getBufferedBytes(state);
+      if (statePtr[kBufferedBytes] > 0) statePtr[kMissingBytes] = 3 - getBufferedBytes(statePtr);
     }
 
-    if (getBufferedBytes(state) > 0) {
+    if (getBufferedBytes(statePtr) > 0) {
       // Copy the requested number of buffered bytes from the end of the
       // input into the incomplete character buffer.
-      nread -= getBufferedBytes(state);
-      memcpy(getIncompleteCharacterBuffer(state), data + nread, getBufferedBytes(state));
+      nread -= getBufferedBytes(statePtr);
+      memcpy(getIncompleteCharacterBuffer(statePtr), data + nread, getBufferedBytes(statePtr));
     }
 
     if (nread > 0) {
@@ -760,43 +776,43 @@ jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::BufferSource bytes, jsg::Bu
   return js.str();
 }
 
-jsg::JsString BufferUtil::flush(jsg::Lock& js, jsg::BufferSource state) {
+jsg::JsString BufferUtil::flush(jsg::Lock& js, jsg::JsUint8Array state) {
   JSG_REQUIRE(state.size() == BufferUtil::kSize, TypeError, "Invalid StringDecoder");
-  auto enc = getEncoding(state);
+  auto statePtr = state.asArrayPtr();
+  auto enc = getEncoding(statePtr);
   if (enc == Encoding::ASCII || enc == Encoding::HEX || enc == Encoding::LATIN1) {
-    JSG_REQUIRE(getMissingBytes(state) == 0, Error, "Invalid StringDecoder state");
-    JSG_REQUIRE(getBufferedBytes(state) == 0, Error, "Invalid StringDecoder state");
+    JSG_REQUIRE(getMissingBytes(statePtr) == 0, Error, "Invalid StringDecoder state");
+    JSG_REQUIRE(getBufferedBytes(statePtr) == 0, Error, "Invalid StringDecoder state");
   }
 
-  auto statePtr = state.asArrayPtr();
-  if (enc == Encoding::UTF16LE && getBufferedBytes(state) % 2 == 1) {
+  if (enc == Encoding::UTF16LE && getBufferedBytes(statePtr) % 2 == 1) {
     // Ignore a single trailing byte, like the JS decoder does.
     statePtr[kMissingBytes]--;
     statePtr[kBufferedBytes]--;
   }
 
-  if (getBufferedBytes(state) == 0) {
+  if (getBufferedBytes(statePtr) == 0) {
     return js.str();
   }
 
-  auto ret = getBufferedString(js, state);
+  auto ret = getBufferedString(js, statePtr);
   statePtr[kMissingBytes] = 0;
 
   return ret;
 }
 
-bool BufferUtil::isAscii(jsg::BufferSource buffer) {
+bool BufferUtil::isAscii(jsg::JsUint8Array buffer) {
   if (buffer.size() == 0) return true;
   return simdutf::validate_ascii(buffer.asArrayPtr().asChars().begin(), buffer.size());
 }
 
-bool BufferUtil::isUtf8(jsg::BufferSource buffer) {
+bool BufferUtil::isUtf8(jsg::JsUint8Array buffer) {
   if (buffer.size() == 0) return true;
   return simdutf::validate_utf8(buffer.asArrayPtr().asChars().begin(), buffer.size());
 }
 
-jsg::BufferSource BufferUtil::transcode(jsg::Lock& js,
-    jsg::BufferSource source,
+jsg::JsUint8Array BufferUtil::transcode(jsg::Lock& js,
+    jsg::JsUint8Array source,
     EncodingValue rawFromEncoding,
     EncodingValue rawToEncoding) {
   auto fromEncoding = static_cast<Encoding>(rawFromEncoding);
@@ -805,7 +821,7 @@ jsg::BufferSource BufferUtil::transcode(jsg::Lock& js,
   JSG_REQUIRE(i18n::canBeTranscoded(fromEncoding) && i18n::canBeTranscoded(toEncoding), Error,
       "Unable to transcode buffer due to unsupported encoding");
 
-  return i18n::transcode(js, source, fromEncoding, toEncoding);
+  return i18n::transcode(js, source.asArrayPtr(), fromEncoding, toEncoding);
 }
 
 }  // namespace workerd::api::node

@@ -1,7 +1,7 @@
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "compute_python_flags", "py_wd_test")
 
-def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_srcs_target_prefix, **kwds):
+def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_srcs_target_prefix, level, data, **kwds):
     """Creates a Python Workers test which includes vendored packages in its bundle, the
     http_archive target containing the vendored sources should be specified in `vendored_srcs_target_prefix`.
 
@@ -16,43 +16,25 @@ def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_sr
 
     # Generate module list
     module_list_name = name + "_modules_string" + "_" + version
-    native.genrule(
-        name = module_list_name,
-        srcs = [
-            vendored_srcs_target,
-            "generate_modules.py",
-        ],
-        outs = [module_list_name + ".txt"],
-        cmd = """
-        # Create a file with all the file paths to avoid Windows command line length limits
-        echo "$(locations """ + vendored_srcs_target + """)" > paths.txt
-        $(execpath @python_3_13//:python3) $(location generate_modules.py) @paths.txt > $@
-        """,
-        tools = ["@python_3_13//:python3"],
-    )
-
-    # Perform substitution to include the generated modules in template
     substitution_name = name + "_perform_substitution" + "_" + version
     native.genrule(
         name = substitution_name,
         srcs = [
             test_template,
-            ":" + module_list_name,
+            vendored_srcs_target,
+            "//src/workerd/server/tests/python/vendor_pkg_tests:generate_modules.py",
         ],
         outs = [name + ".test.generated" + "_" + version],
         cmd = """
-        $(execpath @python_3_13//:python3) -c "
-import sys
-with open('$(location :""" + module_list_name + """)', 'r') as f:
-    modules = f.read()
-with open('$(location """ + test_template + """)', 'r') as f:
-    template = f.read()
-result = template.replace('%PYTHON_VENDORED_MODULES%', modules)
-
-with open('$@', 'w') as f:
-    f.write(result)
-        "
-    """,
+        # Create a file with all the file paths to avoid Windows command line length limits
+        echo "$(locations %s)" > paths.txt
+        $(execpath @python_3_13//:python3) \
+            $(location //src/workerd/server/tests/python/vendor_pkg_tests:generate_modules.py) \
+            --level=%s \
+            --template=$(location %s) \
+            --out=$@ \
+            @paths.txt
+        """ % (vendored_srcs_target, level, test_template),
         tools = ["@python_3_13//:python3"],
     )
 
@@ -61,7 +43,7 @@ with open('$@', 'w') as f:
         name = name,
         src = ":" + substitution_name,
         python_flags = [version],
-        data = [
+        data = data + [
             main_py_file,
             vendored_srcs_target,
         ],
@@ -82,6 +64,8 @@ def vendored_py_wd_test(
         python_flags = "all",
         skip_python_flags = [],
         vendored_package_name = None,
+        level = 1,
+        data = [],
         **kwds):
     python_flags = compute_python_flags(python_flags, skip_python_flags)
     bzl_name = "%s_vendor_test" % name
@@ -98,4 +82,4 @@ def vendored_py_wd_test(
         info = BUNDLE_VERSION_INFO[flag]
         if vendored_package_name not in info["vendored_packages_for_tests"]:
             fail("Not found", vendored_package_name, "in", info["vendored_packages_for_tests"])
-        _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix, **kwds)
+        _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix, level = level, data = data, **kwds)

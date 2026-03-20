@@ -332,6 +332,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
         timer(kj::origin<kj::TimePoint>()),
         server(*this,
             timer,
+            timer,
             mockNetwork,
             *this,
             Worker::LoggingOptions(consoleMode),
@@ -4449,6 +4450,48 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
       "{}, {\"foo\":123,\"bar\":\"abc\"}, false");
 }
 
+KJ_TEST("Server: loopback binding calls accept version property") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["enable_ctx_exports", "enable_version_api"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const serviceVersions = await Promise.all([
+                `      ctx.exports.default({ version: {} }),
+                `      ctx.exports.default({ version: { cohort: null } }),
+                `      ctx.exports.default({ version: { cohort: "test" } }),
+                `      ctx.exports.default({ props: {}, version: { cohort: "test" } }),
+                `    ].map(service => service.version));
+                `    if (serviceVersions.every(version => version === this.version)) {
+                `      return new Response(serviceVersions[0]);
+                `    }
+                `    return new Response(null, { status: 500 });
+                `  },
+                `  get version() { return "constant"; },
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "constant");
+}
+
 // =======================================================================================
 
 // TODO(beta): Test TLS (send and receive)
@@ -4975,6 +5018,146 @@ KJ_TEST("Server: Durable Object facets") {
     auto conn = test.connect("test-addr");
     conn.httpGet200("/props", "{} {\"aProp\":123} {} {\"bProp\":321} {} {\"cProp\":555}");
   }
+}
+
+KJ_TEST("Server: Durable Object facet limits") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = env.MY_ACTOR.idFromName("limits");
+                `    let actor = env.MY_ACTOR.get(id);
+                `    return await actor.fetch(request);
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async fetch(request) {
+                `    let url = new URL(request.url);
+                `    switch (url.pathname) {
+                `      case "/name-too-long": {
+                `        try {
+                `          this.ctx.facets.get("x".repeat(257),
+                `              () => ({class: this.env.RECURSIVE}));
+                `          return new Response("no error");
+                `        } catch (e) {
+                `          return new Response(e.constructor.name + ": " + e.message);
+                `        }
+                `      }
+                `      case "/name-256-ok": {
+                `        this.ctx.facets.get("x".repeat(256),
+                `            () => ({class: this.env.RECURSIVE}));
+                `        return new Response("ok");
+                `      }
+                `      case "/abort-name-too-long": {
+                `        try {
+                `          this.ctx.facets.abort("x".repeat(257), new Error("test"));
+                `          return new Response("no error");
+                `        } catch (e) {
+                `          return new Response(e.constructor.name + ": " + e.message);
+                `        }
+                `      }
+                `      case "/delete-name-too-long": {
+                `        try {
+                `          this.ctx.facets.delete("x".repeat(257));
+                `          return new Response("no error");
+                `        } catch (e) {
+                `          return new Response(e.constructor.name + ": " + e.message);
+                `        }
+                `      }
+                `      case "/depth-ok": {
+                `        // Create 3 levels of facets below root = 4 total (the max).
+                `        let facet = this.ctx.facets.get("a",
+                `            () => ({class: this.env.RECURSIVE}));
+                `        return new Response(await facet.nestOk(2));
+                `      }
+                `      case "/depth-exceeded": {
+                `        // Create 3 levels below root, then try one more.
+                `        let facet = this.ctx.facets.get("b",
+                `            () => ({class: this.env.RECURSIVE}));
+                `        return new Response(await facet.nestDeeper(2));
+                `      }
+                `    }
+                `  }
+                `}
+                `export class RecursiveFacet extends DurableObject {
+                `  async nestOk(remaining) {
+                `    if (remaining <= 0) return "ok";
+                `    let facet = this.ctx.facets.get("child",
+                `        () => ({class: this.env.RECURSIVE}));
+                `    return await facet.nestOk(remaining - 1);
+                `  }
+                `  async nestDeeper(remaining) {
+                `    if (remaining <= 0) {
+                `      try {
+                `        this.ctx.facets.get("too-deep",
+                `            () => ({class: this.env.RECURSIVE}));
+                `        return "no error, unexpected";
+                `      } catch (e) {
+                `        return e.constructor.name + ": " + e.message;
+                `      }
+                `    }
+                `    let facet = this.ctx.facets.get("child",
+                `        () => ({class: this.env.RECURSIVE}));
+                `    return await facet.nestDeeper(remaining - 1);
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            (name = "MY_ACTOR", durableObjectNamespace = "MyActorClass"),
+            (name = "RECURSIVE",
+              durableObjectClass = (name = "hello", entrypoint = "RecursiveFacet"))
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  TestServer test(config);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  // Name length limit.
+  conn.httpGet200("/name-too-long", "TypeError: Facet name is too long (max 256 characters).");
+  conn.httpGet200("/name-256-ok", "ok");
+  conn.httpGet200(
+      "/abort-name-too-long", "TypeError: Facet name is too long (max 256 characters).");
+  conn.httpGet200(
+      "/delete-name-too-long", "TypeError: Facet name is too long (max 256 characters).");
+
+  // Depth limit.
+  conn.httpGet200("/depth-ok", "ok");
+  conn.httpGet200("/depth-exceeded",
+      "Error: Facet nesting depth limit exceeded. "
+      "The maximum depth including the root Durable Object is 4.");
 }
 
 KJ_TEST("Server: Pass service stubs in ctx.props.") {
@@ -5657,7 +5840,7 @@ KJ_TEST("Server: workerdDebugPort binding loopback test") {
                 `    const client = await env.debugPort.connect("debug-addr");
                 `
                 `    // Test 1: Access the default entrypoint
-                `    const defaultFetcher = await client.getEntrypoint("target-service");
+                `    const defaultFetcher = client.getEntrypoint("target-service");
                 `    const defaultResp = await defaultFetcher.fetch("http://fake-host/");
                 `    const defaultText = await defaultResp.text();
                 `    if (defaultText !== "Hello from target!") {
@@ -5665,7 +5848,7 @@ KJ_TEST("Server: workerdDebugPort binding loopback test") {
                 `    }
                 `
                 `    // Test 2: Access a named entrypoint
-                `    const namedFetcher = await client.getEntrypoint("target-service", "namedHandler");
+                `    const namedFetcher = client.getEntrypoint("target-service", "namedHandler");
                 `    const namedResp = await namedFetcher.fetch("http://fake-host/");
                 `    const namedText = await namedResp.text();
                 `    if (namedText !== "Hello from named entrypoint!") {
@@ -5736,7 +5919,7 @@ KJ_TEST("Server: workerdDebugPort binding with props") {
                 `    const client = await env.debugPort.connect("debug-addr");
                 `
                 `    // Test passing props to the entrypoint
-                `    const fetcher = await client.getEntrypoint(
+                `    const fetcher = client.getEntrypoint(
                 `        "target-service", "PropsHandler", {foo: "bar", num: 42});
                 `    const resp = await fetcher.fetch("http://fake-host/");
                 `    const props = await resp.json();
@@ -5824,7 +6007,7 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
                 `    // Get the same actor twice using a fixed ID
                 `    const actorId = "0".repeat(64);
                 `
-                `    const actor1 = await client.getActor("do-service", "Counter", actorId);
+                `    const actor1 = client.getActor("do-service", "Counter", actorId);
                 `    const resp1 = await actor1.fetch("http://fake-host/");
                 `    const text1 = await resp1.text();
                 `    if (text1 !== "Counter: 1") {
@@ -5832,7 +6015,7 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
                 `    }
                 `
                 `    // Second request to same actor should increment counter
-                `    const actor2 = await client.getActor("do-service", "Counter", actorId);
+                `    const actor2 = client.getActor("do-service", "Counter", actorId);
                 `    const resp2 = await actor2.fetch("http://fake-host/");
                 `    const text2 = await resp2.text();
                 `    if (text2 !== "Counter: 2") {
@@ -5841,7 +6024,7 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
                 `
                 `    // Different actor ID should have independent state (counter starts at 1)
                 `    const differentActorId = "1".repeat(64);
-                `    const actor3 = await client.getActor("do-service", "Counter", differentActorId);
+                `    const actor3 = client.getActor("do-service", "Counter", differentActorId);
                 `    const resp3 = await actor3.fetch("http://fake-host/");
                 `    const text3 = await resp3.text();
                 `    if (text3 !== "Counter: 1") {
@@ -5873,6 +6056,101 @@ KJ_TEST("Server: workerdDebugPort binding getActor") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/", "DO actor test passed!");
+}
+
+KJ_TEST("Server: workerdDebugPort WebSocket passthrough via WorkerEntrypoint") {
+  // This test verifies that a WebSocket obtained via the debug port can be passed through
+  // a service binding response (from a WorkerEntrypoint). This was previously broken because
+  // the debug port connection was destroyed when the intermediate IoContext finished.
+  TestServer test(R"((
+    services = [
+      ( name = "target-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `export default {
+                `  async fetch(request) {
+                `    // Accept WebSocket upgrade and echo messages with a prefix
+                `    const upgradeHeader = request.headers.get("Upgrade");
+                `    if (upgradeHeader === "websocket") {
+                `      const pair = new WebSocketPair();
+                `      pair[1].accept();
+                `      pair[1].addEventListener("message", (e) => {
+                `        pair[1].send("echo:" + e.data);
+                `      });
+                `      return new Response(null, { status: 101, webSocket: pair[0] });
+                `    }
+                `    return new Response("Not a WebSocket request");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "proxy-service",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "worker.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `
+                `// This WorkerEntrypoint gets a WebSocket via debug port and passes it through
+                `export class Proxy extends WorkerEntrypoint {
+                `  async fetch(request) {
+                `    const client = await this.env.debugPort.connect("debug-addr");
+                `    const fetcher = client.getEntrypoint("target-service");
+                `    const response = await fetcher.fetch(request);
+                `    if (response.webSocket) {
+                `      // Pass through the WebSocket from the debug port
+                `      return new Response(null, { status: 101, webSocket: response.webSocket });
+                `    }
+                `    return response;
+                `  }
+                `}
+                `
+                `export default {
+                `  async fetch(request, env) {
+                `    // Route through the Proxy entrypoint to test WebSocket passthrough
+                `    return env.proxy.fetch(request);
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "debugPort", workerdDebugPort = void ),
+            ( name = "proxy", service = (name = "proxy-service", entrypoint = "Proxy") )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "proxy-service" )
+    ]
+  ))"_kj);
+
+  test.server.enableDebugPort(kj::str("debug-addr"));
+  test.server.allowExperimental();
+
+  test.start();
+
+  // Connect and upgrade to WebSocket
+  auto wsConn = test.connect("test-addr");
+  wsConn.upgradeToWebSocket();
+
+  // Send a message and verify we get the echoed response
+  // WebSocket frame: 0x81 = final frame + text, 0x05 = payload length 5
+  constexpr kj::StringPtr testMessage = "hello"_kj;
+  wsConn.send(kj::str("\x81\x05", testMessage));
+  wsConn.recvWebSocket("echo:hello");
+
+  // Send another message to verify the connection stays alive
+  constexpr kj::StringPtr testMessage2 = "world"_kj;
+  wsConn.send(kj::str("\x81\x05", testMessage2));
+  wsConn.recvWebSocket("echo:world");
 }
 }  // namespace
 }  // namespace workerd::server

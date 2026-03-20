@@ -588,6 +588,34 @@ export const processGetBuiltinModule = {
     // Should return null/undefined for non-existent modules
     const nonExistent = process.getBuiltinModule('node:nonexistent');
     assert.ok(nonExistent == null);
+
+    // Internal modules must not be accessible via getBuiltinModule.
+    // These are BUILTIN_ONLY modules that should only be importable
+    // by other built-in modules, never by user code.
+    assert.strictEqual(
+      process.getBuiltinModule('node-internal:process'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('node-internal:public_process'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('node-internal:legacy_process'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('node-internal:internal_timers_global_override'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('cloudflare-internal:env'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('cloudflare-internal:filesystem'),
+      undefined
+    );
   },
 };
 

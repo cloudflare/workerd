@@ -10,6 +10,9 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/observer.h>
 #include <workerd/util/ring-buffer.h>
+#include <workerd/util/state-machine.h>
+
+#include <kj/refcount.h>
 
 namespace workerd::api {
 
@@ -38,10 +41,12 @@ class ReadableStreamInternalController: public ReadableStreamController {
  public:
   using Readable = IoOwn<ReadableStreamSource>;
 
-  explicit ReadableStreamInternalController(StreamStates::Closed closed): state(closed) {}
+  explicit ReadableStreamInternalController(StreamStates::Closed closed)
+      : state(State::create<StreamStates::Closed>()) {}
   explicit ReadableStreamInternalController(StreamStates::Errored errored)
-      : state(kj::mv(errored)) {}
-  explicit ReadableStreamInternalController(Readable readable): state(kj::mv(readable)) {}
+      : state(State::create<StreamStates::Errored>(kj::mv(errored))) {}
+  explicit ReadableStreamInternalController(Readable readable)
+      : state(State::create<Readable>(kj::mv(readable))) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamInternalController);
 
@@ -59,6 +64,9 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) override;
+
+  kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(
+      jsg::Lock& js, size_t maxRead = kj::maxValue) override;
 
   jsg::Promise<void> pipeTo(
       jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) override;
@@ -122,6 +130,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   class PipeLocked: public PipeController {
    public:
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
     PipeLocked(ReadableStreamInternalController& inner): inner(inner) {}
 
     bool isClosed() override;
@@ -145,8 +154,28 @@ class ReadableStreamInternalController: public ReadableStreamController {
   };
 
   kj::Maybe<ReadableStream&> owner;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable> state;
-  kj::OneOf<Unlocked, Locked, PipeLocked, ReaderLocked> readState = Unlocked();
+
+  // State machine for ReadableStreamInternalController:
+  // Closed is terminal, Errored is implicitly terminal via ErrorState.
+  // Readable is the active state (stream has data).
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<Readable>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      Readable>;
+  State state;
+
+  // Lock state machine for ReadableStreamInternalController:
+  // All states can transition to any other state (no terminal states).
+  //   Unlocked -> Locked (removeSink() or pumpTo() called)
+  //   Unlocked -> ReaderLocked (lockReader() called)
+  //   Unlocked -> PipeLocked (tryPipeLock() called)
+  //   ReaderLocked -> Unlocked (releaseReader() called)
+  //   PipeLocked -> Unlocked (release() or doClose/doError called)
+  //   Locked -> (remains until stream is done)
+  using ReadLockState = StateMachine<Unlocked, Locked, PipeLocked, ReaderLocked>;
+  ReadLockState readState = ReadLockState::create<Unlocked>();
   bool disturbed = false;
   bool readPending = false;
 
@@ -168,14 +197,16 @@ class WritableStreamInternalController: public WritableStreamController {
     void abort(kj::Exception&& ex);
   };
 
-  explicit WritableStreamInternalController(StreamStates::Closed closed): state(closed) {}
+  explicit WritableStreamInternalController(StreamStates::Closed closed)
+      : state(State::create<StreamStates::Closed>()) {}
   explicit WritableStreamInternalController(StreamStates::Errored errored)
-      : state(kj::mv(errored)) {}
+      : state(State::create<StreamStates::Errored>(kj::mv(errored))) {}
   explicit WritableStreamInternalController(kj::Own<WritableStreamSink> writable,
       kj::Maybe<kj::Own<ByteStreamObserver>> observer,
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none)
-      : state(IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable)))),
+      : state(State::create<IoOwn<Writable>>(
+            IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable))))),
         observer(kj::mv(observer)),
         maybeHighWaterMark(maybeHighWaterMark),
         maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {}
@@ -263,12 +294,33 @@ class WritableStreamInternalController: public WritableStreamController {
   jsg::Promise<void> closeImpl(jsg::Lock& js, bool markAsHandled);
 
   struct PipeLocked {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
     ReadableStream& ref;
   };
 
   kj::Maybe<WritableStream&> owner;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, IoOwn<Writable>> state;
-  kj::OneOf<Unlocked, Locked, PipeLocked, WriterLocked> writeState = Unlocked();
+
+  // State machine for WritableStreamInternalController:
+  // Closed is terminal, Errored is implicitly terminal via ErrorState.
+  // IoOwn<Writable> is the active state (stream is writable).
+  using State = StateMachine<TerminalStates<StreamStates::Closed>,
+      ErrorState<StreamStates::Errored>,
+      ActiveState<IoOwn<Writable>>,
+      StreamStates::Closed,
+      StreamStates::Errored,
+      IoOwn<Writable>>;
+  State state;
+
+  // Lock state machine for WritableStreamInternalController:
+  // All states can transition to any other state (no terminal states).
+  //   Unlocked -> Locked (removeSink() or detach() called)
+  //   Unlocked -> WriterLocked (lockWriter() called)
+  //   Unlocked -> PipeLocked (tryPipeFrom() called)
+  //   WriterLocked -> Unlocked (releaseWriter() called)
+  //   WriterLocked -> Locked (doClose/doError called - stream closed but writer still attached)
+  //   PipeLocked -> Unlocked (pipe completes)
+  using WriteLockState = StateMachine<Unlocked, Locked, PipeLocked, WriterLocked>;
+  WriteLockState writeState = WriteLockState::create<Unlocked>();
 
   kj::Maybe<kj::Own<ByteStreamObserver>> observer;
 
@@ -297,7 +349,7 @@ class WritableStreamInternalController: public WritableStreamController {
   struct Write {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
     size_t totalBytes;
-    jsg::V8Ref<v8::ArrayBuffer> ownBytes;
+    kj::Array<kj::byte> ownBytes;
     kj::ArrayPtr<const kj::byte> bytes;
 
     JSG_MEMORY_INFO(Write) {
@@ -320,21 +372,102 @@ class WritableStreamInternalController: public WritableStreamController {
     }
   };
   struct Pipe {
-    WritableStreamInternalController& parent;
-    ReadableStreamController::PipeController& source;
-    kj::Maybe<jsg::Promise<void>::Resolver> promise;
-    bool preventAbort;
-    bool preventClose;
-    bool preventCancel;
-    kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+    // PipeState is ref-counted so that it can be safely captured by lambdas in pipeLoop().
+    // When drain() destroys the Pipe, the state survives as long as pending callbacks need it.
+    // The `aborted` flag is set when the Pipe is destroyed.
+    struct State: public kj::Refcounted {
+      WritableStreamInternalController& parent;
+      ReadableStreamController::PipeController& source;
+      kj::Maybe<jsg::Promise<void>::Resolver> promise;
+      kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
 
-    bool checkSignal(jsg::Lock& js);
-    jsg::Promise<void> pipeLoop(jsg::Lock& js);
-    jsg::Promise<void> write(v8::Local<v8::Value> value);
+      bool preventAbort;
+      bool preventClose;
+      bool preventCancel;
+
+      // True when the Pipe is being destroyed
+      bool aborted = false;
+
+      State(WritableStreamInternalController& parent,
+          ReadableStreamController::PipeController& source,
+          kj::Maybe<jsg::Promise<void>::Resolver> promise,
+          bool preventAbort,
+          bool preventClose,
+          bool preventCancel,
+          kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
+          : parent(parent),
+            source(source),
+            promise(kj::mv(promise)),
+            maybeSignal(kj::mv(maybeSignal)),
+            preventAbort(preventAbort),
+            preventClose(preventClose),
+            preventCancel(preventCancel) {}
+
+      bool checkSignal(jsg::Lock& js);
+      jsg::Promise<void> pipeLoop(jsg::Lock& js);
+      jsg::Promise<void> write(v8::Local<v8::Value> value);
+
+      JSG_MEMORY_INFO(State) {
+        tracker.trackField("resolver", promise);
+        tracker.trackField("signal", maybeSignal);
+      }
+    };
+
+    kj::Own<State> state;
+
+    Pipe(WritableStreamInternalController& parent,
+        ReadableStreamController::PipeController& source,
+        kj::Maybe<jsg::Promise<void>::Resolver> promise,
+        bool preventAbort,
+        bool preventClose,
+        bool preventCancel,
+        kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
+        : state(kj::refcounted<State>(parent,
+              source,
+              kj::mv(promise),
+              preventAbort,
+              preventClose,
+              preventCancel,
+              kj::mv(maybeSignal))) {}
+
+    ~Pipe() noexcept(false) {
+      state->aborted = true;
+    }
+
+    WritableStreamInternalController& parent() {
+      return state->parent;
+    }
+    ReadableStreamController::PipeController& source() {
+      return state->source;
+    }
+    kj::Maybe<jsg::Promise<void>::Resolver>& promise() {
+      return state->promise;
+    }
+    bool preventAbort() const {
+      return state->preventAbort;
+    }
+    bool preventClose() const {
+      return state->preventClose;
+    }
+    bool preventCancel() const {
+      return state->preventCancel;
+    }
+    kj::Maybe<jsg::Ref<AbortSignal>>& maybeSignal() {
+      return state->maybeSignal;
+    }
+
+    bool checkSignal(jsg::Lock& js) {
+      return state->checkSignal(js);
+    }
+    jsg::Promise<void> pipeLoop(jsg::Lock& js) {
+      return state->pipeLoop(js);
+    }
+    jsg::Promise<void> write(v8::Local<v8::Value> value) {
+      return state->write(value);
+    }
 
     JSG_MEMORY_INFO(Pipe) {
-      tracker.trackField("resolver", promise);
-      tracker.trackField("signal", maybeSignal);
+      tracker.trackField("state", state);
     }
   };
   struct WriteEvent {

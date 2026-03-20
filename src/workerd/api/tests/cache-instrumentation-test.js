@@ -6,7 +6,7 @@ import {
   invocationPromises,
   spans,
   testTailHandler,
-} from 'test:instumentation-tail';
+} from 'test:instrumentation-tail';
 
 // Use shared instrumentation test tail worker
 export default testTailHandler;

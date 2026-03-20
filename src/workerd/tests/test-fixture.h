@@ -26,9 +26,12 @@ struct TestFixture {
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
+    // If true, use real timers instead of mock timers that never advance.
+    // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
+    bool useRealTimers;
   };
 
-  TestFixture(SetupParams&& params = {});
+  TestFixture(SetupParams&& params = {.useRealTimers = false});
 
   struct V8Environment {
     v8::Isolate* isolate;
@@ -55,8 +58,8 @@ struct TestFixture {
   // For void callbacks run waits for their completion, for promises waits for their resolution
   // and returns the result.
   template <typename CallBack>
-  auto runInIoContext(CallBack&& callback) ->
-      typename RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
+  auto runInIoContext(CallBack&& callback)
+      -> RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
     auto request = createIncomingRequest();
     kj::WaitScope* waitScope;
     KJ_IF_SOME(ws, this->waitScope) {

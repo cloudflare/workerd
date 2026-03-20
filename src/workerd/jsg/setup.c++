@@ -367,10 +367,10 @@ static v8::Isolate* newIsolate(
   });
 }
 }  // namespace
-
 IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
     kj::Own<IsolateObserver> observer,
+    kj::Own<ExternalStringAllocator> externalStringAllocator,
     v8::IsolateGroup group)
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
@@ -379,7 +379,8 @@ IsolateBase::IsolateBase(V8System& system,
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
-      observer(kj::mv(observer)) {
+      observer(kj::mv(observer)),
+      externalStringAllocator(kj::mv(externalStringAllocator)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     ptr->SetEmbedderRootsHandler(&heapTracer);
 
@@ -506,6 +507,42 @@ void IsolateBase::oomError(const char* location, const v8::OOMDetails& oom) {
 
 v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike) {
+  // For undefined sources (e.g. eval() with no argument or eval(undefined)),
+  // there is no code generation from strings. V8 returns undefined as-is per spec.
+  // We allow it through without further checks.
+  // Note: Wasm compilation uses a separate callback (AllowWasmCodeGenerationCallback).
+  if (source->IsUndefined()) {
+    return {.codegen_allowed = true, .modified_source = {}};
+  }
+
+  // Allow empty-body, no-parameter Function constructor calls: `new Function()`, or
+  // `class Foo extends Function { constructor() { super(); } }`.
+  //
+  // V8 synthesizes the full source string before calling this callback (see
+  // CreateDynamicFunction in v8/src/builtins/builtins-function.cc). When called with
+  // no arguments (argc == 0), isCodeLike is true and the source is the exact string
+  // below — which contains no user-provided code.
+  //
+  // Security notes:
+  //   - isCodeLike is false on the eval() path, so this check cannot be reached via
+  //     eval(). An attacker cannot use eval("<evil> {\n\n}") to bypass this.
+  //   - isCodeLike is also false when any arguments are plain strings (not CodeLike
+  //     objects), so new Function('a', 'b', undefined) cannot reach this check either.
+  //   - The exact string match ensures no user content (parameters or body) is present.
+  //   - We intentionally only match the no-parameter, no-body case. Calls like
+  //     new Function('a', 'b') are always blocked since the last argument becomes the
+  //     body via ToString(), producing a non-matching source string.
+  //
+  // NOTE: This pattern is tied to V8's CreateDynamicFunction format in
+  // builtins-function.cc:46-71 and must be reviewed during V8 updates. If the format
+  // changes, the setup-test and worker-test will fail, signaling that this constant
+  // needs updating.
+  static constexpr auto kEmptyFunctionSource = "(function anonymous(\n) {\n\n})"_kj;
+  if (isCodeLike && source->IsString() &&
+      kj::str(source.As<v8::String>()) == kEmptyFunctionSource) {
+    return {.codegen_allowed = true, .modified_source = {}};
+  }
+
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   auto& base = IsolateBase::from(isolate);
   if (base.evalAllowed) {
@@ -515,6 +552,7 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     // depending on whether eval should be allowed or not.
     base.observer->onDynamicEval(context, source, isCodeLike ? IsCodeLike::YES : IsCodeLike::NO);
   }
+
   return {.codegen_allowed = base.evalAllowed, .modified_source = {}};
 }
 

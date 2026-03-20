@@ -7,8 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "tls-nodejs-test.js")
         ],
-        compatibilityDate = "2025-01-09",
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "streams_enable_constructors", "add_nodejs_compat_eol_v24"],
         bindings = [
           (name = "ECHO_SERVER_PORT", fromEnvironment = "ECHO_SERVER_PORT"),
           (name = "HELLO_SERVER_PORT", fromEnvironment = "HELLO_SERVER_PORT"),

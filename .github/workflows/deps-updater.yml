@@ -2,8 +2,8 @@ name: Dependency updater
 
 on:
   schedule:
-    # Run at 00:00 UTC every Sunday
-    - cron: '0 0 * * 0'
+    # Run at 18:30 UTC every Monday
+    - cron: '30 18 * * 1'
   # Allow manual triggering for testing
   workflow_dispatch:
 
@@ -21,7 +21,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           show-progress: false
           token: ${{ secrets.DEVPROD_PAT }}
@@ -32,11 +32,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Update rust dependencies
         run: bazel run //deps/rust:crates_vendor -- --repin full
+      - name: Update opencode version
+        run: python3 tools/update_opencode_version.py
+        continue-on-error: true
       - name: Reformat changed files
         run: ./tools/cross/format.py git
       - name: Open pull request
         id: create-pr
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "update dependencies to latest version"
           branch: "automatic-update-deps"

@@ -64,3 +64,11 @@ py_test(
     ] + glob(["internal/workers-api/src/workers/*"]),
     main = "internal/test_introspection.py",
 )
+
+py_test(
+    name = "unit-test-frozen-sdk",
+    srcs = ["internal/test_frozen_sdk.py"],
+    data = glob(["internal/workers-api/**"]),
+    main = "internal/test_frozen_sdk.py",
+    target_compatible_with = ["@platforms//os:linux"],
+)

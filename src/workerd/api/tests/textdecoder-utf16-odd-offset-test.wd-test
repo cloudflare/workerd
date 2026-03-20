@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "textdecoder-utf16-odd-offset-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "textdecoder-utf16-odd-offset-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"]
+      )
+    ),
+  ],
+);

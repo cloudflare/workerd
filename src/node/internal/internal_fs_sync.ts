@@ -95,12 +95,12 @@ import type {
   GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
-  ReadSyncOptions,
+  ReadOptions,
   RmOptions,
-  RmDirOptions,
   StatsFs,
   WriteFileOptions,
 } from 'node:fs';
+import type { RmDirOptions } from 'node-internal:internal_fs_utils';
 
 export function accessSyncImpl(
   path: URL,
@@ -630,7 +630,7 @@ export function readlinkSync(
 export function readSync(
   fd: number,
   buffer: NodeJS.ArrayBufferView,
-  offsetOrOptions: ReadSyncOptions | number = {},
+  offsetOrOptions: ReadOptions | number = {},
   length?: number,
   position: Position = null
 ): number {

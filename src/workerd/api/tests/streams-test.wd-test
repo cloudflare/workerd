@@ -8,8 +8,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "streams-test.js")
         ],
-        compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat", "internal_stream_byob_return_view"],
+        compatibilityFlags = ["nodejs_compat", "internal_stream_byob_return_view", "streams_enable_constructors", "transformstream_enable_standard_constructor", "streams_byob_reader_detaches_buffer"],
         bindings = [
           (name = "subrequest", service = "streams-test")
         ]

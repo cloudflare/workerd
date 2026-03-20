@@ -32,14 +32,6 @@ class ConstMimeType final {
     return this == &other || (type_ == other.type_ && subtype_ == other.subtype_);
   }
 
-  inline bool operator==(kj::StringPtr other) const {
-    KJ_IF_SOME(slashPos, other.findFirst('/')) {
-      return strcaseeq(type_, other.first(slashPos)) &&
-          strcaseeq(subtype_, other.slice(slashPos + 1));
-    }
-    return false;
-  }
-
   bool operator==(const MimeType& other) const;
   operator MimeType() const;
   MimeType clone() const;
@@ -121,8 +113,11 @@ class MimeType final {
   static constexpr bool isXml(const T& mimeType) {
     auto type = mimeType.type();
     auto subtype = mimeType.subtype();
-    return (type == "text" || type == "application") &&
-        (subtype == "xml" || subtype.endsWith("+xml"));
+    // Bare "xml" subtype is only valid for text/xml and application/xml.
+    // The "+xml" structured syntax suffix (RFC 6838 §4.2.8, RFC 6839) indicates
+    // XML-based content regardless of top-level type (e.g. image/svg+xml).
+    return ((type == "text" || type == "application") && subtype == "xml") ||
+        subtype.endsWith("+xml");
   }
 
   template <IsMimeType T>

@@ -14,6 +14,7 @@ pub fn add_builtin(
     callback: fn(*mut ffi::Isolate) -> ffi::Local,
     module_type: ModuleType,
 ) {
+    // SAFETY: registry is a valid pinned ModuleRegistry; specifier and callback are valid.
     unsafe {
         ffi::register_add_builtin_module(registry, specifier, callback, module_type);
     }

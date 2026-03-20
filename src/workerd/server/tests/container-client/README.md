@@ -17,7 +17,7 @@ To run the tests:
 3. Remove existing containers labeled as "cf-container-client-test"
 
    ```shell
-   docker rm -f $(docker ps -aq --filter name=workerd-container-client-test --all)
+   docker ps -aq --filter name=workerd-container-client-test | xargs -r docker rm -f
    ```
 
 4. Remove existing Docker image
@@ -35,5 +35,5 @@ To run the tests:
 6. Run the test
 
    ```shell
-   just stream-test //src/workerd/server/tests/container-client
+   just stream-test //src/workerd/server/tests/container-client:container-client@
    ```

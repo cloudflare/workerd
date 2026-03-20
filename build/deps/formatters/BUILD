@@ -1,4 +1,3 @@
-load("@aspect_rules_lint//format:defs.bzl", "format_multirun")
 load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 load("@npm//:prettier/package_json.bzl", prettier = "bin")
 
@@ -83,6 +82,19 @@ native_binary(
     visibility = ["//visibility:public"],
 )
 
+native_binary(
+    name = "rustfmt@rule",
+    src = select({
+        ":linux_amd64": "@rustfmt-standalone-linux-amd64//:rustfmt",
+        ":linux_arm64": "@rustfmt-standalone-linux-arm64//:rustfmt",
+        ":darwin_arm64": "@rustfmt-standalone-darwin-arm64//:rustfmt",
+        "//conditions:default": "@rustfmt-standalone-linux-amd64//:rustfmt",
+    }),
+    out = "rustfmt",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
 prettier.prettier_binary(
     name = "prettier@rule",
     # Include this js_library and its dependencies in the runfiles (runtime dependencies)
@@ -96,13 +108,4 @@ prettier.prettier_binary(
         "--config=\"$$JS_BINARY__RUNFILES\"/$(rlocationpath //:prettierrc)",
         "--log-level=warn",
     ],
-)
-
-format_multirun(
-    name = "format",
-    cc = ":clang-format@rule",
-    javascript = ":prettier@rule",
-    python = ":ruff@rule",
-    starlark = ":buildifier@rule",
-    visibility = ["//:__pkg__"],
 )
