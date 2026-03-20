@@ -91,11 +91,11 @@ impl<R: Resource> Rc<R> {
     /// Takes `&self` because `GarbageCollected::trace(&self)` receives a shared
     /// reference to `R` inside the `Rc` allocation. The `parent` and `strong`
     /// fields already use `Cell` for interior mutability.
-    /// `WrappableRc::visit_ref(&self)` produces `Pin<&mut Wrappable>` from
+    /// `WrappableRc::visit_rc(&self)` produces `Pin<&mut Wrappable>` from
     /// the raw pointer inside `KjRc` — the mutation target is the C++ heap
     /// object, not the `WrappableRc` wrapper itself.
     pub(crate) fn visit(&self, visitor: &mut v8::GcVisitor) {
-        self.wrappable.visit_ref(
+        self.wrappable.visit_rc(
             self.parent.as_ptr().cast::<usize>(),
             self.strong.as_ptr(),
             visitor,

@@ -507,4 +507,39 @@ void GcVisitor::visit(Data& value) {
   }
 }
 
+void GcVisitor::visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Data>& traced) {
+  if (strong.IsEmpty()) {
+    return;
+  }
+
+  // Mirror visit(Data&): make handle strength match the parent.
+  //
+  // The `parent.wrapper == kj::none` check mirrors the same condition in
+  // visit(Data&): even when strongRefcount > 0, if the JS wrapper already
+  // exists we must keep the handle in traced mode so cppgc can follow edges
+  // from it.  Only when there is no wrapper yet (object not yet exported to JS)
+  // does a positive strongRefcount alone justify keeping the handle strong.
+  if (parent.strongRefcount > 0 && parent.wrapper == kj::none) {
+    // Parent has strong Rust refs and no JS wrapper — keep handle strong,
+    // discard any traced ref.
+    if (!traced.IsEmpty()) {
+      strong.ClearWeak();
+      traced.Reset();
+    }
+  } else {
+    // Parent is only reachable via GC tracing — downgrade to a TracedReference.
+    if (traced.IsEmpty()) {
+      v8::HandleScope scope(parent.isolate);
+      traced.Reset(parent.isolate, strong.Get(parent.isolate));
+      strong.SetWeak();
+    }
+  }
+
+  KJ_IF_SOME(c, cppgcVisitor) {
+    if (!traced.IsEmpty()) {
+      c.Trace(traced);
+    }
+  }
+}
+
 }  // namespace workerd::jsg

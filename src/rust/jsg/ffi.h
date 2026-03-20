@@ -22,6 +22,7 @@ using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
 struct ModuleRegistry;
 struct Local;
 struct Global;
+struct TracedReference;
 struct Realm;
 struct GcVisitor;
 enum class ExceptionType : ::std::uint8_t;
@@ -81,6 +82,19 @@ void wrappable_add_strong_ref(Wrappable& wrappable);
 void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong);
 void wrappable_visit_ref(
     Wrappable& wrappable, uintptr_t* ref_parent, bool* ref_strong, GcVisitor* visitor);
+
+/// Visit a `v8::Global` field during GC tracing, implementing the same
+/// strong↔traced dual-mode switching as `jsg::Data` / `jsg::V8Ref<T>`.
+///
+/// `global` points to the `ptr` field of `ffi::Global` (the strong handle).
+/// `traced` is the `ffi::TracedReference` slot from `Global<T>` on the Rust side.
+/// Both are mutated in-place by this function.
+void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReference& traced);
+
+/// Resets a `v8::TracedReference`, releasing the weak GC handle.
+/// Must be called when a `Global<T>` is dropped in traced mode to avoid
+/// leaking a live `v8::TracedReference`.
+void traced_reference_reset(TracedReference& traced);
 
 // Function declarations
 void local_drop(Local value);

@@ -340,11 +340,14 @@ pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum TraceableType {
-    /// `Rc<T>` - trace via `GarbageCollected` trait on the inner type
+    /// `jsg::Rc<T>` — strong GC edge; visited via `GcVisitor::visit_rc`.
     Ref,
-    /// `Weak<T>` - weak reference, not traced (doesn't keep the target alive)
+    /// `jsg::Weak<T>` — weak reference, not traced (doesn't keep the target alive).
     Weak,
-    /// Not a traceable type
+    /// `jsg::v8::Global<T>` — JS value strong/traced dual-mode handle;
+    /// visited via `GcVisitor::visit_global`.
+    Global,
+    /// Not a traceable type.
     None,
 }
 
@@ -355,20 +358,29 @@ enum OptionalKind {
 
 /// Checks if a type path matches a known JSG traceable type.
 ///
-/// Matches `jsg::Rc<T>` and `jsg::Weak<T>` (qualified with `jsg::` prefix).
-/// Does NOT match unqualified `Rc<T>` — this avoids confusion with `std::rc::Rc<T>`.
-/// Users must write `jsg::Rc<T>` in struct field types for GC tracing.
+/// Matches `jsg::Rc<T>`, `jsg::Weak<T>`, and `jsg::v8::Global<T>`.
+/// All must be fully qualified — this avoids confusion with same-named types
+/// from other crates.
 fn get_traceable_type(ty: &Type) -> TraceableType {
     if let Type::Path(type_path) = ty {
         let segments = &type_path.path.segments;
 
-        // Must be qualified as jsg::Rc or jsg::Weak (exactly 2 segments).
+        // `jsg::Rc<T>` or `jsg::Weak<T>` — exactly 2 segments.
         if segments.len() == 2 && segments[0].ident == "jsg" {
             match segments[1].ident.to_string().as_str() {
                 "Rc" => return TraceableType::Ref,
                 "Weak" => return TraceableType::Weak,
                 _ => {}
             }
+        }
+
+        // `jsg::v8::Global<T>` — exactly 3 segments.
+        if segments.len() == 3
+            && segments[0].ident == "jsg"
+            && segments[1].ident == "v8"
+            && segments[2].ident == "Global"
+        {
+            return TraceableType::Global;
         }
     }
     TraceableType::None
@@ -425,40 +437,63 @@ fn extract_cell_inner(ty: &Type) -> Option<&Type> {
 ///
 /// Because `GarbageCollected::trace` receives `&self`, `Cell<T>` fields cannot be
 /// accessed through normal Rust references (they require `&mut self` or `T: Copy`).
-/// We use `Cell::as_ptr` to obtain a raw pointer and dereference it for read-only
+/// We use `Cell::as_ptr` to obtain a raw pointer and dereference it for mutable
 /// access.  This is safe because:
 ///
 /// - V8 GC tracing is always single-threaded within an isolate.
 /// - `trace` is never re-entrant on the same object during a single GC cycle.
-/// - We only *read* through the pointer; we never move or drop the value.
 fn generate_cell_trace_statement(
     field_name: &syn::Ident,
     cell_inner_ty: &Type,
 ) -> Option<quote::__private::TokenStream> {
-    // Cell<jsg::Rc<T>> — direct strong reference inside a Cell.
-    if get_traceable_type(cell_inner_ty) == TraceableType::Ref {
-        return Some(quote! {
-            // SAFETY: trace() is single-threaded within a V8 isolate and never
-            // re-entrant.  We only read through the pointer; no mutation occurs.
-            unsafe { visitor.visit_ref(&*self.#field_name.as_ptr()); }
-        });
+    match get_traceable_type(cell_inner_ty) {
+        // Cell<jsg::Rc<T>> — strong Rc reference inside a Cell, read-only visit.
+        TraceableType::Ref => {
+            return Some(quote! {
+                // SAFETY: trace() is single-threaded and never re-entrant.
+                // We only read through the pointer.
+                unsafe { visitor.visit_rc(&*self.#field_name.as_ptr()); }
+            });
+        }
+        // Cell<jsg::v8::Global<T>> — visit_global takes &Global (safe).
+        TraceableType::Global => {
+            return Some(quote! {
+                // SAFETY: Cell::as_ptr() dereference is sound because GC
+                // tracing is single-threaded and never re-entrant on the
+                // same object. visit_global itself is safe.
+                unsafe { visitor.visit_global(&*self.#field_name.as_ptr()); }
+            });
+        }
+        TraceableType::Weak | TraceableType::None => {}
     }
 
     // Cell<Option<jsg::Rc<T>>> or Cell<jsg::Nullable<jsg::Rc<T>>>.
-    if let Some((kind, inner_ty)) = extract_optional_inner(cell_inner_ty)
-        && get_traceable_type(inner_ty) == TraceableType::Ref
-    {
+    if let Some((kind, inner_ty)) = extract_optional_inner(cell_inner_ty) {
         let pattern = match kind {
             OptionalKind::Option => quote! { Some(inner) },
             OptionalKind::Nullable => quote! { jsg::Nullable::Some(inner) },
         };
-        return Some(quote! {
-            // SAFETY: trace() is single-threaded within a V8 isolate and never
-            // re-entrant.  We only read through the pointer; no mutation occurs.
-            if let #pattern = unsafe { &*self.#field_name.as_ptr() } {
-                visitor.visit_ref(inner);
+        match get_traceable_type(inner_ty) {
+            TraceableType::Ref => {
+                return Some(quote! {
+                    // SAFETY: trace() is single-threaded and never re-entrant.
+                    if let #pattern = unsafe { &*self.#field_name.as_ptr() } {
+                        visitor.visit_rc(inner);
+                    }
+                });
             }
-        });
+            TraceableType::Global => {
+                return Some(quote! {
+                    // SAFETY: Cell::as_ptr() dereference is sound because GC
+                    // tracing is single-threaded and never re-entrant on the
+                    // same object. visit_global itself is safe.
+                    if let #pattern = unsafe { &*self.#field_name.as_ptr() } {
+                        visitor.visit_global(inner);
+                    }
+                });
+            }
+            TraceableType::Weak | TraceableType::None => {}
+        }
     }
 
     None
@@ -490,7 +525,15 @@ fn generate_trace_statements(
                     TraceableType::Ref => {
                         return Some(quote! {
                             if let #pattern = self.#field_name {
-                                visitor.visit_ref(inner);
+                                visitor.visit_rc(inner);
+                            }
+                        });
+                    }
+                    // Global<T> — visit_global takes &Global (safe).
+                    TraceableType::Global => {
+                        return Some(quote! {
+                            if let #pattern = self.#field_name {
+                                visitor.visit_global(inner);
                             }
                         });
                     }
@@ -501,7 +544,11 @@ fn generate_trace_statements(
 
             match get_traceable_type(ty) {
                 TraceableType::Ref => Some(quote! {
-                    visitor.visit_ref(&self.#field_name);
+                    visitor.visit_rc(&self.#field_name);
+                }),
+                // visit_global takes &Global and handles interior mutation safely.
+                TraceableType::Global => Some(quote! {
+                    visitor.visit_global(&self.#field_name);
                 }),
                 // Weak<T> doesn't keep the target alive and has no GC edges to trace.
                 TraceableType::Weak | TraceableType::None => None,

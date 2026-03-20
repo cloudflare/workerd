@@ -91,7 +91,7 @@ impl DnsUtil {
 
 On struct definitions, generates:
 - `jsg::Type` implementation
-- `jsg::GarbageCollected` implementation (default, no-op trace)
+- `jsg::GarbageCollected` implementation with automatic field tracing (see below)
 - Wrapper struct and `ResourceTemplate` implementations
 
 On impl blocks, scans for `#[jsg_method]` and `#[jsg_static_constant]` attributes and generates the `Resource` trait implementation. Methods with a receiver (`&self`/`&mut self`) are registered as instance methods; methods without a receiver are registered as static methods.
@@ -175,25 +175,40 @@ The macro generates type-checking code that matches JavaScript values to enum va
 
 ### Garbage Collection
 
-Resources are automatically integrated with V8's garbage collector through the C++ `Wrappable` base class. The macro generates a `GarbageCollected` implementation that traces fields requiring GC integration:
+Resources are automatically integrated with V8's garbage collector through the C++ `Wrappable` base class. The macro generates a `GarbageCollected` implementation that traces fields based on their type:
 
-- `Rc<T>` fields - traces the underlying resource
-- `Weak<T>` fields - weak reference (no-op trace, does not keep the target alive)
-- `Option<Rc<T>>` / `Nullable<Rc<T>>` - conditionally traces
+| Field type | Behaviour |
+|---|---|
+| `jsg::Rc<T>` | Strong GC edge — keeps target alive |
+| `jsg::Weak<T>` | Not traced — does not keep target alive |
+| `jsg::v8::Global<T>` | Dual strong/traced — enables back-reference cycle collection |
+| Anything else | Not traced — plain data, ignored by tracer |
+
+`Option<F>` and `jsg::Nullable<F>` wrappers are supported for all traced field types and are traced only when `Some`. Any traced field type may also be wrapped in `Cell<F>` (or `std::cell::Cell<F>`) for interior mutability — required when the field is set after construction, since `GarbageCollected::trace` receives `&self`.
+
+#### `jsg::v8::Global<T>` and cycle collection
+
+`jsg::v8::Global<T>` fields use the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust `Rc` refs the handle stays strong; once all `Rc`s are dropped, `visit_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing back-reference cycles (e.g. a resource holding a callback that captures its own JS wrapper) to be collected by the next full GC.
 
 ```rust
+use std::cell::Cell;
+
 #[jsg_resource]
 pub struct MyResource {
-    // Automatically traced (strong - keeps child alive)
-    child_resource: Option<Rc<ChildResource>>,
+    // Strong GC edge — keeps child alive
+    child: jsg::Rc<ChildResource>,
 
-    // Nullable variant (traces when Nullable::Some)
-    nullable_child: Nullable<Rc<ChildResource>>,
+    // Conditionally traced
+    maybe_child: Option<jsg::Rc<ChildResource>>,
 
-    // Weak reference (does not keep target alive)
-    observer: Weak<ChildResource>,
+    // Weak — does not keep target alive
+    observer: jsg::Weak<ChildResource>,
 
-    // Not traced (plain data)
+    // JS value — traced with dual-mode switching; Cell needed because
+    // the callback is set after construction (trace takes &self)
+    callback: Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+
+    // Plain data — not traced
     name: String,
 }
 ```

@@ -26,14 +26,25 @@ Rust resources integrate with V8's garbage collector through the existing C++ `W
 
 ```rust
 use jsg_macros::{jsg_resource, jsg_method};
+use std::cell::Cell;
 
 #[jsg_resource]
 struct MyResource {
     name: String,
-    child: jsg::Rc<OtherResource>,               // traced by GC
-    maybe_child: Option<jsg::Rc<OtherResource>>,  // conditionally traced
-    nullable_child: jsg::Nullable<jsg::Rc<OtherResource>>, // traced when Some
-    observer: jsg::Weak<OtherResource>,             // weak, does not keep alive
+
+    // jsg::Rc<T> fields — strong GC edges, automatically traced
+    child: jsg::Rc<OtherResource>,
+    maybe_child: Option<jsg::Rc<OtherResource>>,
+    nullable_child: jsg::Nullable<jsg::Rc<OtherResource>>,
+
+    // jsg::Weak<T> fields — weak reference, does not keep the target alive
+    observer: jsg::Weak<OtherResource>,
+
+    // jsg::v8::Global<T> fields — JS value traced with strong↔weak dual-mode switching.
+    // Allows GC to detect and collect back-reference cycles (e.g. a stored callback
+    // that closes over the resource's own JS wrapper).
+    // Must be wrapped in Cell<_> for interior mutability (trace takes &self).
+    callback: Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
 }
 
 #[jsg_resource]
@@ -62,8 +73,27 @@ let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 
 - **No JS wrapper**: Dropping the last `Rc` immediately destroys the resource (no GC needed).
 - **With JS wrapper**: Dropping all `Rc`s makes the wrapper eligible for V8 GC. When collected, the resource is destroyed.
-- **Tracing**: `Rc<T>`, `Option<Rc<T>>`, and `Nullable<Rc<T>>` fields are automatically traced during GC cycles. `Weak<T>` fields are not traced (they don't keep targets alive).
-- **Circular references** through `Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
+- **Tracing**: The `#[jsg_resource]` macro auto-generates `GarbageCollected::trace` based on field types:
+
+| Field type | Traced? | Notes |
+|---|---|---|
+| `jsg::Rc<T>` | Yes — strong edge | Keeps target alive through GC |
+| `Option<jsg::Rc<T>>` | Yes — when `Some` | |
+| `jsg::Nullable<jsg::Rc<T>>` | Yes — when `Some` | |
+| `Cell<jsg::Rc<T>>` | Yes — strong edge | Use `Cell` when field needs interior mutability |
+| `Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | |
+| `Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |
+| `jsg::v8::Global<T>` | Yes — dual strong/traced | Enables cycle collection; see below |
+| `Option<jsg::v8::Global<T>>` | Yes — when `Some` | |
+| `jsg::Nullable<jsg::v8::Global<T>>` | Yes — when `Some` | |
+| `Cell<jsg::v8::Global<T>>` | Yes — dual strong/traced | Required when set after construction |
+| `Cell<Option<jsg::v8::Global<T>>>` | Yes — when `Some` | |
+| `jsg::Weak<T>` | No | Doesn't keep target alive |
+| Anything else | No | Plain data fields are ignored |
+
+- **`Cell<T>` for interior mutability**: `GarbageCollected::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) must be wrapped in `Cell<T>`. Both `Cell<T>` and `std::cell::Cell<T>` are recognised.
+- **`jsg::v8::Global<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
+- **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
 
 ## V8 Handle Types
 
@@ -80,6 +110,27 @@ let global = local.to_global(&mut lock);
 ### `Global<T>`
 
 A persistent handle that outlives `HandleScope`s. Must be explicitly managed.
+
+`Global<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
+
+```rust
+#[jsg_resource]
+struct EventEmitter {
+    // Cell<Option<_>> for interior mutability: the callback is set after
+    // construction, and trace() receives &self.
+    on_event: Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+}
+
+#[jsg_resource]
+impl EventEmitter {
+    #[jsg_method]
+    fn set_callback(&self, lock: &mut jsg::Lock, cb: jsg::v8::Local<jsg::v8::Value>) {
+        self.on_event.set(Some(cb.to_global(lock)));
+    }
+}
+```
+
+Without tracing, storing a `Global` back to the resource's own wrapper creates an unbreakable reference cycle that leaks until the worker is torn down. With `visit_global` tracing (generated automatically by `#[jsg_resource]`), the cycle is collected by the next full GC after all strong Rust `Rc`s are dropped.
 
 ## Union Types
 

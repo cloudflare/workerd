@@ -1803,6 +1803,13 @@ class GcVisitor {
 
   void visit(Data& data);
 
+  /// Visit a raw `v8::Global<Value>` + `v8::TracedReference<Data>` pair,
+  /// implementing the same strong↔traced dual-mode switching as `visit(Data&)`.
+  ///
+  /// Used by the Rust JSG FFI to support `v8::Global<T>` fields on Rust
+  /// resources without a full `jsg::Data` wrapper.
+  void visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Data>& traced);
+
   void visit(kj::Maybe<Data>& maybeData) {
     KJ_IF_SOME(data, maybeData) {
       visit(data);

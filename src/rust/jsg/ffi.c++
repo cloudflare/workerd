@@ -447,8 +447,7 @@ DEFINE_TYPED_ARRAY_GET(biguint64_array, BigUint64Array, uint64_t)
 
 // Global<T>
 void global_reset(Global& value) {
-  auto* glbl = global_as_ref_from_ffi<v8::Value>(value);
-  glbl->Reset();
+  global_as_ref_from_ffi<v8::Value>(value)->Reset();
 }
 
 Global global_clone(Isolate* isolate, const Global& value) {
@@ -505,6 +504,17 @@ void wrappable_remove_strong_ref(Wrappable& wrappable, bool is_strong) {
   // the ref to weak (strong=false), passing true here would double-decrement strongRefcount.
   auto own = kj::addRef(wrappable);
   wrappable.maybeDeferDestruction(is_strong, kj::mv(own), &wrappable);
+}
+
+void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReference& traced) {
+  auto* gcVisitor = gc_visitor_from_ffi(visitor);
+  auto& strongHandle = *reinterpret_cast<v8::Global<v8::Value>*>(global);
+  auto& tracedHandle = traced_ref_from_ffi(traced);
+  gcVisitor->visit(strongHandle, tracedHandle);
+}
+
+void traced_reference_reset(TracedReference& traced) {
+  traced_ref_from_ffi(traced).Reset();
 }
 
 void wrappable_visit_ref(
