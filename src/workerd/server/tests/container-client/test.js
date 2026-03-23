@@ -1257,7 +1257,7 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
 
     await assert.rejects(
-      () => container.snapshotDirectory({ dir: '/app/data' }),
+      async () => container.snapshotDirectory({ dir: '/app/data' }),
       (err) => {
         assert.match(err.message, /not running/);
         return true;

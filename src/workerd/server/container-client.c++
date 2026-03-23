@@ -1414,6 +1414,13 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   caCertInjected.store(false, std::memory_order_release);
   co_await createContainer(entrypoint, environment, params);
 
+  // If anything after container creation fails (CA cert injection, snapshot
+  // restore, startContainer), destroy the half-created Docker container so we
+  // don't leave a zombie in "Created" state that would cause monitor() to hang.
+  KJ_DEFER(if (!containerStarted.load(std::memory_order_acquire)) {
+    waitUntilTasks.add(destroyContainer());
+  });
+
   bool hasTlsMappings = false;
   for (auto& mapping: egressMappings) {
     if (mapping.tls) {
@@ -1447,6 +1454,13 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
       validateAbsolutePath(restoreDir);
 
       auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
+
+      // Docker auto-creates named volumes on container create, so we must
+      // explicitly verify the snapshot volume exists before using it.
+      auto inspectResp = co_await dockerApiRequest(
+          network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str("/volumes/", volumeName));
+      JSG_REQUIRE(inspectResp.statusCode == 200, Error, "Snapshot '", snapshotId,
+          "' not found (volume '", volumeName, "' does not exist)");
 
       // The volume stores raw directory contents (no directory wrapper) at /mnt.
       // Mount it at /mnt{restoreDir} so Docker creates the target directory hierarchy,
@@ -1494,6 +1508,11 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   // Wait for any in-progress mutating RPCs (e.g. start()) to complete
   // before issuing the Docker wait request.
   co_await mutationQueue.addBranch();
+
+  // If start() ran but failed (e.g. snapshot restore error), containerStarted
+  // remains false. Reject immediately rather than hanging on Docker /wait for a
+  // container that was never started.
+  JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error, "Container failed to start");
 
   auto results = context.getResults();
   KJ_DEFER(containerStarted.store(false, std::memory_order_release));
