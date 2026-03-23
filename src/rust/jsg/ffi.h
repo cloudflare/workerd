@@ -142,6 +142,8 @@ bool local_is_biguint64_array(const Local& val);
 bool local_is_array_buffer(const Local& val);
 bool local_is_array_buffer_view(const Local& val);
 bool local_is_function(const Local& val);
+bool local_is_symbol(const Local& val);
+bool local_is_name(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
 
 // Local<String>
@@ -168,7 +170,6 @@ bool local_string_equals(const Local& value, const Local& other);
 bool local_string_is_flat(const Local& value);
 Local local_string_concat(Isolate* isolate, Local left, Local right);
 Local local_string_internalize(Isolate* isolate, const Local& value);
-int32_t local_string_get_identity_hash(const Local& value);
 MaybeLocal local_string_new_from_utf8(
     Isolate* isolate, const uint8_t* data, int32_t length, bool internalized);
 MaybeLocal local_string_new_from_one_byte(
@@ -176,6 +177,14 @@ MaybeLocal local_string_new_from_one_byte(
 MaybeLocal local_string_new_from_two_byte(
     Isolate* isolate, const uint16_t* data, int32_t length, bool internalized);
 bool maybe_local_is_empty(const MaybeLocal& value);
+
+// Local<Name>
+int32_t local_name_get_identity_hash(const Local& value);
+
+// Local<Symbol>
+Local local_symbol_new(Isolate* isolate);
+Local local_symbol_new_with_description(Isolate* isolate, Local description);
+MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
 
 // Local<Function>
 Local local_function_call(

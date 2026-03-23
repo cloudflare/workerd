@@ -574,26 +574,6 @@ fn string_internalize_twice_returns_equal_content() {
 }
 
 #[test]
-fn string_get_identity_hash_is_nonzero() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, _ctx| {
-        let s = from_utf8(lock, "hash-me");
-        assert_ne!(s.get_identity_hash(), 0);
-        Ok(())
-    });
-}
-
-#[test]
-fn string_get_identity_hash_is_stable() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, _ctx| {
-        let s = from_utf8(lock, "stable-hash");
-        assert_eq!(s.get_identity_hash(), s.get_identity_hash());
-        Ok(())
-    });
-}
-
-#[test]
 fn string_is_flat_for_simple_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {

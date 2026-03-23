@@ -221,6 +221,14 @@ bool local_is_function(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsFunction();
 }
 
+bool local_is_symbol(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsSymbol();
+}
+
+bool local_is_name(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsName();
+}
+
 ::rust::String local_type_of(Isolate* isolate, const Local& val) {
   auto v8Val = local_as_ref_from_ffi<v8::Value>(val);
   v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
@@ -315,10 +323,6 @@ Local local_string_internalize(Isolate* isolate, const Local& value) {
   return to_ffi(local_as_ref_from_ffi<v8::String>(value)->InternalizeString(isolate));
 }
 
-int32_t local_string_get_identity_hash(const Local& value) {
-  return local_as_ref_from_ffi<v8::String>(value)->GetIdentityHash();
-}
-
 MaybeLocal local_string_new_from_utf8(
     Isolate* isolate, const uint8_t* data, int32_t length, bool internalized) {
   auto type = internalized ? v8::NewStringType::kInternalized : v8::NewStringType::kNormal;
@@ -341,6 +345,30 @@ MaybeLocal local_string_new_from_two_byte(
 bool maybe_local_is_empty(const MaybeLocal& value) {
   auto ptr_void = reinterpret_cast<const void*>(&value.ptr);
   return reinterpret_cast<const v8::MaybeLocal<v8::Value>*>(ptr_void)->IsEmpty();
+}
+
+// Local<Name>
+int32_t local_name_get_identity_hash(const Local& value) {
+  return local_as_ref_from_ffi<v8::Name>(value)->GetIdentityHash();
+}
+
+// Local<Symbol>
+Local local_symbol_new(Isolate* isolate) {
+  return to_ffi(v8::Symbol::New(isolate));
+}
+
+Local local_symbol_new_with_description(Isolate* isolate, Local description) {
+  return to_ffi(v8::Symbol::New(isolate, local_from_ffi<v8::String>(kj::mv(description))));
+}
+
+MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
+  auto sym = local_as_ref_from_ffi<v8::Symbol>(value);
+  v8::Local<v8::Value> desc = sym->Description(isolate);
+  if (desc->IsUndefined()) {
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::String>());
+  }
+  // Description is always a String when present.
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(desc.As<v8::String>()));
 }
 
 // Local<Function>

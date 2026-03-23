@@ -207,6 +207,8 @@ pub mod ffi {
         pub unsafe fn local_is_array_buffer(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
         pub unsafe fn local_is_function(value: &Local) -> bool;
+        pub unsafe fn local_is_symbol(value: &Local) -> bool;
+        pub unsafe fn local_is_name(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
 
         // Local<String>
@@ -246,7 +248,6 @@ pub mod ffi {
             right: Local,
         ) -> Local;
         pub unsafe fn local_string_internalize(isolate: *mut Isolate, value: &Local) -> Local;
-        pub unsafe fn local_string_get_identity_hash(value: &Local) -> i32;
         pub unsafe fn local_string_new_from_utf8(
             isolate: *mut Isolate,
             data: *const u8,
@@ -266,6 +267,17 @@ pub mod ffi {
             internalized: bool,
         ) -> MaybeLocal;
         pub unsafe fn maybe_local_is_empty(value: &MaybeLocal) -> bool;
+
+        // Local<Name>
+        pub unsafe fn local_name_get_identity_hash(value: &Local) -> i32;
+
+        // Local<Symbol>
+        pub unsafe fn local_symbol_new(isolate: *mut Isolate) -> Local;
+        pub unsafe fn local_symbol_new_with_description(
+            isolate: *mut Isolate,
+            description: Local,
+        ) -> Local;
+        pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<Function>
         pub unsafe fn local_function_call(
@@ -558,9 +570,15 @@ impl std::fmt::Display for ffi::ExceptionType {
 // Marker types for Local<T>
 #[derive(Debug)]
 pub struct Value;
+/// Marker for `v8::Name` handles (supertype of `String` and `Symbol`).
+#[derive(Debug)]
+pub struct Name;
 /// Marker for `v8::String` handles.
 #[derive(Debug)]
 pub struct String;
+/// Marker for `v8::Symbol` handles.
+#[derive(Debug)]
+pub struct Symbol;
 
 impl String {
     /// Maximum length of a V8 string in UTF-16 code units.
@@ -1000,6 +1018,22 @@ impl<'a, T> Local<'a, T> {
         unsafe { ffi::local_is_function(&self.handle) }
     }
 
+    /// Returns true if the value is a JavaScript Symbol.
+    ///
+    /// Corresponds to `v8::Value::IsSymbol()`.
+    pub fn is_symbol(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_symbol(&self.handle) }
+    }
+
+    /// Returns true if the value is a `v8::Name` (either a `String` or a `Symbol`).
+    ///
+    /// Corresponds to `v8::Value::IsName()`.
+    pub fn is_name(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_name(&self.handle) }
+    }
+
     /// Returns the JavaScript type of the underlying value as a string.
     ///
     /// Uses V8's native `TypeOf` method which returns the same result as
@@ -1056,6 +1090,8 @@ impl_as!(Function, is_function);
 impl_as!(Object, is_object);
 impl_as!(Array, is_array);
 impl_as!(String, is_string);
+impl_as!(Symbol, is_symbol);
+impl_as!(Name, is_name);
 
 // Value-specific implementations
 impl<'a> Local<'a, Value> {
@@ -1164,9 +1200,15 @@ macro_rules! impl_local_cast {
 
 // Upcasts to Value
 impl_local_cast!(String -> Value, is_string);
+impl_local_cast!(Name -> Value, is_name);
+impl_local_cast!(Symbol -> Value, is_symbol);
 impl_local_cast!(Object -> Value, is_object);
 impl_local_cast!(Function -> Value, is_function);
 impl_local_cast!(Array -> Value, is_array);
+
+// String and Symbol are both subtypes of Name
+impl_local_cast!(String -> Name, is_string);
+impl_local_cast!(Symbol -> Name, is_symbol);
 impl_local_cast!(Uint8Array -> Value, is_uint8_array);
 impl_local_cast!(Uint16Array -> Value, is_uint16_array);
 impl_local_cast!(Uint32Array -> Value, is_uint32_array);
@@ -1820,18 +1862,6 @@ impl Local<'_, String> {
         }
     }
 
-    /// Returns the identity hash for this string.
-    ///
-    /// The hash is stable for the lifetime of the string and is never `0`,
-    /// but is not guaranteed to be unique across different strings.
-    ///
-    /// Corresponds to `v8::Name::GetIdentityHash()`.
-    #[inline]
-    pub fn get_identity_hash(&self) -> i32 {
-        // SAFETY: self.handle is a valid V8 String handle.
-        unsafe { ffi::local_string_get_identity_hash(&self.handle) }
-    }
-
     /// Returns `true` if the string has a flat (contiguous) internal representation.
     ///
     /// A flat string stores its characters in a single contiguous buffer, which
@@ -1846,6 +1876,73 @@ impl Local<'_, String> {
     pub fn is_flat(&self) -> bool {
         // SAFETY: self.handle is a valid V8 String handle.
         unsafe { ffi::local_string_is_flat(&self.handle) }
+    }
+}
+
+// =============================================================================
+// `Name` — supertype of `String` and `Symbol`
+// =============================================================================
+
+impl Local<'_, Name> {
+    /// Returns the identity hash for this name.
+    ///
+    /// The hash is stable for the lifetime of the name and is never `0`,
+    /// but is not guaranteed to be unique across different names.
+    ///
+    /// Corresponds to `v8::Name::GetIdentityHash()`.
+    #[inline]
+    pub fn get_identity_hash(&self) -> i32 {
+        // SAFETY: self.handle is a valid V8 Name handle.
+        unsafe { ffi::local_name_get_identity_hash(&self.handle) }
+    }
+}
+
+// =============================================================================
+// `Symbol`
+// =============================================================================
+
+impl Symbol {
+    /// Creates a new unique Symbol with an optional description.
+    ///
+    /// The returned symbol is unique — two calls with the same description return
+    /// distinct symbols that are not `===` equal. Pass `None` to create a symbol
+    /// without a description.
+    ///
+    /// Corresponds to `v8::Symbol::New()`.
+    pub fn new<'a>(
+        lock: &mut crate::Lock,
+        description: Option<Local<'a, String>>,
+    ) -> Local<'a, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe {
+            let handle = match description {
+                Some(desc) => {
+                    ffi::local_symbol_new_with_description(isolate.as_ffi(), desc.into_ffi())
+                }
+                None => ffi::local_symbol_new(isolate.as_ffi()),
+            };
+            Local::from_ffi(isolate, handle)
+        }
+    }
+}
+
+impl<'a> Local<'a, Symbol> {
+    /// Returns the description of this symbol, if any.
+    ///
+    /// Returns `None` if the symbol was created without a description.
+    ///
+    /// Corresponds to `v8::Symbol::Description()`.
+    pub fn description(&self, lock: &mut crate::Lock) -> Option<Local<'a, String>> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked; self.handle is a valid Symbol handle.
+        let maybe = unsafe {
+            MaybeLocal::<String>::from_ffi(ffi::local_symbol_description(
+                isolate.as_ffi(),
+                &self.handle,
+            ))
+        };
+        maybe.to_local(lock)
     }
 }
 
