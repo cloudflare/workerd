@@ -12,6 +12,10 @@
 
 namespace workerd::api {
 
+// JavaScript's Number.MAX_SAFE_INTEGER. Snapshot sizes are uint64 in capnp but exposed as
+// doubles in JS, so we cap them at this value to avoid precision loss.
+constexpr uint64_t MAX_SAFE_INTEGER = (1ull << 53) - 1;
+
 // =======================================================================================
 // Basic lifecycle methods
 
@@ -88,7 +92,7 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
         auto& snap = restore.snapshot;
         double size = snap.size;
         JSG_REQUIRE(std::isfinite(size) && size >= 0 &&
-                size <= static_cast<double>((1ull << 53) - 1) && std::floor(size) == size,
+                size <= static_cast<double>(MAX_SAFE_INTEGER) && std::floor(size) == size,
             RangeError, "Snapshot size must be a non-negative integer <= Number.MAX_SAFE_INTEGER");
         auto snapshotBuilder = entry.initSnapshot();
         snapshotBuilder.setId(snap.id);
@@ -136,7 +140,7 @@ jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
       name = kj::str(snapshotName);
     }
 
-    JSG_REQUIRE(snapshot.getSize() <= (1ull << 53) - 1, RangeError,
+    JSG_REQUIRE(snapshot.getSize() <= MAX_SAFE_INTEGER, RangeError,
         "Snapshot size exceeds Number.MAX_SAFE_INTEGER");
 
     return Container::DirectorySnapshot{kj::str(snapshot.getId()),
