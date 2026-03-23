@@ -9,6 +9,8 @@
 
 namespace workerd::jsg {
 
+constexpr uint64_t MAX_SAFE_INTEGER = (1ull << 53) - 1;
+
 inline void requireOnStack(void* self) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(self, "JsValue types must be allocated on stack");
