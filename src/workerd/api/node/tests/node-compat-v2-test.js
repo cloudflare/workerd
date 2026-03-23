@@ -68,8 +68,9 @@ export const nodeJsGetBuiltins = {
 export const nodeJsEventsExports = {
   async test() {
     // Expected node:events exports should be present
-    const { EventEmitter, getMaxListeners, usingDomains } =
-      await import('node:events');
+    const { EventEmitter, getMaxListeners, usingDomains } = await import(
+      'node:events'
+    );
     assert.notEqual(getMaxListeners, undefined);
     assert.strictEqual(getMaxListeners, EventEmitter.getMaxListeners);
     assert.notEqual(usingDomains, undefined);

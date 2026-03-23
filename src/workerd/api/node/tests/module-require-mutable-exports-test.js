@@ -48,8 +48,9 @@ export const testPatchingDoesNotAffectNamedExports = {
     timersPromises.setTimeout = patchedSetTimeout;
 
     // The named export from the module namespace should be unaffected
-    const { setTimeout: namedSetTimeout } =
-      await import('node:timers/promises');
+    const { setTimeout: namedSetTimeout } = await import(
+      'node:timers/promises'
+    );
     notStrictEqual(namedSetTimeout, patchedSetTimeout);
     strictEqual(namedSetTimeout, originalSetTimeout);
 
