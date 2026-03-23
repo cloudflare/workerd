@@ -1,10 +1,9 @@
-// Copyright (c) 2017-2026 Cloudflare, Inc.
+// Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
 use jsg::v8::Local;
 use jsg::v8::MaybeLocal;
-use jsg::v8::NewStringType;
 use jsg::v8::String as JsString;
 use jsg::v8::ToLocalValue;
 use jsg::v8::Utf8Value;
@@ -13,7 +12,7 @@ use jsg::v8::WriteFlags;
 
 // Convenience: create a Local<String> from a UTF-8 str literal.
 fn from_utf8<'a>(lock: &mut jsg::Lock, s: &str) -> Local<'a, JsString> {
-    Local::<JsString>::new_from_utf8(lock, s.as_bytes(), NewStringType::Normal).unwrap(lock)
+    JsString::new_from_utf8(lock, s.as_bytes()).unwrap(lock)
 }
 
 // =============================================================================
@@ -24,7 +23,7 @@ fn from_utf8<'a>(lock: &mut jsg::Lock, s: &str) -> Local<'a, JsString> {
 fn string_empty_has_zero_length() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let s = Local::<JsString>::empty(lock);
+        let s = JsString::empty(lock);
         assert_eq!(s.length(), 0);
         assert!(s.is_one_byte());
         Ok(())
@@ -35,7 +34,7 @@ fn string_empty_has_zero_length() {
 fn string_new_from_utf8_roundtrips_ascii() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let maybe = Local::<JsString>::new_from_utf8(lock, b"hello", NewStringType::Normal);
+        let maybe = JsString::new_from_utf8(lock, b"hello");
         assert!(!maybe.is_empty());
         let s = maybe.unwrap(lock);
         assert_eq!(s.length(), 5);
@@ -59,7 +58,7 @@ fn string_new_from_utf8_roundtrips_unicode() {
 fn string_new_from_utf8_empty_slice() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let maybe = Local::<JsString>::new_from_utf8(lock, b"", NewStringType::Normal);
+        let maybe = JsString::new_from_utf8(lock, b"");
         assert!(!maybe.is_empty());
         let s = maybe.unwrap(lock);
         assert_eq!(s.length(), 0);
@@ -71,7 +70,7 @@ fn string_new_from_utf8_empty_slice() {
 fn string_new_from_one_byte_roundtrips() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let maybe = Local::<JsString>::new_from_one_byte(lock, b"latin1", NewStringType::Normal);
+        let maybe = JsString::new_from_one_byte(lock, b"latin1");
         assert!(!maybe.is_empty());
         let s = maybe.unwrap(lock);
         assert_eq!(s.length(), 6);
@@ -86,7 +85,7 @@ fn string_new_from_two_byte_roundtrips() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let utf16: Vec<u16> = "hello".encode_utf16().collect();
-        let maybe = Local::<JsString>::new_from_two_byte(lock, &utf16, NewStringType::Normal);
+        let maybe = JsString::new_from_two_byte(lock, &utf16);
         assert!(!maybe.is_empty());
         let s = maybe.unwrap(lock);
         assert_eq!(s.length(), 5);
@@ -101,8 +100,7 @@ fn string_new_from_two_byte_unicode() {
     harness.run_in_context(|lock, _ctx| {
         let input = "日本語";
         let utf16: Vec<u16> = input.encode_utf16().collect();
-        let s =
-            Local::<JsString>::new_from_two_byte(lock, &utf16, NewStringType::Normal).unwrap(lock);
+        let s = JsString::new_from_two_byte(lock, &utf16).unwrap(lock);
         assert_eq!(s.to_string(lock), input);
         Ok(())
     });
@@ -112,10 +110,8 @@ fn string_new_from_two_byte_unicode() {
 fn string_new_from_utf8_internalized_roundtrips() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let s1 = Local::<JsString>::new_from_utf8(lock, b"intern_me", NewStringType::Internalized)
-            .unwrap(lock);
-        let s2 = Local::<JsString>::new_from_utf8(lock, b"intern_me", NewStringType::Internalized)
-            .unwrap(lock);
+        let s1 = JsString::new_internalized_from_utf8(lock, b"intern_me").unwrap(lock);
+        let s2 = JsString::new_internalized_from_utf8(lock, b"intern_me").unwrap(lock);
         // Both strings should have the same content.
         assert_eq!(s1.to_string(lock), "intern_me");
         assert_eq!(s2.to_string(lock), "intern_me");
@@ -129,12 +125,7 @@ fn string_new_from_utf8_internalized_roundtrips() {
 fn string_new_from_one_byte_internalized_roundtrips() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let s = Local::<JsString>::new_from_one_byte(
-            lock,
-            b"latin1_intern",
-            NewStringType::Internalized,
-        )
-        .unwrap(lock);
+        let s = JsString::new_internalized_from_one_byte(lock, b"latin1_intern").unwrap(lock);
         assert_eq!(s.to_string(lock), "latin1_intern");
         assert!(s.is_one_byte());
         Ok(())
@@ -146,8 +137,7 @@ fn string_new_from_two_byte_internalized_roundtrips() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let utf16: Vec<u16> = "two_byte_intern".encode_utf16().collect();
-        let s = Local::<JsString>::new_from_two_byte(lock, &utf16, NewStringType::Internalized)
-            .unwrap(lock);
+        let s = JsString::new_internalized_from_two_byte(lock, &utf16).unwrap(lock);
         assert_eq!(s.to_string(lock), "two_byte_intern");
         Ok(())
     });
@@ -322,8 +312,8 @@ fn string_ne_different_content() {
 fn string_empty_eq_empty() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let a = Local::<JsString>::empty(lock);
-        let b = Local::<JsString>::empty(lock);
+        let a = JsString::empty(lock);
+        let b = JsString::empty(lock);
         assert_eq!(a, b);
         Ok(())
     });
@@ -337,7 +327,7 @@ fn string_empty_eq_empty() {
 fn maybe_local_is_not_empty_on_success() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let maybe = Local::<JsString>::new_from_utf8(lock, b"hello", NewStringType::Normal);
+        let maybe = JsString::new_from_utf8(lock, b"hello");
         assert!(!maybe.is_empty());
         Ok(())
     });
@@ -347,7 +337,7 @@ fn maybe_local_is_not_empty_on_success() {
 fn maybe_local_into_option_some() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let maybe = Local::<JsString>::new_from_utf8(lock, b"test", NewStringType::Normal);
+        let maybe = JsString::new_from_utf8(lock, b"test");
         let opt = maybe.into_option(lock);
         assert!(opt.is_some());
         Ok(())
@@ -369,7 +359,7 @@ fn maybe_local_from_none_is_empty() {
 fn maybe_local_unwrap_or_returns_default_when_empty() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let default = Local::<JsString>::empty(lock);
+        let default = JsString::empty(lock);
         let maybe: MaybeLocal<'_, JsString> = None::<Local<'_, JsString>>.into();
         let result = maybe.unwrap_or(lock, default);
         assert_eq!(result.length(), 0);
@@ -530,4 +520,94 @@ fn string_upcast_to_value() {
         assert!(val.is_string());
         Ok(())
     });
+}
+
+// =============================================================================
+// String::concat, internalize, get_identity_hash, is_flat, K_MAX_LENGTH
+// =============================================================================
+
+#[test]
+fn string_concat_produces_concatenated_string() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let left = from_utf8(lock, "hello, ");
+        let right = from_utf8(lock, "world");
+        let result = JsString::concat(lock, left, right);
+        assert_eq!(result.to_string(lock), "hello, world");
+        Ok(())
+    });
+}
+
+#[test]
+fn string_concat_with_empty_string() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "abc");
+        let empty = JsString::empty(lock);
+        let result = JsString::concat(lock, s, empty);
+        assert_eq!(result.to_string(lock), "abc");
+        Ok(())
+    });
+}
+
+#[test]
+fn string_internalize_returns_equal_string() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "intern-me");
+        let interned = s.internalize(lock);
+        assert_eq!(interned.to_string(lock), "intern-me");
+        Ok(())
+    });
+}
+
+#[test]
+fn string_internalize_twice_returns_equal_content() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "dedup");
+        let a = s.internalize(lock);
+        let b = s.internalize(lock);
+        assert_eq!(a.to_string(lock), b.to_string(lock));
+        Ok(())
+    });
+}
+
+#[test]
+fn string_get_identity_hash_is_nonzero() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "hash-me");
+        assert_ne!(s.get_identity_hash(), 0);
+        Ok(())
+    });
+}
+
+#[test]
+fn string_get_identity_hash_is_stable() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "stable-hash");
+        assert_eq!(s.get_identity_hash(), s.get_identity_hash());
+        Ok(())
+    });
+}
+
+#[test]
+fn string_is_flat_for_simple_string() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let s = from_utf8(lock, "flat");
+        assert!(s.is_flat());
+        Ok(())
+    });
+}
+
+#[test]
+fn string_max_length_matches_v8() {
+    // V8's kMaxLength is (1<<28)-16 on 32-bit and (1<<29)-24 on 64-bit.
+    #[cfg(target_pointer_width = "32")]
+    assert_eq!(JsString::MAX_LENGTH, (1 << 28) - 16);
+    #[cfg(target_pointer_width = "64")]
+    assert_eq!(JsString::MAX_LENGTH, (1 << 29) - 24);
 }

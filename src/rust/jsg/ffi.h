@@ -165,6 +165,10 @@ void local_string_write_one_byte_v2(Isolate* isolate,
 size_t local_string_write_utf8_v2(
     Isolate* isolate, const Local& value, uint8_t* buffer, size_t capacity, int32_t flags);
 bool local_string_equals(const Local& value, const Local& other);
+bool local_string_is_flat(const Local& value);
+Local local_string_concat(Isolate* isolate, Local left, Local right);
+Local local_string_internalize(Isolate* isolate, const Local& value);
+int32_t local_string_get_identity_hash(const Local& value);
 MaybeLocal local_string_new_from_utf8(
     Isolate* isolate, const uint8_t* data, int32_t length, bool internalized);
 MaybeLocal local_string_new_from_one_byte(

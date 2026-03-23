@@ -302,6 +302,23 @@ bool local_string_equals(const Local& value, const Local& other) {
       local_as_ref_from_ffi<v8::String>(other));
 }
 
+bool local_string_is_flat(const Local& value) {
+  return local_as_ref_from_ffi<v8::String>(value)->IsFlat();
+}
+
+Local local_string_concat(Isolate* isolate, Local left, Local right) {
+  return to_ffi(v8::String::Concat(isolate, local_from_ffi<v8::String>(kj::mv(left)),
+      local_from_ffi<v8::String>(kj::mv(right))));
+}
+
+Local local_string_internalize(Isolate* isolate, const Local& value) {
+  return to_ffi(local_as_ref_from_ffi<v8::String>(value)->InternalizeString(isolate));
+}
+
+int32_t local_string_get_identity_hash(const Local& value) {
+  return local_as_ref_from_ffi<v8::String>(value)->GetIdentityHash();
+}
+
 MaybeLocal local_string_new_from_utf8(
     Isolate* isolate, const uint8_t* data, int32_t length, bool internalized) {
   auto type = internalized ? v8::NewStringType::kInternalized : v8::NewStringType::kNormal;
