@@ -1427,8 +1427,11 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   // If anything after container creation fails (CA cert injection, snapshot
   // restore, startContainer), destroy the half-created Docker container so we
   // don't leave a zombie in "Created" state that would cause monitor() to hang.
+  // Attach addRef(*this) so the ContainerClient stays alive until the coroutine
+  // completes — without it, ContainerClient could be freed before destroyContainer()
+  // resumes after its first co_await, causing a use-after-free / segfault.
   KJ_DEFER(if (!containerStarted.load(std::memory_order_acquire)) {
-    waitUntilTasks.add(destroyContainer());
+    waitUntilTasks.add(destroyContainer().attach(addRef()));
   });
 
   bool hasTlsMappings = false;
@@ -1480,7 +1483,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
       auto mountPath = restoreDir == "/" ? kj::str("/mnt") : kj::str("/mnt", restoreDir);
 
       auto tempId = co_await createTempContainerWithVolume(volumeName, mountPath);
-      KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
+      KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId)).attach(addRef())));
 
       kj::String archiveGetPath;
       if (restoreDir == "/") {
@@ -1626,12 +1629,13 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   co_await createDockerVolume(volumeName);
   bool volumeCommitted = false;
   KJ_DEFER(if (!volumeCommitted) {
-    waitUntilTasks.add(deleteDockerVolume(kj::str(volumeName)).catch_([](kj::Exception&&) {}));
+    waitUntilTasks.add(
+        deleteDockerVolume(kj::str(volumeName)).catch_([](kj::Exception&&) {}).attach(addRef()));
   });
 
   // Store the contents tar in the volume via a temp container mounted at /mnt.
   auto tempId = co_await createTempContainerWithVolume(volumeName);
-  KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId))));
+  KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId)).attach(addRef())));
 
   auto putResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
       kj::HttpMethod::PUT, kj::str("/containers/", tempId, "/archive?path=/mnt"),
