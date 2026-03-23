@@ -1,3 +1,7 @@
+// Copyright (c) 2017-2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 use jsg::v8::Local;
 use jsg::v8::MaybeLocal;
 use jsg::v8::NewStringType;
@@ -396,6 +400,15 @@ fn write_flags_replace_invalid_utf8_is_two() {
 fn write_flags_bitor_combines_values() {
     let combined = WriteFlags::NullTerminate | WriteFlags::ReplaceInvalidUtf8;
     assert_eq!(combined.bits(), 3);
+    assert_eq!(combined, WriteFlags::NullTerminateAndReplaceInvalidUtf8);
+}
+
+#[test]
+fn write_flags_combined_variant_equals_bitor() {
+    assert_eq!(
+        WriteFlags::NullTerminateAndReplaceInvalidUtf8.bits(),
+        WriteFlags::NullTerminate.bits() | WriteFlags::ReplaceInvalidUtf8.bits()
+    );
 }
 
 // =============================================================================
@@ -407,7 +420,7 @@ fn utf8_value_length_matches_byte_count() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "hello".to_local(lock);
-        let utf8 = Utf8Value::new(lock, val);
+        let utf8 = Utf8Value::new(lock, &val);
         assert_eq!(utf8.length(), 5);
         Ok(())
     });
@@ -418,7 +431,7 @@ fn utf8_value_as_str_returns_correct_content() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "hello world".to_local(lock);
-        let utf8 = Utf8Value::new(lock, val);
+        let utf8 = Utf8Value::new(lock, &val);
         assert_eq!(utf8.as_str(), Some("hello world"));
         Ok(())
     });
@@ -430,7 +443,7 @@ fn utf8_value_as_bytes_matches_utf8_encoding() {
     harness.run_in_context(|lock, _ctx| {
         let input = "Rust 🦀";
         let val: Local<'_, Value> = input.to_local(lock);
-        let utf8 = Utf8Value::new(lock, val);
+        let utf8 = Utf8Value::new(lock, &val);
         assert_eq!(utf8.as_bytes(), input.as_bytes());
         Ok(())
     });
@@ -442,7 +455,7 @@ fn utf8_value_from_unicode_string() {
     harness.run_in_context(|lock, _ctx| {
         let input = "こんにちは";
         let val: Local<'_, Value> = input.to_local(lock);
-        let utf8 = Utf8Value::new(lock, val);
+        let utf8 = Utf8Value::new(lock, &val);
         assert_eq!(utf8.length(), input.len());
         assert_eq!(utf8.as_str(), Some(input));
         Ok(())
@@ -454,7 +467,7 @@ fn utf8_value_from_empty_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "".to_local(lock);
-        let utf8 = Utf8Value::new(lock, val);
+        let utf8 = Utf8Value::new(lock, &val);
         assert_eq!(utf8.length(), 0);
         assert_eq!(utf8.as_str(), Some(""));
         Ok(())
@@ -466,7 +479,7 @@ fn utf8_value_as_ptr_is_non_null() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "test".to_local(lock);
-        let utf8 = Utf8Value::new(lock, val);
+        let utf8 = Utf8Value::new(lock, &val);
         assert!(!utf8.as_ptr().is_null());
         Ok(())
     });
@@ -477,7 +490,7 @@ fn utf8_value_coerces_number_to_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let val = ctx.eval_raw("42").map_err(|e| e.unwrap_jsg_err(lock))?;
-        let utf8 = Utf8Value::new(lock, val);
+        let utf8 = Utf8Value::new(lock, &val);
         assert_eq!(utf8.as_str(), Some("42"));
         Ok(())
     });
