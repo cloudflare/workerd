@@ -1,1 +1,2 @@
 allow-unwrap-in-tests = true
+max-fn-params-bools = 0

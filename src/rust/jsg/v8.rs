@@ -42,6 +42,10 @@ use crate::Number;
 use crate::Resource;
 #[expect(clippy::missing_safety_doc)]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "bool parameters in FFI are dictated by the C++ interface"
+)]
 pub mod ffi {
     #[derive(Debug)]
     struct Local {
@@ -1953,6 +1957,12 @@ impl WrappableRc {
     /// the C++ side with the ref's current `strong` flag. If `is_strong` is
     /// true, `~RefToDelete` will call `removeStrongRef()`; if false (the ref
     /// was already weakened by GC tracing), it skips the decrement.
+    // The bool maps directly to the C++ FFI parameter; an enum would just
+    // convert back to bool immediately before crossing the boundary.
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "thin wrapper over FFI; bool is dictated by the C++ interface"
+    )]
     pub(crate) fn remove_strong_ref(&mut self, is_strong: bool) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
         unsafe { ffi::wrappable_remove_strong_ref(self.as_pin_mut(), is_strong) };
