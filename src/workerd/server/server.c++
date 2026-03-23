@@ -4142,12 +4142,12 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
     }
 
     kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
-        kj::Maybe<kj::String> name, Frankenvalue props) override {
+        kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
       return kj::refcounted<SubrequestChannelImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
     }
 
     kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
-        kj::Maybe<kj::String> name, Frankenvalue props) override {
+        kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
       return kj::refcounted<ActorClassImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
     }
 
