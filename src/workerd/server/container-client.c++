@@ -676,7 +676,17 @@ kj::Promise<uint16_t> ContainerClient::startEgressListener(
   egressHttpServer = httpServer.attach(kj::mv(service));
 
   auto addr = co_await network.parseAddress(kj::str(listenAddress, ":", port));
-  auto listener = addr->listen();
+  // The gateway IP from Docker's bridge network is not always bindable on the host.
+  // On WSL with Docker Desktop, 172.17.0.1 lives inside the Docker VM, not on the WSL host's
+  // interfaces. In that case, fall back to loopback — the sidecar reaches the host via
+  // host-gateway (which Docker Desktop maps to the host loopback) so 127.0.0.1 works correctly.
+  kj::Own<kj::ConnectionReceiver> listener;
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { listener = addr->listen(); })) {
+    KJ_LOG(WARNING, "Could not bind egress listener to gateway address, falling back to loopback",
+        listenAddress, e);
+    auto fallbackAddr = co_await network.parseAddress(kj::str("127.0.0.1:", port));
+    listener = fallbackAddr->listen();
+  }
 
   uint16_t chosenPort = listener->getPort();
 
