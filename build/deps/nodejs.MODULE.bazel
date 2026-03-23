@@ -37,6 +37,10 @@ use_repo(npm, "npm")
 
 rules_ts_ext = use_extension("@aspect_rules_ts//ts:extensions.bzl", "ext")
 rules_ts_ext.deps(
+    # TypeScript 6.0.2 is not yet mirrored in rules_ts, so we must provide the integrity hash manually.
+    # Retrieve with: curl -s https://registry.npmjs.org/typescript/6.0.2 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['dist']['integrity'])"
+    # Remove this once rules_ts mirrors typescript 6.x.
+    ts_integrity = "sha512-bGdAIrZ0wiGDo5l8c++HWtbaNCWTS4UTv7RaTH/ThVIgjkveJt83m74bBHMJkuCbslY8ixgLBVZJIOiQlQTjfQ==",
     # This keeps the TypeScript version in-sync with the editor, which is typically best.
     ts_version_from = "//:package.json",
 )

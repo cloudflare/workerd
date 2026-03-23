@@ -59,7 +59,10 @@ let IN_REQUEST_CONTEXT = false;
  * See entropy_import_context.py where `allow_bad_entropy_calls` is used to dole
  * out the bad entropy.
  */
-export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
+export function getRandomValues(
+  Module: Module,
+  arr: Uint8Array<ArrayBuffer>
+): Uint8Array<ArrayBuffer> {
   if (IN_REQUEST_CONTEXT) {
     return crypto.getRandomValues(arr);
   }
