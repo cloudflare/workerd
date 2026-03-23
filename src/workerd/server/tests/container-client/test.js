@@ -1246,6 +1246,59 @@ export class DurableObjectExample extends DurableObject {
     await monitor2;
   }
 
+  async testSnapshotStoppedContainer() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    await assert.rejects(
+      () => container.snapshotDirectory({ dir: '/app/data' }),
+      (err) => {
+        assert.match(err.message, /not running/);
+        return true;
+      }
+    );
+  }
+
+  async testSnapshotRestoreNonExistentId() {
+    const container = this.ctx.container;
+    if (container.running) {
+      const monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    const fakeSnapshot = {
+      id: 'deadbeef-0000-0000-0000-000000000000',
+      size: 1024,
+      dir: '/app/data',
+    };
+
+    await assert.rejects(
+      () =>
+        new Promise((resolve, reject) => {
+          try {
+            container.start({
+              enableInternet: true,
+              snapshots: [{ snapshot: fakeSnapshot }],
+            });
+          } catch (err) {
+            return reject(err);
+          }
+          const monitor = container.monitor().then(resolve).catch(reject);
+        }),
+      (err) => {
+        assert.ok(err.message.length > 0, 'error should have a message');
+        return true;
+      }
+    );
+  }
+
   async testSnapshotNonExistentDirectory() {
     const container = this.ctx.container;
     if (container.running) {
@@ -1656,6 +1709,28 @@ export const testSnapshotRestoreToRoot = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testSnapshotRestoreToRoot();
+  },
+};
+
+// Test that snapshotDirectory() on a stopped container gives a clear error
+export const testSnapshotStoppedContainer = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSnapshotStoppedContainer')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testSnapshotStoppedContainer();
+  },
+};
+
+// Test that restoring a snapshot with a nonexistent ID fails
+export const testSnapshotRestoreNonExistentId = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSnapshotRestoreNonExistentId')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testSnapshotRestoreNonExistentId();
   },
 };
 

@@ -506,10 +506,9 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
       channelTokenHandler(channelTokenHandler) {
-  if (!staleSnapshotVolumeCheckScheduled) {
-    staleSnapshotVolumeCheckScheduled = true;
+  if (!staleSnapshotVolumeCheckScheduled.exchange(true)) {
     waitUntilTasks.add(warnAboutStaleSnapshotVolumes(network, kj::str(this->dockerPath))
-            .catch_([](kj::Exception&& e) {
+                           .catch_([](kj::Exception&& e) {
       KJ_LOG(WARNING, "failed to inspect snapshot volumes for staleness", e);
     }));
   }
@@ -1556,17 +1555,17 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   co_await ready;
   KJ_DEFER(done->fulfill());
 
-  auto params = context.getParams();
-  auto dir = kj::str(params.getDir());
+  const auto params = context.getParams();
+
+  const auto dir = normalizePath(kj::str(params.getDir()));
+  validateAbsolutePath(dir);
+
   auto name = params.hasName() && params.getName().size() > 0
       ? kj::Maybe<kj::String>(kj::str(params.getName()))
       : kj::Maybe<kj::String>(kj::none);
 
   JSG_REQUIRE(containerStarted.load(std::memory_order_acquire), Error,
       "snapshotDirectory() requires a running container.");
-
-  validateAbsolutePath(dir);
-  dir = normalizePath(kj::mv(dir));
 
   auto snapshotId = randomUUID(kj::none);
 
