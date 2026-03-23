@@ -577,6 +577,19 @@ size_t local_typed_array_length(Isolate* isolate, const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->Length();
 }
 
+uintptr_t local_typed_array_buffer_data(Isolate* isolate, const Local& array) {
+  return reinterpret_cast<uintptr_t>(
+      local_as_ref_from_ffi<v8::TypedArray>(array)->Buffer()->Data());
+}
+
+size_t local_typed_array_byte_offset(Isolate* isolate, const Local& array) {
+  return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteOffset();
+}
+
+size_t local_typed_array_byte_length(Isolate* isolate, const Local& array) {
+  return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteLength();
+}
+
 // TypedArray element getter functions
 DEFINE_TYPED_ARRAY_GET(uint8_array, Uint8Array, uint8_t)
 DEFINE_TYPED_ARRAY_GET(uint16_array, Uint16Array, uint16_t)

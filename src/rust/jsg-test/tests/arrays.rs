@@ -1011,6 +1011,267 @@ fn bigint64_array_to_js_and_from_js() {
 }
 
 // =============================================================================
+// as_slice / as_mut_slice / byte_offset / data / FromJS for Local<T>
+// =============================================================================
+
+/// Helper resource whose methods accept `Local<'_, T>` directly via `FromJS`.
+#[jsg_resource]
+struct SliceResource;
+
+#[jsg_resource]
+impl SliceResource {
+    /// Accepts a `Local<Uint8Array>` directly and sums its elements via `as_slice`.
+    #[jsg_method]
+    pub fn sum_u8_local(&self, arr: jsg::v8::Local<jsg::v8::Uint8Array>) -> jsg::Number {
+        jsg::Number::new(arr.as_slice().iter().map(|&x| f64::from(x)).sum())
+    }
+
+    /// Accepts a `Local<Int32Array>` directly and sums its elements via `as_slice`.
+    #[jsg_method]
+    pub fn sum_i32_local(&self, arr: jsg::v8::Local<jsg::v8::Int32Array>) -> jsg::Number {
+        jsg::Number::new(arr.as_slice().iter().map(|&x| f64::from(x)).sum())
+    }
+
+    /// Accepts a `Local<Float64Array>` directly and sums its elements via `as_slice`.
+    #[jsg_method]
+    pub fn sum_f64_local(&self, arr: jsg::v8::Local<jsg::v8::Float64Array>) -> jsg::Number {
+        jsg::Number::new(arr.as_slice().iter().copied().sum())
+    }
+
+    /// Writes `0xFF` into every byte via `as_mut_slice` and returns the length.
+    #[jsg_method]
+    pub fn fill_ff(&self, mut arr: jsg::v8::Local<jsg::v8::Uint8Array>) -> jsg::Number {
+        // SAFETY: no other reference into this buffer is live during this call.
+        unsafe { arr.as_mut_slice() }.fill(0xFF);
+        #[expect(clippy::cast_precision_loss)]
+        jsg::Number::new(arr.len() as f64)
+    }
+}
+
+#[test]
+fn typed_array_as_slice_zero_copy_sum() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let res = jsg::Rc::new(SliceResource);
+        ctx.set_global("r", res.to_js(lock));
+
+        // Uint8Array
+        let result: jsg::Number = ctx
+            .eval(lock, "r.sumU8Local(new Uint8Array([10, 20, 30]))")
+            .unwrap();
+        assert!((result.value() - 60.0).abs() < f64::EPSILON);
+
+        // Int32Array
+        let result: jsg::Number = ctx
+            .eval(lock, "r.sumI32Local(new Int32Array([-1, 0, 1]))")
+            .unwrap();
+        assert!((result.value() - 0.0).abs() < f64::EPSILON);
+
+        // Float64Array
+        let result: jsg::Number = ctx
+            .eval(lock, "r.sumF64Local(new Float64Array([1.5, 2.5]))")
+            .unwrap();
+        assert!((result.value() - 4.0).abs() < f64::EPSILON);
+
+        Ok(())
+    });
+}
+
+#[test]
+fn typed_array_as_slice_empty() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let data: Vec<u8> = vec![];
+        let js_val = data.to_js(lock);
+        let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
+            // SAFETY: isolate valid, js_val is a Uint8Array Local.
+            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+
+        assert_eq!(typed.as_slice(), &[] as &[u8]);
+        Ok(())
+    });
+}
+
+#[test]
+fn typed_array_as_mut_slice_mutations_visible_in_js() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let res = jsg::Rc::new(SliceResource);
+        ctx.set_global("r", res.to_js(lock));
+
+        // fill_ff writes 0xFF into every element in-place.
+        // The returned length tells us how many bytes were written.
+        let len: jsg::Number = ctx
+            .eval(lock, "r.fillFf(new Uint8Array([1, 2, 3]))")
+            .unwrap();
+        assert!((len.value() - 3.0).abs() < f64::EPSILON);
+
+        // Independently verify with a captured reference: create an array in JS,
+        // pass it in, then read back the same object.
+        let check: jsg::Number = ctx
+            .eval(
+                lock,
+                r"
+                    const buf = new Uint8Array([0, 0, 0]);
+                    r.fillFf(buf);
+                    buf[0] === 255 && buf[1] === 255 && buf[2] === 255 ? 1 : 0
+                ",
+            )
+            .unwrap();
+        assert!((check.value() - 1.0).abs() < f64::EPSILON);
+
+        Ok(())
+    });
+}
+
+#[test]
+fn typed_array_byte_offset_non_zero() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        // Create a view that starts 4 bytes into an 8-byte buffer.
+        // byte_offset() must return 4, len() must return 1.
+        let js_val = ctx
+            .eval_raw(
+                r"
+                    const buf = new ArrayBuffer(8);
+                    const view = new Uint32Array(buf, 4, 1);
+                    view
+                ",
+            )
+            .unwrap();
+        let typed: jsg::v8::Local<'_, jsg::v8::Uint32Array> =
+            // SAFETY: isolate valid; js_val is a Uint32Array Local.
+            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+
+        assert_eq!(typed.byte_offset(), 4);
+        assert_eq!(typed.byte_length(), 4); // 1 element × 4 bytes/u32
+        assert_eq!(typed.len(), 1);
+        Ok(())
+    });
+}
+
+#[test]
+fn typed_array_as_slice_with_byte_offset() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        // Build a 12-byte buffer [0,1,2,...,11], create a Uint8Array view
+        // starting at offset 4 covering 4 bytes: [4, 5, 6, 7].
+        let js_val = ctx
+            .eval_raw(
+                r"
+                    const buf = new ArrayBuffer(12);
+                    const all = new Uint8Array(buf);
+                    for (let i = 0; i < 12; i++) all[i] = i;
+                    new Uint8Array(buf, 4, 4)
+                ",
+            )
+            .unwrap();
+        let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
+            // SAFETY: isolate valid; js_val is a Uint8Array Local.
+            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+
+        assert_eq!(typed.byte_offset(), 4);
+        assert_eq!(typed.len(), 4);
+        assert_eq!(typed.as_slice(), &[4u8, 5, 6, 7]);
+        Ok(())
+    });
+}
+
+#[test]
+fn typed_array_data_pointer_and_byte_offset() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let data: Vec<u8> = vec![10, 20, 30, 40];
+        let js_val = data.to_js(lock);
+        let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
+            // SAFETY: isolate valid; js_val is a Uint8Array Local.
+            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+
+        // A freshly created TypedArray has byte_offset == 0.
+        assert_eq!(typed.byte_offset(), 0);
+
+        // data() + byte_offset() must point at the first element.
+        // as_slice() is derived from exactly this computation, so they must agree.
+        let slice = typed.as_slice();
+        // SAFETY: as_slice() contracts guarantee the pointer + len are valid here.
+        let from_ptr: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                typed.data().byte_add(typed.byte_offset()).cast_const(),
+                typed.len(),
+            )
+        };
+        assert_eq!(slice, from_ptr);
+        assert_eq!(from_ptr, &[10u8, 20, 30, 40]);
+        Ok(())
+    });
+}
+
+#[test]
+fn typed_array_from_js_local_rejects_wrong_type() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let res = jsg::Rc::new(SliceResource);
+        ctx.set_global("r", res.to_js(lock));
+
+        // sumU8Local expects Uint8Array — Int8Array must be rejected.
+        let result: Result<jsg::Number, _> =
+            ctx.eval(lock, "r.sumU8Local(new Int8Array([1, 2, 3]))");
+        assert!(result.is_err());
+
+        // Regular Array must also be rejected.
+        let result: Result<jsg::Number, _> = ctx.eval(lock, "r.sumU8Local([1, 2, 3])");
+        assert!(result.is_err());
+
+        // sumI32Local expects Int32Array — Uint32Array must be rejected.
+        let result: Result<jsg::Number, _> =
+            ctx.eval(lock, "r.sumI32Local(new Uint32Array([1, 2, 3]))");
+        assert!(result.is_err());
+
+        Ok(())
+    });
+}
+
+#[test]
+fn typed_array_element_size_and_is_integer_type() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        // u8 / Uint8Array: 1 byte per element, integer type.
+        let js_val = vec![0u8, 0].to_js(lock);
+        let arr: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
+            // SAFETY: isolate valid; js_val is a Uint8Array Local.
+            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+        assert_eq!(arr.element_size(), 1);
+        assert!(arr.is_integer_type());
+
+        // u32 / Uint32Array: 4 bytes per element, integer type.
+        let js_val = vec![0u32, 0].to_js(lock);
+        let arr: jsg::v8::Local<'_, jsg::v8::Uint32Array> =
+            // SAFETY: isolate valid; js_val is a Uint32Array Local.
+            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+        assert_eq!(arr.element_size(), 4);
+        assert!(arr.is_integer_type());
+
+        // f32 / Float32Array: 4 bytes per element, NOT an integer type.
+        let js_val = vec![0f32, 0.0].to_js(lock);
+        let arr: jsg::v8::Local<'_, jsg::v8::Float32Array> =
+            // SAFETY: isolate valid; js_val is a Float32Array Local.
+            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+        assert_eq!(arr.element_size(), 4);
+        assert!(!arr.is_integer_type());
+
+        // f64 / Float64Array: 8 bytes per element, NOT an integer type.
+        let js_val = vec![0f64, 0.0].to_js(lock);
+        let arr: jsg::v8::Local<'_, jsg::v8::Float64Array> =
+            // SAFETY: isolate valid; js_val is a Float64Array Local.
+            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+        assert_eq!(arr.element_size(), 8);
+        assert!(!arr.is_integer_type());
+
+        Ok(())
+    });
+}
+
+// =============================================================================
 // BigUint64Array tests
 // =============================================================================
 
