@@ -48,6 +48,14 @@ pub mod ffi {
         ptr: usize,
     }
 
+    /// Mirrors `v8::MaybeLocal<T>`: a single pointer-sized word where `ptr == 0` means empty.
+    /// This matches V8's internal layout exactly — `v8::MaybeLocal<T>` holds one `Local<T>`
+    /// field which is itself one `internal::Address*` (one pointer word).
+    #[derive(Debug)]
+    struct MaybeLocal {
+        ptr: usize,
+    }
+
     #[derive(Debug)]
     struct Global {
         /// Strong `v8::Global<v8::Value>` handle. Always valid when non-zero.
@@ -63,6 +71,11 @@ pub mod ffi {
 
     #[derive(Debug)]
     struct GcVisitor {
+        ptr: usize,
+    }
+
+    #[derive(Debug)]
+    struct Utf8Value {
         ptr: usize,
     }
 
@@ -195,6 +208,64 @@ pub mod ffi {
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
         pub unsafe fn local_is_function(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
+
+        // Local<String>
+        pub unsafe fn local_string_length(value: &Local) -> i32;
+        pub unsafe fn local_string_is_one_byte(value: &Local) -> bool;
+        pub unsafe fn local_string_contains_only_one_byte(value: &Local) -> bool;
+        pub unsafe fn local_string_utf8_length(isolate: *mut Isolate, value: &Local) -> usize;
+        pub unsafe fn local_string_write_v2(
+            isolate: *mut Isolate,
+            value: &Local,
+            offset: u32,
+            length: u32,
+            buffer: *mut u16,
+            flags: i32,
+        );
+        pub unsafe fn local_string_write_one_byte_v2(
+            isolate: *mut Isolate,
+            value: &Local,
+            offset: u32,
+            length: u32,
+            buffer: *mut u8,
+            flags: i32,
+        );
+        pub unsafe fn local_string_write_utf8_v2(
+            isolate: *mut Isolate,
+            value: &Local,
+            buffer: *mut u8,
+            capacity: usize,
+            flags: i32,
+        ) -> usize;
+        pub unsafe fn local_string_empty(isolate: *mut Isolate) -> Local;
+        pub unsafe fn local_string_equals(lhs: &Local, rhs: &Local) -> bool;
+        pub unsafe fn local_string_is_flat(value: &Local) -> bool;
+        pub unsafe fn local_string_concat(
+            isolate: *mut Isolate,
+            left: Local,
+            right: Local,
+        ) -> Local;
+        pub unsafe fn local_string_internalize(isolate: *mut Isolate, value: &Local) -> Local;
+        pub unsafe fn local_string_get_identity_hash(value: &Local) -> i32;
+        pub unsafe fn local_string_new_from_utf8(
+            isolate: *mut Isolate,
+            data: *const u8,
+            length: i32,
+            internalized: bool,
+        ) -> MaybeLocal;
+        pub unsafe fn local_string_new_from_one_byte(
+            isolate: *mut Isolate,
+            data: *const u8,
+            length: i32,
+            internalized: bool,
+        ) -> MaybeLocal;
+        pub unsafe fn local_string_new_from_two_byte(
+            isolate: *mut Isolate,
+            data: *const u16,
+            length: i32,
+            internalized: bool,
+        ) -> MaybeLocal;
+        pub unsafe fn maybe_local_is_empty(value: &MaybeLocal) -> bool;
 
         // Local<Function>
         pub unsafe fn local_function_call(
@@ -431,6 +502,11 @@ pub mod ffi {
             isolate: *mut Isolate,
             constructor: &Global, /* v8::Global<FunctionTemplate> */
         ) -> Local /* v8::Local<Function> */;
+
+        pub unsafe fn utf8_value_new(isolate: *mut Isolate, value: Local) -> Utf8Value;
+        pub unsafe fn utf8_value_drop(value: Utf8Value);
+        pub unsafe fn utf8_value_length(value: &Utf8Value) -> usize;
+        pub unsafe fn utf8_value_data(value: &Utf8Value) -> *const u8;
     }
 
     /// Module visibility level, mirroring workerd::jsg::ModuleType from modules.capnp.
@@ -482,12 +558,214 @@ impl std::fmt::Display for ffi::ExceptionType {
 // Marker types for Local<T>
 #[derive(Debug)]
 pub struct Value;
+/// Marker for `v8::String` handles.
+#[derive(Debug)]
+pub struct String;
+
+impl String {
+    /// Maximum length of a V8 string in UTF-16 code units.
+    ///
+    /// Matches `v8::String::kMaxLength`. Attempting to create a string longer than
+    /// this will cause V8 to return an empty `MaybeLocal`.
+    pub const MAX_LENGTH: i32 = if cfg!(target_pointer_width = "32") {
+        (1 << 28) - 16
+    } else {
+        (1 << 29) - 24
+    };
+
+    /// Returns the empty string singleton.
+    ///
+    /// Corresponds to `v8::String::Empty()`.
+    pub fn empty<'a>(lock: &mut crate::Lock) -> Local<'a, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe { Local::from_ffi(isolate, ffi::local_string_empty(isolate.as_ffi())) }
+    }
+
+    /// Creates a new string from a `&str`.
+    ///
+    /// Corresponds to `v8::String::NewFromUtf8`.
+    pub fn new_from_str<'a>(lock: &mut crate::Lock, data: &str) -> MaybeLocal<'a, Self> {
+        Self::new_from_utf8(lock, data.as_bytes())
+    }
+
+    /// Creates an internalized string from a `&str`.
+    ///
+    /// Equal strings will be pointer-equal after internalization, which speeds up
+    /// property-key lookups at the cost of a hash-table probe on creation.
+    ///
+    /// Corresponds to `v8::String::NewFromUtf8` with `kInternalized`.
+    pub fn new_internalized_from_str<'a>(
+        lock: &mut crate::Lock,
+        data: &str,
+    ) -> MaybeLocal<'a, Self> {
+        Self::new_internalized_from_utf8(lock, data.as_bytes())
+    }
+
+    /// Creates a new string from a UTF-8 string literal.
+    ///
+    /// Panics at runtime if `literal.len()` exceeds [`Self::MAX_LENGTH`], matching
+    /// the compile-time `static_assert` that `v8::String::NewFromUtf8Literal` performs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `literal.len()` exceeds [`Self::MAX_LENGTH`].
+    ///
+    /// Corresponds to `v8::String::NewFromUtf8Literal`.
+    pub fn new_from_utf8_literal<'a>(
+        lock: &mut crate::Lock,
+        literal: &'static str,
+    ) -> MaybeLocal<'a, Self> {
+        assert!(
+            literal.len() <= Self::MAX_LENGTH as usize,
+            "string literal exceeds v8::String::kMaxLength"
+        );
+        Self::new_from_utf8(lock, literal.as_bytes())
+    }
+
+    /// Creates a new string from UTF-8 data.
+    ///
+    /// Returns an empty `MaybeLocal` if V8 cannot allocate the string.
+    ///
+    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes
+    /// to satisfy V8's `int`-typed length parameter; in practice V8 will reject strings
+    /// that large anyway due to heap limits.
+    ///
+    /// Corresponds to `v8::String::NewFromUtf8`.
+    pub fn new_from_utf8<'a>(lock: &mut crate::Lock, data: &[u8]) -> MaybeLocal<'a, Self> {
+        let isolate = lock.isolate();
+        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
+        // data.as_ptr() and len describe a valid byte slice.
+        let handle =
+            unsafe { ffi::local_string_new_from_utf8(isolate.as_ffi(), data.as_ptr(), len, false) };
+        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
+        unsafe { MaybeLocal::from_ffi(handle) }
+    }
+
+    /// Creates an internalized string from UTF-8 data.
+    ///
+    /// Equal strings will be pointer-equal after internalization, which speeds up
+    /// property-key lookups at the cost of a hash-table probe on creation.
+    ///
+    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
+    ///
+    /// Corresponds to `v8::String::NewFromUtf8` with `kInternalized`.
+    pub fn new_internalized_from_utf8<'a>(
+        lock: &mut crate::Lock,
+        data: &[u8],
+    ) -> MaybeLocal<'a, Self> {
+        let isolate = lock.isolate();
+        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
+        // data.as_ptr() and len describe a valid byte slice.
+        let handle =
+            unsafe { ffi::local_string_new_from_utf8(isolate.as_ffi(), data.as_ptr(), len, true) };
+        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
+        unsafe { MaybeLocal::from_ffi(handle) }
+    }
+
+    /// Creates a new string from Latin-1 (one-byte) data.
+    ///
+    /// Each byte is mapped to the Unicode code point with the same value.
+    /// Returns an empty `MaybeLocal` if V8 cannot allocate the string.
+    ///
+    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
+    ///
+    /// Corresponds to `v8::String::NewFromOneByte`.
+    pub fn new_from_one_byte<'a>(lock: &mut crate::Lock, data: &[u8]) -> MaybeLocal<'a, Self> {
+        let isolate = lock.isolate();
+        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
+        let handle = unsafe {
+            ffi::local_string_new_from_one_byte(isolate.as_ffi(), data.as_ptr(), len, false)
+        };
+        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
+        unsafe { MaybeLocal::from_ffi(handle) }
+    }
+
+    /// Creates an internalized string from Latin-1 (one-byte) data.
+    ///
+    /// Equal strings will be pointer-equal after internalization.
+    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
+    ///
+    /// Corresponds to `v8::String::NewFromOneByte` with `kInternalized`.
+    pub fn new_internalized_from_one_byte<'a>(
+        lock: &mut crate::Lock,
+        data: &[u8],
+    ) -> MaybeLocal<'a, Self> {
+        let isolate = lock.isolate();
+        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
+        let handle = unsafe {
+            ffi::local_string_new_from_one_byte(isolate.as_ffi(), data.as_ptr(), len, true)
+        };
+        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
+        unsafe { MaybeLocal::from_ffi(handle) }
+    }
+
+    /// Creates a new string from UTF-16 data.
+    ///
+    /// Returns an empty `MaybeLocal` if V8 cannot allocate the string.
+    ///
+    /// Strings longer than `i32::MAX` code units are silently truncated to `i32::MAX` code units.
+    ///
+    /// Corresponds to `v8::String::NewFromTwoByte`.
+    pub fn new_from_two_byte<'a>(lock: &mut crate::Lock, data: &[u16]) -> MaybeLocal<'a, Self> {
+        let isolate = lock.isolate();
+        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
+        let handle = unsafe {
+            ffi::local_string_new_from_two_byte(isolate.as_ffi(), data.as_ptr(), len, false)
+        };
+        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
+        unsafe { MaybeLocal::from_ffi(handle) }
+    }
+
+    /// Creates an internalized string from UTF-16 data.
+    ///
+    /// Equal strings will be pointer-equal after internalization.
+    /// Strings longer than `i32::MAX` code units are silently truncated to `i32::MAX` code units.
+    ///
+    /// Corresponds to `v8::String::NewFromTwoByte` with `kInternalized`.
+    pub fn new_internalized_from_two_byte<'a>(
+        lock: &mut crate::Lock,
+        data: &[u16],
+    ) -> MaybeLocal<'a, Self> {
+        let isolate = lock.isolate();
+        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
+        let handle = unsafe {
+            ffi::local_string_new_from_two_byte(isolate.as_ffi(), data.as_ptr(), len, true)
+        };
+        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
+        unsafe { MaybeLocal::from_ffi(handle) }
+    }
+
+    /// Concatenates two strings.
+    ///
+    /// Corresponds to `v8::String::Concat()`.
+    pub fn concat<'a>(
+        lock: &mut crate::Lock,
+        left: Local<'a, Self>,
+        right: Local<'a, Self>,
+    ) -> Local<'a, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        unsafe {
+            Local::from_ffi(
+                isolate,
+                ffi::local_string_concat(isolate.as_ffi(), left.into_ffi(), right.into_ffi()),
+            )
+        }
+    }
+}
 
 impl Display for Local<'_, Value> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // SAFETY: isolate is valid and locked (guaranteed by the Local's invariant).
         let mut lock = unsafe { Lock::from_isolate_ptr(self.isolate.as_ffi()) };
-        match String::from_js(&mut lock, self.clone()) {
+        match <std::string::String as FromJS>::from_js(&mut lock, self.clone()) {
             Ok(value) => write!(f, "{value}"),
             Err(e) => write!(f, "{e:?}"),
         }
@@ -729,7 +1007,7 @@ impl<'a, T> Local<'a, T> {
     /// "bigint", "string", "symbol", "function", or "object".
     ///
     /// Note: For `null`, this returns "object" (JavaScript's historical behavior).
-    pub fn type_of(&self) -> String {
+    pub fn type_of(&self) -> std::string::String {
         // SAFETY: handle is valid within the current HandleScope.
         unsafe { ffi::local_type_of(self.isolate.as_ffi(), &self.handle) }
     }
@@ -777,6 +1055,7 @@ macro_rules! impl_as {
 impl_as!(Function, is_function);
 impl_as!(Object, is_object);
 impl_as!(Array, is_array);
+impl_as!(String, is_string);
 
 // Value-specific implementations
 impl<'a> Local<'a, Value> {
@@ -802,6 +1081,15 @@ impl PartialEq for Local<'_, Value> {
         unsafe { ffi::local_eq(&self.handle, &other.handle) }
     }
 }
+
+impl PartialEq for Local<'_, String> {
+    fn eq(&self, other: &Self) -> bool {
+        // SAFETY: Both handles are valid V8 String handles.
+        unsafe { ffi::local_string_equals(&self.handle, &other.handle) }
+    }
+}
+
+impl Eq for Local<'_, String> {}
 
 impl Local<'_, Function> {
     /// Calls this function and converts the result via [`FromJS`].
@@ -875,6 +1163,7 @@ macro_rules! impl_local_cast {
 }
 
 // Upcasts to Value
+impl_local_cast!(String -> Value, is_string);
 impl_local_cast!(Object -> Value, is_object);
 impl_local_cast!(Function -> Value, is_function);
 impl_local_cast!(Array -> Value, is_array);
@@ -1179,6 +1468,488 @@ impl_typed_array!(Float64Array, f64, local_float64_array_get);
 impl_typed_array!(BigInt64Array, i64, local_bigint64_array_get);
 impl_typed_array!(BigUint64Array, u64, local_biguint64_array_get);
 
+// =============================================================================
+// `String`-specific implementations
+// =============================================================================
+
+/// Write flags matching `v8::String::WriteFlags`.
+///
+/// These correspond directly to `kNone`, `kNullTerminate`, and `kReplaceInvalidUtf8`.
+/// Flags can be combined with `|` via the `BitOr` impl.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(i32)]
+pub enum WriteFlags {
+    /// No special write flags.
+    #[default]
+    None = 0,
+    /// Include a null terminator in the output. The buffer must have space for it.
+    NullTerminate = 1,
+    /// Replace invalid UTF-8/UTF-16 sequences with the Unicode replacement character U+FFFD.
+    /// Set this to guarantee valid UTF-8 output from `write_utf8`.
+    ReplaceInvalidUtf8 = 2,
+    /// Combines `NullTerminate` and `ReplaceInvalidUtf8`.
+    ///
+    /// Equivalent to `NullTerminate | ReplaceInvalidUtf8`. This variant exists so that
+    /// the enum covers every value in `0..=3`, making the `BitOr` transmute sound.
+    NullTerminateAndReplaceInvalidUtf8 = 3,
+}
+
+impl WriteFlags {
+    /// Returns the underlying `i32` bitmask value.
+    #[inline]
+    pub fn bits(self) -> i32 {
+        self as i32
+    }
+}
+
+impl std::ops::BitOr for WriteFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        // SAFETY: WriteFlags variants cover all values 0..=3; OR-ing any two
+        // produces a value in that range, all of which have valid discriminants.
+        unsafe { std::mem::transmute(self.bits() | rhs.bits()) }
+    }
+}
+
+/// Rust equivalent of `v8::MaybeLocal<T>` — either a `Local<T>` or empty.
+///
+/// Mirrors V8's layout exactly: one pointer-sized word where `ptr == 0` is empty.
+/// No boxing, no `Option` overhead, no stored isolate — this is a direct ABI-compatible
+/// view of the `ffi::MaybeLocal` returned across the FFI boundary.
+///
+/// Methods that produce a `Local<T>` require a `&mut Lock` so they can recover the
+/// isolate pointer on demand, matching the pattern used by `Local<T>` constructors.
+pub struct MaybeLocal<'a, T> {
+    /// The raw FFI handle. `ptr == 0` means empty (matches `v8::MaybeLocal` default).
+    handle: ffi::MaybeLocal,
+    _marker: PhantomData<(&'a (), T)>,
+}
+
+impl<'a, T> MaybeLocal<'a, T> {
+    /// Wraps a raw `ffi::MaybeLocal` returned from the FFI layer.
+    ///
+    /// # Safety
+    /// If `handle.ptr != 0`, the handle must point to a live V8 value within the
+    /// current `HandleScope` of the active isolate.
+    pub unsafe fn from_ffi(handle: ffi::MaybeLocal) -> Self {
+        Self {
+            handle,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns `true` if this `MaybeLocal` is empty.
+    pub fn is_empty(&self) -> bool {
+        // SAFETY: handle is a valid ffi::MaybeLocal; no isolate or HandleScope needed.
+        unsafe { ffi::maybe_local_is_empty(&self.handle) }
+    }
+
+    /// Returns the contained value as a `Local<T>` without consuming `self`, or `None` if empty.
+    ///
+    /// Copies the underlying V8 handle pointer so that both `self` and the returned `Local`
+    /// refer to the same V8 value. V8 `Local` handles are non-owning references into the
+    /// `HandleScope` stack; `local_clone` is a cheap pointer copy (not a deep clone), and
+    /// `local_drop` is a no-op for locals. Use [`into_option`](Self::into_option) to transfer
+    /// ownership without the copy when `self` is no longer needed.
+    pub fn to_local(&self, lock: &mut crate::Lock) -> Option<Local<'a, T>> {
+        // SAFETY: handle is a valid ffi::MaybeLocal; no isolate or HandleScope needed.
+        if unsafe { ffi::maybe_local_is_empty(&self.handle) } {
+            return None;
+        }
+        // local_clone is a bitwise pointer copy — both the MaybeLocal and the returned Local
+        // refer to the same HandleScope entry. This is safe because Local handles are
+        // non-owning and local_drop is a no-op; the HandleScope itself manages the lifetime.
+        // SAFETY: handle is non-empty and points to a live V8 value in the current HandleScope.
+        let cloned = unsafe {
+            ffi::local_clone(&ffi::Local {
+                ptr: self.handle.ptr,
+            })
+        };
+        // SAFETY: handle is non-empty, isolate is valid, and cloned is a valid Local.
+        Some(unsafe { Local::from_ffi(lock.isolate(), cloned) })
+    }
+
+    /// Converts into `Option<Local<'a, T>>`, consuming `self`.
+    ///
+    /// Transfers ownership of the underlying handle without cloning, which is more efficient
+    /// than [`to_local`](Self::to_local) when `self` is no longer needed after the call.
+    pub fn into_option(self, lock: &mut crate::Lock) -> Option<Local<'a, T>> {
+        if self.handle.ptr == 0 {
+            return None;
+        }
+        // Transfer ownership: zero out the ptr so Drop becomes a no-op, then wrap in Local.
+        let ptr = self.handle.ptr;
+        // SAFETY: We are taking ownership of the handle; zeroing the ptr prevents double-free.
+        let mut this = std::mem::ManuallyDrop::new(self);
+        this.handle.ptr = 0;
+        // SAFETY: ptr is non-zero (checked above), isolate is valid, handle ownership transferred.
+        Some(unsafe { Local::from_ffi(lock.isolate(), ffi::Local { ptr }) })
+    }
+
+    /// Unwraps the value, panicking if empty.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `MaybeLocal` is empty.
+    pub fn unwrap(self, lock: &mut crate::Lock) -> Local<'a, T> {
+        self.into_option(lock).expect("MaybeLocal is empty")
+    }
+
+    /// Returns the contained `Local<T>`, or `default` if empty.
+    pub fn unwrap_or(self, lock: &mut crate::Lock, default: Local<'a, T>) -> Local<'a, T> {
+        self.into_option(lock).unwrap_or(default)
+    }
+}
+
+impl<T> Drop for MaybeLocal<'_, T> {
+    fn drop(&mut self) {
+        if self.handle.ptr != 0 {
+            let handle = std::mem::replace(&mut self.handle, ffi::MaybeLocal { ptr: 0 });
+            // SAFETY: handle is a valid non-empty V8 handle being released.
+            unsafe { ffi::local_drop(ffi::Local { ptr: handle.ptr }) };
+        }
+    }
+}
+
+impl<'a, T> From<Option<Local<'a, T>>> for MaybeLocal<'a, T> {
+    /// Constructs a `MaybeLocal` from an `Option<Local<T>>`.
+    /// `None` produces an empty handle (`ptr == 0`); `Some(local)` reuses its pointer.
+    fn from(opt: Option<Local<'a, T>>) -> Self {
+        let ptr = match opt {
+            None => 0,
+            Some(local) => {
+                // SAFETY: we take the handle's ptr out without dropping the Local so the
+                // handle slot stays alive in the HandleScope.
+                let ptr = local.handle.ptr;
+                std::mem::forget(local);
+                ptr
+            }
+        };
+        Self {
+            handle: ffi::MaybeLocal { ptr },
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl Local<'_, String> {
+    // Instance methods — correspond to `v8::String` member functions
+
+    /// Returns the number of characters (UTF-16 code units) in the string.
+    ///
+    /// Returns `i32` to match the V8 API (`v8::String::Length()` returns `int`).
+    /// V8 enforces a maximum string length well below `i32::MAX`, so the result
+    /// is always non-negative.
+    ///
+    /// Corresponds to `v8::String::Length()`.
+    #[inline]
+    pub fn length(&self) -> i32 {
+        // SAFETY: self.handle is a valid V8 String handle.
+        unsafe { ffi::local_string_length(&self.handle) }
+    }
+
+    /// Returns `true` if the string is represented internally as one-byte (Latin-1).
+    ///
+    /// Corresponds to `v8::String::IsOneByte()`.
+    #[inline]
+    pub fn is_one_byte(&self) -> bool {
+        // SAFETY: self.handle is a valid V8 String handle.
+        unsafe { ffi::local_string_is_one_byte(&self.handle) }
+    }
+
+    /// Returns `true` if all characters in the string fit in one byte (Latin-1).
+    ///
+    /// Unlike `is_one_byte()`, this scans the entire string and may be slow for
+    /// two-byte strings that happen to contain only Latin-1 characters.
+    ///
+    /// Corresponds to `v8::String::ContainsOnlyOneByte()`.
+    #[inline]
+    pub fn contains_only_one_byte(&self) -> bool {
+        // SAFETY: self.handle is a valid V8 String handle.
+        unsafe { ffi::local_string_contains_only_one_byte(&self.handle) }
+    }
+
+    /// Returns the number of bytes required to encode the string as UTF-8.
+    ///
+    /// Does not include a null terminator.
+    ///
+    /// Corresponds to `v8::String::Utf8LengthV2()`.
+    #[inline]
+    pub fn utf8_length(&self, lock: &mut crate::Lock) -> usize {
+        // SAFETY: Lock guarantees the isolate is locked; self.handle is a valid String handle.
+        unsafe { ffi::local_string_utf8_length(lock.isolate().as_ffi(), &self.handle) }
+    }
+
+    /// Writes the string as UTF-16 code units into `buffer`.
+    ///
+    /// `offset` is the index of the first character to write; `length` is the
+    /// maximum number of characters to write. `flags` is a combination of
+    /// [`WriteFlags`] variants.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `buffer.len() < length`.
+    ///
+    /// Corresponds to `v8::String::WriteV2()`.
+    pub fn write(
+        &self,
+        lock: &mut crate::Lock,
+        offset: u32,
+        length: u32,
+        buffer: &mut [u16],
+        flags: WriteFlags,
+    ) {
+        assert!(
+            buffer.len() >= length as usize,
+            "buffer too small for requested length"
+        );
+        // SAFETY: Lock guarantees the isolate is locked; buffer is valid and large enough.
+        unsafe {
+            ffi::local_string_write_v2(
+                lock.isolate().as_ffi(),
+                &self.handle,
+                offset,
+                length,
+                buffer.as_mut_ptr(),
+                flags.bits(),
+            );
+        }
+    }
+
+    /// Writes the string as Latin-1 bytes into `buffer`.
+    ///
+    /// Only meaningful when `is_one_byte()` returns `true`; characters outside
+    /// the Latin-1 range are truncated.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `buffer.len() < length`.
+    ///
+    /// Corresponds to `v8::String::WriteOneByteV2()`.
+    pub fn write_one_byte(
+        &self,
+        lock: &mut crate::Lock,
+        offset: u32,
+        length: u32,
+        buffer: &mut [u8],
+        flags: WriteFlags,
+    ) {
+        assert!(
+            buffer.len() >= length as usize,
+            "buffer too small for requested length"
+        );
+        // SAFETY: Lock guarantees the isolate is locked; buffer is valid and large enough.
+        unsafe {
+            ffi::local_string_write_one_byte_v2(
+                lock.isolate().as_ffi(),
+                &self.handle,
+                offset,
+                length,
+                buffer.as_mut_ptr(),
+                flags.bits(),
+            );
+        }
+    }
+
+    /// Writes the string as UTF-8 into `buffer`.
+    ///
+    /// Returns the number of bytes written. `flags` is a combination of
+    /// [`WriteFlags`] constants.
+    ///
+    /// Corresponds to `v8::String::WriteUtf8V2()`.
+    pub fn write_utf8(
+        &self,
+        lock: &mut crate::Lock,
+        buffer: &mut [u8],
+        flags: WriteFlags,
+    ) -> usize {
+        // SAFETY: Lock guarantees the isolate is locked; buffer is valid for `capacity` bytes.
+        unsafe {
+            ffi::local_string_write_utf8_v2(
+                lock.isolate().as_ffi(),
+                &self.handle,
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                flags.bits(),
+            )
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Convenience helpers
+    // -------------------------------------------------------------------------
+
+    /// Decodes the string to an owned Rust `String` via UTF-8.
+    ///
+    /// Allocates a buffer using `utf8_length`, writes into it, and converts.
+    pub fn to_string(&self, lock: &mut crate::Lock) -> std::string::String {
+        let byte_len = self.utf8_length(lock);
+        let mut buf = vec![0u8; byte_len];
+        let written = self.write_utf8(lock, &mut buf, WriteFlags::None);
+        buf.truncate(written);
+        // V8 guarantees valid UTF-8 output when REPLACE_INVALID_UTF8 is not set and
+        // the string was originally created from valid data. Use from_utf8 to avoid a
+        // redundant allocation in the common (valid UTF-8) case; fall back to
+        // from_utf8_lossy only when the bytes are not valid UTF-8 (e.g. two-byte strings
+        // with unpaired surrogates).
+        std::string::String::from_utf8(buf)
+            .unwrap_or_else(|e| std::string::String::from_utf8_lossy(e.as_bytes()).into_owned())
+    }
+
+    // -------------------------------------------------------------------------
+    // Additional string operations
+    // -------------------------------------------------------------------------
+
+    /// Returns an internalized version of this string.
+    ///
+    /// If an equal internalized string already exists in V8's string table it is
+    /// returned; otherwise a new internalized copy is created. The result is
+    /// pointer-equal to any other internalized string with the same content.
+    ///
+    /// Corresponds to `v8::String::InternalizeString()`.
+    #[must_use]
+    pub fn internalize(&self, lock: &mut crate::Lock) -> Self {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked; self.handle is a valid String handle.
+        unsafe {
+            Local::from_ffi(
+                isolate,
+                ffi::local_string_internalize(isolate.as_ffi(), &self.handle),
+            )
+        }
+    }
+
+    /// Returns the identity hash for this string.
+    ///
+    /// The hash is stable for the lifetime of the string and is never `0`,
+    /// but is not guaranteed to be unique across different strings.
+    ///
+    /// Corresponds to `v8::Name::GetIdentityHash()`.
+    #[inline]
+    pub fn get_identity_hash(&self) -> i32 {
+        // SAFETY: self.handle is a valid V8 String handle.
+        unsafe { ffi::local_string_get_identity_hash(&self.handle) }
+    }
+
+    /// Returns `true` if the string has a flat (contiguous) internal representation.
+    ///
+    /// A flat string stores its characters in a single contiguous buffer, which
+    /// is required by some V8 APIs. Newly created strings are usually flat; cons
+    /// strings produced by concatenation may not be.
+    ///
+    /// Note: This method is available via a Cloudflare-specific V8 patch
+    /// (`0029-Add-v8-String-IsFlat-API.patch`).
+    ///
+    /// Corresponds to `v8::String::IsFlat()`.
+    #[inline]
+    pub fn is_flat(&self) -> bool {
+        // SAFETY: self.handle is a valid V8 String handle.
+        unsafe { ffi::local_string_is_flat(&self.handle) }
+    }
+}
+
+// =============================================================================
+// `Utf8Value`
+// =============================================================================
+
+/// Rust equivalent of `v8::String::Utf8Value`.
+///
+/// Converts any V8 value to its UTF-8 string representation (analogous to calling
+/// `.toString()` in JavaScript) and holds the result for the duration of its lifetime.
+///
+/// The UTF-8 bytes are a **heap-allocated copy** independent of the V8 heap — the data
+/// remains valid and stable for the full lifetime of this `Utf8Value` regardless of GC
+/// activity.
+///
+/// If the value cannot be converted to a string (e.g. a `Symbol`), V8 stores a null
+/// pointer internally. In that case [`as_ptr`](Self::as_ptr) returns null,
+/// [`length`](Self::length) returns `0`, and [`as_bytes`](Self::as_bytes) /
+/// [`as_str`](Self::as_str) return empty slices.
+///
+/// # Example
+///
+/// ```ignore
+/// let utf8 = Utf8Value::new(lock, &value);
+/// println!("{}", utf8.as_str().unwrap_or(""));
+/// ```
+pub struct Utf8Value {
+    inner: ffi::Utf8Value,
+}
+
+impl Utf8Value {
+    /// Constructs a `Utf8Value` by converting `value` to its UTF-8 string representation.
+    ///
+    /// Produces a heap-allocated copy of the UTF-8 bytes that is independent of the V8
+    /// heap. If `value` cannot be converted to a string (e.g. a `Symbol`), the internal
+    /// data pointer will be null and [`length`](Self::length) will return `0`.
+    ///
+    /// Corresponds to `v8::String::Utf8Value(isolate, obj)`.
+    pub fn new(lock: &mut Lock, value: &Local<'_, Value>) -> Self {
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        // local_clone produces a cheap handle copy matching V8's by-value constructor semantics.
+        let inner = unsafe {
+            ffi::utf8_value_new(lock.isolate().as_ffi(), ffi::local_clone(value.as_ffi()))
+        };
+        Self { inner }
+    }
+
+    /// Returns the number of UTF-8 bytes in the string, excluding the null terminator.
+    ///
+    /// Returns `0` if V8 could not convert the value to a string.
+    ///
+    /// Corresponds to `v8::String::Utf8Value::length()`.
+    #[inline]
+    pub fn length(&self) -> usize {
+        // SAFETY: self.inner is a valid Utf8Value.
+        unsafe { ffi::utf8_value_length(&self.inner) }
+    }
+
+    /// Returns a raw pointer to the null-terminated UTF-8 bytes stored in this copy.
+    ///
+    /// The pointer points into a heap-allocated buffer owned by this `Utf8Value`, not into
+    /// V8 memory. It is valid for the lifetime of this `Utf8Value`.
+    ///
+    /// Returns null if V8 could not convert the value to a string (e.g. a `Symbol`).
+    ///
+    /// Corresponds to `v8::String::Utf8Value::operator*()`.
+    #[inline]
+    pub fn as_ptr(&self) -> *const u8 {
+        // SAFETY: self.inner is a valid Utf8Value.
+        unsafe { ffi::utf8_value_data(&self.inner) }
+    }
+
+    /// Returns the UTF-8 content as a byte slice.
+    ///
+    /// Returns an empty slice if V8 could not convert the value to a string (e.g. a `Symbol`),
+    /// in which case `operator*()` returns a null pointer.
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        let ptr = self.as_ptr();
+        if ptr.is_null() {
+            return &[];
+        }
+        // SAFETY: ptr is non-null and points to length() valid bytes for the lifetime of self.
+        unsafe { std::slice::from_raw_parts(ptr, self.length()) }
+    }
+
+    /// Returns the UTF-8 content as a `&str`, or `None` if the bytes are not valid UTF-8.
+    #[inline]
+    pub fn as_str(&self) -> Option<&str> {
+        std::str::from_utf8(self.as_bytes()).ok()
+    }
+}
+
+impl Drop for Utf8Value {
+    fn drop(&mut self) {
+        let inner = ffi::Utf8Value {
+            ptr: self.inner.ptr,
+        };
+        // SAFETY: self.inner is a valid Utf8Value being released.
+        unsafe { ffi::utf8_value_drop(inner) };
+    }
+}
+
 // Object-specific implementations
 impl<'a> Local<'a, Object> {
     pub fn set(&mut self, lock: &mut Lock, key: &str, value: Local<'a, Value>) {
@@ -1382,7 +2153,7 @@ macro_rules! impl_to_local_value_integer {
 
 impl_to_local_value_integer!(u8, u16, u32, i8, i16, i32);
 
-impl ToLocalValue for String {
+impl ToLocalValue for std::string::String {
     fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
         self.as_str().to_local(lock)
     }

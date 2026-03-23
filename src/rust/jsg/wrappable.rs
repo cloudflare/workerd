@@ -156,7 +156,7 @@ macro_rules! impl_primitive {
     };
 }
 
-impl_primitive!(String, "string", is_string, unwrap_string);
+impl_primitive!(std::string::String, "string", is_string, unwrap_string);
 impl_primitive!(bool, "boolean", is_boolean, unwrap_boolean);
 
 // Number implementation for JavaScript numbers

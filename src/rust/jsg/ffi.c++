@@ -228,6 +228,121 @@ bool local_is_function(const Local& val) {
   return ::rust::String(*utf8, utf8.length());
 }
 
+// Utf8Value
+Utf8Value utf8_value_new(Isolate* isolate, Local value) {
+  auto* v = new v8::String::Utf8Value(isolate, local_from_ffi<v8::Value>(kj::mv(value)));
+  return Utf8Value{reinterpret_cast<size_t>(v)};
+}
+
+void utf8_value_drop(Utf8Value value) {
+  delete reinterpret_cast<v8::String::Utf8Value*>(value.ptr);
+}
+
+size_t utf8_value_length(const Utf8Value& value) {
+  return reinterpret_cast<const v8::String::Utf8Value*>(value.ptr)->length();
+}
+
+const uint8_t* utf8_value_data(const Utf8Value& value) {
+  return reinterpret_cast<const uint8_t*>(
+      **reinterpret_cast<const v8::String::Utf8Value*>(value.ptr));
+}
+
+// Local<String>
+Local local_string_empty(Isolate* isolate) {
+  return to_ffi(v8::String::Empty(isolate));
+}
+
+int32_t local_string_length(const Local& value) {
+  return local_as_ref_from_ffi<v8::String>(value)->Length();
+}
+
+bool local_string_is_one_byte(const Local& value) {
+  // Note: IsOneByte() reflects V8's internal string representation, not the logical
+  // content. A string containing only Latin-1 characters may still return false if V8
+  // stores it as two-byte (e.g. after concatenation), i.e. false negatives are possible.
+  // Use ContainsOnlyOneByte() for a content-based check, keeping in mind that it scans
+  // the entire string.
+  return local_as_ref_from_ffi<v8::String>(value)->IsOneByte();
+}
+
+bool local_string_contains_only_one_byte(const Local& value) {
+  return local_as_ref_from_ffi<v8::String>(value)->ContainsOnlyOneByte();
+}
+
+size_t local_string_utf8_length(Isolate* isolate, const Local& value) {
+  return local_as_ref_from_ffi<v8::String>(value)->Utf8LengthV2(isolate);
+}
+
+void local_string_write_v2(Isolate* isolate,
+    const Local& value,
+    uint32_t offset,
+    uint32_t length,
+    uint16_t* buffer,
+    int32_t flags) {
+  local_as_ref_from_ffi<v8::String>(value)->WriteV2(isolate, offset, length, buffer, flags);
+}
+
+void local_string_write_one_byte_v2(Isolate* isolate,
+    const Local& value,
+    uint32_t offset,
+    uint32_t length,
+    uint8_t* buffer,
+    int32_t flags) {
+  local_as_ref_from_ffi<v8::String>(value)->WriteOneByteV2(isolate, offset, length, buffer, flags);
+}
+
+size_t local_string_write_utf8_v2(
+    Isolate* isolate, const Local& value, uint8_t* buffer, size_t capacity, int32_t flags) {
+  return local_as_ref_from_ffi<v8::String>(value)->WriteUtf8V2(
+      isolate, reinterpret_cast<char*>(buffer), capacity, flags);
+}
+
+bool local_string_equals(const Local& value, const Local& other) {
+  return local_as_ref_from_ffi<v8::String>(value)->StringEquals(
+      local_as_ref_from_ffi<v8::String>(other));
+}
+
+bool local_string_is_flat(const Local& value) {
+  return local_as_ref_from_ffi<v8::String>(value)->IsFlat();
+}
+
+Local local_string_concat(Isolate* isolate, Local left, Local right) {
+  return to_ffi(v8::String::Concat(isolate, local_from_ffi<v8::String>(kj::mv(left)),
+      local_from_ffi<v8::String>(kj::mv(right))));
+}
+
+Local local_string_internalize(Isolate* isolate, const Local& value) {
+  return to_ffi(local_as_ref_from_ffi<v8::String>(value)->InternalizeString(isolate));
+}
+
+int32_t local_string_get_identity_hash(const Local& value) {
+  return local_as_ref_from_ffi<v8::String>(value)->GetIdentityHash();
+}
+
+MaybeLocal local_string_new_from_utf8(
+    Isolate* isolate, const uint8_t* data, int32_t length, bool internalized) {
+  auto type = internalized ? v8::NewStringType::kInternalized : v8::NewStringType::kNormal;
+  return maybe_local_to_ffi(
+      v8::String::NewFromUtf8(isolate, reinterpret_cast<const char*>(data), type, length));
+}
+
+MaybeLocal local_string_new_from_one_byte(
+    Isolate* isolate, const uint8_t* data, int32_t length, bool internalized) {
+  auto type = internalized ? v8::NewStringType::kInternalized : v8::NewStringType::kNormal;
+  return maybe_local_to_ffi(v8::String::NewFromOneByte(isolate, data, type, length));
+}
+
+MaybeLocal local_string_new_from_two_byte(
+    Isolate* isolate, const uint16_t* data, int32_t length, bool internalized) {
+  auto type = internalized ? v8::NewStringType::kInternalized : v8::NewStringType::kNormal;
+  return maybe_local_to_ffi(v8::String::NewFromTwoByte(isolate, data, type, length));
+}
+
+bool maybe_local_is_empty(const MaybeLocal& value) {
+  auto ptr_void = reinterpret_cast<const void*>(&value.ptr);
+  return reinterpret_cast<const v8::MaybeLocal<v8::Value>*>(ptr_void)->IsEmpty();
+}
+
 // Local<Function>
 Local local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
