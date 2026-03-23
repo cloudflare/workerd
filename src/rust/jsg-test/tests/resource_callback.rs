@@ -454,7 +454,7 @@ fn panic_in_rust_backed_api_errors_request_and_terminates_isolate() {
         // Simulate a fetch-handler that delegates to a Rust-backed binding.
         // The handler calls `obj.panicNow()` — just like real Worker code
         // would call into a Rust-implemented API method.
-        ctx.eval_raw("function handleRequest() { return obj.panicNow(); }")
+        ctx.eval_raw("function handleRequest() { while(true) { obj.panicNow(); } throw null; }")
             .unwrap();
 
         assert!(
