@@ -433,38 +433,62 @@ impl PanicResource {
     }
 }
 
-/// Verifies that a panic inside a `#[jsg_method]` callback is converted to a
-/// JavaScript internal error (matching the behavior of `KJ_ASSERT(false)` in
-/// C++ JSG handlers): the internal panic message is hidden from JS and the
-/// caller sees a generic `"internal error; reference = <id>"` message.
+/// Full round-trip: a JS "request handler" function calls a Rust-backed API
+/// method that panics.  Verifies that:
+///
+/// 1. `catch_panic` converts the panic to an `"internal error"` JS exception
+///    whose message does NOT expose the raw Rust panic string to JS.
+/// 2. `request_termination()` is called so no further JS executes.
+/// 3. The process is not aborted.
+///
+/// This mirrors a real Worker fetch handler that delegates to a Rust-backed
+/// binding: the panic must error the request cleanly and terminate the isolate.
 #[test]
-fn method_panic_becomes_js_internal_error() {
+fn panic_in_rust_backed_api_errors_request_and_terminates_isolate() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(PanicResource);
         let wrapped = resource.to_js(lock);
         ctx.set_global("obj", wrapped);
 
-        // The panic should surface as a JS Error, not abort the process.
-        let is_error: Result<bool, _> = ctx.eval(
-            lock,
-            "try { obj.panicNow(); false } catch(e) { e instanceof Error }",
-        );
-        assert!(is_error.unwrap(), "panic should become a JS Error");
+        // Simulate a fetch-handler that delegates to a Rust-backed binding.
+        // The handler calls `obj.panicNow()` — just like real Worker code
+        // would call into a Rust-implemented API method.
+        ctx.eval_raw("function handleRequest() { return obj.panicNow(); }")
+            .unwrap();
 
-        // The JS error message must contain "internal error" — the internal
-        // panic message must not be exposed to JavaScript.
-        let msg: Result<String, _> =
-            ctx.eval(lock, "try { obj.panicNow(); '' } catch(e) { e.message }");
-        let msg = msg.unwrap();
         assert!(
-            msg.contains("internal error"),
-            "JS error message should say \"internal error\", got: {msg:?}"
+            !lock.is_termination_requested(),
+            "termination should not be requested before the panic"
+        );
+
+        // Invoke the handler — the panic inside panicNow() is caught by
+        // catch_panic, which calls throw_internal_error() then
+        // request_termination().  The internal error exception is set first
+        // and is visible to eval's TryCatch; it carries "internal error" in
+        // its message while hiding the raw panic string from JS.
+        let err = ctx
+            .eval::<bool>(lock, "handleRequest()")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+
+        assert!(
+            err.message.contains("internal error"),
+            "JS error message should say \"internal error\", got: {:?}",
+            err.message
         );
         assert!(
-            !msg.contains("intentional panic in jsg_method"),
-            "internal panic message must not be exposed to JS, got: {msg:?}"
+            !err.message.contains("intentional panic in jsg_method"),
+            "raw panic message must not be exposed to JS, got: {:?}",
+            err.message
         );
+
+        // The isolate is now terminated: no further JS execution is possible.
+        assert!(
+            lock.is_termination_requested(),
+            "termination must be requested after a panic in a Rust-backed method"
+        );
+
         Ok(())
     });
 }

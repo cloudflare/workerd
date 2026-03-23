@@ -5,6 +5,7 @@
 #include "ffi.h"
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -802,6 +803,14 @@ void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage)
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
   isolate->ThrowException(::workerd::jsg::makeInternalError(isolate, message));
+}
+
+void isolate_request_termination(Isolate* isolate) {
+  ::workerd::jsg::IsolateBase::from(isolate).requestTermination();
+}
+
+bool isolate_is_termination_requested(Isolate* isolate) {
+  return ::workerd::jsg::IsolateBase::from(isolate).isTerminationRequested();
 }
 
 bool isolate_is_locked(Isolate* isolate) {
