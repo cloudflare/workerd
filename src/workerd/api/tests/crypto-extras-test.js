@@ -216,6 +216,96 @@ export const deriveBitsNullLength = {
   },
 };
 
+export const subtleCryptoSupportsSha3DerivedDigests = {
+  async test() {
+    async function rejectsNotSupported(algorithm) {
+      let threw = false;
+      try {
+        await crypto.subtle.digest(algorithm, new Uint8Array(0));
+      } catch (err) {
+        threw = true;
+        strictEqual(err.name, 'NotSupportedError');
+      }
+      ok(threw, 'Expected digest operation to reject');
+    }
+
+    ok(SubtleCrypto.supports('digest', 'SHA3-256'));
+    ok(
+      SubtleCrypto.supports('digest', {
+        name: 'cSHAKE128',
+        outputLength: 256,
+      })
+    );
+    ok(
+      SubtleCrypto.supports('digest', {
+        name: 'cSHAKE128',
+        outputLength: 256,
+        functionName: new Uint8Array(0),
+      })
+    );
+    ok(
+      SubtleCrypto.supports('digest', {
+        name: 'cSHAKE128',
+        outputLength: 256,
+        customization: new Uint8Array(0),
+      })
+    );
+
+    strictEqual(
+      SubtleCrypto.supports('digest', {
+        name: 'cSHAKE128',
+        outputLength: 256,
+        functionName: new Uint8Array([1]),
+      }),
+      false
+    );
+    strictEqual(
+      SubtleCrypto.supports('digest', {
+        name: 'cSHAKE128',
+        outputLength: 256,
+        customization: new Uint8Array([1]),
+      }),
+      false
+    );
+    strictEqual(
+      SubtleCrypto.supports('digest', {
+        name: 'TurboSHAKE128',
+        outputLength: 256,
+      }),
+      false
+    );
+
+    strictEqual(
+      (
+        await crypto.subtle.digest(
+          {
+            name: 'cSHAKE128',
+            outputLength: 256,
+            functionName: new Uint8Array(0),
+            customization: new Uint8Array(0),
+          },
+          new Uint8Array(0)
+        )
+      ).byteLength,
+      32
+    );
+    await rejectsNotSupported({
+      name: 'cSHAKE128',
+      outputLength: 256,
+      functionName: new Uint8Array([1]),
+    });
+    await rejectsNotSupported({
+      name: 'cSHAKE128',
+      outputLength: 256,
+      customization: new Uint8Array([1]),
+    });
+    await rejectsNotSupported({
+      name: 'TurboSHAKE128',
+      outputLength: 256,
+    });
+  },
+};
+
 export const aesCounterOverflowTest = {
   async test() {
     // Regression test: Check that the input counter is not modified when it overflows in the

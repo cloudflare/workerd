@@ -122,6 +122,9 @@ class CryptoKey::Impl {
   static ImportFunc importEcdh;
   static ImportFunc importEddsa;
   static ImportFunc importRsaRaw;
+  static ImportFunc importMlDsa;
+  static ImportFunc importMlKem;
+  static ImportFunc importChaCha20Poly1305;
 
   using GenerateFunc = kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>(jsg::Lock& js,
       kj::StringPtr normalizedName,
@@ -135,6 +138,9 @@ class CryptoKey::Impl {
   static GenerateFunc generateEcdsa;
   static GenerateFunc generateEcdh;
   static GenerateFunc generateEddsa;
+  static GenerateFunc generateMlDsa;
+  static GenerateFunc generateMlKem;
+  static GenerateFunc generateChaCha20Poly1305;
 
   Impl(bool extractable, CryptoKeyUsageSet usages): extractable(extractable), usages(usages) {}
 
@@ -182,6 +188,23 @@ class CryptoKey::Impl {
         "\".");
   }
 
+  // Returns {sharedKey, ciphertext} as a pair of byte arrays for KEM encapsulation.
+  virtual std::pair<jsg::JsArrayBuffer, jsg::JsArrayBuffer> encapsulate(jsg::Lock& js) const {
+    JSG_FAIL_REQUIRE(DOMNotSupportedError, "The encapsulate operation is not implemented for \"",
+        getAlgorithmName(), "\".");
+  }
+
+  // Returns the shared key bytes for KEM decapsulation.
+  virtual jsg::JsArrayBuffer decapsulate(
+      jsg::Lock& js, kj::ArrayPtr<const kj::byte> ciphertext) const {
+    JSG_FAIL_REQUIRE(DOMNotSupportedError, "The decapsulate operation is not implemented for \"",
+        getAlgorithmName(), "\".");
+  }
+  // Returns a new public key Impl derived from this private key.
+  virtual kj::Own<CryptoKey::Impl> getPublicKey(jsg::Lock& js, CryptoKeyUsageSet usages) const {
+    JSG_FAIL_REQUIRE(DOMNotSupportedError, "The getPublicKey operation is not implemented for \"",
+        getAlgorithmName(), "\".");
+  }
   virtual jsg::JsArrayBuffer wrapKey(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> unwrappedKey) const {

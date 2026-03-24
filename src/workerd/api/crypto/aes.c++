@@ -151,8 +151,9 @@ class AesKeyBase: public CryptoKey::Impl {
   }
 
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final {
-    JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError, getAlgorithmName(),
-        " key only supports exporting \"raw\" & \"jwk\", not \"", format, "\".");
+    JSG_REQUIRE(format == "raw" || format == "raw-secret" || format == "jwk", DOMNotSupportedError,
+        getAlgorithmName(),
+        " key only supports exporting \"raw\", \"raw-secret\" & \"jwk\", not \"", format, "\".");
 
     if (format == "jwk") {
       auto lengthInBytes = keyData.size();
@@ -786,7 +787,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(jsg::Lock& js,
 
   kj::Array<kj::byte> keyDataArray;
 
-  if (format == "raw") {
+  if (format == "raw" || format == "raw-secret") {
     // NOTE: Checked in SubtleCrypto::importKey().
     auto& source = keyData.get<jsg::JsRef<jsg::JsBufferSource>>();
     auto handle = source.getHandle(js);

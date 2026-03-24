@@ -5,6 +5,7 @@
 #include "crypto.h"
 
 #include "impl.h"
+#include "rsa.h"
 
 #include <workerd/api/crypto/crc-impl.h>
 #include <workerd/api/crypto/endianness.h>
@@ -12,6 +13,7 @@
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/rust/sha3/lib.rs.h>
 #include <workerd/util/uuid.h>
 
 #include <openssl/digest.h>
@@ -20,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <set>
 #include <typeinfo>
@@ -44,6 +47,10 @@ kj::StringPtr CryptoKeyUsageSet::name() const {
   if (*this == deriveBits()) return "deriveBits";
   if (*this == wrapKey()) return "wrapKey";
   if (*this == unwrapKey()) return "unwrapKey";
+  if (*this == encapsulateKey()) return "encapsulateKey";
+  if (*this == encapsulateBits()) return "encapsulateBits";
+  if (*this == decapsulateKey()) return "decapsulateKey";
+  if (*this == decapsulateBits()) return "decapsulateBits";
   KJ_FAIL_REQUIRE("CryptoKeyUsageSet does not contain exactly one key usage");
 }
 
@@ -55,8 +62,9 @@ CryptoKeyUsageSet CryptoKeyUsageSet::byName(kj::StringPtr name) {
 }
 
 kj::ArrayPtr<const CryptoKeyUsageSet> CryptoKeyUsageSet::singletons() {
-  static const workerd::api::CryptoKeyUsageSet singletons[] = {
-    encrypt(), decrypt(), sign(), verify(), deriveKey(), deriveBits(), wrapKey(), unwrapKey()};
+  static const workerd::api::CryptoKeyUsageSet singletons[] = {encrypt(), decrypt(), sign(),
+    verify(), deriveKey(), deriveBits(), wrapKey(), unwrapKey(), encapsulateKey(),
+    encapsulateBits(), decapsulateKey(), decapsulateBits()};
   return singletons;
 }
 
@@ -131,6 +139,13 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
     {"Ed25519"_kj, &CryptoKey::Impl::importEddsa, &CryptoKey::Impl::generateEddsa},
     {"X25519"_kj, &CryptoKey::Impl::importEddsa, &CryptoKey::Impl::generateEddsa},
     {"RSA-RAW"_kj, &CryptoKey::Impl::importRsaRaw},
+    {"ML-DSA-44"_kj, &CryptoKey::Impl::importMlDsa, &CryptoKey::Impl::generateMlDsa},
+    {"ML-DSA-65"_kj, &CryptoKey::Impl::importMlDsa, &CryptoKey::Impl::generateMlDsa},
+    {"ML-DSA-87"_kj, &CryptoKey::Impl::importMlDsa, &CryptoKey::Impl::generateMlDsa},
+    {"ML-KEM-768"_kj, &CryptoKey::Impl::importMlKem, &CryptoKey::Impl::generateMlKem},
+    {"ML-KEM-1024"_kj, &CryptoKey::Impl::importMlKem, &CryptoKey::Impl::generateMlKem},
+    {"ChaCha20-Poly1305"_kj, &CryptoKey::Impl::importChaCha20Poly1305,
+      &CryptoKey::Impl::generateChaCha20Poly1305},
   };
 
   auto iter = ALGORITHMS.find(CryptoAlgorithm{name});
@@ -176,6 +191,7 @@ kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derived
     {"AES-CBC"},
     {"AES-GCM"},
     {"AES-KW"},
+    {"ChaCha20-Poly1305"},
     {"HMAC"},
     {"HKDF"},
     {"PBKDF2"},
@@ -203,6 +219,8 @@ kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derived
             "Derived AES key must be 128, 192, or 256 bits in length but provided ", length, ".");
     }
     return length;
+  } else if (*algIter == "ChaCha20-Poly1305") {
+    return 256;
   } else if (*algIter == "HMAC") {
     KJ_IF_SOME(length, derivedKeyAlgorithm.length) {
       // If the user requested a specific HMAC key length, honor it.
@@ -224,6 +242,346 @@ kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derived
     // deriveBitsPbkdf2Impl()).
     return kj::none;
   }
+}
+
+enum class SubtleOperation {
+  ENCRYPT,
+  DECRYPT,
+  SIGN,
+  VERIFY,
+  DIGEST,
+  GENERATE_KEY,
+  DERIVE_KEY,
+  DERIVE_BITS,
+  IMPORT_KEY,
+  EXPORT_KEY,
+  WRAP_KEY,
+  UNWRAP_KEY,
+  ENCAPSULATE_KEY,
+  ENCAPSULATE_BITS,
+  DECAPSULATE_KEY,
+  DECAPSULATE_BITS,
+  GET_PUBLIC_KEY,
+};
+
+kj::Maybe<SubtleOperation> parseSubtleOperation(kj::StringPtr operation) {
+  struct OperationMapping {
+    kj::StringPtr name;
+    SubtleOperation operation;
+  };
+
+  static constexpr OperationMapping OPERATIONS[] = {
+    {"encrypt"_kj, SubtleOperation::ENCRYPT},
+    {"decrypt"_kj, SubtleOperation::DECRYPT},
+    {"sign"_kj, SubtleOperation::SIGN},
+    {"verify"_kj, SubtleOperation::VERIFY},
+    {"digest"_kj, SubtleOperation::DIGEST},
+    {"generateKey"_kj, SubtleOperation::GENERATE_KEY},
+    {"deriveKey"_kj, SubtleOperation::DERIVE_KEY},
+    {"deriveBits"_kj, SubtleOperation::DERIVE_BITS},
+    {"importKey"_kj, SubtleOperation::IMPORT_KEY},
+    {"exportKey"_kj, SubtleOperation::EXPORT_KEY},
+    {"wrapKey"_kj, SubtleOperation::WRAP_KEY},
+    {"unwrapKey"_kj, SubtleOperation::UNWRAP_KEY},
+    {"encapsulateKey"_kj, SubtleOperation::ENCAPSULATE_KEY},
+    {"encapsulateBits"_kj, SubtleOperation::ENCAPSULATE_BITS},
+    {"decapsulateKey"_kj, SubtleOperation::DECAPSULATE_KEY},
+    {"decapsulateBits"_kj, SubtleOperation::DECAPSULATE_BITS},
+    {"getPublicKey"_kj, SubtleOperation::GET_PUBLIC_KEY},
+  };
+
+  for (const auto& item: OPERATIONS) {
+    if (operation == item.name) return item.operation;
+  }
+  return kj::none;
+}
+
+template <typename Algorithm>
+Algorithm normalizeSupportAlgorithm(jsg::Lock& js,
+    v8::Local<v8::Value> value,
+    const jsg::TypeHandler<kj::OneOf<kj::String, Algorithm>>& handler) {
+  KJ_IF_SOME(algorithm, handler.tryUnwrap(js, value)) {
+    return interpretAlgorithmParam(kj::mv(algorithm));
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "AlgorithmIdentifier could not be converted.");
+}
+
+bool isOneOf(kj::StringPtr value, std::initializer_list<kj::StringPtr> names) {
+  return std::find(names.begin(), names.end(), value) != names.end();
+}
+
+void validateOmittedOrEmptyBufferSource(jsg::Lock& js,
+    const jsg::Optional<jsg::JsRef<jsg::JsBufferSource>>& value,
+    kj::StringPtr name) {
+  KJ_IF_SOME(ref, value) {
+    JSG_REQUIRE(
+        ref.getHandle(js).size() == 0, DOMNotSupportedError, name, " must be omitted or empty.");
+  }
+}
+
+void validateSha3DerivedDigest(jsg::Lock& js, const SubtleCrypto::DigestAlgorithm& algorithm) {
+  if (strcasecmp(algorithm.name.cStr(), "cSHAKE128") == 0 ||
+      strcasecmp(algorithm.name.cStr(), "cSHAKE256") == 0) {
+    auto outputLengthBits = JSG_REQUIRE_NONNULL(
+        algorithm.outputLength, DOMOperationError, "outputLength is required for cSHAKE");
+    JSG_REQUIRE(outputLengthBits >= 0 && outputLengthBits % 8 == 0, DOMOperationError,
+        "outputLength must be a non-negative multiple of 8");
+
+    validateOmittedOrEmptyBufferSource(js, algorithm.functionName, "functionName");
+    validateOmittedOrEmptyBufferSource(js, algorithm.customization, "customization");
+    return;
+  }
+
+  JSG_REQUIRE(strcasecmp(algorithm.name.cStr(), "SHA3-256") == 0 ||
+          strcasecmp(algorithm.name.cStr(), "SHA3-384") == 0 ||
+          strcasecmp(algorithm.name.cStr(), "SHA3-512") == 0,
+      DOMNotSupportedError, "Unrecognized or unimplemented digest algorithm requested.");
+}
+
+bool supportsDigestAlgorithm(jsg::Lock& js, const SubtleCrypto::DigestAlgorithm& algorithm) {
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&] { lookupDigestAlgorithm(algorithm.name); })) {
+    (void)exception;
+    validateSha3DerivedDigest(js, algorithm);
+  }
+  return true;
+}
+
+void validateAesKeyLength(int length) {
+  JSG_REQUIRE(length == 128 || length == 192 || length == 256, DOMOperationError,
+      "AES key length must be 128, 192, or 256 bits.");
+}
+
+void validateAesGcmTagLength(int tagLength) {
+  switch (tagLength) {
+    case 32:
+    case 64:
+    case 96:
+    case 104:
+    case 112:
+    case 120:
+    case 128:
+      return;
+    default:
+      JSG_FAIL_REQUIRE(DOMOperationError, "Invalid AES-GCM tag length ", tagLength, ".");
+  }
+}
+
+void validateNamedCurve(kj::StringPtr namedCurve) {
+  JSG_REQUIRE(namedCurve == "P-256" || namedCurve == "P-384" || namedCurve == "P-521",
+      DOMNotSupportedError, "Unsupported namedCurve \"", namedCurve, "\".");
+}
+
+void validateHashAlgorithm(
+    const kj::Maybe<kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>>& hash,
+    kj::StringPtr fieldName = "algorithm") {
+  lookupDigestAlgorithm(api::getAlgorithmName(
+      JSG_REQUIRE_NONNULL(hash, TypeError, "Missing field \"hash\" in \"", fieldName, "\".")));
+}
+
+uint32_t getEcdhMaxDeriveBits(jsg::Lock& js, const CryptoKey& publicKey) {
+  auto algorithm = publicKey.getAlgorithmName();
+  if (algorithm == "X25519") {
+    return 256;
+  }
+
+  auto keyAlgorithm = publicKey.getAlgorithm(js).get<CryptoKey::EllipticKeyAlgorithm>();
+  auto namedCurve = keyAlgorithm.namedCurve;
+  if (namedCurve == "P-256") return 256;
+  if (namedCurve == "P-384") return 384;
+  KJ_ASSERT(namedCurve == "P-521", namedCurve);
+  return 521;
+}
+
+void validateGenerateKeyAlgorithm(jsg::Lock& js,
+    kj::StringPtr normalizedName,
+    const SubtleCrypto::GenerateKeyAlgorithm& algorithm) {
+  if (normalizedName.startsWith("AES-")) {
+    validateAesKeyLength(JSG_REQUIRE_NONNULL(
+        algorithm.length, TypeError, "Missing field \"length\" in \"algorithm\"."));
+  } else if (normalizedName == "HMAC") {
+    validateHashAlgorithm(algorithm.hash);
+    KJ_IF_SOME(length, algorithm.length) {
+      JSG_REQUIRE(length > 0, DOMOperationError,
+          "HMAC key length must be a non-zero unsigned long integer.");
+    }
+  } else if (normalizedName == "RSASSA-PKCS1-v1_5" || normalizedName == "RSA-PSS" ||
+      normalizedName == "RSA-OAEP") {
+    auto publicExponent = JSG_REQUIRE_NONNULL(
+        algorithm.publicExponent, TypeError, "Missing field \"publicExponent\" in \"algorithm\".")
+                              .getHandle(js);
+    validateHashAlgorithm(algorithm.hash);
+    auto modulusLength = JSG_REQUIRE_NONNULL(
+        algorithm.modulusLength, TypeError, "Missing field \"modulusLength\" in \"algorithm\".");
+    JSG_REQUIRE(modulusLength > 0, DOMOperationError,
+        "modulusLength must be greater than zero (requested ", modulusLength, ").");
+    Rsa::validateRsaParams(js, modulusLength, publicExponent.asArrayPtr());
+    JSG_REQUIRE(!(FeatureFlags::get(js).getStrictCrypto() && (modulusLength & 127)),
+        DOMOperationError, "Can't generate key: RSA key size is required to be a multiple of 128");
+  } else if (normalizedName == "ECDSA" || normalizedName == "ECDH") {
+    validateNamedCurve(JSG_REQUIRE_NONNULL(
+        algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\"."));
+  } else if (normalizedName == "NODE-ED25519") {
+    const auto& namedCurve = JSG_REQUIRE_NONNULL(
+        algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
+    JSG_REQUIRE(namedCurve == "NODE-ED25519", DOMNotSupportedError, "EDDSA curve \"", namedCurve,
+        "\" isn't supported.");
+  }
+}
+
+void validateImportKeyAlgorithm(
+    kj::StringPtr normalizedName, const SubtleCrypto::ImportKeyAlgorithm& algorithm) {
+  if (normalizedName == "HMAC" || normalizedName == "RSASSA-PKCS1-v1_5" ||
+      normalizedName == "RSA-PSS" || normalizedName == "RSA-OAEP") {
+    validateHashAlgorithm(algorithm.hash);
+    if (normalizedName == "HMAC") {
+      KJ_IF_SOME(length, algorithm.length) {
+        JSG_REQUIRE(length > 0, DOMDataError, "Imported HMAC key length (", length,
+            ") must be a non-zero value.");
+      }
+    }
+  } else if (normalizedName == "ECDSA" || normalizedName == "ECDH") {
+    validateNamedCurve(JSG_REQUIRE_NONNULL(
+        algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\"."));
+  } else if (normalizedName == "NODE-ED25519") {
+    const auto& namedCurve = JSG_REQUIRE_NONNULL(
+        algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
+    JSG_REQUIRE(namedCurve == "NODE-ED25519", DOMNotSupportedError, "EDDSA curve \"", namedCurve,
+        "\" isn't supported.");
+  }
+}
+
+bool supportsEncryptDecrypt(kj::StringPtr normalizedName) {
+  return isOneOf(normalizedName,
+      {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "RSA-OAEP"_kj, "ChaCha20-Poly1305"_kj});
+}
+
+bool supportsSign(kj::StringPtr normalizedName) {
+  return isOneOf(normalizedName,
+      {"RSASSA-PKCS1-v1_5"_kj, "RSA-PSS"_kj, "ECDSA"_kj, "NODE-ED25519"_kj, "Ed25519"_kj, "HMAC"_kj,
+        "RSA-RAW"_kj, "ML-DSA-44"_kj, "ML-DSA-65"_kj, "ML-DSA-87"_kj});
+}
+
+bool supportsVerify(kj::StringPtr normalizedName) {
+  return isOneOf(normalizedName,
+      {"RSASSA-PKCS1-v1_5"_kj, "RSA-PSS"_kj, "ECDSA"_kj, "NODE-ED25519"_kj, "Ed25519"_kj, "HMAC"_kj,
+        "ML-DSA-44"_kj, "ML-DSA-65"_kj, "ML-DSA-87"_kj});
+}
+
+bool supportsDeriveBits(kj::StringPtr normalizedName) {
+  return isOneOf(normalizedName, {"PBKDF2"_kj, "HKDF"_kj, "ECDH"_kj, "X25519"_kj});
+}
+
+bool supportsExportKey(kj::StringPtr normalizedName) {
+  return isOneOf(normalizedName,
+      {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "AES-KW"_kj, "HMAC"_kj, "RSASSA-PKCS1-v1_5"_kj,
+        "RSA-PSS"_kj, "RSA-OAEP"_kj, "RSA-RAW"_kj, "ECDSA"_kj, "ECDH"_kj, "NODE-ED25519"_kj,
+        "Ed25519"_kj, "X25519"_kj, "ML-DSA-44"_kj, "ML-DSA-65"_kj, "ML-DSA-87"_kj, "ML-KEM-768"_kj,
+        "ML-KEM-1024"_kj, "ChaCha20-Poly1305"_kj});
+}
+
+bool supportsEncapsulate(kj::StringPtr normalizedName) {
+  return isOneOf(normalizedName, {"ML-KEM-768"_kj, "ML-KEM-1024"_kj});
+}
+
+bool supportsGetPublicKey(kj::StringPtr normalizedName) {
+  return isOneOf(normalizedName,
+      {"RSA-OAEP"_kj, "ECDH"_kj, "X25519"_kj, "ML-KEM-768"_kj, "ML-KEM-1024"_kj, "ECDSA"_kj,
+        "Ed25519"_kj, "RSA-PSS"_kj, "RSASSA-PKCS1-v1_5"_kj, "ML-DSA-44"_kj, "ML-DSA-65"_kj,
+        "ML-DSA-87"_kj});
+}
+
+void validateEncryptAlgorithm(
+    jsg::Lock& js, kj::StringPtr normalizedName, const SubtleCrypto::EncryptAlgorithm& algorithm) {
+  if (normalizedName == "AES-GCM") {
+    auto iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".")
+                  .getHandle(js);
+    JSG_REQUIRE(iv.size() != 0, DOMOperationError, "AES-GCM IV must not be empty.");
+    validateAesGcmTagLength(algorithm.tagLength.orDefault(128));
+  } else if (normalizedName == "AES-CBC") {
+    auto iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".")
+                  .getHandle(js);
+    JSG_REQUIRE(iv.size() == 16, DOMOperationError, "AES-CBC IV must be 16 bytes long.");
+  } else if (normalizedName == "AES-CTR") {
+    auto counter = JSG_REQUIRE_NONNULL(
+        algorithm.counter, TypeError, "Missing \"counter\" member in \"algorithm\".")
+                       .getHandle(js);
+    JSG_REQUIRE(counter.size() == 16, DOMOperationError, "Counter must have length of 16 bytes.");
+    auto counterLength = JSG_REQUIRE_NONNULL(
+        algorithm.length, TypeError, "Missing \"length\" member in \"algorithm\".");
+    JSG_REQUIRE(counterLength > 0 && counterLength <= 128, DOMOperationError, "Invalid counter of ",
+        counterLength, " bits length provided.");
+  } else if (normalizedName == "ChaCha20-Poly1305") {
+    auto iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".")
+                  .getHandle(js);
+    JSG_REQUIRE(iv.size() == 12, DOMOperationError, "ChaCha20-Poly1305 IV must be 12 bytes.");
+    KJ_IF_SOME(tagLength, algorithm.tagLength) {
+      JSG_REQUIRE(tagLength == 128, DOMOperationError, "ChaCha20-Poly1305 tag length must be 128.");
+    }
+  }
+}
+
+void validateSignAlgorithm(
+    kj::StringPtr normalizedName, const SubtleCrypto::SignAlgorithm& algorithm) {
+  if (normalizedName == "ECDSA") {
+    validateHashAlgorithm(algorithm.hash, "AlgorithmIdentifier");
+  } else if (normalizedName == "RSA-PSS") {
+    auto saltLength = JSG_REQUIRE_NONNULL(algorithm.saltLength, TypeError,
+        "Failed to provide salt for RSA-PSS key operation which requires a salt");
+    JSG_REQUIRE(saltLength >= 0, DOMDataError, "SaltLength for RSA-PSS must be non-negative.");
+  }
+}
+
+void validateDeriveBitsAlgorithm(jsg::Lock& js,
+    kj::StringPtr normalizedName,
+    const SubtleCrypto::DeriveKeyAlgorithm& algorithm,
+    kj::Maybe<uint32_t> maybeLength) {
+  if (normalizedName == "HKDF" || normalizedName == "PBKDF2") {
+    validateHashAlgorithm(algorithm.hash);
+    JSG_REQUIRE_NONNULL(algorithm.salt, TypeError, "Missing field \"salt\" in \"algorithm\".");
+    auto length = JSG_REQUIRE_NONNULL(maybeLength, DOMOperationError, normalizedName,
+        " cannot derive a key "
+        "with null length.");
+    JSG_REQUIRE(length % 8 == 0, DOMOperationError, normalizedName,
+        " requires a derived key length that is a multiple of eight.");
+
+    if (normalizedName == "HKDF") {
+      JSG_REQUIRE_NONNULL(algorithm.info, TypeError, "Missing field \"info\" in \"algorithm\".");
+    } else {
+      auto iterations = JSG_REQUIRE_NONNULL(
+          algorithm.iterations, TypeError, "Missing field \"iterations\" in \"algorithm\".");
+      JSG_REQUIRE(iterations > 0, DOMOperationError,
+          "PBKDF2 requires a positive iteration count (requested ", iterations, ").");
+      checkPbkdfLimits(js, iterations);
+    }
+  } else if (normalizedName == "ECDH" || normalizedName == "X25519") {
+    auto& publicKey = JSG_REQUIRE_NONNULL(
+        algorithm.$public, TypeError, "Missing field \"public\" in \"derivedKeyParams\".");
+    JSG_REQUIRE(publicKey->getType() == "public"_kj, DOMInvalidAccessError,
+        "The provided key has type \"", publicKey->getType(), "\", not \"public\"");
+    JSG_REQUIRE(strcasecmp(publicKey->getAlgorithmName().cStr(), normalizedName.cStr()) == 0,
+        DOMInvalidAccessError, "Public key algorithm does not match the requested algorithm.");
+    KJ_IF_SOME(length, maybeLength) {
+      auto maxDeriveBits = getEcdhMaxDeriveBits(js, *publicKey);
+      JSG_REQUIRE(length <= maxDeriveBits, DOMOperationError, "Derived key length (", length,
+          " bits) is too long (should be at most ", maxDeriveBits, " bits).");
+    }
+  }
+}
+
+kj::Maybe<uint32_t> readSupportsLength(jsg::Lock& js, v8::Local<v8::Value> value) {
+  if (value->IsUndefined() || value->IsNull()) return kj::none;
+  if (!value->IsNumber()) return kj::none;
+
+  auto number = jsg::check(value->NumberValue(js.v8Context()));
+  JSG_REQUIRE(std::isfinite(number) && number >= 0 &&
+          number <= std::numeric_limits<uint32_t>::max() && number == std::floor(number),
+      TypeError, "length must be an unsigned long integer.");
+  return static_cast<uint32_t>(number);
+}
+
+bool isAdditionalAlgorithmArgument(v8::Local<v8::Value> value) {
+  return !value->IsUndefined() && !value->IsNull() && !value->IsNumber();
 }
 
 auto webCryptoOperationBegin(
@@ -394,19 +752,58 @@ jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
   });
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(
-    jsg::Lock& js, kj::OneOf<kj::String, HashAlgorithm> algorithmParam, jsg::JsBufferSource data) {
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(jsg::Lock& js,
+    kj::OneOf<kj::String, DigestAlgorithm> algorithmParam,
+    jsg::JsBufferSource data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
 
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
+    auto ptr = nonNullBytes(data.asArrayPtr());
+
+    if (strcasecmp(algorithm.name.cStr(), "cSHAKE128") == 0 ||
+        strcasecmp(algorithm.name.cStr(), "cSHAKE256") == 0) {
+      auto outputLengthBits = JSG_REQUIRE_NONNULL(
+          algorithm.outputLength, DOMOperationError, "outputLength is required for cSHAKE");
+      JSG_REQUIRE(outputLengthBits >= 0 && outputLengthBits % 8 == 0, DOMOperationError,
+          "outputLength must be a non-negative multiple of 8");
+      auto outputLengthBytes = static_cast<size_t>(outputLengthBits / 8);
+
+      validateOmittedOrEmptyBufferSource(js, algorithm.functionName, "functionName");
+      validateOmittedOrEmptyBufferSource(js, algorithm.customization, "customization");
+
+      auto input = ::rust::Slice<const uint8_t>(ptr.begin(), ptr.size());
+      auto result = strcasecmp(algorithm.name.cStr(), "cSHAKE128") == 0
+          ? workerd::rust::sha3::cshake128(input, outputLengthBytes)
+          : workerd::rust::sha3::cshake256(input, outputLengthBytes);
+      auto buf = jsg::JsArrayBuffer::create(js, result.size());
+      memcpy(buf.asArrayPtr().begin(), result.data(), result.size());
+      return buf.addRef(js);
+    }
+
+    auto sha3Fn = [&]() -> kj::Maybe<::rust::Vec<uint8_t> (*)(::rust::Slice<const uint8_t>)> {
+      if (strcasecmp(algorithm.name.cStr(), "SHA3-256") == 0) {
+        return workerd::rust::sha3::sha3_256;
+      } else if (strcasecmp(algorithm.name.cStr(), "SHA3-384") == 0) {
+        return workerd::rust::sha3::sha3_384;
+      } else if (strcasecmp(algorithm.name.cStr(), "SHA3-512") == 0) {
+        return workerd::rust::sha3::sha3_512;
+      }
+      return kj::none;
+    }();
+    KJ_IF_SOME(fn, sha3Fn) {
+      auto result = fn({ptr.begin(), ptr.size()});
+      auto buf = jsg::JsArrayBuffer::create(js, result.size());
+      memcpy(buf.asArrayPtr().begin(), result.data(), result.size());
+      return buf.addRef(js);
+    }
+
     auto type = lookupDigestAlgorithm(algorithm.name).second;
 
     auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
     KJ_ASSERT(digestCtx.get() != nullptr);
 
-    auto ptr = nonNullBytes(data.asArrayPtr());
     OSSLCALL(EVP_DigestInit_ex(digestCtx.get(), type, nullptr));
     OSSLCALL(EVP_DigestUpdate(digestCtx.get(), ptr.begin(), ptr.size()));
 
@@ -473,8 +870,8 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(jsg::Lock& js,
     // TODO(perf): For conformance, importKey() makes a copy of `secret`. In this case we really
     //   don't need to, but rather we ought to call the appropriate CryptoKey::Impl::import*()
     //   function directly.
-    return importKeySync(
-        js, "raw", secret.addRef(js), kj::mv(derivedKeyAlgorithm), extractable, kj::mv(keyUsages));
+    return importKeySync(js, "raw-secret", secret.addRef(js), kj::mv(derivedKeyAlgorithm),
+        extractable, kj::mv(keyUsages));
   });
 }
 
@@ -609,10 +1006,10 @@ jsg::Ref<CryptoKey> SubtleCrypto::importKeySync(jsg::Lock& js,
     ImportKeyAlgorithm algorithm,
     bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
-  if (format == "raw" || format == "pkcs8" || format == "spki") {
+  if (format == "raw" || format == "pkcs8" || format == "spki" || format == "raw-public" ||
+      format == "raw-private" || format == "raw-seed" || format == "raw-secret") {
     auto& key = JSG_REQUIRE_NONNULL(keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>(), TypeError,
-        "Import data provided for \"raw\", \"pkcs8\", or \"spki\" import formats must be a buffer "
-        "source.");
+        "Import data provided for buffer-based import formats must be a buffer source.");
     auto keyHandle = key.getHandle(js);
 
     // Make a copy of the key import data.
@@ -665,6 +1062,309 @@ jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
 
     return key.impl->exportKey(js, format);
   });
+}
+
+jsg::Promise<SubtleCrypto::EncapsulatedBits> SubtleCrypto::encapsulateBits(jsg::Lock& js,
+    kj::OneOf<kj::String, ImportKeyAlgorithm> encapsulationAlgorithmParam,
+    const CryptoKey& encapsulationKey) {
+  auto algorithm = interpretAlgorithmParam(kj::mv(encapsulationAlgorithmParam));
+
+  auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
+
+  return js.evalNow([&]() -> EncapsulatedBits {
+    validateOperation(encapsulationKey, algorithm.name, CryptoKeyUsageSet::encapsulateBits());
+    auto [sharedKey, ciphertext] = encapsulationKey.impl->encapsulate(js);
+    return EncapsulatedBits{
+      .sharedKey = sharedKey.addRef(js),
+      .ciphertext = ciphertext.addRef(js),
+    };
+  });
+}
+
+jsg::Promise<SubtleCrypto::EncapsulatedKey> SubtleCrypto::encapsulateKey(jsg::Lock& js,
+    kj::OneOf<kj::String, ImportKeyAlgorithm> encapsulationAlgorithmParam,
+    const CryptoKey& encapsulationKey,
+    kj::OneOf<kj::String, ImportKeyAlgorithm> sharedKeyAlgorithmParam,
+    bool extractable,
+    kj::Array<kj::String> keyUsages) {
+  auto algorithm = interpretAlgorithmParam(kj::mv(encapsulationAlgorithmParam));
+  auto sharedKeyAlgorithm = interpretAlgorithmParam(kj::mv(sharedKeyAlgorithmParam));
+
+  auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
+
+  return js.evalNow([&]() -> EncapsulatedKey {
+    validateOperation(encapsulationKey, algorithm.name, CryptoKeyUsageSet::encapsulateKey());
+    auto [sharedKey, ciphertext] = encapsulationKey.impl->encapsulate(js);
+    auto sharedKeyRef = importKeySync(js, "raw-secret", sharedKey.copy(),
+        kj::mv(sharedKeyAlgorithm), extractable, kj::mv(keyUsages));
+    return EncapsulatedKey{
+      .sharedKey = kj::mv(sharedKeyRef),
+      .ciphertext = ciphertext.addRef(js),
+    };
+  });
+}
+
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::decapsulateBits(jsg::Lock& js,
+    kj::OneOf<kj::String, ImportKeyAlgorithm> decapsulationAlgorithmParam,
+    const CryptoKey& decapsulationKey,
+    kj::Array<const kj::byte> ciphertext) {
+  auto algorithm = interpretAlgorithmParam(kj::mv(decapsulationAlgorithmParam));
+
+  auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
+
+  return js.evalNow([&] {
+    validateOperation(decapsulationKey, algorithm.name, CryptoKeyUsageSet::decapsulateBits());
+    return decapsulationKey.impl->decapsulate(js, ciphertext).addRef(js);
+  });
+}
+
+jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::decapsulateKey(jsg::Lock& js,
+    kj::OneOf<kj::String, ImportKeyAlgorithm> decapsulationAlgorithmParam,
+    const CryptoKey& decapsulationKey,
+    kj::Array<const kj::byte> ciphertext,
+    kj::OneOf<kj::String, ImportKeyAlgorithm> sharedKeyAlgorithmParam,
+    bool extractable,
+    kj::Array<kj::String> keyUsages) {
+  auto algorithm = interpretAlgorithmParam(kj::mv(decapsulationAlgorithmParam));
+  auto sharedKeyAlgorithm = interpretAlgorithmParam(kj::mv(sharedKeyAlgorithmParam));
+
+  auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
+
+  return js.evalNow([&] {
+    validateOperation(decapsulationKey, algorithm.name, CryptoKeyUsageSet::decapsulateKey());
+    auto secret = decapsulationKey.impl->decapsulate(js, ciphertext);
+    return importKeySync(js, "raw-secret", secret.copy(), kj::mv(sharedKeyAlgorithm), extractable,
+        kj::mv(keyUsages));
+  });
+}
+
+jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::getPublicKey(
+    jsg::Lock& js, const CryptoKey& key, kj::Array<kj::String> keyUsages) {
+  auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, key.getAlgorithmName());
+
+  return js.evalNow([&] {
+    JSG_REQUIRE(key.getType() != "secret"_kj, DOMNotSupportedError,
+        "The getPublicKey operation is not supported for symmetric keys.");
+    JSG_REQUIRE(key.getType() == "private"_kj, DOMInvalidAccessError,
+        "The getPublicKey operation requires a private key.");
+
+    // Determine the algorithm-specific allowed public key usages.
+    auto algorithmName = key.getAlgorithmName();
+    CryptoKeyUsageSet allowedUsages;
+    if (algorithmName == "RSA-OAEP") {
+      allowedUsages = CryptoKeyUsageSet::encrypt() | CryptoKeyUsageSet::wrapKey();
+    } else if (algorithmName == "ECDH" || algorithmName == "X25519") {
+      allowedUsages = CryptoKeyUsageSet();
+    } else if (algorithmName == "ML-KEM-768" || algorithmName == "ML-KEM-1024") {
+      allowedUsages = CryptoKeyUsageSet::encapsulateKey() | CryptoKeyUsageSet::encapsulateBits();
+    } else if (algorithmName == "ECDSA" || algorithmName == "Ed25519" ||
+        algorithmName == "RSA-PSS" || algorithmName == "RSASSA-PKCS1-v1_5" ||
+        algorithmName == "ML-DSA-44" || algorithmName == "ML-DSA-65" ||
+        algorithmName == "ML-DSA-87") {
+      allowedUsages = CryptoKeyUsageSet::verify();
+    } else {
+      JSG_FAIL_REQUIRE(DOMNotSupportedError, "The getPublicKey operation is not supported for \"",
+          algorithmName, "\".");
+    }
+
+    auto usages = CryptoKeyUsageSet::validate(
+        algorithmName, CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
+
+    auto publicKeyImpl = key.impl->getPublicKey(js, usages);
+    return js.alloc<CryptoKey>(kj::mv(publicKeyImpl));
+  });
+}
+
+bool SubtleCrypto::supports(jsg::Lock& js,
+    kj::String operation,
+    v8::Local<v8::Value> algorithm,
+    jsg::Optional<v8::Local<v8::Value>> lengthOrAdditionalAlgorithm,
+    const jsg::TypeHandler<kj::OneOf<kj::String, EncryptAlgorithm>>& encryptAlgorithmHandler,
+    const jsg::TypeHandler<kj::OneOf<kj::String, SignAlgorithm>>& signAlgorithmHandler,
+    const jsg::TypeHandler<kj::OneOf<kj::String, DigestAlgorithm>>& digestAlgorithmHandler,
+    const jsg::TypeHandler<kj::OneOf<kj::String, GenerateKeyAlgorithm>>&
+        generateKeyAlgorithmHandler,
+    const jsg::TypeHandler<kj::OneOf<kj::String, DeriveKeyAlgorithm>>& deriveKeyAlgorithmHandler,
+    const jsg::TypeHandler<kj::OneOf<kj::String, ImportKeyAlgorithm>>& importKeyAlgorithmHandler) {
+  KJ_IF_SOME(parsedOperation, parseSubtleOperation(operation)) {
+    return js.tryCatch([&]() -> bool {
+      auto checkSupportForAlgorithm = [&](SubtleOperation checkedOperation,
+                                          v8::Local<v8::Value> algorithmValue,
+                                          kj::Maybe<uint32_t> maybeLength) -> bool {
+        switch (checkedOperation) {
+          case SubtleOperation::ENCRYPT:
+            [[fallthrough]];
+          case SubtleOperation::DECRYPT: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, encryptAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              if (!supportsEncryptDecrypt(algoImpl.name)) return false;
+              validateEncryptAlgorithm(js, algoImpl.name, normalizedAlgorithm);
+              return true;
+            }
+            return false;
+          }
+
+          case SubtleOperation::SIGN: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, signAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              if (!supportsSign(algoImpl.name)) return false;
+              validateSignAlgorithm(algoImpl.name, normalizedAlgorithm);
+              return true;
+            }
+            return false;
+          }
+
+          case SubtleOperation::VERIFY: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, signAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              if (!supportsVerify(algoImpl.name)) return false;
+              validateSignAlgorithm(algoImpl.name, normalizedAlgorithm);
+              return true;
+            }
+            return false;
+          }
+
+          case SubtleOperation::DIGEST: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, digestAlgorithmHandler);
+            return supportsDigestAlgorithm(js, normalizedAlgorithm);
+          }
+
+          case SubtleOperation::GENERATE_KEY: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, generateKeyAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              if (algoImpl.generateFunc == nullptr) return false;
+              validateGenerateKeyAlgorithm(js, algoImpl.name, normalizedAlgorithm);
+              return true;
+            }
+            return false;
+          }
+
+          case SubtleOperation::DERIVE_KEY:
+            return false;
+
+          case SubtleOperation::DERIVE_BITS: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, deriveKeyAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              if (!supportsDeriveBits(algoImpl.name)) return false;
+              validateDeriveBitsAlgorithm(js, algoImpl.name, normalizedAlgorithm, maybeLength);
+              return true;
+            }
+            return false;
+          }
+
+          case SubtleOperation::IMPORT_KEY: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, importKeyAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              if (algoImpl.importFunc == nullptr) return false;
+              validateImportKeyAlgorithm(algoImpl.name, normalizedAlgorithm);
+              return true;
+            }
+            return false;
+          }
+
+          case SubtleOperation::EXPORT_KEY: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, importKeyAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              return supportsExportKey(algoImpl.name);
+            }
+            return false;
+          }
+
+          case SubtleOperation::WRAP_KEY:
+            [[fallthrough]];
+          case SubtleOperation::UNWRAP_KEY: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, encryptAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              if (algoImpl.name == "AES-KW") return true;
+              if (!supportsEncryptDecrypt(algoImpl.name)) return false;
+              validateEncryptAlgorithm(js, algoImpl.name, normalizedAlgorithm);
+              return true;
+            }
+            return false;
+          }
+
+          case SubtleOperation::ENCAPSULATE_KEY:
+            [[fallthrough]];
+          case SubtleOperation::ENCAPSULATE_BITS:
+            [[fallthrough]];
+          case SubtleOperation::DECAPSULATE_KEY:
+            [[fallthrough]];
+          case SubtleOperation::DECAPSULATE_BITS: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, importKeyAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              return supportsEncapsulate(algoImpl.name);
+            }
+            return false;
+          }
+
+          case SubtleOperation::GET_PUBLIC_KEY: {
+            auto normalizedAlgorithm =
+                normalizeSupportAlgorithm(js, algorithmValue, importKeyAlgorithmHandler);
+            KJ_IF_SOME(algoImpl, lookupAlgorithm(normalizedAlgorithm.name)) {
+              return supportsGetPublicKey(algoImpl.name);
+            }
+            return false;
+          }
+        }
+
+        KJ_UNREACHABLE;
+      };
+
+      KJ_IF_SOME(thirdArgument, lengthOrAdditionalAlgorithm) {
+        if (isAdditionalAlgorithmArgument(thirdArgument)) {
+          auto additionalAlgorithm =
+              normalizeSupportAlgorithm(js, thirdArgument, importKeyAlgorithmHandler);
+
+          switch (parsedOperation) {
+            case SubtleOperation::DERIVE_KEY: {
+              if (!checkSupportForAlgorithm(SubtleOperation::IMPORT_KEY, thirdArgument, kj::none)) {
+                return false;
+              }
+              auto length = getKeyLength(additionalAlgorithm);
+              return checkSupportForAlgorithm(SubtleOperation::DERIVE_BITS, algorithm, length);
+            }
+
+            case SubtleOperation::UNWRAP_KEY:
+              [[fallthrough]];
+            case SubtleOperation::ENCAPSULATE_KEY:
+              [[fallthrough]];
+            case SubtleOperation::DECAPSULATE_KEY:
+              if (!checkSupportForAlgorithm(SubtleOperation::IMPORT_KEY, thirdArgument, kj::none)) {
+                return false;
+              }
+              return checkSupportForAlgorithm(parsedOperation, algorithm, kj::none);
+
+            case SubtleOperation::WRAP_KEY:
+              if (!checkSupportForAlgorithm(SubtleOperation::EXPORT_KEY, thirdArgument, kj::none)) {
+                return false;
+              }
+              return checkSupportForAlgorithm(parsedOperation, algorithm, kj::none);
+
+            default:
+              return checkSupportForAlgorithm(parsedOperation, algorithm, kj::none);
+          }
+        }
+      }
+
+      kj::Maybe<uint32_t> maybeLength = kj::none;
+      KJ_IF_SOME(thirdArgument, lengthOrAdditionalAlgorithm) {
+        maybeLength = readSupportsLength(js, thirdArgument);
+      }
+      return checkSupportForAlgorithm(parsedOperation, algorithm, maybeLength);
+    }, [](jsg::Value&&) { return false; });
+  }
+
+  return false;
 }
 
 bool SubtleCrypto::timingSafeEqual(jsg::JsBufferSource a, jsg::JsBufferSource b) {
