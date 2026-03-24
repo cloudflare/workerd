@@ -1271,6 +1271,30 @@ declare abstract class Crypto {
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto)
  */
 declare abstract class SubtleCrypto {
+  static supports(
+    operation: string,
+    algorithm:
+      | string
+      | SubtleCryptoGenerateKeyAlgorithm
+      | SubtleCryptoImportKeyAlgorithm
+      | SubtleCryptoDeriveKeyAlgorithm
+      | SubtleCryptoDigestAlgorithm
+      | SubtleCryptoEncryptAlgorithm
+      | SubtleCryptoSignAlgorithm,
+    length?: number | null,
+  ): boolean;
+  static supports(
+    operation: string,
+    algorithm:
+      | string
+      | SubtleCryptoGenerateKeyAlgorithm
+      | SubtleCryptoImportKeyAlgorithm
+      | SubtleCryptoDeriveKeyAlgorithm
+      | SubtleCryptoDigestAlgorithm
+      | SubtleCryptoEncryptAlgorithm
+      | SubtleCryptoSignAlgorithm,
+    additionalAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+  ): boolean;
   /**
    * The **`encrypt()`** method of the SubtleCrypto interface encrypts data.
    *
@@ -1318,7 +1342,7 @@ declare abstract class SubtleCrypto {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/digest)
    */
   digest(
-    algorithm: string | SubtleCryptoHashAlgorithm,
+    algorithm: string | SubtleCryptoDigestAlgorithm,
     data: ArrayBuffer | ArrayBufferView,
   ): Promise<ArrayBuffer>;
   /**
@@ -1396,6 +1420,31 @@ declare abstract class SubtleCrypto {
     extractable: boolean,
     keyUsages: string[],
   ): Promise<CryptoKey>;
+  encapsulateKey(
+    encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    encapsulationKey: CryptoKey,
+    sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    extractable: boolean,
+    keyUsages: string[],
+  ): Promise<SubtleCryptoEncapsulatedKey>;
+  encapsulateBits(
+    encapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    encapsulationKey: CryptoKey,
+  ): Promise<SubtleCryptoEncapsulatedBits>;
+  decapsulateKey(
+    decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    decapsulationKey: CryptoKey,
+    ciphertext: ArrayBuffer | ArrayBufferView,
+    sharedKeyAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    extractable: boolean,
+    keyUsages: string[],
+  ): Promise<CryptoKey>;
+  decapsulateBits(
+    decapsulationAlgorithm: string | SubtleCryptoImportKeyAlgorithm,
+    decapsulationKey: CryptoKey,
+    ciphertext: ArrayBuffer | ArrayBufferView,
+  ): Promise<ArrayBuffer>;
+  getPublicKey(key: CryptoKey, keyUsages: string[]): Promise<CryptoKey>;
   timingSafeEqual(
     a: ArrayBuffer | ArrayBufferView,
     b: ArrayBuffer | ArrayBufferView,
@@ -1462,11 +1511,21 @@ interface JsonWebKey {
   qi?: string;
   oth?: RsaOtherPrimesInfo[];
   k?: string;
+  pub?: string;
+  priv?: string;
 }
 interface RsaOtherPrimesInfo {
   r?: string;
   d?: string;
   t?: string;
+}
+interface SubtleCryptoEncapsulatedBits {
+  sharedKey: ArrayBuffer;
+  ciphertext: ArrayBuffer;
+}
+interface SubtleCryptoEncapsulatedKey {
+  sharedKey: CryptoKey;
+  ciphertext: ArrayBuffer;
 }
 interface SubtleCryptoDeriveKeyAlgorithm {
   name: string;
@@ -1496,6 +1555,13 @@ interface SubtleCryptoGenerateKeyAlgorithm {
 interface SubtleCryptoHashAlgorithm {
   name: string;
 }
+interface SubtleCryptoDigestAlgorithm {
+  name: string;
+  outputLength?: number;
+  domainSeparation?: number;
+  functionName?: ArrayBuffer | ArrayBufferView;
+  customization?: ArrayBuffer | ArrayBufferView;
+}
 interface SubtleCryptoImportKeyAlgorithm {
   name: string;
   hash?: string | SubtleCryptoHashAlgorithm;
@@ -1508,6 +1574,7 @@ interface SubtleCryptoSignAlgorithm {
   hash?: string | SubtleCryptoHashAlgorithm;
   dataLength?: number;
   saltLength?: number;
+  context?: ArrayBuffer | ArrayBufferView;
 }
 interface CryptoKeyKeyAlgorithm {
   name: string;

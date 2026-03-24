@@ -28,6 +28,8 @@ syn = { version = "2", features = ["full"] }
 ada-url = "3"
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
+aws-lc-rs = { version = "1", default-features = false, features = ["non-fips"] }
+aws-lc-sys = { version = "0", default-features = false }
 capnp = "0"
 capnpc = "0"
 capnp-rpc = "0"
