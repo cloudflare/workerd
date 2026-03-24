@@ -330,6 +330,16 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::ForkedPromise<void>& forkedDrainWhen,
       bool forTest = false);
 
+  // Parsed socket protocol/TLS config. Extracted from the switch in listenOnSockets() to avoid
+  // goto-over-initialization inside a coroutine, which triggers a clang optimizer crash.
+  struct SocketTypeConfig {
+    uint defaultPort = 0;
+    config::HttpOptions::Reader httpOptions;
+    kj::Maybe<kj::Own<kj::TlsContext>> tls;
+    kj::StringPtr physicalProtocol;
+  };
+  kj::Maybe<SocketTypeConfig> parseSocketType(config::Socket::Reader sock, kj::StringPtr name);
+
   void unlinkWorkerLoaders();
 
   kj::Promise<void> preloadPython(

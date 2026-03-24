@@ -5854,6 +5854,39 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
   }
 }
 
+kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
+    config::Socket::Reader sock, kj::StringPtr name) {
+  switch (sock.which()) {
+    case config::Socket::HTTP: {
+      SocketTypeConfig result;
+      result.defaultPort = 80;
+      result.httpOptions = sock.getHttp();
+      result.physicalProtocol = "http";
+      return kj::mv(result);
+    }
+    case config::Socket::HTTPS: {
+      auto https = sock.getHttps();
+      SocketTypeConfig result;
+      result.defaultPort = 443;
+      result.httpOptions = https.getOptions();
+      result.tls = makeTlsContext(https.getTlsOptions());
+      result.physicalProtocol = "https";
+      return kj::mv(result);
+    }
+    case config::Socket::TCP: {
+      auto tcp = sock.getTcp();
+      SocketTypeConfig result;
+      if (tcp.hasTlsOptions()) {
+        result.tls = makeTlsContext(tcp.getTlsOptions());
+      }
+      return kj::mv(result);
+    }
+  }
+  reportConfigError(kj::str("Encountered unknown socket type in \"", name,
+      "\". Was the config compiled with a newer version of the schema?"));
+  return kj::none;
+}
+
 kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     kj::HttpHeaderTable::Builder& headerTableBuilder,
     kj::ForkedPromise<void>& forkedDrainWhen,
@@ -5890,40 +5923,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       continue;
     }
 
-    uint defaultPort = 0;
-    config::HttpOptions::Reader httpOptions;
-    kj::Maybe<kj::Own<kj::TlsContext>> tls;
-    kj::StringPtr physicalProtocol;
-    switch (sock.which()) {
-      case config::Socket::HTTP:
-        defaultPort = 80;
-        httpOptions = sock.getHttp();
-        physicalProtocol = "http";
-        goto validSocket;
-      case config::Socket::HTTPS: {
-        auto https = sock.getHttps();
-        defaultPort = 443;
-        httpOptions = https.getOptions();
-        tls = makeTlsContext(https.getTlsOptions());
-        physicalProtocol = "https";
-        goto validSocket;
-      }
-      case config::Socket::TCP: {
-        auto tcp = sock.getTcp();
-        // No default port
-        // No physical protocol mention here.
-        if (tcp.hasTlsOptions()) {
-          tls = makeTlsContext(tcp.getTlsOptions());
-        }
-        goto validSocket;
-      }
-    }
-    reportConfigError(kj::str("Encountered unknown socket type in \"", name,
-        "\". Was the config compiled with a "
-        "newer version of the schema?"));
-    continue;
+    auto maybeSocketConfig = parseSocketType(sock, name);
+    if (maybeSocketConfig == kj::none) continue;
+    auto& socketConfig = KJ_ASSERT_NONNULL(maybeSocketConfig);
 
-  validSocket:
     using PromisedReceived = kj::Promise<kj::Own<kj::ConnectionReceiver>>;
     PromisedReceived listener = nullptr;
     KJ_IF_SOME(l, listenerOverride) {
@@ -5932,10 +5935,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       listener = ([](kj::Promise<kj::Own<kj::NetworkAddress>> promise) -> PromisedReceived {
         auto parsed = co_await promise;
         co_return parsed->listen();
-      })(network.parseAddress(addrStr, defaultPort));
+      })(network.parseAddress(addrStr, socketConfig.defaultPort));
     }
 
-    KJ_IF_SOME(t, tls) {
+    KJ_IF_SOME(t, socketConfig.tls) {
       listener = ([](kj::Promise<kj::Own<kj::ConnectionReceiver>> promise,
                       kj::Own<kj::TlsContext> tls) -> PromisedReceived {
         auto port = co_await promise;
@@ -5945,10 +5948,11 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
     // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
     // be available later.
-    auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
+    auto rewriter = kj::heap<HttpRewriter>(socketConfig.httpOptions, headerTableBuilder);
 
     auto handle = kj::coCapture(
-        [this, service = kj::mv(service), rewriter = kj::mv(rewriter), physicalProtocol, name,
+        [this, service = kj::mv(service), rewriter = kj::mv(rewriter),
+            physicalProtocol = socketConfig.physicalProtocol, name,
             isHttp = sock.which() != config::Socket::TCP, addrStr](
             kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
       if (isHttp) {
