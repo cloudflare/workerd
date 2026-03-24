@@ -431,7 +431,8 @@ build:release_windows --copt="/clang:-O3"
 build:release_windows --copt="-fstrict-aliasing"
 # This file breaks our CI windows release builds when compiled using O2/O3
 # Ref: https://github.com/llvm/llvm-project/issues/136481
-build:release_windows --per_file_copt=.*capnp/rpc\.c++@/clang:-O1
+build:windows --per_file_copt=.*capnp/rpc\.c++@-fstrict-aliasing,/O2,/clang:-O3
+build:windows --per_file_copt="src/workerd/server/server.c++"@-fstrict-aliasing,/O2,/clang:-O3
 
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
