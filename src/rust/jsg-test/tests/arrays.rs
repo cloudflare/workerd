@@ -1377,3 +1377,62 @@ fn biguint64_array_to_js_and_from_js() {
         Ok(())
     });
 }
+
+#[test]
+fn uint8clamped_array_from_js() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        use jsg::v8::Local;
+        use jsg::v8::Uint8ClampedArray;
+
+        let val = ctx
+            .eval_raw("new Uint8ClampedArray([0, 128, 255])")
+            .unwrap();
+        assert!(val.is_uint8clamped_array());
+        assert!(!val.is_uint8_array());
+
+        let arr: Local<Uint8ClampedArray> =
+            // SAFETY: isolate valid; val is a Uint8ClampedArray Local.
+            unsafe { Local::from_ffi(lock.isolate(), val.into_ffi()) };
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr.get(0), 0u8);
+        assert_eq!(arr.get(1), 128u8);
+        assert_eq!(arr.get(2), 255u8);
+        assert_eq!(arr.as_slice(), &[0u8, 128, 255]);
+        assert!(arr.is_integer_type());
+        assert_eq!(arr.element_size(), 1);
+
+        Ok(())
+    });
+}
+
+#[test]
+fn uint8clamped_array_rejects_wrong_type() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        use jsg::FromJS;
+        use jsg::v8::Local;
+        use jsg::v8::Uint8ClampedArray;
+
+        let val = ctx.eval_raw("new Uint8Array([1, 2, 3])").unwrap();
+        let result = Local::<Uint8ClampedArray>::from_js(lock, val);
+        assert!(result.is_err());
+
+        Ok(())
+    });
+}
+
+#[test]
+fn is_float16_array_check() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|_lock, ctx| {
+        let f16_val = ctx.eval_raw("new Float16Array([1.0, 2.0])").unwrap();
+        assert!(f16_val.is_float16_array());
+        assert!(!f16_val.is_float32_array());
+
+        let f32_val = ctx.eval_raw("new Float32Array([1.0])").unwrap();
+        assert!(!f32_val.is_float16_array());
+
+        Ok(())
+    });
+}

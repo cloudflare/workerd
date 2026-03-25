@@ -139,6 +139,8 @@ bool local_is_float32_array(const Local& val);
 bool local_is_float64_array(const Local& val);
 bool local_is_bigint64_array(const Local& val);
 bool local_is_biguint64_array(const Local& val);
+bool local_is_float16_array(const Local& val);
+bool local_is_uint8clamped_array(const Local& val);
 bool local_is_array_buffer(const Local& val);
 bool local_is_array_buffer_view(const Local& val);
 bool local_is_function(const Local& val);
@@ -220,6 +222,7 @@ float local_float32_array_get(Isolate* isolate, const Local& array, size_t index
 double local_float64_array_get(Isolate* isolate, const Local& array, size_t index);
 int64_t local_bigint64_array_get(Isolate* isolate, const Local& array, size_t index);
 uint64_t local_biguint64_array_get(Isolate* isolate, const Local& array, size_t index);
+uint8_t local_uint8clamped_array_get(Isolate* isolate, const Local& array, size_t index);
 
 // Global<T>
 void global_reset(Global& value);

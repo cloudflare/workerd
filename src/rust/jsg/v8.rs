@@ -209,6 +209,8 @@ pub mod ffi {
         pub unsafe fn local_is_float64_array(value: &Local) -> bool;
         pub unsafe fn local_is_bigint64_array(value: &Local) -> bool;
         pub unsafe fn local_is_biguint64_array(value: &Local) -> bool;
+        pub unsafe fn local_is_float16_array(value: &Local) -> bool;
+        pub unsafe fn local_is_uint8clamped_array(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer(value: &Local) -> bool;
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
         pub unsafe fn local_is_function(value: &Local) -> bool;
@@ -376,6 +378,11 @@ pub mod ffi {
             array: &Local,
             index: usize,
         ) -> u64;
+        pub unsafe fn local_uint8clamped_array_get(
+            isolate: *mut Isolate,
+            array: &Local,
+            index: usize,
+        ) -> u8;
 
         // Global<T>
         pub unsafe fn global_reset(value: Pin<&mut Global>);
@@ -815,6 +822,7 @@ pub struct Float32Array;
 pub struct Float64Array;
 pub struct BigInt64Array;
 pub struct BigUint64Array;
+pub struct Uint8ClampedArray;
 
 // Generic Local<'a, T> handle with lifetime
 #[derive(Debug)]
@@ -1008,6 +1016,18 @@ impl<'a, T> Local<'a, T> {
     pub fn is_biguint64_array(&self) -> bool {
         // SAFETY: handle is valid within the current HandleScope.
         unsafe { ffi::local_is_biguint64_array(&self.handle) }
+    }
+
+    /// Returns true if the value is a `Float16Array`.
+    pub fn is_float16_array(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_float16_array(&self.handle) }
+    }
+
+    /// Returns true if the value is a `Uint8ClampedArray`.
+    pub fn is_uint8clamped_array(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_uint8clamped_array(&self.handle) }
     }
 
     /// Returns true if the value is an `ArrayBuffer`.
@@ -1229,6 +1249,7 @@ impl_local_cast!(Float32Array -> Value, is_float32_array);
 impl_local_cast!(Float64Array -> Value, is_float64_array);
 impl_local_cast!(BigInt64Array -> Value, is_bigint64_array);
 impl_local_cast!(BigUint64Array -> Value, is_biguint64_array);
+impl_local_cast!(Uint8ClampedArray -> Value, is_uint8clamped_array);
 
 // TypedArray base type to Value. Uses `is_array_buffer_view` which also matches
 // `DataView`, but this is acceptable because `TypedArray` is only constructed from
@@ -1246,6 +1267,7 @@ impl_local_cast!(Float32Array -> TypedArray, is_float32_array);
 impl_local_cast!(Float64Array -> TypedArray, is_float64_array);
 impl_local_cast!(BigInt64Array -> TypedArray, is_bigint64_array);
 impl_local_cast!(BigUint64Array -> TypedArray, is_biguint64_array);
+impl_local_cast!(Uint8ClampedArray -> TypedArray, is_uint8clamped_array);
 
 // Upcasts to Object (Function, Array, TypedArray are all Object subtypes in V8)
 impl_local_cast!(Function -> Object, is_function);
@@ -1634,6 +1656,11 @@ impl_typed_array_from_js!(Float32Array, is_float32_array, "Float32Array");
 impl_typed_array_from_js!(Float64Array, is_float64_array, "Float64Array");
 impl_typed_array_from_js!(BigInt64Array, is_bigint64_array, "BigInt64Array");
 impl_typed_array_from_js!(BigUint64Array, is_biguint64_array, "BigUint64Array");
+impl_typed_array_from_js!(
+    Uint8ClampedArray,
+    is_uint8clamped_array,
+    "Uint8ClampedArray"
+);
 
 impl_typed_array!(Uint8Array, u8, local_uint8_array_get);
 impl_typed_array!(Uint16Array, u16, local_uint16_array_get);
@@ -1645,6 +1672,8 @@ impl_typed_array!(Float32Array, f32, local_float32_array_get);
 impl_typed_array!(Float64Array, f64, local_float64_array_get);
 impl_typed_array!(BigInt64Array, i64, local_bigint64_array_get);
 impl_typed_array!(BigUint64Array, u64, local_biguint64_array_get);
+// Uint8ClampedArray has the same element type as Uint8Array; clamping is a write-side JS concern.
+impl_typed_array!(Uint8ClampedArray, u8, local_uint8clamped_array_get);
 
 // =============================================================================
 // `String`-specific implementations
