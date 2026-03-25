@@ -29,6 +29,11 @@ class Container: public jsg::Object {
     jsg::Optional<kj::String> name;
 
     JSG_STRUCT(id, size, dir, name);
+    JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+      if (!flags.getWorkerdExperimental()) {
+        JSG_TS_OVERRIDE(type DirectorySnapshot = never);
+      }
+    }
   };
 
   struct DirectorySnapshotOptions {
@@ -43,6 +48,11 @@ class Container: public jsg::Object {
     jsg::Optional<kj::String> mountPoint;
 
     JSG_STRUCT(snapshot, mountPoint);
+    JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+      if (!flags.getWorkerdExperimental()) {
+        JSG_TS_OVERRIDE(type SnapshotRestoreParams = never);
+      }
+    }
   };
 
   struct StartupOptions {
@@ -71,7 +81,9 @@ class Container: public jsg::Object {
           entrypoint?: string[];
           enableInternet: boolean;
           env?: Record<string, string>;
+          hardTimeout?: never;
           labels?: Record<string, string>;
+          snapshots?: never;
         });
       }
     }
