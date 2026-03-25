@@ -323,8 +323,12 @@ void EventSource::reconnect(jsg::Lock& js) {
   KJ_ASSERT(impl != kj::none);
   readyState = State::CONNECTING;
   abortController = js.alloc<AbortController>(js);
-  auto signal = abortController->getSignal();
-  context.awaitIo(js, signal->wrap(js, context.afterLimitTimeout(reconnectionTime)))
+  kj::Maybe<jsg::Ref<AbortSignal>> signal = abortController->getSignal();
+
+  auto promise =
+      AbortSignal::maybeCancelWrap(js, signal, context.afterLimitTimeout(reconnectionTime));
+
+  context.awaitIo(js, kj::mv(promise))
       .then(js,
           JSG_VISITABLE_LAMBDA(
               (self = JSG_THIS), (self), (jsg::Lock & js) mutable { self->start(js); }),

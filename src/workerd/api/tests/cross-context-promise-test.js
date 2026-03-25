@@ -174,19 +174,14 @@ async function resolveTest(req, env, ctx) {
     setupWaiter(ctx);
     const { promise, resolve } = Promise.withResolvers();
     globalThis.request1 = { promise, resolve };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const immediate = setImmediate(() => {});
     await als.run(123, async () => {
       await promise;
       strictEqual(als.getStore(), 123);
     });
     // This part is the main test. It will not run until after the promise
     // is resolved in the second request.
-    // We use an AbortSignal because it is bound to the IoContext and will
-    // throw an error if ab.aborted is checked from the wrong IoContext.
-    // If this line runes, it is proof that the promise continuation is
-    // running in the correct IoContext.
-    strictEqual(ab.aborted, true);
+    clearImmediate(immediate);
     return new Response('ok');
   }
 
@@ -219,8 +214,7 @@ async function rejectTest(req, env, ctx) {
     setupWaiter(ctx);
     const { promise, reject } = Promise.withResolvers();
     globalThis.request2 = { reject };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const immediate = setImmediate(() => {});
     try {
       // The promise will be rejected from the other request.
       await promise;
@@ -231,7 +225,7 @@ async function rejectTest(req, env, ctx) {
       // is running in the wrong IoContext, which is the main thing we are
       // testing for here.
       strictEqual(err, reason);
-      strictEqual(ab.aborted, true);
+      clearImmediate(immediate);
     }
     return new Response('ok');
   }
@@ -257,10 +251,9 @@ async function crossRequestStream(req, env, ctx) {
     });
     globalThis.stream = { controller };
     const reader = readable.getReader();
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
-    const read = await reader.read();
-    strictEqual(ab.aborted, true);
+    const immediate = setImmediate(() => {});
+    await reader.read();
+    clearImmediate(immediate);
     return new Response('ok');
   }
 
@@ -280,8 +273,7 @@ async function customThenable(req, env, ctx) {
     setupWaiter(ctx);
     const { promise, resolve } = Promise.withResolvers();
     globalThis.thenable = { resolve };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const immediate = setImmediate(() => {});
 
     // We check to make sure the value provided by the custom thenable is
     // property passed through to the promise resolution.
@@ -289,22 +281,17 @@ async function customThenable(req, env, ctx) {
     strictEqual(await promise, 1);
     // This part is the main test. It will not run until after the promise
     // is resolved in the second request.
-    // We use an AbortSignal because it is bound to the IoContext and will
-    // throw an error if ab.aborted is checked from the wrong IoContext.
-    // If this line runes, it is proof that the promise continuation is
-    // running in the correct IoContext.
-    strictEqual(ab.aborted, true);
+    clearImmediate(immediate);
     return new Response('ok');
   }
 
   // This is our second request. Here, all we do is resolve the promise.
-  const ab = AbortSignal.abort();
-  strictEqual(ab.aborted, true);
+  const immediate = setImmediate(() => {});
 
   const then = mock.fn((resolve) => {
     // The thenable should be invoked in the second request's IoContext.
     // If it is not, then the ab.aborted check below will fail.
-    strictEqual(ab.aborted, true);
+    clearImmediate(immediate);
     resolve(1);
   });
 
@@ -326,8 +313,7 @@ async function unhandledRejection(req, env, ctx) {
     setupWaiter(ctx);
     const { promise, reject } = Promise.withResolvers();
     globalThis.unhandled = { reject };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const immediate = setImmediate(() => {});
 
     const rejectPromise = Promise.withResolvers();
     globalThis.addEventListener(
@@ -337,8 +323,8 @@ async function unhandledRejection(req, env, ctx) {
         // synchronously when the promise is rejected. It does not get deferred.
         // so the IoContext here will be the second request's IoContext! This
         // means that our ab.aborted check will fail!
-        throws(() => ab.aborted, {
-          message: /I\/O type: RefcountedCanceler/,
+        throws(() => clearImmediate(immediate), {
+          message: /I\/O type: IoContext/,
         });
         strictEqual(event.reason, reason);
         rejectPromise.resolve();
@@ -384,20 +370,21 @@ async function expiredContext(req, env, ctx) {
   return new Response('ok');
 }
 
-async function* gen(ab) {
+async function* gen(immediate) {
   let c = 0;
   for (;;) {
     await scheduler.wait(10);
-    strictEqual(ab.aborted, true);
+    clearImmediate(immediate);
     yield c++;
   }
 }
 
 async function asyncIterator(req, env, ctx) {
   if (globalThis.asynciter === undefined) {
-    const ab = AbortSignal.abort();
-    globalThis.asynciter = gen(ab);
-    globalThis.asyncIter2 = gen(ab);
+    const immediate1 = setImmediate(() => {});
+    const immediate2 = setImmediate(() => {});
+    globalThis.asynciter = gen(immediate1);
+    globalThis.asyncIter2 = gen(immediate2);
     return new Response('ok');
   }
 
@@ -432,8 +419,7 @@ async function cyclicPromise(req, env, ctx) {
     setupWaiter(ctx);
     const { promise, resolve } = Promise.withResolvers();
     globalThis.cyclic = { promise, resolve };
-    const ab = AbortSignal.abort();
-    strictEqual(ab.aborted, true);
+    const immediate = setImmediate(() => {});
     await promise;
     throw new Error('should never get here');
   }

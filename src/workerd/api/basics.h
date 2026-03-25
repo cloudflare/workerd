@@ -9,6 +9,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/external-pusher.h>
+#include <workerd/io/io-context.h>
 #include <workerd/io/io-own.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
@@ -568,9 +569,8 @@ class AbortSignal final: public EventTarget {
  public:
   enum class Flag { NONE, NEVER_ABORTS, IGNORE_FOR_SUBREQUESTS };
 
-  AbortSignal(kj::Maybe<kj::Exception> exception = kj::none,
-      jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
-      Flag flag = Flag::NONE);
+  AbortSignal(
+      jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none, Flag flag = Flag::NONE);
 
   using PendingReason = ExternalPusherImpl::PendingAbortReason;
 
@@ -640,31 +640,28 @@ class AbortSignal final: public EventTarget {
     }
   }
 
-  // Allows this AbortSignal to also serve as a kj::Canceler
-  template <typename T>
-  kj::Promise<T> wrap(jsg::Lock& js, kj::Promise<T> promise) {
-    subscribeToRpcAbort(js);
+  struct CancelerAndHandler {
+    kj::Rc<RefcountedCanceler> canceler;
+    kj::Own<void> handler;
+  };
 
-    JSG_REQUIRE(!canceler->isCanceled(), TypeError, "The AbortSignal has already been triggered");
-    return canceler->wrap(kj::mv(promise));
-  }
+  static CancelerAndHandler newMaybeCrossContextCancelHandler(
+      jsg::Lock& js, jsg::Ref<AbortSignal> signal);
 
   template <typename T>
   static kj::Promise<T> maybeCancelWrap(
-      jsg::Lock& js, kj::Maybe<jsg::Ref<AbortSignal>>& signal, kj::Promise<T> promise) {
-    KJ_IF_SOME(s, signal) {
-      return s->wrap(js, kj::mv(promise));
+      jsg::Lock& js, kj::Maybe<jsg::Ref<AbortSignal>>& maybeSignal, kj::Promise<T> promise) {
+    KJ_IF_SOME(signal, maybeSignal) {
+      auto cancelerAndHandler = newMaybeCrossContextCancelHandler(js, signal.addRef());
+      promise = cancelerAndHandler.canceler->wrap(kj::mv(promise));
+      return promise.attach(kj::mv(cancelerAndHandler));
     } else {
       return kj::mv(promise);
     }
   }
 
-  RefcountedCanceler& getCanceler();
-
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     EventTarget::visitForMemoryInfo(tracker);
-    tracker.trackInlineFieldWithSize(
-        "IoOwn<RefcountedCanceler>", sizeof(IoOwn<RefcountedCanceler>));
     tracker.trackField("reason", reason);
   }
 
@@ -686,7 +683,6 @@ class AbortSignal final: public EventTarget {
   bool isIgnoredForSubrequests(jsg::Lock& js) const;
 
  private:
-  IoOwn<RefcountedCanceler> canceler;
   Flag flag;
 
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
@@ -735,8 +731,7 @@ class AbortController final: public jsg::Object {
  public:
   explicit AbortController(
       jsg::Lock& js, AbortSignal::Flag abortSignalFlag = AbortSignal::Flag::NONE)
-      : signal(js.alloc<AbortSignal>(
-            kj::none /* exception */, kj::none /* maybeReason */, abortSignalFlag)) {}
+      : signal(js.alloc<AbortSignal>(kj::none /* maybeReason */, abortSignalFlag)) {}
 
   static jsg::Ref<AbortController> constructor(jsg::Lock& js) {
     return js.alloc<AbortController>(js);
