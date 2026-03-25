@@ -157,7 +157,8 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
 void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
   // The span information is not transmitted via RPC at this point, we can decompose the span into
   // spanOpen/spanEnd.
-  addSpanOpen(span.spanId, span.parentSpanId, kj::mv(span.operationName), span.startTime);
+  addSpanOpen(
+      span.spanId, span.parentSpanId, kj::mv(span.operationName), span.startTime, span.spanKind);
   tracing::SpanEndData spanEnd(span.spanId, span.endTime, kj::mv(span.tags));
   addSpanEnd(kj::mv(spanEnd), span.startTime);
 }
@@ -165,7 +166,8 @@ void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
 void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
     tracing::SpanId parentSpanId,
     kj::ConstString operationName,
-    kj::Date startTime) {
+    kj::Date startTime,
+    SpanKind spanKind) {
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -181,8 +183,8 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
   size_t spanNameSize = operationName.size();
   auto spanOpenContext = tracing::InvocationSpanContext(
       topLevelContext.getTraceId(), topLevelContext.getInvocationId(), parentSpanId);
-  tailStreamWriter->report(
-      spanOpenContext, tracing::SpanOpen(spanId, kj::mv(operationName)), startTime, spanNameSize);
+  tailStreamWriter->report(spanOpenContext,
+      tracing::SpanOpen(spanId, kj::mv(operationName), spanKind), startTime, spanNameSize);
 }
 
 void WorkerTracer::addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) {
@@ -618,8 +620,9 @@ void UserSpanObserver::report(const Span& span) {
   submitter->submitSpan(spanId, parentSpanId, span);
 }
 
-void UserSpanObserver::reportStart(kj::ConstString operationName, kj::Date startTime) {
-  submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+void UserSpanObserver::reportStart(
+    kj::ConstString operationName, kj::Date startTime, SpanKind spanKind) {
+  submitter->submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime, spanKind);
 }
 
 // Provide I/O time to the tracing system for user spans.
