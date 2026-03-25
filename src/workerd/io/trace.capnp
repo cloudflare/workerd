@@ -42,6 +42,15 @@ struct UserSpanData {
   parentSpanId @5 :UInt64;
 }
 
+enum SpanKind {
+  # The semantic kind of a span, as per https://opentelemetry.io/docs/specs/otel/trace/api/#spankind
+  internal @0;
+  server @1;
+  client @2;
+  producer @3;
+  consumer @4;
+}
+
 struct SpanOpenData {
   # Representation of a SpanOpen event, created when a user span is opened.
   operationName @0 :Text;
@@ -51,6 +60,7 @@ struct SpanOpenData {
 
   spanId @2 :UInt64;
   parentSpanId @3 :UInt64;
+  spanKind @4 :SpanKind;
 }
 
 struct SpanEndData {

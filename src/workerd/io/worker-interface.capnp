@@ -16,6 +16,7 @@ using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
+using import "/workerd/io/trace.capnp".SpanKind;
 using import "/workerd/io/frankenvalue.capnp".Frankenvalue;
 
 # A 128-bit trace ID used to identify traces.
@@ -211,6 +212,7 @@ struct Trace @0x8e8d911203762d34 {
     workflow @2;
   }
   executionModel @25 :ExecutionModel;
+
   # the execution model of the worker being traced. Can be stateless for a regular worker,
   # durableObject for a DO worker or workflow for the upcoming Workflows feature.
 
@@ -250,6 +252,7 @@ struct Trace @0x8e8d911203762d34 {
       fetch @4 :FetchEventInfo;
       jsRpc @5 :JsRpcEventInfo;
     }
+    spanKind @6 :SpanKind;
   }
 
   struct SpanClose {
@@ -289,6 +292,7 @@ struct Trace @0x8e8d911203762d34 {
     spanId @8: UInt64;
     # id for the span being opened by this Onset event.
     attributes @9 :List(Attribute);
+    spanKind @10 :SpanKind;
   }
 
   struct Outcome {

@@ -1038,10 +1038,12 @@ Return Return::clone() const {
   return Return();
 }
 
-SpanOpen::SpanOpen(SpanId spanId, kj::ConstString operationName, kj::Maybe<Info> info)
+SpanOpen::SpanOpen(
+    SpanId spanId, kj::ConstString operationName, SpanKind spanKind, kj::Maybe<Info> info)
     : operationName(kj::mv(operationName)),
       info(kj::mv(info)),
-      spanId(spanId) {}
+      spanId(spanId),
+      spanKind(spanKind) {}
 
 namespace {
 kj::Maybe<SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader& reader) {
@@ -1067,11 +1069,13 @@ kj::Maybe<SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader& reader)
 SpanOpen::SpanOpen(rpc::Trace::SpanOpen::Reader reader)
     : operationName(kj::str(reader.getOperationName())),
       info(readSpanOpenInfo(reader)),
-      spanId(reader.getSpanId()) {}
+      spanId(reader.getSpanId()),
+      spanKind(reader.getSpanKind()) {}
 
 void SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) const {
   builder.setOperationName(operationName.asPtr());
   builder.setSpanId(spanId);
+  builder.setSpanKind(spanKind);
   KJ_IF_SOME(i, info) {
     auto infoBuilder = builder.initInfo();
     KJ_SWITCH_ONEOF(i) {
@@ -1108,7 +1112,7 @@ SpanOpen SpanOpen::clone() const {
       KJ_UNREACHABLE;
     });
   };
-  return SpanOpen(spanId, operationName.clone(), cloneInfo(info));
+  return SpanOpen(spanId, operationName.clone(), spanKind, cloneInfo(info));
 }
 
 kj::String KJ_STRINGIFY(const SpanOpen::Info& info) {
@@ -1278,18 +1282,23 @@ Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Reader& reade
 }
 }  // namespace
 
-Onset::Onset(
-    SpanId spanId, Onset::Info&& info, Onset::WorkerInfo&& workerInfo, CustomInfo attributes)
+Onset::Onset(SpanId spanId,
+    Onset::Info&& info,
+    Onset::WorkerInfo&& workerInfo,
+    CustomInfo attributes,
+    SpanKind spanKind)
     : spanId(spanId),
       info(kj::mv(info)),
       workerInfo(kj::mv(workerInfo)),
-      attributes(kj::mv(attributes)) {}
+      attributes(kj::mv(attributes)),
+      spanKind(spanKind) {}
 
 Onset::Onset(rpc::Trace::Onset::Reader reader)
     : spanId(reader.getSpanId()),
       info(readOnsetInfo(reader.getInfo())),
       workerInfo(getWorkerInfoFromReader(reader)),
-      attributes(KJ_MAP(attr, reader.getAttributes()) { return Attribute(attr); }) {}
+      attributes(KJ_MAP(attr, reader.getAttributes()) { return Attribute(attr); }),
+      spanKind(reader.getSpanKind()) {}
 
 void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   builder.setExecutionModel(workerInfo.executionModel);
@@ -1322,6 +1331,7 @@ void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   for (size_t n = 0; n < attributes.size(); n++) {
     attributes[n].copyTo(attributeBuilder[n]);
   }
+  builder.setSpanKind(spanKind);
 }
 
 Onset::WorkerInfo Onset::WorkerInfo::clone() const {
@@ -1375,7 +1385,7 @@ EventInfo cloneEventInfo(const EventInfo& info) {
 
 Onset Onset::clone() const {
   return Onset(spanId, cloneEventInfo(info), workerInfo.clone(),
-      KJ_MAP(attr, attributes) { return attr.clone(); });
+      KJ_MAP(attr, attributes) { return attr.clone(); }, spanKind);
 }
 
 Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)
@@ -1587,13 +1597,15 @@ SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
     : spanId(reader.getSpanId()),
       parentSpanId(reader.getParentSpanId()),
       operationName(kj::str(reader.getOperationName())),
-      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {}
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
+      spanKind(reader.getSpanKind()) {}
 
 void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
   builder.setOperationName(operationName.asPtr());
   builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSpanId(spanId);
   builder.setParentSpanId(parentSpanId);
+  builder.setSpanKind(spanKind);
 }
 
 SpanEndData::SpanEndData(rpc::SpanEndData::Reader reader)
@@ -1713,6 +1725,12 @@ void SpanBuilder::setTag(kj::ConstString key, TagInitValue value) {
   }
 }
 
+void SpanBuilder::setSpanKind(SpanKind kind) {
+  KJ_IF_SOME(s, span) {
+    s.spanKind = kind;
+  }
+}
+
 void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value) {
   KJ_IF_SOME(s, span) {
     if (s.logs.size() >= Span::MAX_LOGS) {
@@ -1773,6 +1791,11 @@ void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) 
       userSpan.setTag(kj::mv(key), i);
     }
   }
+}
+
+void TraceContext::setSpanKind(SpanKind kind) {
+  span.setSpanKind(kind);
+  userSpan.setSpanKind(kind);
 }
 
 Span::TagValue spanTagClone(const Span::TagValue& tag) {
