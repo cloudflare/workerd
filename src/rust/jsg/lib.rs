@@ -674,6 +674,20 @@ impl From<u64> for ConstantValue {
     }
 }
 
+/// Where a [`Member::Property`] is attached on the JavaScript object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyKind {
+    /// On the prototype. Not directly enumerable; visible via `"prop" in obj`;
+    /// overridable by subclasses.
+    Prototype,
+    /// As an own property on every instance. Directly enumerable;
+    /// not overridable by subclasses.
+    Instance,
+    /// Registered under a unique symbol on the prototype. Invisible to normal
+    /// enumeration and string-key lookup; surfaced by `node:util` `inspect()`.
+    Inspect,
+}
+
 pub enum Member {
     Constructor {
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
@@ -682,10 +696,14 @@ pub enum Member {
         name: String,
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
     },
+    /// A property accessor with configurable placement. `setter_callback = None`
+    /// makes the property read-only; `Inspect` properties are always read-only.
     Property {
         name: String,
+        kind: PropertyKind,
         getter_callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
-        setter_callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
+        /// `None` for read-only properties.
+        setter_callback: Option<unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo)>,
     },
     StaticMethod {
         name: String,

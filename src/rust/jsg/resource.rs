@@ -17,6 +17,7 @@ use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
 use crate::Member;
+use crate::PropertyKind;
 use crate::ToJS;
 use crate::Type;
 use crate::v8;
@@ -353,6 +354,7 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
         name: R::class_name().to_owned(),
         constructor: KjMaybe::None,
         methods: Vec::new(),
+        properties: Vec::new(),
         static_methods: Vec::new(),
         static_constants: Vec::new(),
     };
@@ -371,10 +373,23 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
                 });
             }
             Member::Property {
-                name: _,
-                getter_callback: _,
-                setter_callback: _,
-            } => unimplemented!("#[jsg_property] is not yet supported on Rust resources"),
+                name,
+                kind,
+                getter_callback,
+                setter_callback,
+            } => {
+                let ffi_kind = match kind {
+                    PropertyKind::Prototype => v8::ffi::PropertyKind::Prototype,
+                    PropertyKind::Instance => v8::ffi::PropertyKind::Instance,
+                    PropertyKind::Inspect => v8::ffi::PropertyKind::Inspect,
+                };
+                descriptor.properties.push(v8::ffi::PropertyDescriptor {
+                    name,
+                    kind: ffi_kind,
+                    getter_callback: getter_callback as usize,
+                    setter_callback: setter_callback.map(|f| f as usize).into(),
+                });
+            }
             Member::StaticMethod { name, callback } => {
                 descriptor.static_methods.push(v8::ffi::MethodDescriptor {
                     name,

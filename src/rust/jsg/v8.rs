@@ -496,10 +496,29 @@ pub mod ffi {
         pub value: f64, /* number */
     }
 
+    // Flat CXX mirror of `jsg::PropertyKind`.
+    enum PropertyKind {
+        Prototype = 0,
+        Instance = 1,
+        /// Registered under a unique symbol; invisible to normal enumeration.
+        Inspect = 2,
+    }
+
+    /// Descriptor for a single accessor property. `setter_callback` is `None` for
+    /// read-only properties; ignored entirely for `Inspect`.
+    pub struct PropertyDescriptor {
+        pub name: String,
+        pub kind: PropertyKind,
+        pub getter_callback: usize,
+        /// `None` means read-only (no setter).
+        pub setter_callback: KjMaybe<usize>,
+    }
+
     pub struct ResourceDescriptor {
         pub name: String,
         pub constructor: KjMaybe<ConstructorDescriptor>,
         pub methods: Vec<MethodDescriptor>,
+        pub properties: Vec<PropertyDescriptor>,
         pub static_methods: Vec<MethodDescriptor>,
         pub static_constants: Vec<StaticConstantDescriptor>,
     }

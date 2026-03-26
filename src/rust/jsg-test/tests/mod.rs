@@ -13,6 +13,7 @@ mod name;
 mod non_coercible;
 mod resource_callback;
 mod resource_conversion;
+mod resource_properties;
 mod string;
 mod symbol;
 mod unwrap;

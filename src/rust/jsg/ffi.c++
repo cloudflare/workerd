@@ -779,6 +779,102 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     prototype->Set(name, functionTemplate);
   }
 
+  const bool specCompliant = workerd::jsg::getSpecCompliantPropertyAttributes(isolate);
+
+  // Mirrors ResourceTypeBuilder constructor (resource.h:1263-1273): always create and install
+  // the inspectProperties ObjectTemplate under the kResourceTypeInspect API symbol.  node:util's
+  // inspect() checks for this symbol on the prototype to identify JSG resource types and uses
+  // the dictionary to enumerate inspect-only properties by name.  This must be present even on
+  // resource types with no #[jsg_inspect_property] fields, because inspect() also uses the
+  // symbol's presence to decide how to walk the prototype chain.
+  auto kResourceTypeInspectStr = ::workerd::jsg::v8StrIntern(isolate, "kResourceTypeInspect");
+  auto kResourceTypeInspectSymbol = v8::Symbol::ForApi(isolate, kResourceTypeInspectStr);
+  auto inspectProperties = v8::ObjectTemplate::New(isolate);
+  prototype->Set(kResourceTypeInspectSymbol, inspectProperties,
+      static_cast<v8::PropertyAttribute>(
+          v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+
+  for (const auto& prop: descriptor.properties) {
+    // NewFromUtf8 returns an empty MaybeLocal (without scheduling a JS exception) when the
+    // string exceeds v8::String::kMaxLength. Check the length first so that the subsequent
+    // jsg::check() call does not misinterpret a missing exception as an ICE.
+    KJ_REQUIRE(prop.name.size() <= static_cast<size_t>(v8::String::kMaxLength),
+        "Rust property name exceeds V8 string length limit", prop.name);
+    auto v8Name = ::workerd::jsg::check(v8::String::NewFromUtf8(
+        isolate, prop.name.data(), v8::NewStringType::kInternalized, prop.name.size()));
+
+    // Helper: build a FunctionTemplate for a getter or setter callback, applying
+    // spec_compliant_property_attributes name/length rules when enabled.
+    // `isGetter` true → length=0, name="get <prop>"; false → length=1, name="set <prop>".
+    auto makePropFn = [&](size_t callback, bool isGetter) {
+      v8::Local<v8::FunctionTemplate> fn;
+      if (specCompliant) {
+        int len = isGetter ? 0 : 1;
+        fn = v8::FunctionTemplate::New(isolate,
+            reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
+            v8::Local<v8::Value>(), signature, len, v8::ConstructorBehavior::kThrow);
+        auto prefix = isGetter ? "get " : "set ";
+        fn->SetClassName(::workerd::jsg::v8Str(isolate, kj::str(prefix, prop.name)));
+      } else {
+        fn = v8::FunctionTemplate::New(
+            isolate, reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)));
+      }
+      return fn;
+    };
+
+    switch (prop.kind) {
+      case PropertyKind::Prototype: {
+        // Mirrors registerPrototypeProperty / registerReadonlyPrototypeProperty in resource.h.
+        auto getterFn = makePropFn(prop.getter_callback, true);
+        KJ_IF_SOME(setterCb, prop.setter_callback) {
+          auto setterFn = makePropFn(setterCb, false);
+          prototype->SetAccessorProperty(
+              v8Name, getterFn, setterFn, v8::PropertyAttribute::DontEnum);
+        } else {
+          prototype->SetAccessorProperty(v8Name, getterFn, v8::Local<v8::FunctionTemplate>(),
+              static_cast<v8::PropertyAttribute>(
+                  v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+        }
+        break;
+      }
+      case PropertyKind::Instance: {
+        // Mirrors registerInstanceProperty / registerReadonlyInstanceProperty in resource.h.
+        //
+        // We use ObjectTemplate::SetAccessorProperty with FunctionTemplates rather than
+        // SetNativeDataProperty because our Rust callbacks are FunctionCallbackInfo-style
+        // (matching #[jsg_method]), not PropertyCallbackInfo-style.
+        // SetAccessorProperty on the InstanceTemplate installs the accessor as an own
+        // property on every instance, matching JSG_INSTANCE_PROPERTY semantics.
+        auto getterFn = makePropFn(prop.getter_callback, true);
+        KJ_IF_SOME(setterCb, prop.setter_callback) {
+          auto setterFn = makePropFn(setterCb, false);
+          instance->SetAccessorProperty(v8Name, getterFn, setterFn, v8::PropertyAttribute::None);
+        } else {
+          instance->SetAccessorProperty(v8Name, getterFn, v8::Local<v8::FunctionTemplate>(),
+              static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::ReadOnly));
+        }
+        break;
+      }
+      case PropertyKind::Inspect: {
+        // Mirrors registerInspectProperty in resource.h (lines 1521-1535).
+        //
+        // 1. Create a unique per-property symbol (so the getter is inaccessible via string lookup).
+        // 2. Register name → symbol in inspectProperties so node:util can enumerate it by name.
+        // 3. Install the getter under the unique symbol on the prototype (ReadOnly | DontEnum).
+        //
+        // spec_compliant_property_attributes has no effect on inspect properties.
+        auto symbol = v8::Symbol::New(isolate, v8Name);
+        inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
+        auto getterFn = v8::FunctionTemplate::New(isolate,
+            reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(prop.getter_callback)));
+        prototype->SetAccessorProperty(symbol, getterFn, v8::Local<v8::FunctionTemplate>(),
+            static_cast<v8::PropertyAttribute>(
+                v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+        break;
+      }
+    }
+  }
+
   for (const auto& constant: descriptor.static_constants) {
     auto name = ::workerd::jsg::check(v8::String::NewFromUtf8(
         isolate, constant.name.data(), v8::NewStringType::kInternalized, constant.name.size()));

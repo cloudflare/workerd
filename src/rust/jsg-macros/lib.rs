@@ -14,6 +14,16 @@ use syn::ItemImpl;
 use syn::Type;
 use syn::parse_macro_input;
 
+// Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
+// and emit the correct token streams. Cannot reuse the runtime type directly
+// because proc-macro crates cannot link against CXX-bridge runtime crates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum PropertyKind {
+    Prototype,
+    Instance,
+    Inspect,
+}
+
 /// Generates `jsg::Struct` and `jsg::Type` implementations for data structures.
 ///
 /// Only public fields are included in the generated JavaScript object.
@@ -554,31 +564,19 @@ fn generate_trace_statements(
         .collect()
 }
 
-fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
-    let self_ty = &impl_block.self_ty;
-
-    if !matches!(&**self_ty, syn::Type::Path(_)) {
-        return error(
-            self_ty,
-            "#[jsg_resource] impl blocks must use a simple path type (e.g., `impl MyResource`)",
-        );
-    }
-
-    let method_registrations: Vec<_> = impl_block
+/// Scans `impl_block` for `#[jsg_method]`-annotated functions and returns a
+/// `Member::Method` / `Member::StaticMethod` token-stream for each.
+fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+    impl_block
         .items
         .iter()
         .filter_map(|item| {
-            // Skip non-function items (e.g. type aliases, consts).
             let syn::ImplItem::Fn(method) = item else {
                 return None;
             };
-
-            // Only methods annotated with #[jsg_method] are registered.
             let attr = method.attrs.iter().find(|a| is_attr(a, "jsg_method"))?;
 
             let rust_method_name = &method.sig.ident;
-            // Use explicit name from #[jsg_method(name = "...")] if provided,
-            // otherwise convert snake_case to camelCase.
             let js_name = attr
                 .meta
                 .require_list()
@@ -586,52 +584,38 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
                 .map(|list| list.tokens.clone().into())
                 .and_then(extract_name_attribute)
                 .unwrap_or_else(|| snake_to_camel(&rust_method_name.to_string()));
-            let callback_name = syn::Ident::new(
-                &format!("{rust_method_name}_callback"),
-                rust_method_name.span(),
-            );
+            let callback_name =
+                syn::Ident::new(&format!("{rust_method_name}_callback"), rust_method_name.span());
 
-            // Methods with a receiver (&self, &mut self) become instance methods on the prototype.
-            // Methods without a receiver become static methods on the constructor.
             let has_self = method
                 .sig
                 .inputs
                 .iter()
                 .any(|arg| matches!(arg, FnArg::Receiver(_)));
 
-            let member = if has_self {
-                quote! {
-                    jsg::Member::Method {
-                        name: #js_name.to_owned(),
-                        callback: Self::#callback_name,
-                    }
-                }
+            Some(if has_self {
+                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name } }
             } else {
-                quote! {
-                    jsg::Member::StaticMethod {
-                        name: #js_name.to_owned(),
-                        callback: Self::#callback_name,
-                    }
-                }
-            };
-            Some(member)
+                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name } }
+            })
         })
-        .collect();
+        .collect()
+}
 
-    let constant_registrations: Vec<_> = impl_block
+/// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts and returns a
+/// `Member::StaticConstant` token-stream for each.
+fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+    impl_block
         .items
         .iter()
         .filter_map(|item| {
             let syn::ImplItem::Const(constant) = item else {
                 return None;
             };
-            let attr = constant.attrs.iter().find(|a| {
-                a.path().is_ident("jsg_static_constant")
-                    || a.path()
-                        .segments
-                        .last()
-                        .is_some_and(|s| s.ident == "jsg_static_constant")
-            })?;
+            let attr = constant
+                .attrs
+                .iter()
+                .find(|a| is_attr(a, "jsg_static_constant"))?;
 
             let rust_name = &constant.ident;
             let js_name = attr
@@ -649,11 +633,25 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
                 }
             })
         })
+        .collect()
+}
+
+fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
+    let self_ty = &impl_block.self_ty;
+
+    if !matches!(&**self_ty, syn::Type::Path(_)) {
+        return error(
+            self_ty,
+            "#[jsg_resource] impl blocks must use a simple path type (e.g., `impl MyResource`)",
+        );
+    }
+
+    let method_registrations = collect_method_registrations(impl_block);
+    let property_registrations = collect_property_registrations(impl_block);
+    let constant_registrations = collect_constant_registrations(impl_block);
+    let constructor_vec: Vec<_> = generate_constructor_registration(impl_block, self_ty)
+        .into_iter()
         .collect();
-
-    let constructor_registration = generate_constructor_registration(impl_block, self_ty);
-
-    let constructor_vec: Vec<_> = constructor_registration.into_iter().collect();
 
     quote! {
         #impl_block
@@ -667,6 +665,7 @@ fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
                 vec![
                     #(#constructor_vec,)*
                     #(#method_registrations,)*
+                    #(#property_registrations,)*
                     #(#constant_registrations,)*
                 ]
             }
@@ -820,6 +819,275 @@ fn generate_constructor_registration(
         .next()
 }
 
+// ---------------------------------------------------------------------------
+// Property macro helpers
+// ---------------------------------------------------------------------------
+
+/// Emits one `Member::Property { .. }` token stream for a single property group,
+/// or an `Err` compile-error stream if the group has no getter.
+fn emit_property_group(
+    js_name: &str,
+    kind: PropertyKind,
+    getter: Option<syn::Ident>,
+    setter: Option<syn::Ident>,
+) -> Result<quote::__private::TokenStream, quote::__private::TokenStream> {
+    let Some(getter_name) = getter else {
+        return Err(quote! {
+            compile_error!(concat!("no getter found for property \"", #js_name, "\""))
+        });
+    };
+
+    let getter_cb = syn::Ident::new(&format!("{getter_name}_callback"), getter_name.span());
+    let kind_tokens = match kind {
+        PropertyKind::Prototype => quote! { jsg::PropertyKind::Prototype },
+        PropertyKind::Instance => quote! { jsg::PropertyKind::Instance },
+        PropertyKind::Inspect => quote! { jsg::PropertyKind::Inspect },
+    };
+    let setter_tokens = if let Some(setter_name) = setter {
+        let setter_cb = syn::Ident::new(&format!("{setter_name}_callback"), setter_name.span());
+        quote! { Some(Self::#setter_cb) }
+    } else {
+        quote! { None }
+    };
+
+    Ok(quote! {
+        jsg::Member::Property {
+            name: #js_name.to_owned(),
+            kind: #kind_tokens,
+            getter_callback: Self::#getter_cb,
+            setter_callback: #setter_tokens,
+        }
+    })
+}
+
+/// Parses the argument list of `#[jsg_property(placement [, name = "..."] [, readonly])]`.
+///
+/// `placement` must be either `instance` or `prototype` (required).
+/// Returns `(PropertyKind, Option<js_name_override>, is_readonly)`.
+fn parse_jsg_property_args(
+    tokens: TokenStream,
+) -> Result<(PropertyKind, Option<String>, bool), quote::__private::TokenStream> {
+    use syn::parse::Parser as _;
+    let metas = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+        .parse(tokens)
+        .map_err(|e| e.to_compile_error())?;
+
+    let mut kind: Option<PropertyKind> = None;
+    let mut name: Option<String> = None;
+    let mut readonly = false;
+
+    for meta in &metas {
+        match meta {
+            syn::Meta::Path(p) if p.is_ident("instance") => {
+                if kind.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        p,
+                        "conflicting placement: specify either `instance` or `prototype`, not both",
+                    )
+                    .to_compile_error());
+                }
+                kind = Some(PropertyKind::Instance);
+            }
+            syn::Meta::Path(p) if p.is_ident("prototype") => {
+                if kind.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        p,
+                        "conflicting placement: specify either `instance` or `prototype`, not both",
+                    )
+                    .to_compile_error());
+                }
+                kind = Some(PropertyKind::Prototype);
+            }
+            syn::Meta::Path(p) if p.is_ident("readonly") => {
+                let _ = p;
+                readonly = true;
+            }
+            syn::Meta::NameValue(nv) if nv.path.is_ident("name") => {
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(s),
+                    ..
+                }) = &nv.value
+                {
+                    name = Some(s.value());
+                } else {
+                    return Err(syn::Error::new_spanned(
+                        &nv.value,
+                        "expected a string literal for `name`",
+                    )
+                    .to_compile_error());
+                }
+            }
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    meta,
+                    "unknown argument; expected `instance`, `prototype`, `readonly`, or `name = \"...\"`",
+                )
+                .to_compile_error());
+            }
+        }
+    }
+
+    let kind = kind.ok_or_else(|| {
+        quote! {
+            compile_error!(
+                "#[jsg_property] requires `instance` or `prototype` as the first argument"
+            )
+        }
+    })?;
+
+    Ok((kind, name, readonly))
+}
+
+struct PropMethod {
+    rust_name: syn::Ident,
+    is_setter: bool,
+    is_readonly: bool,
+}
+
+type PropGroups = std::collections::BTreeMap<(String, PropertyKind), Vec<PropMethod>>;
+
+/// Derive the JS property name from a Rust method name: strip `get_`/`set_` prefix then
+/// convert `snake_case` → `camelCase`.
+fn derive_js_name(rust_name: &str) -> String {
+    let stripped = rust_name
+        .strip_prefix("get_")
+        .or_else(|| rust_name.strip_prefix("set_"))
+        .unwrap_or(rust_name);
+    snake_to_camel(stripped)
+}
+
+/// Phase 1: scan `impl_block` for `#[jsg_property]` / `#[jsg_inspect_property]` annotations
+/// and group the annotated methods by `(js_name, PropertyKind)`.
+fn scan_property_annotations(
+    impl_block: &ItemImpl,
+) -> Result<PropGroups, quote::__private::TokenStream> {
+    let mut groups = PropGroups::new();
+
+    for item in &impl_block.items {
+        let syn::ImplItem::Fn(method) = item else {
+            continue;
+        };
+        let rust_method_name = method.sig.ident.clone();
+        let rust_name_str = rust_method_name.to_string();
+        let is_setter = rust_name_str.starts_with("set_");
+
+        if let Some(attr) = method.attrs.iter().find(|a| is_attr(a, "jsg_property")) {
+            let tokens: TokenStream = match attr.meta.require_list() {
+                Ok(list) => list.tokens.clone().into(),
+                Err(e) => return Err(e.to_compile_error()),
+            };
+            let (kind, js_name_opt, is_readonly) = parse_jsg_property_args(tokens)?;
+            let js_name = js_name_opt.unwrap_or_else(|| derive_js_name(&rust_name_str));
+            groups.entry((js_name, kind)).or_default().push(PropMethod {
+                rust_name: rust_method_name,
+                is_setter,
+                is_readonly,
+            });
+            continue;
+        }
+
+        if let Some(attr) = method
+            .attrs
+            .iter()
+            .find(|a| is_attr(a, "jsg_inspect_property"))
+        {
+            let attr_tokens: Option<TokenStream> = attr
+                .meta
+                .require_list()
+                .ok()
+                .map(|list| list.tokens.clone().into());
+            let js_name = attr_tokens
+                .and_then(extract_name_attribute)
+                .unwrap_or_else(|| derive_js_name(&rust_name_str));
+            groups
+                .entry((js_name, PropertyKind::Inspect))
+                .or_default()
+                .push(PropMethod {
+                    rust_name: rust_method_name,
+                    is_setter,
+                    is_readonly: false,
+                });
+        }
+    }
+    Ok(groups)
+}
+
+/// Phase 2 (per group): validate constraints and emit a single `Member::Property` token stream.
+fn validate_and_emit_property(
+    js_name: &str,
+    kind: PropertyKind,
+    methods: Vec<PropMethod>,
+) -> Result<quote::__private::TokenStream, quote::__private::TokenStream> {
+    let has_readonly_getter = methods.iter().any(|m| m.is_readonly && !m.is_setter);
+    for m in &methods {
+        if m.is_readonly && m.is_setter {
+            return Err(syn::Error::new(
+                m.rust_name.span(),
+                "`readonly` attribute cannot be used on a setter method",
+            )
+            .to_compile_error());
+        }
+    }
+    let setters: Vec<_> = methods.iter().filter(|m| m.is_setter).collect();
+    if has_readonly_getter && !setters.is_empty() {
+        return Err(syn::Error::new(
+            setters[0].rust_name.span(),
+            "read-only property cannot have a setter; \
+             remove the setter or drop the `readonly` attribute",
+        )
+        .to_compile_error());
+    }
+    if kind == PropertyKind::Inspect {
+        for m in &methods {
+            if m.is_setter {
+                return Err(syn::Error::new(
+                    m.rust_name.span(),
+                    "#[jsg_inspect_property] methods must be getters; \
+                     inspect properties are always read-only",
+                )
+                .to_compile_error());
+            }
+        }
+    }
+
+    let mut getter: Option<syn::Ident> = None;
+    let mut setter: Option<syn::Ident> = None;
+    for m in methods {
+        if m.is_setter {
+            if setter.replace(m.rust_name).is_some() {
+                return Err(
+                    quote! { compile_error!(concat!("duplicate setter for property \"", #js_name, "\"")) },
+                );
+            }
+        } else if getter.replace(m.rust_name).is_some() {
+            return Err(
+                quote! { compile_error!(concat!("duplicate getter for property \"", #js_name, "\"")) },
+            );
+        }
+    }
+    emit_property_group(js_name, kind, getter, setter)
+}
+
+/// Scans an impl block for `#[jsg_property]` and `#[jsg_inspect_property]` annotations
+/// and returns a `Member::Property` token stream for each property group (getter + optional setter).
+fn collect_property_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+    let groups = match scan_property_annotations(impl_block) {
+        Ok(g) => g,
+        Err(e) => return vec![e],
+    };
+    let mut registrations = Vec::new();
+    for ((js_name, kind), methods) in groups {
+        match validate_and_emit_property(&js_name, kind, methods) {
+            Ok(ts) => registrations.push(ts),
+            Err(ts) => {
+                registrations.push(ts);
+                return registrations;
+            }
+        }
+    }
+    registrations
+}
+
 /// Extracts named fields from a struct, returning an empty list for unit structs.
 /// Returns `Err` with a compile error for tuple structs or non-struct data.
 fn extract_named_fields(
@@ -947,6 +1215,127 @@ pub fn jsg_static_constant(_attr: TokenStream, item: TokenStream) -> TokenStream
 pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Marker attribute — the actual registration is handled by #[jsg_resource] on the impl block.
     item
+}
+
+/// Registers a method as a JavaScript property getter or setter on a `#[jsg_resource]` type.
+///
+/// This macro replaces the separate `jsg_prototype_property` and `jsg_instance_property`
+/// macros. The placement (`prototype` or `instance`) is now a required argument.
+///
+/// # Arguments
+///
+/// - **`prototype`** or **`instance`** (required) — where the property lives:
+///   - `prototype`: installed via `prototype->SetAccessorProperty`. Not directly
+///     enumerable (`Object.keys()` is empty), but visible via the prototype chain
+///     (`"prop" in obj` is `true`) and overridable by subclasses.
+///     Equivalent to C++ `JSG_PROTOTYPE_PROPERTY` / `JSG_READONLY_PROTOTYPE_PROPERTY`.
+///   - `instance`: installed via `instance->SetAccessorProperty`, making it an
+///     **own property** of every object instance. `Object.keys()` includes it,
+///     `hasOwnProperty()` returns `true`, and it cannot be overridden by subclasses.
+///     Equivalent to C++ `JSG_INSTANCE_PROPERTY` / `JSG_READONLY_INSTANCE_PROPERTY`.
+///     > **Prefer `prototype` in almost all cases.** Own-property accessors prevent
+///     > minor-GC collection of the object and inhibit some V8 optimisations.
+/// - `name = "..."` — overrides the JS property name (optional).
+/// - `readonly` — marks the property as read-only. It is a compile error to pair
+///   `readonly` with a `set_*` method of the same derived name.
+///
+/// # Naming (when `name` is omitted)
+///
+/// The Rust method name is converted `snake_case` → `camelCase` after stripping a
+/// leading `get_` or `set_` prefix, so `get_foo_bar` / `set_foo_bar` both map to `"fooBar"`.
+///
+/// # Read-only vs read-write
+///
+/// - Methods whose Rust name starts with `set_` are registered as the **setter**.
+/// - All other methods are registered as the **getter**.
+/// - Omitting a setter (or using `readonly`) makes the property read-only. In strict
+///   mode, an assignment to a read-only property throws a `TypeError`.
+///
+/// # `spec_compliant_property_attributes` compat flag
+///
+/// When enabled, getter `.length = 0` / setter `.length = 1`, and getter `.name = "get <name>"` /
+/// setter `.name = "set <name>"` per Web IDL §3.7.6.
+///
+/// # Example
+///
+/// ```ignore
+/// #[jsg_resource]
+/// impl Counter {
+///     // Prototype property — getter + setter (read/write).
+///     #[jsg_property(prototype)]
+///     pub fn get_value(&self) -> jsg::Number { ... }
+///
+///     #[jsg_property(prototype)]
+///     pub fn set_value(&self, v: jsg::Number) { ... }
+///
+///     // Prototype property — read-only (no setter).
+///     #[jsg_property(prototype, readonly)]
+///     pub fn get_label(&self) -> String { ... }
+///
+///     // Prototype property — explicit JS name override.
+///     #[jsg_property(prototype, name = "max")]
+///     pub fn get_maximum(&self) -> jsg::Number { ... }
+///
+///     // Instance (own) property — read/write.
+///     #[jsg_property(instance)]
+///     pub fn get_id(&self) -> String { ... }
+///
+///     #[jsg_property(instance)]
+///     pub fn set_id(&self, v: String) { ... }
+///
+///     // Instance property — read-only, explicit name.
+///     #[jsg_property(instance, name = "shortId", readonly)]
+///     pub fn get_prefix(&self) -> String { ... }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Reuse jsg_method's callback generation — the generated `{name}_callback`
+    // is what collect_property_registrations references.  The method is NOT
+    // added to `Member::Method`; registration happens via Member::Property.
+    //
+    // The attr tokens (placement, name, readonly) are intentionally NOT
+    // forwarded to jsg_method — it only needs the raw function body.
+    jsg_method(TokenStream::new(), item)
+}
+
+/// Registers a method as a **debug-inspect** property on a `#[jsg_resource]` type.
+///
+/// Equivalent to C++ `JSG_INSPECT_PROPERTY`. The getter is registered under a
+/// unique `v8::Symbol` on the prototype, making it **invisible** to all normal
+/// property access (string key lookup, `Object.keys()`, `getOwnPropertyNames()`).
+/// It is surfaced only by `node:util`'s `inspect()` and `console.log()`.
+///
+/// Inspect properties are **always read-only**. Annotating a `set_*` method with
+/// `#[jsg_inspect_property]` is a compile error.
+///
+/// # Arguments
+///
+/// - `name = "..."` — sets the symbol **description** shown by `inspect()` (optional).
+///   When omitted the Rust method name is `snake_case` → `camelCase` converted
+///   (no `get_`/`set_` stripping, since there is no setter concept for inspect).
+///
+/// # Example
+///
+/// ```ignore
+/// #[jsg_resource]
+/// impl ReadableStream {
+///     #[jsg_inspect_property]               // symbol description: "state"
+///     pub fn state(&self) -> String { self.state.to_string() }
+///
+///     #[jsg_inspect_property(name = "streamState")]  // explicit symbol description
+///     pub fn get_debug_state(&self) -> String { ... }
+/// }
+/// // JS: typeof stream.state           // "undefined" (hidden from string keys)
+/// //     Object.keys(stream)           // []
+/// //     // util.inspect shows it via its symbol
+/// ```
+#[proc_macro_attribute]
+pub fn jsg_inspect_property(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Reuse jsg_method's callback generation — the generated `{name}_callback`
+    // is what collect_property_registrations references.  The method is NOT
+    // added to `Member::Method`; registration happens via Member::Property.
+    jsg_method(attr, item)
 }
 
 /// Returns true if the type is `&mut Lock` or `&mut jsg::Lock`.
