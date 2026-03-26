@@ -39,6 +39,8 @@ enum class AutogateKey {
   ENABLE_FAST_TEXTENCODER,
   // Enable draining read on standard streams
   ENABLE_DRAINING_READ_ON_STANDARD_STREAMS,
+  // Enable Rust-backed Node.js Buffer implementation
+  RUST_BACKED_NODE_BUFFER,
   NumOfKeys  // Reserved for iteration.
 };
 

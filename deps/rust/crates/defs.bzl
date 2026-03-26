@@ -319,6 +319,7 @@ _NORMAL_DEPENDENCIES = {
             "scratch": Label("@crates_vendor//:scratch-1.0.9"),
             "serde": Label("@crates_vendor//:serde-1.0.228"),
             "serde_json": Label("@crates_vendor//:serde_json-1.0.149"),
+            "simdutf": Label("@crates_vendor//:simdutf-0.7.0"),
             "static_assertions": Label("@crates_vendor//:static_assertions-1.1.0"),
             "swc_common": Label("@crates_vendor//:swc_common-18.0.1"),
             "swc_ts_fast_strip": Label("@crates_vendor//:swc_ts_fast_strip-43.0.0"),
@@ -2061,6 +2062,16 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__simdutf-0.7.0",
+        sha256 = "5f542752c7335a9174e7bb81112c3ca1415a7a6b6ec2c3e840aca347a30f9141",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/simdutf/0.7.0/download"],
+        strip_prefix = "simdutf-0.7.0",
+        build_file = Label("//deps/rust/crates:BUILD.simdutf-0.7.0.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__siphasher-0.3.11",
         sha256 = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d",
         type = "tar.gz",
@@ -2855,6 +2866,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__scratch-1.0.9", is_dev_dep = False),
         struct(repo = "crates_vendor__serde-1.0.228", is_dev_dep = False),
         struct(repo = "crates_vendor__serde_json-1.0.149", is_dev_dep = False),
+        struct(repo = "crates_vendor__simdutf-0.7.0", is_dev_dep = False),
         struct(repo = "crates_vendor__static_assertions-1.1.0", is_dev_dep = False),
         struct(repo = "crates_vendor__swc_common-18.0.1", is_dev_dep = False),
         struct(repo = "crates_vendor__swc_ts_fast_strip-43.0.0", is_dev_dep = False),

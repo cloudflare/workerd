@@ -18,6 +18,7 @@
 #include <workerd/jsg/url.h>
 #include <workerd/rust/api/lib.rs.h>
 #include <workerd/rust/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 #include <node/node.capnp.h>
 
@@ -27,7 +28,6 @@ namespace workerd::api::node {
 
 #define NODEJS_MODULES(V)                                                                          \
   V(AsyncHooksModule, "node-internal:async_hooks")                                                 \
-  V(BufferUtil, "node-internal:buffer")                                                            \
   V(CryptoImpl, "node-internal:crypto")                                                            \
   V(ModuleUtil, "node-internal:module")                                                            \
   V(ProcessModule, "node-internal:process")                                                        \
@@ -79,6 +79,13 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<T>(N, workerd::jsg::ModuleRegistry::Type::INTERNAL);
 
   NODEJS_MODULES(V)
+
+  // Register C++ BufferUtil only when the Rust implementation is not active.
+  // When the RUST_BACKED_NODE_BUFFER autogate is enabled, the Rust version
+  // is registered instead (see register_nodejs_modules in api/lib.rs).
+  if (!util::Autogate::isEnabled(util::AutogateKey::RUST_BACKED_NODE_BUFFER)) {
+    V(BufferUtil, "node-internal:buffer")
+  }
 
   if (featureFlags.getWorkerdExperimental()) {
     NODEJS_MODULES_EXPERIMENTAL(V)
@@ -220,6 +227,13 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
   static const auto k##M##Specifier = N##_url;                                                     \
   builder.addObject<M, TypeWrapper>(k##M##Specifier);
   NODEJS_MODULES(V)
+
+  // BufferUtil is conditionally registered outside the NODEJS_MODULES macro
+  // (see registerNodeJsCompatModules). In the new module registry, always use
+  // the C++ implementation. The Rust replacement via RUST_BACKED_NODE_BUFFER
+  // autogate currently only applies to the old module registry path.
+  V(BufferUtil, "node-internal:buffer")
+
   if (featureFlags.getWorkerdExperimental()) {
     NODEJS_MODULES_EXPERIMENTAL(V)
   }

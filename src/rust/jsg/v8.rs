@@ -322,6 +322,9 @@ pub mod ffi {
 
         // Local<TypedArray>
         pub unsafe fn local_typed_array_length(isolate: *mut Isolate, array: &Local) -> usize;
+        pub unsafe fn local_typed_array_buffer_data(isolate: *mut Isolate, array: &Local) -> usize;
+        pub unsafe fn local_typed_array_byte_offset(isolate: *mut Isolate, array: &Local) -> usize;
+        pub unsafe fn local_typed_array_byte_length(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_uint8_array_get(
             isolate: *mut Isolate,
             array: &Local,
@@ -454,6 +457,7 @@ pub mod ffi {
         pub unsafe fn isolate_request_termination(isolate: *mut Isolate);
         pub unsafe fn isolate_is_termination_requested(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
+
     }
 
     /// Fat pointer to a `dyn GarbageCollected` trait object plus its TypeId.
@@ -1373,6 +1377,68 @@ macro_rules! impl_typed_array {
                 unsafe { ffi::$get_fn(self.isolate.as_ffi(), &self.handle, index) }
             }
 
+            /// Returns a shared slice view of the typed array's data.
+            ///
+            /// Zero-copy: points directly into the V8 `ArrayBuffer`'s backing store.
+            /// The slice is valid for the lifetime of this `Local` handle.
+            /// Returns the byte offset of this view within its backing `ArrayBuffer`.
+            #[inline]
+            pub fn byte_offset(&self) -> usize {
+                // SAFETY: handle is valid within the current HandleScope.
+                unsafe { ffi::local_typed_array_byte_offset(self.isolate.as_ffi(), &self.handle) }
+            }
+
+            /// Returns a raw pointer to the backing `ArrayBuffer`'s data.
+            ///
+            /// This does **not** account for `byte_offset()` — the caller must
+            /// add it manually when accessing this view's region of the buffer.
+            ///
+            /// # Safety
+            /// The pointer is valid only while the backing `ArrayBuffer` is alive
+            /// and the `Local` handle is in scope.
+            #[inline]
+            pub unsafe fn data(&self) -> *mut $elem {
+                // SAFETY: handle is valid within the current HandleScope.
+                unsafe {
+                    ffi::local_typed_array_buffer_data(self.isolate.as_ffi(), &self.handle)
+                        as *mut $elem
+                }
+            }
+
+            /// Returns a shared slice view of the typed array's data.
+            ///
+            /// Zero-copy: points directly into the V8 `ArrayBuffer`'s backing store.
+            /// The slice is valid for the lifetime of this `Local` handle.
+            #[inline]
+            pub fn as_slice(&self) -> &[$elem] {
+                if self.is_empty() {
+                    return &[];
+                }
+                // SAFETY: handle is valid; non-empty guarantees non-null data pointer.
+                // data() returns the ArrayBuffer base; byte_offset() gives this view's start.
+                unsafe {
+                    let ptr = self.data().byte_add(self.byte_offset());
+                    std::slice::from_raw_parts(ptr.cast_const(), self.len())
+                }
+            }
+
+            /// Returns a mutable slice view of the typed array's data.
+            ///
+            /// Zero-copy: points directly into the V8 `ArrayBuffer`'s backing store.
+            /// The slice is valid for the lifetime of this `Local` handle.
+            #[inline]
+            pub fn as_mut_slice(&mut self) -> &mut [$elem] {
+                if self.is_empty() {
+                    return &mut [];
+                }
+                // SAFETY: handle is valid; non-empty guarantees non-null data pointer.
+                // Mutable access is safe because Local is single-threaded and we have &mut self.
+                unsafe {
+                    let ptr = self.data().byte_add(self.byte_offset());
+                    std::slice::from_raw_parts_mut(ptr, self.len())
+                }
+            }
+
             /// Returns an iterator over the elements.
             ///
             /// The iterator yields elements by value (copied from V8 memory).
@@ -1504,6 +1570,39 @@ macro_rules! impl_typed_array {
         impl<'a> std::iter::FusedIterator for TypedArrayIntoIter<'a, $marker, $elem> {}
     };
 }
+
+/// Generates `FromJS` for `Local<'_, T>` typed array types.
+macro_rules! impl_typed_array_from_js {
+    ($marker:ident, $check:ident, $name:expr) => {
+        impl crate::FromJS for Local<'_, $marker> {
+            type ResultType = Self;
+
+            fn from_js(_lock: &mut crate::Lock, value: Local<Value>) -> Result<Self, crate::Error> {
+                if !value.$check() {
+                    return Err(crate::Error::new_type_error(format!(
+                        "expected {}, got {}",
+                        $name,
+                        value.type_of()
+                    )));
+                }
+                // SAFETY: type check passed; V8 handles share the same pointer
+                // representation across subtypes within the same HandleScope.
+                Ok(unsafe { Self::from_ffi(value.isolate, value.into_ffi()) })
+            }
+        }
+    };
+}
+
+impl_typed_array_from_js!(Uint8Array, is_uint8_array, "Uint8Array");
+impl_typed_array_from_js!(Uint16Array, is_uint16_array, "Uint16Array");
+impl_typed_array_from_js!(Uint32Array, is_uint32_array, "Uint32Array");
+impl_typed_array_from_js!(Int8Array, is_int8_array, "Int8Array");
+impl_typed_array_from_js!(Int16Array, is_int16_array, "Int16Array");
+impl_typed_array_from_js!(Int32Array, is_int32_array, "Int32Array");
+impl_typed_array_from_js!(Float32Array, is_float32_array, "Float32Array");
+impl_typed_array_from_js!(Float64Array, is_float64_array, "Float64Array");
+impl_typed_array_from_js!(BigInt64Array, is_bigint64_array, "BigInt64Array");
+impl_typed_array_from_js!(BigUint64Array, is_biguint64_array, "BigUint64Array");
 
 impl_typed_array!(Uint8Array, u8, local_uint8_array_get);
 impl_typed_array!(Uint16Array, u16, local_uint16_array_get);
@@ -2270,6 +2369,21 @@ impl ToLocalValue for &str {
                 lock.isolate(),
                 ffi::local_new_string(lock.isolate().as_ffi(), self),
             )
+        }
+    }
+}
+
+impl<T: ToLocalValue> ToLocalValue for Option<T> {
+    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+        match self {
+            Some(v) => v.to_local(lock),
+            // SAFETY: isolate is valid and locked (guaranteed by Lock).
+            None => unsafe {
+                Local::from_ffi(
+                    lock.isolate(),
+                    ffi::local_new_undefined(lock.isolate().as_ffi()),
+                )
+            },
         }
     }
 }

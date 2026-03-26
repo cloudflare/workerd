@@ -489,13 +489,23 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
-  v8::Local<v8::String> v8Str = ::workerd::jsg::check(
-      local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
-  v8::String::ValueView view(isolate, v8Str);
-  if (!view.is_one_byte()) {
-    return ::rust::String(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+  // This function is called from Rust via CXX `unsafe` FFI, which generates
+  // a noexcept wrapper. Any C++ exception here → std::terminate. Guard all
+  // throwing operations with try/catch.
+  try {
+    auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
+    v8::Local<v8::String> v8Str;
+    if (!v8Value->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
+      return ::rust::String();
+    }
+    v8::String::ValueView view(isolate, v8Str);
+    if (!view.is_one_byte()) {
+      return ::rust::String(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+    }
+    return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+  } catch (...) {
+    return ::rust::String();
   }
-  return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
 }
 
 bool unwrap_boolean(Isolate* isolate, Local value) {
@@ -575,6 +585,19 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 // Local<TypedArray>
 size_t local_typed_array_length(Isolate* isolate, const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->Length();
+}
+
+uintptr_t local_typed_array_buffer_data(Isolate* isolate, const Local& array) {
+  return reinterpret_cast<uintptr_t>(
+      local_as_ref_from_ffi<v8::TypedArray>(array)->Buffer()->Data());
+}
+
+size_t local_typed_array_byte_offset(Isolate* isolate, const Local& array) {
+  return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteOffset();
+}
+
+size_t local_typed_array_byte_length(Isolate* isolate, const Local& array) {
+  return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteLength();
 }
 
 // TypedArray element getter functions

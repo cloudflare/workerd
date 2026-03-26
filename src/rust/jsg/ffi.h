@@ -203,6 +203,13 @@ void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value
 
 // Local<TypedArray>
 size_t local_typed_array_length(Isolate* isolate, const Local& array);
+// Returns a raw pointer to the underlying ArrayBuffer's data (without byte offset).
+// Use local_typed_array_byte_offset to compute the start of this view's data.
+uintptr_t local_typed_array_buffer_data(Isolate* isolate, const Local& array);
+// Returns the byte offset of this TypedArray view within its backing ArrayBuffer.
+size_t local_typed_array_byte_offset(Isolate* isolate, const Local& array);
+// Returns the byte length of the TypedArray.
+size_t local_typed_array_byte_length(Isolate* isolate, const Local& array);
 uint8_t local_uint8_array_get(Isolate* isolate, const Local& array, size_t index);
 uint16_t local_uint16_array_get(Isolate* isolate, const Local& array, size_t index);
 uint32_t local_uint32_array_get(Isolate* isolate, const Local& array, size_t index);

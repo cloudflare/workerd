@@ -466,6 +466,7 @@ dependencies = [
  "scratch",
  "serde",
  "serde_json",
+ "simdutf",
  "static_assertions",
  "swc_common",
  "swc_ts_fast_strip",
@@ -1535,6 +1536,16 @@ name = "simd-adler32"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
+
+[[package]]
+name = "simdutf"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f542752c7335a9174e7bb81112c3ca1415a7a6b6ec2c3e840aca347a30f9141"
+dependencies = [
+ "bitflags",
+ "cc",
+]
 
 [[package]]
 name = "siphasher"

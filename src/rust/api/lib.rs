@@ -6,8 +6,10 @@ use std::pin::Pin;
 
 use jsg::ToJS;
 
+use crate::buffer::BufferUtil;
 use crate::dns::DnsUtil;
 
+pub mod buffer;
 pub mod dns;
 
 #[cxx::bridge(namespace = "workerd::rust::api")]
@@ -23,9 +25,9 @@ mod ffi {
     }
 }
 
-pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
+pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
-        registry,
+        registry.as_mut(),
         "node-internal:dns",
         // SAFETY: isolate is valid and locked — called from C++ module registration.
         |isolate| unsafe {
@@ -35,6 +37,20 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
         },
         jsg::modules::ModuleType::Internal,
     );
+
+    if jsg::Autogate::is_enabled("rust-backed-node-buffer") {
+        jsg::modules::add_builtin(
+            registry.as_mut(),
+            "node-internal:buffer",
+            // SAFETY: isolate is valid and locked — called from C++ module registration.
+            |isolate| unsafe {
+                let mut lock = jsg::Lock::from_isolate_ptr(isolate);
+                let buffer_util = BufferUtil::new();
+                buffer_util.to_js(&mut lock).into_ffi()
+            },
+            jsg::modules::ModuleType::Internal,
+        );
+    }
 }
 
 #[cfg(test)]

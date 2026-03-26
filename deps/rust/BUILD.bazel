@@ -65,6 +65,15 @@ crates_vendor(
                 "lol_html_c_api_include_lol_html_h": "include/lol_html.h",
             },
         )],
+        # simdutf compiles C++ via the cc crate; workerd uses libc++ not libstdc++.
+        # build_script_toolchains provides Bazel's C++ toolchain to the cc crate
+        # so it uses the same clang/libc++ as workerd. CXXSTDLIB tells cc to link libc++.
+        "simdutf": [crate.annotation(
+            build_script_env = {
+                "CXXSTDLIB": "c++",
+            },
+            build_script_toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
+        )],
     },
     cargo_bazel = CARGO_BAZEL,
     cargo_lockfile = "//deps/rust:Cargo.lock",

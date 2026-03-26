@@ -6,12 +6,14 @@ use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
 
+pub mod autogate;
 pub mod feature_flags;
 pub mod modules;
 pub mod resource;
 pub mod v8;
 mod wrappable;
 
+pub use autogate::Autogate;
 pub use feature_flags::FeatureFlags;
 pub use resource::Rc;
 pub use resource::Resource;
@@ -125,6 +127,60 @@ impl_error_constructors! {
     Error => new_error,
     RangeError => new_range_error,
     ReferenceError => new_reference_error,
+}
+
+/// Checks a condition and returns a JS-typed error if it fails.
+///
+/// Equivalent to C++ `JSG_REQUIRE`. Use inside functions returning
+/// `Result<T, jsg::Error>`.
+///
+/// ```ignore
+/// jsg_require!(buf.len() <= MAX, RangeError, "buffer too large: {}", buf.len());
+/// jsg_require!(!name.is_empty(), TypeError, "name must not be empty");
+/// jsg_require!(ready, InvalidStateError);
+/// ```
+#[macro_export]
+macro_rules! jsg_require {
+    ($cond:expr, $error_type:ident, $($arg:tt)+) => {
+        if !($cond) {
+            return Err($crate::Error {
+                name: $crate::ExceptionType::$error_type,
+                message: format!($($arg)+),
+            });
+        }
+    };
+    ($cond:expr, $error_type:ident) => {
+        if !($cond) {
+            return Err($crate::Error {
+                name: $crate::ExceptionType::$error_type,
+                message: String::new(),
+            });
+        }
+    };
+}
+
+/// Unconditionally returns a JS-typed error.
+///
+/// Equivalent to C++ `JSG_FAIL_REQUIRE`. Use inside functions returning
+/// `Result<T, jsg::Error>`.
+///
+/// ```ignore
+/// jsg_fail_require!(TypeError, "expected object, got {}", typeof_str);
+/// ```
+#[macro_export]
+macro_rules! jsg_fail_require {
+    ($error_type:ident, $($arg:tt)+) => {
+        return Err($crate::Error {
+            name: $crate::ExceptionType::$error_type,
+            message: format!($($arg)+),
+        })
+    };
+    ($error_type:ident) => {
+        return Err($crate::Error {
+            name: $crate::ExceptionType::$error_type,
+            message: String::new(),
+        })
+    };
 }
 
 impl FromJS for Error {

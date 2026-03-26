@@ -28,6 +28,7 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     "ruff_python_parser": crate.spec(git = "https://github.com/astral-sh/ruff", tag = "0.12.1"),
     # param_extractor depends on unbounded_depth feature
     "serde_json": crate.spec(version = "1", features = ["unbounded_depth"]),
+    "simdutf": crate.spec(version = "0"),
     "serde": crate.spec(version = "1", features = ["derive"]),
     "thiserror": crate.spec(version = "2"),
     # tokio is huge, let's enable only features when we actually need them.

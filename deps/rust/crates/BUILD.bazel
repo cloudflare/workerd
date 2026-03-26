@@ -338,6 +338,18 @@ alias(
 )
 
 alias(
+    name = "simdutf-0.7.0",
+    actual = "@crates_vendor__simdutf-0.7.0//:simdutf",
+    tags = ["manual"],
+)
+
+alias(
+    name = "simdutf",
+    actual = "@crates_vendor__simdutf-0.7.0//:simdutf",
+    tags = ["manual"],
+)
+
+alias(
     name = "static_assertions-1.1.0",
     actual = "@crates_vendor__static_assertions-1.1.0//:static_assertions",
     tags = ["manual"],

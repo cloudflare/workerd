@@ -42,18 +42,18 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         let Some(field_name) = field.ident.as_ref() else {
             continue;
         };
-        let field_name_str = field_name.to_string();
+        let js_name = snake_to_camel(&field_name.to_string());
         let field_type = &field.ty;
 
         field_assignments.push(quote! {
             let #field_name = jsg::v8::ToLocalValue::to_local(&this.#field_name, lock);
-            obj.set(lock, #field_name_str, #field_name);
+            obj.set(lock, #js_name, #field_name);
         });
         field_extractions.push(quote! {
             let #field_name = {
-                let prop = obj.get(lock, #field_name_str)
+                let prop = obj.get(lock, #js_name)
                     .ok_or_else(|| jsg::Error::new_type_error(
-                        format!("Missing property '{}'", #field_name_str)
+                        format!("Missing property '{}'", #js_name)
                     ))?;
                 <#field_type as jsg::FromJS>::from_js(lock, prop)?
             };
