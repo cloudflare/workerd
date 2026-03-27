@@ -957,6 +957,19 @@ fn derive_js_name(rust_name: &str) -> String {
     snake_to_camel(stripped)
 }
 
+/// Find the group for `key` in `groups`, or append a new empty one and return it.
+/// Preserves insertion order so that property registration matches source-code order.
+fn prop_groups_find_or_insert(
+    groups: &mut PropGroups,
+    key: (String, PropertyKind),
+) -> &mut Vec<PropMethod> {
+    if let Some(pos) = groups.iter().position(|(k, _)| k == &key) {
+        return &mut groups[pos].1;
+    }
+    groups.push((key, Vec::new()));
+    &mut groups.last_mut().expect("just pushed").1
+}
+
 /// Phase 1: scan `impl_block` for `#[jsg_property]` / `#[jsg_inspect_property]` annotations
 /// and group the annotated methods by `(js_name, PropertyKind)`.
 /// Insertion order mirrors source-code declaration order.
@@ -964,18 +977,6 @@ fn scan_property_annotations(
     impl_block: &ItemImpl,
 ) -> Result<PropGroups, quote::__private::TokenStream> {
     let mut groups: PropGroups = Vec::new();
-
-    // Helper: find the group for `key`, or append a new empty one and return it.
-    fn find_or_insert<'a>(
-        groups: &'a mut PropGroups,
-        key: (String, PropertyKind),
-    ) -> &'a mut Vec<PropMethod> {
-        if let Some(pos) = groups.iter().position(|(k, _)| k == &key) {
-            return &mut groups[pos].1;
-        }
-        groups.push((key, Vec::new()));
-        &mut groups.last_mut().expect("just pushed").1
-    }
 
     for item in &impl_block.items {
         let syn::ImplItem::Fn(method) = item else {
@@ -992,7 +993,7 @@ fn scan_property_annotations(
             };
             let (kind, js_name_opt, is_readonly) = parse_jsg_property_args(tokens)?;
             let js_name = js_name_opt.unwrap_or_else(|| derive_js_name(&rust_name_str));
-            find_or_insert(&mut groups, (js_name, kind)).push(PropMethod {
+            prop_groups_find_or_insert(&mut groups, (js_name, kind)).push(PropMethod {
                 rust_name: rust_method_name,
                 is_setter,
                 is_readonly,
@@ -1013,11 +1014,13 @@ fn scan_property_annotations(
             let js_name = attr_tokens
                 .and_then(extract_name_attribute)
                 .unwrap_or_else(|| derive_js_name(&rust_name_str));
-            find_or_insert(&mut groups, (js_name, PropertyKind::Inspect)).push(PropMethod {
-                rust_name: rust_method_name,
-                is_setter,
-                is_readonly: false,
-            });
+            prop_groups_find_or_insert(&mut groups, (js_name, PropertyKind::Inspect)).push(
+                PropMethod {
+                    rust_name: rust_method_name,
+                    is_setter,
+                    is_readonly: false,
+                },
+            );
         }
     }
     Ok(groups)
