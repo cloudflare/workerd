@@ -810,9 +810,12 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
       v8::Local<v8::FunctionTemplate> fn;
       if (specCompliant) {
         int len = isGetter ? 0 : 1;
+        // Per Web IDL, spec-compliant getters/setters use empty signature (matching C++
+        // registerPrototypeProperty/registerReadonlyPrototypeProperty in resource.h:1438-1441).
         fn = v8::FunctionTemplate::New(isolate,
             reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
-            v8::Local<v8::Value>(), signature, len, v8::ConstructorBehavior::kThrow);
+            v8::Local<v8::Value>(), v8::Local<v8::Signature>(), len,
+            v8::ConstructorBehavior::kThrow);
         auto prefix = isGetter ? "get " : "set ";
         fn->SetClassName(::workerd::jsg::v8Str(isolate, kj::str(prefix, prop.name)));
       } else {
@@ -828,12 +831,14 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         auto getterFn = makePropFn(prop.getter_callback, true);
         KJ_IF_SOME(setterCb, prop.setter_callback) {
           auto setterFn = makePropFn(setterCb, false);
-          prototype->SetAccessorProperty(
-              v8Name, getterFn, setterFn, v8::PropertyAttribute::DontEnum);
+          // Normal (non-Unimplemented) prototype properties are enumerable — use None, matching
+          // C++ registerPrototypeProperty (resource.h:1454-1455) with Gcb::enumerable = true.
+          prototype->SetAccessorProperty(v8Name, getterFn, setterFn, v8::PropertyAttribute::None);
         } else {
-          prototype->SetAccessorProperty(v8Name, getterFn, v8::Local<v8::FunctionTemplate>(),
-              static_cast<v8::PropertyAttribute>(
-                  v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+          // Read-only prototype properties are also enumerable — use ReadOnly only, matching
+          // C++ registerReadonlyPrototypeProperty (resource.h:1498-1501) with Gcb::enumerable = true.
+          prototype->SetAccessorProperty(
+              v8Name, getterFn, v8::Local<v8::FunctionTemplate>(), v8::PropertyAttribute::ReadOnly);
         }
         break;
       }

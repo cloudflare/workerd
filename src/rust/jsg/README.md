@@ -187,7 +187,6 @@ if lock.feature_flags().get_node_js_compat() {
 | Cap'n Proto schema | `src/workerd/io/compatibility-date.capnp` |
 | Generated Rust bindings | `//src/workerd/io:compatibility-date_capnp_rust` (Bazel target) |
 
-
 ## Constructors
 
 To allow JavaScript to create instances of a resource via `new MyResource(args)`, mark a static method with `#[jsg_constructor]`:
@@ -216,6 +215,7 @@ impl Greeting {
 ```
 
 **Rules:**
+
 - The method must be static (no `self` receiver) and must return `Self`.
 - Only one `#[jsg_constructor]` is allowed per impl block.
 - The first parameter may be `&mut Lock` (or `&mut jsg::Lock`) if the constructor needs isolate access; it is not exposed as a JS argument.
@@ -241,6 +241,7 @@ required and must be either `prototype` or `instance`:
   > collection and some V8 optimisations.
 
 **Optional arguments:**
+
 - `name = "..."` — overrides the JS property name (default: `snake_case` → `camelCase` after
   stripping a `get_`/`set_` prefix).
 - `readonly` — compile-time check that no matching `set_*` method is also annotated.
@@ -289,8 +290,6 @@ impl Counter {
 //     counter.hasOwnProperty("id")    // true  (instance)
 //     "value" in counter              // true
 ```
-
-
 
 ### `#[jsg_inspect_property]`
 

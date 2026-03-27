@@ -373,6 +373,75 @@ fn prototype_property_not_an_own_property() {
 }
 
 // =============================================================================
+// Prototype property — enumerability (matches C++ JSG_PROTOTYPE_PROPERTY)
+// =============================================================================
+
+#[test]
+fn prototype_property_is_enumerable() {
+    // C++ registerPrototypeProperty uses v8::PropertyAttribute::None for normal
+    // (non-Unimplemented) properties, making them enumerable.  Verify the Rust
+    // layer matches this behaviour.
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(Counter::new(1.0, "x"));
+        ctx.set_global("c", r.to_js(lock));
+        // value is a read/write prototype property.
+        let enumerable: bool = ctx
+            .eval(
+                lock,
+                "Object.getOwnPropertyDescriptor(Object.getPrototypeOf(c), 'value').enumerable",
+            )
+            .unwrap();
+        assert!(
+            enumerable,
+            "read-write prototype property must be enumerable (matching C++ JSG)"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn prototype_readonly_property_is_enumerable() {
+    // C++ registerReadonlyPrototypeProperty uses v8::PropertyAttribute::ReadOnly
+    // (without DontEnum) for normal properties, making them enumerable.
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(Counter::new(1.0, "x"));
+        ctx.set_global("c", r.to_js(lock));
+        // label is a read-only prototype property.
+        let enumerable: bool = ctx
+            .eval(
+                lock,
+                "Object.getOwnPropertyDescriptor(Object.getPrototypeOf(c), 'label').enumerable",
+            )
+            .unwrap();
+        assert!(
+            enumerable,
+            "read-only prototype property must be enumerable (matching C++ JSG)"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn prototype_property_appears_in_for_in() {
+    // Enumerable prototype properties must appear in for...in loops.
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(Counter::new(1.0, "x"));
+        ctx.set_global("c", r.to_js(lock));
+        let found: bool = ctx
+            .eval(
+                lock,
+                "(function() { for (var k in c) { if (k === 'value') return true; } return false; })()",
+            )
+            .unwrap();
+        assert!(found, "prototype property 'value' must appear in for...in");
+        Ok(())
+    });
+}
+
+// =============================================================================
 // Prototype property — multiple instances are independent
 // =============================================================================
 
