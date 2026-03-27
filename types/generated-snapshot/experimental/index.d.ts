@@ -511,11 +511,6 @@ type ExportedHandlerFetchHandler<
   env: Env,
   ctx: ExecutionContext<Props>,
 ) => Response | Promise<Response>;
-type ExportedHandlerConnectHandler<Env = unknown, Props = unknown> = (
-  socket: Socket,
-  env: Env,
-  ctx: ExecutionContext<Props>,
-) => void | Promise<void>;
 type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (
   events: TraceItem[],
   env: Env,
@@ -557,7 +552,6 @@ interface ExportedHandler<
   Props = unknown,
 > {
   fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
-  connect?: ExportedHandlerConnectHandler<Env, Props>;
   tail?: ExportedHandlerTailHandler<Env, Props>;
   trace?: ExportedHandlerTraceHandler<Env, Props>;
   tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
@@ -590,7 +584,6 @@ declare abstract class ColoLocalActorNamespace {
 }
 interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
-  connect?(socket: Socket): void | Promise<void>;
   alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
   webSocketMessage?(
     ws: WebSocket,
@@ -608,7 +601,7 @@ type DurableObjectStub<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > = Fetcher<
   T,
-  "alarm" | "connect" | "webSocketMessage" | "webSocketClose" | "webSocketError"
+  "alarm" | "webSocketMessage" | "webSocketClose" | "webSocketError"
 > & {
   readonly id: DurableObjectId;
   readonly name?: string;
@@ -3280,7 +3273,6 @@ interface TraceItem {
     | (
         | TraceItemFetchEventInfo
         | TraceItemJsRpcEventInfo
-        | TraceItemConnectEventInfo
         | TraceItemScheduledEventInfo
         | TraceItemAlarmEventInfo
         | TraceItemQueueEventInfo
@@ -3310,7 +3302,6 @@ interface TraceItem {
 interface TraceItemAlarmEventInfo {
   readonly scheduledTime: Date;
 }
-interface TraceItemConnectEventInfo {}
 interface TraceItemCustomEventInfo {}
 interface TraceItemScheduledEventInfo {
   readonly scheduledTime: number;
@@ -13262,7 +13253,6 @@ declare namespace CloudflareWorkersModule {
     constructor(ctx: ExecutionContext, env: Env);
     email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
-    connect?(socket: Socket): void | Promise<void>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;
@@ -13283,7 +13273,6 @@ declare namespace CloudflareWorkersModule {
     constructor(ctx: DurableObjectState, env: Env);
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
-    connect?(socket: Socket): void | Promise<void>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer,
@@ -14283,9 +14272,6 @@ declare namespace TailStream {
     readonly type: "fetch";
     readonly statusCode: number;
   }
-  interface ConnectEventInfo {
-    readonly type: "connect";
-  }
   type EventOutcome =
     | "ok"
     | "canceled"
@@ -14316,7 +14302,6 @@ declare namespace TailStream {
     readonly scriptVersion?: ScriptVersion;
     readonly info:
       | FetchEventInfo
-      | ConnectEventInfo
       | JsRpcEventInfo
       | ScheduledEventInfo
       | AlarmEventInfo
