@@ -771,6 +771,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   }
 
   for (const auto& method: descriptor.methods) {
+    KJ_REQUIRE(method.name.size() <= static_cast<size_t>(v8::String::kMaxLength),
+        "Rust method name exceeds V8 string length limit", method.name);
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
         v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow);
@@ -855,8 +857,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
           auto setterFn = makePropFn(setterCb, false);
           instance->SetAccessorProperty(v8Name, getterFn, setterFn, v8::PropertyAttribute::None);
         } else {
-          instance->SetAccessorProperty(v8Name, getterFn, v8::Local<v8::FunctionTemplate>(),
-              static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::ReadOnly));
+          instance->SetAccessorProperty(
+              v8Name, getterFn, v8::Local<v8::FunctionTemplate>(), v8::PropertyAttribute::ReadOnly);
         }
         break;
       }
@@ -881,6 +883,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   }
 
   for (const auto& constant: descriptor.static_constants) {
+    KJ_REQUIRE(constant.name.size() <= static_cast<size_t>(v8::String::kMaxLength),
+        "Rust constant name exceeds V8 string length limit", constant.name);
     auto name = ::workerd::jsg::check(v8::String::NewFromUtf8(
         isolate, constant.name.data(), v8::NewStringType::kInternalized, constant.name.size()));
     auto value = v8::Number::New(isolate, constant.value);

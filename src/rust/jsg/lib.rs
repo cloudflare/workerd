@@ -677,8 +677,9 @@ impl From<u64> for ConstantValue {
 /// Where a [`Member::Property`] is attached on the JavaScript object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropertyKind {
-    /// On the prototype. Not directly enumerable; visible via `"prop" in obj`;
-    /// overridable by subclasses.
+    /// On the prototype. Enumerable (appears in `for...in` and
+    /// `getOwnPropertyDescriptor(...).enumerable === true`); visible via
+    /// `"prop" in obj`; overridable by subclasses.
     Prototype,
     /// As an own property on every instance. Directly enumerable;
     /// not overridable by subclasses.

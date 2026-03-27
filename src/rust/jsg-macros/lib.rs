@@ -899,7 +899,6 @@ fn parse_jsg_property_args(
                 kind = Some(PropertyKind::Prototype);
             }
             syn::Meta::Path(p) if p.is_ident("readonly") => {
-                let _ = p;
                 readonly = true;
             }
             syn::Meta::NameValue(nv) if nv.path.is_ident("name") => {
@@ -944,7 +943,9 @@ struct PropMethod {
     is_readonly: bool,
 }
 
-type PropGroups = std::collections::BTreeMap<(String, PropertyKind), Vec<PropMethod>>;
+/// Ordered list of property groups, preserving source-code declaration order.
+/// Each entry is `((js_name, kind), methods)`.
+type PropGroups = Vec<((String, PropertyKind), Vec<PropMethod>)>;
 
 /// Derive the JS property name from a Rust method name: strip `get_`/`set_` prefix then
 /// convert `snake_case` → `camelCase`.
@@ -958,10 +959,23 @@ fn derive_js_name(rust_name: &str) -> String {
 
 /// Phase 1: scan `impl_block` for `#[jsg_property]` / `#[jsg_inspect_property]` annotations
 /// and group the annotated methods by `(js_name, PropertyKind)`.
+/// Insertion order mirrors source-code declaration order.
 fn scan_property_annotations(
     impl_block: &ItemImpl,
 ) -> Result<PropGroups, quote::__private::TokenStream> {
-    let mut groups = PropGroups::new();
+    let mut groups: PropGroups = Vec::new();
+
+    // Helper: find the group for `key`, or append a new empty one and return it.
+    fn find_or_insert<'a>(
+        groups: &'a mut PropGroups,
+        key: (String, PropertyKind),
+    ) -> &'a mut Vec<PropMethod> {
+        if let Some(pos) = groups.iter().position(|(k, _)| k == &key) {
+            return &mut groups[pos].1;
+        }
+        groups.push((key, Vec::new()));
+        &mut groups.last_mut().expect("just pushed").1
+    }
 
     for item in &impl_block.items {
         let syn::ImplItem::Fn(method) = item else {
@@ -978,7 +992,7 @@ fn scan_property_annotations(
             };
             let (kind, js_name_opt, is_readonly) = parse_jsg_property_args(tokens)?;
             let js_name = js_name_opt.unwrap_or_else(|| derive_js_name(&rust_name_str));
-            groups.entry((js_name, kind)).or_default().push(PropMethod {
+            find_or_insert(&mut groups, (js_name, kind)).push(PropMethod {
                 rust_name: rust_method_name,
                 is_setter,
                 is_readonly,
@@ -999,14 +1013,11 @@ fn scan_property_annotations(
             let js_name = attr_tokens
                 .and_then(extract_name_attribute)
                 .unwrap_or_else(|| derive_js_name(&rust_name_str));
-            groups
-                .entry((js_name, PropertyKind::Inspect))
-                .or_default()
-                .push(PropMethod {
-                    rust_name: rust_method_name,
-                    is_setter,
-                    is_readonly: false,
-                });
+            find_or_insert(&mut groups, (js_name, PropertyKind::Inspect)).push(PropMethod {
+                rust_name: rust_method_name,
+                is_setter,
+                is_readonly: false,
+            });
         }
     }
     Ok(groups)
@@ -1312,8 +1323,9 @@ pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// # Arguments
 ///
 /// - `name = "..."` — sets the symbol **description** shown by `inspect()` (optional).
-///   When omitted the Rust method name is `snake_case` → `camelCase` converted
-///   (no `get_`/`set_` stripping, since there is no setter concept for inspect).
+///   When omitted the Rust method name is converted: a leading `get_` prefix is
+///   stripped (consistent with `#[jsg_property]`) and the remainder is
+///   `snake_case` → `camelCase`-converted, so `get_debug_state` → `"debugState"`.
 ///
 /// # Example
 ///
