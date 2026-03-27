@@ -350,6 +350,15 @@ async function test(state) {
     /access to _cf_KV.key is prohibited/
   );
 
+  // Exercise logging for future _cf_ prefix restrictions (VULN-129365).
+  // Mixed-case _cf_ prefix triggers a warning log but is currently allowed.
+  sql.exec('CREATE TABLE _CF_log_test (name TEXT)');
+  sql.exec('DROP TABLE _CF_log_test');
+  // FTS5 virtual table with mixed-case _CF_ prefix triggers a warning log but is currently
+  // allowed. (Lowercase _cf_ already fails indirectly because FTS5 shadow tables are blocked.)
+  sql.exec('CREATE VIRTUAL TABLE _CF_fts_log_test USING fts5(content)');
+  sql.exec('DROP TABLE _CF_fts_log_test');
+
   // Some pragmas are completely not allowed
   assert.throws(
     () => sql.exec('PRAGMA hard_heap_limit = 1024'),

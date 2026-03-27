@@ -1269,6 +1269,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         KJ_IF_SOME(moduleName, param2) {
           if (strcasecmp(moduleName.begin(), "fts5") == 0 ||
               strcasecmp(moduleName.begin(), "fts5vocab") == 0) {
+            auto& tableName = KJ_ASSERT_NONNULL(param1);
+            if (tableName.size() >= 4 && strncasecmp(tableName.begin(), "_cf_", 4) == 0) {
+              LOG_WARNING_PERIODICALLY("FTS5 virtual table uses reserved _cf_ prefix");
+            }
             return true;
           }
         }
