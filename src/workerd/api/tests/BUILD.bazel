@@ -165,6 +165,12 @@ wd_test(
 )
 
 wd_test(
+    src = "queue-metrics-sentinel-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-metrics-sentinel-test.js"],
+)
+
+wd_test(
     src = "queue-producer-metadata-test.wd-test",
     args = ["--experimental"],
     data = [

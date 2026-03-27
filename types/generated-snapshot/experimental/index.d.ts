@@ -2409,7 +2409,7 @@ interface Queue<Body = unknown> {
 interface QueueSendMetrics {
   backlogCount: number;
   backlogBytes: number;
-  oldestMessageTimestamp: number;
+  oldestMessageTimestamp?: Date;
 }
 interface QueueSendMetadata {
   metrics: QueueSendMetrics;
@@ -2420,7 +2420,7 @@ interface QueueSendResponse {
 interface QueueSendBatchMetrics {
   backlogCount: number;
   backlogBytes: number;
-  oldestMessageTimestamp: number;
+  oldestMessageTimestamp?: Date;
 }
 interface QueueSendBatchMetadata {
   metrics: QueueSendBatchMetrics;
@@ -2443,12 +2443,12 @@ interface MessageSendRequest<Body = unknown> {
 interface QueueMetrics {
   backlogCount: number;
   backlogBytes: number;
-  oldestMessageTimestamp: number;
+  oldestMessageTimestamp?: Date;
 }
 interface MessageBatchMetrics {
   backlogCount: number;
   backlogBytes: number;
-  oldestMessageTimestamp: number;
+  oldestMessageTimestamp?: Date;
 }
 interface MessageBatchMetadata {
   metrics: MessageBatchMetrics;

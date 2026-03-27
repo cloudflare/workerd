@@ -27,18 +27,22 @@ class WorkerQueue: public jsg::Object {
   // representing this queue.
   WorkerQueue(uint subrequestChannel): subrequestChannel(subrequestChannel) {}
 
+  // The metrics structs below (Metrics, SendMetrics, SendBatchMetrics) are deserialized from
+  // JSON responses where the upstream service uses 0 as a sentinel for "no data" on timestamp
+  // fields. Callers MUST call clearEpochSentinel() on oldestMessageTimestamp after deserialization to convert the
+  // sentinel to kj::none (JS undefined).
   struct Metrics {
-    double backlogCount;
-    double backlogBytes;
-    double oldestMessageTimestamp;
+    double backlogCount = 0;
+    double backlogBytes = 0;
+    jsg::Optional<kj::Date> oldestMessageTimestamp;
     JSG_STRUCT(backlogCount, backlogBytes, oldestMessageTimestamp);
     JSG_STRUCT_TS_OVERRIDE(QueueMetrics);
   };
 
   struct SendMetrics {
-    double backlogCount;
-    double backlogBytes;
-    double oldestMessageTimestamp;
+    double backlogCount = 0;
+    double backlogBytes = 0;
+    jsg::Optional<kj::Date> oldestMessageTimestamp;
     JSG_STRUCT(backlogCount, backlogBytes, oldestMessageTimestamp);
     JSG_STRUCT_TS_OVERRIDE(QueueSendMetrics);
   };
@@ -56,9 +60,9 @@ class WorkerQueue: public jsg::Object {
   };
 
   struct SendBatchMetrics {
-    double backlogCount;
-    double backlogBytes;
-    double oldestMessageTimestamp;
+    double backlogCount = 0;
+    double backlogBytes = 0;
+    jsg::Optional<kj::Date> oldestMessageTimestamp;
     JSG_STRUCT(backlogCount, backlogBytes, oldestMessageTimestamp);
     JSG_STRUCT_TS_OVERRIDE(QueueSendBatchMetrics);
   };
@@ -171,10 +175,12 @@ class WorkerQueue: public jsg::Object {
 
 // Metadata delivered with a message batch in the queue() handler
 
+// Same sentinel caveat as WorkerQueue::Metrics above: the capnp path uses 0 to mean "no data"
+// for oldestMessageTimestamp. As such, we must explicitly set it to kj::none (JS undefined).
 struct MessageBatchMetrics {
-  double backlogCount;
-  double backlogBytes;
-  double oldestMessageTimestamp;
+  double backlogCount = 0;
+  double backlogBytes = 0;
+  jsg::Optional<kj::Date> oldestMessageTimestamp;
   JSG_STRUCT(backlogCount, backlogBytes, oldestMessageTimestamp);
   JSG_STRUCT_TS_OVERRIDE(MessageBatchMetrics);
 };

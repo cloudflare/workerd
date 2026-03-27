@@ -56,15 +56,23 @@ export default {
     if (responseBodyEnabled) {
       assert.strictEqual(sendResult.metadata.metrics.backlogCount, 100);
       assert.strictEqual(sendResult.metadata.metrics.backlogBytes, 2048);
+      assert.ok(
+        sendResult.metadata.metrics.oldestMessageTimestamp instanceof Date,
+        'Expected oldestMessageTimestamp to be a Date'
+      );
       assert.strictEqual(
-        sendResult.metadata.metrics.oldestMessageTimestamp,
+        sendResult.metadata.metrics.oldestMessageTimestamp.getTime(),
         1000000
       );
 
       assert.strictEqual(sendBatchResult.metadata.metrics.backlogCount, 200);
       assert.strictEqual(sendBatchResult.metadata.metrics.backlogBytes, 4096);
+      assert.ok(
+        sendBatchResult.metadata.metrics.oldestMessageTimestamp instanceof Date,
+        'Expected oldestMessageTimestamp to be a Date'
+      );
       assert.strictEqual(
-        sendBatchResult.metadata.metrics.oldestMessageTimestamp,
+        sendBatchResult.metadata.metrics.oldestMessageTimestamp.getTime(),
         2000000
       );
     } else {

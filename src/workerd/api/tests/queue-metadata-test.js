@@ -25,9 +25,9 @@ export default {
     if (
       batch.metadata.metrics.backlogCount === 0 &&
       batch.metadata.metrics.backlogBytes === 0 &&
-      batch.metadata.metrics.oldestMessageTimestamp === 0
+      batch.metadata.metrics.oldestMessageTimestamp === undefined
     ) {
-      // If metadata is omitted → all values default to zero
+      // If metadata is omitted → counts default to zero, timestamp is undefined
       batch.ackAll();
       return;
     }
@@ -35,7 +35,14 @@ export default {
     // Explicit metadata path
     assert.strictEqual(batch.metadata.metrics.backlogCount, 100);
     assert.strictEqual(batch.metadata.metrics.backlogBytes, 2048);
-    assert.strictEqual(batch.metadata.metrics.oldestMessageTimestamp, 1000000);
+    assert.ok(
+      batch.metadata.metrics.oldestMessageTimestamp instanceof Date,
+      'Expected oldestMessageTimestamp to be a Date'
+    );
+    assert.strictEqual(
+      batch.metadata.metrics.oldestMessageTimestamp.getTime(),
+      1000000
+    );
     batch.ackAll();
   },
 

@@ -26,7 +26,11 @@ export default {
       const metrics = await env.QUEUE.metrics();
       assert.strictEqual(metrics.backlogCount, 100);
       assert.strictEqual(metrics.backlogBytes, 2048);
-      assert.strictEqual(metrics.oldestMessageTimestamp, 1000000);
+      assert.ok(
+        metrics.oldestMessageTimestamp instanceof Date,
+        'Expected oldestMessageTimestamp to be a Date'
+      );
+      assert.strictEqual(metrics.oldestMessageTimestamp.getTime(), 1000000);
     } else {
       // Flag OFF → metrics() should not be exposed on the binding
       assert.strictEqual(typeof env.QUEUE.metrics, 'undefined');

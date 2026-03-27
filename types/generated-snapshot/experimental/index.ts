@@ -2412,7 +2412,7 @@ export interface Queue<Body = unknown> {
 export interface QueueSendMetrics {
   backlogCount: number;
   backlogBytes: number;
-  oldestMessageTimestamp: number;
+  oldestMessageTimestamp?: Date;
 }
 export interface QueueSendMetadata {
   metrics: QueueSendMetrics;
@@ -2423,7 +2423,7 @@ export interface QueueSendResponse {
 export interface QueueSendBatchMetrics {
   backlogCount: number;
   backlogBytes: number;
-  oldestMessageTimestamp: number;
+  oldestMessageTimestamp?: Date;
 }
 export interface QueueSendBatchMetadata {
   metrics: QueueSendBatchMetrics;
@@ -2446,12 +2446,12 @@ export interface MessageSendRequest<Body = unknown> {
 export interface QueueMetrics {
   backlogCount: number;
   backlogBytes: number;
-  oldestMessageTimestamp: number;
+  oldestMessageTimestamp?: Date;
 }
 export interface MessageBatchMetrics {
   backlogCount: number;
   backlogBytes: number;
-  oldestMessageTimestamp: number;
+  oldestMessageTimestamp?: Date;
 }
 export interface MessageBatchMetadata {
   metrics: MessageBatchMetrics;

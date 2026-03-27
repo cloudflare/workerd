@@ -23,6 +23,35 @@ namespace {
 // Header for the message format.
 static constexpr kj::StringPtr HDR_MSG_FORMAT = "X-Msg-Fmt"_kj;
 
+// The upstream service sends 0 when there is "no data" available on a timestamp field (e.g. no `oldestMessageTimestamp`).
+// This method converts it to kj::none so users see `undefined`.
+void clearEpochSentinel(jsg::Optional<kj::Date>& ts) {
+  KJ_IF_SOME(date, ts) {
+    if (date == kj::UNIX_EPOCH) {
+      ts = kj::none;
+    }
+  }
+}
+
+// Returns a callback suitable for IoContext::awaitIo() that parses a JSON response string into
+// a typed struct via the given TypeHandler, then clears the epoch sentinel on
+// oldestMessageTimestamp.
+//
+// The returned callback captures `handler` by reference. TypeHandler instances are managed by
+// the JSG type registration system and live for the lifetime of the isolate, so this is safe.
+//
+// getOldestMessageTimestamp: (T&) -> jsg::Optional<kj::Date>&
+template <typename T>
+auto parseQueueResponse(
+    const jsg::TypeHandler<T>& handler, kj::StringPtr errorMsg, auto getOldestMessageTimestamp) {
+  return [&handler, errorMsg, getOldestMessageTimestamp](jsg::Lock& js, kj::String text) -> T {
+    auto parsed = jsg::JsValue::fromJson(js, text);
+    auto result = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, parsed), Error, errorMsg, text);
+    clearEpochSentinel(getOldestMessageTimestamp(result));
+    return kj::mv(result);
+  };
+}
+
 // Header for the message delivery delay.
 static constexpr kj::StringPtr HDR_MSG_DELAY = "X-Msg-Delay-Secs"_kj;
 
@@ -303,12 +332,9 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::sendWithResponse(jsg::Lock&
   auto promise =
       handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes);
 
-  return context.awaitIo(
-      js, kj::mv(promise), [&responseHandler](jsg::Lock& js, kj::String text) -> SendResponse {
-    auto parsed = jsg::JsValue::fromJson(js, text);
-    return JSG_REQUIRE_NONNULL(
-        responseHandler.tryUnwrap(js, parsed), Error, "Failed to parse queue send response", text);
-  });
+  return context.awaitIo(js, kj::mv(promise),
+      parseQueueResponse(responseHandler, "Failed to parse queue send response"_kj,
+          [](SendResponse& r) -> auto& { return r.metadata.metrics.oldestMessageTimestamp; }));
 }
 
 kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
@@ -451,15 +477,9 @@ jsg::Promise<WorkerQueue::Metrics> WorkerQueue::metrics(
 
   auto promise = handleMetrics(kj::mv(req), kj::mv(client), headerIds);
 
-  return context.awaitIo(
-      js, kj::mv(promise), [&metricsHandler](jsg::Lock& js, kj::String text) -> Metrics {
-    auto parsed = jsg::JsValue::fromJson(js, text);
-    KJ_IF_SOME(result, metricsHandler.tryUnwrap(js, parsed)) {
-      return kj::mv(result);
-    }
-    _JSG_INTERNAL_FAIL_REQUIRE(
-        JSG_EXCEPTION(Error), "Failed to parse queue metrics response", text);
-  });
+  return context.awaitIo(js, kj::mv(promise),
+      parseQueueResponse(metricsHandler, "Failed to parse queue metrics response"_kj,
+          [](Metrics& m) -> auto& { return m.oldestMessageTimestamp; }));
 }
 
 jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatchWithResponse(jsg::Lock& js,
@@ -568,12 +588,9 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatchWithResponse(
   auto promise =
       handleWrite(kj::mv(req), kj::mv(body), kj::mv(client), headerIds, exposeErrorCodes);
 
-  return context.awaitIo(
-      js, kj::mv(promise), [&responseHandler](jsg::Lock& js, kj::String text) -> SendBatchResponse {
-    auto parsed = jsg::JsValue::fromJson(js, text);
-    return JSG_REQUIRE_NONNULL(
-        responseHandler.tryUnwrap(js, parsed), Error, "Failed to parse queue send response", text);
-  });
+  return context.awaitIo(js, kj::mv(promise),
+      parseQueueResponse(responseHandler, "Failed to parse queue send response"_kj,
+          [](SendBatchResponse& r) -> auto& { return r.metadata.metrics.oldestMessageTimestamp; }));
 }
 
 QueueMessage::QueueMessage(
@@ -660,14 +677,19 @@ QueueEvent::QueueEvent(
   }
   messages = messagesBuilder.finish();
 
-  // Extract metadata. If the sender didn't set the field, capnp defaults all values to zero.
+  // Extract metadata. If the sender didn't set the field, capnp defaults all to the zero values.
   auto m = params.getMetadata().getMetrics();
+  jsg::Optional<kj::Date> oldestTimestamp;
+  if (m.getOldestMessageTimestamp() != 0) {
+    oldestTimestamp =
+        kj::UNIX_EPOCH + static_cast<int64_t>(m.getOldestMessageTimestamp()) * kj::MILLISECONDS;
+  }
   metadata = MessageBatchMetadata{
     .metrics =
         MessageBatchMetrics{
           .backlogCount = m.getBacklogCount(),
           .backlogBytes = m.getBacklogBytes(),
-          .oldestMessageTimestamp = m.getOldestMessageTimestamp(),
+          .oldestMessageTimestamp = oldestTimestamp,
         },
   };
 }
@@ -677,6 +699,8 @@ QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> res
       queueName(kj::mv(params.queueName)),
       metadata(kj::mv(params.metadata)),
       result(result) {
+  clearEpochSentinel(metadata.metrics.oldestMessageTimestamp);
+
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(params.messages.size());
   for (auto i: kj::indices(params.messages)) {
     messagesBuilder.add(js.alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
@@ -987,7 +1011,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
         auto metricsBuilder = metadataBuilder.initMetrics();
         metricsBuilder.setBacklogCount(p.metadata.metrics.backlogCount);
         metricsBuilder.setBacklogBytes(p.metadata.metrics.backlogBytes);
-        metricsBuilder.setOldestMessageTimestamp(p.metadata.metrics.oldestMessageTimestamp);
+        KJ_IF_SOME(ts, p.metadata.metrics.oldestMessageTimestamp) {
+          metricsBuilder.setOldestMessageTimestamp((ts - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        }
       }
     }
   }
