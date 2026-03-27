@@ -357,10 +357,6 @@ struct ExportedHandler {
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
-  using ConnectHandler = jsg::Promise<void>(
-      jsg::Ref<Socket> socket, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
-  jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
-
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
@@ -400,7 +396,6 @@ struct ExportedHandler {
   jsg::SelfRef self;
 
   JSG_STRUCT(fetch,
-      connect,
       tail,
       trace,
       tailStream,
@@ -418,7 +413,6 @@ struct ExportedHandler {
 
   JSG_STRUCT_TS_DEFINE(
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown, Props = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext<Props>) => Response | Promise<Response>;
-    type ExportedHandlerConnectHandler<Env = unknown, Props = unknown> = (socket: Socket, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown, Props = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext<Props>) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -429,7 +423,6 @@ struct ExportedHandler {
   JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown, Props = unknown> {
     email?: EmailExportedHandler<Env, Props>;
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
-    connect?: ExportedHandlerConnectHandler<Env, Props>;
     tail?: ExportedHandlerTailHandler<Env, Props>;
     trace?: ExportedHandlerTraceHandler<Env, Props>;
     tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
@@ -528,14 +521,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       kj::Maybe<jsg::Ref<AbortSignal>> abortSignal);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
-
-  // Received TCP/socket ingress (called from C++, not JS).
-  kj::Promise<void> connect(kj::String host,
-      const kj::HttpHeaders& headers,
-      kj::AsyncIoStream& connection,
-      kj::HttpService::ConnectResponse& response,
-      Worker::Lock& lock,
-      kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received sendTraces (called from C++, not JS).
   void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,

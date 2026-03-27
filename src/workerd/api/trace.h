@@ -73,7 +73,6 @@ class TraceItem final: public jsg::Object {
 
   class FetchEventInfo;
   class JsRpcEventInfo;
-  class ConnectEventInfo;
   class ScheduledEventInfo;
   class AlarmEventInfo;
   class QueueEventInfo;
@@ -86,7 +85,6 @@ class TraceItem final: public jsg::Object {
 
   using EventInfo = kj::OneOf<jsg::Ref<FetchEventInfo>,
       jsg::Ref<JsRpcEventInfo>,
-      jsg::Ref<ConnectEventInfo>,
       jsg::Ref<ScheduledEventInfo>,
       jsg::Ref<AlarmEventInfo>,
       jsg::Ref<QueueEventInfo>,
@@ -287,14 +285,6 @@ class TraceItem::JsRpcEventInfo final: public jsg::Object {
 
  private:
   kj::String rpcMethod;
-};
-
-class TraceItem::ConnectEventInfo final: public jsg::Object {
- public:
-  explicit ConnectEventInfo(
-      jsg::Lock& js, const Trace& trace, const tracing::ConnectEventInfo& eventInfo);
-
-  JSG_RESOURCE_TYPE(ConnectEventInfo) {}
 };
 
 class TraceItem::ScheduledEventInfo final: public jsg::Object {
@@ -660,12 +650,12 @@ class TraceCustomEvent final: public WorkerInterface::CustomEvent {
 
 #define EW_TRACE_ISOLATE_TYPES                                                                     \
   api::ScriptVersion, api::TailEvent, api::TraceItem, api::TraceItem::AlarmEventInfo,              \
-      api::TraceItem::ConnectEventInfo, api::TraceItem::CustomEventInfo,                           \
-      api::TraceItem::ScheduledEventInfo, api::TraceItem::QueueEventInfo,                          \
-      api::TraceItem::EmailEventInfo, api::TraceItem::TailEventInfo,                               \
-      api::TraceItem::TailEventInfo::TailItem, api::TraceItem::FetchEventInfo,                     \
-      api::TraceItem::FetchEventInfo::Request, api::TraceItem::FetchEventInfo::Response,           \
-      api::TraceItem::JsRpcEventInfo, api::TraceItem::HibernatableWebSocketEventInfo,              \
+      api::TraceItem::CustomEventInfo, api::TraceItem::ScheduledEventInfo,                         \
+      api::TraceItem::QueueEventInfo, api::TraceItem::EmailEventInfo,                              \
+      api::TraceItem::TailEventInfo, api::TraceItem::TailEventInfo::TailItem,                      \
+      api::TraceItem::FetchEventInfo, api::TraceItem::FetchEventInfo::Request,                     \
+      api::TraceItem::FetchEventInfo::Response, api::TraceItem::JsRpcEventInfo,                    \
+      api::TraceItem::HibernatableWebSocketEventInfo,                                              \
       api::TraceItem::HibernatableWebSocketEventInfo::Message,                                     \
       api::TraceItem::HibernatableWebSocketEventInfo::Close,                                       \
       api::TraceItem::HibernatableWebSocketEventInfo::Error, api::TraceLog, api::TraceException,   \

@@ -326,16 +326,6 @@ static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
 
 }  // namespace
 
-ConnectEventInfo::ConnectEventInfo() {}
-
-ConnectEventInfo::ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader) {}
-
-void ConnectEventInfo::copyTo(rpc::Trace::ConnectEventInfo::Builder builder) const {}
-
-ConnectEventInfo ConnectEventInfo::clone() const {
-  return ConnectEventInfo();
-}
-
 FetchEventInfo::FetchEventInfo(
     kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers)
     : method(method),
@@ -791,10 +781,6 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
         auto jsRpcBuilder = eventInfoBuilder.initJsRpc();
         jsRpc.copyTo(jsRpcBuilder);
       }
-      KJ_CASE_ONEOF(connect, tracing::ConnectEventInfo) {
-        auto connectBuilder = eventInfoBuilder.initConnect();
-        connect.copyTo(connectBuilder);
-      }
       KJ_CASE_ONEOF(scheduled, tracing::ScheduledEventInfo) {
         auto scheduledBuilder = eventInfoBuilder.initScheduled();
         scheduled.copyTo(scheduledBuilder);
@@ -904,9 +890,6 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::JS_RPC:
         eventInfo = tracing::JsRpcEventInfo(e.getJsRpc());
-        break;
-      case rpc::Trace::EventInfo::Which::CONNECT:
-        eventInfo = tracing::ConnectEventInfo(e.getConnect());
         break;
       case rpc::Trace::EventInfo::Which::SCHEDULED:
         eventInfo = tracing::ScheduledEventInfo(e.getScheduled());
@@ -1124,9 +1107,6 @@ Onset::Info readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
     case rpc::Trace::Onset::Info::JS_RPC: {
       return JsRpcEventInfo(info.getJsRpc());
     }
-    case rpc::Trace::Onset::Info::CONNECT: {
-      return ConnectEventInfo(info.getConnect());
-    }
     case rpc::Trace::Onset::Info::SCHEDULED: {
       return ScheduledEventInfo(info.getScheduled());
     }
@@ -1156,9 +1136,6 @@ void writeOnsetInfo(const Onset::Info& info, rpc::Trace::Onset::Info::Builder& i
   KJ_SWITCH_ONEOF(info) {
     KJ_CASE_ONEOF(fetch, FetchEventInfo) {
       fetch.copyTo(infoBuilder.initFetch());
-    }
-    KJ_CASE_ONEOF(connect, ConnectEventInfo) {
-      connect.copyTo(infoBuilder.initConnect());
     }
     KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
       jsrpc.copyTo(infoBuilder.initJsRpc());
@@ -1311,9 +1288,6 @@ EventInfo cloneEventInfo(const EventInfo& info) {
   KJ_SWITCH_ONEOF(info) {
     KJ_CASE_ONEOF(fetch, FetchEventInfo) {
       return fetch.clone();
-    }
-    KJ_CASE_ONEOF(connect, ConnectEventInfo) {
-      return connect.clone();
     }
     KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
       return jsrpc.clone();
