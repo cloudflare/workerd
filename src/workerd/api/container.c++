@@ -8,31 +8,9 @@
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
-#include <kj/filesystem.h>
-
 #include <cmath>
 
 namespace workerd::api {
-
-namespace {
-
-kj::Maybe<kj::Path> parseRestorePath(kj::StringPtr path) {
-  JSG_REQUIRE(path.size() > 0 && path[0] == '/', TypeError,
-      "Directory snapshot restore path must be absolute. Got: ", path);
-
-  try {
-    auto parsed = kj::Path::parse(path.slice(1));
-    if (parsed.size() == 0) {
-      return kj::none;
-    }
-    return kj::mv(parsed);
-  } catch (kj::Exception&) {
-    JSG_FAIL_REQUIRE(
-        TypeError, "Directory snapshot restore path contains invalid components: ", path);
-  }
-}
-
-}  // namespace
 
 // =======================================================================================
 // Basic lifecycle methods
@@ -108,14 +86,6 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
         auto entry = list[i];
         auto& restore = snapshots[i];
         auto& snap = restore.snapshot;
-        auto effectiveRestoreDir = snap.dir.asPtr();
-        KJ_IF_SOME(mp, restore.mountPoint) {
-          effectiveRestoreDir = mp.asPtr();
-        }
-
-        JSG_REQUIRE_NONNULL(parseRestorePath(effectiveRestoreDir), Error,
-            "Directory snapshot cannot be restored to root directory.");
-
         double size = snap.size;
         JSG_REQUIRE(std::isfinite(size) && size >= 0 &&
                 size <= static_cast<double>(jsg::MAX_SAFE_INTEGER) && std::floor(size) == size,

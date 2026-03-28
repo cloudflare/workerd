@@ -1211,78 +1211,42 @@ export class DurableObjectExample extends DurableObject {
 
     assert.strictEqual(container.running, false);
 
-    const fakeSnapshot = {
-      id: 'root-explicit-0000-0000-0000-000000000000',
-      size: 1024,
-      dir: '/app/data',
-    };
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
 
-    assert.throws(
-      () =>
-        container.start({
-          enableInternet: true,
-          snapshots: [{ snapshot: fakeSnapshot, mountPoint: '/' }],
-        }),
-      { message: /Directory snapshot cannot be restored to root directory\./ }
-    );
+    const writeResp = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/write-file?path=/app/data/root-test.txt', {
+        method: 'POST',
+        body: 'restore-to-root',
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    assert.equal(writeResp.status, 200);
 
-    assert.strictEqual(container.running, false);
-  }
+    const snapshot = await container.snapshotDirectory({ dir: '/app/data' });
 
-  async testSnapshotRestoreImplicitRootRejected() {
-    const container = this.ctx.container;
-    if (container.running) {
-      const monitor = container.monitor().catch((_err) => {});
-      await container.destroy();
-      await monitor;
-    }
+    await container.destroy();
+    await monitor;
 
-    assert.strictEqual(container.running, false);
+    // Restoring to "/" places snapshot contents directly at the filesystem root
+    container.start({
+      enableInternet: true,
+      snapshots: [{ snapshot, mountPoint: '/' }],
+    });
+    const monitor2 = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
 
-    const fakeSnapshot = {
-      id: 'root-implicit-0000-0000-0000-000000000000',
-      size: 1024,
-      dir: '/',
-    };
+    const readResp = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/read-file?path=/root-test.txt', {
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    assert.equal(readResp.status, 200);
+    assert.strictEqual(await readResp.text(), 'restore-to-root');
 
-    assert.throws(
-      () =>
-        container.start({
-          enableInternet: true,
-          snapshots: [{ snapshot: fakeSnapshot }],
-        }),
-      { message: /Directory snapshot cannot be restored to root directory\./ }
-    );
-
-    assert.strictEqual(container.running, false);
-  }
-
-  async testSnapshotRestoreRelativeMountPointRejected() {
-    const container = this.ctx.container;
-    if (container.running) {
-      const monitor = container.monitor().catch((_err) => {});
-      await container.destroy();
-      await monitor;
-    }
-
-    assert.strictEqual(container.running, false);
-
-    const fakeSnapshot = {
-      id: 'relative-mount-0000-0000-0000-000000000000',
-      size: 1024,
-      dir: '/app/data',
-    };
-
-    assert.throws(
-      () =>
-        container.start({
-          enableInternet: true,
-          snapshots: [{ snapshot: fakeSnapshot, mountPoint: 'tmp/restored' }],
-        }),
-      { message: /mountPoint must be an absolute path starting with '\/'/ }
-    );
-
-    assert.strictEqual(container.running, false);
+    await container.destroy();
+    await monitor2;
   }
 
   async testSnapshotStoppedContainer() {
@@ -1744,7 +1708,7 @@ export const testSnapshotCustomMountPoint = {
   },
 };
 
-// Test that start() rejects an explicit root restore mount point.
+// Test restoring a snapshot to / (root), exercising the restoreDir == "/" special case
 export const testSnapshotRestoreToRoot = {
   async test(_ctrl, env) {
     const id = env.MY_CONTAINER.idFromName(
@@ -1752,30 +1716,6 @@ export const testSnapshotRestoreToRoot = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testSnapshotRestoreToRoot();
-  },
-};
-
-// Test that start() also rejects implicit root restore via snapshot.dir.
-export const testSnapshotRestoreImplicitRootRejected = {
-  async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
-      getRandomDurableObjectName('testSnapshotRestoreImplicitRootRejected')
-    );
-    const stub = env.MY_CONTAINER.get(id);
-    await stub.testSnapshotRestoreImplicitRootRejected();
-  },
-};
-
-// Test that start() rejects relative restore mount points at the API boundary.
-export const testSnapshotRestoreRelativeMountPointRejected = {
-  async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
-      getRandomDurableObjectName(
-        'testSnapshotRestoreRelativeMountPointRejected'
-      )
-    );
-    const stub = env.MY_CONTAINER.get(id);
-    await stub.testSnapshotRestoreRelativeMountPointRejected();
   },
 };
 
