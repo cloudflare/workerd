@@ -2251,14 +2251,11 @@ class Server::WorkerService final: public Service,
 
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
       KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
-        KJ_IF_SOME(name, doId->getName()) {
-          // To emulate production, we preserve the name on the id, but only if it's <= 1024 bytes.
-          if (name.size() > 1024) {
-            auto* idImpl = dynamic_cast<ActorIdFactoryImpl::ActorIdImpl*>(doId.get());
-            KJ_ASSERT(idImpl != nullptr, "Unexpected ActorId type?");
-            idImpl->clearName();
-          }
-        }
+        // To emulate production, we have to recreate this ID.
+        ActorIdFactoryImpl::ActorIdImpl* idImpl =
+            dynamic_cast<ActorIdFactoryImpl::ActorIdImpl*>(doId.get());
+        KJ_ASSERT(idImpl != nullptr, "Unexpected ActorId type?");
+        idImpl->clearName();
       }
 
       return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)));

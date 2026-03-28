@@ -1998,9 +1998,9 @@ KJ_TEST("Server: Durable Objects (in memory)") {
                 `      throw new Error("durable ID should be type DurableObjectId, " +
                 `                      `got: ${this.id.constructor.name}`);
                 `    }
-                `    if (typeof this.id.name !== "string" || this.id.name.length === 0) {
-                `      throw new Error("ctx.id.name should be a non-empty string for " +
-                `                      `named DOs, got: ${JSON.stringify(this.id.name)}`);
+                `    if (this.id.name) {
+                `      throw new Error("ctx.id for Durable Object should not have a .name " +
+                `                      `property, got: ${this.id.name}`);
                 `    }
                 `  }
                 `  async fetch(request) {
@@ -2045,151 +2045,6 @@ KJ_TEST("Server: Durable Objects (in memory)") {
       "/", "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 3");
   conn.httpGet200(
       "/bar", "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
-}
-
-KJ_TEST("Server: Durable Objects keep ctx.id.name undefined for unique IDs") {
-  TestServer test(R"((
-    services = [
-      ( name = "hello",
-        worker = (
-          compatibilityDate = "2022-08-17",
-          modules = [
-            ( name = "main.js",
-              esModule =
-                `export default {
-                `  async fetch(request, env) {
-                `    let actor = env.ns.get(env.ns.newUniqueId())
-                `    return await actor.fetch(request)
-                `  }
-                `}
-                `export class MyActorClass {
-                `  constructor(state, env) {
-                `    this.name = state.id.name;
-                `  }
-                `  async fetch(request) {
-                `    return new Response(String(this.name));
-                `  }
-                `}
-            )
-          ],
-          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
-          durableObjectNamespaces = [
-            ( className = "MyActorClass",
-              uniqueKey = "mykey",
-            )
-          ],
-          durableObjectStorage = (inMemory = void)
-        )
-      ),
-    ],
-    sockets = [
-      ( name = "main",
-        address = "test-addr",
-        service = "hello"
-      )
-    ]
-  ))"_kj);
-
-  test.start();
-  auto conn = test.connect("test-addr");
-  conn.httpGet200("/", "undefined");
-}
-
-KJ_TEST("Server: Durable Objects retain ctx.id.name for short names") {
-  TestServer test(R"((
-    services = [
-      ( name = "hello",
-        worker = (
-          compatibilityDate = "2022-08-17",
-          modules = [
-            ( name = "main.js",
-              esModule =
-                `const name = "retained-name-123"
-                `export default {
-                `  async fetch(request, env) {
-                `    let actor = env.ns.get(env.ns.idFromName(name))
-                `    return await actor.fetch(request)
-                `  }
-                `}
-                `export class MyActorClass {
-                `  constructor(state, env) {
-                `    this.name = state.id.name;
-                `  }
-                `  async fetch(request) {
-                `    return new Response(String(this.name));
-                `  }
-                `}
-            )
-          ],
-          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
-          durableObjectNamespaces = [
-            ( className = "MyActorClass",
-              uniqueKey = "mykey",
-            )
-          ],
-          durableObjectStorage = (inMemory = void)
-        )
-      ),
-    ],
-    sockets = [
-      ( name = "main",
-        address = "test-addr",
-        service = "hello"
-      )
-    ]
-  ))"_kj);
-
-  test.start();
-  auto conn = test.connect("test-addr");
-  conn.httpGet200("/", "retained-name-123");
-}
-
-KJ_TEST("Server: Durable Objects drop ctx.id.name for long names") {
-  TestServer test(R"((
-    services = [
-      ( name = "hello",
-        worker = (
-          compatibilityDate = "2022-08-17",
-          modules = [
-            ( name = "main.js",
-              esModule =
-                `export default {
-                `  async fetch(request, env) {
-                `    let actor = env.ns.get(env.ns.idFromName("a".repeat(1025)))
-                `    return await actor.fetch(request)
-                `  }
-                `}
-                `export class MyActorClass {
-                `  constructor(state, env) {
-                `    this.name = state.id.name;
-                `  }
-                `  async fetch(request) {
-                `    return new Response(String(this.name));
-                `  }
-                `}
-            )
-          ],
-          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
-          durableObjectNamespaces = [
-            ( className = "MyActorClass",
-              uniqueKey = "mykey",
-            )
-          ],
-          durableObjectStorage = (inMemory = void)
-        )
-      ),
-    ],
-    sockets = [
-      ( name = "main",
-        address = "test-addr",
-        service = "hello"
-      )
-    ]
-  ))"_kj);
-
-  test.start();
-  auto conn = test.connect("test-addr");
-  conn.httpGet200("/", "undefined");
 }
 
 KJ_TEST("Server: Simultaneous requests to a DO that hasn't started don't cause split brain") {
