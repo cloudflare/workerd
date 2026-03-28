@@ -84,7 +84,9 @@ build:ci-macOS-debug --config=debug
 # Unfortunately on macOS, we need to be able to invoke sudo to configure the network for sidecar tests
 test:ci-macOS --spawn_strategy=local
 
-build:ci-windows --config=windows_no_dbg
+# Windows CI always runs in the release configuration to prevent breaking the release build.
+# build:ci-windows --config=windows_no_dbg
+build:ci-windows --config=release_windows
 build:ci-windows-debug --config=debug
 
 # Some tests (like Python import tests) take a long time to run, especially when debug is enabled

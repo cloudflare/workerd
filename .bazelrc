@@ -429,9 +429,14 @@ build:release_windows --copt="/clang:-O3"
 # clang-cl does not enable strict aliasing by default to match MSVC's approach, unlike clang on
 # Unix which turns it on for opt builds.
 build:release_windows --copt="-fstrict-aliasing"
-# This file breaks our CI windows release builds when compiled using O2/O3
-# Ref: https://github.com/llvm/llvm-project/issues/136481
-build:release_windows --per_file_copt=.*capnp/rpc\.c++@/clang:-O1
+# TODO(soon): Investigate these issues on an actual Windows system.
+# Compiling these files causes clang-cl 20 to crash on Windows release builds, work around this by
+# disabling inlining (using /Od would work too but we still want to have whatever optimizations we
+# can have)
+build:release_windows --per_file_copt="src/workerd/server/server"@/clang:-fno-inline
+build:release_windows --per_file_copt="src/workerd/server/container-client"@/clang:-fno-inline
+# Work around Windows test failures in rpc-related tests
+build:release_windows --per_file_copt=src/workerd/io/worker-interface@/clang:-fno-inline
 
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
