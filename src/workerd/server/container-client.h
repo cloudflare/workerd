@@ -15,6 +15,7 @@
 #include <capnp/message.h>
 #include <kj/async-io.h>
 #include <kj/async.h>
+#include <kj/cidr.h>
 #include <kj/compat/http.h>
 #include <kj/map.h>
 #include <kj/refcount.h>
@@ -160,14 +161,19 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // For redeeming channel tokens received via setEgressHttp / setEgressHttps.
   ChannelTokenHandler& channelTokenHandler;
 
-  // Opaque implementation struct holding egress mappings. Defined in container-client.c++ to
-  // avoid pulling heavy types (kj::OneOf, kj::CidrRange, kj::Vector) into server.c++ which
-  // includes this header.
-  struct EgressState;
-  kj::Own<EgressState> egressState;
+  // Represents a parsed egress mapping. IP/CIDR mappings match destination IPs,
+  // while hostnameGlob mappings match either HTTP hostnames or TLS SNI depending on `tls`.
+  struct EgressMapping {
+    kj::OneOf<kj::CidrRange, kj::String> destination;
+    uint16_t port;  // 0 means match all ports
+    bool tls;
+    kj::Own<workerd::IoChannelFactory::SubrequestChannel> channel;
+  };
 
-  // Insert or replace an egress mapping.
-  struct EgressMapping;
+  kj::Vector<EgressMapping> egressMappings;
+
+  // Insert or replace an egress mapping. If a mapping with the same destination, port, and TLS
+  // mode already exists, its channel is replaced; otherwise a new mapping is added.
   void upsertEgressMapping(EgressMapping mapping);
   kj::Vector<kj::String> getDnsAllowHostnames() const;
 

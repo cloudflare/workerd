@@ -483,23 +483,6 @@ kj::Promise<void> warnAboutStaleSnapshotVolumes(kj::Network& network, kj::String
 
 }  // namespace
 
-// Represents a parsed egress mapping. IP/CIDR mappings match destination IPs,
-// while hostnameGlob mappings match either HTTP hostnames or TLS SNI depending on `tls`.
-// Defined here (not in the header) to avoid pulling kj::OneOf, kj::CidrRange, and
-// kj::Vector into server.c++ which includes container-client.h.
-struct ContainerClient::EgressMapping {
-  kj::OneOf<kj::CidrRange, kj::String> destination;
-  uint16_t port;  // 0 means match all ports
-  bool tls;
-  kj::Own<workerd::IoChannelFactory::SubrequestChannel> channel;
-};
-
-// Holds all egress mapping state. Stored via kj::Own<EgressState> in ContainerClient
-// so that the EgressMapping type is not visible in container-client.h.
-struct ContainerClient::EgressState {
-  kj::Vector<EgressMapping> mappings;
-};
-
 ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::Timer& timer,
     kj::Network& network,
@@ -522,8 +505,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       waitUntilTasks(waitUntilTasks),
       pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
-      channelTokenHandler(channelTokenHandler),
-      egressState(kj::heap<EgressState>()) {
+      channelTokenHandler(channelTokenHandler) {
   if (!staleSnapshotVolumeCheckScheduled.exchange(true)) {
     waitUntilTasks.add(warnAboutStaleSnapshotVolumes(network, kj::str(this->dockerPath))
                            .catch_([](kj::Exception&& e) {
@@ -1453,7 +1435,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   });
 
   bool hasTlsMappings = false;
-  for (auto& mapping: egressState->mappings) {
+  for (auto& mapping: egressMappings) {
     if (mapping.tls) {
       hasTlsMappings = true;
       break;
@@ -1690,7 +1672,7 @@ kj::Promise<void> ContainerClient::listenTcp(ListenTcpContext context) {
 }
 
 void ContainerClient::upsertEgressMapping(EgressMapping mapping) {
-  for (auto& m: egressState->mappings) {
+  for (auto& m: egressMappings) {
     // If the mapping differs in port or needing TLS, we skip it as it's
     // not the same.
     if (m.port != mapping.port || m.tls != mapping.tls) {
@@ -1717,14 +1699,14 @@ void ContainerClient::upsertEgressMapping(EgressMapping mapping) {
     }
   }
 
-  egressState->mappings.add(kj::mv(mapping));
+  egressMappings.add(kj::mv(mapping));
 }
 
 kj::Vector<kj::String> ContainerClient::getDnsAllowHostnames() const {
-  // result N can be at most size of egressState->mappings.
+  // result N can be at most size of egressMappings.
   kj::Vector<kj::String> result;
 
-  for (auto& mapping: egressState->mappings) {
+  for (auto& mapping: egressMappings) {
     KJ_SWITCH_ONEOF(mapping.destination) {
       KJ_CASE_ONEOF(_, kj::CidrRange) {
         result.add(kj::str("*"));
@@ -1760,7 +1742,7 @@ kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient
     normalizedHostname = normalizeHostname(hostnameValue);
   }
 
-  for (auto& mapping: egressState->mappings) {
+  for (auto& mapping: egressMappings) {
     // Mappings can differ in port, whether to do tls and the cidr/hostname.
     // Users can specify things like google.com:7070, or 0.0.0.0:7070. On top of that,
     // they might want TLS interception.
