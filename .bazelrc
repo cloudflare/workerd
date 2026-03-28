@@ -358,11 +358,11 @@ build:windows --extra_execution_platforms=//:x64_windows-clang-cl
 
 build:windows_no_dbg -c opt
 # build:windows_no_dbg --copt='/Od'
-build:windows_no_dbg --per_file_copt=src/workerd/api@/Od
-build:windows_no_dbg --per_file_copt=src/workerd/io@/Od
-build:windows_no_dbg --per_file_copt=src/workerd/jsg@/Od
-build:windows_no_dbg --per_file_copt=src/workerd/util@/Od
-build:windows_no_dbg --per_file_copt=src/workerd/server@/Od
+# build:windows_no_dbg --per_file_copt=src/workerd/api@/Od
+build:windows_no_dbg --per_file_copt=src/workerd/io/worker-interface@/Od
+# build:windows_no_dbg --per_file_copt=src/workerd/jsg@/Od
+# build:windows_no_dbg --per_file_copt=src/workerd/util@/Od
+# build:windows_no_dbg --per_file_copt=src/workerd/server@/Od
 build:windows_no_dbg --linkopt='/INCREMENTAL:NO'
 build:windows_no_dbg --features=-smaller_binary
 

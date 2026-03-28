@@ -126,7 +126,7 @@ jobs:
           bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --profile build-win-workaround.bazel-profile.gz --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
       - name: Bazel build
         run: |
-          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //...
+          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/api/tests/... //src/workerd/server:server-test@ //src/workerd/server:server-test@all-autogates
       - name: Configure Docker daemon for IPv6
         if: inputs.build_container_images
         run: |
@@ -145,7 +145,7 @@ jobs:
       - name: Bazel test
         if: inputs.run_tests
         run: |
-          bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+          bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/api/tests/... //src/workerd/server:server-test@ //src/workerd/server:server-test@all-autogates
       - name: Bazel coverage
         if: inputs.run_coverage
         run: |
