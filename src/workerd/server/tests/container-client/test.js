@@ -1201,163 +1201,6 @@ export class DurableObjectExample extends DurableObject {
     await monitor2;
   }
 
-  async testSnapshotOverlappingMounts() {
-    const container = this.ctx.container;
-    if (container.running) {
-      const monitor = container.monitor().catch((_err) => {});
-      await container.destroy();
-      await monitor;
-    }
-
-    container.start({ enableInternet: true });
-    const monitor = container.monitor().catch((_err) => {});
-    await this.waitUntilContainerIsHealthy();
-
-    await container
-      .getTcpPort(8080)
-      .fetch('http://foo/write-file?path=/tmp/parent-src/root.txt', {
-        method: 'POST',
-        body: 'parent-root',
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
-      });
-    await container
-      .getTcpPort(8080)
-      .fetch(
-        'http://foo/write-file?path=/tmp/parent-src/child/from-parent.txt',
-        {
-          method: 'POST',
-          body: 'masked-by-child-mount',
-          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
-        }
-      );
-    await container
-      .getTcpPort(8080)
-      .fetch('http://foo/write-file?path=/tmp/child-src/from-child.txt', {
-        method: 'POST',
-        body: 'child-wins',
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
-      });
-
-    const parentSnapshot = await container.snapshotDirectory({
-      dir: '/tmp/parent-src',
-    });
-    const childSnapshot = await container.snapshotDirectory({
-      dir: '/tmp/child-src',
-    });
-
-    await container.destroy();
-    await monitor;
-
-    const assertRestoredTree = async () => {
-      const rootResp = await container
-        .getTcpPort(8080)
-        .fetch('http://foo/read-file?path=/tmp/restored/root.txt', {
-          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
-        });
-      assert.equal(rootResp.status, 200);
-      assert.strictEqual(await rootResp.text(), 'parent-root');
-
-      const childResp = await container
-        .getTcpPort(8080)
-        .fetch('http://foo/read-file?path=/tmp/restored/child/from-child.txt', {
-          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
-        });
-      assert.equal(childResp.status, 200);
-      assert.strictEqual(await childResp.text(), 'child-wins');
-
-      const maskedResp = await container
-        .getTcpPort(8080)
-        .fetch(
-          'http://foo/read-file?path=/tmp/restored/child/from-parent.txt',
-          {
-            signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
-          }
-        );
-      assert.equal(maskedResp.status, 404);
-    };
-
-    const startAndAssert = async (snapshots) => {
-      container.start({ enableInternet: true, snapshots });
-      const restoreMonitor = container.monitor().catch((_err) => {});
-      await this.waitUntilContainerIsHealthy();
-      await assertRestoredTree();
-      await container.destroy();
-      await restoreMonitor;
-    };
-
-    await startAndAssert([
-      { snapshot: childSnapshot, mountPoint: '/tmp/restored/child' },
-      { snapshot: parentSnapshot, mountPoint: '/tmp/restored' },
-    ]);
-
-    await startAndAssert([
-      { snapshot: parentSnapshot, mountPoint: '/tmp/restored' },
-      { snapshot: childSnapshot, mountPoint: '/tmp/restored/child' },
-    ]);
-  }
-
-  async testSnapshotDuplicateRestoreDirsRejected() {
-    const container = this.ctx.container;
-    if (container.running) {
-      const monitor = container.monitor().catch((_err) => {});
-      await container.destroy();
-      await monitor;
-    }
-
-    container.start({ enableInternet: true });
-    const monitor = container.monitor().catch((_err) => {});
-    await this.waitUntilContainerIsHealthy();
-
-    await container
-      .getTcpPort(8080)
-      .fetch('http://foo/write-file?path=/tmp/dup-a/file-a.txt', {
-        method: 'POST',
-        body: 'dup-a',
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
-      });
-    await container
-      .getTcpPort(8080)
-      .fetch('http://foo/write-file?path=/tmp/dup-b/file-b.txt', {
-        method: 'POST',
-        body: 'dup-b',
-        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
-      });
-
-    const firstSnapshot = await container.snapshotDirectory({
-      dir: '/tmp/dup-a',
-    });
-    const secondSnapshot = await container.snapshotDirectory({
-      dir: '/tmp/dup-b',
-    });
-
-    await container.destroy();
-    await monitor;
-
-    await assert.rejects(
-      () =>
-        new Promise((resolve, reject) => {
-          try {
-            container.start({
-              enableInternet: true,
-              snapshots: [
-                { snapshot: firstSnapshot, mountPoint: '/tmp/duplicate' },
-                { snapshot: secondSnapshot, mountPoint: '/tmp/duplicate/' },
-              ],
-            });
-          } catch (err) {
-            return reject(err);
-          }
-          container.monitor().then(resolve).catch(reject);
-        }),
-      (err) => {
-        assert.strictEqual(err.message, 'Container failed to start');
-        return true;
-      }
-    );
-
-    assert.strictEqual(container.running, false);
-  }
-
   async testSnapshotRestoreToRoot() {
     const container = this.ctx.container;
     if (container.running) {
@@ -1369,7 +1212,7 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
 
     const fakeSnapshot = {
-      id: '01234567-89ab-cdef-0123-456789abcdef',
+      id: 'root-explicit-0000-0000-0000-000000000000',
       size: 1024,
       dir: '/app/data',
     };
@@ -1397,7 +1240,7 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
 
     const fakeSnapshot = {
-      id: '11111111-2222-3333-4444-555555555555',
+      id: 'root-implicit-0000-0000-0000-000000000000',
       size: 1024,
       dir: '/',
     };
@@ -1425,7 +1268,7 @@ export class DurableObjectExample extends DurableObject {
     assert.strictEqual(container.running, false);
 
     const fakeSnapshot = {
-      id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      id: 'relative-mount-0000-0000-0000-000000000000',
       size: 1024,
       dir: '/app/data',
     };
@@ -1436,10 +1279,7 @@ export class DurableObjectExample extends DurableObject {
           enableInternet: true,
           snapshots: [{ snapshot: fakeSnapshot, mountPoint: 'tmp/restored' }],
         }),
-      {
-        message:
-          /Directory snapshot restore path must be absolute\. Got: tmp\/restored/,
-      }
+      { message: /mountPoint must be an absolute path starting with '\/'/ }
     );
 
     assert.strictEqual(container.running, false);
@@ -1912,28 +1752,6 @@ export const testSnapshotRestoreToRoot = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testSnapshotRestoreToRoot();
-  },
-};
-
-// Test that overlapping restore paths work regardless of the user-supplied mount order.
-export const testSnapshotOverlappingMounts = {
-  async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
-      getRandomDurableObjectName('testSnapshotOverlappingMounts')
-    );
-    const stub = env.MY_CONTAINER.get(id);
-    await stub.testSnapshotOverlappingMounts();
-  },
-};
-
-// Test that duplicate effective restore paths are rejected after normalization.
-export const testSnapshotDuplicateRestoreDirsRejected = {
-  async test(_ctrl, env) {
-    const id = env.MY_CONTAINER.idFromName(
-      getRandomDurableObjectName('testSnapshotDuplicateRestoreDirsRejected')
-    );
-    const stub = env.MY_CONTAINER.get(id);
-    await stub.testSnapshotDuplicateRestoreDirsRejected();
   },
 };
 

@@ -105,18 +105,6 @@ struct Docker {
     # Networking configuration
     # networkingConfig @22 :NetworkingConfig $Json.name("NetworkingConfig");
 
-    struct Mount {
-      type @0 :Text $Json.name("Type");
-      source @1 :Text $Json.name("Source");
-      target @2 :Text $Json.name("Target");
-      readOnly @3 :Bool = false $Json.name("ReadOnly");
-      volumeOptions @4 :VolumeOptions $Json.name("VolumeOptions");
-
-      struct VolumeOptions {
-        noCopy @0 :Bool = false $Json.name("NoCopy");
-      }
-    }
-
     struct HostConfig {
       # Container configuration that depends on the host
       binds @0 :List(Text) $Json.name("Binds"); # Volume bindings
@@ -170,7 +158,6 @@ struct Docker {
       volumeDriver @48 :Text $Json.name("VolumeDriver");
       shmSize @49 :UInt32 $Json.name("ShmSize");
       extraHosts @50 :List(Text) $Json.name("ExtraHosts"); # --add-host entries in "host:ip" format
-      mounts @51 :List(Mount) $Json.name("Mounts");
 
     }
   }

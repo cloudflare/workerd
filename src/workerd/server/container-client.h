@@ -16,7 +16,6 @@
 #include <kj/async-io.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
-#include <kj/filesystem.h>
 #include <kj/map.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
@@ -126,19 +125,12 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
     uint16_t ingressHostPort;
   };
 
-  struct SnapshotRestoreMount {
-    kj::Path restorePath;
-    kj::String sourceVolume;
-    kj::String cloneVolume;
-  };
-
   kj::Promise<InspectResponse> inspectContainer();
 
   kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> updateSidecarEgressConfig(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
       kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
-      kj::ArrayPtr<const SnapshotRestoreMount> restoreMounts,
       rpc::Container::StartParams::Reader params);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
@@ -149,11 +141,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> createDockerVolume(kj::StringPtr volumeName);
   kj::Promise<void> deleteDockerVolume(kj::String volumeName);
   kj::Promise<kj::String> createTempContainerWithVolume(
-      kj::StringPtr volumeName, kj::StringPtr mountPath);
-  // Creates a writable clone volume by copying an existing snapshot volume through a
-  // short-lived helper container. The caller mounts the returned clone into the app
-  // container with NoCopy=true so the restored path masks any image contents there.
-  kj::Promise<void> cloneSnapshot(SnapshotRestoreMount& snapshot);
+      kj::StringPtr volumeName, kj::StringPtr mountPath = "/mnt"_kj);
   kj::Promise<void> deleteTempContainer(kj::String tempContainerId);
 
   // Sidecar container management (for egress proxy)
@@ -202,10 +190,6 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   std::atomic_bool containerSidecarStarted = false;
   std::atomic_bool egressListenerStarted = false;
   std::atomic_bool caCertInjected = false;
-
-  // Writable clone volumes currently owned by the app container, or by an in-flight start()
-  // that still needs failure cleanup.
-  kj::Vector<kj::String> snapshotClones;
 
   // CA cert read from the sidecar after it starts.
   kj::Maybe<kj::String> caCert;

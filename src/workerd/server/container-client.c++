@@ -37,7 +37,6 @@ constexpr uint16_t SIDECAR_INGRESS_PORT = 39001;
 constexpr uint64_t MAX_JSON_RESPONSE_SIZE = 16ULL * 1024 * 1024;
 
 constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
-constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
 constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
@@ -52,19 +51,32 @@ constexpr size_t MAX_TAR_CONTENT_SIZE = 8ull * 1024 * 1024 * 1024;
 // Ensures the stale-volume check runs at most once per process.
 std::atomic_bool staleSnapshotVolumeCheckScheduled = false;
 
-// Validates an absolute path for snapshot use and returns the parsed component path.
+// Strip trailing slashes from a path, preserving bare "/".
+kj::String normalizePath(kj::String path) {
+  auto len = path.size();
+  while (len > 1 && path[len - 1] == '/') {
+    --len;
+  }
+  if (len == path.size()) return kj::mv(path);
+  return kj::str(path.first(len));
+}
+
+// Validate an absolute path for snapshot use (both creation dir and restore mount point).
 // Rejects relative paths, embedded null bytes, and path traversal components ("..").
-kj::Path parseAbsolutePath(kj::StringPtr path) {
+// Accepts "/" as a valid path.
+void validateAbsolutePath(kj::StringPtr path) {
   JSG_REQUIRE(
       path.size() > 0 && path[0] == '/', Error, "Snapshot path must be absolute, got: ", path);
 
   JSG_REQUIRE(path.findFirst('\0') == kj::none, Error, "Snapshot path must not contain null bytes");
 
-  try {
-    return kj::Path::parse(path.slice(1));
-  } catch (kj::Exception& e) {
-    JSG_FAIL_REQUIRE(
-        Error, "Snapshot path contains invalid components: ", path, "; ", e.getDescription());
+  // "/" is valid (root). For longer paths, kj::Path::parse rejects ".." and other
+  // dangerous components, but throws a raw KJ exception. Wrap it for a user-friendly error.
+  if (path.size() > 1) {
+    KJ_IF_SOME(exc, kj::runCatchingExceptions([&]() { (void)kj::Path::parse(path.slice(1)); })) {
+      JSG_FAIL_REQUIRE(
+          Error, "Snapshot path contains invalid components: ", path, "; ", exc.getDescription());
+    }
   }
 }
 
@@ -411,51 +423,6 @@ kj::Promise<DockerBinaryResponse> dockerApiBinaryRequest(kj::Network& network,
       bodyBytes, "application/x-tar"_kj, maxResponseSize);
 }
 
-kj::Promise<void> deleteVolume(kj::Network& network, kj::String dockerPath, kj::String volumeName) {
-  auto response = co_await dockerApiRequest(
-      network, kj::mv(dockerPath), kj::HttpMethod::DELETE, kj::str("/volumes/", volumeName));
-  if (response.statusCode != 204 && response.statusCode != 404) {
-    KJ_LOG(WARNING, "failed to delete volume", volumeName, response.statusCode, response.body);
-  }
-}
-
-kj::Promise<void> deleteVolumes(
-    kj::Network& network, kj::String dockerPath, kj::Array<kj::String> snapshotCloneVolumes) {
-  kj::Vector<kj::Promise<void>> volumeDeletes;
-  volumeDeletes.reserve(snapshotCloneVolumes.size());
-  for (auto& volumeName: snapshotCloneVolumes) {
-    auto logName = kj::str(volumeName);
-    volumeDeletes.add(deleteVolume(network, kj::str(dockerPath), kj::mv(volumeName))
-                          .catch_([logName = kj::mv(logName)](kj::Exception&& e) {
-      KJ_LOG(WARNING, "failed to delete volume", logName, e);
-    }));
-  }
-  co_await kj::joinPromises(volumeDeletes.releaseAsArray());
-}
-
-kj::Promise<void> removeContainer(
-    kj::Network& network, kj::String dockerPath, kj::String containerName, bool wait = true) {
-  auto endpoint = kj::str("/containers/", containerName, "?force=true");
-  auto response = co_await dockerApiRequest(
-      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
-  // 204 means the container was removed.
-  // 404 means it was already gone.
-  // 409 means removal is already in progress, which is fine for our teardown paths.
-  KJ_REQUIRE(response.statusCode == 204 || response.statusCode == 404 || response.statusCode == 409,
-      "Removing a container failed with: ", response.body);
-
-  // If removal succeeded or is already in progress, wait for Docker to report the container as
-  // fully removed before proceeding with any follow-up cleanup like deleting mounted volumes.
-  if (wait && (response.statusCode == 204 || response.statusCode == 409)) {
-    response = co_await dockerApiRequest(network, kj::mv(dockerPath), kj::HttpMethod::POST,
-        kj::str("/containers/", containerName, "/wait?condition=removed"));
-    // 200 means Docker observed the removal. 404 means the container disappeared before the wait
-    // request was processed, which is also fine.
-    KJ_REQUIRE(response.statusCode == 200 || response.statusCode == 404,
-        "Waiting for container removal failed with: ", response.statusCode, response.body);
-  }
-}
-
 kj::String currentSnapshotVolumeTimestamp() {
   return kj::str((kj::systemPreciseCalendarClock().now() - kj::UNIX_EPOCH) / kj::SECONDS);
 }
@@ -514,43 +481,6 @@ kj::Promise<void> warnAboutStaleSnapshotVolumes(kj::Network& network, kj::String
   }
 }
 
-// Returns the gateway IP on Linux for direct container access.
-// Returns kj::none on macOS where Docker Desktop routes host-gateway to host loopback.
-kj::Maybe<kj::String> gatewayForPlatform(kj::String gateway) {
-#ifdef __APPLE__
-  return kj::none;
-#else
-  return kj::mv(gateway);
-#endif
-}
-
-kj::Maybe<uint16_t> tryParsePublishedHostPort(capnp::json::Value::Reader portMappingValue) {
-  if (portMappingValue.isNull()) {
-    return kj::none;
-  }
-
-  JSG_REQUIRE(
-      portMappingValue.isArray(), Error, "Malformed ContainerInspect port mapping response");
-  auto bindings = portMappingValue.getArray();
-  if (bindings.size() == 0) {
-    return kj::none;
-  }
-
-  auto binding = bindings[0];
-  JSG_REQUIRE(binding.isObject(), Error, "Malformed ContainerInspect port binding response");
-  for (auto field: binding.getObject()) {
-    if (field.getName() == "HostPort") {
-      auto value = field.getValue();
-      JSG_REQUIRE(value.isString(), Error, "Malformed ContainerInspect port binding response");
-      kj::StringPtr hostPort = value.getString();
-      return KJ_REQUIRE_NONNULL(
-          hostPort.tryParseAs<uint16_t>(), "Malformed ContainerInspect host port");
-    }
-  }
-
-  KJ_FAIL_REQUIRE("Malformed ContainerInspect port binding response: missing HostPort");
-}
-
 }  // namespace
 
 // Represents a parsed egress mapping. IP/CIDR mappings match destination IPs,
@@ -606,18 +536,15 @@ ContainerClient::~ContainerClient() noexcept(false) {
   stopEgressListener();
 
   // Best-effort cleanup for both containers.
-  auto sidecarCleanup =
-      removeContainer(network, kj::str(dockerPath), kj::str(sidecarContainerName), false)
-          .catch_([](kj::Exception&&) {});
+  auto sidecarCleanup = dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+      kj::str("/containers/", sidecarContainerName, "?force=true"))
+                            .ignoreResult()
+                            .catch_([](kj::Exception&&) {});
 
-  // Also try to delete any cloned snapshot volumes.
-  auto volumes = snapshotClones.releaseAsArray();
-  auto mainCleanup = removeContainer(network, kj::str(dockerPath), kj::str(containerName))
-                         .catch_([](kj::Exception&&) {})
-                         .then([&network = network, dockerPath = kj::str(dockerPath),
-                                   volumes = kj::mv(volumes)]() mutable {
-    return deleteVolumes(network, kj::mv(dockerPath), kj::mv(volumes));
-  }).catch_([](kj::Exception&&) {});
+  auto mainCleanup = dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+      kj::str("/containers/", containerName, "?force=true"))
+                         .ignoreResult()
+                         .catch_([](kj::Exception&&) {});
 
   // Pass the joined cleanup promise to the callback. The callback wraps it with the
   // canceler (so a future client creation can cancel it), stores it so the next
@@ -907,6 +834,43 @@ kj::Promise<bool> ContainerClient::isDaemonIpv6Enabled() {
   co_return false;
 }
 
+// Returns the gateway IP on Linux for direct container access.
+// Returns kj::none on macOS where Docker Desktop routes host-gateway to host loopback.
+static kj::Maybe<kj::String> gatewayForPlatform(kj::String gateway) {
+#ifdef __APPLE__
+  return kj::none;
+#else
+  return kj::mv(gateway);
+#endif
+}
+
+kj::Maybe<uint16_t> tryParsePublishedHostPort(capnp::json::Value::Reader portMappingValue) {
+  if (portMappingValue.isNull()) {
+    return kj::none;
+  }
+
+  JSG_REQUIRE(
+      portMappingValue.isArray(), Error, "Malformed ContainerInspect port mapping response");
+  auto bindings = portMappingValue.getArray();
+  if (bindings.size() == 0) {
+    return kj::none;
+  }
+
+  auto binding = bindings[0];
+  JSG_REQUIRE(binding.isObject(), Error, "Malformed ContainerInspect port binding response");
+  for (auto field: binding.getObject()) {
+    if (field.getName() == "HostPort") {
+      auto value = field.getValue();
+      JSG_REQUIRE(value.isString(), Error, "Malformed ContainerInspect port binding response");
+      kj::StringPtr hostPort = value.getString();
+      return KJ_REQUIRE_NONNULL(
+          hostPort.tryParseAs<uint16_t>(), "Malformed ContainerInspect host port");
+    }
+  }
+
+  KJ_FAIL_REQUIRE("Malformed ContainerInspect port binding response: missing HostPort");
+}
+
 kj::Promise<uint16_t> ContainerClient::startEgressListener(
     kj::String listenAddress, uint16_t port) {
   auto service = kj::heap<EgressHttpService>(*this, headerTable);
@@ -1134,7 +1098,6 @@ kj::Promise<void> ContainerClient::updateSidecarEgressConfig(
 kj::Promise<void> ContainerClient::createContainer(
     kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
     kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
-    kj::ArrayPtr<const SnapshotRestoreMount> restoreMounts,
     rpc::Container::StartParams::Reader params) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
@@ -1185,18 +1148,6 @@ kj::Promise<void> ContainerClient::createContainer(
     hostConfig.setPidMode("host");
   }
 
-  if (restoreMounts.size() > 0) {
-    auto mounts = hostConfig.initMounts(restoreMounts.size());
-    for (auto i: kj::indices(restoreMounts)) {
-      auto mount = mounts[i];
-      auto& restoreMount = restoreMounts[i];
-      mount.setType("volume");
-      mount.setSource(restoreMount.cloneVolume);
-      mount.setTarget(restoreMount.restorePath.toString(true));
-      mount.initVolumeOptions().setNoCopy(true);
-    }
-  }
-
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
 
@@ -1207,7 +1158,7 @@ kj::Promise<void> ContainerClient::createContainer(
   constexpr auto RETRY_DELAY = 100 * kj::MILLISECONDS;
 
   for (int attempt = 0; response.statusCode == 409 && attempt < MAX_RETRIES; ++attempt) {
-    co_await removeContainer(network, kj::str(dockerPath), kj::str(containerName));
+    co_await destroyContainer();
     co_await timer.afterDelay(RETRY_DELAY);
     response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
         kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
@@ -1258,8 +1209,24 @@ kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
 // No-op when the container does not exist.
 // Wait for the container to actually be stopped and removed when it exists.
 kj::Promise<void> ContainerClient::destroyContainer() {
-  co_await removeContainer(network, kj::str(dockerPath), kj::str(containerName));
-  co_await deleteVolumes(network, kj::str(dockerPath), snapshotClones.releaseAsArray());
+  auto endpoint = kj::str("/containers/", containerName, "?force=true");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
+  // statusCode 204 refers to "no error"
+  // statusCode 404 refers to "no such container"
+  // statusCode 409 refers to "removal already in progress" (race between concurrent destroys)
+  // All of which are fine for us since we're tearing down the container anyway.
+  JSG_REQUIRE(
+      response.statusCode == 204 || response.statusCode == 404 || response.statusCode == 409, Error,
+      "Removing a container failed with: ", response.body);
+  // Do not send a wait request if container doesn't exist. This avoids sending an
+  // unnecessary request.
+  if (response.statusCode == 204 || response.statusCode == 409) {
+    response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+        kj::str("/containers/", containerName, "/wait?condition=removed"));
+    JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
+        "Waiting for container removal failed with: ", response.statusCode, response.body);
+  }
 }
 
 // Creates the sidecar container that owns the shared network namespace.
@@ -1335,7 +1302,21 @@ kj::Promise<void> ContainerClient::startSidecarContainer() {
 }
 
 kj::Promise<void> ContainerClient::destroySidecarContainer() {
-  co_await removeContainer(network, kj::str(dockerPath), kj::str(sidecarContainerName));
+  auto endpoint = kj::str("/containers/", sidecarContainerName, "?force=true");
+  auto responseDestroy = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
+  // statusCode 204 refers to "no error"
+  // statusCode 404 refers to "no such container"
+  // statusCode 409 refers to "removal already in progress" (race between concurrent destroys)
+  // All of which are fine for us since we're tearing down the sidecar
+  JSG_REQUIRE(responseDestroy.statusCode == 204 || responseDestroy.statusCode == 404 ||
+          responseDestroy.statusCode == 409,
+      Error, "Destroying network sidecar container failed with: ", responseDestroy.statusCode,
+      responseDestroy.body);
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/containers/", sidecarContainerName, "/wait?condition=removed"));
+  JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
+      "Destroying docker network sidecar container failed: ", response.statusCode, response.body);
 }
 
 kj::Promise<void> ContainerClient::createDockerVolume(kj::StringPtr volumeName) {
@@ -1385,76 +1366,6 @@ kj::Promise<kj::String> ContainerClient::createTempContainerWithVolume(
   auto respMessage = decodeJsonResponse<docker_api::Docker::ContainerCreateResponse>(response.body);
   auto respRoot = respMessage->getRoot<docker_api::Docker::ContainerCreateResponse>();
   co_return kj::str(respRoot.getId());
-}
-
-kj::Promise<void> ContainerClient::cloneSnapshot(SnapshotRestoreMount& snapshot) {
-  co_await createDockerVolume(snapshot.cloneVolume);
-
-  bool cloneCommitted = false;
-  KJ_DEFER(if (!cloneCommitted) {
-    waitUntilTasks.add(
-        deleteDockerVolume(kj::str(snapshot.cloneVolume)).catch_([](kj::Exception&&) {
-    }).attach(addRef()));
-  });
-
-  capnp::JsonCodec codec;
-  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
-  capnp::MallocMessageBuilder message;
-  auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(containerEgressInterceptorImage);
-  jsonRoot.setEntrypoint("/bin/cp");
-
-  // Run `/bin/cp -a /src/. /dst/` so the clone volume gets the snapshot contents directly.
-  auto cmd = jsonRoot.initCmd(3);
-  cmd.set(0, "-a");
-  cmd.set(1, "/src/.");
-  cmd.set(2, "/dst/");
-
-  auto hostConfig = jsonRoot.initHostConfig();
-  auto binds = hostConfig.initBinds(2);
-  binds.set(0, kj::str(snapshot.sourceVolume, ":/src:ro"));
-  binds.set(1, kj::str(snapshot.cloneVolume, ":/dst"));
-
-  auto createResponse = co_await dockerApiRequest(network, kj::str(dockerPath),
-      kj::HttpMethod::POST, kj::str("/containers/create"), codec.encode(jsonRoot));
-  JSG_REQUIRE(createResponse.statusCode == 201, Error,
-      "Failed to create snapshot clone helper container for volume '", snapshot.sourceVolume,
-      "': ", createResponse.statusCode, " ", createResponse.body);
-
-  auto createMessage =
-      decodeJsonResponse<docker_api::Docker::ContainerCreateResponse>(createResponse.body);
-  auto createRoot = createMessage->getRoot<docker_api::Docker::ContainerCreateResponse>();
-  auto helperContainerId = kj::str(createRoot.getId());
-  bool helperDeleted = false;
-  KJ_DEFER(if (!helperDeleted) {
-    waitUntilTasks.add(
-        deleteTempContainer(kj::str(helperContainerId)).catch_([](kj::Exception&&) {
-    }).attach(addRef()));
-  });
-
-  auto startResponse = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
-      kj::str("/containers/", helperContainerId, "/start"), kj::str(""));
-  JSG_REQUIRE(startResponse.statusCode == 204, Error,
-      "Failed to start snapshot clone helper container '", helperContainerId,
-      "': ", startResponse.statusCode, " ", startResponse.body);
-
-  auto waitResponse = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
-      kj::str("/containers/", helperContainerId, "/wait?condition=not-running"));
-  JSG_REQUIRE(waitResponse.statusCode == 200, Error,
-      "Failed waiting for snapshot clone helper container '", helperContainerId,
-      "': ", waitResponse.statusCode, " ", waitResponse.body);
-
-  auto waitMessage =
-      decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(waitResponse.body);
-  auto waitRoot = waitMessage->getRoot<docker_api::Docker::ContainerMonitorResponse>();
-  // A non-zero exit means the copy failed and the clone volume contents are incomplete.
-  JSG_REQUIRE(waitRoot.getStatusCode() == 0, Error, "Snapshot clone helper container '",
-      helperContainerId, "' exited with status ", waitRoot.getStatusCode());
-
-  co_await deleteTempContainer(kj::str(helperContainerId));
-  helperDeleted = true;
-  cloneCommitted = true;
-  snapshotClones.add(kj::str(snapshot.cloneVolume));
 }
 
 kj::Promise<void> ContainerClient::deleteTempContainer(kj::String tempContainerId) {
@@ -1524,16 +1435,37 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 
   internetEnabled = params.getEnableInternet();
 
-  // If startup fails after we clone any snapshot volumes, tear down the app container first and
-  // then delete those clone volumes so we don't leave mounted Docker volumes behind.
+  co_await ensureEgressListenerStarted();
+  containerSidecarStarted = false;
+  co_await ensureSidecarStarted();
+
+  caCertInjected.store(false, std::memory_order_release);
+  co_await createContainer(entrypoint, environment, params);
+
+  // If anything after container creation fails (CA cert injection, snapshot
+  // restore, startContainer), destroy the half-created Docker container so we
+  // don't leave a zombie in "Created" state that would cause monitor() to hang.
+  // Attach addRef(*this) so the ContainerClient stays alive until the coroutine
+  // completes — without it, ContainerClient could be freed before destroyContainer()
+  // resumes after its first co_await, causing a use-after-free / segfault.
   KJ_DEFER(if (!containerStarted.load(std::memory_order_acquire)) {
     waitUntilTasks.add(destroyContainer().attach(addRef()));
   });
 
-  kj::Vector<SnapshotRestoreMount> restoreMounts;
+  bool hasTlsMappings = false;
+  for (auto& mapping: egressState->mappings) {
+    if (mapping.tls) {
+      hasTlsMappings = true;
+      break;
+    }
+  }
+
+  if (hasTlsMappings) {
+    co_await injectCACert();
+  }
+
   if (params.hasSnapshots()) {
     auto snapshotList = params.getSnapshots();
-    restoreMounts.reserve(snapshotList.size());
     for (auto i: kj::zeroTo(snapshotList.size())) {
       auto entry = snapshotList[i];
       auto snapshot = entry.getSnapshot();
@@ -1548,36 +1480,53 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
       }
 
       const auto mountPointText = entry.getMountPoint();
-      auto restorePath =
-          parseAbsolutePath(mountPointText.size() > 0 ? mountPointText : snapshot.getDir());
+      const auto restoreDir =
+          normalizePath(mountPointText.size() > 0 ? kj::str(mountPointText) : kj::str(dir));
+      validateAbsolutePath(restoreDir);
 
-      auto sourceVolume = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
+      auto volumeName = kj::str(SNAPSHOT_VOLUME_PREFIX, snapshotId);
 
+      // Docker auto-creates named volumes on container create, so we must
+      // explicitly verify the snapshot volume exists before using it.
       auto inspectResp = co_await dockerApiRequest(
-          network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str("/volumes/", sourceVolume));
+          network, kj::str(dockerPath), kj::HttpMethod::GET, kj::str("/volumes/", volumeName));
       JSG_REQUIRE(inspectResp.statusCode == 200, Error, "Snapshot '", snapshotId,
-          "' not found (volume '", sourceVolume, "' does not exist)");
+          "' not found (volume '", volumeName, "' does not exist)");
 
-      restoreMounts.add(SnapshotRestoreMount{kj::mv(restorePath), kj::mv(sourceVolume),
-        kj::str(SNAPSHOT_CLONE_VOLUME_PREFIX, randomUUID(kj::none))});
-    }
+      // The volume stores raw directory contents (no directory wrapper) at /mnt.
+      // Mount it at /mnt{restoreDir} so Docker creates the target directory hierarchy,
+      // then GET from the first path component to obtain a tar with the full path.
+      // Special case: restoreDir == "/" → mount at /mnt, GET with path=/mnt/. to
+      // avoid the extra mnt/ wrapper.
+      auto mountPath = restoreDir == "/" ? kj::str("/mnt") : kj::str("/mnt", restoreDir);
 
-    for (auto& restoreMount: restoreMounts) {
-      co_await cloneSnapshot(restoreMount);
-    }
-  }
+      auto tempId = co_await createTempContainerWithVolume(volumeName, mountPath);
+      KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId)).attach(addRef())));
 
-  co_await ensureEgressListenerStarted();
-  containerSidecarStarted.store(false, std::memory_order_release);
-  co_await ensureSidecarStarted();
+      kj::String archiveGetPath;
+      if (restoreDir == "/") {
+        archiveGetPath = kj::str("/containers/", tempId, "/archive?path=/mnt/.");
+      } else {
+        auto firstSeparator = restoreDir.slice(1).findFirst('/');
+        auto archiveRoot =
+            firstSeparator.map([&](size_t pos) {
+          return kj::str(restoreDir.slice(1, pos + 1));
+        }).orDefault(kj::str(restoreDir.slice(1)));
+        archiveGetPath = kj::str(
+            "/containers/", tempId, "/archive?path=/mnt/", kj::encodeUriComponent(archiveRoot));
+      }
 
-  caCertInjected.store(false, std::memory_order_release);
-  co_await createContainer(entrypoint, environment, restoreMounts.asPtr(), params);
+      auto tarResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
+          kj::HttpMethod::GET, kj::mv(archiveGetPath), kj::none, MAX_SNAPSHOT_TAR_SIZE);
+      JSG_REQUIRE(tarResponse.statusCode == 200, Error, "Failed to read snapshot '", snapshotId,
+          "' from volume '", volumeName, "': ", tarResponse.statusCode);
 
-  for (auto& mapping: egressState->mappings) {
-    if (mapping.tls) {
-      co_await injectCACert();
-      break;
+      auto putResponse =
+          co_await dockerApiBinaryRequest(network, kj::str(dockerPath), kj::HttpMethod::PUT,
+              kj::str("/containers/", containerName, "/archive?path=%2F&noOverwriteDirNonDir=true"),
+              kj::mv(tarResponse.body), MAX_JSON_RESPONSE_SIZE);
+      JSG_REQUIRE(putResponse.statusCode == 200, Error, "Failed to restore snapshot '", snapshotId,
+          "' to '", restoreDir, "': ", putResponse.statusCode);
     }
   }
 
@@ -1658,7 +1607,8 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
 
   const auto params = context.getParams();
 
-  const auto dir = parseAbsolutePath(params.getDir()).toString(true);
+  const auto dir = normalizePath(kj::str(params.getDir()));
+  validateAbsolutePath(dir);
 
   auto name = params.hasName() && params.getName().size() > 0
       ? kj::Maybe<kj::String>(kj::str(params.getName()))
@@ -1702,7 +1652,7 @@ kj::Promise<void> ContainerClient::snapshotDirectory(SnapshotDirectoryContext co
   });
 
   // Store the contents tar in the volume via a temp container mounted at /mnt.
-  auto tempId = co_await createTempContainerWithVolume(volumeName, "/mnt");
+  auto tempId = co_await createTempContainerWithVolume(volumeName);
   KJ_DEFER(waitUntilTasks.add(deleteTempContainer(kj::str(tempId)).attach(addRef())));
 
   auto putResponse = co_await dockerApiBinaryRequest(network, kj::str(dockerPath),
