@@ -1878,3 +1878,325 @@ fn combo_instance_props_independent_across_instances() {
         Ok(())
     });
 }
+
+// =============================================================================
+// get_/set_ prefix detection for getter/setter pairing
+//
+// These tests explicitly verify that:
+//  - Methods named `get_<stem>` are registered as getters.
+//  - Methods named `set_<stem>` are registered as setters.
+//  - A getter and setter with the same `<stem>` are paired into a single
+//    read-write property whose JS name is the camelCase form of `<stem>`.
+//  - The raw Rust method names (`getX` / `setX`) are never exposed to JS.
+//  - A `get_`-only method produces a read-only property.
+// =============================================================================
+
+/// Resource with a rw property (`get_count`/`set_count`) and a getter-only
+/// property (`get_readonly_val`) to exercise prefix-based detection directly.
+#[jsg_resource]
+struct PrefixDetection {
+    count: Cell<f64>,
+    readonly_val: Cell<f64>,
+}
+
+#[jsg_resource]
+impl PrefixDetection {
+    /// `get_count` → getter for JS property "count"
+    #[jsg_property(prototype)]
+    pub fn get_count(&self) -> Number {
+        Number::new(self.count.get())
+    }
+
+    /// `set_count` → setter for JS property "count" (same stem as `get_count`)
+    #[jsg_property(prototype)]
+    pub fn set_count(&self, v: Number) {
+        self.count.set(v.value());
+    }
+
+    /// `get_readonly_val` → getter-only for JS property "readonlyVal"
+    #[jsg_property(prototype, readonly)]
+    pub fn get_readonly_val(&self) -> Number {
+        Number::new(self.readonly_val.get())
+    }
+}
+
+impl PrefixDetection {
+    fn new(count: f64, readonly_val: f64) -> Self {
+        Self {
+            count: Cell::new(count),
+            readonly_val: Cell::new(readonly_val),
+        }
+    }
+}
+
+/// The `get_` prefix identifies `get_count` as the getter; the value is
+/// accessible as the JS property `"count"` (prefix stripped, camelCased).
+#[test]
+fn get_prefix_identifies_getter() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(PrefixDetection::new(42.0, 0.0));
+        ctx.set_global("obj", r.to_js(lock));
+        let v: Number = ctx.eval(lock, "obj.count").unwrap();
+        assert!(
+            (v.value() - 42.0).abs() < f64::EPSILON,
+            "get_count must be accessible as JS property 'count'"
+        );
+        Ok(())
+    });
+}
+
+/// The `set_` prefix identifies `set_count` as the setter for the same
+/// JS property `"count"` (matching stem with `get_count`).
+#[test]
+fn set_prefix_identifies_setter() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(PrefixDetection::new(0.0, 0.0));
+        ctx.set_global("obj", r.to_js(lock));
+        ctx.eval_raw("obj.count = 99").unwrap();
+        let v: Number = ctx.eval(lock, "obj.count").unwrap();
+        assert!(
+            (v.value() - 99.0).abs() < f64::EPSILON,
+            "set_count must write to JS property 'count'"
+        );
+        Ok(())
+    });
+}
+
+/// `get_count` and `set_count` share the same JS name `"count"` because both
+/// have the same stem (`count`) after prefix stripping — they form a single
+/// read-write property.
+#[test]
+fn getter_setter_paired_by_matching_stem() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(PrefixDetection::new(5.0, 0.0));
+        ctx.set_global("obj", r.to_js(lock));
+        // Both getter and setter must share the single JS name.
+        let descriptor: bool = ctx
+            .eval(
+                lock,
+                "(function() {
+                    var d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(obj), 'count');
+                    return typeof d.get === 'function' && typeof d.set === 'function';
+                })()",
+            )
+            .unwrap();
+        assert!(
+            descriptor,
+            "get_count and set_count must be paired as getter+setter on JS property 'count'"
+        );
+        Ok(())
+    });
+}
+
+/// The raw Rust getter name (`getCount`) must NOT be exposed as a JS property.
+#[test]
+fn getter_raw_rust_name_not_exposed() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(PrefixDetection::new(1.0, 0.0));
+        ctx.set_global("obj", r.to_js(lock));
+        let undef: bool = ctx
+            .eval(lock, "typeof obj.getCount === 'undefined'")
+            .unwrap();
+        assert!(
+            undef,
+            "raw getter name 'getCount' must not be exposed to JS"
+        );
+        Ok(())
+    });
+}
+
+/// The raw Rust setter name (`setCount`) must NOT be exposed as a JS property.
+#[test]
+fn setter_raw_rust_name_not_exposed() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(PrefixDetection::new(1.0, 0.0));
+        ctx.set_global("obj", r.to_js(lock));
+        let undef: bool = ctx
+            .eval(lock, "typeof obj.setCount === 'undefined'")
+            .unwrap();
+        assert!(
+            undef,
+            "raw setter name 'setCount' must not be exposed to JS"
+        );
+        Ok(())
+    });
+}
+
+/// A method annotated with only `get_` (no matching `set_`) produces a
+/// getter-only (read-only) property; the JS property descriptor has a getter
+/// but no setter.
+#[test]
+fn getter_only_method_produces_readonly_property() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(PrefixDetection::new(0.0, 7.0));
+        ctx.set_global("obj", r.to_js(lock));
+        let v: Number = ctx.eval(lock, "obj.readonlyVal").unwrap();
+        assert!(
+            (v.value() - 7.0).abs() < f64::EPSILON,
+            "get_readonly_val must be readable as 'readonlyVal'"
+        );
+        // No setter in the descriptor.
+        let no_setter: bool = ctx
+            .eval(
+                lock,
+                "(function() {
+                    var d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(obj), 'readonlyVal');
+                    return typeof d.set === 'undefined';
+                })()",
+            )
+            .unwrap();
+        assert!(no_setter, "getter-only property must have no setter in descriptor");
+        Ok(())
+    });
+}
+
+/// In strict mode, assigning to a getter-only property throws a `TypeError`.
+#[test]
+fn getter_only_throws_on_write_in_strict_mode() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(PrefixDetection::new(0.0, 3.0));
+        ctx.set_global("obj", r.to_js(lock));
+        let result = ctx.eval_raw("'use strict'; obj.readonlyVal = 99");
+        assert!(
+            result.is_err(),
+            "assigning to getter-only property must throw in strict mode"
+        );
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Default placement (`#[jsg_property]` without explicit placement argument)
+//
+// When no placement is specified, the macro defaults to `prototype` placement.
+// These tests verify this default matches the behaviour of explicit
+// `#[jsg_property(prototype)]`.
+// =============================================================================
+
+/// Resource using `#[jsg_property]` (no placement arg) to exercise the default.
+#[jsg_resource]
+struct DefaultPlacement {
+    name: RefCell<String>,
+    version: Cell<f64>,
+}
+
+#[jsg_resource]
+impl DefaultPlacement {
+    /// No placement arg → defaults to `prototype`.
+    #[jsg_property]
+    pub fn get_name(&self) -> String {
+        self.name.borrow().clone()
+    }
+
+    #[jsg_property]
+    pub fn set_name(&self, v: String) {
+        *self.name.borrow_mut() = v;
+    }
+
+    /// Getter-only with default placement.
+    #[jsg_property(readonly)]
+    pub fn get_version(&self) -> Number {
+        Number::new(self.version.get())
+    }
+}
+
+impl DefaultPlacement {
+    fn new(name: impl Into<String>, version: f64) -> Self {
+        Self {
+            name: RefCell::new(name.into()),
+            version: Cell::new(version),
+        }
+    }
+}
+
+/// Default placement (`#[jsg_property]` with no args) places the property on
+/// the prototype, not the instance — `Object.keys()` is empty.
+#[test]
+fn default_placement_is_prototype_not_instance() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(DefaultPlacement::new("hello", 1.0));
+        ctx.set_global("obj", r.to_js(lock));
+        // Prototype property → not an own property.
+        let own: bool = ctx
+            .eval(lock, "Object.prototype.hasOwnProperty.call(obj, 'name')")
+            .unwrap();
+        assert!(
+            !own,
+            "default-placement property must NOT be an own property"
+        );
+        // Prototype property → not in Object.keys().
+        let keys: String = ctx.eval(lock, "Object.keys(obj).join(',')").unwrap();
+        assert_eq!(
+            keys, "",
+            "default-placement property must not appear in Object.keys()"
+        );
+        Ok(())
+    });
+}
+
+/// The getter works with default placement.
+#[test]
+fn default_placement_getter_returns_value() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(DefaultPlacement::new("world", 2.0));
+        ctx.set_global("obj", r.to_js(lock));
+        let v: String = ctx.eval(lock, "obj.name").unwrap();
+        assert_eq!(v, "world");
+        Ok(())
+    });
+}
+
+/// The setter works with default placement.
+#[test]
+fn default_placement_setter_updates_value() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(DefaultPlacement::new("before", 0.0));
+        ctx.set_global("obj", r.to_js(lock));
+        ctx.eval_raw("obj.name = 'after'").unwrap();
+        let v: String = ctx.eval(lock, "obj.name").unwrap();
+        assert_eq!(v, "after");
+        Ok(())
+    });
+}
+
+/// A readonly property with default placement is accessible but rejects writes
+/// in strict mode.
+#[test]
+fn default_placement_readonly_throws_on_write() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(DefaultPlacement::new("x", 42.0));
+        ctx.set_global("obj", r.to_js(lock));
+        let v: Number = ctx.eval(lock, "obj.version").unwrap();
+        assert!((v.value() - 42.0).abs() < f64::EPSILON);
+        let result = ctx.eval_raw("'use strict'; obj.version = 0");
+        assert!(
+            result.is_err(),
+            "readonly default-placement property must throw on write"
+        );
+        Ok(())
+    });
+}
+
+/// Default placement is on the prototype chain — `"name" in obj` is true.
+#[test]
+fn default_placement_found_via_in_operator() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(DefaultPlacement::new("hi", 1.0));
+        ctx.set_global("obj", r.to_js(lock));
+        let found: bool = ctx.eval(lock, "'name' in obj").unwrap();
+        assert!(found, "prototype property must be found by 'in' operator");
+        Ok(())
+    });
+}

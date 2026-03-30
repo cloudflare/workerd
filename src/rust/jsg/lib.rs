@@ -675,19 +675,16 @@ impl From<u64> for ConstantValue {
 }
 
 /// Where a [`Member::Property`] is attached on the JavaScript object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PropertyKind {
-    /// On the prototype. Enumerable (appears in `for...in` and
-    /// `getOwnPropertyDescriptor(...).enumerable === true`); visible via
-    /// `"prop" in obj`; overridable by subclasses.
-    Prototype,
-    /// As an own property on every instance. Directly enumerable;
-    /// not overridable by subclasses.
-    Instance,
-    /// Registered under a unique symbol on the prototype. Invisible to normal
-    /// enumeration and string-key lookup; surfaced by `node:util` `inspect()`.
-    Inspect,
-}
+///
+/// This is a re-export of the CXX bridge type in [`v8::ffi`] so that callers
+/// do not need to import `jsg::v8::ffi` directly.  The three variants behave
+/// as follows:
+///
+/// - `Prototype` — accessor on the prototype chain; enumerable.
+/// - `Instance`  — own accessor on every instance; enumerable.
+/// - `Inspect`   — symbol-keyed on the prototype; hidden from normal enumeration,
+///   surfaced by `node:util` `inspect()`.
+pub use crate::v8::ffi::PropertyKind;
 
 pub enum Member {
     Constructor {

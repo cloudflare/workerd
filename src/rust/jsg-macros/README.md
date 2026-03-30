@@ -144,10 +144,10 @@ The method must be static (no `self` receiver) and must return `Self`. Only one 
 
 If no `#[jsg_constructor]` is present, `new MyClass()` throws an `Illegal constructor` error.
 
-## `#[jsg_property(placement [, name = "..."] [, readonly])]`
+## `#[jsg_property([placement,] [name = "..."] [, readonly])]`
 
 Registers a method as a getter or setter on a `#[jsg_resource]` type. The `placement` argument
-is required and must be either `prototype` or `instance`.
+is optional and must be either `prototype` or `instance`; it defaults to `prototype`.
 
 **`prototype`** — property lives on the prototype chain. Not directly enumerable (`Object.keys()`
 is empty), but `"prop" in obj` is `true`. Can be overridden by subclasses. Equivalent to C++
@@ -167,8 +167,12 @@ from `snake_case` to `camelCase` after stripping a leading `get_` or `set_` pref
 this property. Omitting a setter already makes the property read-only; `readonly` adds an
 explicit check.
 
-**Setter detection** — a method whose Rust name starts with `set_` is registered as the setter;
-all others are getters. Omitting a setter (or using `readonly`) makes the property read-only. In
+**Naming** — methods **must** start with `get_` (getter) or `set_` (setter). A method without
+either prefix is a compile error.  The prefix is stripped and the remainder is converted
+`snake_case` → `camelCase`, so `get_foo_bar` / `set_foo_bar` both map to `"fooBar"`.
+
+**Setter detection** — a method whose Rust name starts with `set_` is registered as the setter.
+Omitting a setter (or using `readonly`) makes the property read-only. In
 strict mode, assigning to a read-only property throws a `TypeError`.
 
 **Compat flag** — when `spec_compliant_property_attributes` is enabled, getter `.length` is set

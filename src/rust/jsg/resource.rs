@@ -17,7 +17,6 @@ use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
 use crate::Member;
-use crate::PropertyKind;
 use crate::ToJS;
 use crate::Type;
 use crate::v8;
@@ -378,14 +377,9 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
                 getter_callback,
                 setter_callback,
             } => {
-                let ffi_kind = match kind {
-                    PropertyKind::Prototype => v8::ffi::PropertyKind::Prototype,
-                    PropertyKind::Instance => v8::ffi::PropertyKind::Instance,
-                    PropertyKind::Inspect => v8::ffi::PropertyKind::Inspect,
-                };
                 descriptor.properties.push(v8::ffi::PropertyDescriptor {
                     name,
-                    kind: ffi_kind,
+                    kind,
                     getter_callback: getter_callback as usize,
                     setter_callback: setter_callback.map(|f| f as usize).into(),
                 });

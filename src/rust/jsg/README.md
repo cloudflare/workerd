@@ -226,104 +226,39 @@ impl Greeting {
 Two macros expose accessor properties on resource types: `#[jsg_property]` for prototype and
 instance properties, and `#[jsg_inspect_property]` for debug-only symbol-keyed properties.
 
-### `#[jsg_property(placement [, name = "..."] [, readonly])]`
-
-Registers a getter (and optional setter) as a JavaScript property. The `placement` argument is
-required and must be either `prototype` or `instance`:
-
-- **`prototype`**: property lives on the prototype chain. Not directly enumerable
-  (`Object.keys()` is empty), but `"prop" in obj` is `true` and subclasses can override it.
-  Equivalent to C++ `JSG_PROTOTYPE_PROPERTY` / `JSG_READONLY_PROTOTYPE_PROPERTY`.
-- **`instance`**: own property on every instance. `Object.keys()` includes it,
-  `hasOwnProperty()` returns `true`, not overridable by subclasses.
-  Equivalent to C++ `JSG_INSTANCE_PROPERTY` / `JSG_READONLY_INSTANCE_PROPERTY`.
-  > Prefer `prototype` in almost all cases — own-property accessors inhibit minor-GC
-  > collection and some V8 optimisations.
-
-**Optional arguments:**
-
-- `name = "..."` — overrides the JS property name (default: `snake_case` → `camelCase` after
-  stripping a `get_`/`set_` prefix).
-- `readonly` — compile-time check that no matching `set_*` method is also annotated.
-
-**Setter detection**: Methods whose Rust name starts with `set_` are registered as the setter.
-Omitting a setter (or using `readonly`) makes the property read-only. In strict mode, an
-assignment to a read-only property throws `TypeError`.
+Full reference documentation (arguments, naming rules, compat-flag behavior, examples) lives in
+**[`jsg-macros/README.md`](../jsg-macros/README.md#jsg_propertyrequired-placement--name---readonly)**.
+The summary below covers the most common patterns:
 
 ```rust
 use std::cell::{Cell, RefCell};
-use jsg_macros::{jsg_resource, jsg_property};
-
-#[jsg_resource]
-struct Counter { value: Cell<f64> }
+use jsg_macros::{jsg_resource, jsg_property, jsg_inspect_property};
 
 #[jsg_resource]
 impl Counter {
-    // Prototype property — read/write (getter + setter pair).
+    // Prototype property (on the proto chain; use this in almost all cases)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> jsg::Number { jsg::Number::new(self.value.get()) }
+    pub fn get_value(&self) -> jsg::Number { /* ... */ }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: jsg::Number) { self.value.set(v.value()); }
+    pub fn set_value(&self, v: jsg::Number) { /* ... */ }
 
-    // Prototype property — read-only (explicit `readonly`, no setter).
+    // Read-only prototype property (no paired `set_value`)
     #[jsg_property(prototype, readonly)]
-    pub fn get_label(&self) -> String { "counter".into() }
+    pub fn get_label(&self) -> String { /* ... */ }
 
-    // Prototype property — explicit JS name override.
-    #[jsg_property(prototype, name = "max")]
-    pub fn get_maximum(&self) -> jsg::Number { jsg::Number::new(1000.0) }
-
-    // Instance (own) property — read/write.
+    // Own-property accessor (use sparingly; inhibits minor-GC)
     #[jsg_property(instance)]
-    pub fn get_id(&self) -> String { "tok".into() }
+    pub fn get_id(&self) -> String { /* ... */ }
 
-    #[jsg_property(instance)]
-    pub fn set_id(&self, _v: String) { }
-
-    // Instance property — read-only with name override.
-    #[jsg_property(instance, name = "shortId", readonly)]
-    pub fn get_prefix(&self) -> String { "tok".into() }
+    // Inspect-only: shown by util.inspect() / console.log, invisible to JS
+    #[jsg_inspect_property]
+    pub fn debug_info(&self) -> String { /* ... */ }
 }
-// JS: Object.keys(counter)            // ["id", "shortId"]  (instance props only)
-//     counter.hasOwnProperty("value") // false (prototype)
-//     counter.hasOwnProperty("id")    // true  (instance)
-//     "value" in counter              // true
 ```
 
-### `#[jsg_inspect_property]`
-
-A getter registered under a unique symbol, invisible to normal property enumeration and string-key lookup. Surfaced by `node:util` `inspect()` and `console.log()`. Always read-only.
-
-```rust
-use jsg_macros::{jsg_resource, jsg_inspect_property};
-
-#[jsg_resource]
-struct ReadableStream { state: String }
-
-#[jsg_resource]
-impl ReadableStream {
-    #[jsg_inspect_property]                       // JS name: "state"
-    pub fn state(&self) -> String { self.state.clone() }
-
-    #[jsg_inspect_property(name = "streamState")] // explicit name override
-    pub fn get_debug(&self) -> String { format!("state={}", self.state) }
-}
-// JS: typeof stream.state // "undefined"  — invisible to string key lookup
-```
-
-### Naming rules (all three macros)
-
-| Rust method name | JS property name | Notes |
-|---|---|---|
-| `get_foo_bar` | `fooBar` | `get_` stripped, then camelCased |
-| `set_foo_bar` | `fooBar` | `set_` stripped — registers as setter |
-| `foo_bar` | `fooBar` | no prefix — registers as getter |
-| `(name = "myProp")` | `myProp` | explicit override wins |
-
-### Compat-flag behavior
-
-When the worker's `spec_compliant_property_attributes` compatibility flag is enabled, getter and setter function templates receive `.length` and `.name` values per Web IDL §3.7.6.
+Methods **must** start with `get_` (getter) or `set_` (setter). The prefix is stripped for the
+JS name. Omitting the setter (or adding `readonly`) makes the property read-only.
 
 ## Static Constants
 

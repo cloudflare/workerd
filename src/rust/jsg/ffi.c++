@@ -57,6 +57,18 @@ namespace workerd::rust::jsg {
 
 // =============================================================================
 
+// Create an interned V8 string from a Rust identifier name (rust::String or rust::Str).
+// NewFromUtf8 returns an empty MaybeLocal (without scheduling a JS exception) when the
+// string exceeds v8::String::kMaxLength; the KJ_REQUIRE prevents a confusing ICE inside
+// jsg::check() by catching the overlong name early with a clear error message.
+template <typename Name>
+static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& name) {
+  KJ_REQUIRE(name.size() <= static_cast<size_t>(v8::String::kMaxLength),
+      "Rust identifier name exceeds V8 string length limit", name);
+  return ::workerd::jsg::check(
+      v8::String::NewFromUtf8(isolate, name.data(), v8::NewStringType::kInternalized, name.size()));
+}
+
 // Wrappable implementation - calls into Rust via CXX bridge
 Wrappable::~Wrappable() {
   wrappable_invoke_drop(*this);
@@ -399,24 +411,21 @@ Local local_function_call(
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
-  auto v8_key = ::workerd::jsg::check(
-      v8::String::NewFromUtf8(isolate, key.cbegin(), v8::NewStringType::kInternalized, key.size()));
+  auto v8_key = makeInternedStr(isolate, key);
   ::workerd::jsg::check(v8_obj->Set(context, v8_key, local_from_ffi<v8::Value>(kj::mv(value))));
 }
 
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
-  auto v8_key = ::workerd::jsg::check(
-      v8::String::NewFromUtf8(isolate, key.cbegin(), v8::NewStringType::kInternalized, key.size()));
+  auto v8_key = makeInternedStr(isolate, key);
   return v8_obj->Has(context, v8_key).FromJust();
 }
 
 kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
-  auto v8_key = ::workerd::jsg::check(
-      v8::String::NewFromUtf8(isolate, key.cbegin(), v8::NewStringType::kInternalized, key.size()));
+  auto v8_key = makeInternedStr(isolate, key);
   v8::Local<v8::Value> result;
   if (!v8_obj->Get(context, v8_key).ToLocal(&result)) {
     return kj::none;
@@ -765,19 +774,14 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
         v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
     functionTemplate->RemovePrototype();
-    auto name = ::workerd::jsg::check(v8::String::NewFromUtf8(
-        isolate, method.name.data(), v8::NewStringType::kInternalized, method.name.size()));
-    constructor->Set(name, functionTemplate);
+    constructor->Set(makeInternedStr(isolate, method.name), functionTemplate);
   }
 
   for (const auto& method: descriptor.methods) {
-    KJ_REQUIRE(method.name.size() <= static_cast<size_t>(v8::String::kMaxLength),
-        "Rust method name exceeds V8 string length limit", method.name);
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
         v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow);
-    auto name = ::workerd::jsg::check(v8::String::NewFromUtf8(
-        isolate, method.name.data(), v8::NewStringType::kInternalized, method.name.size()));
+    auto name = makeInternedStr(isolate, method.name);
     prototype->Set(name, functionTemplate);
   }
 
@@ -797,13 +801,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
           v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
 
   for (const auto& prop: descriptor.properties) {
-    // NewFromUtf8 returns an empty MaybeLocal (without scheduling a JS exception) when the
-    // string exceeds v8::String::kMaxLength. Check the length first so that the subsequent
-    // jsg::check() call does not misinterpret a missing exception as an ICE.
-    KJ_REQUIRE(prop.name.size() <= static_cast<size_t>(v8::String::kMaxLength),
-        "Rust property name exceeds V8 string length limit", prop.name);
-    auto v8Name = ::workerd::jsg::check(v8::String::NewFromUtf8(
-        isolate, prop.name.data(), v8::NewStringType::kInternalized, prop.name.size()));
+    auto v8Name = makeInternedStr(isolate, prop.name);
 
     // Helper: build a FunctionTemplate for a getter or setter callback, applying
     // spec_compliant_property_attributes name/length rules when enabled.
@@ -830,9 +828,9 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     switch (prop.kind) {
       case PropertyKind::Prototype: {
         // Mirrors registerPrototypeProperty / registerReadonlyPrototypeProperty in resource.h.
-        auto getterFn = makePropFn(prop.getter_callback, true);
+        auto getterFn = makePropFn(prop.getter_callback, true /* isGetter */);
         KJ_IF_SOME(setterCb, prop.setter_callback) {
-          auto setterFn = makePropFn(setterCb, false);
+          auto setterFn = makePropFn(setterCb, false /* isGetter */);
           // Normal (non-Unimplemented) prototype properties are enumerable — use None, matching
           // C++ registerPrototypeProperty (resource.h:1454-1455) with Gcb::enumerable = true.
           prototype->SetAccessorProperty(v8Name, getterFn, setterFn, v8::PropertyAttribute::None);
@@ -852,9 +850,9 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         // (matching #[jsg_method]), not PropertyCallbackInfo-style.
         // SetAccessorProperty on the InstanceTemplate installs the accessor as an own
         // property on every instance, matching JSG_INSTANCE_PROPERTY semantics.
-        auto getterFn = makePropFn(prop.getter_callback, true);
+        auto getterFn = makePropFn(prop.getter_callback, true /* isGetter */);
         KJ_IF_SOME(setterCb, prop.setter_callback) {
-          auto setterFn = makePropFn(setterCb, false);
+          auto setterFn = makePropFn(setterCb, false /* isGetter */);
           instance->SetAccessorProperty(v8Name, getterFn, setterFn, v8::PropertyAttribute::None);
         } else {
           instance->SetAccessorProperty(
@@ -883,10 +881,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
   }
 
   for (const auto& constant: descriptor.static_constants) {
-    KJ_REQUIRE(constant.name.size() <= static_cast<size_t>(v8::String::kMaxLength),
-        "Rust constant name exceeds V8 string length limit", constant.name);
-    auto name = ::workerd::jsg::check(v8::String::NewFromUtf8(
-        isolate, constant.name.data(), v8::NewStringType::kInternalized, constant.name.size()));
+    auto name = makeInternedStr(isolate, constant.name);
     auto value = v8::Number::New(isolate, constant.value);
 
     // Per Web IDL, constants are {writable: false, enumerable: true, configurable: false}.

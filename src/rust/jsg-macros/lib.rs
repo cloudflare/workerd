@@ -860,9 +860,10 @@ fn emit_property_group(
     })
 }
 
-/// Parses the argument list of `#[jsg_property(placement [, name = "..."] [, readonly])]`.
+/// Parses the argument list of `#[jsg_property([placement,] [name = "..."] [, readonly])]`.
 ///
-/// `placement` must be either `instance` or `prototype` (required).
+/// `placement` is optional; when omitted it defaults to `Prototype` (the recommended
+/// placement in almost all cases).
 /// Returns `(PropertyKind, Option<js_name_override>, is_readonly)`.
 fn parse_jsg_property_args(
     tokens: TokenStream,
@@ -926,13 +927,9 @@ fn parse_jsg_property_args(
         }
     }
 
-    let kind = kind.ok_or_else(|| {
-        quote! {
-            compile_error!(
-                "#[jsg_property] requires `instance` or `prototype` as the first argument"
-            )
-        }
-    })?;
+    // Default to `Prototype` when no explicit placement is given — prototype properties
+    // are preferred in almost all cases and don't inhibit minor-GC or V8 optimisations.
+    let kind = kind.unwrap_or(PropertyKind::Prototype);
 
     Ok((kind, name, readonly))
 }
@@ -987,10 +984,26 @@ fn scan_property_annotations(
         let is_setter = rust_name_str.starts_with("set_");
 
         if let Some(attr) = method.attrs.iter().find(|a| is_attr(a, "jsg_property")) {
-            let tokens: TokenStream = match attr.meta.require_list() {
-                Ok(list) => list.tokens.clone().into(),
-                Err(e) => return Err(e.to_compile_error()),
-            };
+            // Validate that property methods use `get_` or `set_` prefix so that the
+            // getter/setter pairing is unambiguous.  Methods without either prefix are
+            // rejected at compile time rather than being silently treated as getters.
+            if !rust_name_str.starts_with("get_") && !rust_name_str.starts_with("set_") {
+                return Err(syn::Error::new(
+                    rust_method_name.span(),
+                    "#[jsg_property] methods must be named with a `get_` prefix (getter) \
+                     or `set_` prefix (setter)",
+                )
+                .to_compile_error());
+            }
+
+            // Accept both `#[jsg_property]` (no parens → defaults to prototype) and
+            // `#[jsg_property(...)]`.  Attributes without a parenthesized list are
+            // represented as `Meta::Path`, for which `require_list()` returns an error.
+            let tokens: TokenStream = attr
+                .meta
+                .require_list()
+                .map(|list| list.tokens.clone().into())
+                .unwrap_or_default();
             let (kind, js_name_opt, is_readonly) = parse_jsg_property_args(tokens)?;
             let js_name = js_name_opt.unwrap_or_else(|| derive_js_name(&rust_name_str));
             prop_groups_find_or_insert(&mut groups, (js_name, kind)).push(PropMethod {
@@ -1233,12 +1246,9 @@ pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Registers a method as a JavaScript property getter or setter on a `#[jsg_resource]` type.
 ///
-/// This macro replaces the separate `jsg_prototype_property` and `jsg_instance_property`
-/// macros. The placement (`prototype` or `instance`) is now a required argument.
-///
 /// # Arguments
 ///
-/// - **`prototype`** or **`instance`** (required) — where the property lives:
+/// - **`prototype`** or **`instance`** (optional, defaults to `prototype`) — where the property lives:
 ///   - `prototype`: installed via `prototype->SetAccessorProperty`. Not directly
 ///     enumerable (`Object.keys()` is empty), but visible via the prototype chain
 ///     (`"prop" in obj` is `true`) and overridable by subclasses.
@@ -1255,13 +1265,14 @@ pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Naming (when `name` is omitted)
 ///
-/// The Rust method name is converted `snake_case` → `camelCase` after stripping a
-/// leading `get_` or `set_` prefix, so `get_foo_bar` / `set_foo_bar` both map to `"fooBar"`.
+/// Methods **must** be named with a `get_` prefix (getter) or `set_` prefix (setter).
+/// The prefix is stripped and the remainder is converted `snake_case` → `camelCase`,
+/// so `get_foo_bar` / `set_foo_bar` both map to `"fooBar"`.
 ///
 /// # Read-only vs read-write
 ///
 /// - Methods whose Rust name starts with `set_` are registered as the **setter**.
-/// - All other methods are registered as the **getter**.
+/// - Methods whose Rust name starts with `get_` are registered as the **getter**.
 /// - Omitting a setter (or using `readonly`) makes the property read-only. In strict
 ///   mode, an assignment to a read-only property throws a `TypeError`.
 ///
