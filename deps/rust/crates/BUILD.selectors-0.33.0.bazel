@@ -50,7 +50,7 @@ rust_library(
         "@crates_vendor__new_debug_unreachable-1.0.6//:debug_unreachable",
         "@crates_vendor__phf-0.13.1//:phf",
         "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
-        "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
+        "@crates_vendor__rustc-hash-2.1.2//:rustc_hash",
         "@crates_vendor__selectors-0.33.0//:build_script_build",
         "@crates_vendor__servo_arc-0.4.3//:servo_arc",
         "@crates_vendor__smallvec-1.15.1//:smallvec",

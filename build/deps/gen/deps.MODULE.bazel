@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "403351b295d035d53356215a2ecd15627adfb80aa4b90c80f138904733bae2b7",
-    strip_prefix = "capnproto-capnproto-55ba056/c++",
+    sha256 = "8ac1b5d1462bce557f5bb59081afd83d7ebfd631f26884b34c99c621417a67fa",
+    strip_prefix = "capnproto-capnproto-e8f1994/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/55ba0564e192677b2e63b092c55080f3173c669b",
+    url = "https://github.com/capnproto/capnproto/tarball/e8f1994b35ac72cdc544fa437766df7205aa42d4",
 )
 use_repo(http, "capnp-cpp")
 

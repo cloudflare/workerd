@@ -49,7 +49,7 @@ rust_library(
         "@crates_vendor__ruff_python_ast-0.0.0//:ruff_python_ast",
         "@crates_vendor__ruff_python_trivia-0.0.0//:ruff_python_trivia",
         "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",
-        "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
+        "@crates_vendor__rustc-hash-2.1.2//:rustc_hash",
         "@crates_vendor__static_assertions-1.1.0//:static_assertions",
         "@crates_vendor__unicode-ident-1.0.24//:unicode_ident",
         "@crates_vendor__unicode-normalization-0.1.25//:unicode_normalization",

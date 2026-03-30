@@ -32,14 +32,14 @@ filegroup(
 
 # Workspace Member Dependencies
 alias(
-    name = "ada-url-3.4.2",
-    actual = "@crates_vendor__ada-url-3.4.2//:ada_url",
+    name = "ada-url-3.4.4",
+    actual = "@crates_vendor__ada-url-3.4.4//:ada_url",
     tags = ["manual"],
 )
 
 alias(
     name = "ada-url",
-    actual = "@crates_vendor__ada-url-3.4.2//:ada_url",
+    actual = "@crates_vendor__ada-url-3.4.4//:ada_url",
     tags = ["manual"],
 )
 
@@ -68,14 +68,14 @@ alias(
 )
 
 alias(
-    name = "capnp-0.25.2",
-    actual = "@crates_vendor__capnp-0.25.2//:capnp",
+    name = "capnp-0.25.3",
+    actual = "@crates_vendor__capnp-0.25.3//:capnp",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.25.2//:capnp",
+    actual = "@crates_vendor__capnp-0.25.3//:capnp",
     tags = ["manual"],
 )
 
@@ -92,26 +92,26 @@ alias(
 )
 
 alias(
-    name = "capnpc-0.25.0",
-    actual = "@crates_vendor__capnpc-0.25.0//:capnpc",
+    name = "capnpc-0.25.2",
+    actual = "@crates_vendor__capnpc-0.25.2//:capnpc",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc",
-    actual = "@crates_vendor__capnpc-0.25.0//:capnpc",
+    actual = "@crates_vendor__capnpc-0.25.2//:capnpc",
     tags = ["manual"],
 )
 
 alias(
-    name = "cc-1.2.57",
-    actual = "@crates_vendor__cc-1.2.57//:cc",
+    name = "cc-1.2.58",
+    actual = "@crates_vendor__cc-1.2.58//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.57//:cc",
+    actual = "@crates_vendor__cc-1.2.58//:cc",
     tags = ["manual"],
 )
 
@@ -424,13 +424,13 @@ alias(
 # Binaries
 alias(
     name = "capnpc__capnpc-rust",
-    actual = "@crates_vendor__capnpc-0.25.0//:capnpc-rust__bin",
+    actual = "@crates_vendor__capnpc-0.25.2//:capnpc-rust__bin",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc__capnpc-rust-bootstrap",
-    actual = "@crates_vendor__capnpc-0.25.0//:capnpc-rust-bootstrap__bin",
+    actual = "@crates_vendor__capnpc-0.25.2//:capnpc-rust-bootstrap__bin",
     tags = ["manual"],
 )
 

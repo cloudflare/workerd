@@ -6,13 +6,16 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load(
+    "@rules_rust//rust:defs.bzl",
+    "rust_binary",
+    "rust_library",
+)
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "ada_url",
+    name = "capnpc",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,30 +32,26 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2024",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=ada-url",
+        "crate-name=capnpc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "3.4.2",
+    version = "0.25.2",
     deps = [
-        "@crates_vendor__ada-url-3.4.2//:build_script_build",
+        "@crates_vendor__capnp-0.25.3//:capnp",
     ],
 )
 
-cargo_build_script(
-    name = "_bs",
+rust_binary(
+    name = "capnpc-rust__bin",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -62,7 +61,6 @@ cargo_build_script(
         allow_empty = True,
         exclude = [
             "**/* *",
-            "**/*.rs",
             ".tmp_git_root/**/*",
             "BUILD",
             "BUILD.bazel",
@@ -70,13 +68,32 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
+    crate_root = "src/capnpc-rust.rs",
+    edition = "2021",
+    rustc_flags = [
+        "--cap-lints=allow",
     ],
-    crate_name = "build_script_build",
-    crate_root = "build.rs",
-    data = glob(
+    tags = [
+        "cargo-bazel",
+        "crate-name=capnpc",
+        "manual",
+        "noclippy",
+        "norustfmt",
+    ],
+    version = "0.25.2",
+    deps = [
+        ":capnpc",
+        "@crates_vendor__capnp-0.25.3//:capnp",
+    ],
+)
+
+rust_binary(
+    name = "capnpc-rust-bootstrap__bin",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = True,
+    ),
+    compile_data = glob(
         include = ["**"],
         allow_empty = True,
         exclude = [
@@ -88,29 +105,21 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2024",
-    pkg_name = "ada-url",
+    crate_root = "src/capnpc-rust-bootstrap.rs",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=ada-url",
+        "crate-name=capnpc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "3.4.2",
-    visibility = ["//visibility:private"],
+    version = "0.25.2",
     deps = [
-        "@crates_vendor__cc-1.2.57//:cc",
-        "@crates_vendor__link_args-0.6.0//:link_args",
-        "@crates_vendor__regex-1.12.3//:regex",
+        ":capnpc",
+        "@crates_vendor__capnp-0.25.3//:capnp",
     ],
-)
-
-alias(
-    name = "build_script_build",
-    actual = ":_bs",
-    tags = ["manual"],
 )
