@@ -1050,6 +1050,9 @@ impl BackingStore {
     /// For shared backing stores (`is_shared() == true`), other agents may
     /// concurrently write to this memory. The caller must ensure no concurrent
     /// writes occur for the duration of the borrow.
+    ///
+    /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
+    /// integrate this method with that somehow.
     #[inline]
     pub unsafe fn as_slice(&self, _lock: &mut crate::Lock) -> &[u8] {
         if self.is_empty() {
@@ -1068,6 +1071,11 @@ impl BackingStore {
     /// # Safety
     /// The caller must ensure no other live reference (shared or mutable) to
     /// this memory region exists for the duration of the borrow.
+    ///
+    /// TODO(soon): Define a safe aliasing model for Rust mutable access based on
+    /// interrogating the backing store shared_ptr being singular for the lifetime
+    /// of the current Rust execution model.
+    #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice(&mut self, _lock: &mut crate::Lock) -> &mut [u8] {
         if self.is_empty() {
@@ -1704,6 +1712,9 @@ impl Local<'_, ArrayBuffer> {
     /// Returns a shared byte slice view into the `ArrayBuffer`'s backing store.
     ///
     /// Zero-copy: the slice points directly into V8-managed memory.
+    ///
+    /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
+    /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice(&self) -> &[u8] {
         if self.is_empty() {
@@ -1728,6 +1739,11 @@ impl Local<'_, ArrayBuffer> {
     /// slice. `&mut self` prevents aliasing through *this* `Local` handle, but
     /// two distinct `Local` handles may back the same buffer — the caller is
     /// responsible for ensuring exclusivity.
+    ///
+    /// TODO(soon): Define a safe aliasing model for Rust mutable access based on
+    /// interrogating the backing store shared_ptr being singular for the lifetime
+    /// of the current Rust execution model.
+    #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice(&mut self, _lock: &mut crate::Lock) -> &mut [u8] {
         if self.is_empty() {
@@ -1858,6 +1874,9 @@ impl<'a> Local<'a, ArrayBufferView> {
     /// Returns a shared byte slice of the view's visible region.
     ///
     /// Zero-copy: points directly into V8-managed memory.
+    ///
+    /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
+    /// integrate this method with that somehow.
     #[inline]
     pub fn as_slice(&self) -> &[u8] {
         if self.is_empty() {
@@ -1886,6 +1905,11 @@ impl<'a> Local<'a, ArrayBufferView> {
     /// slice. `&mut self` prevents aliasing through *this* handle, but two
     /// distinct handles backed by the same buffer could alias — the caller is
     /// responsible for ensuring exclusivity.
+    ///
+    /// TODO(soon): Define a safe aliasing model for Rust mutable access based on
+    /// interrogating the backing store shared_ptr being singular for the lifetime
+    /// of the current Rust execution model.
+    #[doc(hidden)]
     #[inline]
     pub unsafe fn as_mut_slice(&mut self, _lock: &mut crate::Lock) -> &mut [u8] {
         if self.is_empty() {
@@ -2037,6 +2061,9 @@ macro_rules! impl_typed_array {
             ///
             /// Zero-copy: points directly into the V8 `ArrayBuffer`'s backing store.
             /// The slice is valid for the lifetime of this `Local` handle.
+            ///
+            /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
+            /// integrate this method with that somehow.
             #[inline]
             pub fn as_slice(&self) -> &[$elem] {
                 if self.is_empty() {
@@ -2067,6 +2094,11 @@ macro_rules! impl_typed_array {
             /// slice. `&mut self` prevents aliasing through *this* `Local` handle, but
             /// two distinct `Local` handles may back the same buffer — the caller is
             /// responsible for ensuring exclusivity.
+            ///
+            /// TODO(soon): Define a safe aliasing model for Rust mutable access based on
+            /// interrogating the backing store shared_ptr being singular for the lifetime
+            /// of the current Rust execution model.
+            #[doc(hidden)]
             #[inline]
             pub unsafe fn as_mut_slice(&mut self, _lock: &mut crate::Lock) -> &mut [$elem] {
                 if self.is_empty() {
