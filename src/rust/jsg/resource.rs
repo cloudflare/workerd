@@ -18,6 +18,7 @@ use crate::GarbageCollected;
 use crate::Lock;
 use crate::Member;
 use crate::ToJS;
+use crate::Traced;
 use crate::Type;
 use crate::v8;
 use crate::v8::ffi::Wrappable;
@@ -88,7 +89,7 @@ impl<R: Resource> Rc<R> {
     /// Delegates to C++ `Wrappable::visitRef()` which handles strong/traced switching
     /// and transitive tracing.
     ///
-    /// Takes `&self` because `GarbageCollected::trace(&self)` receives a shared
+    /// Takes `&self` because `Traced::trace(&self)` receives a shared
     /// reference to `R` inside the `Rc` allocation. The `parent` and `strong`
     /// fields already use `Cell` for interior mutability.
     /// `WrappableRc::visit_rc(&self)` produces `Pin<&mut Wrappable>` from
@@ -201,6 +202,38 @@ impl<R: Resource + 'static> FromJS for Rc<R> {
     }
 }
 
+/// Equality by pointer identity — two `Rc`s are equal iff they point to the
+/// same allocation, matching the behaviour of [`std::rc::Rc`].
+impl<R: Resource> PartialEq for Rc<R> {
+    fn eq(&self, other: &Self) -> bool {
+        std::rc::Rc::ptr_eq(&self.handle, &other.handle)
+    }
+}
+
+impl<R: Resource> Eq for Rc<R> {}
+
+/// Ordering by pointer address — consistent with `PartialEq` and allows
+/// `Rc<T>` to be used as a `BTreeSet`/`BTreeMap` key.
+impl<R: Resource> PartialOrd for Rc<R> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<R: Resource> Ord for Rc<R> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        std::rc::Rc::as_ptr(&self.handle).cmp(&std::rc::Rc::as_ptr(&other.handle))
+    }
+}
+
+/// Hashing by pointer address — consistent with `PartialEq` and allows
+/// `Rc<T>` to be used as a `HashSet`/`HashMap` key.
+impl<R: Resource> std::hash::Hash for Rc<R> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::rc::Rc::as_ptr(&self.handle).hash(state);
+    }
+}
+
 impl<R: Resource> fmt::Debug for Rc<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Rc")
@@ -274,10 +307,17 @@ impl<R: Resource> Clone for Weak<R> {
     }
 }
 
-impl<R: Resource> GarbageCollected for Weak<R> {
-    /// No-op: weak references don't keep the target alive and have no GC edges to trace.
-    fn trace(&self, _visitor: &mut v8::GcVisitor) {}
+/// `Rc<R>` is a strong GC edge — visited via `GcVisitor::visit_rc`.
+impl<R: Resource> Traced for Rc<R> {
+    fn trace(&self, visitor: &mut v8::GcVisitor) {
+        visitor.visit_rc(self);
+    }
+}
 
+/// Weak references don't keep the target alive and have no GC edges to trace.
+impl<R: Resource> Traced for Weak<R> {}
+
+impl<R: Resource> GarbageCollected for Weak<R> {
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // jsgGetMemoryName is only called on live Wrappables, never on Weak<R>.
         // Delegate to the concrete R via a live upgrade. In the (unreachable)

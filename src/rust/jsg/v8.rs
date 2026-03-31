@@ -2992,6 +2992,13 @@ impl<T> Drop for Global<T> {
     }
 }
 
+/// `Global<T>` is a strong GC handle — visited via `GcVisitor::visit_global`.
+impl<T> crate::Traced for Global<T> {
+    fn trace(&self, visitor: &mut GcVisitor) {
+        visitor.visit_global(self);
+    }
+}
+
 // Note: Global<T> intentionally does NOT implement the std Clone trait.
 // Cloning a V8 persistent handle requires an isolate pointer to create an
 // independent handle via v8::Global::New(isolate, original). The Clone trait
@@ -3556,7 +3563,7 @@ impl WrappableRc {
     /// 3. **No same-object re-entrancy** — the C++ methods called through this
     ///    pin (`addStrongRef`, `removeStrongRef`, `visitRef`) may re-enter Rust
     ///    for *different* Wrappables during GC tracing (e.g. `visitRef` traces
-    ///    children, which calls `GarbageCollected::trace()` on them), but never
+    ///    children, which calls `Traced::trace()` on them), but never
     ///    create a second `Pin<&mut Wrappable>` for the *same* object.
     #[expect(
         clippy::mut_from_ref,
@@ -3570,7 +3577,7 @@ impl WrappableRc {
     /// Visits this Wrappable during GC tracing.
     ///
     /// Takes `&self` because this is called from `Ref::visit(&self)` which is
-    /// called from `GarbageCollected::trace(&self)`. The mutation target is
+    /// called from `Traced::trace(&self)`. The mutation target is
     /// the C++ `Wrappable` on the KJ heap, not the `WrappableRc` wrapper.
     pub(crate) fn visit_rc(&self, parent: *mut usize, strong: *mut bool, visitor: &mut GcVisitor) {
         // SAFETY: wrappable, parent, strong, and visitor pointers are all valid (guaranteed by callers).

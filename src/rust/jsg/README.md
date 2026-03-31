@@ -73,7 +73,7 @@ let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 
 - **No JS wrapper**: Dropping the last `Rc` immediately destroys the resource (no GC needed).
 - **With JS wrapper**: Dropping all `Rc`s makes the wrapper eligible for V8 GC. When collected, the resource is destroyed.
-- **Tracing**: The `#[jsg_resource]` macro auto-generates `GarbageCollected::trace` based on field types:
+- **Tracing**: The `#[jsg_resource]` macro auto-generates `Traced::trace` and calls it on every field:
 
 | Field type | Traced? | Notes |
 |---|---|---|
@@ -83,15 +83,26 @@ let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 | `Cell<jsg::Rc<T>>` | Yes — strong edge | Use `Cell` when field needs interior mutability |
 | `Cell<Option<jsg::Rc<T>>>` | Yes — when `Some` | |
 | `Cell<jsg::Nullable<jsg::Rc<T>>>` | Yes — when `Some` | |
+| `Vec<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` in the vec |
+| `HashMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
+| `BTreeMap<K, jsg::Rc<T>>` | Yes — each value | Iterates `.values()` and visits each `Rc` |
+| `HashSet<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` |
+| `BTreeSet<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` |
+| `Cell<Vec<jsg::Rc<T>>>` | Yes — each element | `Cell` variant of above |
+| `Cell<HashMap<K, jsg::Rc<T>>>` | Yes — each value | `Cell` variant of above |
+| Same patterns with `jsg::v8::Global<T>` | Yes | All collection forms work with `Global<T>` too |
 | `jsg::v8::Global<T>` | Yes — dual strong/traced | Enables cycle collection; see below |
 | `Option<jsg::v8::Global<T>>` | Yes — when `Some` | |
 | `jsg::Nullable<jsg::v8::Global<T>>` | Yes — when `Some` | |
 | `Cell<jsg::v8::Global<T>>` | Yes — dual strong/traced | Required when set after construction |
 | `Cell<Option<jsg::v8::Global<T>>>` | Yes — when `Some` | |
 | `jsg::Weak<T>` | No | Doesn't keep target alive |
-| Anything else | No | Plain data fields are ignored |
+| Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
-- **`Cell<T>` for interior mutability**: `GarbageCollected::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) must be wrapped in `Cell<T>`. Both `Cell<T>` and `std::cell::Cell<T>` are recognised.
+- **`Cell<T>` for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) can use `Cell<T>`. `Cell<T>` implements `Traced` by reading through `as_ptr()` during single-threaded GC tracing.
+- **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls; wrappers/collections delegate recursively.
+- **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
+- **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
 - **`jsg::v8::Global<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
 

@@ -4,6 +4,7 @@
 
 mod arrays;
 mod buffer_types;
+mod collections_gc;
 mod eval;
 mod function;
 mod gc;
@@ -17,4 +18,5 @@ mod resource_conversion;
 mod resource_properties;
 mod string;
 mod symbol;
+mod traceable_gc;
 mod unwrap;

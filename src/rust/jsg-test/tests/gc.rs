@@ -935,6 +935,8 @@ struct NativeState {
     value: u64,
 }
 
+impl jsg::Traced for NativeState {}
+
 impl Drop for NativeState {
     fn drop(&mut self) {
         NATIVE_STATE_DROPS.fetch_add(1, Ordering::SeqCst);
@@ -1089,7 +1091,7 @@ static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 /// to the resource's own JS wrapper can be installed after wrapping.
 ///
 /// `Cell<Option<…>>` provides interior mutability through `&self`, matching
-/// the access pattern of `GarbageCollected::trace(&self)`.
+/// the access pattern of `Traced::trace(&self)`.
 #[jsg_resource]
 struct CyclicResource {
     /// The stored "callback". Uses `Cell` so it can be set after `to_js()`
