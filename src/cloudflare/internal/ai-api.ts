@@ -386,6 +386,14 @@ export class Ai {
         return new InferenceUpstreamError(content);
       }
     } catch {
+      // FL2 returns a plain text "error code: 1031" response when the edge
+      // preview token has expired (e.g. during `wrangler dev`).
+      if (content.includes('error code: 1031')) {
+        return new InferenceUpstreamError(
+          `${content} (your API token may have expired — try running \`wrangler login\` to obtain a fresh token and restart your dev server)`
+        );
+      }
+
       return new InferenceUpstreamError(content);
     }
   }

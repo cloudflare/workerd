@@ -126,6 +126,18 @@ export default {
       );
     }
 
+    if (modelName === 'expiredTokenModel') {
+      // Simulate the real FL2 response when an edge preview token has expired.
+      // FL2 returns plain text "error code: 1031" with HTTP 400.
+      return new Response('error code: 1031', {
+        status: 400,
+        headers: {
+          'content-type': 'text/plain; charset=UTF-8',
+          ...respHeaders,
+        },
+      });
+    }
+
     // Handle websocket requests
     if (isWebsocket && modelName === '@cf/test/websocket') {
       // For websocket requests, extract data from URL 'body' parameter

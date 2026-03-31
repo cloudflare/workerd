@@ -89,6 +89,39 @@ export const tests = {
     }
 
     {
+      // Test FL2 plain text "error code: 1031" (expired preview token)
+      // includes wrangler login hint. FL2 returns this as text/plain when
+      // the edge preview token has expired during `wrangler dev`.
+      const err = await env.ai._parseError(
+        new Response('error code: 1031', {
+          status: 400,
+          headers: { 'content-type': 'text/plain; charset=UTF-8' },
+        })
+      );
+      assert.equal(err.name, 'InferenceUpstreamError');
+      assert.ok(err.message.includes('1031'), 'should include error code 1031');
+      assert.ok(
+        err.message.includes('wrangler login'),
+        'should suggest running wrangler login'
+      );
+    }
+
+    {
+      // Test error code 1031 via mock (expired preview token model)
+      try {
+        await env.ai.run('expiredTokenModel', { prompt: 'test' });
+        assert.fail('should have thrown');
+      } catch (e) {
+        assert.equal(e.name, 'InferenceUpstreamError');
+        assert.ok(e.message.includes('1031'), 'should include error code 1031');
+        assert.ok(
+          e.message.includes('wrangler login'),
+          'should suggest running wrangler login'
+        );
+      }
+    }
+
+    {
       // Test raw input
       const resp = await env.ai.run('rawInputs', { prompt: 'test' });
 
