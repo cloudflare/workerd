@@ -151,5 +151,49 @@ KJ_TEST("Guarding against circular symlinks works") {
     KJ_EXPECT(vfs->resolve(env.js, "file:///c"_url) == kj::none);
   });
 }
+
+KJ_TEST("Guarding against deep non-circular symlink chains works") {
+  // Regression test: a deep chain of distinct symlinks (no cycle) must not
+  // cause a stack overflow. The recursion guard should reject the chain once
+  // the depth limit is exceeded.
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto vfs = newVirtualFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl());
+
+    auto maybeTemp = KJ_ASSERT_NONNULL(vfs->resolve(env.js, "file:///"_url));
+    auto& tempDir = maybeTemp.get<kj::Rc<Directory>>();
+
+    // Create a target file at the end of the chain.
+    auto targetResult = KJ_ASSERT_NONNULL(tempDir->tryOpen(
+        env.js, kj::Path({"target"}), Directory::OpenOptions{.createAs = FsType::FILE}));
+    auto& targetFile = targetResult.get<kj::Rc<File>>();
+    KJ_EXPECT(targetFile->write(env.js, 0, "hello"_kjb).get<uint32_t>() == 5);
+
+    // Build a chain of 300 distinct symlinks: link_0 -> link_1 -> ... -> link_299 -> target.
+    // This exceeds the depth limit (256) without forming a cycle.
+    constexpr int chainLen = 300;
+    for (int i = chainLen - 1; i >= 0; i--) {
+      kj::String target =
+          i == chainLen - 1 ? kj::str("file:///target") : kj::str("file:///link_", i + 1);
+      auto targetUrl = KJ_ASSERT_NONNULL(jsg::Url::tryParse(target.asPtr()));
+      KJ_EXPECT(tempDir->add(env.js, kj::str("link_", i),
+                    vfs->newSymbolicLink(env.js, targetUrl)) == kj::none);
+    }
+
+    // Resolving a link near the end of the chain should succeed (under the limit).
+    KJ_ASSERT_NONNULL(vfs->resolve(env.js, "file:///link_299"_url));
+
+    // Resolving from the start of the chain must fail with SYMLINK_DEPTH_EXCEEDED,
+    // not crash with a stack overflow.
+    auto resolved = KJ_ASSERT_NONNULL(vfs->resolve(env.js, "file:///link_0"_url));
+    KJ_EXPECT(resolved.get<workerd::FsError>() == workerd::FsError::SYMLINK_DEPTH_EXCEEDED);
+
+    // stat should also fail gracefully.
+    auto resolvedStat = KJ_ASSERT_NONNULL(vfs->resolveStat(env.js, "file:///link_0"_url));
+    KJ_EXPECT(resolvedStat.get<workerd::FsError>() == workerd::FsError::SYMLINK_DEPTH_EXCEEDED);
+  });
+}
+
 }  // namespace
 }  // namespace workerd
