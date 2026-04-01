@@ -129,7 +129,7 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString
 double SqlStorage::getDatabaseSize(jsg::Lock& js) {
   auto& context = IoContext::current();
   TraceContext traceContext =
-      context.makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);
+      context.makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc, SpanKind::INTERNAL);
   traceContext.setTag("db.operation.name"_kjc, "getDatabaseSize"_kjc);
   auto& db = getDb(js);
   int64_t pages = execMemoized(db, pragmaPageCount,

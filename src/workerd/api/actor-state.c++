@@ -478,7 +478,8 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
       "setAlarm() cannot be called with an alarm time <= 0");
 
   auto& context = IoContext::current();
-  auto traceContext = context.makeUserTraceSpan("durable_object_storage_setAlarm"_kjc);
+  auto traceContext =
+      context.makeUserTraceSpan("durable_object_storage_setAlarm"_kjc, SpanKind::PRODUCER);
   // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
   // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
   // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler. This
@@ -655,7 +656,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
         callback,
     jsg::Optional<TransactionOptions> options) {
   auto& context = IoContext::current();
-  auto traceContext = context.makeUserTraceSpan("durable_object_storage_transaction"_kjc);
+  auto traceContext =
+      context.makeUserTraceSpan("durable_object_storage_transaction"_kjc, SpanKind::INTERNAL);
 
   struct TxnResult {
     jsg::JsRef<jsg::JsValue> value;
@@ -755,7 +757,8 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   auto& context = IoContext::current();
-  auto traceContext = context.makeUserTraceSpan("durable_object_storage_sync"_kjc);
+  auto traceContext =
+      context.makeUserTraceSpan("durable_object_storage_sync"_kjc, SpanKind::INTERNAL);
   KJ_IF_SOME(p, cache->onNoPendingFlush(traceContext.getInternalSpanParent())) {
     // Note that we're not actually flushing since that will happen anyway once we go async. We're
     // merely checking if we have any pending or in-flight operations, and providing a promise that
@@ -852,7 +855,8 @@ jsg::Ref<SyncKvStorage> DurableObjectStorage::getKv(jsg::Lock& js) {
 
 kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {
   auto& context = IoContext::current();
-  auto traceContext = context.makeUserTraceSpan("durable_object_storage_getCurrentBookmark"_kjc);
+  auto traceContext = context.makeUserTraceSpan(
+      "durable_object_storage_getCurrentBookmark"_kjc, SpanKind::INTERNAL);
 
   return cache->getCurrentBookmark(traceContext.getInternalSpanParent())
       .attach(kj::mv(traceContext));
@@ -868,7 +872,8 @@ kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestoreBookmark(kj::S
 
 kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
   auto& context = IoContext::current();
-  auto traceContext = context.makeUserTraceSpan("durable_object_storage_waitForBookmark"_kjc);
+  auto traceContext =
+      context.makeUserTraceSpan("durable_object_storage_waitForBookmark"_kjc, SpanKind::INTERNAL);
 
   return cache->waitForBookmark(bookmark, traceContext.getInternalSpanParent())
       .attach(kj::mv(traceContext));

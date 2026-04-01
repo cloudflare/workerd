@@ -216,7 +216,8 @@ kj::Promise<void> WorkerQueue::send(
   // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
   // we have to do is provide the end of the path (which is "/message") to send a single message.
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  auto traceContext = context.makeUserTraceSpan("queue_send"_kjc, SpanKind::PRODUCER);
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
   auto req = client->request(
       kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
 
@@ -240,7 +241,7 @@ kj::Promise<void> WorkerQueue::send(
   };
 
   return handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes)
-      .attach(context.registerPendingEvent());
+      .attach(kj::mv(traceContext), context.registerPendingEvent());
 };
 
 jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::sendWithResponse(jsg::Lock& js,
@@ -277,7 +278,8 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::sendWithResponse(jsg::Lock&
     serialized = serializeV8(js, body);
   }
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  auto traceContext = context.makeUserTraceSpan("queue_send"_kjc, SpanKind::PRODUCER);
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
   auto req = client->request(
       kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
 
@@ -301,7 +303,8 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::sendWithResponse(jsg::Lock&
   };
 
   auto promise =
-      handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes);
+      handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes)
+          .attach(kj::mv(traceContext));
 
   return context.awaitIo(
       js, kj::mv(promise), [&responseHandler](jsg::Lock& js, kj::String text) -> SendResponse {
@@ -384,7 +387,8 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
   kj::String body(bodyBuilder.releaseAsArray());
   KJ_DASSERT(jsg::JsValue::fromJson(js, body).isObject());
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  auto traceContext = context.makeUserTraceSpan("queue_send"_kjc, SpanKind::PRODUCER);
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
 
   // We add info about the size of the batch to the headers so that the queue implementation can
   // decide whether it's too large.
@@ -427,7 +431,7 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
   };
 
   return handleWrite(kj::mv(req), kj::mv(body), kj::mv(client), headerIds, exposeErrorCodes)
-      .attach(context.registerPendingEvent());
+      .attach(kj::mv(traceContext), context.registerPendingEvent());
 };
 
 jsg::Promise<WorkerQueue::Metrics> WorkerQueue::metrics(
@@ -530,7 +534,8 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatchWithResponse(
   kj::String body(bodyBuilder.releaseAsArray());
   KJ_DASSERT(jsg::JsValue::fromJson(js, body).isObject());
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  auto traceContext = context.makeUserTraceSpan("queue_send"_kjc, SpanKind::PRODUCER);
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
 
   auto headers = kj::HttpHeaders(context.getHeaderTable());
   headers.addPtr("CF-Queue-Batch-Count"_kj, kj::str(messageCount));
@@ -565,8 +570,8 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatchWithResponse(
     co_return kj::str(responseBody.asChars());
   };
 
-  auto promise =
-      handleWrite(kj::mv(req), kj::mv(body), kj::mv(client), headerIds, exposeErrorCodes);
+  auto promise = handleWrite(kj::mv(req), kj::mv(body), kj::mv(client), headerIds, exposeErrorCodes)
+                     .attach(kj::mv(traceContext));
 
   return context.awaitIo(
       js, kj::mv(promise), [&responseHandler](jsg::Lock& js, kj::String text) -> SendBatchResponse {

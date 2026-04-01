@@ -82,6 +82,8 @@ type EventOutcome = "ok" | "canceled" | "exception" | "unknown" | "killSwitch" |
                     "daemonDown" | "exceededCpu" | "exceededMemory" | "loadShed" |
                     "responseStreamDisconnected" | "scriptNotFound";
 
+type SpanKind = "client" | "server" | "producer" | "consumer" | "internal";
+
 interface ScriptVersion {
   readonly id: string;
   readonly tag?: string;
@@ -118,6 +120,7 @@ interface SpanOpen {
   // id for the span being opened by this SpanOpen event.
   readonly spanId: string;
   readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
+  readonly spanKind: SpanKind;
 }
 
 interface SpanClose {

@@ -1108,10 +1108,12 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
   return getCurrentTraceSpan().newChild(kj::mv(operationName));
 }
 
-TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
+TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName, SpanKind spanKind) {
   auto span = makeTraceSpan(operationName.clone());
   auto userSpan = getCurrentUserTraceSpan().newChild(kj::mv(operationName));
-  return TraceContext(kj::mv(span), kj::mv(userSpan));
+  TraceContext ctx(kj::mv(span), kj::mv(userSpan));
+  ctx.setSpanKind(spanKind);
+  return ctx;
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

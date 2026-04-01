@@ -880,8 +880,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // context, if available.
   [[nodiscard]] SpanBuilder makeTraceSpan(kj::ConstString operationName);
   // Returns both an internal and a user tracing span, this ensures that all user spans are
-  // available in internal tracing.
-  [[nodiscard]] TraceContext makeUserTraceSpan(kj::ConstString operationName);
+  // available in internal tracing. The spanKind defaults to CLIENT since the majority of
+  // auto-instrumented child spans are outbound client calls.
+  [[nodiscard]] TraceContext makeUserTraceSpan(
+      kj::ConstString operationName, SpanKind spanKind = SpanKind::CLIENT);
 
   // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
   // request and get a possibly wrapped stream back.
