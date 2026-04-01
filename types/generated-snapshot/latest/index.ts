@@ -3794,6 +3794,7 @@ export interface Container {
   snapshotContainer(
     options: ContainerSnapshotOptions,
   ): Promise<ContainerSnapshot>;
+  interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
 }
 export interface ContainerDirectorySnapshot {
   id: string;

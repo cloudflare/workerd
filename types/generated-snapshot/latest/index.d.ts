@@ -3788,6 +3788,7 @@ interface Container {
   snapshotContainer(
     options: ContainerSnapshotOptions,
   ): Promise<ContainerSnapshot>;
+  interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
 }
 interface ContainerDirectorySnapshot {
   id: string;

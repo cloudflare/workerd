@@ -137,9 +137,7 @@ class Container: public jsg::Object {
     JSG_METHOD(interceptAllOutboundHttp);
     JSG_METHOD(snapshotDirectory);
     JSG_METHOD(snapshotContainer);
-    if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(interceptOutboundHttps);
-    }
+    JSG_METHOD(interceptOutboundHttps);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
