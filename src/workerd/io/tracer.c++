@@ -379,10 +379,28 @@ void WorkerTracer::setEventInfoInternal(
     auto onsetContext = tracing::InvocationSpanContext(
         context.getTraceId(), context.getInvocationId(), tracing::SpanId::nullId);
 
+    // Derive SpanKind for the root span from the handler type.
+    SpanKind onsetSpanKind = SpanKind::SERVER;
+    KJ_SWITCH_ONEOF(info) {
+      KJ_CASE_ONEOF(_, tracing::ScheduledEventInfo) {
+        onsetSpanKind = SpanKind::CONSUMER;
+      }
+      KJ_CASE_ONEOF(_, tracing::AlarmEventInfo) {
+        onsetSpanKind = SpanKind::CONSUMER;
+      }
+      KJ_CASE_ONEOF(_, tracing::QueueEventInfo) {
+        onsetSpanKind = SpanKind::CONSUMER;
+      }
+      KJ_CASE_ONEOF(_, tracing::EmailEventInfo) {
+        onsetSpanKind = SpanKind::CONSUMER;
+      }
+      KJ_CASE_ONEOF_DEFAULT { /* SERVER for fetch, jsrpc, trace, hibernatableWebSocket, etc. */ }
+    }
+
     // Not applying size accounting for Onset since it is sent separately
     writer->report(onsetContext,
         tracing::Onset(context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo),
-            attributes.releaseAsArray()),
+            attributes.releaseAsArray(), onsetSpanKind),
         timestamp, 0);
   }
 

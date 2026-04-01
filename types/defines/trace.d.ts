@@ -82,6 +82,8 @@ type EventOutcome = "ok" | "canceled" | "exception" | "unknown" | "killSwitch" |
                     "daemonDown" | "exceededCpu" | "exceededMemory" | "loadShed" |
                     "responseStreamDisconnected" | "scriptNotFound";
 
+type SpanKind = "client" | "server" | "producer" | "consumer" | "internal";
+
 interface ScriptVersion {
   readonly id: string;
   readonly tag?: string;
@@ -103,6 +105,7 @@ interface Onset {
                  ScheduledEventInfo | AlarmEventInfo | QueueEventInfo |
                  EmailEventInfo | TraceEventInfo |
                  HibernatableWebSocketEventInfo | CustomEventInfo;
+  readonly spanKind: SpanKind;
 }
 
 interface Outcome {

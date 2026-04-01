@@ -78,6 +78,12 @@ namespace {
   V(SPANCLOSE, "spanClose")                                                                        \
   V(SPANCONTEXT, "spanContext")                                                                    \
   V(SPANID, "spanId")                                                                              \
+  V(SPANKIND, "spanKind")                                                                          \
+  V(SPANKIND_CLIENT, "client")                                                                     \
+  V(SPANKIND_SERVER, "server")                                                                     \
+  V(SPANKIND_PRODUCER, "producer")                                                                 \
+  V(SPANKIND_CONSUMER, "consumer")                                                                 \
+  V(SPANKIND_INTERNAL, "internal")                                                                 \
   V(SPANOPEN, "spanOpen")                                                                          \
   V(STACK, "stack")                                                                                \
   V(STATUSCODE, "statusCode")                                                                      \
@@ -135,6 +141,22 @@ class StringCache final {
 // which also seems wasteful and unnecessary. We also don't need the type mapping for
 // these structs to be bidirectional. So, instead, let's just do the simple easy thing
 // and define a set of serializers to these types.
+
+kj::LiteralStringConst spanKindToString(SpanKind kind) {
+  switch (kind) {
+    case SpanKind::CLIENT:
+      return SPANKIND_CLIENT_STR;
+    case SpanKind::SERVER:
+      return SPANKIND_SERVER_STR;
+    case SpanKind::PRODUCER:
+      return SPANKIND_PRODUCER_STR;
+    case SpanKind::CONSUMER:
+      return SPANKIND_CONSUMER_STR;
+    case SpanKind::INTERNAL:
+      return SPANKIND_INTERNAL_STR;
+  }
+  KJ_UNREACHABLE;
+}
 
 // Serialize attribute value
 jsg::JsValue ToJs(jsg::Lock& js, const Attribute::Value& value) {
@@ -405,6 +427,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
         js.arr(onset.attributes.asPtr(),
             [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); }));
   }
+  obj.set(js, SPANKIND_STR, cache.get(js, spanKindToString(onset.spanKind)));
 
   return obj;
 }
