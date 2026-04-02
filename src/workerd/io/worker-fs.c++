@@ -41,7 +41,7 @@ bool setCurrentWorkingDirectory(kj::Path newCwd) {
 
 namespace {
 // Maximum distinct symlinks that can be traversed during a single resolution.
-constexpr size_t kMaxSymlinkDepth = 256;
+static constexpr size_t kMaxSymlinkDepth = 256;
 
 // The SymbolicLinkRecursionGuardScope is used on-stack to guard against
 // circular symbolic links. As soon as a cycle is detected, it throws.
