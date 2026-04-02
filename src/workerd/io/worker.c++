@@ -2153,8 +2153,14 @@ void Worker::handleLog(jsg::Lock& js,
 
           // Determine whether `obj` is constructed using `{}` or `new Object()`. This ensures
           // we don't serialise values like Promises to JSON.
+#if V8_MAJOR_VERSION >= 15 || (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION >= 7)
+          if (obj->GetPrototype()->SameValue(freshObj->GetPrototype()) ||
+              obj->GetPrototype()->IsNull()) {
+#else
+          // TODO(cleanup): Remove when unnecessary.
           if (obj->GetPrototypeV2()->SameValue(freshObj->GetPrototypeV2()) ||
               obj->GetPrototypeV2()->IsNull()) {
+#endif
             shouldSerialiseToJson = true;
           }
 
@@ -3727,7 +3733,7 @@ struct Worker::Actor::Impl {
 
   struct ScheduledAlarm {
     ScheduledAlarm(
-        kj::Date scheduledTime, kj::PromiseFulfillerPair<WorkerInterface::AlarmResult> pf)
+        kj::Date scheduledTime, kj::PromiseFulfillerPair<WorkerInterface::AlarmOutcome> pf)
         : scheduledTime(scheduledTime),
           resultFulfiller(kj::mv(pf.fulfiller)),
           resultPromise(pf.promise.fork()) {}
@@ -3737,16 +3743,16 @@ struct Worker::Actor::Impl {
 
     kj::Date scheduledTime;
     WorkerInterface::AlarmFulfiller resultFulfiller;
-    kj::ForkedPromise<WorkerInterface::AlarmResult> resultPromise;
+    kj::ForkedPromise<WorkerInterface::AlarmOutcome> resultPromise;
     kj::Promise<void> cleanupPromise = resultPromise.addBranch().then(
-        [](WorkerInterface::AlarmResult&&) {}, [](kj::Exception&&) {});
+        [](WorkerInterface::AlarmOutcome&&) {}, [](kj::Exception&&) {});
     // The first thing we do after we get a result should be to remove the running alarm (if we got
     // that far). So we grab the first branch now and ignore any results, before anyone else has a
     // chance to do so.
   };
   struct RunningAlarm {
     kj::Date scheduledTime;
-    kj::ForkedPromise<WorkerInterface::AlarmResult> resultPromise;
+    kj::ForkedPromise<WorkerInterface::AlarmOutcome> resultPromise;
   };
   // If valid, we have an alarm invocation that has not yet received an `AlarmFulfiller` and thus
   // is either waiting for a running alarm or its scheduled time.
@@ -4104,7 +4110,7 @@ void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> new
   maybeAlarmPreviewTask = retry();
 }
 
-kj::Maybe<kj::Promise<WorkerInterface::AlarmResult>> Worker::Actor::getAlarm(
+kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> Worker::Actor::getAlarm(
     kj::Date scheduledTime) {
   KJ_IF_SOME(runningAlarm, impl->maybeRunningAlarm) {
     if (runningAlarm.scheduledTime == scheduledTime) {
@@ -4141,7 +4147,7 @@ kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::scheduleAlarm(
 
   KJ_IASSERT(impl->maybeScheduledAlarm == kj::none);
   auto& scheduledAlarm = impl->maybeScheduledAlarm.emplace(
-      scheduledTime, kj::newPromiseAndFulfiller<WorkerInterface::AlarmResult>());
+      scheduledTime, kj::newPromiseAndFulfiller<WorkerInterface::AlarmOutcome>());
 
   // Probably don't need to use kj::coCapture for this but doing so just to be on the
   // safe side...

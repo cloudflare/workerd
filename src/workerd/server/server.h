@@ -9,7 +9,6 @@
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker.h>
-#include <workerd/server/alarm-scheduler.h>
 #include <workerd/server/workerd.capnp.h>
 
 #include <kj/async-io.h>
@@ -196,9 +195,6 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
-  // Initialized in startAlarmScheduler().
-  kj::Own<AlarmScheduler> alarmScheduler;
-
   // An HttpServer object maintained in a linked list.
   struct ListedHttpServer {
     Server& owner;
@@ -290,6 +286,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::StringPtr physicalProtocol,
       kj::Own<HttpRewriter> rewriter);
 
+  kj::Promise<void> listenTcp(
+      kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr);
+
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
 
   class InvalidConfigService;
@@ -302,6 +301,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   class WorkerEntrypointService;
   class WorkerdBootstrapImpl;
   class HttpListener;
+  class TcpListener;
   class DebugPortListener;
 
   struct ErrorReporter;
@@ -318,13 +318,20 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen);
 
-  // Must be called after startServices!
-  void startAlarmScheduler(config::Config::Reader config);
-
   kj::Promise<void> listenOnSockets(config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen,
       bool forTest = false);
+
+  // Parsed socket protocol/TLS config. Extracted from the switch in listenOnSockets() to avoid
+  // goto-over-initialization inside a coroutine, which triggers a clang optimizer crash.
+  struct SocketTypeConfig {
+    uint defaultPort = 0;
+    config::HttpOptions::Reader httpOptions;
+    kj::Maybe<kj::Own<kj::TlsContext>> tls;
+    kj::StringPtr physicalProtocol;
+  };
+  kj::Maybe<SocketTypeConfig> parseSocketType(config::Socket::Reader sock, kj::StringPtr name);
 
   void unlinkWorkerLoaders();
 

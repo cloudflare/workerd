@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
 import assert from 'node:assert';
 
@@ -819,6 +822,38 @@ export let noMixedJsPythonModules2 = {
       message:
         'Module "foo.py" is a Python module, but the main module isn\'t a Python module.',
     });
+  },
+};
+
+export let suggestWorkerBundlerForTypeScriptModules = {
+  async test(ctrl, env, ctx) {
+    for (let mainModule of ['main.ts', 'main.tsx', 'main.jsx']) {
+      let worker = env.loader.get(mainModule, () => {
+        return {
+          compatibilityDate: '2026-01-01',
+          mainModule,
+          modules: {
+            [mainModule]: `
+              export default {
+                fetch() {
+                  return new Response('ok');
+                }
+              }
+            `,
+          },
+        };
+      });
+
+      await assert.rejects(
+        worker.getEntrypoint().fetch('https://example.com'),
+        {
+          name: 'TypeError',
+          message:
+            `Module name must end with '.js' or '.py' (or the content must be an object indicating the type explicitly). Got: ${mainModule}. ` +
+            "If you're trying to load TypeScript, bundle it first with '@cloudflare/worker-bundler' and pass the generated JavaScript modules.",
+        }
+      );
+    }
   },
 };
 

@@ -349,15 +349,17 @@ class ConsumerImpl final {
 
   // A simple utility to be allocated on any stack where consumer buffer data maybe consumed
   // or expanded. When the stack is unwound, it ensures the backpressure is appropriately
-  // updated. Captures the queue at construction time since the consumer may be
-  // destroyed before the scope ends (e.g., via onConsumerError -> owner.doError()).
+  // updated. Captures the weakref to the consumer as there's a chance it'll be destroyed
+  // while the scope is pending.
   struct UpdateBackpressureScope final {
-    kj::Maybe<QueueImpl&> queue;
-    UpdateBackpressureScope(ConsumerImpl& consumer): queue(consumer.queue) {}
+    kj::Rc<WeakRef<ConsumerImpl<Self>>> consumer;
+    UpdateBackpressureScope(ConsumerImpl& consumer): consumer(consumer.selfRef.addRef()) {}
     ~UpdateBackpressureScope() noexcept(false) {
-      KJ_IF_SOME(q, queue) {
-        q.maybeUpdateBackpressure();
-      }
+      consumer->runIfAlive([](ConsumerImpl& consumer) {
+        KJ_IF_SOME(q, consumer.queue) {
+          q.maybeUpdateBackpressure();
+        }
+      });
     }
     KJ_DISALLOW_COPY_AND_MOVE(UpdateBackpressureScope);
   };

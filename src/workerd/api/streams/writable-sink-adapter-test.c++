@@ -202,7 +202,7 @@ KJ_TEST("Basic abort() operation") {
 
     KJ_ASSERT(adapter->isClosed() == false, "Adapter should not be closed after abort()");
     KJ_ASSERT(adapter->isClosing() == false, "Adapter should not be closing after abort()");
-    auto exception =
+    auto& exception =
         KJ_ASSERT_NONNULL(adapter->isErrored(), "Adapter should be in errored state after abort()");
     KJ_ASSERT(exception.getDescription().contains("Abort reason"),
         "Adapter should be in errored state after abort()");
@@ -223,7 +223,7 @@ KJ_TEST("Basic abort() operation") {
         "End after abort() call should be rejected");
 
     adapter->abort(env.js, env.js.str("Abort reason 2"_kj));
-    auto exception2 = KJ_ASSERT_NONNULL(
+    auto& exception2 = KJ_ASSERT_NONNULL(
         adapter->isErrored(), "Adapter should still be in errored state after second abort()");
     KJ_ASSERT(exception2.getDescription().contains("Abort reason 2"),
         "Adapter should reflect reason from second abort() call");
@@ -248,7 +248,7 @@ KJ_TEST("Abort from closing state supersedes close") {
 
     KJ_ASSERT(adapter->isClosed() == false, "Adapter should not be closed after abort()");
     KJ_ASSERT(adapter->isClosing() == false, "Adapter should not be closing after abort()");
-    auto exception =
+    auto& exception =
         KJ_ASSERT_NONNULL(adapter->isErrored(), "Adapter should be in errored state after abort()");
     KJ_ASSERT(exception.getDescription().contains("Abort reason"),
         "Adapter should be in errored state after abort()");

@@ -375,14 +375,13 @@ interface StreamScopedCaptions {
    * Uploads the caption or subtitle file to the endpoint for a specific BCP47 language.
    * One caption or subtitle file per language is allowed.
    * @param language The BCP 47 language tag for the caption or subtitle.
-   * @param file The caption or subtitle file to upload.
+   * @param input The caption or subtitle stream to upload.
    * @returns The created caption entry.
    * @throws {NotFoundError} if the video is not found
    * @throws {BadRequestError} if the language or file is invalid
-   * @throws {MaxFileSizeError} if the file size is too large
    * @throws {InternalError} if an unexpected error occurs
    */
-  upload(language: string, file: File): Promise<StreamCaption>;
+  upload(language: string, input: ReadableStream): Promise<StreamCaption>;
   /**
    * Generate captions or subtitles for the provided language via AI.
    * @param language The BCP 47 language tag to generate.
@@ -461,17 +460,16 @@ interface StreamVideos {
 interface StreamWatermarks {
   /**
    * Generate a new watermark profile
-   * @param file The image file to upload
+   * @param input The image stream to upload
    * @param params The watermark creation parameters.
    * @returns The created watermark profile.
    * @throws {BadRequestError} if the parameters are invalid
    * @throws {InvalidURLError} if the URL is invalid
-   * @throws {MaxFileSizeError} if the file size is too large
    * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
    * @throws {InternalError} if an unexpected error occurs
    */
   generate(
-    file: File,
+    input: ReadableStream,
     params: StreamWatermarkCreateParams
   ): Promise<StreamWatermark>;
   /**
@@ -481,7 +479,6 @@ interface StreamWatermarks {
    * @returns The created watermark profile.
    * @throws {BadRequestError} if the parameters are invalid
    * @throws {InvalidURLError} if the URL is invalid
-   * @throws {MaxFileSizeError} if the file size is too large
    * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
    * @throws {InternalError} if an unexpected error occurs
    */

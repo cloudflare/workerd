@@ -392,8 +392,10 @@ class Fetcher: public JsRpcClientProvider {
     JSG_STRUCT(outcome, ackAll, retryBatch, explicitAcks, retryMessages);
   };
 
-  jsg::Promise<QueueResult> queue(
-      jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages);
+  jsg::Promise<QueueResult> queue(jsg::Lock& js,
+      kj::String queueName,
+      kj::Array<ServiceBindingQueueMessage> messages,
+      jsg::Optional<MessageBatchMetadata> metadata);
 
   struct ScheduledOptions {
     jsg::Optional<kj::Date> scheduledTime;
@@ -446,7 +448,7 @@ class Fetcher: public JsRpcClientProvider {
       ) & {
         fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
         connect(address: SocketAddress | string, options?: SocketOptions): Socket;
-        queue(queueName: string, messages: ServiceBindingQueueMessage[]): Promise<FetcherQueueResult>;
+        queue(queueName: string, messages: ServiceBindingQueueMessage[], metadata?: MessageBatchMetadata): Promise<FetcherQueueResult>;
         scheduled(options?: FetcherScheduledOptions): Promise<FetcherScheduledResult>;
       });
     } else {

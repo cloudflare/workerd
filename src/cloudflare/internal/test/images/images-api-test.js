@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-// @ts-ignore
+// @ts-expect-error - no type declarations for node:assert in this context
 import * as assert from 'node:assert';
 
 const encoder = new TextEncoder();
@@ -458,7 +458,7 @@ export const test_images_get_success = {
    * @param {Env} env
    */
   async test(_, env) {
-    const metadata = await env.images.hosted.details('test-image-id');
+    const metadata = await env.images.hosted.image('test-image-id').details();
     assert.notEqual(metadata, null);
     assert.equal(metadata.id, 'test-image-id');
     assert.equal(metadata.filename, 'test.jpg');
@@ -473,7 +473,7 @@ export const test_images_get_not_found = {
    * @param {Env} env
    */
   async test(_, env) {
-    const metadata = await env.images.hosted.details('not-found');
+    const metadata = await env.images.hosted.image('not-found').details();
     assert.equal(metadata, null);
   },
 };
@@ -485,7 +485,7 @@ export const test_images_getImage_success = {
    * @param {Env} env
    */
   async test(_, env) {
-    const stream = await env.images.hosted.image('test-image-id');
+    const stream = await env.images.hosted.image('test-image-id').bytes();
     assert.notEqual(stream, null);
 
     const reader = stream.getReader();
@@ -506,7 +506,7 @@ export const test_images_getImage_not_found = {
    * @param {Env} env
    */
   async test(_, env) {
-    const stream = await env.images.hosted.image('not-found');
+    const stream = await env.images.hosted.image('not-found').bytes();
     assert.equal(stream, null);
   },
 };
@@ -556,7 +556,7 @@ export const test_images_update_success = {
    * @param {Env} env
    */
   async test(_, env) {
-    const metadata = await env.images.hosted.update('test-image-id', {
+    const metadata = await env.images.hosted.image('test-image-id').update({
       requireSignedURLs: true,
       metadata: { updated: true },
       creator: 'update-creator',
@@ -580,7 +580,9 @@ export const test_images_update_not_found = {
      */
     let e;
     try {
-      await env.images.hosted.update('not-found', { requireSignedURLs: true });
+      await env.images.hosted
+        .image('not-found')
+        .update({ requireSignedURLs: true });
     } catch (err) {
       e = err;
     }
@@ -596,7 +598,7 @@ export const test_images_delete_success = {
    * @param {Env} env
    */
   async test(_, env) {
-    const result = await env.images.hosted.delete('test-image-id');
+    const result = await env.images.hosted.image('test-image-id').delete();
     assert.equal(result, true);
   },
 };
@@ -607,7 +609,7 @@ export const test_images_delete_not_found = {
    * @param {Env} env
    */
   async test(_, env) {
-    const result = await env.images.hosted.delete('not-found');
+    const result = await env.images.hosted.image('not-found').delete();
     assert.equal(result, false);
   },
 };

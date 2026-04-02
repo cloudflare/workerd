@@ -9,13 +9,13 @@
     "bundle-with-wrangler": "wrangler deploy --dry-run --outdir=dist"
   },
   "dependencies": {
-    "@opennextjs/cloudflare": "1.16.3",
-    "next": "16.1.6",
+    "@opennextjs/cloudflare": "1.17.2",
+    "next": "16.2.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "wrangler": "4.63.0"
+    "wrangler": "4.76.0"
   },
   "devDependencies": {
-    "esbuild": "^0.27.2"
+    "esbuild": "^0.27.4"
   }
 }

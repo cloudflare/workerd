@@ -15,8 +15,8 @@
 #include <capnp/message.h>
 #include <kj/async-io.h>
 #include <kj/async.h>
-#include <kj/cidr.h>
 #include <kj/compat/http.h>
+#include <kj/filesystem.h>
 #include <kj/map.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
@@ -71,10 +71,14 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> monitor(MonitorContext context) override;
   kj::Promise<void> destroy(DestroyContext context) override;
   kj::Promise<void> signal(SignalContext context) override;
+  kj::Promise<void> exec(ExecContext context) override;
   kj::Promise<void> getTcpPort(GetTcpPortContext context) override;
   kj::Promise<void> listenTcp(ListenTcpContext context) override;
   kj::Promise<void> setInactivityTimeout(SetInactivityTimeoutContext context) override;
   kj::Promise<void> setEgressHttp(SetEgressHttpContext context) override;
+  kj::Promise<void> setEgressHttps(SetEgressHttpsContext context) override;
+  kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override;
+  kj::Promise<void> snapshotContainer(SnapshotContainerContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
@@ -107,14 +111,10 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Docker-specific Port implementation
   class DockerPort;
+  class DockerProcessHandle;
 
   // EgressHttpService handles CONNECT requests from proxy-anything sidecar
   friend class EgressHttpService;
-
-  struct Response {
-    kj::uint statusCode;
-    kj::String body;
-  };
 
   struct InspectResponse {
     bool isRunning;
@@ -129,23 +129,57 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
     uint16_t ingressHostPort;
   };
 
-  // Docker API v1.50 helper methods
-  static kj::Promise<Response> dockerApiRequest(kj::Network& network,
-      kj::String dockerPath,
-      kj::HttpMethod method,
-      kj::String endpoint,
-      kj::Maybe<kj::String> body = kj::none);
+  struct SnapshotRestoreMount {
+    kj::Path restorePath;
+    kj::String sourceVolume;
+    kj::String cloneVolume;
+  };
+
+  struct ImageInspectResponse {
+    kj::String id;
+    uint64_t size;
+  };
+
+  struct ExecInspectResponse {
+    int32_t exitCode;
+    bool running;
+    uint32_t pid;
+  };
+
   kj::Promise<InspectResponse> inspectContainer();
 
   kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> updateSidecarEgressConfig(uint16_t ingressHostPort, uint16_t egressPort);
-  kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
+  kj::Promise<void> createContainer(kj::StringPtr effectiveImage,
+      kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
       kj::Maybe<capnp::List<capnp::Text>::Reader> environment,
+      kj::ArrayPtr<const SnapshotRestoreMount> restoreMounts,
       rpc::Container::StartParams::Reader params);
+  kj::Promise<kj::String> createExec(capnp::List<capnp::Text>::Reader cmd,
+      rpc::Container::ExecOptions::Reader params,
+      bool attachStdout,
+      bool attachStderr);
+  kj::Promise<kj::Own<kj::AsyncIoStream>> startExec(kj::String execId);
+  kj::Promise<ExecInspectResponse> inspectExec(kj::StringPtr execId);
+  kj::Promise<void> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
   kj::Promise<void> destroyContainer();
+
+  // Docker volume management for snapshots
+  kj::Promise<void> createVolume(kj::StringPtr volumeName);
+  kj::Promise<void> deleteVolume(kj::String volumeName);
+  kj::Promise<void> commitContainer(kj::StringPtr imageRef);
+  kj::Promise<ImageInspectResponse> inspectImage(kj::StringPtr imageRef);
+  kj::Promise<void> deleteImage(kj::String imageRef);
+  kj::Promise<kj::String> createTempContainerWithVolume(
+      kj::StringPtr volumeName, kj::StringPtr mountPath);
+  // Creates a writable clone volume by copying an existing snapshot volume through a
+  // short-lived helper container. The caller mounts the returned clone into the app
+  // container with NoCopy=true so the restored path masks any image contents there.
+  kj::Promise<void> cloneSnapshot(SnapshotRestoreMount& snapshot);
+  kj::Promise<void> deleteTempContainer(kj::String tempContainerId);
 
   // Sidecar container management (for egress proxy)
   // Inspect the sidecar container to retrieve the port to ingress to
@@ -160,28 +194,31 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // to await, and add a branch to waitUntilTasks to keep the cleanup tasks alive.
   kj::Function<void(kj::Promise<void>)> cleanupCallback;
 
-  // For redeeming channel tokens received via setEgressHttp
+  // For redeeming channel tokens received via setEgressHttp / setEgressHttps.
   ChannelTokenHandler& channelTokenHandler;
 
-  // Represents a parsed egress mapping. IP/CIDR mappings match all hostnames,
-  // while hostnameGlob mappings only match requests carrying a matching hostname.
-  struct EgressMapping {
-    kj::OneOf<kj::CidrRange, kj::String> destination;
-    uint16_t port;  // 0 means match all ports
-    kj::Own<workerd::IoChannelFactory::SubrequestChannel> channel;
-  };
+  // Opaque implementation struct holding egress mappings. Defined in container-client.c++ to
+  // avoid pulling heavy types (kj::OneOf, kj::CidrRange, kj::Vector) into server.c++ which
+  // includes this header.
+  struct EgressState;
+  kj::Own<EgressState> egressState;
 
-  kj::Vector<EgressMapping> egressMappings;
-
-  // Insert or replace an egress mapping. If a mapping with the same destination and port
-  // already exists, its channel is replaced; otherwise a new mapping is added.
+  // Insert or replace an egress mapping.
+  struct EgressMapping;
   void upsertEgressMapping(EgressMapping mapping);
   kj::Vector<kj::String> getDnsAllowHostnames() const;
 
   // Find a matching egress mapping for the given destination address (host:port format).
   // Returns an addRef'd Own so the channel stays alive even if the mapping is later replaced.
   kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> findEgressMapping(
-      kj::StringPtr destAddr, uint16_t defaultPort, kj::Maybe<kj::StringPtr> hostname);
+      kj::StringPtr destAddr, uint16_t defaultPort, kj::Maybe<kj::StringPtr> hostname, bool tls);
+
+  kj::Promise<void> writeFileToContainer(kj::StringPtr container,
+      kj::StringPtr dir,
+      kj::StringPtr filename,
+      kj::ArrayPtr<const kj::byte> content);
+  kj::Promise<void> readCACert();
+  kj::Promise<void> injectCACert();
 
   // Whether general internet access is enabled for this container, when known.
   kj::Maybe<bool> internetEnabled = kj::none;
@@ -189,6 +226,14 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   std::atomic_bool containerStarted = false;
   std::atomic_bool containerSidecarStarted = false;
   std::atomic_bool egressListenerStarted = false;
+  std::atomic_bool caCertInjected = false;
+
+  // Writable clone volumes currently owned by the app container, or by an in-flight start()
+  // that still needs failure cleanup.
+  kj::Vector<kj::String> snapshotClones;
+
+  // CA cert read from the sidecar after it starts.
+  kj::Maybe<kj::String> caCert;
 
   kj::Maybe<kj::Own<kj::HttpServer>> egressHttpServer;
   kj::Maybe<kj::Promise<void>> egressListenerTask;

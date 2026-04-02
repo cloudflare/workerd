@@ -341,7 +341,7 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
       }).orDefault(nullptr);
     }
 
-    return js.alloc<Blob>(js, kj::mv(buffer), kj::mv(contentType));
+    return js.alloc<Blob>(js, buffer.getJsHandle(js), kj::mv(contentType));
   });
 }
 
@@ -673,7 +673,31 @@ void Request::shallowCopyHeadersTo(kj::HttpHeaders& out) {
 }
 
 kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
-  if (cacheMode == CacheMode::NONE) {
+  // We need to clone the cf object if we're going to modify it. We modify it when:
+  // 1. cacheMode != NONE (existing behavior: map cache option to cacheTtl/cacheLevel/etc.)
+  // 2. cacheControl is not explicitly set and we need to synthesize it from cacheTtl or cacheMode
+  //
+  // For backward compatibility during migration, we dual-write: keep cacheTtl as-is but also
+  // synthesize cacheControl so downstream services can start consuming the unified field.
+  // Once downstream fully migrates to cacheControl, cacheTtl can be removed.
+
+  bool hasCacheMode = (cacheMode != CacheMode::NONE);
+  bool needsSynthesizedCacheControl = false;
+
+  // TODO(cleanup): Remove the workerdExperimental gate once validated in production.
+  bool experimentalCacheControl = FeatureFlags::get(js).getWorkerdExperimental();
+
+  if (!hasCacheMode && experimentalCacheControl) {
+    // Check if cf has cacheTtl but no cacheControl — we'll need to synthesize cacheControl.
+    KJ_IF_SOME(cfObj, cf.get(js)) {
+      if (!cfObj.has(js, "cacheControl") && cfObj.has(js, "cacheTtl")) {
+        auto ttlVal = cfObj.get(js, "cacheTtl");
+        needsSynthesizedCacheControl = !ttlVal.isUndefined();
+      }
+    }
+  }
+
+  if (!hasCacheMode && !needsSynthesizedCacheControl) {
     return cf.serialize(js);
   }
 
@@ -687,25 +711,57 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   auto obj = KJ_ASSERT_NONNULL(clone.get(js));
 
   constexpr int NOCACHE_TTL = -1;
-  switch (cacheMode) {
-    case CacheMode::NOSTORE:
-      if (obj.has(js, "cacheTtl")) {
-        jsg::JsValue oldTtl = obj.get(js, "cacheTtl");
-        JSG_REQUIRE(oldTtl.strictEquals(js.num(NOCACHE_TTL)), TypeError,
-            kj::str("CacheTtl: ", oldTtl, ", is not compatible with cache: ",
-                getCacheModeName(cacheMode).orDefault("none"_kj), " header."));
-      } else {
-        obj.set(js, "cacheTtl", js.num(NOCACHE_TTL));
+  if (hasCacheMode) {
+    switch (cacheMode) {
+      case CacheMode::NOSTORE:
+        if (obj.has(js, "cacheTtl")) {
+          jsg::JsValue oldTtl = obj.get(js, "cacheTtl");
+          JSG_REQUIRE(oldTtl.strictEquals(js.num(NOCACHE_TTL)), TypeError,
+              kj::str("CacheTtl: ", oldTtl, ", is not compatible with cache: ",
+                  getCacheModeName(cacheMode).orDefault("none"_kj), " header."));
+        } else {
+          obj.set(js, "cacheTtl", js.num(NOCACHE_TTL));
+        }
+        KJ_FALLTHROUGH;
+      case CacheMode::RELOAD:
+        obj.set(js, "cacheLevel", js.str("bypass"_kjc));
+        break;
+      case CacheMode::NOCACHE:
+        obj.set(js, "cacheForceRevalidate", js.boolean(true));
+        break;
+      case CacheMode::NONE:
+        KJ_UNREACHABLE;
+    }
+  }
+
+  // Synthesize cacheControl from cacheTtl or cacheMode when cacheControl is not explicitly set.
+  // This dual-writes both fields so downstream can migrate to cacheControl incrementally.
+  // TODO(cleanup): Remove the workerdExperimental gate once validated in production.
+  if (experimentalCacheControl && !obj.has(js, "cacheControl")) {
+    if (hasCacheMode) {
+      // Synthesize from the cache request option.
+      switch (cacheMode) {
+        case CacheMode::NOSTORE:
+          obj.set(js, "cacheControl", js.str("no-store"_kjc));
+          break;
+        case CacheMode::NOCACHE:
+          obj.set(js, "cacheControl", js.str("no-cache"_kjc));
+          break;
+        case CacheMode::RELOAD:
+          break;
+        case CacheMode::NONE:
+          KJ_UNREACHABLE;
       }
-      KJ_FALLTHROUGH;
-    case CacheMode::RELOAD:
-      obj.set(js, "cacheLevel", js.str("bypass"_kjc));
-      break;
-    case CacheMode::NOCACHE:
-      obj.set(js, "cacheForceRevalidate", js.boolean(true));
-      break;
-    case CacheMode::NONE:
-      KJ_UNREACHABLE;
+    } else if (obj.has(js, "cacheTtl")) {
+      // Synthesize from cacheTtl value: positive/zero → max-age=N, -1 → no-store.
+      jsg::JsValue ttlVal = obj.get(js, "cacheTtl");
+      if (ttlVal.strictEquals(js.num(NOCACHE_TTL))) {
+        obj.set(js, "cacheControl", js.str("no-store"_kjc));
+      } else KJ_IF_SOME(ttlInt, ttlVal.tryCast<jsg::JsInt32>()) {
+        auto ttl = KJ_ASSERT_NONNULL(ttlInt.value(js));
+        obj.set(js, "cacheControl", js.str(kj::str("max-age=", ttl)));
+      }
+    }
   }
 
   return clone.serialize(js);
@@ -726,6 +782,36 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
         !FeatureFlags::get(js).getCacheReload() && (cacheMode == Request::CacheMode::RELOAD);
     JSG_REQUIRE(
         !invalidNoCache && !invalidReload, TypeError, kj::str("Unsupported cache mode: ", c));
+  }
+
+  // Validate mutual exclusion of cf.cacheControl with cf.cacheTtl and the cache request option.
+  // cacheControl provides explicit Cache-Control header override and cannot be combined with
+  // cacheTtl (which sets a simplified TTL) or the cache option (which maps to cacheTtl internally).
+  // cacheTtlByStatus is allowed alongside cacheControl since they serve different purposes.
+  // TODO(cleanup): Remove the workerdExperimental gate once validated in production.
+  if (FeatureFlags::get(js).getWorkerdExperimental()) {
+    KJ_IF_SOME(cfRef, cf) {
+      auto cfObj = jsg::JsObject(cfRef.getHandle(js));
+      if (cfObj.has(js, "cacheControl")) {
+        auto cacheControlVal = cfObj.get(js, "cacheControl");
+        if (!cacheControlVal.isUndefined()) {
+          // cacheControl + cacheTtl → throw
+          if (cfObj.has(js, "cacheTtl")) {
+            auto cacheTtlVal = cfObj.get(js, "cacheTtl");
+            JSG_REQUIRE(cacheTtlVal.isUndefined(), TypeError,
+                "The 'cacheControl' and 'cacheTtl' options on cf are mutually exclusive. "
+                "Use 'cacheControl' for explicit Cache-Control header directives, "
+                "or 'cacheTtl' for a simplified TTL, but not both.");
+          }
+          // cacheControl + cache option (no-store/no-cache) → throw
+          // The cache request option maps to cacheTtl internally, so they conflict.
+          JSG_REQUIRE(cache == kj::none, TypeError,
+              "The 'cacheControl' option on cf cannot be used together with the 'cache' "
+              "request option. The 'cache' option ('no-store'/'no-cache') maps to cache TTL "
+              "behavior internally, which conflicts with explicit Cache-Control directives.");
+        }
+      }
+    }
   }
 
   KJ_IF_SOME(e, encodeResponseBody) {
@@ -802,7 +888,10 @@ jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
     jsg::Deserializer& deserializer,
     const jsg::TypeHandler<RequestInitializerDict>& initDictHandler) {
   auto url = deserializer.readLengthDelimitedString();
-  auto init = KJ_ASSERT_NONNULL(initDictHandler.tryUnwrap(js, deserializer.readValue(js)));
+  auto init = KJ_UNWRAP_OR(initDictHandler.tryUnwrap(js, deserializer.readValue(js)), {
+    JSG_FAIL_REQUIRE(DOMDataCloneError,
+        "Deserialization failed: could not deserialize Request initializer");
+  });
   return Request::constructor(js, kj::mv(url), kj::mv(init));
 }
 
@@ -1349,8 +1438,14 @@ jsg::Ref<Response> Response::deserialize(jsg::Lock& js,
     jsg::Deserializer& deserializer,
     const jsg::TypeHandler<InitializerDict>& initDictHandler,
     const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
-  auto body = KJ_ASSERT_NONNULL(streamHandler.tryUnwrap(js, deserializer.readValue(js)));
-  auto init = KJ_ASSERT_NONNULL(initDictHandler.tryUnwrap(js, deserializer.readValue(js)));
+  auto body = KJ_UNWRAP_OR(streamHandler.tryUnwrap(js, deserializer.readValue(js)), {
+    JSG_FAIL_REQUIRE(DOMDataCloneError,
+        "Deserialization failed: could not deserialize Response body");
+  });
+  auto init = KJ_UNWRAP_OR(initDictHandler.tryUnwrap(js, deserializer.readValue(js)), {
+    JSG_FAIL_REQUIRE(DOMDataCloneError,
+        "Deserialization failed: could not deserialize Response initializer");
+  });
 
   // If the status code is zero, then it was an error response. We cannot
   // use the Response::constructor.
@@ -1582,12 +1677,6 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
         headers.setPtr(kj::HttpHeaderId::CONTENT_LENGTH, "0"_kj);
       }
 
-      KJ_IF_SOME(ctx, traceContext) {
-        KJ_IF_SOME(cfRay, headers.get(headerIds.cfRay)) {
-          ctx.setTag("cloudflare.ray_id"_kjc, cfRay);
-        }
-      }
-
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, maybeLength);
       auto& nr = KJ_ASSERT_NONNULL(nativeRequest);
       auto stream = newSystemStream(kj::mv(nr.body), StreamEncoding::IDENTITY);
@@ -1638,6 +1727,10 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
         ctx.setTag("http.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
         KJ_IF_SOME(length, response.body->tryGetLength()) {
           ctx.setTag("http.response.body.size"_kjc, static_cast<int64_t>(length));
+        }
+        auto headerIds = IoContext::current().getHeaderIds();
+        KJ_IF_SOME(cfRay, response.headers->get(headerIds.cfRay)) {
+          ctx.setTag("cloudflare.ray_id"_kjc, cfRay);
         }
       }
       return handleHttpResponse(
@@ -2230,8 +2323,10 @@ jsg::Promise<void> Fetcher::delete_(jsg::Lock& js, kj::String url) {
   return throwOnError(js, "DELETE", fetchImpl(js, JSG_THIS, kj::mv(url), kj::mv(subInit)));
 }
 
-jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
-    jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages) {
+jsg::Promise<Fetcher::QueueResult> Fetcher::queue(jsg::Lock& js,
+    kj::String queueName,
+    kj::Array<ServiceBindingQueueMessage> messages,
+    jsg::Optional<MessageBatchMetadata> metadata) {
   auto& ioContext = IoContext::current();
 
   auto encodedMessages = kj::heapArrayBuilder<IncomingQueueMessage>(messages.size());
@@ -2264,6 +2359,7 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
   auto event = kj::refcounted<api::QueueCustomEvent>(QueueEvent::Params{
     .queueName = kj::mv(queueName),
     .messages = encodedMessages.finish(),
+    .metadata = kj::mv(metadata).orDefault({}),
   });
 
   auto eventRef =

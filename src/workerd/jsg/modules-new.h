@@ -237,6 +237,17 @@ class Module {
     FALLBACK,
   };
 
+  // The content type of the module, used to validate import attributes.
+  // For instance, `import data from './data.json' with { type: 'json' }`
+  // will only succeed if the module's content type is JSON.
+  enum class ContentType : uint8_t {
+    NONE,  // No specific content type (ESM, CJS, builtin objects, etc.)
+    JSON,  // JSON module
+    TEXT,  // Text module
+    DATA,  // Data/binary module
+    WASM,  // WebAssembly module
+  };
+
   // The flags are set internally and are used to identify various properties
   // of the module.
   enum class Flags : uint8_t {
@@ -263,7 +274,7 @@ class Module {
   class Evaluator final {
    public:
     KJ_DISALLOW_COPY_AND_MOVE(Evaluator);
-    kj::Maybe<jsg::Promise<Value>> operator()(jsg::Lock& js,
+    kj::Maybe<jsg::JsPromise> operator()(jsg::Lock& js,
         const Module& module,
         v8::Local<v8::Module> v8Module,
         const CompilationObserver& observer) const;
@@ -299,6 +310,11 @@ class Module {
 
   // If isWasm() returns true, then the module is a WebAssembly module.
   inline bool isWasm() const;
+
+  // Returns the content type of the module.
+  inline ContentType contentType() const {
+    return contentType_;
+  }
 
   // Returns a v8::Module representing this Module definition for the given isolate.
   // The return value follows the established v8 rules for Maybe. If the returned
@@ -359,14 +375,22 @@ class Module {
   // is different from the Module::Evaluator, which is used to ensure that
   // evaluation of a module occurs outside of an IoContext. This callback
   // is always called to actually perform the evaluation of a synthetic module.
+  // If false is returned, then an exception should have been scheduled on the isolate.
   using EvaluateCallback =
       Function<bool(const Url&, const ModuleNamespace&, const CompilationObserver&)>;
 
+  // Returns a new synthetic module. The callback is invoked to evaluate the module. Due to
+  // the nature of synthetic modules, the callback is expected to perform all necessary evaluation
+  // synchronously and return a boolean indicating whether the evaluation succeeded or not. The
+  // evaluation cannot be async because V8 does not wait for the synthetic module evaluation
+  // promises to resolve before it considers the module to be evaluated. The most it will do is
+  // track errors thrown synchronously from the callback to determine whether evaluation failed.
   static kj::Own<Module> newSynthetic(Url id,
       Type type,
       EvaluateCallback callback,
       kj::Array<kj::String> namedExports = nullptr,
-      Flags flags = Flags::NONE);
+      Flags flags = Flags::NONE,
+      ContentType contentType = ContentType::NONE);
 
   // Creates a new ESM module that takes ownership of the given code array.
   // This is generally used to construct ESM modules from a worker bundle.
@@ -401,27 +425,6 @@ class Module {
       kj::Maybe<JsObject> compileExtensions,
       const CompilationObserver& observer) KJ_WARN_UNUSED_RESULT;
 
-  // Some modules may need to protect against being evaluated recursively. The
-  // EvaluateOnce class makes it possible to guard against that, returning false
-  // if evaluation has already been started. Once setEvaluating() returns true,
-  // subsequent calls will always return false — this is single-use by design
-  // (CJS modules should only be evaluated once).
-  class EvaluateOnce final {
-   public:
-    EvaluateOnce() = default;
-    KJ_DISALLOW_COPY_AND_MOVE(EvaluateOnce);
-
-    // On the first call, this returns true. On subsequent calls, it returns false.
-    bool setEvaluating() {
-      if (evaluating) return false;
-      evaluating = true;
-      return true;
-    }
-
-   private:
-    bool evaluating = false;
-  };
-
   // A CjsStyleModuleHandler is used for CommonJS style modules (including
   // The template type T must be a jsg::Object that implements a getExports(Lock&)
   // method returning a JsValue. This is set as the default export of the
@@ -430,15 +433,9 @@ class Module {
   template <typename T, typename TypeWrapper>
   static EvaluateCallback newCjsStyleModuleHandler(
       kj::StringPtr source, kj::StringPtr name) KJ_WARN_UNUSED_RESULT {
-    return [source, name, evaluateOnce = kj::heap<EvaluateOnce>()](Lock& js, const Url& id,
-               const Module::ModuleNamespace& ns,
+    return [source, name](Lock& js, const Url& id, const Module::ModuleNamespace& ns,
                const CompilationObserver& observer) mutable -> bool {
       return js.tryCatch([&] {
-        // A CJS module can only be evaluated once. Return early if evaluation
-        // has already been started.
-        if (!evaluateOnce->setEvaluating()) {
-          return true;
-        }
         auto& wrapper = TypeWrapper::from(js.v8Isolate);
         auto ext = js.alloc<T>(js, id);
         ns.setDefault(js, ext->getExports(js));
@@ -474,12 +471,13 @@ class Module {
   }
 
  protected:
-  Module(Url id, Type type, Flags flags = Flags::NONE);
+  Module(Url id, Type type, Flags flags = Flags::NONE, ContentType contentType = ContentType::NONE);
 
  private:
   const Url id_;
   Type type_;
   Flags flags_;
+  ContentType contentType_;
 
   // TODO: Support source objects as optional instantiation-hook creations and move
   // Wasm compilation to start at instantiation-time instead of evaluation-time.
@@ -545,7 +543,8 @@ class ModuleBundle {
 
     BundleBuilder& addSyntheticModule(kj::StringPtr name,
         EvaluateCallback callback,
-        kj::Array<kj::String> namedExports = nullptr) KJ_LIFETIMEBOUND;
+        kj::Array<kj::String> namedExports = nullptr,
+        Module::ContentType contentType = Module::ContentType::NONE) KJ_LIFETIMEBOUND;
 
     BundleBuilder& addEsmModule(kj::StringPtr name,
         kj::ArrayPtr<const char> code,
@@ -651,6 +650,12 @@ class ModuleBundle {
 // and owned by a single Worker instance. In production, however, a
 // single ModuleRegistry instance may be shared by multiple replicas
 // of a Worker and therefore must be AtomicRefcounted.
+
+// When passed to tryResolveModuleNamespace, controls whether non-ESM
+// (synthetic) modules return the default export instead of the full
+// module namespace. Matches Node.js require() semantics.
+WD_STRONG_BOOL(UnwrapDefault);
+
 class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBase {
  private:
   enum BundleIndices { kBundle, kBuiltin, kBuiltinOnly, kFallback, kBundleCount };
@@ -661,7 +666,7 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   // Flag::EVAL on a module is ignored. If the EvalCallback is set, then any
   // Modules that have the Flag::EVAL set will have their evaluation deferred
   // to this callback.
-  using EvalCallback = Function<jsg::Promise<Value>(
+  using EvalCallback = Function<jsg::JsPromise(
       const Module& module, v8::Local<v8::Module> v8Module, const CompilationObserver& observer)>;
 
   class Builder final {
@@ -726,11 +731,12 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   // JsExceptionThrown exception if an error occurs while the module is being evaluated.
   // Modules resolved with this method must be capable of fully evaluating within one
   // drain of the microtask queue.
-  static kj::Maybe<JsObject> tryResolveModuleNamespace(Lock& js,
+  static kj::Maybe<JsValue> tryResolveModuleNamespace(Lock& js,
       kj::StringPtr specifier,
       ResolveContext::Type type = ResolveContext::Type::BUNDLE,
       ResolveContext::Source source = ResolveContext::Source::INTERNAL,
-      kj::Maybe<const Url&> maybeReferrer = kj::none);
+      kj::Maybe<const Url&> maybeReferrer = kj::none,
+      UnwrapDefault unwrapDefault = UnwrapDefault::NO);
 
   // The constructor is public because kj::heap requires is to be. Do not
   // use the constructor directly. Use the ModuleRegistry::Builder
@@ -785,7 +791,7 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
       ModuleBundle& bundle,
       const Url& bundleBase) KJ_WARN_UNUSED_RESULT;
 
-  kj::Maybe<jsg::Promise<Value>> evaluateImpl(jsg::Lock& js,
+  kj::Maybe<jsg::JsPromise> evaluateImpl(jsg::Lock& js,
       const Module& module,
       v8::Local<v8::Module> v8Module,
       const CompilationObserver& observer) const;

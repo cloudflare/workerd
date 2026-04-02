@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 //! Tests for `Local<Function>::call()`, `As<T>` trait, and `impl_local_cast!` conversions.
 
 use jsg::Number;

@@ -1,9 +1,13 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   default as assert,
   notStrictEqual,
   ok,
   rejects,
   strictEqual,
+  throws,
   deepStrictEqual,
 } from 'assert'; // Intentionally omit the 'node:' prefix
 import { foo, default as def } from 'foo';
@@ -187,6 +191,17 @@ await rejects(import('%90%E8%54%C1'), {
   message: /Module not found/,
 });
 
+// The cjs6 module attempts to require and esm with a top-level await, which is rejected
+// following node.js' established require(esm) precedent.
+await rejects(import('cjs6'), {
+  message: /^Top-level await is not supported/,
+});
+
+// Cannot directly require an ESM with top-level await either.
+throws(() => myRequire('tla'), {
+  message: /^Top-level await is not supported/,
+});
+
 // Verify that a module is unable to perform IO operations at the top level, even if
 // the dynamic import is initiated within the scope of an active IoContext.
 export const noTopLevelIo = {
@@ -243,15 +258,14 @@ export const queryAndFragment = {
   },
 };
 
-// We do not currently support import attributes. Per the recommendation
-// in the spec, we throw an error when they are encountered.
+// Unrecognized import attributes are rejected.
 export const importAssertionsFail = {
   async test() {
     await rejects(import('ia'), {
-      message: /^Import attributes are not supported/,
+      message: /^Unsupported import attribute: "a"/,
     });
     await rejects(import('foo', { with: { a: 'abc' } }), {
-      message: /^Import attributes are not supported/,
+      message: /^Unsupported import attribute: "a"/,
     });
   },
 };
@@ -316,6 +330,41 @@ export const complexModuleTest = {
 
     const { default: abc2 } = await import('abc');
     strictEqual(abc2, 'file:///bundle/abc');
+  },
+};
+
+// Regression test: getBuiltinModule called from a function defined in eval'd
+// code should work. Previously failed on first invocation with "top-level await"
+// error due to extra microtask tick from wrapSimplePromise().
+export const getBuiltinModuleFromEval = {
+  async test(_, env) {
+    const code = `"use strict";async (exports)=>{
+      exports.getPath = () => process.getBuiltinModule("node:path");
+    }`;
+    const exports = {};
+    const fn = env.unsafe.eval(code);
+    await fn(exports);
+
+    const path = exports.getPath();
+    ok(path.join, 'node:path should have join');
+  },
+};
+
+// Regression test: createRequire called from a function defined in eval'd
+// code should work. Same root cause as getBuiltinModuleFromEval.
+export const createRequireFromEval = {
+  async test(_, env) {
+    const code = `"use strict";async (exports)=>{
+      const { createRequire } = process.getBuiltinModule("node:module");
+      const require = createRequire("/");
+      exports.getUtil = () => require("node:util");
+    }`;
+    const exports = {};
+    const fn = env.unsafe.eval(code);
+    await fn(exports);
+
+    const util = exports.getUtil();
+    ok(util.promisify, 'node:util should have promisify');
   },
 };
 

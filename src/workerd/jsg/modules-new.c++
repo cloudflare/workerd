@@ -170,7 +170,7 @@ class EsModule final: public Module {
       // since we're either consuming cached data or not using any options at all.
       KJ_ASSERT(v8::ScriptCompiler::CompileOptionsIsValid(options));
       if (!v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options).ToLocal(&module)) {
-        return v8::MaybeLocal<v8::Module>();
+        return {};
       }
     }
 
@@ -220,11 +220,15 @@ class EsModule final: public Module {
       const CompilationObserver& observer,
       const Evaluator& maybeEvaluate) const override {
     if (!ensureInstantiated(js, module, observer, *this)) {
-      return v8::MaybeLocal<v8::Value>();
-    };
+      if (!js.v8Isolate->HasPendingException()) {
+        js.v8Isolate->ThrowError(js.str("Failed to instantiate module"_kj));
+      }
+      return {};
+    }
 
     KJ_IF_SOME(result, maybeEvaluate(js, *this, module, observer)) {
-      return js.wrapSimplePromise(kj::mv(result));
+      v8::Local<v8::Value> val = result;
+      return val;
     }
 
     return actuallyEvaluate(js, module, observer);
@@ -250,8 +254,9 @@ class SyntheticModule final: public Module {
       Type type,
       ModuleBundle::BundleBuilder::EvaluateCallback callback,
       kj::Array<kj::String> namedExports,
-      Flags flags = Flags::NONE)
-      : Module(kj::mv(id), type, flags),
+      Flags flags = Flags::NONE,
+      ContentType contentType = ContentType::NONE)
+      : Module(kj::mv(id), type, flags, contentType),
         callback(kj::mv(callback)),
         namedExports(kj::mv(namedExports)) {
     // Synthetic modules can never be ESM or Main
@@ -279,19 +284,15 @@ class SyntheticModule final: public Module {
       Lock& js, v8::Local<v8::Module> module, const CompilationObserver& observer) const override {
     // The return value will be a resolved promise.
     v8::Local<v8::Promise::Resolver> resolver;
-
     if (!v8::Promise::Resolver::New(js.v8Context()).ToLocal(&resolver)) {
-      return v8::MaybeLocal<v8::Value>();
+      return {};
     }
 
     ModuleNamespace ns(module, namedExports);
-    if (!callback(js, id(), ns, observer)) {
+    if (!callback(js, id(), ns, observer) ||
+        resolver->Resolve(js.v8Context(), js.v8Undefined()).IsNothing()) {
       // An exception should already be scheduled with the isolate
-      return v8::MaybeLocal<v8::Value>();
-    }
-
-    if (resolver->Resolve(js.v8Context(), js.v8Undefined()).IsNothing()) {
-      return v8::MaybeLocal<v8::Value>();
+      return {};
     }
 
     return resolver->GetPromise();
@@ -302,18 +303,20 @@ class SyntheticModule final: public Module {
       const CompilationObserver& observer,
       const Evaluator& maybeEvaluate) const override {
     if (!ensureInstantiated(js, module, observer, *this)) {
-      return v8::MaybeLocal<v8::Value>();
+      if (!js.v8Isolate->HasPendingException()) {
+        js.v8Isolate->ThrowError(js.str("Failed to instantiate module"_kj));
+      }
+      return {};
     }
-
     // If this synthetic module is marked with Flags::EVAL, and the evalCallback
     // is specified, then we defer evaluation to the given callback.
     if (isEval()) {
       KJ_IF_SOME(result, maybeEvaluate(js, *this, module, observer)) {
-        return js.wrapSimplePromise(kj::mv(result));
+        v8::Local<v8::Value> val = result;
+        return val;
       }
     }
-
-    return actuallyEvaluate(js, module, observer);
+    return module->Evaluate(js.v8Context());
   }
 
   // Marked mutable because kj::Function::operator() is non-const, but evaluation
@@ -328,6 +331,72 @@ class SyntheticModule final: public Module {
 #pragma clang diagnostic ignored "-Wunused-function"
 WD_STRONG_BOOL(SourcePhase);
 #pragma clang diagnostic pop
+
+// Parses import attributes from V8's FixedArray format (key-value-location triples).
+// Returns the value of the "type" attribute if present, or kj::none if no attributes.
+// Throws TypeError for any unrecognized attribute keys or unsupported type values.
+kj::Maybe<kj::StringPtr> parseImportAttributes(
+    Lock& js, v8::Local<v8::FixedArray> import_attributes) {
+  if (import_attributes.IsEmpty() || import_attributes->Length() == 0) {
+    return kj::none;
+  }
+  // V8 encodes import attributes as a FixedArray of triples: [key, value, location, ...]
+  kj::Maybe<kj::StringPtr> typeValue;
+  for (int i = 0; i < import_attributes->Length(); i += 3) {
+    auto key = js.toString(import_attributes->Get(i).As<v8::String>());
+    if (key == "type"_kj) {
+      auto value = js.toString(import_attributes->Get(i + 1).As<v8::String>());
+      if (value == "json"_kj) {
+        typeValue = "json"_kjc;
+      } else if (value == "text"_kj) {
+        typeValue = "text"_kjc;
+      } else if (value == "bytes"_kj) {
+        typeValue = "bytes"_kjc;
+      } else {
+        js.throwException(
+            js.typeError(kj::str("Unsupported import attribute type: \"", value, "\"")));
+      }
+    } else {
+      js.throwException(js.typeError(kj::str("Unsupported import attribute: \"", key, "\"")));
+    }
+  }
+  return typeValue;
+}
+
+// Validates that the resolved module's content type matches the import attribute "type" value.
+// Throws TypeError on mismatch. Does nothing if no type attribute was specified.
+void validateImportType(
+    Lock& js, kj::Maybe<kj::StringPtr> importType, const Module& module, kj::StringPtr specifier) {
+  KJ_IF_SOME(type, importType) {
+    // Import Text (TC39 Stage 3) and Import Bytes (TC39 Stage 2.7) are
+    // recognized but not yet supported. Text support is pending the proposal
+    // reaching Stage 4. Bytes support requires Uint8Array backed by an
+    // immutable ArrayBuffer, which is not yet implemented.
+    if (type == "text"_kj) {
+      js.throwException(js.typeError("Import attribute type \"text\" is not yet supported"_kj));
+    }
+    if (type == "bytes"_kj) {
+      js.throwException(js.typeError("Import attribute type \"bytes\" is not yet supported"_kj));
+    }
+
+    Module::ContentType expected = Module::ContentType::NONE;
+    if (type == "json"_kj) {
+      expected = Module::ContentType::JSON;
+    }
+    // TODO(later): Enable when Import Text (TC39) reaches Stage 4.
+    // else if (type == "text"_kj) {
+    //   expected = Module::ContentType::TEXT;
+    // }
+    // TODO(later): Enable when immutable ArrayBuffer is implemented.
+    // else if (type == "bytes"_kj) {
+    //   expected = Module::ContentType::DATA;
+    // }
+    if (module.contentType() != expected) {
+      js.throwException(
+          js.typeError(kj::str("Module \"", specifier, "\" is not of type \"", type, "\"")));
+    }
+  }
+}
 
 // Binds a ModuleRegistry to an Isolate.
 class IsolateModuleRegistry final {
@@ -385,13 +454,17 @@ class IsolateModuleRegistry final {
       Url normalizedSpecifier,
       Url referrer,
       kj::StringPtr rawSpecifier,
-      SourcePhase sourcePhase) {
-    static constexpr auto evaluate = [](Lock& js, Entry& entry, const CompilationObserver& observer,
-                                         const Module::Evaluator& maybeEvaluate) {
-      auto module = entry.key.getHandle(js);
+      SourcePhase sourcePhase,
+      kj::Maybe<kj::StringPtr> importType = kj::none) {
+    // Note: Takes v8::Local<v8::Module> and const Module& directly rather than
+    // Entry& for the same reason as require()'s evaluate lambda — the lookupCache
+    // table may rehash during evaluate(), invalidating Entry& references.
+    static constexpr auto evaluate =
+        [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef,
+            const CompilationObserver& observer, const Module::Evaluator& maybeEvaluate) {
       return js
           .toPromise(
-              check(entry.module.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>())
+              check(moduleDef.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>())
           .then(js, [module = js.v8Ref(module)](Lock& js, Value) mutable -> Promise<Value> {
         return js.resolvedPromise(js.v8Ref(module.getHandle(js)->GetModuleNamespace()));
       });
@@ -415,8 +488,21 @@ class IsolateModuleRegistry final {
       };
 
       auto handleFoundModule = [&](Entry& found) -> Promise<Value> {
-        auto evaluatePromise = evaluate(js, found, getObserver(), inner.getEvaluator());
-        auto isWasm = found.module.isWasm();
+        // Extract module handle and Module& before calling evaluate, since
+        // evaluate may trigger table rehashing that invalidates the Entry&.
+        auto v8Module = found.key.getHandle(js);
+        auto& moduleDef = found.module;
+
+        // Validate import type attribute against the resolved module's content type.
+        validateImportType(js, importType, moduleDef, rawSpecifier);
+
+        if (v8Module->GetStatus() == v8::Module::kErrored) {
+          return js.rejectedPromise<Value>(v8Module->GetException());
+        }
+
+        auto evaluatePromise =
+            evaluate(js, v8Module, moduleDef, getObserver(), inner.getEvaluator());
+        auto isWasm = moduleDef.isWasm();
 
         if (!sourcePhase) {
           return evaluatePromise;
@@ -442,8 +528,9 @@ class IsolateModuleRegistry final {
                   return js.v8Ref(defaultExport);
                 }
               }
-              KJ_FAIL_REQUIRE(v8::Exception::SyntaxError,
-                  "Source phase import not available for module: ", normalizedSpecifier.getHref());
+              js.throwException(js.v8Ref(v8::Exception::SyntaxError(
+                  js.str(kj::str("Source phase import not available for module: "_kj,
+                      normalizedSpecifier.getHref())))));
             });
           }
           return js.rejectedPromise<Value>(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(kj::str(
@@ -469,20 +556,74 @@ class IsolateModuleRegistry final {
   }
 
   enum class RequireOption {
-    DEFAULT,
-    RETURN_EMPTY,
+    DEFAULT = 0,
+    RETURN_EMPTY = 1 << 0,
+    NO_TOP_LEVEL_AWAIT = 1 << 1,
+    // When set, the default export is returned instead of the module namespace.
+    // This matches Node.js require() semantics where require() returns the
+    // default export (module.exports for CJS, default export for ESM builtins,
+    // parsed value for JSON, etc.).
+    UNWRAP_DEFAULT = 1 << 2,
   };
+
+  friend constexpr RequireOption operator|(RequireOption a, RequireOption b) {
+    return static_cast<RequireOption>(static_cast<int>(a) | static_cast<int>(b));
+  }
+  friend constexpr RequireOption operator&(RequireOption a, RequireOption b) {
+    return static_cast<RequireOption>(static_cast<int>(a) & static_cast<int>(b));
+  }
 
   // Used to implement the synchronous dynamic import of modules in support of APIs
   // like the CommonJS require. Returns the instantiated/evaluated module namespace.
   // If an empty v8::MaybeLocal is returned and the default option is given, then an
   // exception has been scheduled.
-  v8::MaybeLocal<v8::Object> require(
+  v8::MaybeLocal<v8::Value> require(
       Lock& js, const ResolveContext& context, RequireOption option = RequireOption::DEFAULT) {
-    static constexpr auto evaluate = [](Lock& js, Entry& entry, const Url& id,
-                                         const CompilationObserver& observer,
-                                         const Module::Evaluator& maybeEvaluate) {
-      auto module = entry.key.getHandle(js);
+    // Returns either the module namespace or, when UNWRAP_DEFAULT is set and
+    // the module is not ESM, the default export from the namespace. This matches
+    // Node.js require() semantics: require('esm') returns the namespace,
+    // require('data.json') returns the parsed value.
+    // When UNWRAP_DEFAULT is set, returns the default export for all module types
+    // except user bundle ESM, which returns the namespace (matching Node.js require(esm)
+    // behavior). Builtin ESM returns default because workerd wraps CJS-style APIs in
+    // ESM default exports. Synthetic modules (CJS, JSON, Text, etc.) return default
+    // because that's where their value lives.
+    static constexpr auto maybeUnwrapDefault =
+        [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef,
+            RequireOption option) -> v8::MaybeLocal<v8::Value> {
+      auto ns = module->GetModuleNamespace().As<v8::Object>();
+      if ((option & RequireOption::UNWRAP_DEFAULT) == RequireOption::UNWRAP_DEFAULT) {
+        // User bundle ESM returns the full namespace, matching Node.js require(esm),
+        // unless the module has __cjsUnwrapDefault set (a convention used by bundlers
+        // like esbuild when transpiling CJS to ESM), in which case we return the
+        // default export.
+        if (moduleDef.type() == Module::Type::BUNDLE && moduleDef.isEsm()) {
+          auto unwrap = ns->Get(js.v8Context(), js.strIntern("__cjsUnwrapDefault"_kj));
+          v8::Local<v8::Value> unwrapValue;
+          if (unwrap.ToLocal(&unwrapValue) && unwrapValue->BooleanValue(js.v8Isolate)) {
+            return check(ns->Get(js.v8Context(), js.strIntern("default"_kj)));
+          }
+          return ns;
+        }
+        // Everything else (builtins, synthetic modules) returns the default export.
+        // Note: The default export may be a primitive (e.g. Text module returns a string).
+        // We cast to v8::Object here because require() returns MaybeLocal<Object>, but
+        // callers immediately convert to JsValue. The cast is safe because v8::Local is
+        // just a pointer wrapper.
+        return check(ns->Get(js.v8Context(), js.strIntern("default"_kj)));
+      }
+      return ns;
+    };
+
+    // Note: This lambda takes v8::Local<v8::Module> and const Module& directly
+    // rather than Entry& because the lookupCache table may rehash during
+    // ensureInstantiated() or evaluate() (when V8 resolves static import
+    // dependencies via resolveModuleCallback -> resolveWithCaching -> upsert),
+    // which would invalidate any Entry& reference into the table.
+    static constexpr auto evaluate =
+        [](Lock& js, v8::Local<v8::Module> module, const Module& moduleDef, const Url& id,
+            const CompilationObserver& observer, const Module::Evaluator& maybeEvaluate,
+            RequireOption option) -> v8::MaybeLocal<v8::Value> {
       auto status = module->GetStatus();
 
       // If status is kErrored, that means a prior attempt to evaluate the module
@@ -496,7 +637,7 @@ class IsolateModuleRegistry final {
       // because v8 will not allow us to grab the default export while the module
       // is still evaluating.
 
-      if (entry.module.isEsm() && status == v8::Module::kEvaluating) {
+      if (moduleDef.isEsm() && status == v8::Module::kEvaluating) {
         JSG_FAIL_REQUIRE(Error, "Circular dependency when resolving module: ", id);
       }
 
@@ -508,45 +649,66 @@ class IsolateModuleRegistry final {
       // to a degree. Just like in Node.js, however, such circular dependencies
       // can still be problematic depending on how they are used.
       if (status == v8::Module::kEvaluated || status == v8::Module::kEvaluating) {
-        return module->GetModuleNamespace().As<v8::Object>();
+        return maybeUnwrapDefault(js, module, moduleDef, option);
+      }
+
+      // Matches the require(esm) behavior implemented in Node.js, which is to
+      // throw if the module being imported uses top-level await.
+      if ((option & RequireOption::NO_TOP_LEVEL_AWAIT) == RequireOption::NO_TOP_LEVEL_AWAIT) {
+        // We have to ensure the module is instantiated before we can check for top-level await.
+        JSG_REQUIRE(ensureInstantiated(js, module, observer, moduleDef), Error,
+            "Failed to instantiate module: ", id);
+        JSG_REQUIRE(!module->IsGraphAsync(), Error,
+            "Top-level await is not supported in this context for module: ", id);
       }
 
       // Evaluate the module and grab the default export from the module namespace.
       auto promise =
-          check(entry.module.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>();
+          check(moduleDef.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>();
 
       // Run the microtasks to ensure that any promises that happen to be scheduled
-      // during the evaluation of the top-level scope have a chance to be settled,
-      js.runMicrotasks();
+      // during the evaluation of the top-level scope have a chance to be settled.
+      // We only pump the microtasks queue if NO_TOP_LEVEL_AWAIT is not set.
+      if ((option & RequireOption::NO_TOP_LEVEL_AWAIT) != RequireOption::NO_TOP_LEVEL_AWAIT) {
+        js.runMicrotasks();
 
-      static const auto kTopLevelAwaitError =
-          "Use of top-level await in a synchronously required module is restricted to "
-          "promises that are resolved synchronously. This includes any top-level awaits "
-          "in the entrypoint module for a worker."_kj;
+        static const auto kTopLevelAwaitError =
+            "Use of top-level await in a synchronously required module is restricted to "
+            "promises that are resolved synchronously. This includes any top-level awaits "
+            "in the entrypoint module for a worker."_kj;
 
-      switch (promise->State()) {
-        case v8::Promise::kFulfilled: {
-          // This is what we want. The module namespace should be fully populated
-          // and evaluated at this point.
-          return module->GetModuleNamespace().As<v8::Object>();
+        switch (promise->State()) {
+          case v8::Promise::kFulfilled: {
+            // This is what we want. The module namespace should be fully populated
+            // and evaluated at this point.
+            return maybeUnwrapDefault(js, module, moduleDef, option);
+          }
+          case v8::Promise::kRejected: {
+            // Oops, there was an error. We should throw it.
+            js.throwException(JsValue(promise->Result()));
+            break;
+          }
+          case v8::Promise::kPending: {
+            // The module evaluation could not complete in a single drain of the
+            // microtask queue. This means we've got a pending promise somewhere
+            // that is being awaited preventing the module from being ready to
+            // go. We can't have that! Throw! Throw!
+            JSG_FAIL_REQUIRE(Error, kTopLevelAwaitError, " Specifier: \"", id, "\".");
+          }
         }
-        case v8::Promise::kRejected: {
-          // Oops, there was an error. We should throw it.
+      } else {
+        KJ_ASSERT(!module->IsGraphAsync() && promise->State() != v8::Promise::kPending,
+            "Top-level await is not supported in this context, so the module promise "
+            "should never be pending");
+        if (promise->State() == v8::Promise::kRejected) {
           js.throwException(JsValue(promise->Result()));
-          break;
         }
-        case v8::Promise::kPending: {
-          // The module evaluation could not complete in a single drain of the
-          // microtask queue. This means we've got a pending promise somewhere
-          // that is being awaited preventing the module from being ready to
-          // go. We can't have that! Throw! Throw!
-          JSG_FAIL_REQUIRE(Error, kTopLevelAwaitError, " Specifier: \"", id, "\".");
-        }
+        return maybeUnwrapDefault(js, module, moduleDef, option);
       }
       KJ_UNREACHABLE;
     };
 
-    return js.tryCatch([&]() -> v8::MaybeLocal<v8::Object> {
+    return js.tryCatch([&]() -> v8::MaybeLocal<v8::Value> {
       KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, context.normalizedSpecifier.getHref())) {
         ResolveContext newContext{
           .type = ResolveContext::Type::BUILTIN_ONLY,
@@ -560,23 +722,29 @@ class IsolateModuleRegistry final {
 
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
-        return evaluate(
-            js, found, context.normalizedSpecifier, getObserver(), inner.getEvaluator());
+        // Extract module handle and Module& before calling evaluate, since
+        // evaluate may trigger table rehashing that invalidates the Entry&.
+        auto foundModule = found.key.getHandle(js);
+        auto& foundModuleDef = found.module;
+        return evaluate(js, foundModule, foundModuleDef, context.normalizedSpecifier, getObserver(),
+            inner.getEvaluator(), option);
       }
 
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
-        return evaluate(
-            js, found, context.normalizedSpecifier, getObserver(), inner.getEvaluator());
+        auto foundModule = found.key.getHandle(js);
+        auto& foundModuleDef = found.module;
+        return evaluate(js, foundModule, foundModuleDef, context.normalizedSpecifier, getObserver(),
+            inner.getEvaluator(), option);
       }
 
-      if (option == RequireOption::RETURN_EMPTY) {
-        return v8::MaybeLocal<v8::Object>();
+      if ((option & RequireOption::RETURN_EMPTY) == RequireOption::RETURN_EMPTY) {
+        return {};
       }
       JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.normalizedSpecifier.getHref()));
-    }, [&](Value exception) {
+    }, [&](Value exception) -> v8::MaybeLocal<v8::Object> {
       // Use the isolate to rethrow the exception here instead of using the lock.
       js.v8Isolate->ThrowException(exception.getHandle(js));
-      return v8::MaybeLocal<v8::Object>();
+      return {};
     });
   }
 
@@ -678,22 +846,20 @@ class IsolateModuleRegistry final {
 
 v8::MaybeLocal<v8::Value> SyntheticModule::evaluationSteps(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
-  try {
-    auto& js = Lock::current();
+  auto& js = Lock::current();
+  KJ_TRY {
     auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
-
     KJ_IF_SOME(found, registry.lookup(js, module)) {
-      return found.module.evaluate(
-          js, module, registry.getObserver(), registry.inner.getEvaluator());
+      return found.module.actuallyEvaluate(js, module, registry.getObserver());
     }
-
-    // This case really should never actually happen but we handle it anyway.
     KJ_LOG(ERROR, "Synthetic module not found in registry for evaluation");
-
     js.v8Isolate->ThrowError(js.str("Requested module does not exist"_kj));
-    return v8::MaybeLocal<v8::Value>();
-  } catch (...) {
-    kj::throwFatalException(kj::getCaughtExceptionAsKj());
+    return {};
+  }
+  KJ_CATCH(exception) {
+    auto ex = js.exceptionToJsValue(kj::mv(exception));
+    js.v8Isolate->ThrowException(ex.getHandle(js));
+    return {};
   }
 }
 
@@ -778,27 +944,19 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
     v8::Local<v8::Promise::Resolver> resolver;
     if (!v8::Promise::Resolver::New(js.v8Context()).ToLocal(&resolver) ||
         resolver->Reject(js.v8Context(), error).IsNothing()) {
-      return v8::MaybeLocal<v8::Promise>();
+      return {};
     }
     return resolver->GetPromise();
   };
 
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
-  try {
+  KJ_TRY {
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Promise> {
       auto spec = specifierToString(js, specifier);
 
-      // The proposed specification for import attributes strongly recommends that
-      // embedders reject import attributes and types they do not understand/implement.
-      // This is because import attributes can alter the interpretation of a module.
-      // Throwing an error for things we do not understand is the safest thing to do
-      // for backwards compatibility.
-      //
-      // For now, we do not support any import attributes, so if there are any at all
-      // we will reject the import.
-      if (!import_attributes.IsEmpty() && import_attributes->Length() > 0) {
-        return rejected(js, js.typeError("Import attributes are not supported"));
-      };
+      // Parse import attributes. Throws for unrecognized attribute keys.
+      // Returns the "type" value if specified, or kj::none.
+      auto importType = parseImportAttributes(js, import_attributes);
 
       Url referrer = ([&] {
         if (resource_name.IsEmpty()) {
@@ -820,13 +978,12 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
       KJ_IF_SOME(processUrl, maybeRedirectNodeProcess(js, spec.asPtr())) {
         auto processSpec = kj::str(processUrl.getHref());
         return registry.dynamicResolve(
-            js, processUrl.clone(), kj::mv(referrer), processSpec, isSourcePhase);
+            js, processUrl.clone(), kj::mv(referrer), processSpec, isSourcePhase, importType);
       }
 
       KJ_IF_SOME(url, referrer.tryResolve(spec.asPtr())) {
-        auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-        return registry.dynamicResolve(
-            js, kj::mv(normalized), kj::mv(referrer), spec, isSourcePhase);
+        return registry.dynamicResolve(js, url.clone(Url::EquivalenceOption::NORMALIZE_PATH),
+            kj::mv(referrer), spec, isSourcePhase, importType);
       }
 
       // We were not able to parse the specifier. We'll return a rejected promise.
@@ -838,8 +995,10 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
       // anyway.
       return rejected(js, jsg::JsValue(exception.getHandle(js)));
     });
-  } catch (...) {
-    kj::throwFatalException(kj::getCaughtExceptionAsKj());
+  }
+  KJ_CATCH(exception) {
+    auto ex = js.exceptionToJsValue(kj::mv(exception));
+    return rejected(js, ex.getHandle(js));
   }
 }
 
@@ -899,19 +1058,20 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
     // Throwing an error for things we do not understand is the safest thing to do
     // for backwards compatibility.
     //
-    // For now, we do not support any import attributes, so if there are any at all
-    // we will reject the import.
-    if (!import_attributes.IsEmpty() && import_attributes->Length() > 0) {
-      js.throwException(js.typeError("Import attributes are not supported"));
-    }
+    // Parse import attributes. Throws for unrecognized attribute keys.
+    auto importType = parseImportAttributes(js, import_attributes);
 
     ResolveContext::Type type = ResolveContext::Type::BUNDLE;
 
-    auto& referrerUrl = registry.lookup(js, referrer)
-                            .map([&](IsolateModuleRegistry::Entry& entry) -> const Url& {
+    // Clone the referrer URL out of the lookup cache entry rather than holding
+    // a reference into it. The lookupCache table may rehash during resolve()
+    // (via resolveWithCaching -> upsert), which would invalidate any reference
+    // into the table's storage.
+    Url referrerUrl = registry.lookup(js, referrer)
+                          .map([&](IsolateModuleRegistry::Entry& entry) -> Url {
       type = moduleTypeToResolveContextType(entry.module.type());
-      return entry.context.id;
-    }).orDefault(registry.getBundleBase());
+      return entry.context.id.clone();
+    }).orDefault(registry.getBundleBase().clone());
 
     // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
     // is a bare node specifier and resolve it to a full node: URL.
@@ -932,8 +1092,25 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
           .referrerNormalizedSpecifier = referrerUrl,
           .rawSpecifier = processSpec.asPtr(),
         };
-
-        return registry.resolve(js, resolveContext);
+        auto maybeResolved = registry.resolve(js, resolveContext);
+        v8::Local<v8::Module> resolved;
+        if (!maybeResolved.ToLocal(&resolved)) {
+          return {};
+        }
+        if (resolved->GetStatus() == v8::Module::kErrored) {
+          js.throwException(JsValue(resolved->GetException()));
+          return {};
+        }
+        if (resolved->GetStatus() == v8::Module::kEvaluating) {
+          js.throwException(
+              js.typeError(kj::str("Circular dependency when resolving module: ", spec)));
+          return {};
+        }
+        // Validate import type attribute against the resolved module's content type.
+        KJ_IF_SOME(entry, registry.lookup(js, resolved)) {
+          validateImportType(js, importType, entry.module, spec);
+        }
+        return resolved;
       }
     }
 
@@ -949,11 +1126,27 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
       };
 
       auto maybeResolved = registry.resolve(js, resolveContext);
-      if (maybeResolved.IsEmpty()) {
+
+      v8::Local<v8::Module> resolved;
+      if (!maybeResolved.ToLocal(&resolved)) {
+        return {};
+      }
+
+      // If the resolved module is in an errored state, we will rethrow the same exception here.
+      if (resolved->GetStatus() == v8::Module::kErrored) {
+        js.throwException(JsValue(resolved->GetException()));
+        return {};
+      }
+      if (resolved->GetStatus() == v8::Module::kEvaluating) {
+        js.throwException(
+            js.typeError(kj::str("Circular dependency when resolving module: ", spec)));
         return v8::MaybeLocal<ReturnType>();
       }
 
-      auto resolved = check(maybeResolved);
+      // Validate import type attribute against the resolved module's content type.
+      KJ_IF_SOME(entry, registry.lookup(js, resolved)) {
+        validateImportType(js, importType, entry.module, spec);
+      }
 
       if constexpr (!IsSourcePhase) {
         return resolved;
@@ -968,35 +1161,42 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
           // with the compiled record, so that we can just directly read `sourceObject_` off of
           // entry.module instead.
           if (entry.module.isWasm()) {
-            v8::Local<v8::Object> moduleNamespace;
+            v8::Local<v8::Value> moduleNamespace;
             if (registry
                     .require(js, resolveContext, IsolateModuleRegistry::RequireOption::RETURN_EMPTY)
                     .ToLocal(&moduleNamespace)) {
               v8::Local<v8::Value> defaultExport;
-              if (moduleNamespace->Get(js.v8Context(), js.strIntern("default"_kj))
+              if (moduleNamespace.As<v8::Object>()
+                      ->Get(js.v8Context(), js.strIntern("default"_kj))
                       .ToLocal(&defaultExport)) {
                 if (defaultExport->IsWasmModuleObject()) {
                   return defaultExport.As<v8::Object>();
                 }
               }
             }
+            // If require() failed with an exception (e.g. WASM compilation error),
+            // propagate that instead of masking it with the generic message below.
+            if (js.v8Isolate->HasPendingException()) {
+              return {};
+            }
           }
         }
         js.throwException(js.v8Ref(v8::Exception::SyntaxError(
-            js.strIntern(kj::str("Source phase import not available for module: "_kj, spec)))));
-        return v8::MaybeLocal<ReturnType>();
+            js.str(kj::str("Source phase import not available for module: "_kj, spec)))));
+        return {};
       }
+      KJ_UNREACHABLE;
     }
 
     js.throwException(js.error(kj::str("Invalid module specifier: "_kj, specifier)));
-    return v8::MaybeLocal<ReturnType>();
+    return {};
   }, [&](Value exception) -> v8::MaybeLocal<ReturnType> {
     // If there are any synchronously thrown exceptions, we want to catch them
     // here and convert them into a rejected promise. The only exception are
     // fatal cases where the isolate is terminating which won't make it here
     // anyway.
     js.v8Isolate->ThrowException(exception.getHandle(js));
-    return v8::MaybeLocal<ReturnType>();
+    return {};
   });
 }
 
@@ -1333,15 +1533,17 @@ const jsg::Url processModuleName(kj::StringPtr name, const jsg::Url& base) {
 
 }  // namespace
 
-ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
-    kj::StringPtr name, EvaluateCallback callback, kj::Array<kj::String> namedExports) {
+ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(kj::StringPtr name,
+    EvaluateCallback callback,
+    kj::Array<kj::String> namedExports,
+    Module::ContentType contentType) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
       [url = url.clone(), callback = kj::mv(callback), namedExports = kj::mv(namedExports),
-          type = type()](const ResolveContext& context) mutable
+          type = type(), contentType](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod =
-        Module::newSynthetic(kj::mv(url), type, kj::mv(callback), kj::mv(namedExports));
+    kj::Own<Module> mod = Module::newSynthetic(kj::mv(url), type, kj::mv(callback),
+        kj::mv(namedExports), Module::Flags::NONE, contentType);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -1380,8 +1582,8 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(
       [url = url.clone(), callback = kj::mv(callback), type = type()](
           const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod =
-        Module::newSynthetic(kj::mv(url), type, kj::mv(callback), nullptr, EsModule::Flags::WASM);
+    kj::Own<Module> mod = Module::newSynthetic(kj::mv(url), type, kj::mv(callback), nullptr,
+        EsModule::Flags::WASM, Module::ContentType::WASM);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -1469,7 +1671,7 @@ ModuleRegistry::ModuleRegistry(ModuleRegistry::Builder* builder)
       maybeEvalCallback(kj::mv(builder->maybeEvalCallback)),
       schemaLoader(kj::mv(builder->schemaLoader)) {}
 
-kj::Maybe<jsg::Promise<Value>> ModuleRegistry::evaluateImpl(jsg::Lock& js,
+kj::Maybe<jsg::JsPromise> ModuleRegistry::evaluateImpl(jsg::Lock& js,
     const Module& module,
     v8::Local<v8::Module> v8Module,
     const CompilationObserver& observer) const {
@@ -1600,11 +1802,12 @@ kj::Maybe<const Module&> ModuleRegistry::lookup(const ResolveContext& context) c
   return kj::none;
 }
 
-kj::Maybe<JsObject> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
+kj::Maybe<JsValue> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
     kj::StringPtr specifier,
     ResolveContext::Type type,
     ResolveContext::Source source,
-    kj::Maybe<const Url&> maybeReferrer) {
+    kj::Maybe<const Url&> maybeReferrer,
+    UnwrapDefault unwrapDefault) {
   auto& bound = IsolateModuleRegistry::from(js.v8Isolate);
   auto url = ([&] {
     KJ_IF_SOME(referrer, maybeReferrer) {
@@ -1621,13 +1824,23 @@ kj::Maybe<JsObject> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
     .rawSpecifier = specifier,
   };
   v8::TryCatch tryCatch(js.v8Isolate);
-  auto ns = bound.require(js, context, IsolateModuleRegistry::RequireOption::RETURN_EMPTY);
+  auto option = IsolateModuleRegistry::RequireOption::RETURN_EMPTY;
+  // Following the behavior of Node.js' require(esm) implementation, we disallow top-level await
+  // in synchronously required modules.
+  if (source == ResolveContext::Source::REQUIRE) {
+    option = option | IsolateModuleRegistry::RequireOption::NO_TOP_LEVEL_AWAIT;
+  }
+  if (unwrapDefault == UnwrapDefault::YES) {
+    option = option | IsolateModuleRegistry::RequireOption::UNWRAP_DEFAULT;
+  }
+
+  auto ns = bound.require(js, context, option);
   if (tryCatch.HasCaught()) {
     tryCatch.ReThrow();
     throw JsExceptionThrown();
   }
   if (ns.IsEmpty()) return kj::none;
-  return JsObject(check(ns));
+  return JsValue(check(ns));
 }
 
 JsValue ModuleRegistry::resolve(Lock& js,
@@ -1636,7 +1849,8 @@ JsValue ModuleRegistry::resolve(Lock& js,
     ResolveContext::Type type,
     ResolveContext::Source source,
     kj::Maybe<const Url&> maybeReferrer) {
-  KJ_IF_SOME(ns, tryResolveModuleNamespace(js, specifier, type, source, maybeReferrer)) {
+  KJ_IF_SOME(val, tryResolveModuleNamespace(js, specifier, type, source, maybeReferrer)) {
+    auto ns = KJ_ASSERT_NONNULL(val.tryCast<JsObject>());
     return ns.get(js, exportName);
   }
   JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", specifier));
@@ -1644,9 +1858,13 @@ JsValue ModuleRegistry::resolve(Lock& js,
 
 // ======================================================================================
 
-Module::Module(Url id, Type type, Flags flags): id_(kj::mv(id)), type_(type), flags_(flags) {}
+Module::Module(Url id, Type type, Flags flags, ContentType contentType)
+    : id_(kj::mv(id)),
+      type_(type),
+      flags_(flags),
+      contentType_(contentType) {}
 
-kj::Maybe<jsg::Promise<Value>> Module::Evaluator::operator()(jsg::Lock& js,
+kj::Maybe<jsg::JsPromise> Module::Evaluator::operator()(jsg::Lock& js,
     const Module& module,
     v8::Local<v8::Module> v8Module,
     const CompilationObserver& observer) const {
@@ -1689,9 +1907,14 @@ bool Module::evaluateContext(const ResolveContext& context) const {
   return true;
 }
 
-kj::Own<Module> Module::newSynthetic(
-    Url id, Type type, EvaluateCallback callback, kj::Array<kj::String> namedExports, Flags flags) {
-  return kj::heap<SyntheticModule>(kj::mv(id), type, kj::mv(callback), kj::mv(namedExports), flags);
+kj::Own<Module> Module::newSynthetic(Url id,
+    Type type,
+    EvaluateCallback callback,
+    kj::Array<kj::String> namedExports,
+    Flags flags,
+    ContentType contentType) {
+  return kj::heap<SyntheticModule>(
+      kj::mv(id), type, kj::mv(callback), kj::mv(namedExports), flags, contentType);
 }
 
 kj::Own<Module> Module::newEsm(Url id, Type type, kj::Array<const char> code, Flags flags) {

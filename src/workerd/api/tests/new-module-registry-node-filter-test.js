@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 // Test that per-module Node.js feature flag filtering works with the new
 // module registry. node:repl is behind enable_nodejs_repl_module which has
 // no enable date before 2026-03-17. With the compat flag

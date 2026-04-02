@@ -23,6 +23,35 @@ namespace {
 // Header for the message format.
 static constexpr kj::StringPtr HDR_MSG_FORMAT = "X-Msg-Fmt"_kj;
 
+// The upstream service sends 0 when there is "no data" available on a timestamp field (e.g. no `oldestMessageTimestamp`).
+// This method converts it to kj::none so users see `undefined`.
+void clearEpochSentinel(jsg::Optional<kj::Date>& ts) {
+  KJ_IF_SOME(date, ts) {
+    if (date == kj::UNIX_EPOCH) {
+      ts = kj::none;
+    }
+  }
+}
+
+// Returns a callback suitable for IoContext::awaitIo() that parses a JSON response string into
+// a typed struct via the given TypeHandler, then clears the epoch sentinel on
+// oldestMessageTimestamp.
+//
+// The returned callback captures `handler` by reference. TypeHandler instances are managed by
+// the JSG type registration system and live for the lifetime of the isolate, so this is safe.
+//
+// getOldestMessageTimestamp: (T&) -> jsg::Optional<kj::Date>&
+template <typename T>
+auto parseQueueResponse(
+    const jsg::TypeHandler<T>& handler, kj::StringPtr errorMsg, auto getOldestMessageTimestamp) {
+  return [&handler, errorMsg, getOldestMessageTimestamp](jsg::Lock& js, kj::String text) -> T {
+    auto parsed = jsg::JsValue::fromJson(js, text);
+    auto result = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, parsed), Error, errorMsg, text);
+    clearEpochSentinel(getOldestMessageTimestamp(result));
+    return kj::mv(result);
+  };
+}
+
 // Header for the message delivery delay.
 static constexpr kj::StringPtr HDR_MSG_DELAY = "X-Msg-Delay-Secs"_kj;
 
@@ -243,6 +272,71 @@ kj::Promise<void> WorkerQueue::send(
       .attach(context.registerPendingEvent());
 };
 
+jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::sendWithResponse(jsg::Lock& js,
+    jsg::JsValue body,
+    jsg::Optional<SendOptions> options,
+    const jsg::TypeHandler<SendResponse>& responseHandler) {
+  auto& context = IoContext::current();
+
+  JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
+
+  auto headers = kj::HttpHeaders(context.getHeaderTable());
+  headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::OCTET_STREAM.toString());
+
+  kj::Maybe<kj::StringPtr> contentType;
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(type, opts.contentType) {
+      auto validatedType = validateContentType(type);
+      headers.addPtrPtr(HDR_MSG_FORMAT, validatedType);
+      contentType = validatedType;
+    }
+    KJ_IF_SOME(secs, opts.delaySeconds) {
+      headers.addPtr(HDR_MSG_DELAY, kj::str(secs));
+    }
+  }
+
+  Serialized serialized;
+  KJ_IF_SOME(type, contentType) {
+    serialized = serialize(js, body, type, SerializeArrayBufferBehavior::DEEP_COPY);
+  } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
+    headers.addPtrPtr("X-Msg-Fmt", IncomingQueueMessage::ContentType::JSON);
+    serialized = serialize(
+        js, body, IncomingQueueMessage::ContentType::JSON, SerializeArrayBufferBehavior::DEEP_COPY);
+  } else {
+    serialized = serializeV8(js, body);
+  }
+
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  auto req = client->request(
+      kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
+
+  const auto& headerIds = context.getHeaderIds();
+  const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
+
+  static constexpr auto handleSend = [](auto req, auto serialized, auto client, auto& headerIds,
+                                         bool exposeErrorCodes) -> kj::Promise<kj::String> {
+    co_await req.body->write(serialized.data);
+    auto response = co_await req.response;
+
+    if (exposeErrorCodes) {
+      JSG_REQUIRE(response.statusCode == 200, Error, buildQueueErrorMessage(response, headerIds));
+    } else {
+      JSG_REQUIRE(
+          response.statusCode == 200, Error, kj::str("Queue send failed: ", response.statusText));
+    }
+
+    auto responseBody = co_await response.body->readAllBytes();
+    co_return kj::str(responseBody.asChars());
+  };
+
+  auto promise =
+      handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes);
+
+  return context.awaitIo(js, kj::mv(promise),
+      parseQueueResponse(responseHandler, "Failed to parse queue send response"_kj,
+          [](SendResponse& r) -> auto& { return r.metadata.metrics.oldestMessageTimestamp; }));
+}
+
 kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
     jsg::Sequence<MessageSendRequest> batch,
     jsg::Optional<SendBatchOptions> options) {
@@ -362,6 +456,143 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
       .attach(context.registerPendingEvent());
 };
 
+jsg::Promise<WorkerQueue::Metrics> WorkerQueue::metrics(
+    jsg::Lock& js, const jsg::TypeHandler<Metrics>& metricsHandler) {
+  auto& context = IoContext::current();
+
+  auto headers = kj::HttpHeaders(context.getHeaderTable());
+
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_metrics"_kjc);
+  auto req = client->request(kj::HttpMethod::GET, "https://fake-host/metrics"_kjc, headers);
+  const auto& headerIds = context.getHeaderIds();
+
+  static constexpr auto handleMetrics = [](auto req, auto client,
+                                            auto& headerIds) -> kj::Promise<kj::String> {
+    auto response = co_await req.response;
+
+    JSG_REQUIRE(response.statusCode == 200, Error, buildQueueErrorMessage(response, headerIds));
+
+    co_return co_await response.body->readAllText();
+  };
+
+  auto promise = handleMetrics(kj::mv(req), kj::mv(client), headerIds);
+
+  return context.awaitIo(js, kj::mv(promise),
+      parseQueueResponse(metricsHandler, "Failed to parse queue metrics response"_kj,
+          [](Metrics& m) -> auto& { return m.oldestMessageTimestamp; }));
+}
+
+jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatchWithResponse(jsg::Lock& js,
+    jsg::Sequence<MessageSendRequest> batch,
+    jsg::Optional<SendBatchOptions> options,
+    const jsg::TypeHandler<SendBatchResponse>& responseHandler) {
+  auto& context = IoContext::current();
+
+  JSG_REQUIRE(batch.size() > 0, TypeError, "sendBatch() requires at least one message");
+
+  size_t totalSize = 0;
+  size_t largestMessage = 0;
+  auto messageCount = batch.size();
+  auto builder = kj::heapArrayBuilder<SerializedWithOptions>(messageCount);
+  for (auto& message: batch) {
+    auto body = message.body.getHandle(js);
+    JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
+
+    SerializedWithOptions item;
+    KJ_IF_SOME(secs, message.delaySeconds) {
+      item.delaySeconds = secs;
+    }
+
+    KJ_IF_SOME(contentType, message.contentType) {
+      item.contentType = validateContentType(contentType);
+      item.body = serialize(js, body, contentType, SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
+    } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
+      item.contentType = IncomingQueueMessage::ContentType::JSON;
+      item.body = serialize(js, body, IncomingQueueMessage::ContentType::JSON,
+          SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
+    } else {
+      item.body = serializeV8(js, body);
+    }
+
+    builder.add(kj::mv(item));
+    totalSize += builder.back().body.data.size();
+    largestMessage = kj::max(largestMessage, builder.back().body.data.size());
+  }
+  auto serializedBodies = builder.finish();
+
+  auto estimatedSize = (totalSize + 2) / 3 * 4 + messageCount * 64 + 32;
+  kj::Vector<char> bodyBuilder(estimatedSize);
+  bodyBuilder.addAll("{\"messages\":["_kj);
+  for (size_t i = 0; i < messageCount; ++i) {
+    bodyBuilder.addAll("{\"body\":\""_kj);
+    bodyBuilder.addAll(kj::encodeBase64(serializedBodies[i].body.data));
+    bodyBuilder.add('"');
+
+    KJ_IF_SOME(contentType, serializedBodies[i].contentType) {
+      bodyBuilder.addAll(",\"contentType\":\""_kj);
+      bodyBuilder.addAll(contentType);
+      bodyBuilder.add('"');
+    }
+
+    KJ_IF_SOME(delaySecs, serializedBodies[i].delaySeconds) {
+      bodyBuilder.addAll(",\"delaySecs\": "_kj);
+      bodyBuilder.addAll(kj::str(delaySecs));
+    }
+
+    bodyBuilder.addAll("}"_kj);
+    if (i < messageCount - 1) {
+      bodyBuilder.add(',');
+    }
+  }
+  bodyBuilder.addAll("]}"_kj);
+  bodyBuilder.add('\0');
+  KJ_DASSERT(bodyBuilder.size() <= estimatedSize);
+  kj::String body(bodyBuilder.releaseAsArray());
+  KJ_DASSERT(jsg::JsValue::fromJson(js, body).isObject());
+
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+
+  auto headers = kj::HttpHeaders(context.getHeaderTable());
+  headers.addPtr("CF-Queue-Batch-Count"_kj, kj::str(messageCount));
+  headers.addPtr("CF-Queue-Batch-Bytes"_kj, kj::str(totalSize));
+  headers.addPtr("CF-Queue-Largest-Msg"_kj, kj::str(largestMessage));
+  headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
+
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(secs, opts.delaySeconds) {
+      headers.addPtr(HDR_MSG_DELAY, kj::str(secs));
+    }
+  }
+
+  auto req =
+      client->request(kj::HttpMethod::POST, "https://fake-host/batch"_kjc, headers, body.size());
+
+  const auto& headerIds = context.getHeaderIds();
+  const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
+  static constexpr auto handleWrite = [](auto req, auto body, auto client, auto& headerIds,
+                                          bool exposeErrorCodes) -> kj::Promise<kj::String> {
+    co_await req.body->write(body.asBytes());
+    auto response = co_await req.response;
+
+    if (exposeErrorCodes) {
+      JSG_REQUIRE(response.statusCode == 200, Error, buildQueueErrorMessage(response, headerIds));
+    } else {
+      JSG_REQUIRE(response.statusCode == 200, Error,
+          kj::str("Queue sendBatch failed: ", response.statusText));
+    }
+
+    auto responseBody = co_await response.body->readAllBytes();
+    co_return kj::str(responseBody.asChars());
+  };
+
+  auto promise =
+      handleWrite(kj::mv(req), kj::mv(body), kj::mv(client), headerIds, exposeErrorCodes);
+
+  return context.awaitIo(js, kj::mv(promise),
+      parseQueueResponse(responseHandler, "Failed to parse queue send response"_kj,
+          [](SendBatchResponse& r) -> auto& { return r.metadata.metrics.oldestMessageTimestamp; }));
+}
+
 QueueMessage::QueueMessage(
     jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result)
     : id(kj::str(message.getId())),
@@ -445,12 +676,31 @@ QueueEvent::QueueEvent(
     messagesBuilder.add(js.alloc<QueueMessage>(js, incoming[i], result));
   }
   messages = messagesBuilder.finish();
+
+  // Extract metadata. If the sender didn't set the field, capnp defaults all to the zero values.
+  auto m = params.getMetadata().getMetrics();
+  jsg::Optional<kj::Date> oldestTimestamp;
+  if (m.getOldestMessageTimestamp() != 0) {
+    oldestTimestamp =
+        kj::UNIX_EPOCH + static_cast<int64_t>(m.getOldestMessageTimestamp()) * kj::MILLISECONDS;
+  }
+  metadata = MessageBatchMetadata{
+    .metrics =
+        MessageBatchMetrics{
+          .backlogCount = m.getBacklogCount(),
+          .backlogBytes = m.getBacklogBytes(),
+          .oldestMessageTimestamp = oldestTimestamp,
+        },
+  };
 }
 
 QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> result)
     : ExtendableEvent("queue"),
       queueName(kj::mv(params.queueName)),
+      metadata(kj::mv(params.metadata)),
       result(result) {
+  clearEpochSentinel(metadata.metrics.oldestMessageTimestamp);
+
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(params.messages.size());
   for (auto i: kj::indices(params.messages)) {
     messagesBuilder.add(js.alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
@@ -742,6 +992,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
     KJ_CASE_ONEOF(p, rpc::EventDispatcher::QueueParams::Reader) {
       req.setQueueName(p.getQueueName());
       req.setMessages(p.getMessages());
+      req.setMetadata(p.getMetadata());
     }
     KJ_CASE_ONEOF(p, QueueEvent::Params) {
       req.setQueueName(p.queueName);
@@ -754,6 +1005,15 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
           messages[i].setContentType(contentType);
         }
         messages[i].setAttempts(p.messages[i].attempts);
+      }
+      {
+        auto metadataBuilder = req.initMetadata();
+        auto metricsBuilder = metadataBuilder.initMetrics();
+        metricsBuilder.setBacklogCount(p.metadata.metrics.backlogCount);
+        metricsBuilder.setBacklogBytes(p.metadata.metrics.backlogBytes);
+        KJ_IF_SOME(ts, p.metadata.metrics.oldestMessageTimestamp) {
+          metricsBuilder.setOldestMessageTimestamp((ts - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        }
       }
     }
   }

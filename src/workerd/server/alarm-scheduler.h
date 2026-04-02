@@ -17,27 +17,22 @@
 
 namespace workerd::server {
 
-using byte = kj::byte;
-
 struct ActorKey {
-  kj::StringPtr uniqueKey;
   kj::StringPtr actorId;
 
   bool operator==(const ActorKey& other) const {
-    return uniqueKey == other.uniqueKey && actorId == other.actorId;
+    return actorId == other.actorId;
   }
 
   kj::Own<ActorKey> clone() const {
-    auto ownUniqueKey = kj::str(uniqueKey);
     auto ownActorId = kj::str(actorId);
 
-    return kj::attachVal(ActorKey{.uniqueKey = ownUniqueKey, .actorId = ownActorId},
-        kj::mv(ownUniqueKey), kj::mv(ownActorId));
+    return kj::attachVal(ActorKey{.actorId = ownActorId}, kj::mv(ownActorId));
   }
 };
 
 inline uint KJ_HASHCODE(const ActorKey& k) {
-  return kj::hashCode(k.uniqueKey, k.actorId);
+  return kj::hashCode(k.actorId);
 }
 
 // Allows scheduling alarm executions at specific times, returning a promise representing
@@ -60,25 +55,22 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
 
   using GetActorFn = kj::Function<kj::Own<WorkerInterface>(kj::String)>;
 
-  AlarmScheduler(
-      const kj::Clock& clock, kj::Timer& timer, const SqliteDatabase::Vfs& vfs, kj::Path path);
+  AlarmScheduler(const kj::Clock& clock,
+      kj::Timer& timer,
+      const SqliteDatabase::Vfs& vfs,
+      kj::Path path,
+      GetActorFn getActor);
 
   kj::Maybe<kj::Date> getAlarm(ActorKey actor);
   bool setAlarm(ActorKey actor, kj::Date scheduledTime);
   bool deleteAlarm(ActorKey actor);
-
-  void registerNamespace(kj::StringPtr uniqueKey, GetActorFn getActor);
 
  private:
   enum class AlarmStatus { WAITING, STARTED, FINISHED };
   const kj::Clock& clock;
   kj::Timer& timer;
   std::default_random_engine random;
-
-  struct Namespace {
-    GetActorFn getActor;
-  };
-  kj::HashMap<kj::StringPtr, Namespace> namespaces;
+  GetActorFn getActor;
   kj::Own<SqliteDatabase> db;
   kj::TaskSet tasks;
 
@@ -112,8 +104,6 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   kj::Promise<RetryInfo> runAlarm(
       const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount);
 
-  void setAlarmInMemory(kj::Own<ActorKey> actor, kj::Date scheduledTime);
-
   ScheduledAlarm scheduleAlarm(kj::Date now, kj::Own<ActorKey> actor, kj::Date scheduledTime);
 
   kj::Promise<void> makeAlarmTask(
@@ -122,11 +112,11 @@ class AlarmScheduler final: kj::TaskSet::ErrorHandler {
   kj::Promise<void> checkTimestamp(kj::Duration delay, kj::Date scheduledTime);
 
   SqliteDatabase::Statement stmtSetAlarm = db->prepare(R"(
-    INSERT INTO _cf_ALARM VALUES(?, ?, ?)
+    INSERT INTO _cf_ALARM VALUES(?, ?)
       ON CONFLICT DO UPDATE SET scheduled_time = excluded.scheduled_time;
   )");
   SqliteDatabase::Statement stmtDeleteAlarm = db->prepare(R"(
-    DELETE FROM _cf_ALARM WHERE actor_unique_key = ? AND actor_id = ?
+    DELETE FROM _cf_ALARM WHERE actor_id = ?
   )");
 
   void taskFailed(kj::Exception&& exception) override;

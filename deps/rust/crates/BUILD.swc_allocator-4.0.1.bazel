@@ -48,6 +48,6 @@ rust_library(
         "@crates_vendor__allocator-api2-0.2.21//:allocator_api2",
         "@crates_vendor__bumpalo-3.20.2//:bumpalo",
         "@crates_vendor__hashbrown-0.14.5//:hashbrown",
-        "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
+        "@crates_vendor__rustc-hash-2.1.2//:rustc_hash",
     ],
 )

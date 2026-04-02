@@ -324,11 +324,9 @@ void FormData::parse(jsg::Lock& js,
               .value = kj::str(kj::mv(messageData)),
             });
           } else {
-            auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, message.size());
-            jsg::BufferSource bytes(js, kj::mv(backing));
-            bytes.asArrayPtr().copyFrom(message);
+            auto bytes = jsg::JsArrayBuffer::create(js, message);
             data.add(FormData::Entry{.name = kj::str(name),
-              .value = js.alloc<File>(js, kj::mv(bytes), kj::str(filename),
+              .value = js.alloc<File>(js, jsg::JsBufferSource(bytes), kj::str(filename),
                   kj::str(maybeType.orDefault(nullptr)), dateNow())});
           }
         } else {

@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "queue-producer-metadata-enabled",
+      worker = (
+        modules = [
+          ( name = "worker-producer-metadata-enabled", esModule = embed "queue-producer-metadata-test.js" )
+        ],
+        bindings = [
+          ( name = "QUEUE", queue = "queue-producer-metadata-enabled" ),
+          ( name = "RESPONSE_BODY_FLAG", json = "true" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "queues_json_messages", "experimental", "capture_async_api_throws"],
+      )
+    ),
+    ( name = "queue-producer-metadata-disabled",
+      worker = (
+        modules = [
+          ( name = "worker-producer-metadata-disabled", esModule = embed "queue-producer-metadata-test.js" )
+        ],
+        bindings = [
+          ( name = "QUEUE", queue = "queue-producer-metadata-disabled" ),
+          ( name = "RESPONSE_BODY_FLAG", json = "false" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "queues_json_messages", "capture_async_api_throws"],
+      )
+    ),
+  ],
+);

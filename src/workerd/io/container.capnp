@@ -44,6 +44,102 @@ interface Container @0x9aaceefc06523bca {
 
     compatibilityFlags @4 :CompatibilityFlags;
     # Compatibility flags for this worker
+
+    labels @5 :List(Label);
+    # Optional key-value metadata labels for metrics/observability.
+
+    directorySnapshots @6 :List(DirectorySnapshotRestoreParams);
+    # Directory snapshots to restore before the container starts.
+
+    containerSnapshotId @7 :Text;
+    # Id of the full container snapshot to restore before the container starts.
+  }
+
+  struct Label {
+    name @0 :Text;
+    value @1 :Text;
+  }
+
+  struct DirectorySnapshotRestoreParams {
+    snapshotId @0 :Text;
+    # The id of the snapshot to restore.
+
+    restorePath @1 :Text;
+    # Where to restore the snapshot in the container filesystem.
+  }
+
+  struct DirectorySnapshot {
+    # Opaque handle to a directory snapshot.
+
+    id @0 :Text;
+    # Unique identifier of the snapshot.
+
+    size @1 :UInt64;
+    # Snapshot size, in bytes.
+
+    dir @2 :Text;
+    # Path of the snapshotted directory.
+
+    name @3 :Text;
+    # Optional human-friendly name. Empty string means not set.
+  }
+
+  struct SnapshotDirectoryParams {
+    dir @0 :Text;
+    # Directory path to snapshot.
+
+    name @1 :Text;
+    # Optional human-friendly name. Empty string means not set.
+  }
+
+  struct ContainerSnapshot {
+    # Opaque handle to a full container snapshot.
+
+    id @0 :Text;
+    # Unique identifier of the snapshot.
+
+    size @1 :UInt64;
+    # Snapshot size, in bytes.
+
+    name @2 :Text;
+    # Optional human-friendly name. Empty string means not set.
+  }
+
+  struct SnapshotContainerParams {
+    name @0 :Text;
+    # Optional human-friendly name. Empty string means not set.
+  }
+
+  struct ExecOptions {
+    env @0 :List(Text);
+    # Environment variables to add/override for the exec'd process, in NAME=VALUE format.
+
+    workingDirectory @1 :Text;
+    # Working directory for the exec'd process. Empty string means use the container default.
+
+    user @2 :Text;
+    # User for the exec'd process. Empty string means use the container default.
+
+    combinedOutput @3 :Bool;
+    # If true, stderr is combined into stdout. If stdout is not set, combined output is discarded.
+  }
+
+  struct Process {
+    pid @0 :Int32;
+    handle @1 :ProcessHandle;
+  }
+
+  interface ProcessHandle {
+    wait @0 () -> (exitCode :Int32);
+    # Waits for the process to exit and returns its exit code.
+
+    stdinWriter @1 () -> (writer :ByteStream);
+    # Retrieves a ByteStream handle to write to the process's stdin.
+    # If not called before wait(), stdin automatically EOFs.
+    # Throws an error if called after wait().
+
+    kill @2 (signo :UInt32);
+    # Sends the given signal to the process.
   }
 
   monitor @2 () -> (exitCode: Int32);
@@ -123,6 +219,28 @@ interface Container @0x9aaceefc06523bca {
   # If port is omitted, it's assumed to only cover port 80.
   # This method does not support HTTPs yet.
 
+  setEgressHttps @9 (hostPort :Text, channelToken :Data);
+  # Configures egress HTTPS routing for the container. The format of `hostPort` is the same as
+  # `setEgressHttp`: '<ip|cidr|hostnameGlob>[':'<port>]'. If the host part is not an IP or CIDR,
+  # it is treated as a hostname glob matched against the TLS SNI hostname. If `port` is omitted,
+  # it is assumed to only cover port 443.
+  #
+  # The runtime routes matching decrypted HTTP traffic back to Workers using `channelToken` and
+  # must ensure the container trusts the interception CA.
+
 
   # TODO: setEgressTcp
+
+  snapshotDirectory @10 SnapshotDirectoryParams -> (snapshot :DirectorySnapshot);
+  # Creates a snapshot for a directory in the running container.
+
+  snapshotContainer @11 SnapshotContainerParams -> (snapshot :ContainerSnapshot);
+  # Creates a full container snapshot for the running container.
+
+  exec @12 (cmd :List(Text), stdoutWriter :ByteStream, stderrWriter :ByteStream,
+      params :ExecOptions) -> (process :Process);
+  # Executes a short-lived process in the running container.
+  #
+  # If stdoutWriter/stderrWriter are not provided, output is discarded. If params.combinedOutput
+  # is true, stderr is merged into stdout and the stderrWriter capability is ignored.
 }

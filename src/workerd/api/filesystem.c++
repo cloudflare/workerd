@@ -1891,7 +1891,8 @@ jsg::Ref<Blob> FileSystemModule::openAsBlob(
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
           KJ_CASE_ONEOF(bytes, jsg::BufferSource) {
-            return js.alloc<Blob>(js, kj::mv(bytes), kj::mv(options.type).orDefault(kj::String()));
+            return js.alloc<Blob>(
+                js, bytes.getJsHandle(js), kj::mv(options.type).orDefault(kj::String()));
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
             throwFsError(js, err, "open"_kj);
@@ -2558,7 +2559,7 @@ jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(
         KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
           KJ_CASE_ONEOF(bytes, jsg::BufferSource) {
             return js.resolvedPromise(
-                js.alloc<File>(js, kj::mv(bytes), jsg::USVString(kj::str(getName(js))),
+                js.alloc<File>(js, bytes.getJsHandle(js), jsg::USVString(kj::str(getName(js))),
                     kj::String(), (stat.lastModified - kj::UNIX_EPOCH) / kj::MILLISECONDS));
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {

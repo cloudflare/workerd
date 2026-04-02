@@ -103,6 +103,9 @@ class _Location {
       contains(_string: string): boolean {
         return false;
       },
+      [Symbol.iterator](): ArrayIterator<string> {
+        return ([] as string[])[Symbol.iterator]();
+      },
     };
   }
 

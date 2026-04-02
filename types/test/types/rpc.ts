@@ -356,6 +356,7 @@ class TestAlarmObject extends DurableObject {
     if (alarmInfo !== undefined) {
       const _isRetry: boolean = alarmInfo.isRetry;
       const _retryCount: number = alarmInfo.retryCount;
+      const _scheduledTime: number = alarmInfo.scheduledTime;
     }
   }
 
@@ -367,6 +368,7 @@ class TestAlarmObject extends DurableObject {
     return await this.alarm({
       isRetry: true,
       retryCount: 1,
+      scheduledTime: 1000,
     });
   }
 }
@@ -460,7 +462,8 @@ export default <ExportedHandler<Env>>{
       expectTypeOf(env.RPC_SERVICE.queue).toEqualTypeOf<
         (
           queueName: string,
-          messages: ServiceBindingQueueMessage[]
+          messages: ServiceBindingQueueMessage[],
+          metadata?: MessageBatchMetadata
         ) => Promise<FetcherQueueResult>
       >();
       expectTypeOf(env.RPC_SERVICE.scheduled).toEqualTypeOf<

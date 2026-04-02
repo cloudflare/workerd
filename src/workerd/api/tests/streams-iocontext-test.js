@@ -94,7 +94,7 @@ const rs5 = new ReadableStream({
     c.close();
   },
 });
-const res5 = new Response(rs5);
+const _res5 = new Response(rs5);
 
 export const globalScopeReadablestream5 = {
   async test(ctrl, env) {

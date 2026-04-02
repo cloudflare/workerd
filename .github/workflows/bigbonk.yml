@@ -39,7 +39,7 @@ jobs:
           mentions: '/bigbonk'
           variant: 'max'
           permissions: write
-          opencode_version: '1.2.27'
+          opencode_version: '1.3.8'
           # token_permissions defaults to WRITE (i.e. Bonk can push commits).
           # We intentionally leave it that way here because users may ask Bonk
           # to update their PR via /bigbonk.

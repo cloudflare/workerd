@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from http import HTTPMethod, HTTPStatus
 
 import js
-from workers import Blob, File, FormData, Request, Response, WorkerEntrypoint, fetch
+from workers import Blob, File, FormData, Request, Response, WorkerEntrypoint
 
 import pyodide.http
 from pyodide.ffi import JsProxy, to_js
@@ -35,14 +35,14 @@ class Default(WorkerEntrypoint):
     async def fetch(self, request):
         assert isinstance(request, Request)
         if request.url.endswith("/modify"):
-            resp = await fetch("https://example.com/sub")
+            resp = await self.env.SERVER.fetch("https://example.com/sub")
             return Response(
                 resp.body,
                 status=201,
                 headers={"Custom-Header-That-Should-Passthrough": "modified"},
             )
         elif request.url.endswith("/modify_tuple"):
-            resp = await fetch("https://example.com/sub")
+            resp = await self.env.SERVER.fetch("https://example.com/sub")
             return Response(
                 resp.body,
                 headers=[
@@ -51,7 +51,7 @@ class Default(WorkerEntrypoint):
                 ],
             )
         elif request.url.endswith("/fetch_opts"):
-            resp = await fetch(
+            resp = await self.env.SERVER.fetch(
                 "https://example.com/sub_headers",
                 method=HTTPMethod.GET,
                 body=None,
@@ -64,7 +64,7 @@ class Default(WorkerEntrypoint):
             # that way accidentally to make sure we give them a reasonable error
             # message.
             try:
-                resp = await fetch(
+                resp = await self.env.SERVER.fetch(
                     "https://example.com/sub",
                     {"headers": {"Custom-Req-Header": 123}},
                 )
@@ -84,7 +84,7 @@ class Default(WorkerEntrypoint):
                 assert opts.foobarbaz == 42
 
             async with _mock_fetch(fetch_check):
-                resp = await fetch(
+                resp = await self.env.SERVER.fetch(
                     "https://example.com/redirect", redirect="manual", foobarbaz=42
                 )
 
@@ -108,7 +108,7 @@ class Default(WorkerEntrypoint):
         elif request.url.endswith("/formdata"):
             # server.py creates a new FormData and verifies that it can be passed
             # to Response.
-            resp = await fetch("https://example.com/formdata")
+            resp = await self.env.SERVER.fetch("https://example.com/formdata")
             data = await resp.formData()
             if data["field"] == "value":
                 return Response("success")
@@ -117,7 +117,7 @@ class Default(WorkerEntrypoint):
         elif request.url.endswith("/formdatablob"):
             # server.py creates a new FormData and verifies that it can be passed
             # to Response.
-            resp = await fetch("https://example.com/formdatablob")
+            resp = await self.env.SERVER.fetch("https://example.com/formdatablob")
             data = await resp.formData()
             assert data["field"] == "value"
             assert (await data["blob.py"].text()) == "print(42)"
@@ -126,7 +126,7 @@ class Default(WorkerEntrypoint):
 
             return Response("success")
         elif request.url.endswith("/cf_opts"):
-            resp = await fetch(
+            resp = await self.env.SERVER.fetch(
                 "http://example.com/redirect",
                 redirect="manual",
                 cf={
@@ -146,7 +146,7 @@ class Default(WorkerEntrypoint):
             assert "some_value, some_other_value" in headers
             return Response("success")
         else:
-            resp = await fetch("https://example.com/sub")
+            resp = await self.env.SERVER.fetch("https://example.com/sub")
             return resp
 
     async def scheduled(self, ctrl, env, ctx):
@@ -175,7 +175,6 @@ class Default(WorkerEntrypoint):
         await can_use_event_decorator(js_env)
         await response_unit_tests(js_env)
         await response_buffer_source_unit_tests(js_env)
-        await can_fetch_python_request()
 
 
 # TODO: Right now the `fetch` that's available on a binding is the JS fetch.
@@ -590,14 +589,6 @@ async def response_buffer_source_unit_tests(env):
         assert int(buffer.byteLength) == expected_length, (
             f"Response buffer length mismatch for {type_name}"
         )
-
-
-async def can_fetch_python_request():
-    def fetch_check(request, opts):
-        assert isinstance(request, JsProxy)
-
-    async with _mock_fetch(fetch_check):
-        await fetch(Request("https://example.com/redirect"))
 
 
 async def can_support_scheduled_cron_trigger(env):

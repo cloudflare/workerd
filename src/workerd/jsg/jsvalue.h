@@ -9,6 +9,8 @@
 
 namespace workerd::jsg {
 
+constexpr uint64_t MAX_SAFE_INTEGER = (1ull << 53) - 1;
+
 inline void requireOnStack(void* self) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(self, "JsValue types must be allocated on stack");
@@ -325,6 +327,8 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
   JsBufferSource(JsArrayBuffer& buffer): JsBase(static_cast<v8::Local<v8::Value>>(buffer)) {}
   JsBufferSource(JsUint8Array& buffer): JsBase(static_cast<v8::Local<v8::Value>>(buffer)) {}
   JsBufferSource(JsArrayBufferView& buffer): JsBase(static_cast<v8::Local<v8::Value>>(buffer)) {}
+  JsBufferSource(v8::Local<v8::SharedArrayBuffer> buffer)
+      : JsBase(static_cast<v8::Local<v8::Value>>(buffer)) {}
 
   kj::ArrayPtr<kj::byte> asArrayPtr();
 
@@ -333,8 +337,10 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
   // Returns true if the underlying value is an integer-typed TypedArray.
   bool isIntegerType() const;
 
+  bool isSharedArrayBuffer() const;
   bool isArrayBuffer() const;
   bool isArrayBufferView() const;
+  bool isResizable() const;
 
   // Return a copy of this buffer's data as a kj::Array.
   kj::Array<kj::byte> copy();

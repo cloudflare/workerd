@@ -7,6 +7,12 @@ wd_test(
     data = glob(["*.js"]),
 )
 
+wd_test(
+    src = "autorag-api-rpc-test.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]),
+)
+
 py_wd_test(
     size = "large",
     src = "python-autorag-api-test.wd-test",

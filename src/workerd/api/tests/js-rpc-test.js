@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
 import { waitUntil } from 'cloudflare:workers';
 import {
@@ -192,6 +195,13 @@ export class MyService extends WorkerEntrypoint {
   async fetch(req, x) {
     assert.strictEqual(x, undefined);
     return new Response('method = ' + req.method + ', url = ' + req.url);
+  }
+
+  async connect(socket) {
+    const enc = new TextEncoder();
+    let writer = socket.writable.getWriter();
+    await writer.write(enc.encode('hello'));
+    await writer.close();
   }
 
   // Define a property to test behavior of property accessors.
@@ -629,6 +639,20 @@ export let extendingEntrypointClasses = {
     // Verify that we can instantiate classes that inherit built-in classes.
     let svc = new MyService(ctx, env);
     assert.equal(svc instanceof WorkerEntrypoint, true);
+  },
+};
+export let connectBinding = {
+  async test(controller, env, ctx) {
+    let socket = await env.MyService.connect('localhost:8081');
+    await socket.opened;
+    const dec = new TextDecoder();
+    let result = '';
+    for await (const chunk of socket.readable) {
+      result += dec.decode(chunk, { stream: true });
+    }
+    result += dec.decode();
+    assert.strictEqual(result, 'hello');
+    await socket.closed;
   },
 };
 
@@ -1186,7 +1210,7 @@ export let crossContextSharingDoesntWork = {
     );
 
     // OK, now let's look at cases that do NOT work. These all produce the same error.
-    let expectedError = {
+    let _expectedError = {
       name: 'Error',
       message:
         'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
@@ -1415,8 +1439,7 @@ export let streams = {
       // remote knows the stream failed and can no longer be written to. The call to
       // writeToStreamExpectingError should throw because the error should be propagated
       // through the round trip.
-      const dec = new TextDecoder();
-      let result = '';
+      let _result = '';
       let writeCalled = 0;
       const writable = new WritableStream({
         write(chunk) {
@@ -1443,7 +1466,6 @@ export let streams = {
       // but we currently do not propagate the abort reason through. What ends up
       // happening is that the local stream is dropped with a generic cancelation
       // error.
-      const dec = new TextDecoder();
       const { promise, resolve } = Promise.withResolvers();
       const writable = new WritableStream({
         write(chunk) {},
@@ -2073,10 +2095,10 @@ export let eOrderTest = {
     let abortController = new AbortController();
     let abortSignal = abortController.signal;
 
-    let readableController;
+    let _readableController;
     let readableStream = new ReadableStream({
       start(c) {
-        readableController = c;
+        _readableController = c;
       },
     });
 

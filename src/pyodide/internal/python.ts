@@ -238,7 +238,6 @@ function compileModuleFromReadOnlyFS(
 export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
-  indexURL: string,
   customSerializedObjects: CustomSerializedObjects
 ): Pyodide {
   try {
@@ -248,7 +247,6 @@ export function loadPyodide(
     Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
     Module.API.config.jsglobals = globalThis;
     if (isWorkerd) {
-      Module.API.config.indexURL = indexURL;
       Module.API.config.resolveLockFilePromise!(lockfile);
     }
     Module.setUnsafeEval(UnsafeEval);

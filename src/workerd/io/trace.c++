@@ -326,6 +326,16 @@ static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
 
 }  // namespace
 
+ConnectEventInfo::ConnectEventInfo() {}
+
+ConnectEventInfo::ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader) {}
+
+void ConnectEventInfo::copyTo(rpc::Trace::ConnectEventInfo::Builder builder) const {}
+
+ConnectEventInfo ConnectEventInfo::clone() const {
+  return ConnectEventInfo();
+}
+
 FetchEventInfo::FetchEventInfo(
     kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers)
     : method(method),
@@ -496,6 +506,26 @@ void TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder) const {
 
 TraceEventInfo TraceEventInfo::clone() const {
   return TraceEventInfo(KJ_MAP(item, traces) { return item.clone(); });
+}
+
+TracePreview::TracePreview(kj::String id, kj::String slug, kj::String name)
+    : id(kj::mv(id)),
+      slug(kj::mv(slug)),
+      name(kj::mv(name)) {}
+
+TracePreview::TracePreview(rpc::Trace::TracePreviewInfo::Reader reader)
+    : id(kj::str(reader.getId())),
+      slug(kj::str(reader.getSlug())),
+      name(kj::str(reader.getName())) {}
+
+void TracePreview::copyTo(rpc::Trace::TracePreviewInfo::Builder builder) const {
+  builder.setId(id);
+  builder.setSlug(slug);
+  builder.setName(name);
+}
+
+TracePreview TracePreview::clone() const {
+  return TracePreview(kj::str(id), kj::str(slug), kj::str(name));
 }
 
 TraceEventInfo::TraceItem::TraceItem(kj::Maybe<kj::String> scriptName)
@@ -697,7 +727,8 @@ Trace::Trace(kj::Maybe<kj::String> stableId,
     kj::Array<kj::String> scriptTags,
     kj::Maybe<kj::String> entrypoint,
     ExecutionModel executionModel,
-    kj::Maybe<kj::String> durableObjectId)
+    kj::Maybe<kj::String> durableObjectId,
+    kj::Maybe<tracing::TracePreview> preview)
     : stableId(kj::mv(stableId)),
       scriptName(kj::mv(scriptName)),
       scriptVersion(kj::mv(scriptVersion)),
@@ -705,6 +736,7 @@ Trace::Trace(kj::Maybe<kj::String> stableId,
       scriptId(kj::mv(scriptId)),
       scriptTags(kj::mv(scriptTags)),
       entrypoint(kj::mv(entrypoint)),
+      preview(kj::mv(preview)),
       durableObjectId(kj::mv(durableObjectId)),
       executionModel(executionModel) {}
 Trace::Trace(rpc::Trace::Reader reader) {
@@ -764,6 +796,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
     builder.setEntrypoint(e);
   }
 
+  KJ_IF_SOME(p, preview) {
+    p.copyTo(builder.initPreview());
+  }
+
   KJ_IF_SOME(id, durableObjectId) {
     builder.setDurableObjectId(id);
   }
@@ -780,6 +816,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
       KJ_CASE_ONEOF(jsRpc, tracing::JsRpcEventInfo) {
         auto jsRpcBuilder = eventInfoBuilder.initJsRpc();
         jsRpc.copyTo(jsRpcBuilder);
+      }
+      KJ_CASE_ONEOF(connect, tracing::ConnectEventInfo) {
+        auto connectBuilder = eventInfoBuilder.initConnect();
+        connect.copyTo(connectBuilder);
       }
       KJ_CASE_ONEOF(scheduled, tracing::ScheduledEventInfo) {
         auto scheduledBuilder = eventInfoBuilder.initScheduled();
@@ -874,6 +914,10 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
     entrypoint = kj::str(reader.getEntrypoint());
   }
 
+  if (reader.hasPreview()) {
+    preview = tracing::TracePreview(reader.getPreview());
+  }
+
   if (reader.hasDurableObjectId()) {
     durableObjectId = kj::str(reader.getDurableObjectId());
   }
@@ -890,6 +934,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::JS_RPC:
         eventInfo = tracing::JsRpcEventInfo(e.getJsRpc());
+        break;
+      case rpc::Trace::EventInfo::Which::CONNECT:
+        eventInfo = tracing::ConnectEventInfo(e.getConnect());
         break;
       case rpc::Trace::EventInfo::Which::SCHEDULED:
         eventInfo = tracing::ScheduledEventInfo(e.getScheduled());
@@ -1107,6 +1154,9 @@ Onset::Info readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
     case rpc::Trace::Onset::Info::JS_RPC: {
       return JsRpcEventInfo(info.getJsRpc());
     }
+    case rpc::Trace::Onset::Info::CONNECT: {
+      return ConnectEventInfo(info.getConnect());
+    }
     case rpc::Trace::Onset::Info::SCHEDULED: {
       return ScheduledEventInfo(info.getScheduled());
     }
@@ -1136,6 +1186,9 @@ void writeOnsetInfo(const Onset::Info& info, rpc::Trace::Onset::Info::Builder& i
   KJ_SWITCH_ONEOF(info) {
     KJ_CASE_ONEOF(fetch, FetchEventInfo) {
       fetch.copyTo(infoBuilder.initFetch());
+    }
+    KJ_CASE_ONEOF(connect, ConnectEventInfo) {
+      connect.copyTo(infoBuilder.initConnect());
     }
     KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
       jsrpc.copyTo(infoBuilder.initJsRpc());
@@ -1288,6 +1341,9 @@ EventInfo cloneEventInfo(const EventInfo& info) {
   KJ_SWITCH_ONEOF(info) {
     KJ_CASE_ONEOF(fetch, FetchEventInfo) {
       return fetch.clone();
+    }
+    KJ_CASE_ONEOF(connect, ConnectEventInfo) {
+      return connect.clone();
     }
     KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
       return jsrpc.clone();

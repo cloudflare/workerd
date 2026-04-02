@@ -844,6 +844,8 @@ jsg::Ref<Headers> Headers::deserialize(
   KJ_REQUIRE(guard <= static_cast<uint>(Guard::NONE), "unknown guard value");
 
   uint count = deserializer.readRawUint32();
+  JSG_REQUIRE(count <= 1024, DOMDataCloneError,
+      "Deserialization failed: header count exceeds maximum (", count, ")");
 
   for (auto i KJ_UNUSED: kj::zeroTo(count)) {
     uint commonId = deserializer.readRawUint32();

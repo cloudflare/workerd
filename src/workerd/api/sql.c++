@@ -7,6 +7,13 @@
 #include "actor-state.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/util/sentry.h>
+
+#if _WIN32
+#define strncasecmp _strnicmp
+#else
+#include <strings.h>
+#endif
 
 namespace workerd::api {
 
@@ -135,7 +142,11 @@ double SqlStorage::getDatabaseSize(jsg::Lock& js) {
 }
 
 bool SqlStorage::isAllowedName(kj::StringPtr name) const {
-  return !name.startsWith("_cf_");
+  if (name.startsWith("_cf_")) return false;
+  if (name.size() >= 4 && strncasecmp(name.begin(), "_cf_", 4) == 0) {
+    LOG_WARNING_PERIODICALLY("SQL identifier matches reserved _cf_ prefix case-insensitively");
+  }
+  return true;
 }
 
 bool SqlStorage::isAllowedTrigger(kj::StringPtr name) const {

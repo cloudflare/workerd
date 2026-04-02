@@ -1,15 +1,16 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 use jsg::ExceptionType;
 use jsg::NonCoercible;
 use jsg::Number;
-use jsg::ResourceState;
-use jsg::ResourceTemplate;
+use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
 #[jsg_resource]
-struct MyResource {
-    _state: ResourceState,
-}
+struct MyResource;
 
 #[jsg_resource]
 #[expect(clippy::unnecessary_wraps)]
@@ -126,12 +127,8 @@ fn non_coercible_debug() {
 fn non_coercible_methods_accept_correct_types_and_reject_incorrect_types() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Ref::new(MyResource {
-            _state: ResourceState::default(),
-        });
-        let mut template = MyResourceTemplate::new(lock);
-        // SAFETY: Lock is valid, resource is a valid Ref, and template holds a valid FunctionTemplate.
-        let wrapped = unsafe { jsg::wrap_resource(lock, resource, &mut template) };
+        let resource = jsg::Rc::new(MyResource);
+        let wrapped = resource.to_js(lock);
         ctx.set_global("resource", wrapped);
 
         // String method accepts string

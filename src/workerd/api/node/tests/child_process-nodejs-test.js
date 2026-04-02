@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { strictEqual, throws, ok, deepStrictEqual } from 'node:assert';
 import * as child_process from 'node:child_process';
 import {
@@ -404,10 +407,10 @@ export const testChildProcessProperties = {
 
 export const testExecReturnsChildProcess = {
   async test() {
-    let result;
+    let _result;
     try {
-      result = exec('ls');
-    } catch (e) {
+      _result = exec('ls');
+    } catch (_e) {
       // Expected to throw
     }
     ok(true);

@@ -1,13 +1,18 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
   services = [
     ( name = "blob-test",
       worker = (
         modules = [
           (name = "worker", esModule = embed "blob-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "set_tostring_tag", "workers_api_getters_setters_on_prototype"],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "set_tostring_tag",
+          "workers_api_getters_setters_on_prototype",
+          "resizable_array_buffer_in_blob"],
         bindings = [
           (name = "request-blob", service = "blob-test")
         ]

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import inspector from 'node:inspector';
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
@@ -95,10 +98,10 @@ export const inspectorSession = {
 
 export const inspectorSessionMethods = {
   test() {
-    let session;
+    let _session;
     try {
-      session = new inspector.Session();
-    } catch (e) {
+      _session = new inspector.Session();
+    } catch (_e) {
       const SessionProto = inspector.Session.prototype;
 
       assert.strictEqual(typeof SessionProto.connect, 'function');

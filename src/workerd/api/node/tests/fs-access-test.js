@@ -330,7 +330,7 @@ export const stdioFds = {
     strictEqual(stat1.size, 0);
 
     const buf = Buffer.alloc(20);
-    const bytesRead = readSync(0, buf, { position: 1000 });
+    const _bytesRead = readSync(0, buf, { position: 1000 });
 
     const fd = openSync('/tmp/test.txt', 'w');
     strictEqual(fd, 3);

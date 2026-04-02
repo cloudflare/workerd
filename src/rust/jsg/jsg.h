@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 #pragma once
 
 #include <workerd/jsg/jsg.h>
@@ -23,6 +27,21 @@ struct RustModuleRegistry: public ::workerd::rust::jsg::ModuleRegistry {
 
   void addBuiltinModule(
       ::rust::Str specifier, ModuleCallback moduleCallback, ModuleType moduleType) override {
+    ::workerd::jsg::ModuleType jsgModuleType;
+    switch (moduleType) {
+      case ModuleType::Bundle:
+        jsgModuleType = ::workerd::jsg::ModuleType::BUNDLE;
+        break;
+      case ModuleType::Builtin:
+        jsgModuleType = ::workerd::jsg::ModuleType::BUILTIN;
+        break;
+      case ModuleType::Internal:
+        jsgModuleType = ::workerd::jsg::ModuleType::INTERNAL;
+        break;
+      default:
+        KJ_UNREACHABLE;
+    }
+
     registry.addBuiltinModule(kj::str(specifier),
         [kj_specifier = kj::str(specifier), callback = kj::mv(moduleCallback)](
             ::workerd::jsg::Lock& js, ::workerd::jsg::ModuleRegistry::ResolveMethod,
@@ -37,7 +56,7 @@ struct RustModuleRegistry: public ::workerd::rust::jsg::ModuleRegistry {
       return kj::Maybe(
           ModuleInfo(js, kj_specifier, kj::none, ObjectModuleInfo(js, value.As<v8::Object>())));
     },
-        moduleType);
+        jsgModuleType);
   }
 
   Registry& registry;

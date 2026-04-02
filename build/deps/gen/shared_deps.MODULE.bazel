@@ -113,9 +113,13 @@ use_repo(http, "ruff-linux-arm64")
 http.archive(
     name = "wpt",
     build_file = "@workerd//:build/BUILD.wpt",
-    sha256 = "12e70405452dd56cbd92d4986d4e002fa91db2db1c3f1725d303692b6699974b",
-    strip_prefix = "wpt-11b9300f1",
+    patch_strip = 1,
+    patches = [
+        "//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch",
+    ],
+    sha256 = "d91669520a18f13af99a43cd1f0acf19d13d12627daa11032c184e3939b30a2e",
+    strip_prefix = "wpt-8b139c3a3",
     type = "tgz",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/wpt-11b9300f1/wpt-11b9300f1.tar.gz",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/wpt-8b139c3a3/wpt-8b139c3a3.tar.gz",
 )
 use_repo(http, "wpt")

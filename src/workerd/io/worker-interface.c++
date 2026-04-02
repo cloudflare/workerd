@@ -406,9 +406,14 @@ kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(
   req.setRetryCount(retryCount);
   return req.send().then([](auto resp) {
     auto respResult = resp.getResult();
+    kj::Maybe<kj::String> errorDescription;
+    if (respResult.hasErrorDescription()) {
+      errorDescription = kj::str(respResult.getErrorDescription());
+    }
     return WorkerInterface::AlarmResult{.retry = respResult.getRetry(),
       .retryCountsAgainstLimit = respResult.getRetryCountsAgainstLimit(),
-      .outcome = respResult.getOutcome()};
+      .outcome = respResult.getOutcome(),
+      .errorDescription = kj::mv(errorDescription)};
   });
 }
 
@@ -419,7 +424,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RpcWorkerInterface::customEven
 
 // ======================================================================================
 WorkerInterface::AlarmFulfiller::AlarmFulfiller(
-    kj::Own<kj::PromiseFulfiller<AlarmResult>> fulfiller)
+    kj::Own<kj::PromiseFulfiller<AlarmOutcome>> fulfiller)
     : maybeFulfiller(kj::mv(fulfiller)) {}
 
 WorkerInterface::AlarmFulfiller::~AlarmFulfiller() noexcept(false) {
@@ -428,7 +433,7 @@ WorkerInterface::AlarmFulfiller::~AlarmFulfiller() noexcept(false) {
   }
 }
 
-void WorkerInterface::AlarmFulfiller::fulfill(const AlarmResult& result) {
+void WorkerInterface::AlarmFulfiller::fulfill(const AlarmOutcome& result) {
   KJ_IF_SOME(fulfiller, getFulfiller()) {
     fulfiller.fulfill(kj::cp(result));
   }
@@ -442,14 +447,14 @@ void WorkerInterface::AlarmFulfiller::reject(const kj::Exception& e) {
 
 void WorkerInterface::AlarmFulfiller::cancel() {
   KJ_IF_SOME(fulfiller, getFulfiller()) {
-    fulfiller.fulfill(AlarmResult{
+    fulfiller.fulfill(AlarmOutcome{
       .retry = false,
       .outcome = EventOutcome::CANCELED,
     });
   }
 }
 
-kj::Maybe<kj::PromiseFulfiller<WorkerInterface::AlarmResult>&> WorkerInterface::AlarmFulfiller::
+kj::Maybe<kj::PromiseFulfiller<WorkerInterface::AlarmOutcome>&> WorkerInterface::AlarmFulfiller::
     getFulfiller() {
   KJ_IF_SOME(fulfiller, maybeFulfiller) {
     if (fulfiller.get()->isWaiting()) {

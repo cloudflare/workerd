@@ -58,6 +58,7 @@ export const tests = {
           }
         );
         // Test request internal status code is present
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
         assert.deepEqual;
         assert.deepStrictEqual(env.ai.lastRequestInternalStatusCode, 1001);
       }
@@ -161,7 +162,7 @@ export const tests = {
         async () => {
           const arr = [1, 2, 3];
           const encoder = new TextEncoder();
-          const resp = await env.ai.run('readableStreamIputs', {
+          const _resp = await env.ai.run('readableStreamIputs', {
             audio: {
               body: new ReadableStream({
                 start(controller) {
@@ -195,7 +196,7 @@ export const tests = {
               controller.close();
             },
           });
-          const resp = await env.ai.run('readableStreamIputs', {
+          const _resp = await env.ai.run('readableStreamIputs', {
             audio: {
               body: stream,
               contentType: 'audio/wav',
@@ -363,6 +364,90 @@ export const tests = {
           upgrade: 'websocket',
         },
       });
+    }
+
+    {
+      // Test signal option is not included in request body
+      const controller = new AbortController();
+      const resp = await env.ai.run(
+        'rawInputs',
+        { prompt: 'test' },
+        { signal: controller.signal }
+      );
+
+      assert.deepStrictEqual(resp, {
+        inputs: { prompt: 'test' },
+        options: {},
+        requestUrl: 'https://workers-binding.ai/run?version=3',
+      });
+    }
+
+    {
+      // Test already-aborted signal throws AbortError for websocket requests
+      await assert.rejects(
+        async () => {
+          await env.ai.run(
+            '@cf/test/websocket',
+            { encoding: 'utf8' },
+            { websocket: true, signal: AbortSignal.abort() }
+          );
+        },
+        { name: 'AbortError' }
+      );
+    }
+
+    {
+      // Test already-aborted signal throws AbortError for readable stream inputs
+      await assert.rejects(
+        async () => {
+          await env.ai.run(
+            'readableStreamIputs',
+            {
+              audio: {
+                body: new ReadableStream({
+                  start(controller) {
+                    controller.enqueue(new TextEncoder().encode('1'));
+                    controller.close();
+                  },
+                }),
+                contentType: 'audio/wav',
+              },
+            },
+            { signal: AbortSignal.abort() }
+          );
+        },
+        { name: 'AbortError' }
+      );
+    }
+
+    {
+      // Test already-aborted signal throws AbortError
+      await assert.rejects(
+        async () => {
+          await env.ai.run(
+            'rawInputs',
+            { prompt: 'test' },
+            { signal: AbortSignal.abort() }
+          );
+        },
+        { name: 'AbortError' }
+      );
+    }
+
+    {
+      // Test aborting an in-flight request
+      const controller = new AbortController();
+      let resolved = false;
+      const promise = env.ai
+        .run('hangingModel', { prompt: 'test' }, { signal: controller.signal })
+        .finally(() => {
+          resolved = true;
+        });
+      // Wait a moment for the request to start.
+      await scheduler.wait(10);
+      assert.deepStrictEqual(resolved, false);
+      controller.abort();
+      await assert.rejects(promise, { name: 'AbortError' });
     }
   },
 };

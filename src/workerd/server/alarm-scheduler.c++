@@ -28,11 +28,15 @@ std::default_random_engine makeSeededRandomEngine() {
 
 }  // namespace
 
-AlarmScheduler::AlarmScheduler(
-    const kj::Clock& clock, kj::Timer& timer, const SqliteDatabase::Vfs& vfs, kj::Path path)
+AlarmScheduler::AlarmScheduler(const kj::Clock& clock,
+    kj::Timer& timer,
+    const SqliteDatabase::Vfs& vfs,
+    kj::Path path,
+    GetActorFn getActor)
     : clock(clock),
       timer(timer),
       random(makeSeededRandomEngine()),
+      getActor(kj::mv(getActor)),
       db([&] {
         auto db = kj::heap<SqliteDatabase>(vfs, kj::mv(path),
             kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
@@ -49,10 +53,8 @@ void AlarmScheduler::ensureInitialized(SqliteDatabase& db) {
 
   db.run(R"(
     CREATE TABLE IF NOT EXISTS _cf_ALARM (
-      actor_unique_key TEXT,
-      actor_id TEXT,
-      scheduled_time INTEGER,
-      PRIMARY KEY (actor_unique_key, actor_id)
+      actor_id TEXT PRIMARY KEY,
+      scheduled_time INTEGER
     ) WITHOUT ROWID;
   )");
 }
@@ -63,25 +65,20 @@ void AlarmScheduler::loadAlarmsFromDb() {
   // TODO(someday): don't maintain the entire alarm set in memory -- right now for the usecase of
   // local development, doing so is sufficient.
   auto query = db->run(R"(
-    SELECT actor_unique_key, actor_id, scheduled_time FROM _cf_ALARM;
+    SELECT actor_id, scheduled_time FROM _cf_ALARM;
   )");
 
   while (!query.isDone()) {
-    auto date = kj::UNIX_EPOCH + (kj::NANOSECONDS * query.getInt64(2));
+    auto date = kj::UNIX_EPOCH + (kj::NANOSECONDS * query.getInt64(1));
 
-    auto ownUniqueKey = kj::str(query.getText(0));
-    auto ownActorId = kj::str(query.getText(1));
-    auto actor = kj::attachVal(ActorKey{.uniqueKey = ownUniqueKey, .actorId = ownActorId},
-        kj::mv(ownUniqueKey), kj::mv(ownActorId));
+    auto ownActorId = kj::str(query.getText(0));
+    auto actor = kj::attachVal(ActorKey{.actorId = ownActorId}, kj::mv(ownActorId));
+    auto& actorRef = *actor;
 
-    alarms.insert(*actor, scheduleAlarm(now, kj::mv(actor), date));
+    alarms.insert(actorRef, scheduleAlarm(now, kj::mv(actor), date));
 
     query.nextRow();
   }
-}
-
-void AlarmScheduler::registerNamespace(kj::StringPtr uniqueKey, GetActorFn getActor) {
-  namespaces.insert(uniqueKey, Namespace{.getActor = kj::mv(getActor)});
 }
 
 kj::Maybe<kj::Date> AlarmScheduler::getAlarm(ActorKey actor) {
@@ -103,16 +100,14 @@ kj::Maybe<kj::Date> AlarmScheduler::getAlarm(ActorKey actor) {
 
 bool AlarmScheduler::setAlarm(ActorKey actor, kj::Date scheduledTime) {
   int64_t scheduledTimeNs = (scheduledTime - kj::UNIX_EPOCH) / kj::NANOSECONDS;
-  auto query = stmtSetAlarm.run(actor.uniqueKey, actor.actorId, scheduledTimeNs);
+  auto query = stmtSetAlarm.run(actor.actorId, scheduledTimeNs);
 
   bool existing = true;
   auto& entry = alarms.findOrCreate(actor, [&]() {
     existing = false;
 
-    auto ownUniqueKey = kj::str(actor.uniqueKey);
     auto ownActorId = kj::str(actor.actorId);
-    auto ownActor = kj::attachVal(ActorKey{.uniqueKey = ownUniqueKey, .actorId = ownActorId},
-        kj::mv(ownUniqueKey), kj::mv(ownActorId));
+    auto ownActor = kj::attachVal(ActorKey{.actorId = ownActorId}, kj::mv(ownActorId));
 
     return decltype(alarms)::Entry{
       *ownActor, scheduleAlarm(clock.now(), kj::mv(ownActor), scheduledTime)};
@@ -132,7 +127,7 @@ bool AlarmScheduler::setAlarm(ActorKey actor, kj::Date scheduledTime) {
 }
 
 bool AlarmScheduler::deleteAlarm(ActorKey actor) {
-  auto query = stmtDeleteAlarm.run(actor.uniqueKey, actor.actorId);
+  auto query = stmtDeleteAlarm.run(actor.actorId);
 
   KJ_IF_SOME(entry, alarms.findEntry(actor)) {
     KJ_IF_SOME(queued, entry.value.queuedAlarm) {
@@ -155,14 +150,10 @@ bool AlarmScheduler::deleteAlarm(ActorKey actor) {
 
 kj::Promise<AlarmScheduler::RetryInfo> AlarmScheduler::runAlarm(
     const ActorKey& actor, kj::Date scheduledTime, uint32_t retryCount) {
-  KJ_IF_SOME(ns, namespaces.find(actor.uniqueKey)) {
-    auto result = co_await ns.getActor(kj::str(actor.actorId))->runAlarm(scheduledTime, retryCount);
+  auto result = co_await getActor(kj::str(actor.actorId))->runAlarm(scheduledTime, retryCount);
 
-    co_return RetryInfo{.retry = result.outcome != EventOutcome::OK && result.retry,
-      .retryCountsAgainstLimit = result.retryCountsAgainstLimit};
-  } else {
-    throw KJ_EXCEPTION(FAILED, "uniqueKey for stored alarm was not registered?");
-  }
+  co_return RetryInfo{.retry = result.outcome != EventOutcome::OK && result.retry,
+    .retryCountsAgainstLimit = result.retryCountsAgainstLimit};
 }
 
 AlarmScheduler::ScheduledAlarm AlarmScheduler::scheduleAlarm(

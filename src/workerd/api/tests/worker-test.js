@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { throws, rejects, strictEqual } from 'node:assert';
 import { mock } from 'node:test';
 
@@ -47,11 +50,7 @@ export const testStartupEval = {
     strictEqual(typeof emptyFn, 'function');
 
     // Extending Function with super() and no arguments is also allowed.
-    class Foo extends Function {
-      constructor() {
-        super();
-      }
-    }
+    class Foo extends Function {}
     const foo = new Foo();
     strictEqual(typeof foo, 'function');
   },

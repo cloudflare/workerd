@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { strictEqual, throws } from 'assert';
 
 // Test depends on the setting of the upper_case_all_http_methods compatibility flag.

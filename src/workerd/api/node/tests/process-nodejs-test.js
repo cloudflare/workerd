@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as processMod from 'node:process';
@@ -12,6 +15,7 @@ const processBuiltinScheme = processMod.getBuiltinModule('node:process');
 queueMicrotask(() => process);
 queueMicrotask(() => Buffer);
 process.env.QUX = 1;
+// eslint-disable-next-line @typescript-eslint/no-unused-expressions
 Buffer;
 
 const originalProcess = process;
@@ -383,6 +387,7 @@ export const processEnv = {
       assert.strictEqual(symbol in process.env, false);
 
       // Verify that deleting a symbol key returns true.
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       assert.strictEqual(delete process.env[symbol], true);
 
       // Checks that well-known symbols like `Symbol.toStringTag` won’t throw.

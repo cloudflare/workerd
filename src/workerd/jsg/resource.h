@@ -29,6 +29,11 @@
 #include <type_traits>
 #include <typeindex>
 
+// TODO(cleanup): Remove when unnecessary.
+#if V8_MAJOR_VERSION >= 15 || (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION >= 7)
+#define HolderV2 Holder
+#endif
+
 namespace std {
 inline auto KJ_HASHCODE(const std::type_index& idx) {
   // Make std::type_index (which points to std::type_info) usable as a kj::HashMap key.

@@ -73,11 +73,14 @@ export const testNetAfterClose = {
     // Calling functions / accessing properties of a closed socket should not throw
     c.setNoDelay();
     c.setKeepAlive();
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     c.bufferSize;
     c.pause();
     c.resume();
     c.address();
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     c.remoteAddress;
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     c.remotePort;
   },
 };
@@ -716,8 +719,11 @@ export const testNetDuringClose = {
   test(ctrl, env, ctx) {
     const c = net.connect(env.SERVER_PORT, env.SIDECAR_HOSTNAME);
     c.destroy();
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     c.remoteAddress;
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     c.remoteFamily;
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     c.remotePort;
   },
 };
@@ -1703,7 +1709,7 @@ export const testNetWriteCbOnDestroyBefureConnected = {
     const socket = new net.Socket();
 
     socket.on('connect', () => {
-      reject(new Error('Connect should not have been called'));
+      throw new Error('Connect should not have been called');
     });
 
     socket.connect(Number(env.SERVER_PORT), env.SIDECAR_HOSTNAME);

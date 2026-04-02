@@ -84,11 +84,11 @@ class StreamWorkerInterface;
 
 jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Own<kj::AsyncIoStream> connection,
-    kj::String remoteAddress,
+    kj::Maybe<kj::String> remoteAddress,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
     SecureTransportKind secureTransport,
-    kj::String domain,
+    kj::Maybe<kj::String> domain,
     bool isDefaultFetchPort,
     kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair) {
   auto& ioContext = IoContext::current();
@@ -323,10 +323,10 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
       secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
   JSG_REQUIRE(connectionData != kj::none, TypeError,
       "The connection was closed before startTls could be started.");
-  JSG_REQUIRE(domain != nullptr, TypeError, "startTls can only be called once.");
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
   JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);
+  JSG_REQUIRE(domain != kj::none, TypeError, "startTls can only be called once.");
 
   // The current socket's writable buffers need to be flushed. The socket's WritableStream is backed
   // by an AsyncIoStream which doesn't implement any buffering, so we don't need to worry about
@@ -346,10 +346,10 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
           // flush to complete. While it is unlikely to be GC'd while we are waiting because
           // the user code *likely* is holding a active reference to it at this point, we
           // don't want to take any chances. This prevents a possible UAF.
-          JSG_VISITABLE_LAMBDA(
-              (self = JSG_THIS, domain = kj::heapString(domain), tlsOptions = kj::mv(tlsOptions),
-                  openedResolver = openedPrPair.resolver.addRef(js),
-                  remoteAddress = kj::str(remoteAddress)),
+          JSG_VISITABLE_LAMBDA((self = JSG_THIS, domain = kj::heapString(KJ_ASSERT_NONNULL(domain)),
+                                   tlsOptions = kj::mv(tlsOptions),
+                                   openedResolver = openedPrPair.resolver.addRef(js),
+                                   remoteAddress = mapCopyString(remoteAddress)),
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
@@ -381,7 +381,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
                 // Fork the starter promise because we need to create two separate things waiting
                 // on it below. The first is resolving the openedResolver with a JS promise that
-                // wraps one branch, the secnod is the kj::Promise that we use to resolve the
+                // wraps one branch, the second is the kj::Promise that we use to resolve the
                 // secureStream for the promised stream. This keeps us from having to bounce in and
                 // out of the JS isolate lock.
                 auto forkedPromise = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname).fork();
@@ -410,9 +410,9 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // The existing tlsStarter gets consumed and we won't need it again. Pass in an empty tlsStarter
   // to `setupSocket`.
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
-  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)), kj::str(remoteAddress),
-      kj::mv(options), kj::mv(newTlsStarter), SecureTransportKind::ON, kj::mv(domain),
-      isDefaultFetchPort, kj::mv(openedPrPair));
+  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)),
+      mapCopyString(remoteAddress), kj::mv(options), kj::mv(newTlsStarter), SecureTransportKind::ON,
+      kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 }
 
 void Socket::handleProxyStatus(
@@ -436,7 +436,7 @@ void Socket::handleProxyStatus(
       if (isDefaultFetchPort) {
         msg = kj::str(msg, ". It looks like you might be trying to connect to a HTTP-based service",
             " — consider using fetch instead");
-      } else if (remoteAddress.contains(".hyperdrive.local"_kj)) {
+      } else if (remoteAddress.orDefault(kj::String()).contains(".hyperdrive.local"_kj)) {
         // No attempts to connect to Hyperdrive should end up here, since they go through the other
         // version of handleProxyStatus. If they end up here somehow, log about it to get some
         // context that can aid in debugging.
@@ -450,7 +450,7 @@ void Socket::handleProxyStatus(
       // because there's no useful value we can provide.
       openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = kj::str(remoteAddress),
+            .remoteAddress = mapCopyString(remoteAddress),
             .localAddress = kj::none,
           });
     }
@@ -478,7 +478,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
       // because there's no useful value we can provide.
       openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = kj::str(remoteAddress),
+            .remoteAddress = mapCopyString(remoteAddress),
             .localAddress = kj::none,
           });
     }

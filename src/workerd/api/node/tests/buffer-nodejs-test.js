@@ -1982,7 +1982,6 @@ export const concat = {
       }
     );
 
-    // eslint-disable-next-line node-core/crypto-check
     const random10 = Buffer.alloc(10);
     crypto.getRandomValues(random10);
     const empty = Buffer.alloc(0);
@@ -2319,7 +2318,8 @@ export const fakes = {
     }, TypeError);
 
     throws(function () {
-      +Buffer.prototype; // eslint-disable-line no-unused-expressions
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      +Buffer.prototype;
     }, TypeError);
 
     throws(function () {
@@ -2599,6 +2599,7 @@ export const fill = {
       }
 
       // Should never be reached.
+      // eslint-disable-next-line no-undef
       if (offset < 0 || end > buf2.length) throw new ERR_OUT_OF_RANGE();
 
       if (end <= offset) return buf2;
@@ -5014,8 +5015,8 @@ export const writeUint8 = {
 
       // Test 1 to 6 bytes.
       for (let i = 1; i <= 6; i++) {
-        const range = i < 5 ? `= ${val - 1}` : ` 2 ** ${i * 8}`;
-        const received =
+        const _range = i < 5 ? `= ${val - 1}` : ` 2 ** ${i * 8}`;
+        const _received =
           i > 4 ? String(val).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1_') : val;
         ['writeUIntBE', 'writeUIntLE'].forEach((fn) => {
           throws(
@@ -5263,12 +5264,12 @@ export const writeInt = {
         ['writeIntBE', 'writeIntLE'].forEach((fn) => {
           const min = -(2 ** (i * 8 - 1));
           const max = 2 ** (i * 8 - 1) - 1;
-          let range = `>= ${min} and <= ${max}`;
+          let _range = `>= ${min} and <= ${max}`;
           if (i > 4) {
-            range = `>= -(2 ** ${i * 8 - 1}) and < 2 ** ${i * 8 - 1}`;
+            _range = `>= -(2 ** ${i * 8 - 1}) and < 2 ** ${i * 8 - 1}`;
           }
           [min - 1, max + 1].forEach((val) => {
-            const received =
+            const _received =
               i > 4
                 ? String(val).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1_')
                 : val;

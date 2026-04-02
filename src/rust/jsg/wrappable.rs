@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
@@ -72,6 +72,165 @@ use crate::Number;
 use crate::Type;
 use crate::v8;
 use crate::v8::ToLocalValue;
+
+// =============================================================================
+// Traced trait — GC tracing for field types
+// =============================================================================
+
+/// Trait for types that can be visited during V8 garbage collection tracing.
+///
+/// Every type that can appear as a field in a `#[jsg_resource]` struct must
+/// implement `Traced`. The generated `Traced::trace` body calls
+/// `Traced::trace` on every field — types with no GC-visible references
+/// simply use the default no-op implementation.
+///
+/// # Built-in implementations
+///
+/// - **Primitives** (`bool`, `String`, integers, floats, `()`) — no-op.
+/// - **`Option<T>`**, **`Nullable<T>`** — delegates to the inner value if present.
+/// - **Collections** (`Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
+///   `BTreeSet<T>`) — iterates elements/values and traces each.
+/// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
+/// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
+/// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
+/// - **`jsg::v8::Global<T>`** — visits via `GcVisitor::visit_global`.
+pub trait Traced {
+    /// Visit GC-visible references held by this value.
+    ///
+    /// The default implementation is a no-op, suitable for types with no
+    /// GC-visible references (primitives, plain data structs, etc.).
+    fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
+}
+
+/// Generates no-op `Traced` implementations for types with no GC-visible references.
+macro_rules! impl_traced_noop {
+    ($($t:ty),* $(,)?) => {
+        $(impl Traced for $t {})*
+    };
+}
+
+impl_traced_noop!(
+    (),
+    bool,
+    String,
+    crate::Error,
+    u8,
+    u16,
+    u32,
+    u64,
+    usize,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    f32,
+    f64,
+    crate::v8::ArrayBuffer,
+    crate::v8::ArrayBufferView,
+    crate::v8::BackingStore,
+    crate::v8::BigInt64Array,
+    crate::v8::BigUint64Array,
+    crate::v8::Float32Array,
+    crate::v8::Float64Array,
+    crate::v8::Int8Array,
+    crate::v8::Int16Array,
+    crate::v8::Int32Array,
+    crate::v8::Uint8Array,
+    crate::v8::Uint16Array,
+    crate::v8::Uint32Array,
+    &str,
+    Number,
+);
+
+impl<T: Traced> Traced for Option<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        if let Some(inner) = self {
+            inner.trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced> Traced for Nullable<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        if let Self::Some(inner) = self {
+            inner.trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced> Traced for NonCoercible<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        self.as_ref().trace(visitor);
+    }
+}
+
+impl<T: Traced> Traced for Vec<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        for item in self {
+            item.trace(visitor);
+        }
+    }
+}
+
+impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashMap<K, V, S> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        for value in self.values() {
+            value.trace(visitor);
+        }
+    }
+}
+
+impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        for value in self.values() {
+            value.trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<T, S> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        for item in self {
+            item.trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced> Traced for std::collections::BTreeSet<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        for item in self {
+            item.trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced> Traced for std::cell::Cell<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        // SAFETY: V8 GC tracing is single-threaded within an isolate and never
+        // re-entrant on the same object during a single GC cycle. We only read
+        // through the pointer.
+        unsafe {
+            (*self.as_ptr()).trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced> Traced for std::cell::RefCell<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        // Use `try_borrow()` to avoid panicking across the FFI boundary if a
+        // mutable borrow is active during GC.
+        if let Ok(inner) = self.try_borrow() {
+            inner.trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced> Traced for std::rc::Rc<T> {
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        (**self).trace(visitor);
+    }
+}
 
 // =============================================================================
 // ToJS trait (Rust → JavaScript)
@@ -156,7 +315,7 @@ macro_rules! impl_primitive {
     };
 }
 
-impl_primitive!(String, "string", is_string, unwrap_string);
+impl_primitive!(std::string::String, "string", is_string, unwrap_string);
 impl_primitive!(bool, "boolean", is_boolean, unwrap_boolean);
 
 // Number implementation for JavaScript numbers
@@ -380,7 +539,7 @@ impl<T: ToJS> ToJS for Vec<T> {
     where
         'b: 'a,
     {
-        let mut array = v8::Local::<v8::Array>::new(lock, self.len());
+        let mut array = v8::Array::new(lock, self.len());
         for (i, item) in self.into_iter().enumerate() {
             array.set(i, item.to_js(lock));
         }
@@ -569,3 +728,29 @@ impl_typed_array!(
     local_new_biguint64_array,
     unwrap_biguint64_array
 );
+
+// =============================================================================
+// ArrayBuffer, ArrayBufferView, SharedArrayBuffer
+// =============================================================================
+//
+// These three types only implement `Type` (used by `NonCoercible<T>` for type
+// checking).  They do not have element-typed `ToJS`/`FromJS` conversions and
+// do not fit the `impl_typed_array!` macro.
+
+impl Type for v8::ArrayBuffer {
+    fn class_name() -> &'static str {
+        "ArrayBuffer"
+    }
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+        value.is_array_buffer()
+    }
+}
+
+impl Type for v8::ArrayBufferView {
+    fn class_name() -> &'static str {
+        "ArrayBufferView"
+    }
+    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+        value.is_array_buffer_view()
+    }
+}

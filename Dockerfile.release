@@ -14,8 +14,7 @@ RUN ./llvm.sh 19
 RUN apt-get install -y --no-install-recommends clang-19 lld-19 libunwind-19 libc++abi1-19 libc++1-19 libc++-19-dev libclang-rt-19-dev
 COPY . .
 
-RUN echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
-RUN echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
+RUN echo "build:linux --repo_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
 COPY .bazel-cache /bazel-disk-cache
 # pnpm version will be different depending on the value of `packageManager` field in package.json
 RUN npm install -g pnpm@latest

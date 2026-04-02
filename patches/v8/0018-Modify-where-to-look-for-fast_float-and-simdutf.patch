@@ -4,6 +4,10 @@ Date: Mon, 3 Mar 2025 22:30:37 +0100
 Subject: Modify where to look for fast_float and simdutf.
 
 Similar to fp16, these dependencies now needs to be downloaded by bazel.
+The external @simdutf and @fast_float packages use include_prefix to
+provide headers at the upstream paths (third_party/simdutf/simdutf.h and
+third_party/fast_float/src/include/fast_float/fast_float.h), so no C++
+include changes are needed.
 
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
@@ -59,93 +63,4 @@ index 401ab449242f3e11028872baec6584b8169e11f1..8c4ce514cd6dbd4e2a389c04b591a26f
 +        "@simdutf",
      ],
  )
- 
-diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
-index 06849f39146789df8eaa7d192803dc7a34f8838e..3ab036e76312f6554308136d1a758f26f775135f 100644
---- a/src/builtins/builtins-typed-array.cc
-+++ b/src/builtins/builtins-typed-array.cc
-@@ -2,6 +2,7 @@
- // Use of this source code is governed by a BSD-style license that can be
- // found in the LICENSE file.
- 
-+#include "simdutf.h"
- #include "src/base/logging.h"
- #include "src/base/macros.h"
- #include "src/builtins/builtins-utils-inl.h"
-@@ -15,7 +16,6 @@
- #include "src/objects/objects-inl.h"
- #include "src/objects/option-utils.h"
- #include "src/objects/simd.h"
--#include "third_party/simdutf/simdutf.h"
- 
- namespace v8::internal {
- 
-diff --git a/src/objects/string-inl.h b/src/objects/string-inl.h
-index 175fabb486a8892771bd901e6dfda2d5af5ad305..8149433531edaca95431adee17e920ea46708ee1 100644
---- a/src/objects/string-inl.h
-+++ b/src/objects/string-inl.h
-@@ -12,6 +12,8 @@
- #include <type_traits>
- 
- #include "absl/functional/overload.h"
-+#include "simdutf.h"
-+#include "src/base/template-utils.h"
- #include "src/common/assert-scope.h"
- #include "src/common/globals.h"
- #include "src/execution/isolate-utils.h"
-@@ -38,7 +40,6 @@
- #include "src/torque/runtime-macro-shims.h"
- #include "src/torque/runtime-support.h"
- #include "src/utils/utils.h"
--#include "third_party/simdutf/simdutf.h"
- 
- // Has to be the last include (doesn't have include guards):
- #include "src/objects/object-macros.h"
-diff --git a/src/objects/string.h b/src/objects/string.h
-index c6003839758fa44cce5dbb1359b95605080ba22f..c8ef0434577d960f2d666b79e4b3896390ad270d 100644
---- a/src/objects/string.h
-+++ b/src/objects/string.h
-@@ -8,6 +8,7 @@
- #include <memory>
- #include <optional>
- 
-+#include "simdutf.h"
- #include "src/base/bits.h"
- #include "src/base/export-template.h"
- #include "src/base/small-vector.h"
-@@ -21,7 +22,6 @@
- #include "src/objects/tagged.h"
- #include "src/sandbox/external-pointer.h"
- #include "src/strings/unicode-decoder.h"
--#include "third_party/simdutf/simdutf.h"
- 
- // Has to be the last include (doesn't have include guards):
- #include "src/objects/object-macros.h"
-diff --git a/src/strings/unicode-inl.h b/src/strings/unicode-inl.h
-index 25f3d0375e7f1a71cb1e58f6244b3000b81a5bb2..3f1b5b33f3432ad8046d69382e25326a9776a9f9 100644
---- a/src/strings/unicode-inl.h
-+++ b/src/strings/unicode-inl.h
-@@ -8,9 +8,9 @@
- #include "src/strings/unicode.h"
- // Include the non-inl header before the rest of the headers.
- 
-+#include "simdutf.h"
- #include "src/base/logging.h"
- #include "src/utils/utils.h"
--#include "third_party/simdutf/simdutf.h"
- 
- namespace unibrow {
- 
-diff --git a/src/strings/unicode.cc b/src/strings/unicode.cc
-index d213ea68e8ad1dde4eec3ba97b6f9f23db6173e5..74687f7463e3a133095a3cfd7a00e0bf7da0132b 100644
---- a/src/strings/unicode.cc
-+++ b/src/strings/unicode.cc
-@@ -22,7 +22,7 @@
- #endif
- 
- #include "hwy/highway.h"
--#include "third_party/simdutf/simdutf.h"
-+#include "simdutf.h"
- 
- namespace unibrow {
  

@@ -87,6 +87,16 @@ import { Dir, Dirent } from 'node-internal:internal_fs';
 import { default as cffs } from 'cloudflare-internal:filesystem';
 
 import { Buffer } from 'node-internal:internal_buffer';
+import {
+  expandBraces,
+  normalizePattern,
+  walkGlob,
+  compileExcludePatterns,
+  collapseGlobstars,
+  precompileSegmentRegexes,
+  type GlobResult,
+} from 'node-internal:internal_fs_glob';
+import processImpl from 'node-internal:process';
 import type {
   BigIntStatsFs,
   CopySyncOptions,
@@ -839,17 +849,87 @@ export function writevSync(
 }
 
 export function globSync(
-  _pattern: string | readonly string[],
-  _options:
+  pattern: string | readonly string[],
+  options:
     | GlobOptions
     | GlobOptionsWithFileTypes
     | GlobOptionsWithoutFileTypes = {}
-): string[] {
-  // We do not yet implement the globSync function. In Node.js, this
-  // function depends heavily on the third party minimatch library
-  // which is not yet available in the workers runtime. This will be
-  // explored for implementation separately in the future.
-  throw new ERR_UNSUPPORTED_OPERATION();
+): string[] | Dirent[] {
+  // Normalize pattern to array
+  const patterns: string[] =
+    typeof pattern === 'string' ? [pattern] : [...pattern];
+  for (const p of patterns) {
+    validateString(p, 'pattern');
+  }
+
+  if (typeof options !== 'object' || options === null) {
+    validateObject(options, 'options');
+  }
+
+  const cwdOption = (options as GlobOptions).cwd;
+  const cwd: string =
+    cwdOption instanceof URL
+      ? cwdOption.pathname
+      : ((cwdOption as string | undefined) ?? processImpl.getCwd());
+  validateString(cwd, 'options.cwd');
+
+  const withFileTypes: boolean =
+    (options as GlobOptionsWithFileTypes).withFileTypes ?? false;
+
+  // Exclude can be a user function or an array of glob patterns.
+  // Keep them as separate variables to preserve proper type signatures.
+  const excludeOption = (options as GlobOptions).exclude;
+  let excludeUserFn: ((path: string | Dirent) => boolean) | undefined;
+  let excludePatternFn: ((path: string) => boolean) | undefined;
+  if (typeof excludeOption === 'function') {
+    excludeUserFn = excludeOption as (path: string | Dirent) => boolean;
+  } else if (Array.isArray(excludeOption)) {
+    excludePatternFn = compileExcludePatterns(excludeOption as string[]);
+  }
+
+  // Pattern-driven directory walk
+  const results = new Map<string, GlobResult>();
+  const dirCache = new Map<
+    string,
+    import('cloudflare-internal:filesystem').DirEntryHandle[]
+  >();
+
+  for (const p of patterns) {
+    for (const expanded of expandBraces(p)) {
+      const normalized = normalizePattern(expanded);
+      const segments = collapseGlobstars(
+        normalized.split('/').filter((s) => s !== '')
+      );
+      if (segments.length === 0) continue;
+      const segmentRegexes = precompileSegmentRegexes(segments);
+      walkGlob(cwd, segments, 0, cwd, '', results, dirCache, segmentRegexes);
+    }
+  }
+
+  // Build final results, applying exclude filter
+  const stringResults: string[] = [];
+  const direntResults: Dirent[] = [];
+
+  for (const [relPath, entry] of results) {
+    if (!relPath) continue; // skip empty paths
+
+    if (excludePatternFn && excludePatternFn(relPath)) continue;
+
+    if (withFileTypes) {
+      const parts = relPath.split('/');
+      const name = parts.pop() ?? '';
+      const parentPath = cwd + (parts.length ? '/' + parts.join('/') : '');
+      const type = entry.handle?.type ?? 0;
+      const dirent = new Dirent(name, type, parentPath);
+      if (excludeUserFn && excludeUserFn(dirent)) continue;
+      direntResults.push(dirent);
+    } else {
+      if (excludeUserFn && excludeUserFn(relPath)) continue;
+      stringResults.push(relPath);
+    }
+  }
+
+  return withFileTypes ? direntResults : stringResults;
 }
 
 export interface OpenAsBlobOptions {
@@ -930,4 +1010,4 @@ export function openAsBlob(
 // [x][x][2][x][x] fs.copyFileSync(src, dest[, mode])
 // [x][x][2][x][x] fs.opendirSync(path[, options])
 // [x][x][2][x][x] fs.cpSync(src, dest[, options])
-// [ ][ ][ ][ ][ ] fs.globSync(pattern[, options])
+// [x][x][2][x][x] fs.globSync(pattern[, options])

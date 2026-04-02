@@ -1,23 +1,24 @@
 /**
- * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchInternalError instead.
- * @see AiSearchInternalError
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export interface AutoRAGInternalError extends Error {}
 
 /**
- * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchNotFoundError instead.
- * @see AiSearchNotFoundError
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export interface AutoRAGNotFoundError extends Error {}
 
 /**
- * @deprecated This error type is no longer used in the AI Search API.
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export interface AutoRAGUnauthorizedError extends Error {}
 
 /**
- * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchNameNotSetError instead.
- * @see AiSearchNameNotSetError
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export interface AutoRAGNameNotSetError extends Error {}
 
@@ -33,9 +34,8 @@ export type CompoundFilter = {
 };
 
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchSearchRequest with the new API instead.
- * @see AiSearchSearchRequest
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export type AutoRagSearchRequest = {
   query: string;
@@ -53,9 +53,8 @@ export type AutoRagSearchRequest = {
 };
 
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchChatCompletionsRequest with the new API instead.
- * @see AiSearchChatCompletionsRequest
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
@@ -63,9 +62,8 @@ export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
 };
 
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchChatCompletionsRequest with stream: true instead.
- * @see AiSearchChatCompletionsRequest
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
@@ -75,9 +73,8 @@ export type AutoRagAiSearchRequestStreaming = Omit<
 };
 
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchSearchResponse with the new API instead.
- * @see AiSearchSearchResponse
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export type AutoRagSearchResponse = {
   object: 'vector_store.search_results.page';
@@ -97,9 +94,8 @@ export type AutoRagSearchResponse = {
 };
 
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchListResponse with the new API instead.
- * @see AiSearchListResponse
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export type AutoRagListResponse = {
   id: string;
@@ -112,54 +108,45 @@ export type AutoRagListResponse = {
 }[];
 
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * The new API returns different response formats for chat completions.
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
 
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use the new AI Search API instead: `env.AI.aiSearch`
- *
- * Migration guide:
- * - `env.AI.autorag().list()` → `env.AI.aiSearch.list()`
- * - `env.AI.autorag('id').search(...)` → `env.AI.aiSearch.get('id').search(...)`
- * - `env.AI.autorag('id').aiSearch(...)` → `env.AI.aiSearch.get('id').chatCompletions(...)`
- *
- * @see AiSearchAccountService
- * @see AiSearchInstanceService
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 export declare abstract class AutoRAG {
   /**
-   * @deprecated Use `env.AI.aiSearch.list()` instead.
-   * @see AiSearchAccountService.list
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   list(): Promise<AutoRagListResponse>;
 
   /**
-   * @deprecated Use `env.AI.aiSearch.get(id).search(...)` instead.
-   * Note: The new API uses a messages array instead of a query string.
-   * @see AiSearchInstanceService.search
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
 
   /**
-   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
-   * @see AiSearchInstanceService.chatCompletions
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
 
   /**
-   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
-   * @see AiSearchInstanceService.chatCompletions
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;
 
   /**
-   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
-   * @see AiSearchInstanceService.chatCompletions
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   aiSearch(
     params: AutoRagAiSearchRequest

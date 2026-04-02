@@ -73,7 +73,7 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_UNSUPPORTED_OPERATION,
 } from 'node-internal:internal_errors';
-import { type Dir } from 'node-internal:internal_fs';
+import { type Dir, Dirent } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
 import { isArrayBufferView } from 'node-internal:internal_types';
 import {
@@ -1416,18 +1416,28 @@ export function watchFile(): void {
 }
 
 export function glob(
-  _pattern: string | readonly string[],
-  _options:
+  pattern: string | readonly string[],
+  optionsOrCallback:
     | GlobOptions
     | GlobOptionsWithFileTypes
-    | GlobOptionsWithoutFileTypes,
-  _callback: ErrorOnlyCallback
+    | GlobOptionsWithoutFileTypes
+    | SingleArgCallback<string[] | Dirent[]>,
+  callback?: SingleArgCallback<string[] | Dirent[]>
 ): void {
-  // We do not yet implement the globSync function. In Node.js, this
-  // function depends heavily on the third party minimatch library
-  // which is not yet available in the workers runtime. This will be
-  // explored for implementation separately in the future.
-  throw new ERR_UNSUPPORTED_OPERATION();
+  let options:
+    | GlobOptions
+    | GlobOptionsWithFileTypes
+    | GlobOptionsWithoutFileTypes;
+  if (typeof optionsOrCallback === 'function') {
+    callback = optionsOrCallback;
+    options = {};
+  } else {
+    options = optionsOrCallback;
+  }
+  if (callback === undefined) {
+    throw new ERR_INVALID_ARG_TYPE('callback', ['function'], callback);
+  }
+  callWithSingleArgCallback(() => fssync.globSync(pattern, options), callback);
 }
 
 // An API is considered stubbed if it is not implemented by the function
@@ -1497,5 +1507,5 @@ export function glob(
 // [ ][ ][ ][ ] fs.createReadStream(path[, options])
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
 //
-// [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
+// [x][x][x][x] fs.glob(pattern[, options], callback)
 // [ ][ ][ ][ ] fs.openAsBlob(path[, options])

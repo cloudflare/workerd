@@ -14,5 +14,6 @@ cc_library(
         "-Wno-unused-const-variable",
     ],
     defines = ["SIMDUTF_ATOMIC_REF"],
+    include_prefix = "third_party/simdutf",
     visibility = ["//visibility:public"],
 )

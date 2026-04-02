@@ -577,6 +577,27 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   KJ_ASSERT(attrs2[1].name == "bar"_kj);
 }
 
+KJ_TEST("Trace with Preview") {
+  auto trace = kj::refcounted<Trace>(kj::str("test-stable-id"), kj::str("test-script"),
+      kj::none,  // scriptVersion
+      kj::str("test-namespace"), kj::str("test-script-id"),
+      kj::Array<kj::String>(),  // scriptTags
+      kj::str("test-entrypoint"), ExecutionModel::STATELESS,
+      kj::none,  // durableObjectId
+      TracePreview(kj::str("63bafce9179948688866bb22268eb1c6"), kj::str("feature-my-branch"),
+          kj::str("feature/my-branch")));
+
+  capnp::MallocMessageBuilder builder;
+  auto traceBuilder = builder.initRoot<rpc::Trace>();
+  trace->copyTo(traceBuilder);
+
+  auto trace2 = kj::refcounted<Trace>(traceBuilder.asReader());
+  auto& preview = KJ_ASSERT_NONNULL(trace2->preview);
+  KJ_ASSERT(preview.id == "63bafce9179948688866bb22268eb1c6"_kj);
+  KJ_ASSERT(preview.slug == "feature-my-branch"_kj);
+  KJ_ASSERT(preview.name == "feature/my-branch"_kj);
+}
+
 KJ_TEST("Trace with Durable Object ID") {
   auto trace = kj::refcounted<Trace>(kj::str("test-stable-id"), kj::str("test-script"),
       kj::none,  // scriptVersion

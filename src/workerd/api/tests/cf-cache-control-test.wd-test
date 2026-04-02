@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "cf-cache-control-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "cf-cache-control-test.js" )
+        ],
+        bindings = [
+          ( name = "CACHE_ENABLED", json = "false" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "cache_option_disabled", "experimental"],
+      )
+    ),
+    ( name = "cf-cache-control-test-cache-enabled",
+      worker = (
+        modules = [
+          ( name = "worker-cache-enabled", esModule = embed "cf-cache-control-test.js" )
+        ],
+        bindings = [
+          ( name = "CACHE_ENABLED", json = "true" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "cache_option_enabled", "experimental"],
+      )
+    ),
+  ],
+);

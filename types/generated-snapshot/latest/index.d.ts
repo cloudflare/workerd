@@ -489,6 +489,11 @@ type ExportedHandlerFetchHandler<
   env: Env,
   ctx: ExecutionContext<Props>,
 ) => Response | Promise<Response>;
+type ExportedHandlerConnectHandler<Env = unknown, Props = unknown> = (
+  socket: Socket,
+  env: Env,
+  ctx: ExecutionContext<Props>,
+) => void | Promise<void>;
 type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (
   events: TraceItem[],
   env: Env,
@@ -530,6 +535,7 @@ interface ExportedHandler<
   Props = unknown,
 > {
   fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
+  connect?: ExportedHandlerConnectHandler<Env, Props>;
   tail?: ExportedHandlerTailHandler<Env, Props>;
   trace?: ExportedHandlerTraceHandler<Env, Props>;
   tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
@@ -551,12 +557,14 @@ declare abstract class Navigator {
 interface AlarmInvocationInfo {
   readonly isRetry: boolean;
   readonly retryCount: number;
+  readonly scheduledTime: number;
 }
 interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
 }
 interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
+  connect?(socket: Socket): void | Promise<void>;
   alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
   webSocketMessage?(
     ws: WebSocket,
@@ -574,7 +582,7 @@ type DurableObjectStub<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > = Fetcher<
   T,
-  "alarm" | "webSocketMessage" | "webSocketClose" | "webSocketError"
+  "alarm" | "connect" | "webSocketMessage" | "webSocketClose" | "webSocketError"
 > & {
   readonly id: DurableObjectId;
   readonly name?: string;
@@ -3107,6 +3115,11 @@ interface QueuingStrategyInit {
    */
   highWaterMark: number;
 }
+interface TracePreviewInfo {
+  id: string;
+  slug: string;
+  name: string;
+}
 interface ScriptVersion {
   id?: string;
   tag?: string;
@@ -3121,6 +3134,7 @@ interface TraceItem {
     | (
         | TraceItemFetchEventInfo
         | TraceItemJsRpcEventInfo
+        | TraceItemConnectEventInfo
         | TraceItemScheduledEventInfo
         | TraceItemAlarmEventInfo
         | TraceItemQueueEventInfo
@@ -3140,6 +3154,7 @@ interface TraceItem {
   readonly dispatchNamespace?: string;
   readonly scriptTags?: string[];
   readonly tailAttributes?: Record<string, boolean | number | string>;
+  readonly preview?: TracePreviewInfo;
   readonly durableObjectId?: string;
   readonly outcome: string;
   readonly executionModel: string;
@@ -3150,6 +3165,7 @@ interface TraceItem {
 interface TraceItemAlarmEventInfo {
   readonly scheduledTime: Date;
 }
+interface TraceItemConnectEventInfo {}
 interface TraceItemCustomEventInfo {}
 interface TraceItemScheduledEventInfo {
   readonly scheduledTime: number;
@@ -3766,12 +3782,43 @@ interface Container {
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
   interceptOutboundHttp(addr: string, binding: Fetcher): Promise<void>;
   interceptAllOutboundHttp(binding: Fetcher): Promise<void>;
+  snapshotDirectory(
+    options: ContainerDirectorySnapshotOptions,
+  ): Promise<ContainerDirectorySnapshot>;
+  snapshotContainer(
+    options: ContainerSnapshotOptions,
+  ): Promise<ContainerSnapshot>;
+  interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
+}
+interface ContainerDirectorySnapshot {
+  id: string;
+  size: number;
+  dir: string;
+  name?: string;
+}
+interface ContainerDirectorySnapshotOptions {
+  dir: string;
+  name?: string;
+}
+interface ContainerDirectorySnapshotRestoreParams {
+  snapshot: ContainerDirectorySnapshot;
+  mountPoint?: string;
+}
+interface ContainerSnapshot {
+  id: string;
+  size: number;
+  name?: string;
+}
+interface ContainerSnapshotOptions {
+  name?: string;
 }
 interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
-  hardTimeout?: number | bigint;
+  labels?: Record<string, string>;
+  directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
+  containerSnapshot?: ContainerSnapshot;
 }
 /**
  * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
@@ -3918,11 +3965,10 @@ declare abstract class Performance {
    */
   toJSON(): object;
 }
-// AI Search V2 API Error Interfaces
+// ============ AI Search Error Interfaces ============
 interface AiSearchInternalError extends Error {}
 interface AiSearchNotFoundError extends Error {}
-interface AiSearchNameNotSetError extends Error {}
-// AI Search V2 Request Types
+// ============ AI Search Request Types ============
 type AiSearchSearchRequest = {
   messages: Array<{
     role: "system" | "developer" | "user" | "assistant" | "tool";
@@ -3947,9 +3993,8 @@ type AiSearchSearchRequest = {
       [key: string]: unknown;
     };
     reranking?: {
-      /** Enable reranking (default false) */
       enabled?: boolean;
-      model?: "@cf/baai/bge-reranker-base" | "";
+      model?: "@cf/baai/bge-reranker-base" | string;
       /** Match threshold (0-1, default 0.4) */
       match_threshold?: number;
       [key: string]: unknown;
@@ -3961,6 +4006,7 @@ type AiSearchChatCompletionsRequest = {
   messages: Array<{
     role: "system" | "developer" | "user" | "assistant" | "tool";
     content: string | null;
+    [key: string]: unknown;
   }>;
   model?: string;
   stream?: boolean;
@@ -3981,7 +4027,7 @@ type AiSearchChatCompletionsRequest = {
     };
     reranking?: {
       enabled?: boolean;
-      model?: "@cf/baai/bge-reranker-base" | "";
+      model?: "@cf/baai/bge-reranker-base" | string;
       match_threshold?: number;
       [key: string]: unknown;
     };
@@ -3989,7 +4035,7 @@ type AiSearchChatCompletionsRequest = {
   };
   [key: string]: unknown;
 };
-// AI Search V2 Response Types
+// ============ AI Search Response Types ============
 type AiSearchSearchResponse = {
   search_query: string;
   chunks: Array<{
@@ -4008,26 +4054,65 @@ type AiSearchSearchResponse = {
       keyword_score?: number;
       /** Vector similarity score (0-1) */
       vector_score?: number;
+      [key: string]: unknown;
     };
   }>;
 };
-type AiSearchListResponse = Array<{
-  id: string;
-  internal_id?: string;
-  account_id?: string;
-  account_tag?: string;
-  /** Whether the instance is enabled (default true) */
-  enable?: boolean;
-  type?: "r2" | "web-crawler";
-  source?: string;
+type AiSearchChatCompletionsResponse = {
+  id?: string;
+  object?: string;
+  model?: string;
+  choices: Array<{
+    index?: number;
+    message: {
+      role: "system" | "developer" | "user" | "assistant" | "tool";
+      content: string | null;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  }>;
+  chunks: AiSearchSearchResponse["chunks"];
   [key: string]: unknown;
-}>;
+};
+type AiSearchStatsResponse = {
+  queued?: number;
+  running?: number;
+  completed?: number;
+  error?: number;
+  skipped?: number;
+  outdated?: number;
+  last_activity?: string;
+};
+// ============ AI Search Instance Info Types ============
+type AiSearchInstanceInfo = {
+  id: string;
+  type?: "r2" | "web-crawler" | string;
+  source?: string;
+  paused?: boolean;
+  status?: string;
+  namespace?: string;
+  created_at?: string;
+  modified_at?: string;
+  [key: string]: unknown;
+};
+type AiSearchListResponse = {
+  result: AiSearchInstanceInfo[];
+  result_info?: {
+    count: number;
+    page: number;
+    per_page: number;
+    total_count: number;
+  };
+};
+// ============ AI Search Config Types ============
 type AiSearchConfig = {
   /** Instance ID (1-32 chars, pattern: ^[a-z0-9_]+(?:-[a-z0-9_]+)*$) */
   id: string;
-  type: "r2" | "web-crawler";
-  source: string;
-  source_params?: object;
+  /** Instance type. Omit to create with built-in storage. */
+  type?: "r2" | "web-crawler" | string;
+  /** Source URL (required for web-crawler type). */
+  source?: string;
+  source_params?: unknown;
   /** Token ID (UUID format) */
   token_id?: string;
   ai_gateway_id?: string;
@@ -4037,54 +4122,307 @@ type AiSearchConfig = {
   reranking?: boolean;
   embedding_model?: string;
   ai_search_model?: string;
-};
-type AiSearchInstance = {
-  id: string;
-  enable?: boolean;
-  type?: "r2" | "web-crawler";
-  source?: string;
   [key: string]: unknown;
 };
-// AI Search Instance Service - Instance-level operations
-declare abstract class AiSearchInstanceService {
+// ============ AI Search Item Types ============
+type AiSearchItemInfo = {
+  id: string;
+  key: string;
+  status:
+    | "completed"
+    | "error"
+    | "skipped"
+    | "queued"
+    | "processing"
+    | "outdated";
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+type AiSearchItemContentResult = {
+  body: ReadableStream;
+  contentType: string;
+  filename: string;
+  size: number;
+};
+type AiSearchUploadItemOptions = {
+  metadata?: Record<string, unknown>;
+};
+type AiSearchListItemsParams = {
+  page?: number;
+  per_page?: number;
+};
+type AiSearchListItemsResponse = {
+  result: AiSearchItemInfo[];
+  result_info?: {
+    count: number;
+    page: number;
+    per_page: number;
+    total_count: number;
+  };
+};
+// ============ AI Search Job Types ============
+type AiSearchJobInfo = {
+  id: string;
+  source: "user" | "schedule";
+  description?: string;
+  last_seen_at?: string;
+  started_at?: string;
+  ended_at?: string;
+  end_reason?: string;
+};
+type AiSearchJobLog = {
+  id: number;
+  message: string;
+  message_type: number;
+  created_at: number;
+};
+type AiSearchCreateJobParams = {
+  description?: string;
+};
+type AiSearchListJobsParams = {
+  page?: number;
+  per_page?: number;
+};
+type AiSearchListJobsResponse = {
+  result: AiSearchJobInfo[];
+  result_info?: {
+    count: number;
+    page: number;
+    per_page: number;
+    total_count: number;
+  };
+};
+type AiSearchJobLogsParams = {
+  page?: number;
+  per_page?: number;
+};
+type AiSearchJobLogsResponse = {
+  result: AiSearchJobLog[];
+  result_info?: {
+    count: number;
+    page: number;
+    per_page: number;
+    total_count: number;
+  };
+};
+// ============ AI Search Sub-Service Classes ============
+/**
+ * Single item service for an AI Search instance.
+ * Provides info, delete, and download operations on a specific item.
+ */
+declare abstract class AiSearchItem {
+  /** Get metadata about this item. */
+  info(): Promise<AiSearchItemInfo>;
+  /**
+   * Download the item's content.
+   * @returns Object with body stream, content type, filename, and size.
+   */
+  download(): Promise<AiSearchItemContentResult>;
+}
+/**
+ * Items collection service for an AI Search instance.
+ * Provides list, upload, and access to individual items.
+ */
+declare abstract class AiSearchItems {
+  /** List items in this instance. */
+  list(params?: AiSearchListItemsParams): Promise<AiSearchListItemsResponse>;
+  /**
+   * Upload a file as an item.
+   * @param name Filename for the uploaded item.
+   * @param content File content as a ReadableStream, ArrayBuffer, or string.
+   * @param options Optional metadata to attach to the item.
+   * @returns The created item info.
+   */
+  upload(
+    name: string,
+    content: ReadableStream | ArrayBuffer | string,
+    options?: AiSearchUploadItemOptions,
+  ): Promise<AiSearchItemInfo>;
+  /**
+   * Upload a file and poll until processing completes.
+   * @param name Filename for the uploaded item.
+   * @param content File content as a ReadableStream, ArrayBuffer, or string.
+   * @param options Optional metadata to attach to the item.
+   * @returns The item info after processing completes (or timeout).
+   */
+  uploadAndPoll(
+    name: string,
+    content: ReadableStream | ArrayBuffer | string,
+    options?: AiSearchUploadItemOptions,
+  ): Promise<AiSearchItemInfo>;
+  /**
+   * Get an item by ID.
+   * @param itemId The item identifier.
+   * @returns Item service for info, delete, and download operations.
+   */
+  get(itemId: string): AiSearchItem;
+  /** Delete this item from the instance.
+   * @param itemId The item identifier.
+   */
+  delete(itemId: string): Promise<void>;
+}
+/**
+ * Single job service for an AI Search instance.
+ * Provides info and logs for a specific job.
+ */
+declare abstract class AiSearchJob {
+  /** Get metadata about this job. */
+  info(): Promise<AiSearchJobInfo>;
+  /** Get logs for this job. */
+  logs(params?: AiSearchJobLogsParams): Promise<AiSearchJobLogsResponse>;
+}
+/**
+ * Jobs collection service for an AI Search instance.
+ * Provides list, create, and access to individual jobs.
+ */
+declare abstract class AiSearchJobs {
+  /** List jobs for this instance. */
+  list(params?: AiSearchListJobsParams): Promise<AiSearchListJobsResponse>;
+  /**
+   * Create a new indexing job.
+   * @param params Optional job parameters.
+   * @returns The created job info.
+   */
+  create(params?: AiSearchCreateJobParams): Promise<AiSearchJobInfo>;
+  /**
+   * Get a job by ID.
+   * @param jobId The job identifier.
+   * @returns Job service for info and logs operations.
+   */
+  get(jobId: string): AiSearchJob;
+}
+// ============ AI Search Binding Classes ============
+/**
+ * Instance-level AI Search service.
+ *
+ * Used as:
+ * - The return type of `AiSearchNamespace.get(name)` (namespace binding)
+ * - The type of `env.BLOG_SEARCH` (single instance binding via `ai_search`)
+ *
+ * Provides search, chat, update, stats, items, and jobs operations.
+ *
+ * @example
+ * ```ts
+ * // Via namespace binding
+ * const instance = env.AI_SEARCH.get("blog");
+ * const results = await instance.search({
+ *   messages: [{ role: "user", content: "How does caching work?" }],
+ * });
+ *
+ * // Via single instance binding
+ * const results = await env.BLOG_SEARCH.search({
+ *   messages: [{ role: "user", content: "How does caching work?" }],
+ * });
+ * ```
+ */
+declare abstract class AiSearchInstance {
   /**
    * Search the AI Search instance for relevant chunks.
-   * @param params Search request with messages and AI search options
-   * @returns Search response with matching chunks
+   * @param params Search request with messages and optional AI search options.
+   * @returns Search response with matching chunks and search query.
    */
   search(params: AiSearchSearchRequest): Promise<AiSearchSearchResponse>;
   /**
+   * Generate chat completions with AI Search context (streaming).
+   * @param params Chat completions request with stream: true.
+   * @returns ReadableStream of server-sent events.
+   */
+  chatCompletions(
+    params: AiSearchChatCompletionsRequest & {
+      stream: true;
+    },
+  ): Promise<ReadableStream>;
+  /**
    * Generate chat completions with AI Search context.
-   * @param params Chat completions request with optional streaming
-   * @returns Response object (if streaming) or chat completion result
+   * @param params Chat completions request.
+   * @returns Chat completion response with choices and RAG chunks.
    */
   chatCompletions(
     params: AiSearchChatCompletionsRequest,
-  ): Promise<Response | object>;
+  ): Promise<AiSearchChatCompletionsResponse>;
   /**
-   * Delete this AI Search instance.
+   * Update the instance configuration.
+   * @param config Partial configuration to update.
+   * @returns Updated instance info.
    */
-  delete(): Promise<void>;
-}
-// AI Search Account Service - Account-level operations
-declare abstract class AiSearchAccountService {
+  update(config: Partial<AiSearchConfig>): Promise<AiSearchInstanceInfo>;
+  /** Get metadata about this instance. */
+  info(): Promise<AiSearchInstanceInfo>;
   /**
-   * List all AI Search instances in the account.
-   * @returns Array of AI Search instances
+   * Get instance statistics (item count, indexing status, etc.).
+   * @returns Statistics with counts per status and last activity time.
+   */
+  stats(): Promise<AiSearchStatsResponse>;
+  /** Items collection — list, upload, and manage items in this instance. */
+  get items(): AiSearchItems;
+  /** Jobs collection — list, create, and inspect indexing jobs. */
+  get jobs(): AiSearchJobs;
+}
+/**
+ * Namespace-level AI Search service.
+ *
+ * Used as the type of `env.AI_SEARCH` (namespace binding via `ai_search_namespaces`).
+ * Scoped to a single namespace. Provides dynamic instance access, creation, and deletion.
+ *
+ * @example
+ * ```ts
+ * // Access an instance within the namespace
+ * const blog = env.AI_SEARCH.get("blog");
+ * const results = await blog.search({
+ *   messages: [{ role: "user", content: "How does caching work?" }],
+ * });
+ *
+ * // List all instances in the namespace
+ * const instances = await env.AI_SEARCH.list();
+ *
+ * // Create a new instance with built-in storage
+ * const tenant = await env.AI_SEARCH.create({
+ *   id: "tenant-123",
+ * });
+ *
+ * // Upload items into the instance
+ * await tenant.items.upload("doc.pdf", fileContent);
+ *
+ * // Delete an instance
+ * await env.AI_SEARCH.delete("tenant-123");
+ * ```
+ */
+declare abstract class AiSearchNamespace {
+  /**
+   * Get an instance by name within the bound namespace.
+   * @param name Instance name.
+   * @returns Instance service for search, chat, update, stats, items, and jobs.
+   */
+  get(name: string): AiSearchInstance;
+  /**
+   * List all instances in the bound namespace.
+   * @returns Array of instance metadata.
    */
   list(): Promise<AiSearchListResponse>;
   /**
-   * Get an AI Search instance by ID.
-   * @param name Instance ID
-   * @returns Instance service for performing operations
+   * Create a new instance within the bound namespace.
+   * @param config Instance configuration. Only `id` is required — omit `type` and `source` to create with built-in storage.
+   * @returns Instance service for the newly created instance.
+   *
+   * @example
+   * ```ts
+   * // Create with built-in storage (upload items manually)
+   * const instance = await env.AI_SEARCH.create({ id: "my-search" });
+   *
+   * // Create with web crawler source
+   * const instance = await env.AI_SEARCH.create({
+   *   id: "docs-search",
+   *   type: "web-crawler",
+   *   source: "https://developers.cloudflare.com",
+   * });
+   * ```
    */
-  get(name: string): AiSearchInstanceService;
+  create(config: AiSearchConfig): Promise<AiSearchInstance>;
   /**
-   * Create a new AI Search instance.
-   * @param config Instance configuration
-   * @returns Instance service for performing operations
+   * Delete an instance from the bound namespace.
+   * @param name Instance name to delete.
    */
-  create(config: AiSearchConfig): Promise<AiSearchInstanceService>;
+  delete(name: string): Promise<void>;
 }
 type AiImageClassificationInput = {
   image: number[];
@@ -10082,6 +10420,7 @@ type AiOptions = {
   returnRawResponse?: boolean;
   prefix?: string;
   extraHeaders?: object;
+  signal?: AbortSignal;
 };
 type AiModelsSearchParams = {
   author?: string;
@@ -10125,46 +10464,16 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
   /**
-   * Access the AI Search API for managing AI-powered search instances.
-   *
-   * This is the new API that replaces AutoRAG with better namespace separation:
-   * - Account-level operations: `list()`, `create()`
-   * - Instance-level operations: `get(id).search()`, `get(id).chatCompletions()`, `get(id).delete()`
-   *
-   * @example
-   * ```typescript
-   * // List all AI Search instances
-   * const instances = await env.AI.aiSearch.list();
-   *
-   * // Search an instance
-   * const results = await env.AI.aiSearch.get('my-search').search({
-   *   messages: [{ role: 'user', content: 'What is the policy?' }],
-   *   ai_search_options: {
-   *     retrieval: { max_num_results: 10 }
-   *   }
-   * });
-   *
-   * // Generate chat completions with AI Search context
-   * const response = await env.AI.aiSearch.get('my-search').chatCompletions({
-   *   messages: [{ role: 'user', content: 'What is the policy?' }],
-   *   model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
-   * });
-   * ```
+   * @deprecated Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
-  aiSearch(): AiSearchAccountService;
+  aiSearch(): AiSearchNamespace;
   /**
    * @deprecated AutoRAG has been replaced by AI Search.
-   * Use `env.AI.aiSearch` instead for better API design and new features.
+   * Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    *
-   * Migration guide:
-   * - `env.AI.autorag().list()` → `env.AI.aiSearch.list()`
-   * - `env.AI.autorag('id').search({ query: '...' })` → `env.AI.aiSearch.get('id').search({ messages: [{ role: 'user', content: '...' }] })`
-   * - `env.AI.autorag('id').aiSearch(...)` → `env.AI.aiSearch.get('id').chatCompletions(...)`
-   *
-   * Note: The old API continues to work for backwards compatibility, but new projects should use AI Search.
-   *
-   * @see AiSearchAccountService
-   * @param autoragId Optional instance ID (omit for account-level operations)
+   * @param autoragId Instance ID
    */
   autorag(autoragId: string): AutoRAG;
   run<
@@ -10323,22 +10632,23 @@ declare abstract class AiGateway {
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
 /**
- * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchInternalError instead.
- * @see AiSearchInternalError
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 interface AutoRAGInternalError extends Error {}
 /**
- * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchNotFoundError instead.
- * @see AiSearchNotFoundError
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 interface AutoRAGNotFoundError extends Error {}
 /**
- * @deprecated This error type is no longer used in the AI Search API.
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 interface AutoRAGUnauthorizedError extends Error {}
 /**
- * @deprecated AutoRAG has been replaced by AI Search. Use AiSearchNameNotSetError instead.
- * @see AiSearchNameNotSetError
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 interface AutoRAGNameNotSetError extends Error {}
 type ComparisonFilter = {
@@ -10351,9 +10661,8 @@ type CompoundFilter = {
   filters: ComparisonFilter[];
 };
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchSearchRequest with the new API instead.
- * @see AiSearchSearchRequest
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 type AutoRagSearchRequest = {
   query: string;
@@ -10370,18 +10679,16 @@ type AutoRagSearchRequest = {
   rewrite_query?: boolean;
 };
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchChatCompletionsRequest with the new API instead.
- * @see AiSearchChatCompletionsRequest
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
   system_prompt?: string;
 };
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchChatCompletionsRequest with stream: true instead.
- * @see AiSearchChatCompletionsRequest
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
@@ -10390,9 +10697,8 @@ type AutoRagAiSearchRequestStreaming = Omit<
   stream: true;
 };
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchSearchResponse with the new API instead.
- * @see AiSearchSearchResponse
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 type AutoRagSearchResponse = {
   object: "vector_store.search_results.page";
@@ -10411,9 +10717,8 @@ type AutoRagSearchResponse = {
   next_page: string | null;
 };
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use AiSearchListResponse with the new API instead.
- * @see AiSearchListResponse
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 type AutoRagListResponse = {
   id: string;
@@ -10425,49 +10730,40 @@ type AutoRagListResponse = {
   status: string;
 }[];
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * The new API returns different response formats for chat completions.
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
 /**
- * @deprecated AutoRAG has been replaced by AI Search.
- * Use the new AI Search API instead: `env.AI.aiSearch`
- *
- * Migration guide:
- * - `env.AI.autorag().list()` → `env.AI.aiSearch.list()`
- * - `env.AI.autorag('id').search(...)` → `env.AI.aiSearch.get('id').search(...)`
- * - `env.AI.autorag('id').aiSearch(...)` → `env.AI.aiSearch.get('id').chatCompletions(...)`
- *
- * @see AiSearchAccountService
- * @see AiSearchInstanceService
+ * @deprecated Use the standalone AI Search Workers binding instead.
+ * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
  */
 declare abstract class AutoRAG {
   /**
-   * @deprecated Use `env.AI.aiSearch.list()` instead.
-   * @see AiSearchAccountService.list
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   list(): Promise<AutoRagListResponse>;
   /**
-   * @deprecated Use `env.AI.aiSearch.get(id).search(...)` instead.
-   * Note: The new API uses a messages array instead of a query string.
-   * @see AiSearchInstanceService.search
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
   /**
-   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
-   * @see AiSearchInstanceService.chatCompletions
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
   /**
-   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
-   * @see AiSearchInstanceService.chatCompletions
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;
   /**
-   * @deprecated Use `env.AI.aiSearch.get(id).chatCompletions(...)` instead.
-   * @see AiSearchInstanceService.chatCompletions
+   * @deprecated Use the standalone AI Search Workers binding instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
   aiSearch(
     params: AutoRagAiSearchRequest,
@@ -10592,6 +10888,41 @@ interface RequestInitCfProperties extends Record<string, unknown> {
    * (e.g. { '200-299': 86400, '404': 1, '500-599': 0 })
    */
   cacheTtlByStatus?: Record<string, number>;
+  /**
+   * Explicit Cache-Control header value to set on the response stored in cache.
+   * This gives full control over cache directives (e.g. 'public, max-age=3600, s-maxage=86400').
+   *
+   * Cannot be used together with `cacheTtl` or the `cache` request option (`no-store`/`no-cache`),
+   * as these are mutually exclusive cache control mechanisms. Setting both will throw a TypeError.
+   *
+   * Can be used together with `cacheTtlByStatus`.
+   */
+  cacheControl?: string;
+  /**
+   * Whether the response should be eligible for Cache Reserve storage.
+   */
+  cacheReserveEligible?: boolean;
+  /**
+   * Whether to respect strong ETags (as opposed to weak ETags) from the origin.
+   */
+  respectStrongEtag?: boolean;
+  /**
+   * Whether to strip ETag headers from the origin response before caching.
+   */
+  stripEtags?: boolean;
+  /**
+   * Whether to strip Last-Modified headers from the origin response before caching.
+   */
+  stripLastModified?: boolean;
+  /**
+   * Whether to enable Cache Deception Armor, which protects against web cache
+   * deception attacks by verifying the Content-Type matches the URL extension.
+   */
+  cacheDeceptionArmor?: boolean;
+  /**
+   * Minimum file size in bytes for a response to be eligible for Cache Reserve storage.
+   */
+  cacheReserveMinimumFileSize?: number;
   scrapeShield?: boolean;
   apps?: boolean;
   image?: RequestInitCfPropertiesImage;
@@ -11899,19 +12230,37 @@ interface ImageList {
   cursor?: string;
   listComplete: boolean;
 }
-interface HostedImagesBinding {
+interface ImageHandle {
   /**
-   * Get detailed metadata for a hosted image
-   * @param imageId The ID of the image (UUID or custom ID)
+   * Get metadata for a hosted image
    * @returns Image metadata, or null if not found
    */
-  details(imageId: string): Promise<ImageMetadata | null>;
+  details(): Promise<ImageMetadata | null>;
   /**
    * Get the raw image data for a hosted image
-   * @param imageId The ID of the image (UUID or custom ID)
    * @returns ReadableStream of image bytes, or null if not found
    */
-  image(imageId: string): Promise<ReadableStream<Uint8Array> | null>;
+  bytes(): Promise<ReadableStream<Uint8Array> | null>;
+  /**
+   * Update hosted image metadata
+   * @param options Properties to update
+   * @returns Updated image metadata
+   * @throws {@link ImagesError} if update fails
+   */
+  update(options: ImageUpdateOptions): Promise<ImageMetadata>;
+  /**
+   * Delete a hosted image
+   * @returns True if deleted, false if not found
+   */
+  delete(): Promise<boolean>;
+}
+interface HostedImagesBinding {
+  /**
+   * Get a handle for a hosted image
+   * @param imageId The ID of the image (UUID or custom ID)
+   * @returns A handle for per-image operations
+   */
+  image(imageId: string): ImageHandle;
   /**
    * Upload a new hosted image
    * @param image The image file to upload
@@ -11923,20 +12272,6 @@ interface HostedImagesBinding {
     image: ReadableStream<Uint8Array> | ArrayBuffer,
     options?: ImageUploadOptions,
   ): Promise<ImageMetadata>;
-  /**
-   * Update hosted image metadata
-   * @param imageId The ID of the image
-   * @param options Properties to update
-   * @returns Updated image metadata
-   * @throws {@link ImagesError} if update fails
-   */
-  update(imageId: string, options: ImageUpdateOptions): Promise<ImageMetadata>;
-  /**
-   * Delete a hosted image
-   * @param imageId The ID of the image
-   * @returns True if deleted, false if not found
-   */
-  delete(imageId: string): Promise<boolean>;
   /**
    * List hosted images with pagination
    * @param options List configuration
@@ -12504,6 +12839,7 @@ declare namespace CloudflareWorkersModule {
     constructor(ctx: ExecutionContext, env: Env);
     email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
+    connect?(socket: Socket): void | Promise<void>;
     queue?(batch: MessageBatch): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;
@@ -12524,6 +12860,7 @@ declare namespace CloudflareWorkersModule {
     constructor(ctx: DurableObjectState, env: Env);
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
+    connect?(socket: Socket): void | Promise<void>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer,
@@ -13010,14 +13347,13 @@ interface StreamScopedCaptions {
    * Uploads the caption or subtitle file to the endpoint for a specific BCP47 language.
    * One caption or subtitle file per language is allowed.
    * @param language The BCP 47 language tag for the caption or subtitle.
-   * @param file The caption or subtitle file to upload.
+   * @param input The caption or subtitle stream to upload.
    * @returns The created caption entry.
    * @throws {NotFoundError} if the video is not found
    * @throws {BadRequestError} if the language or file is invalid
-   * @throws {MaxFileSizeError} if the file size is too large
    * @throws {InternalError} if an unexpected error occurs
    */
-  upload(language: string, file: File): Promise<StreamCaption>;
+  upload(language: string, input: ReadableStream): Promise<StreamCaption>;
   /**
    * Generate captions or subtitles for the provided language via AI.
    * @param language The BCP 47 language tag to generate.
@@ -13093,17 +13429,16 @@ interface StreamVideos {
 interface StreamWatermarks {
   /**
    * Generate a new watermark profile
-   * @param file The image file to upload
+   * @param input The image stream to upload
    * @param params The watermark creation parameters.
    * @returns The created watermark profile.
    * @throws {BadRequestError} if the parameters are invalid
    * @throws {InvalidURLError} if the URL is invalid
-   * @throws {MaxFileSizeError} if the file size is too large
    * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
    * @throws {InternalError} if an unexpected error occurs
    */
   generate(
-    file: File,
+    input: ReadableStream,
     params: StreamWatermarkCreateParams,
   ): Promise<StreamWatermark>;
   /**
@@ -13113,7 +13448,6 @@ interface StreamWatermarks {
    * @returns The created watermark profile.
    * @throws {BadRequestError} if the parameters are invalid
    * @throws {InvalidURLError} if the URL is invalid
-   * @throws {MaxFileSizeError} if the file size is too large
    * @throws {TooManyWatermarksError} if the number of allowed watermarks is reached
    * @throws {InternalError} if an unexpected error occurs
    */
@@ -13523,6 +13857,9 @@ declare namespace TailStream {
     readonly type: "fetch";
     readonly statusCode: number;
   }
+  interface ConnectEventInfo {
+    readonly type: "connect";
+  }
   type EventOutcome =
     | "ok"
     | "canceled"
@@ -13553,6 +13890,7 @@ declare namespace TailStream {
     readonly scriptVersion?: ScriptVersion;
     readonly info:
       | FetchEventInfo
+      | ConnectEventInfo
       | JsRpcEventInfo
       | ScheduledEventInfo
       | AlarmEventInfo

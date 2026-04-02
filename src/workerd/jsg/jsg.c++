@@ -358,7 +358,8 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
     return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
-        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN);
+        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN)
+        .map([](JsValue val) { return KJ_ASSERT_NONNULL(val.tryCast<JsObject>()); });
   }
 
   // Use the original module registry implementation
@@ -371,15 +372,18 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
 kj::Maybe<JsObject> Lock::resolvePublicBuiltinModule(kj::StringPtr specifier) {
   auto& isolate = IsolateBase::from(v8Isolate);
   KJ_ASSERT(isolate.isUsingNewModuleRegistry());
-  return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
-      *this, specifier, jsg::modules::ResolveContext::Type::PUBLIC_BUILTIN);
+  return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(*this, specifier,
+      jsg::modules::ResolveContext::Type::PUBLIC_BUILTIN,
+      jsg::modules::ResolveContext::Source::REQUIRE)
+      .map([](JsValue val) { return KJ_ASSERT_NONNULL(val.tryCast<JsObject>()); });
 }
 
 kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requireEsm) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
     return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
-        *this, specifier, jsg::modules::ResolveContext::Type::BUNDLE);
+        *this, specifier, jsg::modules::ResolveContext::Type::BUNDLE)
+        .map([](JsValue val) { return KJ_ASSERT_NONNULL(val.tryCast<JsObject>()); });
   }
 
   auto moduleRegistry = jsg::ModuleRegistry::from(*this);

@@ -165,4 +165,10 @@ kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennes
       tunneledInfo.message);
 }
 
+bool isExceptionFromInputGateBroken(kj::StringPtr description) {
+  // annotateBroken() produces "broken.inputGateBroken; {message}", optionally prefixed with
+  // "remote." when crossing RPC boundaries. Strip the remote prefix first, then check the tag.
+  return stripRemoteExceptionPrefix(description).startsWith("broken.inputGateBroken; "_kj);
+}
+
 }  // namespace workerd::jsg

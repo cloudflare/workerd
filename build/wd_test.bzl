@@ -1,4 +1,5 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
+load("@workerd//:build/lint_test.bzl", "lint_test")
 
 def wd_test(
         src,
@@ -6,6 +7,7 @@ def wd_test(
         name = None,
         args = [],
         ts_deps = [],
+        lint = True,
         python_snapshot_test = False,
         generate_default_variant = True,
         generate_all_autogates_variant = True,
@@ -62,6 +64,21 @@ def wd_test(
             deps = ["//src/node:node@tsproject"] + ts_deps,
         )
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
+
+    if lint:
+        lint_srcs = [s for s in data if (s.endswith(".ts") or s.endswith(".mts") or s.endswith(".js") or s.endswith(".mjs")) and not s.startswith("../") and not s.startswith("//")]
+        if lint_srcs:
+            lint_test(
+                name = name,
+                eslintrc_json = "@workerd//tools:base.eslint.config.mjs",
+                tsconfig_json = "@workerd//tools:base.tsconfig.json",
+                srcs = lint_srcs,
+                data = ["tsconfig.json"] if len(ts_srcs) > 0 else [],
+                no_copy_to_bin = [
+                    "@workerd//tools:base.eslint.config.mjs",
+                    "@workerd//tools:base.tsconfig.json",
+                ],
+            )
 
     # Add initial arguments for `workerd test` command.
     base_args = [

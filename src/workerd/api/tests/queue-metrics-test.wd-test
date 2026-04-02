@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "queue-metrics-enabled",
+      worker = (
+        modules = [
+          ( name = "worker-metrics-enabled", esModule = embed "queue-metrics-test.js" )
+        ],
+        bindings = [
+          ( name = "QUEUE", queue = "queue-metrics-enabled" ),
+          ( name = "METRICS_FLAG", json = "true" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "capture_async_api_throws"],
+      )
+    ),
+    ( name = "queue-metrics-disabled",
+      worker = (
+        modules = [
+          ( name = "worker-metrics-disabled", esModule = embed "queue-metrics-test.js" )
+        ],
+        bindings = [
+          ( name = "QUEUE", queue = "queue-metrics-disabled" ),
+          ( name = "METRICS_FLAG", json = "false" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "capture_async_api_throws"],
+      )
+    ),
+  ],
+);

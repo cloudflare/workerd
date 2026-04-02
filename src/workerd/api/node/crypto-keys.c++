@@ -287,8 +287,21 @@ class AsymmetricKey final: public CryptoKey::Impl {
 
     auto maybeBio = ([&] {
       if (isPrivate) {
-        return key.writePrivateKey(
-            ncrypto::EVPKeyPointer::PrivateKeyEncodingConfig(false, formatType, encType));
+        ncrypto::EVPKeyPointer::PrivateKeyEncodingConfig config(false, formatType, encType);
+
+        KJ_IF_SOME(ciph, cipher) {
+          config.cipher = ncrypto::getCipherByName(ciph.cStr());
+          JSG_REQUIRE(config.cipher != nullptr, Error, "Unknown cipher: ", ciph);
+        }
+
+        KJ_IF_SOME(pass, passphrase) {
+          auto dp = ncrypto::DataPointer::Alloc(pass.size());
+          kj::ArrayPtr<kj::byte> ptr(dp.get<kj::byte>(), dp.size());
+          ptr.copyFrom(pass.asPtr());
+          config.passphrase = kj::mv(dp);
+        }
+
+        return key.writePrivateKey(config);
       }
       return key.writePublicKey(
           ncrypto::EVPKeyPointer::PublicKeyEncodingConfig(false, formatType, encType));

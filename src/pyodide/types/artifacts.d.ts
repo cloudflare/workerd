@@ -12,6 +12,7 @@ declare namespace ArtifactBundler {
 
   const hasMemorySnapshot: () => boolean;
   const isEwValidating: () => boolean;
+  const isDynamicWorker: () => boolean;
   const readMemorySnapshot: (
     offset: number,
     buf: Uint32Array | Uint8Array

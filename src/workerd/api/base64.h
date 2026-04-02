@@ -11,9 +11,9 @@ class Base64Module final: public jsg::Object {
   Base64Module() = default;
   Base64Module(jsg::Lock&, const jsg::Url&) {}
 
-  jsg::BufferSource decodeArray(jsg::Lock& js, jsg::BufferSource source);
-  jsg::BufferSource encodeArray(jsg::Lock& js, jsg::BufferSource source);
-  jsg::JsString encodeArrayToString(jsg::Lock&, jsg::BufferSource source);
+  jsg::JsBufferSource decodeArray(jsg::Lock& js, jsg::JsBufferSource source);
+  jsg::JsBufferSource encodeArray(jsg::Lock& js, jsg::JsBufferSource source);
+  jsg::JsString encodeArrayToString(jsg::Lock&, jsg::JsBufferSource source);
 
   JSG_RESOURCE_TYPE(Base64Module) {
     JSG_METHOD(encodeArray);

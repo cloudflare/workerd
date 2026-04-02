@@ -72,53 +72,52 @@ constexpr ErrorTag getErrorTagFromName(jsg::Lock& js, kj::StringPtr str) {
   return ErrorTag::UNKNOWN;
 }
 
-JsObject toJsError(Lock& js, ErrorTag tag, JsValue message) {
-  auto str = message.toJsString(js);
+JsObject toJsError(Lock& js, ErrorTag tag, JsString message) {
   switch (tag) {
     case ErrorTag::ERROR: {
-      return JsObject(v8::Exception::Error(str).As<v8::Object>());
+      return JsObject(v8::Exception::Error(message).As<v8::Object>());
     }
     case ErrorTag::TYPE_ERROR: {
-      return JsObject(v8::Exception::TypeError(str).As<v8::Object>());
+      return JsObject(v8::Exception::TypeError(message).As<v8::Object>());
     }
     case ErrorTag::RANGE_ERROR: {
-      return JsObject(v8::Exception::RangeError(str).As<v8::Object>());
+      return JsObject(v8::Exception::RangeError(message).As<v8::Object>());
     }
     case ErrorTag::REFERENCE_ERROR: {
-      return JsObject(v8::Exception::ReferenceError(str).As<v8::Object>());
+      return JsObject(v8::Exception::ReferenceError(message).As<v8::Object>());
     }
     case ErrorTag::SYNTAX_ERROR: {
-      return JsObject(v8::Exception::SyntaxError(str).As<v8::Object>());
+      return JsObject(v8::Exception::SyntaxError(message).As<v8::Object>());
     }
     case ErrorTag::WASM_COMPILE_ERROR: {
-      return JsObject(v8::Exception::WasmCompileError(str).As<v8::Object>());
+      return JsObject(v8::Exception::WasmCompileError(message).As<v8::Object>());
     }
     case ErrorTag::WASM_LINK_ERROR: {
-      return JsObject(v8::Exception::WasmLinkError(str).As<v8::Object>());
+      return JsObject(v8::Exception::WasmLinkError(message).As<v8::Object>());
     }
     case ErrorTag::WASM_RUNTIME_ERROR: {
-      return JsObject(v8::Exception::WasmRuntimeError(str).As<v8::Object>());
+      return JsObject(v8::Exception::WasmRuntimeError(message).As<v8::Object>());
     }
     case ErrorTag::WASM_SUSPEND_ERROR: {
-      return JsObject(v8::Exception::WasmSuspendError(str).As<v8::Object>());
+      return JsObject(v8::Exception::WasmSuspendError(message).As<v8::Object>());
     }
     case ErrorTag::EVAL_ERROR: {
-      return JsObject(v8::Exception::EvalError(str).As<v8::Object>());
+      return JsObject(v8::Exception::EvalError(message).As<v8::Object>());
     }
     case ErrorTag::URI_ERROR: {
-      return JsObject(v8::Exception::URIError(str).As<v8::Object>());
+      return JsObject(v8::Exception::URIError(message).As<v8::Object>());
     }
     case ErrorTag::AGGREGATE_ERROR: {
-      return JsObject(v8::Exception::AggregateError(str).As<v8::Object>());
+      return JsObject(v8::Exception::AggregateError(message).As<v8::Object>());
     }
     case ErrorTag::SUPPRESSED_ERROR: {
-      return JsObject(v8::Exception::SuppressedError(str).As<v8::Object>());
+      return JsObject(v8::Exception::SuppressedError(message).As<v8::Object>());
     }
     case ErrorTag::UNKNOWN: {
-      return JsObject(v8::Exception::Error(str).As<v8::Object>());
+      return JsObject(v8::Exception::Error(message).As<v8::Object>());
     }
   }
-  return JsObject(v8::Exception::Error(str).As<v8::Object>());
+  return JsObject(v8::Exception::Error(message).As<v8::Object>());
 }
 }  // namespace
 
@@ -231,7 +230,12 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
   // to be serialized normally. Otherwise, it is a class instance, which we should treat as a host
   // object. Inside `WriteHostObject()` we will throw DataCloneError due to the object not having
   // internal fields.
+#if V8_MAJOR_VERSION >= 15 || (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION >= 7)
+  return v8::Just(object->GetPrototype() != prototypeOfObject);
+#else
+  // TODO(cleanup): Remove when unnecessary.
   return v8::Just(object->GetPrototypeV2() != prototypeOfObject);
+#endif
 }
 
 v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
@@ -490,8 +494,13 @@ v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
       }
 
       // The next value is the message, which is always present.
+      auto messageValue = readValue(js);
+      auto messageStr = KJ_UNWRAP_OR(messageValue.tryCast<JsString>(), {
+        JSG_FAIL_REQUIRE(
+            DOMDataCloneError, "Deserialization failed: error message is not a string");
+      });
       // Now let's create the error object based on the tag and message.
-      auto obj = toJsError(js, errorTag, readValue(js));
+      auto obj = toJsError(js, errorTag, messageStr);
 
       // If we have a name, we set it on the error object. This is not
       // perfect but it gets close enough. Specifically, when the error

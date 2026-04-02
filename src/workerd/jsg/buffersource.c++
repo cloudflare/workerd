@@ -135,6 +135,18 @@ v8::Local<v8::Value> BufferSource::getHandle(Lock& js) {
   return handle.getHandle(js);
 }
 
+JsBufferSource BufferSource::getJsHandle(Lock& js) {
+  auto handle = getHandle(js);
+  if (handle->IsArrayBuffer()) {
+    return JsBufferSource(JsArrayBuffer(handle.As<v8::ArrayBuffer>()));
+  } else if (handle->IsSharedArrayBuffer()) {
+    return JsBufferSource(handle.As<v8::SharedArrayBuffer>());
+  } else if (handle->IsArrayBufferView()) {
+    return JsBufferSource(JsArrayBufferView(handle.As<v8::ArrayBufferView>()));
+  }
+  KJ_UNREACHABLE;
+}
+
 void BufferSource::setDetachKey(Lock& js, v8::Local<v8::Value> key) {
   auto handle = getHandle(js);
   auto buffer = handle->IsArrayBuffer() ? handle.As<v8::ArrayBuffer>()

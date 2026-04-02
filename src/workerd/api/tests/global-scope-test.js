@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   deepStrictEqual,
   strictEqual,
@@ -163,15 +166,15 @@ export const unhandledRejectionHandler = {
 
 export const unhandledRejectionHandler2 = {
   async test() {
-    let resolve;
-    const promise = new Promise((a) => (resolve = a));
     const handler = (event) => {
       throw new Error('should not have fired');
     };
     addEventListener('unhandledrejection', handler);
     try {
       await Promise.reject('boom');
-    } catch {}
+    } catch {
+      // intentionally empty
+    }
     await Promise.reject('boom').catch(() => {});
     removeEventListener('unhandledrejection', handler);
   },
@@ -196,11 +199,13 @@ export const unhandledRejectionHandler3 = {
 
 export const unhandledRejectionHandler4 = {
   async test() {
-    let resolve;
-    const promise = new Promise((a) => (resolve = a));
-    addEventListener('unhandledrejection', (event) => {
-      throw new Error('does not crash. safe to ignore in test logs');
-    });
+    addEventListener(
+      'unhandledrejection',
+      (event) => {
+        throw new Error('does not crash. safe to ignore in test logs');
+      },
+      { once: true }
+    );
 
     Promise.reject('boom');
   },
@@ -371,7 +376,7 @@ export const base64 = {
       }
 
       var out = '';
-      for (var i = 0; i < s.length; i += 3) {
+      for (let i = 0; i < s.length; i += 3) {
         var groupsOfSix = [undefined, undefined, undefined, undefined];
         groupsOfSix[0] = s.charCodeAt(i) >> 2;
         groupsOfSix[1] = (s.charCodeAt(i) & 0x03) << 4;
@@ -549,7 +554,7 @@ export const base64 = {
       strictEqual(globalThis.atob(globalThis.btoa(input)), String(input));
     }
 
-    var tests = [
+    let tests = [
       'עברית',
       '',
       'ab',
@@ -606,7 +611,7 @@ export const base64 = {
     });
 
     var everything = '';
-    for (var i = 0; i < 256; i++) {
+    for (let i = 0; i < 256; i++) {
       everything += String.fromCharCode(i);
     }
     tests.push(['btoa(first 256 code points concatenated)', everything]);
@@ -623,7 +628,7 @@ export const base64 = {
       strictEqual(globalThis.atob(input), expected);
     }
 
-    var tests = [
+    tests = [
       '',
       'abcd',
       ' abcd',
@@ -846,7 +851,9 @@ export const structuredCloneError = {
         var returnVal;
         try {
           returnVal = gTCtor.entries(this);
-        } catch (e) {}
+        } catch (_e) {
+          // expected
+        }
         return returnVal;
       },
     };

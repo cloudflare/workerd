@@ -609,6 +609,15 @@ using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
     registry.template registerTypeScriptDefine<DEFINE>();                                          \
   } while (false)
 
+// Like JSG_TS_DEFINE, but accepts a string literal (e.g. a raw string R"(...)") instead of bare tokens.
+// This avoids the preprocessor parsing the TypeScript content as C++ tokens, which is necessary when the
+// TypeScript definition contains C++20 keywords like `module` that Clang rejects inside macro arguments.
+#define JSG_TS_DEFINE_LITERAL(jsg_string_literal)                                                  \
+  do {                                                                                             \
+    static const char DEFINE[] = jsg_string_literal;                                               \
+    registry.template registerTypeScriptDefine<DEFINE>();                                          \
+  } while (false)
+
 // Like JSG_TS_ROOT but for use with JSG_STRUCT. Should be placed adjacent to the JSG_STRUCT declaration,
 // inside the same `struct` definition. See the `## TypeScript` section of the JSG README.md for more
 // details.
@@ -1803,6 +1812,13 @@ class GcVisitor {
 
   void visit(Data& data);
 
+  /// Visit a raw `v8::Global<Value>` + `v8::TracedReference<Data>` pair,
+  /// implementing the same strong↔traced dual-mode switching as `visit(Data&)`.
+  ///
+  /// Used by the Rust JSG FFI to support `v8::Global<T>` fields on Rust
+  /// resources without a full `jsg::Data` wrapper.
+  void visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Data>& traced);
+
   void visit(kj::Maybe<Data>& maybeData) {
     KJ_IF_SOME(data, maybeData) {
       visit(data);
@@ -2547,6 +2563,7 @@ class Lock {
   // Like above, but return a pure-JS promise, not a typed Promise.
   JsPromise rejectedJsPromise(jsg::JsValue exception);
   JsPromise rejectedJsPromise(kj::Exception&& exception, ExceptionToJsOptions options = {});
+  JsPromise resolvedJsPromise(jsg::JsValue value);
 
   // Like `kj::evalNow()`, but returns a jsg::Promise for the result. Synchronous exceptions are
   // caught and returned as a rejected promise.

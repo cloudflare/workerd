@@ -30,8 +30,7 @@ WD_STRONG_BOOL(IsValidating);
 WD_STRONG_BOOL(IsWorkerd);
 WD_STRONG_BOOL(SnapshotToDisk);
 
-const auto PYTHON_PACKAGES_URL =
-    "https://storage.googleapis.com/cloudflare-edgeworker-python-packages/";
+const auto PYTHON_PACKAGES_URL = "https://pyodide-capnp-bin.edgeworker.net/";
 class PyodideBundleManager {
  public:
   void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
@@ -319,19 +318,25 @@ struct ArtifactBundler_State {
   // to store a memory snapshot.
   bool isValidating;
 
+  // Set when the worker is a dynamically-loaded worker. Dynamic workers don't support dedicated
+  // snapshots yet, so the Python runtime uses this to skip snapshot type validation.
+  bool isDynamicWorkerFlag;
+
   ArtifactBundler_State(kj::Maybe<const PyodidePackageManager&> packageManager,
       kj::Maybe<kj::Array<const kj::byte>> existingSnapshot,
-      bool isValidating = false)
+      bool isValidating = false,
+      bool isDynamicWorker = false)
       : packageManager(packageManager),
         storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
-        isValidating(isValidating) {};
+        isValidating(isValidating),
+        isDynamicWorkerFlag(isDynamicWorker) {};
 
   kj::Own<ArtifactBundler_State> clone() {
     return kj::heap<ArtifactBundler_State>(packageManager,
         existingSnapshot.map(
             [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }),
-        isValidating);
+        isValidating, isDynamicWorkerFlag);
   }
 };
 
@@ -369,6 +374,11 @@ class ArtifactBundler: public jsg::Object {
     return inner->isValidating;
   }
 
+  // Determines whether this ArtifactBundler belongs to a dynamically-loaded worker.
+  bool isDynamicWorker() {
+    return inner->isDynamicWorkerFlag;
+  }
+
   static kj::Own<State> makeDisabledBundler() {
     return kj::heap<State>(kj::none, kj::none);
   }
@@ -404,6 +414,7 @@ class ArtifactBundler: public jsg::Object {
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(isEwValidating);
+    JSG_METHOD(isDynamicWorker);
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
     JSG_METHOD(getPackage);

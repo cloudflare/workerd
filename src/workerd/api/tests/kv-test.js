@@ -73,7 +73,7 @@ export default class KVTest extends WorkerEntrypoint {
       const prefix = queryParameters.prefix;
 
       switch (prefix) {
-        case 'te':
+        case 'te': {
           // [0, 1, 2, ... limit]
           const range = [...Array(limit)].keys();
           const keys = Array.from(range).map((index) => ({
@@ -88,6 +88,7 @@ export default class KVTest extends WorkerEntrypoint {
             expiration: 1234,
           });
           break;
+        }
         case 'not-found':
           result = JSON.stringify({
             keys: [],

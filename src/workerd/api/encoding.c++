@@ -525,12 +525,11 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
 jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   if (!workerd::util::Autogate::isEnabled(workerd::util::AutogateKey::ENABLE_FAST_TEXTENCODER)) {
     auto str = input.orDefault(js.str());
-    auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
-        "Cannot allocate space for TextEncoder.encode");
+    auto view = jsg::JsUint8Array::create(js, str.utf8Length(js));
     [[maybe_unused]] auto result = str.writeInto(
         js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
     KJ_DASSERT(result.written == view.size());
-    return jsg::JsUint8Array(view.getHandle(js).As<v8::Uint8Array>());
+    return view;
   }
 
   jsg::JsString str = input.orDefault(js.str());
@@ -559,17 +558,17 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
     utf8_length = simdutf::utf8_length_from_latin1(
         reinterpret_cast<const char*>(latin1Buffer.begin()), length);
 
-    auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
+    auto view = jsg::JsUint8Array::create(js, utf8_length);
     if (utf8_length == length) {
       // ASCII fast path: no conversion needed, Latin-1 is same as UTF-8 for ASCII
-      kj::arrayPtr(static_cast<kj::byte*>(backingStore->Data()), length).copyFrom(latin1Buffer);
+      view.asArrayPtr().copyFrom(latin1Buffer);
     } else {
       [[maybe_unused]] auto written =
           simdutf::convert_latin1_to_utf8(reinterpret_cast<const char*>(latin1Buffer.begin()),
-              length, reinterpret_cast<char*>(backingStore->Data()));
+              length, view.asArrayPtr().asChars().begin());
       KJ_DASSERT(utf8_length == written);
     }
-    return jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, utf8_length);
+    return view;
   }
 
   // Use off-heap allocation for intermediate UTF-16 buffer to avoid wasting V8 heap space
@@ -592,12 +591,11 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
     KJ_DASSERT(lengthResult.error == simdutf::SUCCESS);
   }
 
-  auto backingStore = js.allocBackingStore(utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
+  auto view = jsg::JsUint8Array::create(js, utf8_length);
   [[maybe_unused]] auto written =
-      simdutf::convert_utf16_to_utf8(data, length, reinterpret_cast<char*>(backingStore->Data()));
+      simdutf::convert_utf16_to_utf8(data, length, view.asArrayPtr().asChars().begin());
   KJ_DASSERT(written == utf8_length, "Conversion yielded wrong number of UTF-8 bytes");
-
-  return jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, utf8_length);
+  return view;
 }
 
 namespace {

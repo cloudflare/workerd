@@ -1178,108 +1178,84 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
 }
 
 namespace {
-kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(kj::StringPtr condHeader,
-    kj::Vector<R2Bucket::Etag> etagAccumulator = kj::Vector<R2Bucket::Etag>(),
-    bool leadingCommaRequired = false) {
-  // Vague recursion termination proof:
-  // Stop condition triggers when no more etags and wildcards are found
-  // => empty string also results in termination
-  // There are 2 recursive calls in this function body, each of them always moves the start of the
-  // condHeader to some value found in the condHeader + 1.
-  // => upon each recursion, the size of condHeader is reduced by at least 1.
-  // Eventually we must arrive at an empty string, hence triggering the stop condition.
 
-  size_t nextWildcard = condHeader.findFirst('*').orDefault(SIZE_MAX);
-  size_t nextQuotation = condHeader.findFirst('"').orDefault(SIZE_MAX);
-  size_t nextWeak = condHeader.findFirst('W').orDefault(SIZE_MAX);
-  size_t nextComma = condHeader.findFirst(',').orDefault(SIZE_MAX);
-
-  if (nextQuotation == SIZE_MAX && nextWildcard == SIZE_MAX) {
-    // Both of these being SIZE_MAX means no more wildcards or double quotes are left in the header.
-    // When this is the case, there's no more useful etags that can potentially still be extracted.
-    return etagAccumulator.releaseAsArray();
-  }
-
-  if (nextComma < nextWildcard && nextComma < nextQuotation && nextComma < nextWeak) {
-    // Get rid of leading commas, this can happen during recursion because servers must deal with
-    // empty list elements. E.g.: If-None-Match "abc", , "cdef" should be accepted by the server.
-    // This slice is always safe, since we're at most setting start to the last index + 1,
-    // which just results in an empty list if it's out of bounds by 1.
-    return parseConditionalEtagHeader(condHeader.slice(nextComma + 1), kj::mv(etagAccumulator));
-  } else if (leadingCommaRequired) {
-    // we don't need to include nextComma in this min check since in this else branch nextComma is
-    // always larger than at least one of nextWildcard, nextQuotation and nextWeak
-    size_t firstEncounteredProblem = std::min({nextWildcard, nextQuotation, nextWeak});
-
-    kj::StringPtr failureReason;
-    if (firstEncounteredProblem == nextWildcard) {
-      failureReason = "Encountered a wildcard character '*' instead."_kjc;
-    } else if (firstEncounteredProblem == nextQuotation) {
-      failureReason = "Encountered a double quote character '\"' instead. "
-                      "This would otherwise indicate the start of a new strong etag."_kjc;
-    } else if (firstEncounteredProblem == nextWeak) {
-      failureReason = "Encountered a weak quotation character 'W' instead. "
-                      "This would otherwise indicate the start of a new weak etag."_kjc;
-    } else {
-      KJ_FAIL_ASSERT(
-          "We shouldn't be able to reach this point. The above etag parsing code is incorrect.");
+kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(kj::StringPtr condHeader) {
+  // Iterative parser for conditional etag headers (If-Match / If-None-Match).
+  // Dispatches on the first non-whitespace character each iteration rather than
+  // scanning the full remaining string for multiple characters.
+  kj::Vector<R2Bucket::Etag> etagAccumulator;
+  bool leadingCommaRequired = false;
+  for (;;) {
+    // Strip optional whitespace (OWS) per RFC 7230 §7 list rule.
+    while (condHeader.size() > 0 && (condHeader[0] == ' ' || condHeader[0] == '\t')) {
+      condHeader = condHeader.slice(1);
     }
-
-    // Did not find a leading comma, and we expected a leading comma before any further etags
-    JSG_FAIL_REQUIRE(Error, "Comma was expected to separate etags. ", failureReason);
-  }
-
-  if (nextWildcard < nextQuotation) {
-    // Unquoted wildcard found
-    // remove all other etags since they're overridden by the wildcard anyways
-    etagAccumulator.clear();
-    struct R2Bucket::WildcardEtag etag = {};
-    etagAccumulator.add(kj::mv(etag));
-    return etagAccumulator.releaseAsArray();
-  }
-  if (nextQuotation < nextWildcard) {
-    size_t etagValueStart = nextQuotation + 1;
-    // Find closing quotation mark, instead of going by the next comma.
-    // This is done because commas are allowed in etags, and double quotes are not.
-    kj::Maybe<size_t> closingQuotation =
-        condHeader.slice(etagValueStart).findFirst('"').map([=](size_t cq) {
-      return cq + etagValueStart;
-    });
-
-    KJ_IF_SOME(cq, closingQuotation) {
-      // Slice end is non inclusive, meaning that this drops the closingQuotation from the etag
-      kj::String etagValue = kj::str(condHeader.slice(etagValueStart, cq));
-      if (nextWeak < nextQuotation) {
-        JSG_REQUIRE(condHeader.size() > nextWeak + 2 && condHeader[nextWeak + 1] == '/' &&
-                nextWeak + 2 == nextQuotation,
-            Error, "Weak etags must start with W/ and their value must be quoted");
-        R2Bucket::WeakEtag etag = {kj::mv(etagValue)};
-        etagAccumulator.add(kj::mv(etag));
-      } else {
-        R2Bucket::StrongEtag etag = {kj::mv(etagValue)};
-        etagAccumulator.add(kj::mv(etag));
+    if (condHeader.size() == 0) {
+      return etagAccumulator.releaseAsArray();
+    }
+    switch (condHeader[0]) {
+      case ',': {
+        // Skip separator commas (including empty list elements per RFC 7230 §7).
+        condHeader = condHeader.slice(1);
+        leadingCommaRequired = false;
+        continue;
       }
-      return parseConditionalEtagHeader(condHeader.slice(cq + 1), kj::mv(etagAccumulator), true);
-    } else {
-      JSG_FAIL_REQUIRE(Error, "Unclosed double quote for Etag");
+      case '*': {
+        if (leadingCommaRequired) {
+          JSG_FAIL_REQUIRE(Error,
+              "Comma was expected to separate etags. "
+              "Encountered a wildcard character '*' instead.");
+        }
+        // Wildcard overrides all other etags.
+        etagAccumulator.clear();
+        etagAccumulator.add(R2Bucket::WildcardEtag{});
+        return etagAccumulator.releaseAsArray();
+      }
+      case 'W': {
+        if (leadingCommaRequired) {
+          JSG_FAIL_REQUIRE(Error,
+              "Comma was expected to separate etags. "
+              "Encountered a weak quotation character 'W' instead. "
+              "This would otherwise indicate the start of a new weak etag.");
+        }
+        JSG_REQUIRE(condHeader.size() > 2 && condHeader[1] == '/' && condHeader[2] == '"', Error,
+            "Weak etags must start with W/ and their value must be quoted");
+        condHeader = condHeader.slice(3);  // skip W/"
+        auto closingQuote = condHeader.findFirst('"');
+        auto& cq = JSG_REQUIRE_NONNULL(closingQuote, Error, "Unclosed double quote for Etag");
+        etagAccumulator.add(R2Bucket::WeakEtag{kj::str(condHeader.slice(0, cq))});
+        condHeader = condHeader.slice(cq + 1);
+        leadingCommaRequired = true;
+        continue;
+      }
+      case '"': {
+        if (leadingCommaRequired) {
+          JSG_FAIL_REQUIRE(Error,
+              "Comma was expected to separate etags. "
+              "Encountered a double quote character '\"' instead. "
+              "This would otherwise indicate the start of a new strong etag.");
+        }
+        condHeader = condHeader.slice(1);  // skip opening "
+        auto closingQuote = condHeader.findFirst('"');
+        auto& cq = JSG_REQUIRE_NONNULL(closingQuote, Error, "Unclosed double quote for Etag");
+        etagAccumulator.add(R2Bucket::StrongEtag{kj::str(condHeader.slice(0, cq))});
+        condHeader = condHeader.slice(cq + 1);
+        leadingCommaRequired = true;
+        continue;
+      }
+      default: {
+        // No valid etag token starts with this character; stop parsing.
+        return etagAccumulator.releaseAsArray();
+      }
     }
-  } else {
-    JSG_FAIL_REQUIRE(Error, "Invalid conditional header");
   }
+  KJ_UNREACHABLE;
 }
 
 kj::Array<R2Bucket::Etag> buildSingleEtagArray(kj::StringPtr etagValue) {
-  kj::ArrayBuilder<R2Bucket::Etag> etagArrayBuilder = kj::heapArrayBuilder<R2Bucket::Etag>(1);
-
-  if (etagValue == "*") {
-    struct R2Bucket::WildcardEtag etag = {};
-    etagArrayBuilder.add(kj::mv(etag));
-  } else {
-    struct R2Bucket::StrongEtag etag = {.value = kj::str(etagValue)};
-    etagArrayBuilder.add(kj::mv(etag));
-  }
-
-  return etagArrayBuilder.finish();
+  return etagValue == "*"
+      ? kj::arr<R2Bucket::Etag>(R2Bucket::WildcardEtag{})
+      : kj::arr<R2Bucket::Etag>(R2Bucket::StrongEtag{.value = kj::str(etagValue)});
 }
 
 }  // namespace
@@ -1289,26 +1265,20 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
   KJ_IF_SOME(e, h.getCommon(js, capnp::CommonHeaderName::IF_MATCH)) {
     etagMatches = parseConditionalEtagHeader(e);
     KJ_IF_SOME(arr, etagMatches) {
-      if (arr.size() == 0) {
-        JSG_FAIL_REQUIRE(Error, "Invalid ETag in if-match header");
-      }
+      JSG_REQUIRE(arr.size() > 0, Error, "Invalid ETag in if-match header");
     }
   }
   KJ_IF_SOME(e, h.getCommon(js, capnp::CommonHeaderName::IF_NONE_MATCH)) {
     etagDoesNotMatch = parseConditionalEtagHeader(e);
     KJ_IF_SOME(arr, etagDoesNotMatch) {
-      if (arr.size() == 0) {
-        JSG_FAIL_REQUIRE(Error, "Invalid ETag in if-none-match header");
-      }
+      JSG_REQUIRE(arr.size() > 0, Error, "Invalid ETag in if-none-match header");
     }
   }
   KJ_IF_SOME(d, h.getCommon(js, capnp::CommonHeaderName::IF_MODIFIED_SINCE)) {
-    auto date = parseDate(js, d);
-    uploadedAfter = date;
+    uploadedAfter = parseDate(js, d);
   }
   KJ_IF_SOME(d, h.getCommon(js, capnp::CommonHeaderName::IF_UNMODIFIED_SINCE)) {
-    auto date = parseDate(js, d);
-    uploadedBefore = date;
+    uploadedBefore = parseDate(js, d);
   }
 }
 
@@ -1451,7 +1421,7 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
     // httpMetadata can't be null because GetResult always populates it.
     kj::String contentType =
         mapCopyString(KJ_REQUIRE_NONNULL(httpMetadata).contentType).orDefault(nullptr);
-    return js.alloc<Blob>(js, kj::mv(buffer), kj::mv(contentType));
+    return js.alloc<Blob>(js, buffer.getJsHandle(js), kj::mv(contentType));
   });
 }
 

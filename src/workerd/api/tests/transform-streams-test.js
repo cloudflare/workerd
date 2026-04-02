@@ -488,7 +488,9 @@ export const transformCrashRegression = {
                 } else {
                   results[key][writeProp] = typeof obj[key][property];
                 }
-              } catch (err) {}
+              } catch (_err) {
+                // expected
+              }
               let instance;
               try {
                 if (property === 'prototype') {
@@ -540,14 +542,16 @@ export const transformCrashRegression = {
                         results[key][writeProp][instanceProperty] =
                           typeof instance[instanceProperty];
                       }
-                    } catch {}
+                    } catch {
+                      // intentionally empty
+                    }
                   }
                 } else {
                   if (results[key][writeProp] === undefined) {
                     results[key][writeProp] = typeof instance;
                   }
                 }
-              } catch (e) {
+              } catch (_e) {
                 if (results[key][writeProp] === undefined) {
                   results[key][writeProp] = typeof obj[key][property];
                 }

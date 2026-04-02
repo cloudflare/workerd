@@ -2,6 +2,18 @@ load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    src = "structuredclone-error-serialize-test.wd-test",
+    args = ["--experimental"],
+    data = ["structuredclone-error-serialize-test.js"],
+)
+
+wd_test(
+    src = "deserialize-hardening-test.wd-test",
+    args = ["--experimental"],
+    data = ["deserialize-hardening-test.js"],
+)
+
+wd_test(
     src = "settimeout-test.wd-test",
     args = ["--experimental"],
     data = ["settimeout-test.js"],
@@ -17,6 +29,18 @@ wd_test(
     src = "delete-all-deletes-alarm-test.wd-test",
     args = ["--experimental"],
     data = ["delete-all-deletes-alarm-test.js"],
+)
+
+wd_test(
+    src = "connect-handler-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "connect-handler-test.js",
+        "connect-handler-test-proxy.js",
+    ],
+    # Test uses TCP sockets for ports 8081-8083 and may fail when running concurrently with other
+    # tests that do so.
+    tags = ["exclusive"],
 )
 
 wd_test(
@@ -42,7 +66,10 @@ wd_test(
         "tail-worker-test-invalid.js",
         "tail-worker-test-jsrpc.js",
         "websocket-hibernation.js",
+        "connect-handler-test.js",
+        "connect-handler-test-proxy.js",
     ],
+    tags = ["exclusive"],
 )
 
 # Test to validate timing semantics for JSRPC streaming responses.
@@ -85,6 +112,12 @@ wd_test(
 )
 
 wd_test(
+    src = "cf-cache-control-test.wd-test",
+    args = ["--experimental"],
+    data = ["cf-cache-control-test.js"],
+)
+
+wd_test(
     src = "ctx-props-test.wd-test",
     args = ["--experimental"],
 )
@@ -116,6 +149,32 @@ wd_test(
     data = [
         "queue-error-codes-test.js",
         "queue-test.js",
+    ],
+)
+
+wd_test(
+    src = "queue-metrics-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-metrics-test.js"],
+)
+
+wd_test(
+    src = "queue-metadata-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-metadata-test.js"],
+)
+
+wd_test(
+    src = "queue-metrics-sentinel-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-metrics-sentinel-test.js"],
+)
+
+wd_test(
+    src = "queue-producer-metadata-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "queue-producer-metadata-test.js",
     ],
 )
 
@@ -327,6 +386,7 @@ wd_test(
     src = "js-rpc-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-test.js"],
+    tags = ["exclusive"],
 )
 
 wd_test(
@@ -577,12 +637,14 @@ wd_test(
         "--no-verbose",
     ],
     data = ["js-rpc-test.js"],
+    tags = ["exclusive"],
 )
 
 wd_test(
     src = "http-test-ts.ts-wd-test",
     args = ["--experimental"],
     data = ["http-test-ts.ts"],
+    lint = False,
 )
 
 wd_test(
@@ -592,6 +654,7 @@ wd_test(
         "new-module-registry-test.js",
         "test.wasm",
     ],
+    lint = False,
 )
 
 wd_test(

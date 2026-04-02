@@ -454,7 +454,7 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
     });
   } catch (kj::Exception& e) {
     if (!ignoreDescription(e.getDescription())) {
-      throw e;
+      throw kj::mv(e);
     }
   }
 }

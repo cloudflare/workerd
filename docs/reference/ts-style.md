@@ -44,6 +44,10 @@ Import specifiers follow a tiered module system:
   public module exports.
 - `.d.ts` files without a matching `.ts` file declare the shape of C++ JSG modules imported
   via internal specifiers.
+- New `.ts`/`.js` files in `src/node/internal/` are **auto-discovered** by `BUILD.bazel` via glob.
+  No explicit registration is needed — creating a file immediately makes its `node-internal:`
+  specifier available. See `src/node/AGENTS.md` for details on what does and does not require
+  explicit wiring.
 
 ### Export Patterns
 
@@ -226,20 +230,20 @@ When reviewing JS/TS code in workerd, check for each of these items.
 - **Always** use `#` syntax for private members instead of the `private` keyword.
 - **Never** use the `public` keyword on class members.
 - **Never** use the non-null assertion (`!`). Prefer proper narrowing or `?? defaultValue`.
-   Flag any `eslint-disable` for `@typescript-eslint/no-non-null-assertion`.
-- **Never** use TypeScript enum or namespace**. We only use `erasableSyntaxOnly`. Use `as const`
+  Flag any `eslint-disable` for `@typescript-eslint/no-non-null-assertion`.
+- **Never** use TypeScript enum or namespace. We only use `erasableSyntaxOnly`. Use `as const`
   objects for enum-like patterns.
 - **Always** use compat flag gating. Behavioral changes that could break existing workers must be
-   gated behind a compat flag. Check that the flag exists in `compatibility-date.capnp` and is
-   checked at runtime.
+  gated behind a compat flag. Check that the flag exists in `compatibility-date.capnp` and is
+  checked at runtime.
 - **Always** use dual export pattern in public modules. Top-level files in `src/node/` and `src/cloudflare/`
-    must provide both named exports and a default export object.
+  must provide both named exports and a default export object.
 - **Never** use `eslint-disable` without justification. Every `eslint-disable` comment should name a
-    specific rule and explain why the override is necessary. Blanket `eslint-disable` (no rule
-    name) is never acceptable.
+  specific rule and explain why the override is necessary. Blanket `eslint-disable` (no rule
+  name) is never acceptable.
 - **Never** use `@ts-expect-error` without explanation. Must include a comment explaining why the type
-    system cannot express the correct type. Prefer fixing the types over suppressing the error.
+  system cannot express the correct type. Prefer fixing the types over suppressing the error.
 - **Never** use `require()`. Banned. Use ESM `import` syntax and dynamic `import()` if necessary.
 - **Never** re-export module namespaces. Use explicit named re-exports.
 - **Never** allow unused `eslint-disable`. If the suppressed lint no longer fires, the disable comment
-    should be removed. Review for stale suppressions.
+  should be removed. Review for stale suppressions.

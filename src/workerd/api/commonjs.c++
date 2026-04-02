@@ -25,9 +25,15 @@ jsg::JsValue CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier)
   }
 
   if (FeatureFlags::get(js).getNewModuleRegistry()) {
-    return jsg::modules::ModuleRegistry::resolve(js, specifier, "default"_kj,
-        jsg::modules::ResolveContext::Type::BUNDLE, jsg::modules::ResolveContext::Source::REQUIRE,
-        KJ_ASSERT_NONNULL(pathOrSpecifier.tryGet<jsg::Url>()));
+    auto& referrer = KJ_ASSERT_NONNULL(pathOrSpecifier.tryGet<jsg::Url>());
+    KJ_IF_SOME(ns,
+        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, specifier,
+            jsg::modules::ResolveContext::Type::BUNDLE,
+            jsg::modules::ResolveContext::Source::REQUIRE, referrer,
+            jsg::modules::UnwrapDefault::YES)) {
+      return ns;
+    }
+    JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", specifier));
   }
 
   auto& path = KJ_ASSERT_NONNULL(pathOrSpecifier.tryGet<kj::Path>());

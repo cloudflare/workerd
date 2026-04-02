@@ -43,7 +43,7 @@ rust_library(
     version = "40.0.0",
     deps = [
         "@crates_vendor__bytes-str-0.2.7//:bytes_str",
-        "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
+        "@crates_vendor__rustc-hash-2.1.2//:rustc_hash",
         "@crates_vendor__serde-1.0.228//:serde",
         "@crates_vendor__swc_atoms-9.0.0//:swc_atoms",
         "@crates_vendor__swc_common-18.0.1//:swc_common",

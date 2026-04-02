@@ -181,3 +181,20 @@ export const overLarge = {
     );
   },
 };
+
+export const depthTest = {
+  async test() {
+    let blob = new Blob(['x']);
+    const depth = 100_000;
+
+    for (let i = 0; i < depth; i++) {
+      blob = blob.slice(0, 1);
+    }
+
+    // Force GC to trigger recursive traversal
+    gc();
+
+    // Access the blob to ensure it's still valid
+    console.log('Blob size:', blob.size);
+  },
+};

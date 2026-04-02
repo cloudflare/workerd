@@ -2,16 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-function base64ToBlob(base64, mimeType) {
-  const binaryString = atob(base64); // Decode Base64
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: mimeType });
-}
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -110,6 +100,14 @@ export default {
       );
     }
 
+    if (modelName === 'hangingModel') {
+      // Never resolve — used to test abort signal on an in-flight request.
+      // We can't just return a hanging promise because the runtime actually detects that and
+      // errors. We use an excessively long timeout instead so that the runtime thinks that it's
+      // actually waiting for something.
+      await scheduler.wait(1e8);
+    }
+
     if (modelName === 'inputErrorModel') {
       return Response.json(
         {
@@ -137,7 +135,7 @@ export default {
         try {
           // The AI API doesn't URL-encode the body parameter, so parse directly
           websocketData = JSON.parse(bodyParam);
-        } catch (e) {
+        } catch (_e) {
           websocketData = { inputs: {}, options: {} };
         }
       }

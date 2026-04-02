@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { strictEqual, rejects, ok } from 'node:assert';
+import { strictEqual, rejects } from 'node:assert';
 
 // Test Response body methods with JS-backed BYOB ReadableStream
 export const responseBodyMethodsJsByob = {
@@ -702,7 +702,8 @@ export const jsSourceTeed = {
     const tee = readable.tee();
 
     async function consume(branch) {
-      for await (const chunk of branch) {
+      for await (const _chunk of branch) {
+        // intentionally empty
       }
     }
 

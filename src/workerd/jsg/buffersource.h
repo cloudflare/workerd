@@ -343,6 +343,7 @@ class BufferSource {
   BackingStore detach(Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeKey = kj::none);
 
   v8::Local<v8::Value> getHandle(Lock& js);
+  JsBufferSource getJsHandle(Lock& js);
 
   template <typename T = kj::byte>
   inline kj::ArrayPtr<T> asArrayPtr() KJ_LIFETIMEBOUND {

@@ -5942,6 +5942,7 @@ export type AiOptions = {
   returnRawResponse?: boolean;
   prefix?: string;
   extraHeaders?: object;
+  signal?: AbortSignal;
 };
 export type AiModelsSearchParams = {
   author?: string;
@@ -5983,47 +5984,17 @@ export declare abstract class Ai<AiModelList extends AiModelListType = AiModels>
   gateway(gatewayId: string): AiGateway;
 
   /**
-   * Access the AI Search API for managing AI-powered search instances.
-   *
-   * This is the new API that replaces AutoRAG with better namespace separation:
-   * - Account-level operations: `list()`, `create()`
-   * - Instance-level operations: `get(id).search()`, `get(id).chatCompletions()`, `get(id).delete()`
-   *
-   * @example
-   * ```typescript
-   * // List all AI Search instances
-   * const instances = await env.AI.aiSearch.list();
-   *
-   * // Search an instance
-   * const results = await env.AI.aiSearch.get('my-search').search({
-   *   messages: [{ role: 'user', content: 'What is the policy?' }],
-   *   ai_search_options: {
-   *     retrieval: { max_num_results: 10 }
-   *   }
-   * });
-   *
-   * // Generate chat completions with AI Search context
-   * const response = await env.AI.aiSearch.get('my-search').chatCompletions({
-   *   messages: [{ role: 'user', content: 'What is the policy?' }],
-   *   model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
-   * });
-   * ```
+   * @deprecated Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    */
-  aiSearch(): AiSearchAccountService;
+  aiSearch(): AiSearchNamespace;
 
   /**
    * @deprecated AutoRAG has been replaced by AI Search.
-   * Use `env.AI.aiSearch` instead for better API design and new features.
+   * Use the standalone `ai_search_namespaces` or `ai_search` Workers bindings instead.
+   * See https://developers.cloudflare.com/ai-search/usage/workers-binding/
    *
-   * Migration guide:
-   * - `env.AI.autorag().list()` → `env.AI.aiSearch.list()`
-   * - `env.AI.autorag('id').search({ query: '...' })` → `env.AI.aiSearch.get('id').search({ messages: [{ role: 'user', content: '...' }] })`
-   * - `env.AI.autorag('id').aiSearch(...)` → `env.AI.aiSearch.get('id').chatCompletions(...)`
-   *
-   * Note: The old API continues to work for backwards compatibility, but new projects should use AI Search.
-   *
-   * @see AiSearchAccountService
-   * @param autoragId Optional instance ID (omit for account-level operations)
+   * @param autoragId Instance ID
    */
   autorag(autoragId: string): AutoRAG;
   run<Name extends keyof AiModelList, Options extends AiOptions, InputOptions extends AiModelList[Name]["inputs"]>(

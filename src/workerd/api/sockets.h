@@ -60,7 +60,7 @@ class Socket: public jsg::Object {
   Socket(jsg::Lock& js,
       IoContext& context,
       kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
-      kj::String remoteAddress,
+      kj::Maybe<kj::String> remoteAddress,
       jsg::Ref<ReadableStream> readableParam,
       jsg::Ref<WritableStream> writable,
       jsg::PromiseResolverPair<void> closedPrPair,
@@ -68,7 +68,7 @@ class Socket: public jsg::Object {
       jsg::Optional<SocketOptions> options,
       kj::Own<kj::TlsStarterCallback> tlsStarter,
       SecureTransportKind secureTransport,
-      kj::String domain,
+      kj::Maybe<kj::String> domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
       : connectionData(context.addObject(kj::heap<ConnectionData>(
@@ -200,12 +200,12 @@ class Socket: public jsg::Object {
   // Memoized copy that is returned by the `closed` attribute.
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
   jsg::Optional<SocketOptions> options;
-  kj::String remoteAddress;
+  kj::Maybe<kj::String> remoteAddress;
   // Set to true when the socket is upgraded to a secure one.
   bool upgraded = false;
   SecureTransportKind secureTransport;
   // The domain/ip this socket is connected to. Used for startTls.
-  kj::String domain;
+  kj::Maybe<kj::String> domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;
   // This fulfiller is used to resolve the `openedPromise` below.
@@ -245,11 +245,11 @@ class Socket: public jsg::Object {
 
 jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Own<kj::AsyncIoStream> connection,
-    kj::String remoteAddress,
+    kj::Maybe<kj::String> remoteAddress,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
     SecureTransportKind secureTransport,
-    kj::String domain,
+    kj::Maybe<kj::String> domain,
     bool isDefaultFetchPort,
     kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair);
 

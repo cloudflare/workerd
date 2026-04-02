@@ -85,6 +85,17 @@ a finding with a reference to the original comment. Use this format:
 - Always be respectful and constructive. Always acknowledge that the code review comments are written
   by an AI assistant and may not be perfect.
 
+### CI Status Interpretation
+
+When reviewing PRs, be aware of CI jobs that are expected to fail for certain contributors:
+
+- **`internal-build`**: Requires Cloudflare internal access. **Always fails for external
+  contributors** — this is not indicative of a build or code problem. Do not flag CI failures from
+  this job as issues on PRs from external contributors.
+
+Before attributing a CI failure to a code problem, check whether the PR author is an external
+contributor (not a Cloudflare org member). If so, check whether the failing job is access-gated.
+
 ### Tools
 
 For interaction with GitHub, use the GitHub CLI (`gh`) tool or `git` as appropriate.

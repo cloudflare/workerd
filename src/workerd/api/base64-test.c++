@@ -12,9 +12,9 @@ KJ_TEST("base64 encode") {
 
   t.runInIoContext([](const workerd::TestFixture::Environment& env) {
     auto b = Base64Module();
-    auto backing = jsg::BackingStore::alloc(env.js, 1);
-    backing.asArrayPtr().begin()[0] = 'A';
-    auto ret = b.encodeArray(env.js, jsg::BufferSource(env.js, kj::mv(backing)));
+    auto ab = jsg::JsArrayBuffer::create(env.js, 1);
+    ab.asArrayPtr().begin()[0] = 'A';
+    auto ret = b.encodeArray(env.js, jsg::JsBufferSource(ab));
     KJ_ASSERT(ret.asArrayPtr() == "QQ=="_kjb);
   });
 }
@@ -24,9 +24,9 @@ KJ_TEST("base64 valid decode") {
 
   t.runInIoContext([](const workerd::TestFixture::Environment& env) {
     auto b = Base64Module();
-    auto backing = jsg::BackingStore::alloc(env.js, 4);
-    backing.asArrayPtr().copyFrom("QQ=="_kjb);
-    auto ret = b.decodeArray(env.js, jsg::BufferSource(env.js, kj::mv(backing)));
+    auto ab = jsg::JsArrayBuffer::create(env.js, 4);
+    ab.asArrayPtr().copyFrom("QQ=="_kjb);
+    auto ret = b.decodeArray(env.js, jsg::JsBufferSource(ab));
     KJ_ASSERT(ret.asArrayPtr() == "A"_kjb);
   });
 }
@@ -36,11 +36,10 @@ KJ_TEST("base64 invalid decode") {
 
   t.runInIoContext([](const workerd::TestFixture::Environment& env) {
     auto b = Base64Module();
-    auto backing = jsg::BackingStore::alloc(env.js, 14);
-    auto ptr = backing.asArrayPtr();
-    ptr.copyFrom("INVALID BASE64"_kjb);
+    auto ab = jsg::JsArrayBuffer::create(env.js, 14);
+    ab.asArrayPtr().copyFrom("INVALID BASE64"_kjb);
     try {
-      auto ret = b.decodeArray(env.js, jsg::BufferSource(env.js, kj::mv(backing)));
+      b.decodeArray(env.js, jsg::JsBufferSource(ab));
       KJ_UNREACHABLE;
     } catch (kj::Exception& e) {
       KJ_EXPECT(e.getDescription().contains("jsg.DOMException(SyntaxError): Invalid base64"_kj));
@@ -53,10 +52,9 @@ KJ_TEST("base64 decode as string") {
 
   t.runInIoContext([](const workerd::TestFixture::Environment& env) {
     auto b = Base64Module();
-    auto backing = jsg::BackingStore::alloc(env.js, 1);
-    backing.asArrayPtr().begin()[0] = 'A';
-    KJ_ASSERT(b.encodeArrayToString(env.lock, jsg::BufferSource(env.js, kj::mv(backing))) ==
-        env.js.str("QQ=="_kj));
+    auto ab = jsg::JsArrayBuffer::create(env.js, 1);
+    ab.asArrayPtr().begin()[0] = 'A';
+    KJ_ASSERT(b.encodeArrayToString(env.js, jsg::JsBufferSource(ab)) == env.js.str("QQ=="_kj));
   });
 }
 }  // namespace

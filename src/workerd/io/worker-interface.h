@@ -58,29 +58,42 @@ class WorkerInterface: public kj::HttpService {
     EventOutcome outcome = EventOutcome::UNKNOWN;
   };
 
-  struct AlarmResult {
+  // Copyable subset of AlarmResult, used by ForkedPromise for alarm deduplication in Worker::Actor.
+  struct AlarmOutcome {
     bool retry = true;
     bool retryCountsAgainstLimit = true;
     EventOutcome outcome = EventOutcome::UNKNOWN;
   };
 
+  struct AlarmResult {
+    bool retry = true;
+    bool retryCountsAgainstLimit = true;
+    EventOutcome outcome = EventOutcome::UNKNOWN;
+    kj::Maybe<kj::String> errorDescription;
+
+    AlarmOutcome asOutcome() const {
+      return {
+        .retry = retry, .retryCountsAgainstLimit = retryCountsAgainstLimit, .outcome = outcome};
+    }
+  };
+
   class AlarmFulfiller {
    public:
-    AlarmFulfiller(kj::Own<kj::PromiseFulfiller<AlarmResult>> fulfiller);
+    AlarmFulfiller(kj::Own<kj::PromiseFulfiller<AlarmOutcome>> fulfiller);
     KJ_DISALLOW_COPY(AlarmFulfiller);
     AlarmFulfiller(AlarmFulfiller&&) = default;
     AlarmFulfiller& operator=(AlarmFulfiller&&) = default;
     ~AlarmFulfiller() noexcept(false);
-    void fulfill(const AlarmResult& result);
+    void fulfill(const AlarmOutcome& result);
     void reject(const kj::Exception& e);
     void cancel();
 
    private:
-    kj::Maybe<kj::Own<kj::PromiseFulfiller<AlarmResult>>> maybeFulfiller;
-    kj::Maybe<kj::PromiseFulfiller<AlarmResult>&> getFulfiller();
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<AlarmOutcome>>> maybeFulfiller;
+    kj::Maybe<kj::PromiseFulfiller<AlarmOutcome>&> getFulfiller();
   };
 
-  using ScheduleAlarmResult = kj::OneOf<AlarmResult, AlarmFulfiller>;
+  using ScheduleAlarmResult = kj::OneOf<AlarmOutcome, AlarmFulfiller>;
 
   // Trigger a scheduled event with the given scheduled (unix timestamp) time and cron string.
   // The cron string must be valid until the returned promise completes.

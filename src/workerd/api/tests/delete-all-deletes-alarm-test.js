@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 // Tests that the delete_all_deletes_alarm compat flag correctly controls whether
 // deleteAll() also deletes alarms. This file is used by two test services: one
 // with the flag enabled and one with it disabled. The EXPECT_ALARM_DELETED binding

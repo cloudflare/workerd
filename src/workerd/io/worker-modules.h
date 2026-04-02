@@ -95,15 +95,20 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
 
   // This callback is used when a module is being loaded to arrange evaluating the
   // module outside of the current IoContext.
-  builder.setEvalCallback([](jsg::Lock& js, const auto& module, auto v8Module,
-                              const auto& observer) -> jsg::Promise<jsg::Value> {
-    return js.tryOrReject<jsg::Value>([&] {
-      // Creating the SuppressIoContextScope here ensures that the current IoContext,
-      // if any, is moved out of the way while we are evaluating.
-      SuppressIoContextScope suppressIoContextScope;
-      KJ_DASSERT(!IoContext::hasCurrent(), "Module evaluation must not be in an IoContext");
-      return jsg::check(v8Module->Evaluate(js.v8Context()));
-    });
+  builder.setEvalCallback(
+      [](jsg::Lock& js, const auto& module, auto v8Module, const auto& observer) -> jsg::JsPromise {
+    // Creating the SuppressIoContextScope here ensures that the current IoContext,
+    // if any, is moved out of the way while we are evaluating.
+    SuppressIoContextScope suppressIoContextScope;
+    KJ_DASSERT(!IoContext::hasCurrent(), "Module evaluation must not be in an IoContext");
+    JSG_TRY(js) {
+      auto ret = jsg::check(v8Module->Evaluate(js.v8Context()));
+      KJ_ASSERT(ret->IsPromise());
+      return jsg::JsPromise(ret.template As<v8::Promise>());
+    }
+    JSG_CATCH(exception) {
+      return js.rejectedJsPromise(jsg::JsValue(exception.getHandle(js)));
+    }
   });
 
   // Add the module bundles that are built into the runtime.
@@ -155,8 +160,9 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // module registry. We can safely pass a reference to the module handler.
           // It will not be copied into a JS string until the module is actually
           // evaluated.
-          bundleBuilder.addSyntheticModule(
-              def.name, jsg::modules::Module::newTextModuleHandler(content.body));
+          bundleBuilder.addSyntheticModule(def.name,
+              jsg::modules::Module::newTextModuleHandler(content.body), nullptr,
+              jsg::modules::Module::ContentType::TEXT);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
@@ -164,8 +170,9 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // module registry. We can safely pass a reference to the module handler.
           // It will not be copied into a JS string until the module is actually
           // evaluated.
-          bundleBuilder.addSyntheticModule(
-              def.name, jsg::modules::Module::newDataModuleHandler(content.body));
+          bundleBuilder.addSyntheticModule(def.name,
+              jsg::modules::Module::newDataModuleHandler(content.body), nullptr,
+              jsg::modules::Module::ContentType::DATA);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
@@ -181,8 +188,9 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // module registry. We can safely pass a reference to the module handler.
           // It will not be copied into a JS string until the module is actually
           // evaluated.
-          bundleBuilder.addSyntheticModule(
-              def.name, jsg::modules::Module::newJsonModuleHandler(content.body));
+          bundleBuilder.addSyntheticModule(def.name,
+              jsg::modules::Module::newJsonModuleHandler(content.body), nullptr,
+              jsg::modules::Module::ContentType::JSON);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {

@@ -15,9 +15,17 @@ export default {
   },
   'urlpattern.any.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
+    disabledTests: [
+      // Windows uses MSVC std::regex which rejects \H as an invalid escape,
+      // causing the URLPattern constructor to throw (test passes). Linux std::regex
+      // treats \H as an identity escape so no throw occurs (test fails). Use
+      // disabledTests to avoid the cross-platform mismatch.
+      'Pattern: ["(\\\\H):"] Inputs: undefined',
+    ],
     expectedFailures: [
       // Each of these *ought* to pass. They are included here because we
       // know they currently do not. Each needs to be investigated.
+      'Pattern: ["((?R)):"] Inputs: undefined',
       'Pattern: [{"pathname":"/foo/bar","baseURL":"https://example.com?query#hash"}] Inputs: [{"pathname":"/foo/bar"}]',
       'Pattern: [{"pathname":"/foo/bar","baseURL":"https://example.com?query#hash"}] Inputs: [{"hostname":"example.com","pathname":"/foo/bar"}]',
       'Pattern: [{"pathname":"/foo/bar","baseURL":"https://example.com?query#hash"}] Inputs: [{"protocol":"https","hostname":"example.com","pathname":"/foo/bar"}]',

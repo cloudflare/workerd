@@ -21,7 +21,7 @@ The main execution looks as follows:
 ## Test if REPRL works
 
 ```bash
-bazel test --config=fuzzilli //src/workerd/tests:test-reprl-kj --action_env=CC=/usr/bin/clang-19 --test_timeout=5 --test_output=all
+bazel test --config=fuzzilli //src/workerd/tests:test-reprl-kj --repo_env=CC=/usr/bin/clang-19 --test_timeout=5 --test_output=all
 ```
 
 From the Fuzzilli directory test if the REPRL interface works by running:

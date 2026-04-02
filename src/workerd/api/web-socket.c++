@@ -1051,8 +1051,8 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
             if (binaryType_ == BinaryType::BLOB) {
               // Per the WHATWG spec, deliver binary messages as Blob when binaryType is "blob".
-              auto bufferSource = jsg::BufferSource(js, jsg::BackingStore::from(js, kj::mv(data)));
-              auto blob = js.alloc<Blob>(js, kj::mv(bufferSource), kj::str());
+              auto ab = jsg::JsArrayBuffer::create(js, data);
+              auto blob = js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::str());
               dispatchEventImpl(js, js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob)));
             } else {
               auto ab = js.arrayBuffer(kj::mv(data)).getHandle(js);

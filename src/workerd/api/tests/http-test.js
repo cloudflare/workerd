@@ -13,6 +13,12 @@ export default {
     if (pathname === '/body-length') {
       return Response.json(Object.fromEntries(request.headers));
     }
+    if (pathname === '/ray-id') {
+      return new Response(null, {
+        status: 200,
+        headers: { 'CF-Ray': 'test-ray-id-123' },
+      });
+    }
     if (pathname === '/web-socket') {
       const pair = new WebSocketPair();
       pair[0].addEventListener('message', (event) => {
@@ -67,6 +73,14 @@ export default {
       const headers = new Headers(await response.json());
       assert.strictEqual(headers.get('Content-Length'), null);
       assert.strictEqual(headers.get('Transfer-Encoding'), 'chunked');
+    }
+
+    // Call `fetch()` with GET to endpoint that returns CF-Ray header, verifying
+    // cloudflare.ray_id is set on the trace span from the response headers.
+    {
+      const response = await env.SERVICE.fetch('http://placeholder/ray-id');
+      assert.strictEqual(response.status, 200);
+      assert.strictEqual(response.headers.get('CF-Ray'), 'test-ray-id-123');
     }
 
     // Call `scheduled()` with no options

@@ -1406,6 +1406,131 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (s
 }
 
 // ======================================================================================
+
+KJ_TEST("ESM -> CJS -> require(ESM) -> static import CJS circular dependency fails gracefully") {
+  // This tests a specific crash scenario: when a CJS module (b) is mid-evaluation
+  // (kEvaluating), and it require()s an ESM (c) that statically imports the same
+  // CJS module (b), V8's InnerModuleEvaluation would call Module::Evaluate on
+  // the kEvaluating synthetic module, hitting a CHECK crash. The resolveModuleCallback
+  // kEvaluating guard prevents this by rejecting the circular dependency at
+  // instantiation time.
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // a.js (ESM) -> imports b (CJS)
+    auto a = kj::str("import b from 'b'; export default b;");
+    bundleBuilder.addEsmModule("a", a, Module::Flags::MAIN);
+
+    // b (CJS) -> require('c') which is an ESM that imports b back
+    auto bSource = kj::str("exports = require('c');");
+    bundleBuilder.addSyntheticModule(
+        "b", Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(bSource, "b"_kj));
+
+    // c.js (ESM) -> imports b (CJS) — creates the circular dependency
+    auto c = kj::str("import b from 'b'; export default b;");
+    bundleBuilder.addEsmModule("c", c);
+
+    auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
+
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      ModuleRegistry::resolve(js, "file:///a", "default"_kjc);
+      JSG_FAIL_REQUIRE(Error, "Should have thrown");
+    }, [&](Value exception) {
+      auto str = kj::str(exception.getHandle(js));
+      KJ_ASSERT(str == "TypeError: Circular dependency when resolving module: b");
+    });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("UNWRAP_DEFAULT returns namespace for bundle ESM, default for others") {
+  PREAMBLE([&](Lock& js) {
+    ResolveObserverImpl observer;
+    CompilationObserver compilationObserver;
+
+    ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    // Bundle ESM with named exports (no __cjsUnwrapDefault)
+    auto esm = kj::str("export default 42; export const name = 'esm';");
+    bundleBuilder.addEsmModule("esm-mod", esm, Module::Flags::MAIN);
+
+    // Bundle ESM with __cjsUnwrapDefault convention
+    auto esmCjs = kj::str("export default 'unwrapped'; export const __cjsUnwrapDefault = true;");
+    bundleBuilder.addEsmModule("esm-cjs", esmCjs);
+
+    // JSON synthetic module
+    auto json = kj::str("{\"key\": \"value\"}");
+    bundleBuilder.addSyntheticModule(
+        "data.json", Module::newJsonModuleHandler(json.first(json.size())));
+
+    // Text synthetic module
+    auto text = kj::str("hello world");
+    bundleBuilder.addSyntheticModule(
+        "data.txt", Module::newTextModuleHandler(text.first(text.size())));
+
+    auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    // Bundle ESM without __cjsUnwrapDefault: tryResolveModuleNamespace with UnwrapDefault::YES
+    // returns the full namespace (has "default", "name" properties).
+    js.tryCatch([&] {
+      auto val = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(js, "file:///esm-mod",
+          ResolveContext::Type::BUNDLE, ResolveContext::Source::REQUIRE, kj::none,
+          modules::UnwrapDefault::YES));
+      auto ns = KJ_ASSERT_NONNULL(val.tryCast<JsObject>());
+      // The namespace should have both "default" and "name" properties.
+      auto nameVal = ns.get(js, "name");
+      KJ_ASSERT(!nameVal.isUndefined());
+      KJ_ASSERT(kj::str(nameVal) == "esm");
+      auto defaultVal = ns.get(js, "default");
+      KJ_ASSERT(!defaultVal.isUndefined());
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+
+    // Bundle ESM with __cjsUnwrapDefault: returns the default export.
+    js.tryCatch([&] {
+      auto result = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(js,
+          "file:///esm-cjs", ResolveContext::Type::BUNDLE, ResolveContext::Source::REQUIRE,
+          kj::none, modules::UnwrapDefault::YES));
+      KJ_ASSERT(kj::str(result) == "unwrapped");
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+
+    // JSON synthetic module: returns the parsed value (the default export).
+    js.tryCatch([&] {
+      auto result = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(js,
+          "file:///data.json", ResolveContext::Type::BUNDLE, ResolveContext::Source::REQUIRE,
+          kj::none, modules::UnwrapDefault::YES));
+      // Should be the parsed JSON object, not the namespace.
+      auto obj = KJ_ASSERT_NONNULL(result.tryCast<JsObject>());
+      KJ_ASSERT(kj::str(obj.get(js, "key")) == "value");
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+
+    // Text synthetic module: returns the string value (the default export).
+    js.tryCatch([&] {
+      auto result = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(js,
+          "file:///data.txt", ResolveContext::Type::BUNDLE, ResolveContext::Source::REQUIRE,
+          kj::none, modules::UnwrapDefault::YES));
+      // The default is a string — JsValue directly.
+      KJ_ASSERT(kj::str(result) == "hello world");
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+
+    // Without UnwrapDefault, all modules return the namespace.
+    js.tryCatch([&] {
+      auto val = KJ_ASSERT_NONNULL(ModuleRegistry::tryResolveModuleNamespace(
+          js, "file:///data.json", ResolveContext::Type::BUNDLE, ResolveContext::Source::REQUIRE));
+      auto ns = KJ_ASSERT_NONNULL(val.tryCast<JsObject>());
+      // Should have a "default" property (it's the namespace).
+      KJ_ASSERT(!ns.get(js, "default").isUndefined());
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+  });
+}
+
+// ======================================================================================
 KJ_TEST("Resolution occurs relative to the referrer") {
   ResolveObserver observer;
   CompilationObserver compilationObserver;
@@ -1839,12 +1964,69 @@ KJ_TEST("Aliased modules (import maps) work") {
 
 // ======================================================================================
 
-KJ_TEST("Import attributes are currently unsupported") {
+KJ_TEST("Import attribute type:json succeeds for JSON modules") {
   ResolveObserver resolveObserver;
   CompilationObserver compilationObserver;
   ModuleBundle::BundleBuilder builder(BASE);
 
-  auto foo = kj::str("import abc from 'foo' with { type: 'json' };");
+  // An ESM that imports a JSON module with the type attribute
+  auto entry = kj::str("import data from 'data.json' with { type: 'json' }; export default data;");
+  builder.addEsmModule("entry", entry, Module::Flags::MAIN);
+
+  auto json = kj::str("{\"key\": \"value\"}");
+  builder.addSyntheticModule("data.json", Module::newJsonModuleHandler(json.first(json.size())),
+      nullptr, Module::ContentType::JSON);
+
+  auto registry = ModuleRegistry::Builder(resolveObserver, BASE).add(builder.finish()).finish();
+
+  PREAMBLE([&](Lock& js) {
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      auto val = ModuleRegistry::resolve(js, "file:///entry", "default"_kjc);
+      // The JSON module should have been resolved and its value should be the parsed object.
+      KJ_ASSERT(!val.isUndefined());
+    }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Import attribute type:json fails for non-JSON modules") {
+  ResolveObserver resolveObserver;
+  CompilationObserver compilationObserver;
+  ModuleBundle::BundleBuilder builder(BASE);
+
+  // An ESM that imports another ESM with type:json (should fail - ESM is not JSON)
+  auto entry = kj::str("import foo from 'other' with { type: 'json' }; export default foo;");
+  builder.addEsmModule("entry", entry, Module::Flags::MAIN);
+
+  auto other = kj::str("export default 42;");
+  builder.addEsmModule("other", other);
+
+  auto registry = ModuleRegistry::Builder(resolveObserver, BASE).add(builder.finish()).finish();
+
+  PREAMBLE([&](Lock& js) {
+    auto attached = registry->attachToIsolate(js, compilationObserver);
+
+    js.tryCatch([&] {
+      ModuleRegistry::resolve(js, "file:///entry", "default"_kjc);
+      JSG_FAIL_REQUIRE(Error, "Should have thrown");
+    }, [&](Value exception) {
+      auto str = kj::str(exception.getHandle(js));
+      KJ_ASSERT(str == "TypeError: Module \"other\" is not of type \"json\"");
+    });
+  });
+}
+
+// ======================================================================================
+
+KJ_TEST("Unsupported import attributes are rejected") {
+  ResolveObserver resolveObserver;
+  CompilationObserver compilationObserver;
+  ModuleBundle::BundleBuilder builder(BASE);
+
+  auto foo = kj::str("import abc from 'foo' with { unsupported: 'value' };");
   builder.addEsmModule("foo", foo);
 
   auto registry = ModuleRegistry::Builder(resolveObserver, BASE).add(builder.finish()).finish();
@@ -1857,7 +2039,7 @@ KJ_TEST("Import attributes are currently unsupported") {
       JSG_FAIL_REQUIRE(Error, "Should have thrown");
     }, [&](Value exception) {
       auto str = kj::str(exception.getHandle(js));
-      KJ_ASSERT(str == "TypeError: Import attributes are not supported");
+      KJ_ASSERT(str == "TypeError: Unsupported import attribute: \"unsupported\"");
     });
   });
 }
@@ -1877,7 +2059,7 @@ KJ_TEST("Using a deferred eval callback works") {
                       .setEvalCallback([&called](Lock& js, const Module& module, auto v8Module,
                                            const auto& observer) {
     called = true;
-    return js.resolvedPromise<Value>(js.v8Ref<v8::Value>(js.num(123)));
+    return js.resolvedJsPromise(js.num(123));
   }).finish();
 
   PREAMBLE([&](Lock& js) {

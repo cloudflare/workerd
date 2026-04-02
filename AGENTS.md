@@ -167,7 +167,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - **`src/cloudflare/`** - Cloudflare-specific APIs (TypeScript)
 - **`src/node/`** - Node.js compatibility layer (TypeScript)
 - **`src/pyodide/`** - Python runtime support via Pyodide
-- **`src/rust/`** - Rust integration components
+- **`src/rust/`** - Rust integration components; see `src/rust/AGENTS.md` for the full macro reference and GC tracing guide
 
 ### Configuration System
 

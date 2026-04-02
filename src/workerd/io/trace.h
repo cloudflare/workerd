@@ -362,6 +362,15 @@ struct JsRpcEventInfo final {
   kj::String toString() const;
 };
 
+class ConnectEventInfo {
+ public:
+  explicit ConnectEventInfo();
+  explicit ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader);
+
+  void copyTo(rpc::Trace::ConnectEventInfo::Builder builder) const;
+  ConnectEventInfo clone() const;
+};
+
 // Describes a scheduled request
 struct ScheduledEventInfo final {
   explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
@@ -423,6 +432,21 @@ struct EmailEventInfo final {
 };
 
 // Describes a buffered tail worker request
+struct TracePreview final {
+  explicit TracePreview(kj::String id, kj::String slug, kj::String name);
+  TracePreview(rpc::Trace::TracePreviewInfo::Reader reader);
+  TracePreview(TracePreview&&) = default;
+  TracePreview& operator=(TracePreview&&) = default;
+  KJ_DISALLOW_COPY(TracePreview);
+
+  kj::String id;
+  kj::String slug;
+  kj::String name;
+
+  void copyTo(rpc::Trace::TracePreviewInfo::Builder builder) const;
+  TracePreview clone() const;
+};
+
 struct TraceEventInfo final {
   struct TraceItem;
 
@@ -577,6 +601,7 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     EmailEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
+    ConnectEventInfo,
     CustomEventInfo>;
 
 EventInfo cloneEventInfo(const EventInfo& info);
@@ -885,7 +910,8 @@ class Trace final: public kj::Refcounted {
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint,
       ExecutionModel executionModel,
-      kj::Maybe<kj::String> durableObjectId = kj::none);
+      kj::Maybe<kj::String> durableObjectId = kj::none,
+      kj::Maybe<tracing::TracePreview> preview = kj::none);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -908,6 +934,7 @@ class Trace final: public kj::Refcounted {
   kj::Array<kj::String> scriptTags;
   kj::Maybe<kj::Array<tracing::Attribute>> tailAttributes;
   kj::Maybe<kj::String> entrypoint;
+  kj::Maybe<tracing::TracePreview> preview;
   kj::Maybe<kj::String> durableObjectId;
 
   kj::Vector<tracing::Log> logs;

@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { WorkerEntrypoint } from 'cloudflare:workers';
+import { WorkerEntrypoint, RpcTarget } from 'cloudflare:workers';
 
 /**
  * @param {FormDataEntryValue | null} blob
@@ -20,18 +20,23 @@ async function imageAsString(blob) {
   return blob.text();
 }
 
-export class ServiceEntrypoint extends WorkerEntrypoint {
-  /**
-   * @param {string} imageId
-   * @returns {Promise<ImageMetadata | null>}
-   */
-  async details(imageId) {
-    if (imageId === 'not-found') {
+class ImageHandleMock extends RpcTarget {
+  /** @type {string} */
+  #imageId;
+
+  /** @param {string} imageId */
+  constructor(imageId) {
+    super();
+    this.#imageId = imageId;
+  }
+
+  async details() {
+    if (this.#imageId === 'not-found') {
       return null;
     }
 
     return {
-      id: imageId,
+      id: this.#imageId,
       filename: 'test.jpg',
       uploaded: '2024-01-01T00:00:00Z',
       requireSignedURLs: false,
@@ -42,13 +47,52 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
     };
   }
 
-  async image(imageId) {
-    if (imageId === 'not-found') {
+  async bytes() {
+    if (this.#imageId === 'not-found') {
       return null;
     }
 
-    const mockData = `MOCK_IMAGE_DATA_${imageId}`;
+    const mockData = `MOCK_IMAGE_DATA_${this.#imageId}`;
     return new Blob([mockData]).stream();
+  }
+
+  /**
+   * @param {ImageUpdateOptions} body
+   * @returns {Promise<ImageMetadata>}
+   */
+  async update(body) {
+    if (this.#imageId === 'not-found') {
+      throw new Error('Image not found');
+    }
+
+    return {
+      id: this.#imageId,
+      filename: 'updated.jpg',
+      uploaded: '2024-01-01T00:00:00Z',
+      requireSignedURLs:
+        body.requireSignedURLs !== undefined ? body.requireSignedURLs : false,
+      variants: ['public'],
+      meta: body.metadata || {},
+      draft: false,
+      creator: body.creator,
+    };
+  }
+
+  /**
+   * @returns {Promise<boolean>}
+   */
+  async delete() {
+    return this.#imageId !== 'not-found';
+  }
+}
+
+export class ServiceEntrypoint extends WorkerEntrypoint {
+  /**
+   * @param {string} imageId
+   * @returns {ImageHandleMock}
+   */
+  image(imageId) {
+    return new ImageHandleMock(imageId);
   }
 
   async upload(image, options) {
@@ -75,37 +119,6 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
       draft: false,
       creator: options?.creator,
     };
-  }
-
-  /**
-   * @param {string} imageId
-   * @param {ImageUpdateOptions} body
-   * @returns {Promise<ImageMetadata>}
-   */
-  async update(imageId, body) {
-    if (imageId === 'not-found') {
-      throw new Error('Image not found');
-    }
-
-    return {
-      id: imageId,
-      filename: 'updated.jpg',
-      uploaded: '2024-01-01T00:00:00Z',
-      requireSignedURLs:
-        body.requireSignedURLs !== undefined ? body.requireSignedURLs : false,
-      variants: ['public'],
-      meta: body.metadata || {},
-      draft: false,
-      creator: body.creator,
-    };
-  }
-
-  /**
-   * @param {string} imageId
-   * @returns {Promise<boolean>}
-   */
-  async delete(imageId) {
-    return imageId !== 'not-found';
   }
 
   /**
@@ -180,7 +193,7 @@ export class ServiceEntrypoint extends WorkerEntrypoint {
         /** @type {any} */
         const obj = {
           image: await imageAsString(form.get('image')),
-          // @ts-ignore
+          // @ts-expect-error - form.get() returns FormDataEntryValue which is not assignable to string
           transforms: JSON.parse(form.get('transforms') || '{}'),
         };
         for (const x of [

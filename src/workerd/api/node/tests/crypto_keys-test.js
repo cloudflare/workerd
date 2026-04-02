@@ -1,11 +1,7 @@
-import {
-  notDeepStrictEqual,
-  deepStrictEqual,
-  strictEqual,
-  ok,
-  rejects,
-  throws,
-} from 'node:assert';
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+import { deepStrictEqual, strictEqual, ok, rejects, throws } from 'node:assert';
 import {
   KeyObject,
   SecretKeyObject,
@@ -18,8 +14,8 @@ import {
   generateKeySync,
   generateKeyPair,
   generateKeyPairSync,
-  generatePrimeSync,
-  diffieHellman,
+  sign,
+  verify,
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { promisify } from 'node:util';
@@ -1556,6 +1552,18 @@ export const ed_public_key_jwk_import = {
     const key = createPublicKey({ key: jwk, format: 'jwk' });
     strictEqual(key.asymmetricKeyType, 'ed25519');
 
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+    const publicJwk = publicKey.export({ format: 'jwk' });
+    const reimported = createPublicKey({ key: publicJwk, format: 'jwk' });
+    const data = Buffer.from('workerd okp jwk');
+    const sig = sign(null, data, privateKey);
+    ok(verify(null, data, reimported, sig));
+    ok(
+      publicKey
+        .export({ format: 'der', type: 'spki' })
+        .equals(reimported.export({ format: 'der', type: 'spki' }))
+    );
+
     const jwk2 = {
       crv: 'X25519',
       x: 'K1wIouqnuiA04b3WrMa-xKIKIpfHetNZRv3h9fBf768',
@@ -1564,6 +1572,15 @@ export const ed_public_key_jwk_import = {
 
     const key2 = createPublicKey({ key: jwk2, format: 'jwk' });
     strictEqual(key2.asymmetricKeyType, 'x25519');
+
+    const { publicKey: x25519PublicKey } = generateKeyPairSync('x25519');
+    const x25519Jwk = x25519PublicKey.export({ format: 'jwk' });
+    const x25519Reimported = createPublicKey({ key: x25519Jwk, format: 'jwk' });
+    ok(
+      x25519PublicKey
+        .export({ format: 'der', type: 'spki' })
+        .equals(x25519Reimported.export({ format: 'der', type: 'spki' }))
+    );
 
     // The fail due to missing information in the JWK
     throws(
@@ -2105,5 +2122,72 @@ export const generate_ed_keypair_promisified = {
     );
     strictEqual(publicKey.asymmetricKeyType, 'ed25519');
     strictEqual(privateKey.asymmetricKeyType, 'ed25519');
+  },
+};
+
+// Regression test: privateKey.export() with cipher and passphrase must
+// produce an encrypted PEM (BEGIN ENCRYPTED PRIVATE KEY), not plaintext.
+export const export_encrypted_private_key = {
+  test() {
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+
+    const plainPem = privateKey.export({ format: 'pem', type: 'pkcs8' });
+    const encryptedPem = privateKey.export({
+      format: 'pem',
+      type: 'pkcs8',
+      cipher: 'aes-256-cbc',
+      passphrase: 'test-passphrase',
+    });
+
+    // Encrypted PEM must differ from unencrypted PEM.
+    ok(plainPem !== encryptedPem);
+
+    // Encrypted PEM must have the ENCRYPTED header.
+    ok(
+      encryptedPem.startsWith('-----BEGIN ENCRYPTED PRIVATE KEY-----'),
+      'Expected encrypted PEM header'
+    );
+
+    // Re-import the encrypted PEM using the passphrase.
+    const reimported = createPrivateKey({
+      key: encryptedPem,
+      format: 'pem',
+      passphrase: 'test-passphrase',
+    });
+
+    // The re-imported key must produce the same unencrypted export.
+    strictEqual(reimported.export({ format: 'pem', type: 'pkcs8' }), plainPem);
+  },
+};
+
+// Verify encrypted export also works for EC keys.
+export const export_encrypted_ec_private_key = {
+  test() {
+    const { privateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+    });
+
+    const encryptedPem = privateKey.export({
+      format: 'pem',
+      type: 'pkcs8',
+      cipher: 'aes-128-cbc',
+      passphrase: 'ec-passphrase',
+    });
+
+    ok(
+      encryptedPem.startsWith('-----BEGIN ENCRYPTED PRIVATE KEY-----'),
+      'Expected encrypted PEM header for EC key'
+    );
+
+    const reimported = createPrivateKey({
+      key: encryptedPem,
+      format: 'pem',
+      passphrase: 'ec-passphrase',
+    });
+
+    strictEqual(
+      reimported.export({ format: 'pem', type: 'pkcs8' }),
+      privateKey.export({ format: 'pem', type: 'pkcs8' })
+    );
   },
 };

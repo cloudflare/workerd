@@ -44,7 +44,7 @@ jobs:
           model: 'cloudflare-ai-gateway/anthropic/claude-opus-4-6'
           forks: 'false'
           permissions: write
-          opencode_version: '1.2.27'
+          opencode_version: '1.3.8'
           # The auto-reviewer must never push to PR branches. Its prompt
           # (bonk_reviewer.md) already forbids git write ops, but NO_PUSH
           # enforces that at the token level so it holds even if the model

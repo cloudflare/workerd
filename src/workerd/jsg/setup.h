@@ -19,6 +19,7 @@
 #include <kj/mutex.h>
 #include <kj/vector.h>
 
+#include <atomic>
 #include <typeindex>
 
 namespace workerd::jsg {
@@ -393,7 +394,7 @@ class IsolateBase {
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
   bool extraMicrotaskCheckpointRequested = false;
-  bool terminationRequested = false;
+  std::atomic<bool> terminationRequested = false;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;

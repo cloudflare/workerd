@@ -321,7 +321,9 @@ class ExecutionContext: public jsg::Object {
 // AlarmEventInfo is a jsg::Object used to pass alarm invocation info to an alarm handler.
 class AlarmInvocationInfo: public jsg::Object {
  public:
-  AlarmInvocationInfo(uint32_t retry): retryCount(retry) {}
+  AlarmInvocationInfo(kj::Date scheduledTime, uint32_t retry)
+      : scheduledTime(static_cast<double>((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS)),
+        retryCount(retry) {}
 
   bool getIsRetry() {
     return retryCount > 0;
@@ -329,13 +331,18 @@ class AlarmInvocationInfo: public jsg::Object {
   uint32_t getRetryCount() {
     return retryCount;
   }
+  double getScheduledTime() {
+    return scheduledTime;
+  }
 
   JSG_RESOURCE_TYPE(AlarmInvocationInfo) {
     JSG_READONLY_INSTANCE_PROPERTY(isRetry, getIsRetry);
     JSG_READONLY_INSTANCE_PROPERTY(retryCount, getRetryCount);
+    JSG_READONLY_INSTANCE_PROPERTY(scheduledTime, getScheduledTime);
   }
 
  private:
+  double scheduledTime;
   uint32_t retryCount = 0;
 };
 
@@ -349,6 +356,10 @@ struct ExportedHandler {
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
+
+  using ConnectHandler = jsg::Promise<void>(
+      jsg::Ref<Socket> socket, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
       jsg::Value env,
@@ -389,6 +400,7 @@ struct ExportedHandler {
   jsg::SelfRef self;
 
   JSG_STRUCT(fetch,
+      connect,
       tail,
       trace,
       tailStream,
@@ -406,6 +418,7 @@ struct ExportedHandler {
 
   JSG_STRUCT_TS_DEFINE(
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown, Props = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext<Props>) => Response | Promise<Response>;
+    type ExportedHandlerConnectHandler<Env = unknown, Props = unknown> = (socket: Socket, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown, Props = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext<Props>) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -416,6 +429,7 @@ struct ExportedHandler {
   JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown, Props = unknown> {
     email?: EmailExportedHandler<Env, Props>;
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
+    connect?: ExportedHandlerConnectHandler<Env, Props>;
     tail?: ExportedHandlerTailHandler<Env, Props>;
     trace?: ExportedHandlerTraceHandler<Env, Props>;
     tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
@@ -514,6 +528,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       kj::Maybe<jsg::Ref<AbortSignal>> abortSignal);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
+
+  // Received TCP/socket ingress (called from C++, not JS).
+  kj::Promise<void> connect(kj::String host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      kj::HttpService::ConnectResponse& response,
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received sendTraces (called from C++, not JS).
   void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
@@ -846,7 +868,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
 
     JSG_TS_ROOT();
-    JSG_TS_DEFINE(
+    // JSG_TS_DEFINE_LITERAL is used here instead of JSG_TS_DEFINE because the TypeScript definition
+    // contains the `module` keyword, which Clang rejects as a C++20 module directive when it
+    // appears inside macro arguments.
+    JSG_TS_DEFINE_LITERAL(R"(
       interface Console {
         "assert"(condition?: boolean, ...data: any[]): void;
         clear(): void;
@@ -958,7 +983,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
         function instantiate(module: Module, imports?: Imports): Promise<Instance>;
         function validate(bytes: BufferSource): boolean;
       }
-    );
+    )");
     // workerd disables dynamic WebAssembly compilation, so `compile()`, `compileStreaming()`, the
     // `instantiate()` override taking a `BufferSource` and `instantiateStreaming()` are omitted.
     // `Module` is also declared `abstract` to disable its `BufferSource` constructor.

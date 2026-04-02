@@ -57,10 +57,7 @@ import {
 import type { Dirent } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
 import { type Dir } from 'node-internal:internal_fs';
-import {
-  ERR_EBADF,
-  ERR_UNSUPPORTED_OPERATION,
-} from 'node-internal:internal_errors';
+import { ERR_EBADF } from 'node-internal:internal_errors';
 import {
   validateBoolean,
   validateObject,
@@ -664,18 +661,17 @@ export function writeFile(
   });
 }
 
-export function glob(
-  _pattern: string | readonly string[],
-  _options:
+export async function* glob(
+  pattern: string | readonly string[],
+  options:
     | GlobOptions
     | GlobOptionsWithFileTypes
     | GlobOptionsWithoutFileTypes = {}
-): NodeJS.AsyncIterator<string | Dirent> {
-  // We do not yet implement the globSync function. In Node.js, this
-  // function depends heavily on the third party minimatch library
-  // which is not yet available in the workers runtime. This will be
-  // explored for implementation separately in the future.
-  throw new ERR_UNSUPPORTED_OPERATION();
+): AsyncGenerator<string | Dirent> {
+  const results = await Promise.resolve(fssync.globSync(pattern, options));
+  for (const result of results) {
+    yield result;
+  }
 }
 
 function getReadableWebStream(

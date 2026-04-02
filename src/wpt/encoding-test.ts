@@ -465,7 +465,15 @@ export default {
     comment: 'ReferenceError: window is not defined',
     omittedTests: true,
   },
-  'textdecoder-arguments.any.js': {},
+  'textdecoder-arguments.any.js': {
+    comment:
+      'TextDecoder does not detach the underlying ArrayBuffer during options argument conversion',
+    disabledTests: [
+      // Behavior differs between platforms: on Windows this test passes while
+      // it fails on Linux. Use disabledTests to avoid the cross-platform mismatch.
+      'TextDecoder decode() with array buffer detached during arg conversion',
+    ],
+  },
   'textdecoder-byte-order-marks.any.js': {},
   'textdecoder-copy.any.js': {},
   'textdecoder-eof.any.js': {},
@@ -474,6 +482,14 @@ export default {
   'textdecoder-fatal.any.js': {},
   'textdecoder-ignorebom.any.js': {},
   'textdecoder-labels.any.js': {},
+  'textdecoder-mistakes.any.js': {
+    comment: 'iso-2022-jp fatal stream state not preserved after throw',
+    disabledTests: [
+      // Behavior differs between platforms: on Windows this test passes while
+      // it fails on Linux. Use disabledTests to avoid the cross-platform mismatch.
+      'fatal stream: iso-2022-jp',
+    ],
+  },
   'textdecoder-streaming.any.js': {},
   'textdecoder-utf16-surrogates.any.js': {},
   'textencoder-constructor-non-utf.any.js': {},

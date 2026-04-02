@@ -18,7 +18,6 @@ import {
   MAIN_MODULE_NAME,
   SHOULD_SNAPSHOT_TO_DISK,
   TRANSITIVE_REQUIREMENTS,
-  WORKERD_INDEX_URL,
   WORKFLOWS_ENABLED,
 } from 'pyodide-internal:metadata';
 import {
@@ -153,7 +152,7 @@ async function getPyodide(): Promise<Pyodide> {
       return pyodidePromise;
     }
     pyodidePromise = (async function (): Promise<Pyodide> {
-      const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL, {
+      const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, {
         pyodide_entrypoint_helper: get_pyodide_entrypoint_helper(),
         cloudflare_compat_flags: COMPATIBILITY_FLAGS,
       });

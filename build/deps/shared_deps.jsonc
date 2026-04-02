@@ -114,7 +114,10 @@
       "repo": "workerd-tools",
       "file_regex": "wpt-.*.tar.gz",
       "build_file": "@workerd//:build/BUILD.wpt",
-      "freeze_version": "wpt-11b9300f1"
+      "freeze_version": "wpt-8b139c3a3",
+      "patches": [
+        "//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch"
+      ]
     }
   ]
 }

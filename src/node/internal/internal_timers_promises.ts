@@ -206,9 +206,9 @@ export async function* setInterval<T = void>(
 }
 
 declare global {
-  var scheduler: {
+  interface Scheduler {
     wait: (delay: number, options?: { signal?: AbortSignal }) => Promise<void>;
-  };
+  }
 }
 
 // TODO(@jasnell): Scheduler is an API currently being discussed by WICG
@@ -226,9 +226,19 @@ class Scheduler {
     return setImmediate();
   }
 
-  wait(...args: Parameters<typeof globalThis.scheduler.wait>): Promise<void> {
+  wait(delay: number, options?: { signal?: AbortSignal }): Promise<void> {
     if (!this[kScheduler]) throw new ERR_INVALID_THIS('Scheduler');
-    return globalThis.scheduler.wait(...args);
+    // TODO(soon): The cast through `unknown` is needed because the local `class Scheduler`
+    // shadows the global `Scheduler` interface augmentation, causing TS to see two incompatible
+    // `Scheduler` types. Refactor to avoid the name collision (e.g. rename the local class).
+    return (
+      globalThis.scheduler as unknown as {
+        wait: (
+          delay: number,
+          options?: { signal?: AbortSignal }
+        ) => Promise<void>;
+      }
+    ).wait(delay, options);
   }
 }
 

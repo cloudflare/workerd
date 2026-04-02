@@ -97,6 +97,7 @@ struct Trace @0x8e8d911203762d34 {
     email @16 :EmailEventInfo;
     trace @18 :TraceEventInfo;
     hibernatableWebSocket @20 :HibernatableWebSocketEventInfo;
+    connect @29 :ConnectEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -112,6 +113,9 @@ struct Trace @0x8e8d911203762d34 {
 
   struct JsRpcEventInfo {
     methodName @0 :Text;
+  }
+
+  struct ConnectEventInfo {
   }
 
   struct ScheduledEventInfo {
@@ -132,6 +136,12 @@ struct Trace @0x8e8d911203762d34 {
     mailFrom @0 :Text;
     rcptTo @1 :Text;
     rawSize @2 :UInt32;
+  }
+
+  struct TracePreviewInfo {
+    id @0 :Text;
+    slug @1 :Text;
+    name @2 :Text;
   }
 
   struct TraceEventInfo {
@@ -167,6 +177,7 @@ struct Trace @0x8e8d911203762d34 {
   scriptTags @14 :List(Text);
 
   entrypoint @22 :Text;
+  preview @30 :TracePreviewInfo;
   durableObjectId @27 :Text;
   tailAttributes @28 :List(Attribute);
 
@@ -270,6 +281,7 @@ struct Trace @0x8e8d911203762d34 {
       email @5 :EmailEventInfo;
       trace @6 :TraceEventInfo;
       hibernatableWebSocket @7 :HibernatableWebSocketEventInfo;
+      connect @9 :ConnectEventInfo;
       custom @8 :CustomEventInfo;
     }
     }
@@ -330,6 +342,7 @@ struct AlarmRun @0xfa8ea4e97e23b03d {
 
   retry @1 :Bool;
   retryCountsAgainstLimit @2 :Bool = true;
+  errorDescription @3 :Text;
 }
 
 struct QueueMessage @0x944adb18c0352295 {
@@ -365,6 +378,20 @@ struct QueueResponse @0x90e98932c0bfc0de {
   # List of Message IDs that were explicitly marked as acknowledged.
   retryMessages @4 :List(QueueRetryMessage);
   # List of retry options for messages that were explicitly marked for retry.
+}
+
+struct MessageBatchMetrics {
+  backlogCount @0 :Float64;
+  # Number of messages remaining in the queue backlog.
+  backlogBytes @1 :Float64;
+  # Total bytes of messages remaining in the queue backlog.
+  oldestMessageTimestamp @2 :Float64;
+  # Timestamp (ms since epoch) of the oldest message in the queue.
+}
+
+struct MessageBatchMetadata {
+  metrics @0 :MessageBatchMetrics;
+  # Best effort queue metrics at the time the batch was dispatched.
 }
 
 struct HibernatableWebSocketEventMessage {
@@ -756,11 +783,13 @@ interface EventDispatcher @0xf20697475ec1752d {
   #   It would be cleaner to handle that inside the implementation so we could mark the entire
   #   interface (and file) with allowCancellation.
 
-  queue @8 (messages :List(QueueMessage), queueName :Text) -> (result :QueueResponse)
+  queue @8 (messages :List(QueueMessage), queueName :Text, metadata :MessageBatchMetadata)
+      -> (result :QueueResponse)
       $Cxx.allowCancellation;
   # Delivers a batch of queue messages to a worker's queue event handler. Returns information about
   # the success of the batch, including which messages should be considered acknowledged and which
-  # should be retried.
+  # should be retried. The optional metadata field carries queue metrics at the time the batch was
+  # dispatched; it is safe for the sender to omit this field (the consumer sees it as absent).
 
   jsRpcSession @9 () -> (topLevel :JsRpcTarget) $Cxx.allowCancellation;
   # Opens a JS rpc "session". The call does not return until the session is complete.

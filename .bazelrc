@@ -15,8 +15,8 @@ build --test_timeout=3,15,60,240
 # As part of starlarkification, Bazel 8 and 9 remove a number of rules which now need to be imported
 # from other repositories. In the long term, load() statements will be needed to import these rules.
 # For now, we can still autoload the affected repositories when needed. Do this only for a remaining
-# protobuf components and rules_cc (needed with Bazel 9).
-common --incompatible_autoload_externally="+ProtoInfo,+cc_binary,+cc_import,+cc_library,+cc_shared_library,+cc_test,+cc_toolchain"
+# protobuf component and rules_cc (needed with Bazel 9).
+common --incompatible_autoload_externally="+ProtoInfo,+cc_binary,+cc_library"
 
 # TODO(cleanup): Bazel 9 sets this by default, which breaks the macOS-cross build. Fix and re-enable.
 common --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=False
@@ -39,9 +39,6 @@ import %workspace%/build/tools/clang_tidy/clang_tidy.bazelrc
 
 # Continue building locally when remote cache entries fail to materialize
 build --incompatible_remote_local_fallback_for_remote_cache
-
-# TODO(soon): Flipped by default in Bazel 9, add required variables to --repo_env and enable
-build --noincompatible_repo_env_ignores_action_env
 
 # Use -isystem for cc_library includes attribute – this prevents warnings for misbehaving external
 # code.
@@ -258,8 +255,8 @@ build:unix --cxxopt='-std=c++23' --host_cxxopt='-std=c++23'
 build:unix --@capnp-cpp//src/kj:libdl=True
 
 # Bazel uses CC to compile C and C++ actions, no need to define CXX.
-build:unix --action_env=BAZEL_COMPILER=clang
-build:unix --action_env=CC=clang
+build:unix --repo_env=BAZEL_COMPILER=clang
+build:unix --repo_env=CC=clang
 
 build:unix --test_env=LLVM_SYMBOLIZER=llvm-symbolizer
 
@@ -429,9 +426,14 @@ build:release_windows --copt="/clang:-O3"
 # clang-cl does not enable strict aliasing by default to match MSVC's approach, unlike clang on
 # Unix which turns it on for opt builds.
 build:release_windows --copt="-fstrict-aliasing"
-# This file breaks our CI windows release builds when compiled using O2/O3
-# Ref: https://github.com/llvm/llvm-project/issues/136481
-build:release_windows --per_file_copt=.*capnp/rpc\.c++@/clang:-O1
+# TODO(soon): Investigate these issues on an actual Windows system.
+# Compiling these files causes clang-cl 20 to crash on Windows release builds, work around this by
+# disabling inlining (using /Od would work too but we still want to have whatever optimizations we
+# can have)
+build:release_windows --per_file_copt="src/workerd/server/server"@/clang:-fno-inline
+build:release_windows --per_file_copt="src/workerd/server/container-client"@/clang:-fno-inline
+# Work around Windows test failures in rpc-related tests
+build:release_windows --per_file_copt=src/workerd/io/worker-interface@/clang:-fno-inline
 
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
@@ -448,17 +450,15 @@ build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 # Coverage configuration using LLVM tools. These environment variables are used by rules_cc
 # to locate LLVM coverage tools. Users should ensure llvm-profdata and llvm-cov are available
 # in PATH (create symlinks to version-specific binaries if needed, e.g., ln -s llvm-cov-19 llvm-cov).
-build:coverage --action_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
-build:coverage --test_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
+build:coverage --repo_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
 # GCOV is used by rules_cc to merge raw profile data (.profraw) into indexed profile data (.profdata)
-build:coverage --action_env=GCOV=llvm-profdata
-build:coverage --test_env=GCOV=llvm-profdata
+build:coverage --repo_env=GCOV=llvm-profdata
 # COVERAGE_GCOV_PATH is used by collect_cc_coverage.sh for merging .profraw files.
 build:coverage --action_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
+build:coverage --repo_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
 build:coverage --test_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
 # BAZEL_LLVM_COV is used by rules_cc to generate coverage reports from profile data
-build:coverage --action_env=BAZEL_LLVM_COV=llvm-cov
-build:coverage --test_env=BAZEL_LLVM_COV=llvm-cov
+build:coverage --repo_env=BAZEL_LLVM_COV=llvm-cov
 # LLVM_COV is used by collect_cc_coverage.sh for generating LCOV output
 build:coverage --test_env=LLVM_COV=llvm-cov
 # GENERATE_LLVM_LCOV=1 tells collect_cc_coverage.sh to use llvm-cov export to generate LCOV format

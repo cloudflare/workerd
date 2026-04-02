@@ -15,6 +15,7 @@
 #endif
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/scheduled.h>
+#include <workerd/api/sockets.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/util.h>
@@ -86,6 +87,7 @@ jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& functi
 ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
   return ExportedHandler{
     .fetch{mapAddRef(js, fetch)},
+    .connect{mapAddRef(js, connect)},
     .tail{mapAddRef(js, tail)},
     .trace{mapAddRef(js, trace)},
     .tailStream{mapAddRef(js, tailStream)},
@@ -116,6 +118,49 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope()
 void ServiceWorkerGlobalScope::clear() {
   removeAllHandlers();
   unhandledRejections.clear();
+}
+
+kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
+    const kj::HttpHeaders& headers,
+    kj::AsyncIoStream& connection,
+    kj::HttpService::ConnectResponse& response,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
+  ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
+      "Connect ingress is not currently supported with Service Workers syntax.");
+  KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
+      "connect handling requires the experimental flag.");
+
+  KJ_IF_SOME(handler, eh.connect) {
+    // Has a connect handler!
+    response.accept(200, "OK", headers);
+
+    // Using neuterable stream to manage lifetime of stream promises
+    auto ownConnection = newNeuterableIoStream(connection);
+
+    auto& ioContext = IoContext::current();
+    jsg::Lock& js = lock;
+
+    // TLS support is not implemented so far. Note that setupSocket() expects the domain parameter
+    // to be set to the expected host name using startTLS, so that it can be provided to the TLS
+    // callback, so we'd need to change that or figure out a way to get the host domain.
+    auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
+    // We set isDefaultFetchPort to false here – sockets.c++ sets it for ports 443 and 8080 to
+    // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
+    // side.
+    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::mv(ownConnection), kj::none, kj::none,
+        kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
+    // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
+    // connection is already open at this point, exception handling is not required.
+    jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+
+    kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
+    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span));
+  }
+  lock.logWarningOnce("Received a connect event but we lack a handler. "
+                      "Did you remember to export a connect() function?");
+  JSG_FAIL_REQUIRE(Error, "Handler does not export a connect() function.");
 }
 
 kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMethod method,
@@ -451,7 +496,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
 
       return context
-          .run([exportedHandler, &context, timeout, retryCount, &alarm,
+          .run([exportedHandler, &context, timeout, retryCount, scheduledTime, &alarm,
                    maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](
                    Worker::Lock& lock) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
@@ -483,7 +528,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
             .retry = true, .retryCountsAgainstLimit = true, .outcome = EventOutcome::EXCEEDED_CPU};
         });
 
-        return alarm(lock, js.alloc<AlarmInvocationInfo>(retryCount))
+        return alarm(lock, js.alloc<AlarmInvocationInfo>(scheduledTime, retryCount))
             .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
           return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
         }).exclusiveJoin(kj::mv(timeoutPromise));
@@ -520,12 +565,20 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
 
         // We only want to retry against limits if it's a user error. By default let's check if the
         // output gate is broken.
-        auto shouldRetryCountsAgainstLimits = !context.isOutputGateBroken();
+        //
+        // Special case: when a user throws inside blockConcurrencyWhile after starting a storage
+        // operation, the output gate may also appear broken as a secondary side-effect. Treat it
+        // as a user error so retries count against the limit and the alarm is eventually deleted.
+        auto isInputGateBrokenByUser = jsg::isExceptionFromInputGateBroken(description);
+        auto shouldRetryCountsAgainstLimits =
+            !context.isOutputGateBroken() || isInputGateBrokenByUser;
 
-        // We want to alert if we aren't going to count this alarm retry against limits
-        if (log && context.isOutputGateBroken()) {
+        // We want to alert if we aren't going to count this alarm retry against limits.
+        // Skip logging when the output gate broke as a secondary effect of a user throw inside
+        // blockConcurrencyWhile: that is expected behaviour and already counted as a user error.
+        if (!isInputGateBrokenByUser && log && context.isOutputGateBroken()) {
           LOG_NOSENTRY(ERROR, "output lock broke during alarm execution", actorId, description);
-        } else if (context.isOutputGateBroken()) {
+        } else if (!isInputGateBrokenByUser && context.isOutputGateBroken()) {
           if (isUserError) {
             // The handler failed because the user overloaded the object. It's their fault, we'll not
             // retry forever.
@@ -540,12 +593,14 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         }
         return WorkerInterface::AlarmResult{.retry = true,
           .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
-          .outcome = outcome};
+          .outcome = outcome,
+          .errorDescription = kj::str(description)};
       })
           .then([&context](WorkerInterface::AlarmResult result)
                     -> kj::Promise<WorkerInterface::AlarmResult> {
-        return context.waitForOutputLocks().then(
-            [result]() { return kj::mv(result); }, [&context](kj::Exception&& e) {
+        return context.waitForOutputLocks().then([result = kj::mv(result)]() mutable {
+          return kj::mv(result);
+        }, [&context](kj::Exception&& e) {
           auto& actor = KJ_ASSERT_NONNULL(context.getActor());
           kj::String actorId;
           KJ_SWITCH_ONEOF(actor.getId()) {
@@ -558,13 +613,20 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           }
           // We only want to retry against limits if it's a user error. By default let's assume it's our
           // fault.
-          auto shouldRetryCountsAgainstLimits = false;
+          //
+          // Special case: when a user throws inside blockConcurrencyWhile after starting a storage
+          // operation, the output gate also appears broken as a secondary side-effect. Treat it
+          // as a user error so retries count against the limit and the alarm is eventually deleted.
+          auto isInputGateBrokenByUser = jsg::isExceptionFromInputGateBroken(e.getDescription());
+          auto shouldRetryCountsAgainstLimits = isInputGateBrokenByUser;
           if (auto desc = e.getDescription();
               !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
-            if (isInterestingException(e)) {
-              LOG_EXCEPTION("alarmOutputLock"_kj, e);
-            } else {
-              LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", actorId, e);
+            if (!isInputGateBrokenByUser) {
+              if (isInterestingException(e)) {
+                LOG_EXCEPTION("alarmOutputLock"_kj, e);
+              } else {
+                LOG_NOSENTRY(ERROR, "output lock broke after executing alarm", actorId, e);
+              }
             }
           } else {
             if (e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none) {
@@ -575,7 +637,8 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           }
           return WorkerInterface::AlarmResult{.retry = true,
             .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
-            .outcome = EventOutcome::EXCEPTION};
+            .outcome = EventOutcome::EXCEPTION,
+            .errorDescription = kj::str(e.getDescription())};
         });
       });
     }

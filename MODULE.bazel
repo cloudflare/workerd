@@ -17,15 +17,23 @@ archive_override(
         "//:patches/sqlite/0004-invalid-wal-on-rollback-fix.patch",
     ],
     remote_file_integrity = {
-        "MODULE.bazel": "sha256-TtpmqyHyks3o0WcSJO0XFyKkHfAIF98wq06+urs3oKI=",
+        "MODULE.bazel": "sha256-+H38CSP6DtMT+YPSy9lplRLcfBApkukY4vdX6lBjDfI=",
     },
+    # Using build file from more recent version since it imports rules_cc properly
     remote_file_urls = {
-        "MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/sqlite3/3.47.0/MODULE.bazel"],
+        "MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/sqlite3/3.51.2.bcr.1/MODULE.bazel"],
     },
     sha256 = "f59c349bedb470203586a6b6d10adb35f2afefa49f91e55a672a36a09a8fedf7",
     strip_prefix = "sqlite-src-3470000",
     url = "https://sqlite.org/2024/sqlite-src-3470000.zip",
 )
+
+# rules_android/rules_go are not used by ourselves, but protobuf pulls in outdated versions that are
+# missing rules_cc symbols – can be dropped once protobuf uses more recent versions. At least we can
+# use repo_name = None so that these are not visible to workerd itself and won't be pulled in if not
+# needed transitively.
+bazel_dep(name = "rules_go", version = "0.60.0", repo_name = None)
+bazel_dep(name = "rules_android", version = "0.7.1", repo_name = None)
 
 # Automatically managed dependencies
 include("//build/deps:gen/deps.MODULE.bazel")

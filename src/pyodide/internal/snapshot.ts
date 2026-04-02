@@ -15,6 +15,7 @@ import {
   REQUIREMENTS,
   IS_CREATING_SNAPSHOT,
   IS_EW_VALIDATING,
+  IS_DYNAMIC_WORKER,
   IS_DEDICATED_SNAPSHOT_ENABLED,
   COMPATIBILITY_FLAGS,
   type CompatibilityFlags,
@@ -761,6 +762,12 @@ export function isRestoringSnapshot(): boolean {
 
 function checkSnapshotType(snapshotType: string): void {
   if (SHOULD_SNAPSHOT_TO_DISK) {
+    return;
+  }
+  // Dynamic workers don't yet support dedicated snapshots, so they will receive a baseline
+  // snapshot from GCS even when the dedicated snapshot compat flag is enabled. Skip the
+  // snapshot type validation in this case.
+  if (IS_DYNAMIC_WORKER) {
     return;
   }
   if (

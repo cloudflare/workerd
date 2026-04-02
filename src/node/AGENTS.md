@@ -7,9 +7,9 @@ TypeScript and JavaScript layer implementing Node.js compatible built-in modules
 It is split across multiple layers:
 
 1. An **internal layer** consisting of:
-  - Non-user-importable TypeScript and JavaScript files in `internal/` that implement core logic, utilities, and C++ JSG module declarations.
-  - C++ JSG modules  (`src/workerd/api/node/`) expose native ops via `node-internal:*` specifiers
-  - Some native internal modules may be implemented in Rust
+    - Non-user-importable TypeScript and JavaScript files in `internal/` that implement core logic, utilities, and C++ JSG module declarations.
+    - C++ JSG modules (`src/workerd/api/node/`) expose native ops via `node-internal:*` specifiers
+    - Some native internal modules may be implemented in Rust
 2. A **public layer** of TypeScript files at the top-level that are user-importable.
 
 It is common, but not required, for top-level `.ts` files to re-export from `internal/` via `node-internal:` specifiers. This allows for a clean separation between public API surface and internal implementation details.
@@ -32,6 +32,23 @@ Runtime compat flags checked via `Cloudflare.compatibilityFlags['flag_name']`:
 | `remove_nodejs_compat_eol_v22/v23/v24` | EOL deprecation of specific API surfaces (crypto, util, tls, process) |
 
 Most modules require `nodejs_compat` + `nodejs_compat_v2` flags (enforced by C++ side, not visible here).
+
+## ADDING NEW INTERNAL MODULES
+
+New `.ts` and `.js` files in `internal/` are **auto-discovered** by the build system via
+`glob(["internal/*.ts", "internal/*.js"])` in `BUILD.bazel`. No explicit registration is needed —
+just create the file and it becomes importable via its `node-internal:` specifier.
+
+For example, creating `internal/internal_fs_glob.ts` immediately makes
+`node-internal:internal_fs_glob` available as an import specifier. No changes to `BUILD.bazel` or
+any registration macro are required.
+
+**What does require explicit wiring:**
+
+- New top-level `node:*` public modules need a corresponding `.ts` file in `src/node/` and must be
+  registered in the C++ module registry (`src/workerd/api/node/node.h`, the `NODEJS_MODULES` macro).
+- New C++ JSG native modules require a `.d.ts` declaration file in `internal/` to declare the shape
+  of the native module.
 
 ## CONVENTIONS
 

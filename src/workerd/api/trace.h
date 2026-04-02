@@ -67,12 +67,30 @@ struct ScriptVersion {
   }
 };
 
+struct TracePreviewInfo {
+  explicit TracePreviewInfo(const tracing::TracePreview& preview);
+  TracePreviewInfo(const TracePreviewInfo&);
+
+  kj::String id;
+  kj::String slug;
+  kj::String name;
+
+  JSG_STRUCT(id, slug, name);
+
+  JSG_MEMORY_INFO(TracePreviewInfo) {
+    tracker.trackField("id", id);
+    tracker.trackField("slug", slug);
+    tracker.trackField("name", name);
+  }
+};
+
 class TraceItem final: public jsg::Object {
  public:
   using TailAttributeValue = kj::OneOf<bool, double, kj::String>;
 
   class FetchEventInfo;
   class JsRpcEventInfo;
+  class ConnectEventInfo;
   class ScheduledEventInfo;
   class AlarmEventInfo;
   class QueueEventInfo;
@@ -85,6 +103,7 @@ class TraceItem final: public jsg::Object {
 
   using EventInfo = kj::OneOf<jsg::Ref<FetchEventInfo>,
       jsg::Ref<JsRpcEventInfo>,
+      jsg::Ref<ConnectEventInfo>,
       jsg::Ref<ScheduledEventInfo>,
       jsg::Ref<AlarmEventInfo>,
       jsg::Ref<QueueEventInfo>,
@@ -103,6 +122,7 @@ class TraceItem final: public jsg::Object {
   jsg::Optional<ScriptVersion> getScriptVersion();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
+  jsg::Optional<TracePreviewInfo> getPreview();
   jsg::Optional<jsg::Dict<TailAttributeValue>> getTailAttributes();
   jsg::Optional<kj::StringPtr> getDurableObjectId();
   kj::StringPtr getExecutionModel();
@@ -124,6 +144,7 @@ class TraceItem final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(dispatchNamespace, getDispatchNamespace);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(tailAttributes, getTailAttributes);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(preview, getPreview);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(durableObjectId, getDurableObjectId);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(outcome, getOutcome);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(executionModel, getExecutionModel);
@@ -146,6 +167,7 @@ class TraceItem final: public jsg::Object {
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
   kj::Maybe<kj::Array<tracing::Attribute>> tailAttributes;
+  jsg::Optional<TracePreviewInfo> preview;
   kj::Maybe<kj::String> durableObjectId;
   kj::String executionModel;
   kj::String outcome;
@@ -285,6 +307,14 @@ class TraceItem::JsRpcEventInfo final: public jsg::Object {
 
  private:
   kj::String rpcMethod;
+};
+
+class TraceItem::ConnectEventInfo final: public jsg::Object {
+ public:
+  explicit ConnectEventInfo(
+      jsg::Lock& js, const Trace& trace, const tracing::ConnectEventInfo& eventInfo);
+
+  JSG_RESOURCE_TYPE(ConnectEventInfo) {}
 };
 
 class TraceItem::ScheduledEventInfo final: public jsg::Object {
@@ -649,7 +679,8 @@ class TraceCustomEvent final: public WorkerInterface::CustomEvent {
 };
 
 #define EW_TRACE_ISOLATE_TYPES                                                                     \
-  api::ScriptVersion, api::TailEvent, api::TraceItem, api::TraceItem::AlarmEventInfo,              \
+  api::TracePreviewInfo, api::ScriptVersion, api::TailEvent, api::TraceItem,                       \
+      api::TraceItem::AlarmEventInfo, api::TraceItem::ConnectEventInfo,                            \
       api::TraceItem::CustomEventInfo, api::TraceItem::ScheduledEventInfo,                         \
       api::TraceItem::QueueEventInfo, api::TraceItem::EmailEventInfo,                              \
       api::TraceItem::TailEventInfo, api::TraceItem::TailEventInfo::TailItem,                      \

@@ -67,10 +67,6 @@ export default {
     ],
   },
 
-  'encap_decap/ml_kem_encap_decap.js': {
-    comment: 'ML-KEM (post-quantum key encapsulation) is not supported',
-    omittedTests: true,
-  },
   'encap_decap/ml_kem_vectors.js': {
     comment: 'ML-KEM (post-quantum key encapsulation) is not supported',
     omittedTests: true,
@@ -327,6 +323,12 @@ export default {
   'import_export/symmetric_importKey.https.any.js': {},
   'import_export/symmetric_importKey.js': {},
 
+  'normalize-algorithm-name.https.any.js': {
+    comment:
+      'Algorithm names with Unicode Kelvin sign (U+212A) lookalikes throw SyntaxError instead of NotSupportedError',
+    expectedFailures: [/does not match "HKDF"/, /does not match "PBKDF2"/],
+  },
+
   'randomUUID.https.any.js': {},
 
   'sign_verify/ecdsa.https.any.js': {},
@@ -337,6 +339,7 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'EdDSA Ed25519 verification failure due to shortened signature',
+      'EdDSA Ed25519 verification with transferred signature during call',
     ],
   },
   'sign_verify/eddsa_small_order_points.https.any.js': {

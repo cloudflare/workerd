@@ -134,5 +134,38 @@ KJ_TEST("decodeJsonResponse ContainerMonitorResponse - non-zero exit") {
   KJ_EXPECT(root.getStatusCode() == 137);
 }
 
+KJ_TEST("ContainerCreateRequest encodes structured mounts with NoCopy") {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
+
+  capnp::MallocMessageBuilder message;
+  auto root = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
+  root.setImage("test-image");
+
+  auto mounts = root.initHostConfig().initMounts(1);
+  auto mount = mounts[0];
+  mount.setType("volume");
+  mount.setSource("snapshot-clone-volume");
+  mount.setTarget("/app/data");
+  mount.initVolumeOptions().setNoCopy(true);
+
+  auto json = codec.encode(root);
+  auto jsonText = json.asPtr();
+
+  KJ_EXPECT(jsonText.contains("\"Mounts\""));
+  KJ_EXPECT(jsonText.contains("\"VolumeOptions\""));
+  KJ_EXPECT(jsonText.contains("\"NoCopy\":true"));
+
+  auto decoded = decodeJsonResponse<docker_api::Docker::ContainerCreateRequest>(jsonText);
+  auto decodedRoot = decoded->getRoot<docker_api::Docker::ContainerCreateRequest>();
+  auto decodedMounts = decodedRoot.getHostConfig().getMounts();
+
+  KJ_REQUIRE(decodedMounts.size() == 1);
+  KJ_EXPECT(decodedMounts[0].getType() == "volume");
+  KJ_EXPECT(decodedMounts[0].getSource() == "snapshot-clone-volume");
+  KJ_EXPECT(decodedMounts[0].getTarget() == "/app/data");
+  KJ_EXPECT(decodedMounts[0].getVolumeOptions().getNoCopy());
+}
+
 }  // namespace
 }  // namespace workerd::server

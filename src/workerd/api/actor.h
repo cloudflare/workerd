@@ -108,6 +108,7 @@ class DurableObject final: public Fetcher {
 
     JSG_TS_DEFINE(interface DurableObject {
       fetch(request: Request): Response | Promise<Response>;
+      connect?(socket: Socket): void | Promise<void>;
       alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
       webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;
       webSocketClose?(ws: WebSocket, code: number, reason: string, wasClean: boolean): void | Promise<void>;
@@ -115,7 +116,7 @@ class DurableObject final: public Fetcher {
     });
     JSG_TS_OVERRIDE(
       type DurableObjectStub<T extends Rpc.DurableObjectBranded | undefined = undefined> =
-        Fetcher<T, "alarm" | "webSocketMessage" | "webSocketClose" | "webSocketError">
+        Fetcher<T, "alarm" | "connect" | "webSocketMessage" | "webSocketClose" | "webSocketError">
         & {
           readonly id: DurableObjectId;
           readonly name?: string;

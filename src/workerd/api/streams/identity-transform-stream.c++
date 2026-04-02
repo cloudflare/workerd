@@ -107,12 +107,12 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
         if (amount > l) {
           auto exception = JSG_KJ_EXCEPTION(
               FAILED, TypeError, "Attempt to write too many bytes through a FixedLengthStream.");
-          cancel(exception);
+          cancel(kj::cp(exception));
           return kj::mv(exception);
         } else if (amount == 0 && l != 0) {
           auto exception = JSG_KJ_EXCEPTION(FAILED, TypeError,
               "FixedLengthStream did not see all expected bytes before close().");
-          cancel(exception);
+          cancel(kj::cp(exception));
           return kj::mv(exception);
         }
         l -= amount;

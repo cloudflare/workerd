@@ -14,7 +14,7 @@ namespace workerd {
 #define WD_EXPECT_THROW(expException, code, ...)                                                   \
   do {                                                                                             \
     /* NOLINTNEXTLINE(performance-unnecessary-copy-initialization) */                              \
-    auto expExcObj = expException;                                                                 \
+    auto expExcObj = kj::cp(expException);                                                         \
     KJ_IF_SOME(e, ::kj::runCatchingExceptions([&]() { (void)({ code; }); })) {                     \
       KJ_EXPECT(e.getType() == expExcObj.getType(), "code threw wrong exception type: " #code, e,  \
           ##__VA_ARGS__);                                                                          \

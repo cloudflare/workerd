@@ -4,7 +4,6 @@
 
 import { connect, internalNewHttpClient } from 'cloudflare:sockets';
 import { strict as assert } from 'node:assert';
-import { setTimeout as sleep } from 'node:timers/promises';
 
 // Basic connectivity and GET test
 export const oneRequest = {
@@ -197,7 +196,7 @@ export const socketCloseThenFetch = {
 export const lockReaderFail = {
   async test(ctrl, env, ctx) {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
-    const reader = socket.readable.getReader();
+    const _reader = socket.readable.getReader();
     await assert.rejects(internalNewHttpClient(socket), {
       name: 'TypeError',
       message: 'The ReadableStream has been locked to a reader.',
@@ -209,7 +208,7 @@ export const lockReaderFail = {
 export const lockWriterFail = {
   async test(ctrl, env, ctx) {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
-    const writer = socket.writable.getWriter();
+    const _writer = socket.writable.getWriter();
     await assert.rejects(internalNewHttpClient(socket), {
       name: 'TypeError',
       message: 'This WritableStream is currently locked to a writer.',
@@ -259,7 +258,7 @@ export const errorRemoteWrites = {
 export const websockets = {
   async test(ctrl, env, ctx) {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
-    const httpClient = await internalNewHttpClient(socket);
+    const _httpClient = await internalNewHttpClient(socket);
 
     const res = await fetch(
       `http://localhost:${env.HTTP_SOCKET_SERVER_PORT}/`,
@@ -290,6 +289,7 @@ export const websockets = {
       ws.addEventListener('message', (event) => {
         // Verify we got the welcome message
         if (event.data === 'Welcome to WebSocket server') {
+          // intentionally empty
         } else if (event.data.startsWith('Echo:')) {
           clearTimeout(timeout);
           ws.close();

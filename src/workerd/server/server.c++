@@ -4,6 +4,7 @@
 
 #include "server.h"
 
+#include "alarm-scheduler.h"
 #include "container-client.h"
 #include "pyodide.h"
 #include "workerd-api.h"
@@ -33,6 +34,7 @@
 #include <workerd/server/fallback-service.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/stream-utils.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/websocket-error-handler.h>
@@ -1892,7 +1894,6 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<ActorClass>> actorClass;
     kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> cache;
     kj::Maybe<const kj::Directory&> actorStorage;
-    AlarmScheduler& alarmScheduler;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
     kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
@@ -1949,8 +1950,9 @@ class Server::WorkerService final: public Service,
 
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
       auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
-          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(), channelTokenHandler,
-          network, dockerPath, containerEgressInterceptorImage, waitUntilTasks);
+          kj::systemPreciseCalendarClock(), threadContext.getUnsafeTimer(),
+          threadContext.getByteStreamFactory(), channelTokenHandler, network, dockerPath,
+          containerEgressInterceptorImage, waitUntilTasks);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -2054,7 +2056,7 @@ class Server::WorkerService final: public Service,
     auto linked = callback(*this, errorReporter);
 
     for (auto& ns: actorNamespaces) {
-      ns.value->link(linked.actorStorage, linked.alarmScheduler);
+      ns.value->link(linked.actorStorage);
     }
 
     ioChannels = kj::mv(linked);
@@ -2214,6 +2216,7 @@ class Server::WorkerService final: public Service,
    public:
     ActorNamespace(kj::Own<ActorClass> actorClass,
         const ActorConfig& config,
+        const kj::Clock& clock,
         kj::Timer& timer,
         capnp::ByteStreamFactory& byteStreamFactory,
         ChannelTokenHandler& channelTokenHandler,
@@ -2223,6 +2226,7 @@ class Server::WorkerService final: public Service,
         kj::TaskSet& waitUntilTasks)
         : actorClass(kj::mv(actorClass)),
           config(config),
+          clock(clock),
           timer(timer),
           byteStreamFactory(byteStreamFactory),
           channelTokenHandler(channelTokenHandler),
@@ -2231,18 +2235,40 @@ class Server::WorkerService final: public Service,
           containerEgressInterceptorImage(containerEgressInterceptorImage),
           waitUntilTasks(waitUntilTasks) {}
 
-    // Called at link time to provide needed resources.
-    void link(kj::Maybe<const kj::Directory&> serviceActorStorage,
-        kj::Maybe<AlarmScheduler&> alarmScheduler) {
+    void link(kj::Maybe<const kj::Directory&> serviceActorStorage) {
       KJ_IF_SOME(dir, serviceActorStorage) {
         KJ_IF_SOME(d, config.tryGet<Durable>()) {
-          // Create a subdirectory for this namespace based on the unique key.
           this->actorStorage.emplace(dir.openSubdir(
               kj::Path({d.uniqueKey}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY));
         }
       }
 
-      this->alarmScheduler = alarmScheduler;
+      KJ_IF_SOME(d, config.tryGet<Durable>()) {
+        auto idFactory = kj::heap<ActorIdFactoryImpl>(d.uniqueKey);
+        AlarmScheduler::GetActorFn getActor =
+            [this, idFactory = kj::mv(idFactory)](
+                kj::String idStr) mutable -> kj::Own<WorkerInterface> {
+          Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
+          auto actorContainer = this->getActorContainer(kj::mv(id));
+          return newPromisedWorkerInterface(actorContainer->startRequest({}));
+        };
+
+        KJ_IF_SOME(as, this->actorStorage) {
+          // Create per-namespace alarm scheduler backed by on-disk storage in the
+          // namespace directory, alongside the per-actor .sqlite files.
+          this->ownAlarmScheduler = kj::heap<AlarmScheduler>(
+              clock, timer, as.vfs, kj::Path({"metadata.sqlite"}), kj::mv(getActor));
+        } else {
+          // No on-disk storage -- create an in-memory alarm scheduler.
+          auto memDir = kj::newInMemoryDirectory(clock);
+          auto vfs = kj::heap<SqliteDatabase::Vfs>(*memDir);
+          this->ownAlarmScheduler = kj::heap<AlarmScheduler>(
+              clock, timer, *vfs, kj::Path({"metadata.sqlite"}), kj::mv(getActor))
+                                        .attach(kj::mv(vfs), kj::mv(memDir));
+        }
+
+        this->alarmScheduler = *KJ_ASSERT_NONNULL(ownAlarmScheduler);
+      }
     }
 
     const ActorConfig& getConfig() {
@@ -2251,11 +2277,14 @@ class Server::WorkerService final: public Service,
 
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
       KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
-        // To emulate production, we have to recreate this ID.
-        ActorIdFactoryImpl::ActorIdImpl* idImpl =
-            dynamic_cast<ActorIdFactoryImpl::ActorIdImpl*>(doId.get());
-        KJ_ASSERT(idImpl != nullptr, "Unexpected ActorId type?");
-        idImpl->clearName();
+        KJ_IF_SOME(name, doId->getName()) {
+          // To emulate production, we preserve the name on the id, but only if it's <= 1024 bytes.
+          if (name.size() > 1024) {
+            auto* idImpl = dynamic_cast<ActorIdFactoryImpl::ActorIdImpl*>(doId.get());
+            KJ_ASSERT(idImpl != nullptr, "Unexpected ActorId type?");
+            idImpl->clearName();
+          }
+        }
       }
 
       return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)));
@@ -2743,8 +2772,7 @@ class Server::WorkerService final: public Service,
               kj::Own<ActorSqlite::Hooks> sqliteHooks;
               if (parent == kj::none) {
                 KJ_IF_SOME(a, ns.alarmScheduler) {
-                  sqliteHooks = kj::heap<ActorSqliteHooks>(
-                      a, ActorKey{.uniqueKey = d.uniqueKey, .actorId = key});
+                  sqliteHooks = kj::heap<ActorSqliteHooks>(a, ActorKey{.actorId = key});
                 } else {
                   // No alarm scheduler available, use default hooks instance.
                   sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
@@ -2948,6 +2976,7 @@ class Server::WorkerService final: public Service,
    private:
     kj::Own<ActorClass> actorClass;
     const ActorConfig& config;
+    const kj::Clock& clock;
 
     struct ActorStorage {
       kj::Own<const kj::Directory> directory;
@@ -2958,9 +2987,10 @@ class Server::WorkerService final: public Service,
             vfs(*directory) {}
     };
 
-    // Note: The Vfs must not be torn down until all actors have been torn down, so we have to
-    //   declare `actorStorage` before `actors`.
+    // Note: The Vfs, actorStorage, and ownAlarmScheduler must not be torn down until all actors
+    // have been torn down, so we declare them before `actors`.
     kj::Maybe<ActorStorage> actorStorage;
+    kj::Maybe<kj::Own<AlarmScheduler>> ownAlarmScheduler;
 
     // Tracks the canceler and cleanup promise for a Docker container's lifecycle cleanup.
     // Useful to await on async calls of a ContainerClient destructor when the new
@@ -4673,7 +4703,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
   auto linkCallback = [this, def = kj::mv(def), totalActorChannels](WorkerService& workerService,
                           Worker::ValidationErrorReporter& errorReporter) mutable {
-    WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
+    WorkerService::LinkedIoChannels result;
 
     auto entrypointNames = workerService.getEntrypointNames();
     auto actorClassNames = workerService.getActorClassNames();
@@ -4775,24 +4805,6 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       } else {
         errorReporter.addError(kj::str("durableObjectStorage config refers to a service \"",
             diskName, "\", but no such service is defined."));
-      }
-    }
-
-    kj::HashMap<kj::StringPtr, WorkerService::ActorNamespace&> durableNamespacesByUniqueKey;
-    for (auto& [className, ns]: workerService.getActorNamespaces()) {
-      KJ_IF_SOME(config, ns->getConfig().tryGet<Server::Durable>()) {
-        auto& actorNs =
-            ns;  // clangd gets confused trying to use ns directly in the capture below??
-
-        auto idFactory = kj::heap<ActorIdFactoryImpl>(config.uniqueKey);
-
-        alarmScheduler->registerNamespace(config.uniqueKey,
-            [&actorNs, idFactory = kj::mv(idFactory)](
-                kj::String idStr) mutable -> kj::Own<WorkerInterface> {
-          Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
-          auto actorContainer = actorNs->getActorContainer(kj::mv(id));
-          return newPromisedWorkerInterface(actorContainer->startRequest({}));
-        });
       }
     }
 
@@ -5338,17 +5350,20 @@ class Server::HttpListener final: public kj::Refcounted {
         kj::AsyncIoStream& connection,
         ConnectResponse& response,
         kj::HttpConnectSettings settings) override {
+      TRACE_EVENT("workerd", "Connection:connect()");
       KJ_IF_SOME(h, parent.rewriter->getCapnpConnectHost()) {
         if (h == host) {
           // Client is requesting to open a capnp session!
           response.accept(200, "OK", kj::HttpHeaders(parent.headerTable));
-          return parent.acceptCapnpConnection(connection);
+          co_return co_await parent.acceptCapnpConnection(connection);
         }
       }
 
-      // TODO(someday): Deliver connect() event to to worker? For now we call the default
-      //   implementation which throws an exception.
-      return kj::HttpService::connect(host, headers, connection, response, kj::mv(settings));
+      IoChannelFactory::SubrequestMetadata metadata;
+      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+
+      auto worker = parent.service->startRequest(kj::mv(metadata));
+      co_return co_await worker->connect(host, headers, connection, response, kj::mv(settings));
     }
 
     // ---------------------------------------------------------------------------
@@ -5368,6 +5383,57 @@ class Server::HttpListener final: public kj::Refcounted {
   };
 };
 
+class Server::TcpListener final: public kj::Refcounted {
+ public:
+  TcpListener(Server& owner,
+      kj::Own<kj::ConnectionReceiver> listener,
+      kj::Own<Service> service,
+      kj::HttpHeaderTable& headerTable,
+      kj::StringPtr addrStr)
+      : owner(owner),
+        listener(kj::mv(listener)),
+        service(kj::mv(service)),
+        headerTable(headerTable),
+        addrStr(addrStr) {}
+
+  kj::Promise<void> run() {
+    TRACE_EVENT("workerd", "TcpListener::run");
+    for (;;) {
+      kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
+      TRACE_EVENT("workerd", "TcpListener handle connection");
+
+      IoChannelFactory::SubrequestMetadata metadata;
+      auto req = service->startRequest(kj::mv(metadata));
+      auto response = kj::heap<ResponseWrapper>();
+      kj::HttpHeaders headers(headerTable);
+      owner.tasks.add(req->connect(addrStr, headers, *stream.stream, *response, {})
+                          .attach(kj::mv(stream.stream), kj::mv(response))
+                          .attach(kj::mv(req)));
+    }
+  }
+
+ private:
+  Server& owner;
+  kj::Own<kj::ConnectionReceiver> listener;
+  kj::Own<Service> service;
+  kj::HttpHeaderTable& headerTable;
+  kj::StringPtr addrStr;
+
+  struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
+    void accept(
+        uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+      // Ok.. we're accepting the connection... anything to do?
+    }
+    kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+        kj::StringPtr statusText,
+        const kj::HttpHeaders& headers,
+        kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+      // Doh... we're rejecting the connection... anything to do?
+      return newNullOutputStream();
+    }
+  };
+};
+
 kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
     kj::Own<Service> service,
     kj::StringPtr physicalProtocol,
@@ -5375,6 +5441,13 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
   auto obj =
       kj::refcounted<HttpListener>(*this, kj::mv(listener), kj::mv(service), physicalProtocol,
           kj::mv(rewriter), globalContext->headerTable, timer, globalContext->httpOverCapnpFactory);
+  co_return co_await obj->run();
+}
+
+kj::Promise<void> Server::listenTcp(
+    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr) {
+  auto obj = kj::refcounted<TcpListener>(
+      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, addrStr);
   co_return co_await obj->run();
 }
 
@@ -5571,17 +5644,6 @@ kj::Promise<void> Server::run(
   auto ownHeaderTable = headerTableBuilder.build();
 
   co_return co_await listenPromise.exclusiveJoin(kj::mv(fatalPromise));
-}
-
-void Server::startAlarmScheduler(config::Config::Reader config) {
-  auto& clock = kj::systemPreciseCalendarClock();
-  auto dir = kj::newInMemoryDirectory(clock);
-  auto vfs = kj::heap<SqliteDatabase::Vfs>(*dir).attach(kj::mv(dir));
-
-  // TODO(someday): support persistent storage for alarms
-
-  alarmScheduler =
-      kj::heap<AlarmScheduler>(clock, timer, *vfs, kj::Path({"alarms.sqlite"})).attach(kj::mv(vfs));
 }
 
 // Configure and start the inspector socket, returning the port the socket started on.
@@ -5782,14 +5844,44 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
     return decltype(services)::Entry{kj::str("internet"_kj), kj::mv(service)};
   });
 
-  // Start the alarm scheduler before linking services
-  startAlarmScheduler(config);
-
   // Third pass: Cross-link services.
   for (auto& service: services) {
     ConfigErrorReporter errorReporter(*this, service.key);
     service.value->link(errorReporter);
   }
+}
+
+kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
+    config::Socket::Reader sock, kj::StringPtr name) {
+  switch (sock.which()) {
+    case config::Socket::HTTP: {
+      SocketTypeConfig result;
+      result.defaultPort = 80;
+      result.httpOptions = sock.getHttp();
+      result.physicalProtocol = "http";
+      return kj::mv(result);
+    }
+    case config::Socket::HTTPS: {
+      auto https = sock.getHttps();
+      SocketTypeConfig result;
+      result.defaultPort = 443;
+      result.httpOptions = https.getOptions();
+      result.tls = makeTlsContext(https.getTlsOptions());
+      result.physicalProtocol = "https";
+      return kj::mv(result);
+    }
+    case config::Socket::TCP: {
+      auto tcp = sock.getTcp();
+      SocketTypeConfig result;
+      if (tcp.hasTlsOptions()) {
+        result.tls = makeTlsContext(tcp.getTlsOptions());
+      }
+      return kj::mv(result);
+    }
+  }
+  reportConfigError(kj::str("Encountered unknown socket type in \"", name,
+      "\". Was the config compiled with a newer version of the schema?"));
+  return kj::none;
 }
 
 kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
@@ -5828,31 +5920,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       continue;
     }
 
-    uint defaultPort = 0;
-    config::HttpOptions::Reader httpOptions;
-    kj::Maybe<kj::Own<kj::TlsContext>> tls;
-    kj::StringPtr physicalProtocol;
-    switch (sock.which()) {
-      case config::Socket::HTTP:
-        defaultPort = 80;
-        httpOptions = sock.getHttp();
-        physicalProtocol = "http";
-        goto validSocket;
-      case config::Socket::HTTPS: {
-        auto https = sock.getHttps();
-        defaultPort = 443;
-        httpOptions = https.getOptions();
-        tls = makeTlsContext(https.getTlsOptions());
-        physicalProtocol = "https";
-        goto validSocket;
-      }
-    }
-    reportConfigError(kj::str("Encountered unknown socket type in \"", name,
-        "\". Was the config compiled with a "
-        "newer version of the schema?"));
-    continue;
+    auto maybeSocketConfig = parseSocketType(sock, name);
+    if (maybeSocketConfig == kj::none) continue;
+    auto& socketConfig = KJ_ASSERT_NONNULL(maybeSocketConfig);
 
-  validSocket:
     using PromisedReceived = kj::Promise<kj::Own<kj::ConnectionReceiver>>;
     PromisedReceived listener = nullptr;
     KJ_IF_SOME(l, listenerOverride) {
@@ -5861,10 +5932,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       listener = ([](kj::Promise<kj::Own<kj::NetworkAddress>> promise) -> PromisedReceived {
         auto parsed = co_await promise;
         co_return parsed->listen();
-      })(network.parseAddress(addrStr, defaultPort));
+      })(network.parseAddress(addrStr, socketConfig.defaultPort));
     }
 
-    KJ_IF_SOME(t, tls) {
+    KJ_IF_SOME(t, socketConfig.tls) {
       listener = ([](kj::Promise<kj::Own<kj::ConnectionReceiver>> promise,
                       kj::Own<kj::TlsContext> tls) -> PromisedReceived {
         auto port = co_await promise;
@@ -5874,12 +5945,19 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
     // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
     // be available later.
-    auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
+    auto rewriter = kj::heap<HttpRewriter>(socketConfig.httpOptions, headerTableBuilder);
 
     auto handle = kj::coCapture(
-        [this, service = kj::mv(service), rewriter = kj::mv(rewriter), physicalProtocol, name](
+        [this, service = kj::mv(service), rewriter = kj::mv(rewriter),
+            physicalProtocol = socketConfig.physicalProtocol, name,
+            isHttp = sock.which() != config::Socket::TCP, addrStr](
             kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
-      TRACE_EVENT("workerd", "setup listenHttp");
+      if (isHttp) {
+        TRACE_EVENT("workerd", "setup listenHttp");
+      } else {
+        TRACE_EVENT("workerd", "setup listenTcp");
+      }
+
       auto listener = co_await promise;
       KJ_IF_SOME(stream, controlOverride) {
         auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name,
@@ -5890,7 +5968,12 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
           KJ_LOG(ERROR, e);
         }
       }
-      co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
+
+      if (isHttp) {
+        co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
+      } else {
+        co_await listenTcp(kj::mv(listener), kj::mv(service), addrStr);
+      }
     });
     tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
   }

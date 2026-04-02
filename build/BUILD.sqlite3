@@ -5,6 +5,9 @@ This is just enough to build the sqlite3 library; it does not include
 the shell or any other utilities.
 """
 
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 package(default_visibility = ["//visibility:private"])
 
 SQLITE_DEFINES = [

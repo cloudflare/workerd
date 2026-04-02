@@ -34,6 +34,7 @@ const unitTests :Workerd.Config = (
           # Intentional circular dependency
           (name = "cjs4", commonJsModule = "module.exports = require('cjs5')"),
           (name = "cjs5", commonJsModule = "module.exports = require('cjs4')"),
+          (name = "cjs6", commonJsModule = "module.exports = require('tla')"),
 
           # Other module types work
           (name = "text", text = "abc"),
@@ -68,11 +69,16 @@ const unitTests :Workerd.Config = (
 
           # Unicode characters in the path should be handled as UTF-8 and supported.
           (name = "部品", esModule = "export default 1;"),
+
+          (name = "tla", esModule = "export default await import('text')"),
         ],
         compatibilityFlags = [
           "nodejs_compat_v2",
           "new_module_registry",
           "experimental",
+        ],
+        bindings = [
+          (name = "unsafe", unsafeEval = void),
         ],
       ),
     ),

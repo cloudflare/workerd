@@ -550,7 +550,6 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
       jsg::Deserializer deserializer(js, cacheValue->bytes.asPtr());
       return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
     }
-    readSpan.setTag("cache_hit"_kjc, false);
     return js.resolvedPromise(jsg::JsRef(js, js.undefined()));
   }
 }

@@ -289,7 +289,7 @@ export const conditionalRequestOperations = {
         'If-None-Match': 'abc123',
       },
     });
-    let matchResult = await cache.match(matchRequest1);
+    let _matchResult = await cache.match(matchRequest1);
 
     // Test cache.match() with If-Modified-Since (should work with Last-Modified)
     const matchRequest2 = new Request(
@@ -301,6 +301,6 @@ export const conditionalRequestOperations = {
         },
       }
     );
-    matchResult = await cache.match(matchRequest2);
+    _matchResult = await cache.match(matchRequest2);
   },
 };

@@ -15,7 +15,9 @@ class File;
 // An implementation of the Web Platform Standard Blob API
 class Blob: public jsg::Object {
  public:
-  Blob(jsg::Lock& js, jsg::BufferSource data, kj::String type);
+  // Creates an empty Blob
+  Blob(kj::String type);
+  Blob(jsg::Lock& js, jsg::JsBufferSource data, kj::String type);
   Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type);
 
   kj::ArrayPtr<const byte> getData() const KJ_LIFETIMEBOUND;
@@ -30,7 +32,8 @@ class Blob: public jsg::Object {
     JSG_STRUCT(type, endings);
   };
 
-  using Bits = kj::Array<kj::OneOf<kj::Array<const byte>, kj::String, jsg::Ref<Blob>>>;
+  using BitsValue = kj::OneOf<jsg::JsBufferSource, kj::String, jsg::Ref<Blob>>;
+  using Bits = kj::Array<BitsValue>;
 
   static jsg::Ref<Blob> constructor(
       jsg::Lock& js, jsg::Optional<Bits> bits, jsg::Optional<Options> options);
@@ -38,7 +41,7 @@ class Blob: public jsg::Object {
   int getSize() const {
     return data.size();
   }
-  kj::StringPtr getType() const {
+  kj::StringPtr getType() const KJ_LIFETIMEBOUND {
     return type;
   }
 
@@ -47,9 +50,11 @@ class Blob: public jsg::Object {
       jsg::Optional<int> end,
       jsg::Optional<kj::String> type);
 
-  jsg::Promise<jsg::BufferSource> arrayBuffer(jsg::Lock& js);
-  jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
-  jsg::Promise<kj::String> text(jsg::Lock& js);
+  // Each of the consumption methods (arrayBuffer, bytes, text) create copies of
+  // the Blob's underlying data.
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> arrayBuffer(jsg::Lock& js);
+  jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> bytes(jsg::Lock& js);
+  jsg::Promise<jsg::JsRef<jsg::JsString>> text(jsg::Lock& js);
   jsg::Ref<ReadableStream> stream(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(Blob, CompatibilityFlags::Reader flags) {
@@ -75,7 +80,8 @@ class Blob: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     KJ_SWITCH_ONEOF(ownData) {
-      KJ_CASE_ONEOF(data, jsg::BufferSource) {
+      KJ_CASE_ONEOF(_, Empty) {}
+      KJ_CASE_ONEOF(data, jsg::JsRef<jsg::JsBufferSource>) {
         tracker.trackField("ownData", data);
       }
       KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
@@ -91,18 +97,22 @@ class Blob: public jsg::Object {
  private:
   Blob(kj::Array<byte> data, kj::String type);
 
-  // Using a jsg::BufferSource to store the ownData allows the associated isolate
+  // Sentinel type for the case where the Blob is just ... empty.
+  struct Empty {};
+
+  // Using a jsg::JsRef<jsg::JsBufferSource> to store the ownData allows the associated isolate
   // to track the external data allocation correctly.
   // The Variation that uses kj::Array<kj::byte> only is used only in very
   // specific cases (i.e. the internal fiddle service) where we parse FormData
   // outside of the isolate lock.
-  kj::OneOf<jsg::BufferSource, kj::Array<kj::byte>, jsg::Ref<Blob>> ownData;
+  kj::OneOf<Empty, jsg::JsRef<jsg::JsBufferSource>, kj::Array<kj::byte>, jsg::Ref<Blob>> ownData;
   kj::ArrayPtr<const byte> data;
   kj::String type;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_SWITCH_ONEOF(ownData) {
-      KJ_CASE_ONEOF(b, jsg::BufferSource) {
+      KJ_CASE_ONEOF(_, Empty) {}
+      KJ_CASE_ONEOF(b, jsg::JsRef<jsg::JsBufferSource>) {
         visitor.visit(b);
       }
       KJ_CASE_ONEOF(b, jsg::Ref<Blob>) {
@@ -119,12 +129,17 @@ class Blob: public jsg::Object {
 // An implementation of the Web Platform Standard File API
 class File: public Blob {
  public:
+  // Creates a zero-length File
+  File(kj::String name, kj::String type, double lastModified);
   // This constructor variation is used when a File is created outside of the isolate
   // lock. This is currently only the case when parsing FormData outside of running
   // JavaScript (such as in the internal fiddle service).
   File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified);
-  File(
-      jsg::Lock& js, jsg::BufferSource data, kj::String name, kj::String type, double lastModified);
+  File(jsg::Lock& js,
+      jsg::JsBufferSource data,
+      kj::String name,
+      kj::String type,
+      double lastModified);
   File(jsg::Ref<Blob> parent,
       kj::ArrayPtr<const byte> data,
       kj::String name,

@@ -10,9 +10,9 @@ let serializedBody;
 export default {
   // Producer receiver (from `env.QUEUE`)
   async fetch(request, env, ctx) {
-    assert.strictEqual(request.method, 'POST');
     const { pathname } = new URL(request.url);
     if (pathname === '/message') {
+      assert.strictEqual(request.method, 'POST');
       const format = request.headers.get('X-Msg-Fmt') ?? 'v8';
       if (format === 'text') {
         assert.strictEqual(request.headers.get('X-Msg-Delay-Secs'), '2');
@@ -32,6 +32,7 @@ export default {
         assert.fail(`Unexpected format: ${JSON.stringify(format)}`);
       }
     } else if (pathname === '/batch') {
+      assert.strictEqual(request.method, 'POST');
       assert.strictEqual(request.headers.get('X-Msg-Delay-Secs'), '2');
 
       const body = await request.json();

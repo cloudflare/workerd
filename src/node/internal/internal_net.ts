@@ -1354,7 +1354,9 @@ async function startRead(socket: Socket): Promise<void> {
 
       // The [kBufferGen] function should always be a function that returns
       // a Uint8Array we can read into.
-      const { value, done } = await reader.read(generatedBuffer);
+      const { value, done } = await reader.read(
+        generatedBuffer as Uint8Array<ArrayBuffer>
+      );
 
       // Make sure the socket was not destroyed while we were waiting.
       // If it was, we're going to throw away the chunk of data we just

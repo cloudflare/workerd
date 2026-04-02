@@ -105,6 +105,18 @@ struct Docker {
     # Networking configuration
     # networkingConfig @22 :NetworkingConfig $Json.name("NetworkingConfig");
 
+    struct Mount {
+      type @0 :Text $Json.name("Type");
+      source @1 :Text $Json.name("Source");
+      target @2 :Text $Json.name("Target");
+      readOnly @3 :Bool = false $Json.name("ReadOnly");
+      volumeOptions @4 :VolumeOptions $Json.name("VolumeOptions");
+
+      struct VolumeOptions {
+        noCopy @0 :Bool = false $Json.name("NoCopy");
+      }
+    }
+
     struct HostConfig {
       # Container configuration that depends on the host
       binds @0 :List(Text) $Json.name("Binds"); # Volume bindings
@@ -158,6 +170,7 @@ struct Docker {
       volumeDriver @48 :Text $Json.name("VolumeDriver");
       shmSize @49 :UInt32 $Json.name("ShmSize");
       extraHosts @50 :List(Text) $Json.name("ExtraHosts"); # --add-host entries in "host:ip" format
+      mounts @51 :List(Mount) $Json.name("Mounts");
 
     }
   }
@@ -170,6 +183,10 @@ struct Docker {
 
   struct ContainerMonitorResponse {
     statusCode @0 :Int32 $Json.name("StatusCode");
+  }
+
+  struct ContainerCommitResponse {
+    id @0 :Text $Json.name("Id");
   }
 
   struct ContainerState {
@@ -262,6 +279,44 @@ struct Docker {
     networkSettings @5 :NetworkSettings $Json.name("NetworkSettings");
   }
 
+  struct ImageInspectResponse {
+    id @0 :Text $Json.name("Id");
+    size @1 :UInt64 $Json.name("Size");
+  }
+
+  struct ExecCreateRequest {
+    attachStdin @0 :Bool = false $Json.name("AttachStdin");
+    attachStdout @1 :Bool = false $Json.name("AttachStdout");
+    attachStderr @2 :Bool = false $Json.name("AttachStderr");
+    tty @3 :Bool = false $Json.name("Tty");
+    cmd @4 :List(Text) $Json.name("Cmd");
+    env @5 :List(Text) $Json.name("Env");
+    workingDir @6 :Text $Json.name("WorkingDir");
+    user @7 :Text $Json.name("User");
+  }
+
+  struct ExecCreateResponse {
+    id @0 :Text $Json.name("Id");
+  }
+
+  struct ExecStartRequest {
+    detach @0 :Bool = false $Json.name("Detach");
+    tty @1 :Bool = false $Json.name("Tty");
+  }
+
+  struct ExecInspectResponse {
+    canRemove @0 :Bool $Json.name("CanRemove");
+    detachKeys @1 :Text $Json.name("DetachKeys");
+    exitCode @2 :Json.Value $Json.name("ExitCode");
+    id @3 :Text $Json.name("ID");
+    openStderr @4 :Bool $Json.name("OpenStderr");
+    openStdin @5 :Bool $Json.name("OpenStdin");
+    openStdout @6 :Bool $Json.name("OpenStdout");
+    processConfig @7 :Json.Value $Json.name("ProcessConfig");
+    running @8 :Bool $Json.name("Running");
+    pid @9 :UInt32 $Json.name("Pid");
+  }
+
   struct Command {
     struct ContainerCreate {
       struct Params {
@@ -312,6 +367,28 @@ struct Docker {
   struct NetworkCreateResponse {
     id @0 :Text $Json.name("Id");
     warning @1 :Text $Json.name("Warning");
+  }
+
+  # Volume create request (POST /volumes/create)
+  struct VolumeCreateRequest {
+    name @0 :Text $Json.name("Name");
+    labels @1 :Json.Value $Json.name("Labels");
+  }
+
+  # Volume list filters query parameter (GET /volumes?filters=...)
+  struct VolumeListFilters {
+    name @0 :List(Text) $Json.name("name");
+  }
+
+  # Volume list response (GET /volumes)
+  struct VolumeListResponse {
+    volumes @0 :List(Volume) $Json.name("Volumes");
+    warnings @1 :List(Text) $Json.name("Warnings");
+
+    struct Volume {
+      name @0 :Text $Json.name("Name");
+      labels @1 :Json.Value $Json.name("Labels");
+    }
   }
 }
 
