@@ -161,17 +161,26 @@ jsg::JsUint8Array decodeStringImpl(
     case Encoding::BASE64:
       // Fall-through
     case Encoding::BASE64URL: {
-      // TODO(soon): Use simdutf for faster decoding for BASE64 and BASE64URL.
       // We do not use the kj::String conversion here because inline null-characters
       // need to be ignored.
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
       auto result = string.writeInto(js, buf, options);
       auto len = result.written;
-      auto dest = jsg::JsUint8Array::create(js, nbytes::Base64DecodedSize(buf.begin(), len));
-      len = nbytes::Base64Decode(
-          dest.asArrayPtr<char>().begin(), dest.size(), buf.begin(), buf.size());
-      if (len < dest.size()) {
-        return dest.slice(js, len);
+      // Node.js quirk: Base64 and Base64URL decoders accept both alphabets mixed together.
+      // simdutf strictly adheres to one or the other. We must normalize the url-safe
+      // characters into standard Base64 characters before passing to the decoder.
+      for (size_t i = 0; i < len; ++i) {
+        if (buf[i] == '-')
+          buf[i] = '+';
+        else if (buf[i] == '_')
+          buf[i] = '/';
+      }
+      auto dest = jsg::JsUint8Array::create(
+          js, simdutf::maximal_binary_length_from_base64(buf.asChars().begin(), len));
+      auto dec_result = simdutf::base64_to_binary(buf.asChars().begin(), len,
+          dest.asArrayPtr().asChars().begin(), simdutf::base64_default_accept_garbage);
+      if (dec_result.count < dest.size()) {
+        return dest.slice(js, dec_result.count);
       }
       return dest;
     }
