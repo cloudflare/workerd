@@ -10,7 +10,7 @@ live workers (https://chat.google.com/room/AAAAnS2bXT4/GX5-pa8O0ts).
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/src/inspector/v8-inspector-impl.cc b/src/inspector/v8-inspector-impl.cc
-index 9dae9ef1f3693ddcf6759349c917dbe213cf3578..096fdd50f2e7e39b266d2094b873eb422851aa5f 100644
+index b57097472e2d55128a3b116c6c613a3cefccfe56..d1d3f312234a11776d98c67a874ef0c62c324a56 100644
 --- a/src/inspector/v8-inspector-impl.cc
 +++ b/src/inspector/v8-inspector-impl.cc
 @@ -68,7 +68,7 @@ V8InspectorImpl::V8InspectorImpl(v8::Isolate* isolate,
