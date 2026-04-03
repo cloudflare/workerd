@@ -5,6 +5,7 @@
 #include "worker-interface.h"
 
 #include <workerd/util/http-util.h>
+#include <workerd/util/stream-utils.h>
 
 #include <kj/debug.h>
 
@@ -264,9 +265,22 @@ kj::Promise<void> RevocableWebSocketWorkerInterface::connect(kj::StringPtr host,
     kj::AsyncIoStream& connection,
     ConnectResponse& response,
     kj::HttpConnectSettings settings) {
-  KJ_UNIMPLEMENTED(
-      "TODO(someday): RevocableWebSocketWorkerInterface::connect() should be implemented to "
-      "disconnect long-lived connections similar to how it treats WebSockets");
+  // We give TCP sockets the same treatment as WebSockets because the purpose here is to
+  // disconnect long-running connections, e.g. on a code update for a Durable Object, and that
+  // applies equally to TCP sockets.
+  auto wrappedConnection = newNeuterableIoStream(connection);
+  auto* wrappedConnectionPtr = wrappedConnection.get();
+  auto revokeTask =
+      revokeProm.addBranch()
+          .catch_([&connection, wrappedConnectionPtr](kj::Exception&& e) -> kj::Promise<void> {
+    wrappedConnectionPtr->neuter(kj::cp(e));
+    connection.abortWrite(kj::cp(e));
+    connection.abortRead();
+    return kj::READY_NOW;
+  }).eagerlyEvaluate(nullptr);
+
+  return worker.connect(host, headers, *wrappedConnection, response, kj::mv(settings))
+      .attach(kj::mv(wrappedConnection), kj::mv(revokeTask));
 }
 
 RevocableWebSocketWorkerInterface::RevocableWebSocketWorkerInterface(
