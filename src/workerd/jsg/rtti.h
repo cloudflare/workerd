@@ -695,11 +695,6 @@ struct MemberCounter {
     ++members;
   }
 
-  inline void registerTypeScriptRoot() { /* not a member */ }
-
-  template <const char* tsOverride>
-  inline void registerTypeScriptOverride() { /* not a member */ }
-
   template <const char* tsDefine>
   inline void registerTypeScriptDefine() { /* not a member */ }
 

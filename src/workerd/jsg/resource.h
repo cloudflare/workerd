@@ -1668,11 +1668,6 @@ struct ResourceTypeBuilder {
     }
   }
 
-  inline void registerTypeScriptRoot() { /* only needed for RTTI */ }
-
-  template <const char* tsOverride>
-  inline void registerTypeScriptOverride() { /* only needed for RTTI */ }
-
   template <const char* tsDefine>
   inline void registerTypeScriptDefine() { /* only needed for RTTI */ }
 
@@ -1754,11 +1749,6 @@ struct JsSetup {
 
   template <typename Type, const char* name>
   inline void registerNestedType() {}
-
-  inline void registerTypeScriptRoot() {}
-
-  template <const char* tsOverride>
-  inline void registerTypeScriptOverride() {}
 
   template <const char* tsDefine>
   inline void registerTypeScriptDefine() {}
