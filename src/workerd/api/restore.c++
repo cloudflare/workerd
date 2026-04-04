@@ -340,7 +340,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::sen
   channelFulfiller->fulfill(kj::refcounted<RestoredRpcSubrequestChannel>(
       httpOverCapnpFactory, byteStreamFactory, frankenvalueHandler, sent.getService()));
 
-  co_await sent.ignoreResult();
+  co_await sent;
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }
