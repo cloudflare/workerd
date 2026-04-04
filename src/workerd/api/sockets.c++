@@ -167,7 +167,9 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   if (!allowHalfOpen) {
     eofPromise = readable->onEof(js);
   }
-  auto openedPrPair = kj::mv(maybeOpenedPrPair).orDefault(js.newPromiseAndResolver<SocketInfo>());
+  auto openedPrPair = kj::mv(maybeOpenedPrPair).orDefault([&js]() {
+    return js.newPromiseAndResolver<SocketInfo>();
+  });
   openedPrPair.promise.markAsHandled(js);
   auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
       ioContext.getMetrics().tryCreateWritableByteStreamObserver(),
