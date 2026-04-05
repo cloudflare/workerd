@@ -609,7 +609,7 @@ struct MemberCounter {
   inline void registerWildcardProperty() { /* not a member */ }
 
   template <const char* name, auto Method>
-  inline void registerMethod() {
+  inline __attribute__((always_inline)) void registerMethod() {
     ++members;
   }
 
@@ -645,7 +645,7 @@ struct MemberCounter {
   }
 
   template <const char* name, typename Getter, Getter getter>
-  inline void registerReadonlyPrototypeProperty() {
+  inline __attribute__((always_inline)) void registerReadonlyPrototypeProperty() {
     ++members;
   }
 
@@ -655,12 +655,13 @@ struct MemberCounter {
   }
 
   template <const char* name, typename Getter, Getter getter>
-  inline void registerReadonlyInstanceProperty() {
+  inline __attribute__((always_inline)) void registerReadonlyInstanceProperty() {
     ++members;
   }
 
   template <typename T>
-  inline void registerReadonlyInstanceProperty(kj::StringPtr, T value) {
+  inline __attribute__((always_inline)) void registerReadonlyInstanceProperty(
+      kj::StringPtr, T value) {
     ++members;
   }
 
@@ -673,7 +674,7 @@ struct MemberCounter {
   }
 
   template <const char* name, typename Getter, Getter getter, bool readOnly>
-  inline void registerLazyInstanceProperty() {
+  inline __attribute__((always_inline)) void registerLazyInstanceProperty() {
     ++members;
   }
 
