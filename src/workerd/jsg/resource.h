@@ -50,11 +50,11 @@ class Deserializer;
 // Return true if the type requires GC visitation, which we assume is the case if the type or any
 // superclass (other than Object) declares a `visitForGc()` method.
 template <typename T>
-constexpr bool resourceNeedsGcTracing() {
+consteval bool resourceNeedsGcTracing() {
   return &T::visitForGc != &Object::visitForGc;
 }
 template <>
-constexpr bool resourceNeedsGcTracing<Object>() {
+consteval bool resourceNeedsGcTracing<Object>() {
   return false;
 }
 

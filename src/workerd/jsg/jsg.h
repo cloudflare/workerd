@@ -71,7 +71,7 @@ namespace workerd::jsg {
     ::workerd::jsg::visitSubclassForMemoryInfo<Type>(self, tracker);                               \
   }                                                                                                \
   template <typename>                                                                              \
-  friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();                                  \
+  friend consteval bool ::workerd::jsg::resourceNeedsGcTracing();                                  \
   template <typename T>                                                                            \
   friend void ::workerd::jsg::visitSubclassForGc(T* obj, ::workerd::jsg::GcVisitor& visitor);      \
   inline void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override {                         \
@@ -1276,12 +1276,12 @@ struct IsArguments_<Arguments<T>> {
   static constexpr bool value = true;
 };
 template <typename T>
-constexpr bool isArguments() {
+consteval bool isArguments() {
   return IsArguments_<T>::value;
 }
 
 template <typename T>
-constexpr bool resourceNeedsGcTracing();
+consteval bool resourceNeedsGcTracing();
 template <typename T>
 void visitSubclassForGc(T* obj, GcVisitor& visitor);
 
@@ -1338,7 +1338,7 @@ class Object: private Wrappable {
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
   inline void visitForGc(GcVisitor& visitor) {}
   template <typename>
-  friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();
+  friend consteval bool ::workerd::jsg::resourceNeedsGcTracing();
   template <typename T>
   friend void visitSubclassForGc(T* obj, GcVisitor& visitor);
   template <typename T>
@@ -1934,7 +1934,7 @@ struct IsPromise_<Promise<T>> {
   static constexpr bool value = true;
 };
 template <typename T>
-constexpr bool isPromise() {
+consteval bool isPromise() {
   return IsPromise_<T>::value;
 }
 
@@ -2066,7 +2066,7 @@ constexpr bool hasPublicVisitForGc_(T*) {
 }
 
 template <typename T>
-constexpr bool hasPublicVisitForGc() {
+consteval bool hasPublicVisitForGc() {
   return hasPublicVisitForGc_(static_cast<T*>(nullptr));
 }
 
@@ -2197,7 +2197,7 @@ constexpr bool isGcVisitable_(T*) {
 }
 
 template <typename T>
-constexpr bool isGcVisitable() {
+consteval bool isGcVisitable() {
   return isGcVisitable_(static_cast<T*>(nullptr));
 }
 
