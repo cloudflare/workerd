@@ -222,24 +222,47 @@ void identityPromiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args
 template <typename TypeWrapper>
 class PromiseWrapper;
 
-template <typename T>
-class Promise {
+class PromiseBase {
  public:
-  static_assert(!kj::canConvert<T*, v8::Data*>(),
-      "jsg::Promise<T> expects T to be an instantiable C++ type, not a JS heap type; use "
-      "jsg::Promise<jsg::V8Ref<T>> to represent a promise for a JavaScript heap object.");
+  kj::Maybe<V8Ref<v8::Promise>> v8Promise;
 
-  Promise(v8::Isolate* isolate, v8::Local<v8::Promise> v8Promise)
+  PromiseBase(v8::Isolate* isolate, v8::Local<v8::Promise> v8Promise)
       : v8Promise(V8Ref<v8::Promise>(isolate, v8Promise)) {}
 
-  Promise(decltype(nullptr)): v8Promise(kj::none) {}
-  // For use when you're declaring a local variable that will be initialized later.
+  PromiseBase(decltype(nullptr)): v8Promise(kj::none) {}
+  bool markedAsHandled = false;
 
   void markAsHandled(Lock& js) {
     auto promise = getInner(js);
     promise->MarkAsHandled();
     markedAsHandled = true;
   }
+  v8::Local<v8::Promise> getInner(Lock& js) {
+    return KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once").getHandle(js);
+  }
+
+  v8::Local<v8::Promise> consumeHandle(Lock& js) {
+    auto result = getInner(js);
+    v8Promise = kj::none;
+    return result;
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(v8Promise);
+  }
+};
+template <typename T>
+class Promise: public PromiseBase {
+ public:
+  static_assert(!kj::canConvert<T*, v8::Data*>(),
+      "jsg::Promise<T> expects T to be an instantiable C++ type, not a JS heap type; use "
+      "jsg::Promise<jsg::V8Ref<T>> to represent a promise for a JavaScript heap object.");
+
+  Promise(v8::Isolate* isolate, v8::Local<v8::Promise> v8Promise)
+      : PromiseBase(isolate, v8Promise) {}
+
+  Promise(decltype(nullptr)): PromiseBase(nullptr) {}
+  // For use when you're declaring a local variable that will be initialized later.
 
   // Attach a continuation function and error handler to be called when this promise
   // is fulfilled. It is important to remember that then(...) can synchronously throw
@@ -294,12 +317,6 @@ class Promise {
       promise.markAsHandled(js);
     }
     return kj::mv(promise);
-  }
-
-  v8::Local<v8::Promise> consumeHandle(Lock& js) {
-    auto result = getInner(js);
-    v8Promise = kj::none;
-    return result;
   }
 
   // If the promise is resolved, return the result, consuming the Promise. If it is pending
@@ -375,10 +392,6 @@ class Promise {
     friend class MemoryTracker;
   };
 
-  void visitForGc(GcVisitor& visitor) {
-    visitor.visit(v8Promise);
-  }
-
   JSG_MEMORY_INFO(Promise) {
     KJ_IF_SOME(promise, v8Promise) {
       tracker.trackField("promise", promise);
@@ -401,15 +414,8 @@ class Promise {
   }
 
  private:
-  kj::Maybe<V8Ref<v8::Promise>> v8Promise;
-  bool markedAsHandled = false;
-
-  v8::Local<v8::Promise> getInner(Lock& js) {
-    return KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once").getHandle(js);
-  }
-
   template <typename U = T, typename = kj::EnableIf<!isVoid<U>()>()>
-  Promise(Lock& js, kj::NoInfer<U>&& value) {
+  Promise(Lock& js, kj::NoInfer<U>&& value): PromiseBase(nullptr) {
     js.withinHandleScope([&] {
       auto context = js.v8Context();
       auto resolver = check(v8::Promise::Resolver::New(context));
@@ -425,7 +431,7 @@ class Promise {
   }
 
   template <typename U = T, typename = kj::EnableIf<isVoid<U>()>()>
-  explicit Promise(Lock& js) {
+  explicit Promise(Lock& js): PromiseBase(nullptr) {
     js.withinHandleScope([&] {
       auto context = js.v8Context();
       auto resolver = check(v8::Promise::Resolver::New(context));
