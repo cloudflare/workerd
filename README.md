@@ -73,6 +73,8 @@ To build `workerd`, you need:
   * When developing at the command-line, run [bazel-env.bat](tools/windows/bazel-env.bat) in your shell first
     to select tools and Windows SDK versions before running bazel.
 
+In order to fetch dependencies (like ICU and zlib) that are from googlesource.com, you'll need to set up credentials. Follow the instructions at <https://www.googlesource.com/new-password>.
+
 You may then build `workerd` at the command-line with:
 
 ```sh
