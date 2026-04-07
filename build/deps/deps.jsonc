@@ -46,7 +46,7 @@
       "build_file_content": "cc_library(name = 'dragonbox', hdrs = glob(['include/dragonbox/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/dragonbox/src')",
       "owner": "jk-jeon",
       "repo": "dragonbox",
-      "freeze_commit": "6c7c925b571d54486b9ffae8d9d18a822801cbda"
+      "freeze_commit": "beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44"
     },
     // We want to avoid version skew with v8, so we use identical versions.
     {
@@ -67,7 +67,7 @@
       "use_bazel_dep": true,
       "owner": "Maratyszcza",
       "repo": "FP16",
-      "freeze_commit": "b3720617faf1a4581ed7e6787cc51722ec7751f0",
+      "freeze_commit": "3d2de1816307bac63c16a297e8c4dc501b4076df",
       "build_file_content": "exports_files(glob(['**']))",
       "use_module_bazel_from_bcr": "0.0.0-20210320-0a92994"
     },
@@ -78,7 +78,7 @@
       "use_bazel_dep": true,
       "owner": "google",
       "repo": "highway",
-      "freeze_commit": "00fe003dac355b979f36157f9407c7c46448958e",
+      "freeze_commit": "84379d1c73de9681b54fbe1c035a23c7bd5d272d",
       "use_module_bazel_from_bcr": "1.3.0"
     },
     {

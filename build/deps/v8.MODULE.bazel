@@ -72,7 +72,7 @@ http_archive(
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "a86a32e67b8d1384b33f8fa48c83a6079b86f8cd",
+    commit = "ee5f27adc28bd3f15b2c293f726d14d2e336cbd5",
     patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
     patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
