@@ -5512,7 +5512,7 @@ class Server::DebugPortListener {
       // rather than being sanitized to a generic "internal error; reference = ...".
       auto& serviceEntry =
           KJ_ASSERT_NONNULL(srv.services.find(serviceName),
-              kj::str("jsg.Error: Service \"", serviceName, "\" not found"));
+              kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
       auto service = serviceEntry->service();
 
       // Convert props from Frankenvalue if provided
@@ -5540,7 +5540,7 @@ class Server::DebugPortListener {
         // Not a WorkerService
         KJ_ASSERT(
             !params.hasEntrypoint(),
-            kj::str("jsg.Error: Service does not support named entrypoints"));
+            kj::str("jsg.Error: Worker does not support named entrypoints"));
 
         // Try to apply props if the service supports it
         if (params.hasProps()) {
@@ -5567,13 +5567,13 @@ class Server::DebugPortListener {
       // Look up the service
       auto& serviceEntry =
           KJ_ASSERT_NONNULL(srv.services.find(serviceName),
-              kj::str("jsg.Error: Service \"", serviceName, "\" not found"));
+              kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
       auto service = serviceEntry->service();
 
       // Try to cast to WorkerService
       auto* workerService = dynamic_cast<WorkerService*>(service);
       KJ_REQUIRE(workerService != nullptr,
-          kj::str("jsg.Error: Service does not support Durable Objects"));
+          kj::str("jsg.Error: Worker does not support Durable Objects"));
 
       // Look up the actor namespace
       auto& actorNamespace = KJ_ASSERT_NONNULL(workerService->getActorNamespace(entrypointName),
