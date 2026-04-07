@@ -5512,7 +5512,7 @@ class Server::DebugPortListener {
       // rather than being sanitized to a generic "internal error; reference = ...".
       auto& serviceEntry =
           KJ_ASSERT_NONNULL(srv.services.find(serviceName),
-              kj::str("jsg.Error: Service not found: ", serviceName));
+              kj::str("jsg.Error: Service \"", serviceName, "\" not found"));
       auto service = serviceEntry->service();
 
       // Convert props from Frankenvalue if provided
@@ -5534,13 +5534,13 @@ class Server::DebugPortListener {
 
         targetService =
             KJ_ASSERT_NONNULL(workerService->getEntrypoint(maybeEntrypoint, kj::mv(props)),
-                kj::str("jsg.Error: Entrypoint not found: ",
-                    maybeEntrypoint.orDefault("(default)")));
+                kj::str("jsg.Error: Worker does not export an entrypoint named \"",
+                    maybeEntrypoint.orDefault("(default)"), "\""));
       } else {
         // Not a WorkerService
         KJ_ASSERT(
             !params.hasEntrypoint(),
-            kj::str("jsg.Error: Service does not support named entrypoints: ", serviceName));
+            kj::str("jsg.Error: Service does not support named entrypoints"));
 
         // Try to apply props if the service supports it
         if (params.hasProps()) {
@@ -5567,17 +5567,18 @@ class Server::DebugPortListener {
       // Look up the service
       auto& serviceEntry =
           KJ_ASSERT_NONNULL(srv.services.find(serviceName),
-              kj::str("jsg.Error: Service not found: ", serviceName));
+              kj::str("jsg.Error: Service \"", serviceName, "\" not found"));
       auto service = serviceEntry->service();
 
       // Try to cast to WorkerService
       auto* workerService = dynamic_cast<WorkerService*>(service);
       KJ_REQUIRE(workerService != nullptr,
-          kj::str("jsg.Error: Service does not support Durable Objects: ", serviceName));
+          kj::str("jsg.Error: Service does not support Durable Objects"));
 
       // Look up the actor namespace
       auto& actorNamespace = KJ_ASSERT_NONNULL(workerService->getActorNamespace(entrypointName),
-          kj::str("jsg.Error: Durable Object class not found: ", entrypointName));
+          kj::str("jsg.Error: Worker does not export a Durable Object class named \"",
+              entrypointName, "\""));
 
       // Create an actor ID - use the namespace config to determine if it's durable or ephemeral
       Worker::Actor::Id actorId;
