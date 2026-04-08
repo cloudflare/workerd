@@ -200,9 +200,11 @@ void ExecProcess::kill(jsg::Lock& js, jsg::Optional<int> signal) {
 // =======================================================================================
 // Basic lifecycle methods
 
-Container::Container(rpc::Container::Client rpcClient, bool running)
+Container::Container(rpc::Container::Client rpcClient, bool running,
+                     kj::Maybe<kj::String> instanceId)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
-      running(running) {}
+      running(running),
+      instanceId(kj::mv(instanceId)) {}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   auto flags = FeatureFlags::get(js);
@@ -279,7 +281,26 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
 
   req.setCompatibilityFlags(flags);
 
-  IoContext::current().addTask(req.sendIgnoringResult());
+  // Fire the start RPC. Update instanceId from the response as a side effect.
+  // Capture a strong self-reference (JSG_THIS) to guarantee the Container object
+  // stays alive until the background task completes, and capture the current
+  // lifecycle epoch to detect stale responses.
+  auto self = JSG_THIS;
+  auto epoch = lifecycleEpoch;
+  IoContext::current().addTask(
+    req.send().then(
+      [self = kj::mv(self), epoch](
+          capnp::Response<rpc::Container::StartResults> results) mutable {
+        if (epoch != self->lifecycleEpoch) {
+          // A destroy/monitor happened since this start() was issued. Discard.
+          return;
+        }
+        if (results.hasInstanceId()) {
+          self->instanceId = kj::str(results.getInstanceId());
+        }
+      }
+    )
+  );
 
   running = true;
 }
@@ -552,6 +573,8 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
       .then(js, [this](jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
     running = false;
+    instanceId = kj::none;
+    ++lifecycleEpoch;
     auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, destroyReason) {
       jsg::Value error = kj::mv(d);
@@ -566,6 +589,8 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
     }
   }, [this](jsg::Lock& js, jsg::Value&& error) {
     running = false;
+    instanceId = kj::none;
+    ++lifecycleEpoch;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
   });
@@ -577,6 +602,9 @@ jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> e
   if (destroyReason == kj::none) {
     destroyReason = kj::mv(error);
   }
+
+  instanceId = kj::none;
+  ++lifecycleEpoch;
 
   return IoContext::current().awaitIo(
       js, rpcClient->destroyRequest(capnp::MessageSize{4, 0}).sendIgnoringResult());

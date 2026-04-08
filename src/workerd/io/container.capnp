@@ -13,11 +13,15 @@ interface Container @0x9aaceefc06523bca {
   # When the actor shuts down, workerd will drop the `Container` capability, at which point
   # the container engine should implicitly destroy the container.
 
-  status @0 () -> (running :Bool);
-  # Returns the container's current status. The runtime will always call this at DO startup.
+  status @0 () -> (running :Bool, instanceId :Text);
+  # Returns the container's current status and unique instance identifier.
+  # `instanceId` is an opaque string that uniquely identifies this specific container instance.
+  # It changes every time a new container is provisioned (after sleep, crash, or eviction).
+  # Empty string means no ID is available (e.g., old runtime that predates this field).
 
-  start @1 StartParams -> ();
-  # Start the container. It's an error to call this if the container is already running.
+  start @1 StartParams -> (instanceId :Text);
+  # Start the container. Returns the unique instance identifier for the new container.
+  # It's an error to call this if the container is already running.
 
   struct StartParams {
     entrypoint @0 :List(Text);

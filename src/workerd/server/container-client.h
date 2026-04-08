@@ -126,6 +126,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   struct InspectResponse {
     bool isRunning;
+    kj::Maybe<kj::String> id;  // Docker container ID, None if container not found (404)
   };
 
   struct IPAMConfigResult {
