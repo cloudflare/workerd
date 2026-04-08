@@ -613,6 +613,16 @@ kj_test(
 )
 
 kj_test(
+    src = "sockets-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+        "//src/workerd/util:autogate",
+    ],
+)
+
+kj_test(
     src = "api-rtti-test.c++",
     deps = [
         ":encoding",
