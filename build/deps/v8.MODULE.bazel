@@ -75,7 +75,7 @@ git_repository(
     commit = "a86a32e67b8d1384b33f8fa48c83a6079b86f8cd",
     patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
     patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
-    remote = "https://chromium.googlesource.com/a/chromium/deps/icu.git",
+    remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
 )
 
 # For use with perfetto, see https://github.com/google/perfetto/blob/main/bazel/standalone/README.md

@@ -153,7 +153,7 @@ git_override(
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",
     ],
-    remote = "https://chromium.googlesource.com/a/chromium/src/third_party/zlib.git",
+    remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
 # zstd
