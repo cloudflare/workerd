@@ -379,6 +379,187 @@ export const test_invalid_cert = {
   },
 };
 
+// Test parsing a SHA384 ECDSA (P-384) certificate in DER (.cer) format
+//
+// Generated with:
+//   # CA key + self-signed CA cert
+//   openssl ecparam -name secp384r1 -genkey -noout -out ec384_ca_key.pem
+//   openssl req -new -x509 -key ec384_ca_key.pem -sha384 -days 100000 \
+//     -out ec384_ca_cert.pem -subj "/C=US/ST=CA/L=SF/O=Test/OU=TestUnit/CN=TestCA"
+//
+//   # End-entity key + CSR + cert signed by the CA
+//   openssl ecparam -name secp384r1 -genkey -noout -out ec384_key.pem
+//   openssl req -new -key ec384_key.pem -sha384 -out ec384_csr.pem \
+//     -subj "/C=US/ST=CA/L=SF/O=Test/OU=TestUnit/CN=agent1/emailAddress=test@example.com"
+//   openssl x509 -req -in ec384_csr.pem -CA ec384_ca_cert.pem -CAkey ec384_ca_key.pem \
+//     -CAcreateserial -out ec384_cert.pem -days 100000 -sha384
+const ecCert = Buffer.from(`-----BEGIN CERTIFICATE-----
+MIICVzCCAd6gAwIBAgIUczuwDn2NET/tEfVmMXL4mPYyz4AwCgYIKoZIzj0EAwMw
+WjELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQswCQYDVQQHDAJTRjENMAsGA1UE
+CgwEVGVzdDERMA8GA1UECwwIVGVzdFVuaXQxDzANBgNVBAMMBlRlc3RDQTAgFw0y
+NjA0MDgwNTE1MzZaGA8yMzAwMDEyMjA1MTUzNlowezELMAkGA1UEBhMCVVMxCzAJ
+BgNVBAgMAkNBMQswCQYDVQQHDAJTRjENMAsGA1UECgwEVGVzdDERMA8GA1UECwwI
+VGVzdFVuaXQxDzANBgNVBAMMBmFnZW50MTEfMB0GCSqGSIb3DQEJARYQdGVzdEBl
+eGFtcGxlLmNvbTB2MBAGByqGSM49AgEGBSuBBAAiA2IABP66lBV0gd87DBgeGtRG
+c+nKyL5u9snb0ByLhcw+8CL+YGGv6SWOtVa5LFTiAEP95yBl861RBYExDzSbLGfb
+Oifr+9EmUxKsahSaMNHIRXxoALnseTOOnDYcn2B66fck+qNCMEAwHQYDVR0OBBYE
+FEefA0NT2iIPiO8NQ3eBUeUIrAQIMB8GA1UdIwQYMBaAFGMNBZGlbYnBCXgHLTrU
+KRDLfkFOMAoGCCqGSM49BAMDA2cAMGQCME8lAYbgOeO10lqvwUGx2xR29G13pouH
+k4dEBxJF5hiUaOyRHcv+57tm8aBL/nWmEQIwf+G5sVuUJGcou41ick7RXM+fDg4t
+mnbgde9KSx8Ogi9u2RimDFan8BMiJWbJIwBj
+-----END CERTIFICATE-----
+`);
+
+const ecCa = Buffer.from(`-----BEGIN CERTIFICATE-----
+MIICSTCCAc6gAwIBAgIUJbLH/BA5dfjCxho12s8bw8BjxlcwCgYIKoZIzj0EAwMw
+WjELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQswCQYDVQQHDAJTRjENMAsGA1UE
+CgwEVGVzdDERMA8GA1UECwwIVGVzdFVuaXQxDzANBgNVBAMMBlRlc3RDQTAgFw0y
+NjA0MDgwNTE1MTVaGA8yMzAwMDEyMjA1MTUxNVowWjELMAkGA1UEBhMCVVMxCzAJ
+BgNVBAgMAkNBMQswCQYDVQQHDAJTRjENMAsGA1UECgwEVGVzdDERMA8GA1UECwwI
+VGVzdFVuaXQxDzANBgNVBAMMBlRlc3RDQTB2MBAGByqGSM49AgEGBSuBBAAiA2IA
+BPA7rTck1nzyMF+VHeP17ih9EYcwDkSJ5MtWr4ftLLcgPD6gPxMosNv+ykPLpw0P
+V8IycMa4gFceYGp8NFPE5tavX2Y1loRrmQbduo5ctox11so+/4TisC/Kl3Ovile2
+/aNTMFEwHQYDVR0OBBYEFGMNBZGlbYnBCXgHLTrUKRDLfkFOMB8GA1UdIwQYMBaA
+FGMNBZGlbYnBCXgHLTrUKRDLfkFOMA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0E
+AwMDaQAwZgIxAN5cy8aaW3zyozwFRVqR6k7vorwpuemQnqYSocfmuQI5CxbXgYEy
+2cVrA4j32pZD5wIxAJBE4gfYmjJt4OG/YdOaslrnn84Jk1O21cTzxtivtTxxNOcQ
+rd0vE+2ygF1pCs5aEw==
+-----END CERTIFICATE-----
+`);
+
+// Convert the PEM to DER for testing the raw property and to ensure that the same data is being parsed in both cases.
+// openssl x509 -in ec384_cert.pem -outform DER | python3 -c "import sys; print(sys.stdin.buffer.read().hex())"
+const ecDer = Buffer.from(
+  '30820257308201dea0030201020214733bb00e7d8d113fed11f5663172f898f632cf80' +
+    '300a06082a8648ce3d040303305a310b3009060355040613025553310b300906035504' +
+    '080c024341310b300906035504070c025346310d300b060355040a0c04546573743111' +
+    '300f060355040b0c0854657374556e6974310f300d06035504030c06546573744341' +
+    '3020170d3236303430383035313533365a180f32333030303132323035313533365a' +
+    '307b310b3009060355040613025553310b300906035504080c024341310b3009060355' +
+    '04070c025346310d300b060355040a0c04546573743111300f060355040b0c08546573' +
+    '74556e6974310f300d06035504030c066167656e7431311f301d06092a864886f70d01' +
+    '0901161074657374406578616d706c652e636f6d3076301006072a8648ce3d02010605' +
+    '2b8104002203620004feba94157481df3b0c181e1ad44673e9cac8be6ef6c9dbd01c8b' +
+    '85cc3ef022fe6061afe9258eb556b92c54e20043fde72065f3ad510581310f349b2c67' +
+    'db3a27ebfbd1265312ac6a149a30d1c8457c6800b9ec79338e9c361c9f607ae9f724fa' +
+    'a3423040301d0603551d0e04160414479f034353da220f88ef0d43778151e508ac0408' +
+    '301f0603551d23041830168014630d0591a56d89c10978072d3ad42910cb7e414e300a' +
+    '06082a8648ce3d040303036700306402304f250186e039e3b5d25aafc141b1db1476f4' +
+    '6d77a68b87938744071245e6189468ec911dcbfee7bb66f1a04bfe75a61102307fe1b9' +
+    'b15b94246728bb8d62724ed15ccf9f0e0e2d9a76e075ef4a4b1f0e822f6ed918a60c56' +
+    'a7f013222566c9230063',
+  'hex'
+);
+
+const ecSubjectCheck = `C=US
+ST=CA
+L=SF
+O=Test
+OU=TestUnit
+CN=agent1
+emailAddress=test@example.com`;
+
+const ecIssuerCheck = `C=US
+ST=CA
+L=SF
+O=Test
+OU=TestUnit
+CN=TestCA`;
+
+export const test_sha384_ecdsa = {
+  async test() {
+    // Test parsing a SHA384 ECDSA certificate (P-384 curve)
+    const x509 = new X509Certificate(ecCert);
+    ok(!x509.ca);
+    strictEqual(x509.subject, ecSubjectCheck);
+    strictEqual(x509.subjectAltName, undefined);
+    strictEqual(x509.issuer, ecIssuerCheck);
+    strictEqual(x509.validFrom, 'Apr  8 05:15:36 2026 GMT');
+    strictEqual(x509.validTo, 'Jan 22 05:15:36 2300 GMT');
+    strictEqual(
+      x509.fingerprint,
+      'F5:CD:67:3C:C2:41:ED:A0:E9:7B:1E:F9:8D:CD:72:36:FB:BC:27:E6'
+    );
+    strictEqual(
+      x509.fingerprint256,
+      '97:87:A6:43:9C:54:D4:F7:5D:42:58:2C:E0:D7:F1:2E:08:DF:08:BF:' +
+        '18:F4:62:4D:2E:52:E1:C4:EC:41:6B:77'
+    );
+    strictEqual(
+      x509.fingerprint512,
+      '28:02:30:8A:87:86:07:5E:C6:FC:33:3C:D3:D9:C1:35:A5:72:F3:F2:' +
+        'D4:D8:33:D2:9C:F4:73:7B:A5:33:6B:9B:3E:23:D6:84:70:B5:37:F8:' +
+        'C2:D7:A3:03:9C:61:F1:40:92:AC:43:44:E6:6C:43:2D:98:AE:CF:0B:' +
+        '9A:99:90:6C'
+    );
+    strictEqual(x509.serialNumber, '733BB00E7D8D113FED11F5663172F898F632CF80');
+
+    // Verify DER round-trip
+    deepStrictEqual(x509.raw, ecDer);
+
+    // Public key should be an EC key
+    ok(x509.publicKey instanceof PublicKeyObject);
+    ok(x509.publicKey.type === 'public');
+
+    // PEM round-trip
+    strictEqual(
+      x509.toString().replaceAll('\r\n', '\n'),
+      ecCert.toString().replaceAll('\r\n', '\n')
+    );
+    strictEqual(x509.toJSON(), x509.toString());
+
+    // Test parsing from DER (.cer) format directly
+    const x509FromDer = new X509Certificate(ecDer);
+    strictEqual(
+      x509FromDer.serialNumber,
+      '733BB00E7D8D113FED11F5663172F898F632CF80'
+    );
+    strictEqual(x509FromDer.subject, ecSubjectCheck);
+    strictEqual(x509FromDer.issuer, ecIssuerCheck);
+    deepStrictEqual(x509FromDer.raw, ecDer);
+
+    // Host/email checks
+    strictEqual(x509.checkHost('agent1'), 'agent1');
+    strictEqual(x509.checkHost('agent2'), undefined);
+    strictEqual(x509.checkEmail('test@example.com'), 'test@example.com');
+    strictEqual(x509.checkEmail('other@example.com'), undefined);
+
+    // CA certificate verification
+    const caCert = new X509Certificate(ecCa);
+    ok(caCert.ca);
+    ok(x509.checkIssued(caCert));
+    ok(x509.verify(caCert.publicKey));
+    ok(!x509.checkIssued(x509));
+
+    // Legacy object format
+    const legacyObject = x509.toLegacyObject();
+    deepStrictEqual(legacyObject.raw, x509.raw);
+    deepStrictEqual(legacyObject.subject, {
+      C: 'US',
+      ST: 'CA',
+      L: 'SF',
+      O: 'Test',
+      OU: 'TestUnit',
+      CN: 'agent1',
+      emailAddress: 'test@example.com',
+    });
+    deepStrictEqual(legacyObject.issuer, {
+      C: 'US',
+      ST: 'CA',
+      L: 'SF',
+      O: 'Test',
+      OU: 'TestUnit',
+      CN: 'TestCA',
+    });
+    strictEqual(legacyObject.valid_from, 'Apr  8 05:15:36 2026 GMT');
+    strictEqual(legacyObject.valid_to, 'Jan 22 05:15:36 2300 GMT');
+    strictEqual(
+      legacyObject.serialNumber,
+      '733BB00E7D8D113FED11F5663172F898F632CF80'
+    );
+  },
+};
+
 // Ref: https://github.com/unjs/unenv/pull/310
 export const shouldImportCertificate = {
   test() {
