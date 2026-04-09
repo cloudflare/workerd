@@ -888,6 +888,33 @@ void DurableObjectStorage::disableReplicas() {
   return cache->disableReplicas();
 }
 
+jsg::Promise<void> DurableObjectStorage::configureReadReplication(jsg::Lock& js,
+    ReadReplicationOptions options) {
+  auto& context = IoContext::current();
+  auto traceContext = context.makeUserTraceSpan("durable_object_storage_configure_read_replication"_kjc);
+
+  if (maybePrimary != kj::none) {
+    JSG_FAIL_REQUIRE(Error, "replica Durable Objects cannot call configureReadReplication().");
+  }
+
+  bool enabled = false;
+  KJ_IF_SOME(m, options.mode) {
+    if (m == "auto"_kj) {
+      enabled = true;
+    } else if (m != "disabled"_kj) {
+      JSG_FAIL_REQUIRE(TypeError, "configureReadReplication() called with unknown mode setting.");
+    }
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, "configureReadReplication() called without mode setting.");
+  }
+
+  auto promise = cache->configureReadReplication(ActorCacheInterface::ReadReplicationOptions{
+    .enabled = enabled,
+  });
+
+  return context.awaitIo(js, kj::mv(promise));
+}
+
 jsg::Optional<jsg::Ref<DurableObject>> DurableObjectStorage::getPrimary(jsg::Lock& js) {
   KJ_IF_SOME(primary, maybePrimary) {
     return primary.addRef();

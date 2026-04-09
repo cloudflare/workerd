@@ -293,6 +293,14 @@ class ActorCacheInterface: public ActorCacheOps {
   virtual void disableReplicas() {
     JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not support replication.");
   }
+
+  struct ReadReplicationOptions {
+    kj::Maybe<bool> enabled;
+  };
+
+  virtual kj::Promise<void> configureReadReplication(ReadReplicationOptions) {
+    JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not support replication.");
+  }
 };
 
 // An in-memory caching layer on top of ActorStorage.Stage RPC interface.
