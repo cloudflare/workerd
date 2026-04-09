@@ -182,3 +182,35 @@ export const testSignLength = {
     }
   },
 };
+
+// Test that Web Crypto keys (from crypto.subtle) can be used with
+// Node.js crypto sign/verify one-shot functions.
+export const webCryptoKeySignVerify = {
+  async test() {
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+    const data = Buffer.from('hello world');
+    const sig = sign('SHA256', data, keyPair.privateKey);
+    ok(sig instanceof Buffer);
+    ok(sig.length > 0);
+    ok(verify('SHA256', data, keyPair.publicKey, sig));
+  },
+};
+
+export const webCryptoKeySignVerifyP384 = {
+  async test() {
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-384' },
+      true,
+      ['sign', 'verify']
+    );
+    const data = Buffer.from('test data');
+    const sig = sign('SHA384', data, keyPair.privateKey);
+    ok(sig instanceof Buffer);
+    ok(sig.length > 0);
+    ok(verify('SHA384', data, keyPair.publicKey, sig));
+  },
+};

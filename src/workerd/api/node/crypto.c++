@@ -441,7 +441,7 @@ jsg::JsUint8Array CryptoImpl::SignHandle::sign(jsg::Lock& js,
   ncrypto::ClearErrorOnReturn clear_error_on_return;
   JSG_REQUIRE(ctx, Error, "Signing context has already been finalized");
 
-  const auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "Invalid key for sign operation");
+  auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "Invalid key for sign operation");
   JSG_REQUIRE(pkey.validateDsaParameters(), Error, "Invalid DSA parameters");
 
   // There's a bug in ncrypto that doesn't clear the EVPMDCtxPointer when
@@ -497,7 +497,7 @@ bool CryptoImpl::VerifyHandle::verify(jsg::Lock& js,
 
   JSG_REQUIRE(ctx, Error, "Verification context has already been finalized");
 
-  const auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "Invalid key for verify operation");
+  auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "Invalid key for verify operation");
 
   JSG_REQUIRE(!pkey.isOneShotVariant(), Error, "Unsupported operation for this key");
 
@@ -529,7 +529,7 @@ jsg::JsUint8Array CryptoImpl::signOneShot(jsg::Lock& js,
   auto mdctx = ncrypto::EVPMDCtxPointer::New();
   JSG_REQUIRE(mdctx, Error, "Failed to create signing context");
 
-  const auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "Invalid key for sign operation");
+  auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "Invalid key for sign operation");
 
   // The version of BoringSSL we use does not support DSA keys with EVP
   // When signing/verification. This may change in the future.
@@ -546,7 +546,13 @@ jsg::JsUint8Array CryptoImpl::signOneShot(jsg::Lock& js,
     .len = data.size(),
   };
 
-  ncrypto::DataPointer sig = mdctx.signOneShot(buf);
+  // For one-shot-only key types (e.g. Ed25519, Ed448), we must use
+  // EVP_DigestSign via signOneShot(). For other key types (e.g. ECDSA),
+  // we use sign() which calls EVP_DigestSignUpdate + EVP_DigestSignFinal
+  // and correctly resizes the output buffer to the actual signature length.
+  // This matters for ECDSA where DER-encoded signatures can be shorter
+  // than the maximum estimated size.
+  ncrypto::DataPointer sig = pkey.isOneShotVariant() ? mdctx.signOneShot(buf) : mdctx.sign(buf);
   auto sigBuf =
       jsg::JsUint8Array::create(js, kj::ArrayPtr<const kj::byte>(sig.get<kj::byte>(), sig.size()));
 
@@ -574,8 +580,7 @@ bool CryptoImpl::verifyOneShot(jsg::Lock& js,
   auto mdctx = ncrypto::EVPMDCtxPointer::New();
   JSG_REQUIRE(mdctx, Error, "Failed to create verification context");
 
-  const auto& pkey =
-      JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "Invalid key for verification operation");
+  auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "Invalid key for verification operation");
 
   // The version of BoringSSL we use does not support DSA keys with EVP
   // When signing/verification. This may change in the future.
@@ -1317,7 +1322,7 @@ jsg::JsUint8Array CryptoImpl::publicEncrypt(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
     jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
-  auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
+  auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
   JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
   auto ctx = pkey.newCtx();
   JSG_REQUIRE(ctx.initForEncrypt(), Error, "Failed to init for encryption");
@@ -1328,7 +1333,7 @@ jsg::JsUint8Array CryptoImpl::privateDecrypt(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
     jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
-  auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
+  auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
   JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
   auto ctx = pkey.newCtx();
   JSG_REQUIRE(ctx.initForDecrypt(), Error, "Failed to init for decryption");
@@ -1339,7 +1344,7 @@ jsg::JsUint8Array CryptoImpl::publicDecrypt(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
     jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
-  auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
+  auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
   JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
   auto ctx = pkey.newCtx();
   JSG_REQUIRE(EVP_PKEY_verify_recover_init(ctx.get()) == 1, Error, "Failed to init for decryption");
@@ -1353,7 +1358,7 @@ jsg::JsUint8Array CryptoImpl::privateEncrypt(jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
     jsg::JsBufferSource buffer,
     CryptoImpl::PublicPrivateCipherOptions options) {
-  auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
+  auto pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
   JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
   auto ctx = pkey.newCtx();
   JSG_REQUIRE(EVP_PKEY_sign_init(ctx.get()) == 1, Error, "Failed to init for encryption");
