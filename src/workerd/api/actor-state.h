@@ -276,13 +276,30 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   //
   // Once a Durable Object instance calls `ensureReplicas`, all subsequent calls will be no-ops,
   // making it idempotent, unless `disableReplicas` has been called between `ensureReplicas` calls.
+  //
+  // Deprecated: See configureReadReplication.
   void ensureReplicas();
 
   // Arrange to disable replicas for this Durable Object.
   //
   // If replicas have never been created, this is a no-op. Similar to `ensureReplicas`, repeated
   // calls are no-ops unless `ensureReplicas` re-enabled the replicas.
+  //
+  // Deprecated: See configureReadReplication.
   void disableReplicas();
+
+  struct ReadReplicationOptions {
+    kj::String mode;
+
+    JSG_STRUCT(mode);
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectReadReplicationOptions { mode: "auto" | "disabled"; });
+  };
+
+  // Arrange to change replica settings for this Durable Object.
+  //
+  // Must be called with a mode of "auto" or "disabled". Repeat calls that set the same settings are
+  // idempotent.
+  jsg::Promise<void> configureReadReplication(jsg::Lock& js, ReadReplicationOptions options);
 
   jsg::Optional<jsg::Ref<DurableObject>> getPrimary(jsg::Lock& js);
 
@@ -314,6 +331,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
     if (flags.getReplicaRouting()) {
       JSG_METHOD(ensureReplicas);
       JSG_METHOD(disableReplicas);
+      JSG_METHOD(configureReadReplication);
     }
 
     JSG_TS_OVERRIDE({
@@ -746,7 +764,8 @@ class DurableObjectState: public jsg::Object {
 
 #define EW_ACTOR_STATE_ISOLATE_TYPES                                                               \
   api::ActorState, api::DurableObjectState, api::DurableObjectTransaction,                         \
-      api::DurableObjectStorage, api::DurableObjectStorage::TransactionOptions,                    \
+      api::DurableObjectStorage, api::DurableObjectStorage::ReadReplicationOptions,                \
+      api::DurableObjectStorage::TransactionOptions,                                               \
       api::DurableObjectStorageOperations::ListOptions,                                            \
       api::DurableObjectStorageOperations::GetOptions,                                             \
       api::DurableObjectStorageOperations::GetAlarmOptions,                                        \

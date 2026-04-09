@@ -7,6 +7,7 @@
 #include <workerd/io/actor-storage.capnp.h>
 #include <workerd/io/trace.h>
 #include <workerd/jsg/exception.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/async.h>
 #include <kj/debug.h>
@@ -25,6 +26,8 @@ using kj::uint;
 class OutputGate;
 class SqliteDatabase;
 class SqliteKv;
+
+WD_STRONG_BOOL(ReadReplicationIsEnabled);
 
 struct ActorCacheReadOptions {
   // If the entry is not already in cache and has to be read from disk, don't store the result in
@@ -299,6 +302,10 @@ class ActorCacheInterface: public ActorCacheOps {
   }
 
   virtual void disableReplicas() {
+    JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not support replication.");
+  }
+
+  virtual kj::Promise<void> configureReadReplication(ReadReplicationIsEnabled) {
     JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not support replication.");
   }
 };

@@ -787,6 +787,12 @@ export interface DurableObjectStorage {
   readonly primary?: DurableObjectStub;
   ensureReplicas(): void;
   disableReplicas(): void;
+  configureReadReplication(
+    options: DurableObjectReadReplicationOptions,
+  ): Promise<void>;
+}
+export interface DurableObjectReadReplicationOptions {
+  mode: "auto" | "disabled";
 }
 export interface DurableObjectListOptions {
   start?: string;

@@ -876,16 +876,41 @@ kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
 
 void DurableObjectStorage::ensureReplicas() {
   if (maybePrimary != kj::none) {
-    KJ_FAIL_ASSERT("replica Durable Objects cannot call ensureReplicas().");
+    KJ_FAIL_ASSERT("Replica Durable Objects cannot call ensureReplicas().");
   }
   return cache->ensureReplicas();
 }
 
 void DurableObjectStorage::disableReplicas() {
   if (maybePrimary != kj::none) {
-    KJ_FAIL_ASSERT("replica Durable Objects cannot call disableReplicas().");
+    KJ_FAIL_ASSERT("Replica Durable Objects cannot call disableReplicas().");
   }
   return cache->disableReplicas();
+}
+
+jsg::Promise<void> DurableObjectStorage::configureReadReplication(
+    jsg::Lock& js, ReadReplicationOptions options) {
+  auto& context = IoContext::current();
+  auto traceContext =
+      context.makeUserTraceSpan("durable_object_storage_configureReadReplication"_kjc);
+
+  if (maybePrimary != kj::none) {
+    JSG_FAIL_REQUIRE(Error, "Replica Durable Objects cannot call configureReadReplication().");
+  }
+
+  bool enabled = [&]() {
+    if (options.mode == "auto"_kj) {
+      return true;
+    } else if (options.mode == "disabled"_kj) {
+      return false;
+    }
+    JSG_FAIL_REQUIRE(TypeError,
+        "configureReadReplication() called with unknown mode setting: ", options.mode, ".");
+  }();
+
+  auto promise = cache->configureReadReplication(ReadReplicationIsEnabled(enabled));
+
+  return context.attachSpans(js, context.awaitIo(js, kj::mv(promise)), kj::mv(traceContext));
 }
 
 jsg::Optional<jsg::Ref<DurableObject>> DurableObjectStorage::getPrimary(jsg::Lock& js) {
