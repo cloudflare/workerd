@@ -12215,6 +12215,12 @@ export declare abstract class Flags {
     context?: EvaluationContext,
   ): Promise<EvaluationDetails<T>>;
 }
+export {
+  Flags as Flagship,
+  FlagEvaluationError as FlagshipEvaluationError,
+  EvaluationContext as FlagshipEvaluationContext,
+  EvaluationDetails as FlagshipEvaluationDetails,
+};
 /**
  * Hello World binding to serve as an explanatory example. DO NOT USE
  */

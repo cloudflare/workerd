@@ -3937,23 +3937,28 @@ interface ExecOutput {
   readonly stdout: ArrayBuffer;
   readonly stderr: ArrayBuffer;
   readonly exitCode: number;
+  readonly __stdoutp: ArrayBuffer;
+  readonly __stderrp: ArrayBuffer;
 }
 interface ContainerExecOptions {
   cwd?: string;
   env?: Record<string, string>;
   user?: string;
-  stdin?: ReadableStream | "pipe";
-  stdout?: "pipe" | "ignore";
-  stderr?: "pipe" | "ignore" | "combined";
+  __stdinp?: ReadableStream | "pipe";
+  __stdoutp?: "pipe" | "ignore";
+  __stderrp?: "pipe" | "ignore" | "combined";
 }
 interface ExecProcess {
-  readonly stdin: WritableStream | null;
-  readonly stdout: ReadableStream | null;
-  readonly stderr: ReadableStream | null;
+  get stdin(): WritableStream | undefined;
+  get stdout(): ReadableStream | undefined;
+  get stderr(): ReadableStream | undefined;
   readonly pid: number;
   readonly exitCode: Promise<number>;
   output(): Promise<ExecOutput>;
   kill(signal?: number): void;
+  readonly __stdinp: WritableStream | null;
+  readonly __stdoutp: ReadableStream | null;
+  readonly __stderrp: ReadableStream | null;
 }
 interface Container {
   get running(): boolean;
@@ -12891,6 +12896,12 @@ declare abstract class Flags {
     context?: EvaluationContext,
   ): Promise<EvaluationDetails<T>>;
 }
+export {
+  Flags as Flagship,
+  FlagEvaluationError as FlagshipEvaluationError,
+  EvaluationContext as FlagshipEvaluationContext,
+  EvaluationDetails as FlagshipEvaluationDetails,
+};
 /**
  * Hello World binding to serve as an explanatory example. DO NOT USE
  */

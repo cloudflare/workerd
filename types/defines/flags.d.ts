@@ -143,3 +143,10 @@ export declare abstract class Flags {
     context?: EvaluationContext
   ): Promise<EvaluationDetails<T>>;
 }
+
+export {
+  Flags as Flagship,
+  FlagEvaluationError as FlagshipEvaluationError,
+  EvaluationContext as FlagshipEvaluationContext,
+  EvaluationDetails as FlagshipEvaluationDetails,
+};
