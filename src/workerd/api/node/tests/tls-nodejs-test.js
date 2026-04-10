@@ -753,6 +753,34 @@ export const testConvertALPNProtocols = {
   },
 };
 
+export const testConnectAcceptsAlpnProtocols = {
+  async test(_ctrl, env) {
+    const socket = tls.connect({
+      port: env.ECHO_SERVER_PORT,
+      ALPNProtocols: ['http/1.1'],
+    });
+
+    await once(socket, 'secureConnect');
+    socket.destroy();
+  },
+};
+
+export const testConnectRejectsInvalidAlpnProtocolLength = {
+  async test() {
+    throws(
+      () =>
+        tls.connect({
+          port: 42,
+          lookup() {},
+          ALPNProtocols: [new String('a').repeat(500)],
+        }),
+      {
+        code: 'ERR_OUT_OF_RANGE',
+      }
+    );
+  },
+};
+
 export const testStartTlsBehaviorOnUpgrade = {
   async test(ctrl, env) {
     const { promise, resolve, reject } = Promise.withResolvers();
