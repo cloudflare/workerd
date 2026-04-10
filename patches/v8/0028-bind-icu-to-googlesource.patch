@@ -5,10 +5,10 @@ Subject: bind icu to googlesource
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index b3ae97e40f7fd77ba9122ad35421759540a0a100..159142a018dd65f608c986cde611b0aed2df4bed 100644
+index f1bd0b48884616428e43f753cf47c2fa39480c1e..f66241b1c95738c61b843e0eb83b410df0fe8b23 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4618,7 +4618,7 @@ v8_library(
+@@ -4635,7 +4635,7 @@ v8_library(
      copts = ["-Wno-implicit-fallthrough"],
      icu_deps = [
          ":icu/generated_torque_definitions_headers",
@@ -17,7 +17,7 @@ index b3ae97e40f7fd77ba9122ad35421759540a0a100..159142a018dd65f608c986cde611b0ae
      ],
      icu_srcs = [
          ":generated_regexp_special_case",
-@@ -4741,7 +4741,7 @@ v8_binary(
+@@ -4758,7 +4758,7 @@ v8_binary(
      ],
      deps = [
          ":v8_libbase",

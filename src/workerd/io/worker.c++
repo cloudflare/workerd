@@ -3855,7 +3855,9 @@ Worker::Actor::Actor(const Worker& worker,
       // const_cast OK because we're just storing the pointer and will only use this under lock.
       impl->classInstance = const_cast<ActorClassInfo*>(&cls);
     } else {
-      kj::throwFatalException(KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", c));
+      auto e = KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", c);
+      e.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<kj::byte>(0));
+      kj::throwFatalException(kj::mv(e));
     }
   } else {
     impl->classInstance = Impl::NoClass();

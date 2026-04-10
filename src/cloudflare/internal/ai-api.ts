@@ -442,7 +442,11 @@ export class Ai {
   }
 
   gateway(gatewayId: string, options?: { beta?: boolean }): AiGateway {
-    if (aiBindingExperimental || options?.beta === true) {
+    // Use RPC if the `beta` flag is set or if the "experimental" compat flag is in use. Note that
+    // this is explicitly structured to allow opting out with `{beta: false}`, even if
+    // "experimental" is set, because currently `AbortSignal` does not work over RPC, and Gadgets
+    // needs it (and sets "experimental" for other reasons).
+    if (options?.beta ?? aiBindingExperimental) {
       return this.#fetcher.gateway(gatewayId);
     }
     return new AiGateway(this.#fetcher, gatewayId);

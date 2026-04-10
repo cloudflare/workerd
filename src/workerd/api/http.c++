@@ -117,24 +117,10 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       buffer = kj::mv(text);
     }
     KJ_CASE_ONEOF(bytesRef, jsg::JsRef<jsg::JsBufferSource>) {
-      auto bytes = bytesRef.getHandle(js);
-      if (bytes.isResizable()) {
-        // If the input buffer is resizable, it's safest to make a copy of it since otherwise
-        // the original buffer could be resized after we snapshot the view, which requires
-        // additional book keeping while the body is alive to ensure the view remains valid.
-        // Making a copy is what the spec requires and keeps the implementation simpler, at
-        // the cost of extra CPU and memory usage.
-        auto buf = kj::heapArray<kj::byte>(bytes.size());
-        buf.asPtr().copyFrom(bytes.asArrayPtr());
-        buffer = kj::mv(buf);
-      } else {
-        // NOTE: The spec would have us create a copy of the input buffer here, but that would be
-        // a sad waste of CPU and memory. This is technically a non-conformity that would allow a
-        // user to construct a Body from a BufferSource and then later modify the BufferSource.
-        // However, redirects cause body streams to be reconstructed from the original, possibly
-        // mutated, buffer anyway, so this is unlikely to be a problem in practice.
-        buffer = Buffer(js, bytes);
-      }
+      // Per the Fetch spec we must copy the input buffer here. Previously we skipped the copy
+      // for non-resizable buffers as an optimization, but the spec requires it for all buffer
+      // types to ensure the body is an independent snapshot of the data at construction time.
+      buffer = kj::heapArray(bytesRef.getHandle(js).asArrayPtr());
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
       // Blobs always have a type, but it defaults to an empty string. We should NOT set
@@ -172,9 +158,9 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
 
   // We use streams::newMemorySource() here rather than newSystemStream() wrapping a
   // newMemoryInputStream() because we do NOT want deferred proxying for bodies with
-  // V8 heap provenance. Specifically, the bufferCopy.view here, while being a kj::ArrayPtr,
-  // will typically be wrapping a v8::BackingStore, and we must ensure that is is consumed
-  // and destroyed while under the isolate lock, which means deferred proxying is not allowed.
+  // V8 heap provenance. Some buffer types (e.g. Blob data) may reference V8 heap memory
+  // and we must ensure the data is consumed and destroyed while under the isolate lock,
+  // which means deferred proxying is not allowed.
   auto rs = streams::newMemorySource(buf.view, kj::heap(kj::mv(buf.ownBytes)));
 
   return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),

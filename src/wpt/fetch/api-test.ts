@@ -199,11 +199,7 @@ export default {
   'basic/stream-safe-creation.any.js': {},
   'basic/text-utf8.any.js': {},
 
-  'body/cloned-any.js': {
-    comment:
-      'We need to actually clone the body instead of taking a reference to it.',
-    expectedFailures: ['TypedArray is cloned', 'ArrayBuffer is cloned'],
-  },
+  'body/cloned-any.js': {},
   'body/formdata.any.js': {},
   'body/mime-type.any.js': {},
 

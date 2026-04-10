@@ -6,7 +6,7 @@ Subject: Port V8_USE_ZLIB support
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index a2848e9358ca331997061ae105498c07b7d5c775..369e3f975beacf9aea41f05aae919554a8944a61 100644
+index d859282148a9198008f44d287df3747305ed6060..6a5b53b4b67436176f38b50822876b9044630c83 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -162,6 +162,11 @@ v8_flag(name = "v8_enable_verify_predictable")
@@ -21,15 +21,15 @@ index a2848e9358ca331997061ae105498c07b7d5c775..369e3f975beacf9aea41f05aae919554
  v8_flag(name = "v8_wasm_random_fuzzers")
  
  v8_flag(
-@@ -521,6 +526,7 @@ v8_config(
-         "v8_jitless": "V8_JITLESS",
+@@ -533,6 +538,7 @@ v8_config(
          "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
          "v8_enable_undefined_double": "V8_ENABLE_UNDEFINED_DOUBLE",
+         "v8_use_host_cpu_arm_features": "V8_USE_HOST_CPU_ARM_FEATURES",
 +        "v8_use_zlib": "V8_USE_ZLIB",
      },
      defines = [
          "GOOGLE3",
-@@ -4641,6 +4647,8 @@ v8_library(
+@@ -4658,6 +4664,8 @@ v8_library(
          "@highway//:hwy",
          "@fast_float",
          "@simdutf",
@@ -52,7 +52,7 @@ index 3c1ed7cf1e45ab4b87dd134430f7cda321e5e338..fa41e87973bebbe36da35e90a5136537
  
  namespace v8 {
 diff --git a/src/objects/deoptimization-data.cc b/src/objects/deoptimization-data.cc
-index fc9805d59779984bf8f038673e2371662181c3fa..717a0ea734d41538bd9aa4186140bfff6e5cf5de 100644
+index b6f9151bd9acb5c82cb8de0d9f26d00c51b305f7..589d5947d17ca2f12e360fb2934149c19fd6d288 100644
 --- a/src/objects/deoptimization-data.cc
 +++ b/src/objects/deoptimization-data.cc
 @@ -14,7 +14,7 @@

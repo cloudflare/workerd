@@ -229,6 +229,7 @@ export class AiGateway {
     options?: {
       gateway?: UniversalGatewayOptions;
       extraHeaders?: Record<string, string>;
+      signal?: AbortSignal;
     }
   ): Promise<Response> {
     const input = Array.isArray(data) ? data : [data];
@@ -250,13 +251,18 @@ export class AiGateway {
       }
     }
 
+    const fetchOptions: RequestInit = {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: headers,
+    };
+    if (options?.signal) {
+      fetchOptions.signal = options.signal;
+    }
+
     return this.#fetcher.fetch(
       `https://workers-binding.ai/ai-gateway/universal/run/${this.#gatewayId}`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input),
-        headers: headers,
-      }
+      fetchOptions
     );
   }
 

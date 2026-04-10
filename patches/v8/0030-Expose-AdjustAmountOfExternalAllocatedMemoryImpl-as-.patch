@@ -14,7 +14,7 @@ method. This patch simply makes it public for embedder use.
 Signed-off-by: Aditya Tewari <adityaatewari@gmail.com>
 
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index 067c9f3fec9e21890a1c8d5d1c430d1a473c1a4c..07987b7af4d1dee4731c3006258fad67d02fd526 100644
+index 2d075ddde2fb8c88368e1dfc7c927f838e2c2d27..71ba631157597a14303b08c0cfdf5c781a5d691d 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
 @@ -1093,6 +1093,14 @@ class V8_EXPORT Isolate {
@@ -37,6 +37,6 @@ index 067c9f3fec9e21890a1c8d5d1c430d1a473c1a4c..07987b7af4d1dee4731c3006258fad67
    internal::ValueHelper::InternalRepresentationType GetDataFromSnapshotOnce(
        size_t index);
 -  int64_t AdjustAmountOfExternalAllocatedMemoryImpl(int64_t change_in_bytes);
-   void HandleExternalMemoryInterrupt();
  };
  
+ void Isolate::SetData(uint32_t slot, void* data) {
