@@ -19,7 +19,6 @@ import externrefMemoryModule from 'signal-externref-memory.wasm';
 import importedMemoryModule from 'signal-imported-memory.wasm';
 import reclaimModule from 'signal-memory-reclaim.wasm';
 import preinitModule from 'signal-preinit.wasm';
-import signalOnlyReclaimModule from 'signal-signal-only-reclaim.wasm';
 
 // ---------------------------------------------------------------------------
 // Export permutation tests
@@ -77,7 +76,6 @@ export let syncTerminatedOnlyRegisters = {
 
 // Permutation 3: only __instance_signal present (no __instance_terminated).
 // The module should be registered — either signal is sufficient.
-// Cleanup relies on the weak instanceRef (GC-based).
 export let signalOnlyRegisters = {
   async test() {
     const instance = await WebAssembly.instantiate(partialModule);
@@ -247,36 +245,21 @@ export let syncInstanceImportedMemory = {
 // GC reclamation tests
 // ---------------------------------------------------------------------------
 
-// Instantiate many large (16MB) WASM modules, mark each as "exited" via
-// mark_exited(), then let GC reclaim them. If the GC prologue filter doesn't
-// clean up terminated entries, this will OOM.
-export let gcReclaimsTerminatedModules = {
-  async test() {
-    for (let i = 0; i < 20; i++) {
-      const instance = await WebAssembly.instantiate(reclaimModule);
-      // Mark the module as exited so the GC prologue filter removes it.
-      instance.exports.mark_exited();
-    }
-    // If we get here without OOM, reclamation is working.
-  },
-};
-
-// Instantiate many large (16MB) signal-only WASM modules (no __instance_terminated),
-// let them go out of scope so V8 can GC the instances. The weak instanceRef should
-// cause the GC prologue filter to remove entries and release the memory.
+// Instantiate many large (16MB) WASM modules, let them go out of scope so V8 can
+// GC the instances. The weak instanceRef becomes empty when V8 collects the
+// unreachable instance, and the GC prologue filter removes the entry, releasing
+// the strong reference to linear memory. If entries aren't cleaned up, this OOMs.
 //
-// Unlike gcReclaimsTerminatedModules (which sets the terminated flag for immediate cleanup),
-// this test relies on V8's GC to collect the unreachable instance objects. There is a one-cycle
-// delay: V8 resets the weak handle during GC, but our prologue (which runs before marking)
-// detects it in the *next* cycle. V8's external memory tracking (16MB per BackingStore) should
-// trigger GC frequently enough to prevent OOM.
-export let gcReclaimsSignalOnlyModules = {
+// There is a one-cycle delay: V8 resets the weak handle during GC, but our prologue
+// (which runs before marking) detects it in the *next* cycle. V8's external memory
+// tracking (16MB per BackingStore) should trigger GC frequently enough to prevent OOM.
+export let gcReclaimsModules = {
   async test() {
     for (let i = 0; i < 20; i++) {
       // Each instance goes out of scope at the end of the loop iteration.
       // The `await` yields to the event loop, giving V8 opportunities to trigger GC.
-      await WebAssembly.instantiate(signalOnlyReclaimModule);
+      await WebAssembly.instantiate(reclaimModule);
     }
-    // If we get here without OOM, GC-based reclamation via weak instanceRef is working.
+    // If we get here without OOM, reclamation is working.
   },
 };

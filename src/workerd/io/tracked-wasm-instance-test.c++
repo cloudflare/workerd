@@ -435,17 +435,19 @@ KJ_TEST("backing stores freed after V8 disposal WITHOUT clear() — the bug") {
 // permutations that reach the C++ signal list are:
 //   1. Both signal + terminated offsets present
 //   2. Only terminated offset (signal = kj::none)
-//   3. Only signal offset (terminated = kj::none) — new: relies on weak instanceRef for cleanup
+//   3. Only signal offset (terminated = kj::none)
 //
 // (The fourth permutation — neither — is rejected by the JS shim before reaching C++, so it
 // is only tested in the JS test file.)
 //
-// For each permutation we verify the full operation set:
+// For each permutation we verify the signal read/write operations:
 //   - writeShutdownSignals  (writes SIGXCPU to signal address)
 //   - clearShutdownSignals  (zeros the signal address)
 //   - writeTerminatedFlags  (writes 1 to terminated address)
-//   - shouldRetain          (returns true when entry should be kept)
-//   - filter via shouldRetain (removes entries that should not be retained)
+//
+// shouldRetain + filter coverage is in the mixed list test, which exercises all
+// three permutations in a single pass. Without a real V8 isolate, instanceRef is
+// always empty (default-constructed), so shouldRetain() returns false for all entries.
 // ---------------------------------------------------------------------------
 
 // Helper: construct a TrackedWasmInstance backed by a FakeBackingStore.
@@ -511,25 +513,6 @@ KJ_TEST("permutation: both offsets — writeTerminatedFlags writes 1") {
   KJ_EXPECT(readU32(signals, kTerminatedOffset) == 1);
 }
 
-KJ_TEST("permutation: both offsets — shouldRetain and filter") {
-  bool destroyed = false;
-  SignalSafeList<TrackedWasmInstance> signals;
-  constexpr uint32_t kSignalOffset = 0;
-  constexpr uint32_t kTerminatedOffset = sizeof(uint32_t);
-
-  pushSignal(signals, destroyed, kSignalOffset, kTerminatedOffset);
-
-  // Without instanceRef set, shouldRetain returns false (empty instanceRef means collected).
-  // In production, instanceRef is always set at registration. Here we test the terminated path
-  // which takes priority regardless of instanceRef state.
-  writeTerminatedFlags(signals);
-  signals.iterate([](TrackedWasmInstance& s) { KJ_EXPECT(!s.shouldRetain()); });
-
-  signals.filter([](const TrackedWasmInstance& s) { return s.shouldRetain(); });
-  KJ_EXPECT(signals.isEmpty());
-  KJ_EXPECT(destroyed);
-}
-
 // Permutation 2: only terminated offset (signal = kj::none).
 KJ_TEST("permutation: terminated only — writeShutdownSignals is a no-op") {
   bool destroyed = false;
@@ -574,24 +557,7 @@ KJ_TEST("permutation: terminated only — writeTerminatedFlags writes 1") {
   KJ_EXPECT(readU32(signals, kTerminatedOffset) == 1);
 }
 
-KJ_TEST("permutation: terminated only — shouldRetain and filter") {
-  bool destroyed = false;
-  SignalSafeList<TrackedWasmInstance> signals;
-  constexpr uint32_t kTerminatedOffset = 0;
-
-  pushSignal(signals, destroyed, kj::none, kTerminatedOffset);
-
-  writeTerminatedFlags(signals);
-  signals.iterate([](TrackedWasmInstance& s) { KJ_EXPECT(!s.shouldRetain()); });
-
-  signals.filter([](const TrackedWasmInstance& s) { return s.shouldRetain(); });
-  KJ_EXPECT(signals.isEmpty());
-  KJ_EXPECT(destroyed);
-}
-
 // Permutation 3: only signal offset (terminated = kj::none).
-// In production, cleanup is via the weak instanceRef. Without a real V8 isolate, the
-// instanceRef is empty (default), so shouldRetain() returns false immediately.
 KJ_TEST("permutation: signal only — writeShutdownSignals writes SIGXCPU") {
   bool destroyed = false;
   SignalSafeList<TrackedWasmInstance> signals;
@@ -631,24 +597,9 @@ KJ_TEST("permutation: signal only — writeTerminatedFlags is a no-op") {
   });
 }
 
-KJ_TEST("permutation: signal only — shouldRetain with empty instanceRef returns false") {
-  // Without a real V8 isolate, instanceRef is empty (default-constructed).
-  // shouldRetain() should return false since an empty instanceRef means the instance was collected.
-  bool destroyed = false;
-  SignalSafeList<TrackedWasmInstance> signals;
-  constexpr uint32_t kSignalOffset = 0;
-
-  pushSignal(signals, destroyed, kSignalOffset, kj::none);
-
-  signals.iterate([](TrackedWasmInstance& s) { KJ_EXPECT(!s.shouldRetain()); });
-
-  signals.filter([](const TrackedWasmInstance& s) { return s.shouldRetain(); });
-  KJ_EXPECT(signals.isEmpty());
-  KJ_EXPECT(destroyed);
-}
-
 // Mixed list: all three permutations in a single list.
-// Verifies that operations correctly target each entry based on its offsets.
+// Verifies that signal read/write operations correctly target each entry based on its offsets,
+// and that shouldRetain + filter removes all entries (instanceRef is empty without real V8).
 KJ_TEST("permutation: mixed list — all three entry types coexist") {
   bool destroyedBoth = false;
   bool destroyedTermOnly = false;
@@ -714,9 +665,7 @@ KJ_TEST("permutation: mixed list — all three entry types coexist") {
     ++index;
   });
 
-  // --- shouldRetain: all should report not retained ---
-  // Both-offsets and terminated-only entries: terminated flag is set.
-  // Signal-only entry: instanceRef is empty (no real V8).
+  // --- shouldRetain: all should report not retained (instanceRef is empty without real V8) ---
   signals.iterate([](TrackedWasmInstance& s) { KJ_EXPECT(!s.shouldRetain()); });
 
   // --- filter: all entries removed, memory reclaimed ---

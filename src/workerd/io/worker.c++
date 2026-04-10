@@ -671,8 +671,9 @@ struct Worker::Isolate::Impl {
 
     void gcPrologue() {
       metrics.gcPrologue();
-      // Filter out tracked WASM instance entries where the module has exited, allowing
-      // the linear memory to be reclaimed.
+      // Filter out tracked WASM instance entries where the instance has been
+      // garbage-collected (weak instanceRef is empty), allowing the linear memory
+      // to be reclaimed.
       limitEnforcer.getTrackedWasmInstances().filter(*lock);
     }
     void gcEpilogue() {

@@ -28,17 +28,13 @@ constexpr size_t WASM_SIGNAL_FIELD_BYTES = sizeof(uint32_t);
 //   "__instance_signal"     — (optional) address of a uint32 in linear memory. When present,
 //                            the runtime writes SIGXCPU (24) here when CPU time is nearly
 //                            exhausted.
-//   "__instance_terminated" — (optional) address of a uint32 in linear memory. The WASM module
-//                            writes a non-zero value here when it has exited and is no longer
-//                            listening. The runtime checks this in a GC prologue hook and removes
-//                            entries where terminated is non-zero, allowing the linear memory to
-//                            be reclaimed. The runtime also writes 1 here when the isolate is
-//                            killed after exceeding its CPU limit.
+//   "__instance_terminated" — (optional) address of a uint32 in linear memory. The runtime
+//                            writes 1 here when the isolate is killed after exceeding its CPU
+//                            limit, informing the WASM module that it was forcefully terminated.
 //
-// When both are present, the terminated flag provides a fast-path for cleanup. When only
-// __instance_signal is present, a weak reference to the WASM instance (instanceRef) is used
-// instead: when V8 garbage-collects the instance, the handle becomes empty and the GC prologue
-// filter removes the entry.
+// Cleanup of entries relies on a weak reference to the WASM instance (instanceRef): when V8
+// garbage-collects the instance, the handle becomes empty and the GC prologue filter removes
+// the entry, releasing the strong reference to linear memory.
 struct TrackedWasmInstance {
   // Owns a reference to the WASM module's linear memory. The underlying v8::BackingStore is kept
   // alive via kj::Array's attach() mechanism, preventing V8 from garbage-collecting the memory
@@ -55,12 +51,11 @@ struct TrackedWasmInstance {
 
   // Offset into `memory` of the uint32 the runtime writes SIGXCPU (24) to (__instance_signal).
   // When kj::none, the module did not export __instance_signal and will not receive the
-  // SIGXCPU shutdown warning, but will still receive the terminated flag.
+  // SIGXCPU shutdown warning.
   kj::Maybe<uint32_t> signalByteOffset;
 
-  // Offset into `memory` of the uint32 the module writes to (__instance_terminated).
-  // When kj::none, the module did not export __instance_terminated and relies on
-  // the weak instanceRef for cleanup.
+  // Offset into `memory` of the uint32 the runtime writes to (__instance_terminated).
+  // When kj::none, the module did not export __instance_terminated.
   kj::Maybe<uint32_t> terminatedByteOffset;
 
   // Weak handle to the WASM instance. Set to weak via SetWeak() at registration time. When V8
@@ -74,20 +69,9 @@ struct TrackedWasmInstance {
   v8::Global<v8::Object> instanceRef;
 
   // Returns true if the entry should be kept in the list, false if it should be removed.
-  //
-  // An entry should be removed when:
-  //   - The module set its terminated flag (fast-path, avoids waiting for GC), or
-  //   - The instance was garbage-collected (instanceRef became empty).
+  // An entry is removed when V8 garbage-collects the WASM instance, which resets the weak
+  // handle making IsEmpty() return true.
   bool shouldRetain() const {
-    // Fast-path: if the module set its terminated flag, remove immediately.
-    KJ_IF_SOME(offset, terminatedByteOffset) {
-      uint32_t terminated = 0;
-      for (auto& b: memory.slice(offset, offset + WASM_SIGNAL_FIELD_BYTES)) {
-        terminated |= b;
-      }
-      if (terminated != 0) return false;
-    }
-    // If the weak reference to the instance is dead, the instance was GC'd.
     return !instanceRef.IsEmpty();
   }
 };
@@ -193,10 +177,11 @@ class SignalSafeList {
 // does not hold the lock.
 class TrackedWasmInstanceList {
  public:
-  // Registers a WASM module for receiving the "shut down" signal and/or GC-based cleanup.
+  // Registers a WASM module for receiving the "shut down" signal and/or terminated notification.
   // At least one of signalOffset or terminatedOffset must be provided. Both are optional
   // individually: when signalOffset is kj::none, the module will not receive SIGXCPU; when
-  // terminatedOffset is kj::none, cleanup relies on the weak instanceRef.
+  // terminatedOffset is kj::none, the module will not receive the terminated notification.
+  // Cleanup always relies on the weak instanceRef becoming empty when V8 GCs the instance.
   //
   // Silently skips registration if any provided offset falls outside the module's linear memory.
   //
@@ -207,9 +192,8 @@ class TrackedWasmInstanceList {
       kj::Maybe<uint32_t> signalOffset,
       kj::Maybe<uint32_t> terminatedOffset) const;
 
-  // Filters out entries where the module has exited (terminated != 0) or the instance has been
-  // garbage-collected (instanceRef is empty). Call from a GC prologue hook to allow linear memory
-  // to be reclaimed.
+  // Filters out entries where the instance has been garbage-collected (instanceRef is empty).
+  // Call from a GC prologue hook to allow linear memory to be reclaimed.
   void filter(jsg::Lock&) const;
 
   // Removes all entries unconditionally. Call before the V8 isolate is disposed, since each
