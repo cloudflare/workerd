@@ -4,12 +4,11 @@
 build:ci --keep_going
 build:ci --verbose_failures
 # Use a higher jobs level to effectively fetch from CPU and and use the remote cache at the same
-# time, see https://github.com/bazelbuild/bazel/issues/6394. 32 is still a fairly small number here
-# and should work for the small CI runners we use, if we switch to a bigger runner consider
-# increasing this closer towards the suggested value of 200. Note the number of maximum build jobs
-# is controlled by the --local_resources=cpu flag and still limited to the number of cores by
-# default.
-build:ci --jobs=32
+# time, see https://github.com/bazelbuild/bazel/issues/6394. This is still a relatively small number
+# and should work for the CI runners we use, if we switch to bigger runners consider increasing this
+# closer towards the suggested value of 200. Note the number of maximum build jobs is controlled by
+# the --local_resources=cpu flag and still limited to the number of cores by default.
+build:ci --jobs=64
 # Do not check for changes in external repository files, should speed up bazel invocations after the first one
 build:ci --noexperimental_check_external_repository_files
 # Only build runfile trees when needed. Runfile trees are useful for directly invoking bazel-built
