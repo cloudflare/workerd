@@ -4250,9 +4250,9 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
       kj::Own<WorkerInterface> startRequest(
           IoChannelFactory::SubrequestMetadata metadata) override {
         if (isolate->service == kj::none) {
-          return newPromisedWorkerInterface(
-              isolate->startupTask.addBranch().then([this, metadata = kj::mv(metadata)]() mutable {
-            return startRequestImpl(kj::mv(metadata));
+          return newPromisedWorkerInterface(isolate->startupTask.addBranch().then(
+              [self = kj::addRef(*this), metadata = kj::mv(metadata)]() mutable {
+            return self->startRequestImpl(kj::mv(metadata));
           }));
         } else {
           return startRequestImpl(kj::mv(metadata));
