@@ -64,6 +64,7 @@ wd_test(
         "tail-worker-test-receiver.js",
         "tail-worker-test-dummy.js",
         "tail-worker-test-invalid.js",
+        "tail-worker-test-no-op.js",
         "tail-worker-test-jsrpc.js",
         "websocket-hibernation.js",
         "connect-handler-test.js",

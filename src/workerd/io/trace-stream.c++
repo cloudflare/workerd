@@ -934,6 +934,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         });
       }
       return ioContext.awaitJs(js, kj::mv(p));
+    } else if (doFulfill) {
+      // If we have no promises, but doFulfill is true, then none of the events we have had a
+      // handler available, but we still need to indicate that we are done since we got the outcome
+      // event – do this by calling fulfill right away.
+      doneReceiving = true;
+      doneFulfiller->fulfill();
     }
     return kj::READY_NOW;
   }
