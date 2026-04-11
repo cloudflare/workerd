@@ -760,7 +760,9 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     // At present we have no use for `cfStr`.
-    return kj::heap<TcpPortWorkerInterface>(byteStreamFactory, entropySource, headerTable, port);
+    return IoContext::current().getSubrequestNoChecks([&](auto& tracing, auto& channelFactory) {
+      return kj::heap<TcpPortWorkerInterface>(byteStreamFactory, entropySource, headerTable, port);
+    }, {.inHouse = false, .wrapMetrics = false});
   }
 
  private:

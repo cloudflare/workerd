@@ -8,6 +8,7 @@
 #include "streams/standard.h"
 #include "system-streams.h"
 
+#include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
@@ -636,8 +637,11 @@ class StreamWorkerInterface final: public WorkerInterface {
 kj::Own<WorkerInterface> StreamOutgoingFactory::newSingleUseClient(kj::Maybe<kj::String> cfStr) {
   JSG_ASSERT(stream.get() != nullptr, Error,
       "Fetcher created from internalNewHttpClient can only be used once");
-  // Create a WorkerInterface that wraps the stream
-  return kj::heap<StreamWorkerInterface>(kj::addRef(*this));
+  // Create a WorkerInterface that wraps the stream, routing through getSubrequestNoChecks to apply
+  // external memory adjustment for GC pressure.
+  return IoContext::current().getSubrequestNoChecks([&](auto& tracing, auto& channelFactory) {
+    return kj::heap<StreamWorkerInterface>(kj::addRef(*this));
+  }, {.inHouse = false, .wrapMetrics = false});
 }
 
 jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(

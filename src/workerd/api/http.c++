@@ -2434,12 +2434,15 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
-      // For outgoing factories, no trace context needed
+      // Outgoing factories are responsible for routing through getSubrequestNoChecks() (or
+      // getSubrequest()) internally if they create HTTP connections, to ensure external memory
+      // adjustment and other subrequest accounting are applied.
       auto client = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
       return ClientWithTracing{kj::mv(client), kj::none};
     }
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
-      // For cross-context outgoing factories, no trace context needed
+      // Same as OutgoingFactory above -- the factory is responsible for routing through
+      // getSubrequestNoChecks() internally.
       auto client = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
       return ClientWithTracing{kj::mv(client), kj::none};
     }
