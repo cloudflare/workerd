@@ -60,7 +60,7 @@ jobs:
           chmod +x run_benchmarks.sh
 
       - name: Run benchmarks
-        uses: CodSpeedHQ/action@v4
+        uses: CodSpeedHQ/action@db35df748deb45fdef0960669f57d627c1956c30 # v4.13.1
         with:
           mode: simulation
           run: ./run_benchmarks.sh
