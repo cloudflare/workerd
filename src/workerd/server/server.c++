@@ -5510,9 +5510,8 @@ class Server::DebugPortListener {
       // Look up the service.
       // Use `jsg.Error:` prefix so the error message tunnels through capnp RPC
       // rather than being sanitized to a generic "internal error; reference = ...".
-      auto& serviceEntry =
-          KJ_ASSERT_NONNULL(srv.services.find(serviceName),
-              kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
+      auto& serviceEntry = KJ_ASSERT_NONNULL(srv.services.find(serviceName),
+          kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
       auto service = serviceEntry->service();
 
       // Convert props from Frankenvalue if provided
@@ -5538,8 +5537,7 @@ class Server::DebugPortListener {
                     maybeEntrypoint.orDefault("(default)"), "\""));
       } else {
         // Not a WorkerService
-        KJ_ASSERT(
-            !params.hasEntrypoint(),
+        KJ_ASSERT(!params.hasEntrypoint(),
             kj::str("jsg.Error: Worker does not support named entrypoints"));
 
         // Try to apply props if the service supports it
@@ -5565,15 +5563,14 @@ class Server::DebugPortListener {
       auto actorIdStr = params.getActorId();
 
       // Look up the service
-      auto& serviceEntry =
-          KJ_ASSERT_NONNULL(srv.services.find(serviceName),
-              kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
+      auto& serviceEntry = KJ_ASSERT_NONNULL(srv.services.find(serviceName),
+          kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
       auto service = serviceEntry->service();
 
       // Try to cast to WorkerService
       auto* workerService = dynamic_cast<WorkerService*>(service);
-      KJ_REQUIRE(workerService != nullptr,
-          kj::str("jsg.Error: Worker does not support Durable Objects"));
+      KJ_REQUIRE(
+          workerService != nullptr, kj::str("jsg.Error: Worker does not support Durable Objects"));
 
       // Look up the actor namespace
       auto& actorNamespace = KJ_ASSERT_NONNULL(workerService->getActorNamespace(entrypointName),
