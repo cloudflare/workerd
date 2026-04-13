@@ -20,10 +20,11 @@ import type { Duplex } from 'node:stream';
 // We don't intend to support the Agent API right now beyond providing a very limited stub API.
 //
 export class Agent extends EventEmitter implements _Agent {
-  defaultPort = 80;
-  protocol: string = 'http:';
+  defaultPort: number;
+  protocol: string;
 
   options: AgentOptions & { __proto__: null };
+  agentKeepAliveTimeoutBuffer: number = 1000;
   keepAliveMsecs: number = 1000;
   keepAlive: boolean = false;
   maxSockets: number;
@@ -38,6 +39,22 @@ export class Agent extends EventEmitter implements _Agent {
   constructor(options?: AgentOptions) {
     super({});
     this.options = { __proto__: null, ...options };
+
+    // Match Node.js: read defaultPort and protocol from options with fallbacks,
+    // set path = null, and ensure proxyEnv key exists.
+    /* eslint-disable @typescript-eslint/no-unsafe-assignment,
+       @typescript-eslint/no-unsafe-member-access,
+       @typescript-eslint/no-explicit-any */
+    const opts = this.options as any;
+    this.defaultPort = opts.defaultPort || 80;
+    this.protocol = opts.protocol || 'http:';
+    opts.path = null;
+    if (!('proxyEnv' in opts)) {
+      opts.proxyEnv = undefined;
+    }
+    /* eslint-enable @typescript-eslint/no-unsafe-assignment,
+       @typescript-eslint/no-unsafe-member-access,
+       @typescript-eslint/no-explicit-any */
 
     if (this.options.noDelay === undefined) this.options.noDelay = true;
 

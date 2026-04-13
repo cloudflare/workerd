@@ -27,6 +27,7 @@ import {
   emitWarning,
   env,
   features,
+  config,
   _setEventsProcess,
 } from 'node-internal:internal_process';
 import { validateString } from 'node-internal:validators';
@@ -34,16 +35,31 @@ import internalAssert from 'node-internal:internal_assert';
 import type { Readable } from 'node-internal:streams_readable';
 import type * as NodeFS from 'node:fs';
 
-export { platform, nextTick, emitWarning, env, features };
+export { platform, nextTick, emitWarning, env, features, config };
 
 // For stdin, we emulate `node foo.js < /dev/null`
+// In Node.js, process.stdin is a net.Socket (Duplex) with both readable and writable properties.
+// We use 'any' cast to assign socket-like properties without type conflicts.
 export const stdin = new ReadStream(null, {
   fd: 0,
   autoClose: false,
-}) as Readable & {
-  fd: number;
-};
+}) as Readable & { fd: number };
 stdin.fd = 0;
+// In Node.js, process.stdin is a net.Socket (Duplex) with socket-like properties.
+// We add socket-like stub properties for compatibility, but avoid setting writable-related
+// properties that would cause the streams internals to treat this ReadStream as writable
+// (which would trigger calls to .end() that don't exist on ReadStream).
+/* eslint-disable @typescript-eslint/no-unsafe-assignment,
+   @typescript-eslint/no-unsafe-member-access,
+   @typescript-eslint/no-explicit-any */
+const stdinAny = stdin as any;
+stdinAny.allowHalfOpen = false;
+stdinAny.bufferSize = 0;
+stdinAny.connecting = false;
+stdinAny.readyState = 'open';
+/* eslint-enable @typescript-eslint/no-unsafe-assignment,
+   @typescript-eslint/no-unsafe-member-access,
+   @typescript-eslint/no-explicit-any */
 
 function chunkToBuffer(
   chunk: Buffer | ArrayBufferView | DataView | string,
@@ -83,8 +99,35 @@ class SyncWriteStream extends Writable {
   }
 }
 
+// In Node.js, process.stdout/stderr are net.Socket (TTY) instances with Duplex stream properties.
+// We assign socket-like stub properties for compatibility.
+/* eslint-disable @typescript-eslint/no-unsafe-assignment,
+   @typescript-eslint/no-unsafe-member-access,
+   @typescript-eslint/no-explicit-any */
+function addSocketProperties(stream: SyncWriteStream): void {
+  const s = stream as any;
+  s.allowHalfOpen = false;
+  s.bufferSize = 0;
+  s.bytesRead = 0;
+  s.bytesWritten = 0;
+  s.connecting = false;
+  s.pending = false;
+  s.readableAborted = false;
+  s.readableDidRead = false;
+  s.readableEnded = false;
+  s.readableHighWaterMark = 16384;
+  s.readableLength = 0;
+  s.readableObjectMode = false;
+  s.readyState = 'open';
+}
+/* eslint-enable @typescript-eslint/no-unsafe-assignment,
+   @typescript-eslint/no-unsafe-member-access,
+   @typescript-eslint/no-explicit-any */
+
 export const stdout = new SyncWriteStream(1);
+addSocketProperties(stdout);
 export const stderr = new SyncWriteStream(2);
+addSocketProperties(stderr);
 
 export function chdir(path: string | Buffer | URL): void {
   validateString(path, 'directory');
@@ -135,11 +178,6 @@ export const argv0 = 'workerd';
 export const execArgv = [];
 
 export const arch = 'x64';
-
-export const config = {
-  target_defaults: {},
-  variables: {},
-};
 
 // For simplicity and polyfill expectations, we assign pid 1 to the process and pid 0 to the "parent".
 export const pid = 1;

@@ -253,6 +253,7 @@ EventEmitter.init = function (this: EventEmitter, opts?: EventEmitterOptions) {
   }
 
   (this as any)._maxListeners ??= undefined;
+  (this as any).domain = null;
 
   if (opts?.captureRejections) {
     validateBoolean(opts.captureRejections, 'options.captureRejections');

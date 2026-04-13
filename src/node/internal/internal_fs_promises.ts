@@ -64,6 +64,7 @@ import {
   validateUint32,
 } from 'node-internal:validators';
 import * as constants from 'node-internal:internal_fs_constants';
+export { constants };
 import type {
   BigIntStatsFs,
   CopySyncOptions,

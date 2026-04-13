@@ -6,11 +6,29 @@
 /* eslint-disable @typescript-eslint/no-deprecated,@typescript-eslint/restrict-plus-operands */
 
 import { Agent as HttpAgent } from 'node-internal:internal_http_agent';
+import type { AgentOptions } from 'node:http';
 import type { RequestOptions } from 'node:https';
 
 export class Agent extends HttpAgent {
-  override defaultPort = 443;
-  override protocol: string = 'https:';
+  maxCachedSessions: number = 100;
+
+  constructor(options?: AgentOptions) {
+    // Match Node.js: the HTTPS Agent constructor sets defaultPort and protocol
+    // on the options object before passing them to the base HTTP Agent constructor,
+    // so they end up on both this.options and this.defaultPort/this.protocol.
+    /* eslint-disable @typescript-eslint/no-unsafe-assignment,
+       @typescript-eslint/no-unsafe-member-access,
+       @typescript-eslint/no-unsafe-argument,
+       @typescript-eslint/no-explicit-any */
+    const opts = { ...options } as any;
+    opts.defaultPort ??= 443;
+    opts.protocol ??= 'https:';
+    super(opts);
+    /* eslint-enable @typescript-eslint/no-unsafe-assignment,
+       @typescript-eslint/no-unsafe-member-access,
+       @typescript-eslint/no-unsafe-argument,
+       @typescript-eslint/no-explicit-any */
+  }
 
   override getName(options: RequestOptions = {}): string {
     let name = super.getName(options);

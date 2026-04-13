@@ -576,6 +576,7 @@ export declare abstract class Navigator {
   sendBeacon(url: string, body?: BodyInit): boolean;
   readonly userAgent: string;
   readonly hardwareConcurrency: number;
+  readonly platform: string;
   readonly language: string;
   readonly languages: string[];
   readonly storage: StorageManager;

@@ -94,6 +94,10 @@ class Navigator: public jsg::Object {
     return 1;
   }
 
+  kj::StringPtr getPlatform() {
+    return "Linux"_kj;
+  }
+
   kj::StringPtr getLanguage() {
     // Some packages depend on navigator.language being set to a specific value.
     return "en"_kj;
@@ -111,6 +115,7 @@ class Navigator: public jsg::Object {
     JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
     JSG_READONLY_INSTANCE_PROPERTY(hardwareConcurrency, getHardwareConcurrency);
+    JSG_READONLY_INSTANCE_PROPERTY(platform, getPlatform);
 
     if (reader.getEnableNavigatorLanguage()) {
       JSG_READONLY_INSTANCE_PROPERTY(language, getLanguage);
