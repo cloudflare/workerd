@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "getrandom",
+    name = "icu_collections",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,37 +28,27 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__displaydoc-0.2.5//:displaydoc",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=getrandom",
+        "crate-name=icu_collections",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.17",
+    version = "2.2.0",
     deps = [
-        "@crates_vendor__cfg-if-1.0.4//:cfg_if",
-    ] + select({
-        "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.185//:libc",  # cfg(unix)
-        ],
-        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.185//:libc",  # cfg(unix)
-        ],
-        "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.185//:libc",  # cfg(unix)
-        ],
-        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.185//:libc",  # cfg(unix)
-        ],
-        "//conditions:default": [],
-    }),
+        "@crates_vendor__potential_utf-0.1.5//:potential_utf",
+        "@crates_vendor__utf8_iter-1.0.4//:utf8_iter",
+        "@crates_vendor__yoke-0.8.2//:yoke",
+        "@crates_vendor__zerofrom-0.1.7//:zerofrom",
+        "@crates_vendor__zerovec-0.11.6//:zerovec",
+    ],
 )

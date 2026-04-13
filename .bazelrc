@@ -498,3 +498,7 @@ coverage --build_tests_only
 # This config is defined internally and enabled on many machines.
 # Defining it as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
+build:linux --repo_env=CC=/usr/lib/llvm-19/bin/clang
+build:linux --linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld
+build:linux --host_linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld
+build:linux --repo_env=AR=/usr/lib/llvm-19/bin/llvm-ar

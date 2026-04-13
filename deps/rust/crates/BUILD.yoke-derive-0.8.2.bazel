@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "getrandom",
+rust_proc_macro(
+    name = "yoke_derive",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,37 +28,23 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=getrandom",
+        "crate-name=yoke-derive",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.17",
+    version = "0.8.2",
     deps = [
-        "@crates_vendor__cfg-if-1.0.4//:cfg_if",
-    ] + select({
-        "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.185//:libc",  # cfg(unix)
-        ],
-        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.185//:libc",  # cfg(unix)
-        ],
-        "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.185//:libc",  # cfg(unix)
-        ],
-        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.185//:libc",  # cfg(unix)
-        ],
-        "//conditions:default": [],
-    }),
+        "@crates_vendor__proc-macro2-1.0.106//:proc_macro2",
+        "@crates_vendor__quote-1.0.45//:quote",
+        "@crates_vendor__syn-2.0.117//:syn",
+        "@crates_vendor__synstructure-0.13.2//:synstructure",
+    ],
 )
