@@ -5951,7 +5951,11 @@ KJ_TEST("Server: debug port RPC calls") {
     return makeHttpRequestImpl(service, entrypoint, [](auto& props) { props.setEmptyObject(); });
   };
 
-  // Test 1: Get entrypoint for different services
+  // Test 1: Request a non-existent service should fail
+  KJ_EXPECT_THROW_MESSAGE("Worker \"nonexistent\" not found",
+      getBootstrap("nonexistent", kj::none, [](auto& props) { props.setEmptyObject(); }));
+
+  // Test 2: Get entrypoint for different services
   KJ_EXPECT(makeHttpRequest("hello", kj::none) == "Hello from hello service");
   KJ_EXPECT(makeHttpRequest("world", kj::none) == "Hello from world service");
 

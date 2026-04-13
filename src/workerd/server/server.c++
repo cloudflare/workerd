@@ -5508,10 +5508,12 @@ class Server::DebugPortListener {
       auto propsReader = params.getProps();
 
       // Look up the service.
-      // Use `jsg.Error:` prefix so the error message tunnels through capnp RPC
-      // rather than being sanitized to a generic "internal error; reference = ...".
-      auto& serviceEntry = KJ_ASSERT_NONNULL(srv.services.find(serviceName),
-          kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
+      auto maybeServiceEntry = srv.services.find(serviceName);
+      if (maybeServiceEntry == kj::none) {
+        return kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+            kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
+      }
+      auto& serviceEntry = KJ_ASSERT_NONNULL(kj::mv(maybeServiceEntry));
       auto service = serviceEntry->service();
 
       // Convert props from Frankenvalue if provided
