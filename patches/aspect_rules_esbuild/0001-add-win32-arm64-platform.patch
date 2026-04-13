@@ -1,0 +1,29 @@
+diff --git a/esbuild/private/toolchains_repo.bzl b/esbuild/private/toolchains_repo.bzl
+index 7ac299c..d3c9648 100644
+--- a/esbuild/private/toolchains_repo.bzl
++++ b/esbuild/private/toolchains_repo.bzl
+@@ -52,6 +52,12 @@ _PLATFORMS = {
+             "@platforms//cpu:x86_64",
+         ],
+     ),
++    "win32-arm64": struct(
++        compatible_with = [
++            "@platforms//os:windows",
++            "@platforms//cpu:aarch64",
++        ],
++    ),
+ }
+ 
+ def get_platforms(version):
+diff --git a/esbuild/private/versions.bzl b/esbuild/private/versions.bzl
+index fa70920..be75f12 100644
+--- a/esbuild/private/versions.bzl
++++ b/esbuild/private/versions.bzl
+@@ -100,6 +100,7 @@ TOOL_VERSIONS = {
+         "linux-x64": "sha512-JUjpystGFFmNrEHQnIVG8hKwvA2DN5o7RqiO1CVX8EN/F/gkCjkUMgVn6hzScpwnJtl2mPR6I9XV1oW8k9O+0A==",
+         "linux-arm64": "sha512-PiPblfe1BjK7WDAKR1Cr9O7VVPqVNpwFcPWgfn4xu0eMemzRp442hXyzF/fSwgrufI66FpHOEJk0yYdPInsmyQ==",
+         "win32-x64": "sha512-oxoQgglOP7RH6iasDrhY+R/3cHrfwIDvRlT4CGChflq6twk8iENeVvMJjmvBb94Ik1Z+93iGO27err7w6l54GQ==",
++        "win32-arm64": "sha512-GQoa6OrQ8G08guMFgeXPH7yE/8Dt0IfOGWJSfSH4uafwdC7rWwrfE6P9N8AtPGIjUzdo2+7bN8Xo3qC578olhg==",
+     },
+     "0.19.8": {
+         "npm": "sha512-l7iffQpT2OrZfH2rXIp7/FkmaeZM0vxbxN9KfiCwGYuZqzMg/JdvX26R31Zxn/Pxvsrg3Y9N6XTcnknqDyyv4w==",

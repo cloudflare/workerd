@@ -1,0 +1,12 @@
+diff --git a/MODULE.bazel b/MODULE.bazel
+index 9100e7b..c773576 100644
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -72,6 +72,7 @@ use_repo(
+     "yq_linux_ppc64le",
+     "yq_linux_s390x",
+     "yq_windows_amd64",
++    "yq_windows_arm64",
+ )
+ 
+ tar_toolchains = use_extension("@tar.bzl//tar:extensions.bzl", "toolchains")

@@ -35,6 +35,42 @@ archive_override(
 bazel_dep(name = "rules_go", version = "0.60.0", repo_name = None)
 bazel_dep(name = "rules_android", version = "0.7.1", repo_name = None)
 
+# Override yq.bzl to 0.3.5 for Windows ARM64 yq toolchain support. The transitive version (0.3.2)
+# pulled in by aspect_rules_js lacks windows_arm64 in its platform list.
+bazel_dep(name = "yq.bzl", version = "0.3.5")
+archive_override(
+    module_name = "yq.bzl",
+    integrity = "sha256-zma0n7LjdqDY0rxYe8GqIju96A6GwKghRXCYp56lgDg=",
+    strip_prefix = "yq.bzl-0.3.5",
+    url = "https://github.com/bazel-contrib/yq.bzl/releases/download/v0.3.5/yq.bzl-v0.3.5.tar.gz",
+)
+
+# Patch aspect_rules_js to add yq_windows_arm64 to its use_repo list. Without this, the
+# @yq_windows_arm64 repo created by yq.bzl is not visible from aspect_rules_js's module scope.
+archive_override(
+    module_name = "aspect_rules_js",
+    integrity = "sha256-eBgxR7xQutVxi+c7M4Dn9G4hR/PJl6KQ4sXpWZQQUuE=",
+    patch_args = ["-p1"],
+    patches = [
+        "//:patches/aspect_rules_js/0001-add-yq-windows-arm64-to-use-repo.patch",
+    ],
+    strip_prefix = "rules_js-3.0.3",
+    url = "https://github.com/aspect-build/rules_js/releases/download/v3.0.3/rules_js-v3.0.3.tar.gz",
+)
+
+# Patch aspect_rules_esbuild to add win32-arm64 platform + integrity hash. The upstream rules
+# don't include ARM64 Windows despite esbuild shipping native binaries for it.
+archive_override(
+    module_name = "aspect_rules_esbuild",
+    integrity = "sha256-tz1ly+0pGMOC93pUihBpgrQPhSAPAlVl1c+hsuCQEec=",
+    patch_args = ["-p1"],
+    patches = [
+        "//:patches/aspect_rules_esbuild/0001-add-win32-arm64-platform.patch",
+    ],
+    strip_prefix = "rules_esbuild-0.25.1",
+    url = "https://github.com/aspect-build/rules_esbuild/releases/download/v0.25.1/rules_esbuild-v0.25.1.tar.gz",
+)
+
 # Automatically managed dependencies
 include("//build/deps:gen/deps.MODULE.bazel")
 include("//build/deps:gen/build_deps.MODULE.bazel")

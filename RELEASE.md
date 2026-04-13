@@ -8,4 +8,4 @@ The primary distribution channel for `workerd` right now is through `npm`. We us
 
 ## Cutting Releases
 
-This is pretty simple, and completely automatic—every time the date in [release-version.txt](src/workerd/io/release-version.txt) changes, a new release is generated, along with the built binaries for `linux-64`, `linux-arm64`, `darwin-64`, `darwin-arm64` and `windows-64`. The types will also be generated and published automatically. This is governed by the [release.yml](.github/workflows/release.yml) GitHub Action.
+This is pretty simple, and completely automatic—every time the date in [release-version.txt](src/workerd/io/release-version.txt) changes, a new release is generated, along with the built binaries for `linux-64`, `linux-arm64`, `darwin-64`, `darwin-arm64`, `windows-64` and `windows-arm64`. The types will also be generated and published automatically. This is governed by the [release.yml](.github/workflows/release.yml) GitHub Action.

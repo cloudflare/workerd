@@ -51,6 +51,9 @@ rust_library(
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
             "@crates_vendor__libc-0.2.183//:libc",  # cfg(unix)
         ],
+        "@rules_rust//rust/platform:aarch64-pc-windows-msvc": [
+            "@crates_vendor__getrandom-0.3.4//:getrandom",  # cfg(windows)
+        ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@crates_vendor__getrandom-0.3.4//:getrandom",  # cfg(windows)
         ],

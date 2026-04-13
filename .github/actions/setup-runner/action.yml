@@ -49,6 +49,14 @@ runs:
         git config --show-scope --show-origin core.symlinks
         git config --system core.longpaths true
         [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=\\\\?\\C:\\tmp')
+    - name: Use Bazel 9.0.2rc1 on ARM64 Windows
+      shell: pwsh
+      if: runner.os == 'Windows' && runner.arch == 'ARM64'
+      # Bazel 9.0.1 has a broken ARM64 Windows build (bazelbuild/bazel#28941).
+      # Use 9.0.2rc1 which fixes the JNI DLL architecture mismatch.
+      # TODO(cleanup): Remove this once .bazelversion is bumped to 9.0.2+.
+      run: |
+        echo "USE_BAZEL_VERSION=9.0.2rc1" >> $env:GITHUB_ENV
     - name: Setup macOS
       if: runner.os == 'macOS'
       shell: bash

@@ -8,6 +8,8 @@ RUST_TARGET_TRIPLES = [
     "x86_64-apple-darwin",
     # Add support for macOS rosetta
     "aarch64-unknown-linux-gnu",
+    # Add support for Windows ARM64
+    "aarch64-pc-windows-msvc",
 ]
 
 # rules_rust
@@ -36,6 +38,7 @@ rust.toolchain(
         "x86_64-pc-windows-msvc": ["-Ctarget-feature=+sse4.2"],
         "aarch64-unknown-linux-gnu": ["-Ctarget-feature=+crc"],
         # No options needed for aarch64-apple-darwin: CRC feature is enabled by default.
+        # No options needed for aarch64-pc-windows-msvc: CRC feature is enabled by default on ARM64.
     },
     extra_target_triples = RUST_TARGET_TRIPLES,
     rustfmt_version = RUST_NIGHTLY_VERSION,

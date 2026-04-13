@@ -51,6 +51,8 @@ native_binary(
             "@bazel_tools//src/conditions:darwin_arm64": "@wasm_tools_macos_arm64//:wasm-tools",
             "@bazel_tools//src/conditions:darwin_x86_64": "@wasm_tools_macos_x64//:wasm-tools",
             "@bazel_tools//src/conditions:windows_x64": "@wasm_tools_windows_x64//:wasm-tools.exe",
+            # x64 binary runs under emulation on Windows ARM64
+            "@bazel_tools//src/conditions:windows_arm64": "@wasm_tools_windows_x64//:wasm-tools.exe",
         },
     ),
     out = "wasm-tools",
@@ -65,6 +67,8 @@ native_binary(
             "@bazel_tools//src/conditions:linux_aarch64": "@clang_tidy_linux_arm64//file:downloaded",
             "@bazel_tools//src/conditions:darwin_arm64": "@clang_tidy_darwin_arm64//file:downloaded",
             "@bazel_tools//src/conditions:windows_x64": "@clang_tidy_windows_amd64//file:downloaded",
+            # x64 binary runs under emulation on Windows ARM64
+            "@bazel_tools//src/conditions:windows_arm64": "@clang_tidy_windows_amd64//file:downloaded",
         },
     ),
     out = "clang_tidy",

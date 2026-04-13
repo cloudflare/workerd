@@ -37,6 +37,9 @@ rust_library(
         "socket2",
         "time",
     ] + select({
+        "@rules_rust//rust/platform:aarch64-pc-windows-msvc": [
+            "windows-sys",  # aarch64-pc-windows-msvc
+        ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "windows-sys",  # x86_64-pc-windows-msvc
         ],
@@ -68,6 +71,9 @@ rust_library(
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
             "@crates_vendor__libc-0.2.183//:libc",  # x86_64-apple-darwin
+        ],
+        "@rules_rust//rust/platform:aarch64-pc-windows-msvc": [
+            "@crates_vendor__windows-sys-0.61.2//:windows_sys",  # aarch64-pc-windows-msvc
         ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@crates_vendor__windows-sys-0.61.2//:windows_sys",  # x86_64-pc-windows-msvc

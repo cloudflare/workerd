@@ -37,6 +37,9 @@ oci_load(
     name = "load",
     image = ":image",
     repo_tags = ["cloudflare/workerd/container-client-test:latest"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -44,5 +47,8 @@ oci_load(
     name = "load-proxy-everything",
     image = "@proxy_everything",
     repo_tags = ["cloudflare/proxy-everything:main"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+    ],
     visibility = ["//visibility:public"],
 )

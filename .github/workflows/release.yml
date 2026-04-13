@@ -104,6 +104,11 @@ jobs:
             image: windows-2025-16core
             bazel-config: release_windows
             target-arch: X64
+          - title: windows-arm64
+            os-name: Windows
+            image: windows-11-arm
+            bazel-config: release_windows_arm64
+            target-arch: ARM64
     name: build (${{ matrix.title }})
     uses: './.github/workflows/_bazel.yml'
     with:
@@ -130,8 +135,6 @@ jobs:
     strategy:
       matrix:
         arch: [linux-64, darwin-64, windows-64]
-        # This variable itself is unused, but allows us to set up two macOS builds. arm64 builds for
-        # other platforms will be supported later, then we'll list both architectures here.
         cpu: [X64]
         include:
           - arch: linux-64
@@ -146,6 +149,9 @@ jobs:
             cpu: ARM64
           - arch: windows-64
             name: Windows-X64
+          - arch: windows-arm64
+            name: Windows-ARM64
+            cpu: ARM64
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v6
@@ -158,15 +164,15 @@ jobs:
           name: ${{ matrix.name }}-binary
           path: /tmp
       # Set execute permissions before compressing the binary
-      - if: matrix.arch != 'windows-64'
+      - if: ${{ !contains(matrix.arch, 'windows') }}
         run: chmod +x /tmp/workerd
       - name: Compress release binary
         run: |
           # As of release v1.20230404.0 the Linux x64 binary after debug_strip is 65.8 MB,
           # 21.0 MB with gzip and 17.3 MB with brotli -9. Use gzip as a widely supported format
           # which still produces an acceptable compressed size.
-          gzip -9N -k /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
-      - run: mv /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}.gz /tmp/workerd-${{ matrix.arch }}.gz
+          gzip -9N -k /tmp/workerd${{ contains(matrix.arch, 'windows') && '.exe' || '' }}
+      - run: mv /tmp/workerd${{ contains(matrix.arch, 'windows') && '.exe' || '' }}.gz /tmp/workerd-${{ matrix.arch }}.gz
       # Upload compressed release binaries – one set of artifacts is sufficient with gzip being
       # widely supported
       - name: Upload Release Assets
@@ -191,7 +197,7 @@ jobs:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - run: mkdir npm/workerd-${{ matrix.arch }}/bin
-      - run: cp /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }} npm/workerd-${{ matrix.arch }}/bin/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
+      - run: cp /tmp/workerd${{ contains(matrix.arch, 'windows') && '.exe' || '' }} npm/workerd-${{ matrix.arch }}/bin/workerd${{ contains(matrix.arch, 'windows') && '.exe' || '' }}
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd-${{ matrix.arch }}/.npmrc
       - run: cd npm/workerd-${{ matrix.arch }} && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
         env:

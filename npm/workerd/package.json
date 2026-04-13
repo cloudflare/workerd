@@ -18,6 +18,7 @@
     "@cloudflare/workerd-darwin-64": "1.20220926.0",
     "@cloudflare/workerd-linux-arm64": "1.20220926.0",
     "@cloudflare/workerd-linux-64": "1.20220926.0",
+    "@cloudflare/workerd-windows-arm64": "1.20220926.0",
     "@cloudflare/workerd-windows-64": "1.20220926.0"
   },
   "license": "Apache-2.0"

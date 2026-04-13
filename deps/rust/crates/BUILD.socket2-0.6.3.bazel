@@ -54,6 +54,9 @@ rust_library(
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
             "@crates_vendor__libc-0.2.183//:libc",  # cfg(any(unix, target_os = "wasi"))
         ],
+        "@rules_rust//rust/platform:aarch64-pc-windows-msvc": [
+            "@crates_vendor__windows-sys-0.61.2//:windows_sys",  # cfg(windows)
+        ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@crates_vendor__windows-sys-0.61.2//:windows_sys",  # cfg(windows)
         ],

@@ -37,6 +37,7 @@ jobs:
             { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm-16core },
             { name: macOS, arch: ARM64, image: macos-15-xlarge, use_lld: true },
             { name: windows, arch: X64, image: windows-2025-16core },
+            { name: windows-arm64, arch: ARM64, image: windows-11-arm },
           ]
         config: [
             # Default build: no suffix or additional bazel arguments
@@ -56,6 +57,8 @@ jobs:
           #   config: { suffix: -debug, bazel-args: --config=windows_dbg }
         exclude:
           - os: { name: windows, arch: X64, image: windows-2025-16core }
+            config: { suffix: -debug }
+          - os: { name: windows-arm64, arch: ARM64, image: windows-11-arm }
             config: { suffix: -debug }
           # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
           # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the

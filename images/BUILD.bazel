@@ -9,6 +9,9 @@ IMAGES = {
     command(
         name = name,
         command = target,
+        target_compatible_with = [
+            "@platforms//os:linux",
+        ],
     )
     for (name, target) in IMAGES.items()
 ]
@@ -16,4 +19,7 @@ IMAGES = {
 multirun(
     name = "load_all",
     commands = IMAGES.keys(),
+    target_compatible_with = [
+        "@platforms//os:linux",
+    ],
 )
