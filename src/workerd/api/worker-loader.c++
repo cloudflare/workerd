@@ -14,11 +14,12 @@ jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
     jsg::Optional<kj::Maybe<kj::String>> name,
     jsg::Optional<EntrypointOptions> options) {
   Frankenvalue props;
-
+  kj::Maybe<ResourceLimits> limits;
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(p, o.props) {
       props = Frankenvalue::fromJs(js, p.getHandle(js));
     }
+    limits = o.limits;
   }
 
   kj::Maybe<kj::String> entrypointName;
@@ -30,7 +31,7 @@ jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
     }
   }
 
-  auto subreqChannel = channel->getEntrypoint(kj::mv(entrypointName), kj::mv(props));
+  auto subreqChannel = channel->getEntrypoint(kj::mv(entrypointName), kj::mv(props), limits);
   return js.alloc<Fetcher>(IoContext::current().addObject(kj::mv(subreqChannel)));
 }
 
@@ -38,11 +39,12 @@ jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
     jsg::Optional<kj::Maybe<kj::String>> name,
     jsg::Optional<EntrypointOptions> options) {
   Frankenvalue props;
-
+  kj::Maybe<ResourceLimits> limits;
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(p, o.props) {
       props = Frankenvalue::fromJs(js, p.getHandle(js));
     }
+    limits = o.limits;
   }
 
   kj::Maybe<kj::String> entrypointName;
@@ -55,7 +57,7 @@ jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
   }
 
   return js.alloc<DurableObjectClass>(IoContext::current().addObject(
-      channel->getActorClass(kj::mv(entrypointName), kj::mv(props))));
+      channel->getActorClass(kj::mv(entrypointName), kj::mv(props), limits)));
 }
 
 jsg::Ref<WorkerStub> WorkerLoader::get(
@@ -157,6 +159,7 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
 
   return {.source = kj::mv(extractedSource),
     .compatibilityFlags = compatFlags,
+    .limits = code.limits,
     .env = kj::mv(env),
     .globalOutbound = kj::mv(globalOutbound),
     .tails = kj::mv(tailChannels),
