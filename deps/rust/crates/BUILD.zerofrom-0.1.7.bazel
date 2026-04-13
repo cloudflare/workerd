@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "capnp",
+    name = "zerofrom",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,21 +29,22 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
-        "default",
-        "std",
+        "derive",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__zerofrom-derive-0.1.7//:zerofrom_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=capnp",
+        "crate-name=zerofrom",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.25.3",
+    version = "0.1.7",
 )

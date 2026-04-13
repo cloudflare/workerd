@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "tinystr",
+    name = "icu_properties",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,25 +29,27 @@ rust_library(
         ],
     ),
     crate_features = [
-        "zerovec",
+        "compiled_data",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__displaydoc-0.2.5//:displaydoc",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=tinystr",
+        "crate-name=icu_properties",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.8.2",
+    version = "2.2.0",
     deps = [
-        "@crates_vendor__zerovec-0.11.5//:zerovec",
+        "@crates_vendor__icu_collections-2.2.0//:icu_collections",
+        "@crates_vendor__icu_locale_core-2.2.0//:icu_locale_core",
+        "@crates_vendor__icu_properties_data-2.2.0//:icu_properties_data",
+        "@crates_vendor__icu_provider-2.2.0//:icu_provider",
+        "@crates_vendor__zerotrie-0.2.4//:zerotrie",
+        "@crates_vendor__zerovec-0.11.6//:zerovec",
     ],
 )

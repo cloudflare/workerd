@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_proc_macro(
-    name = "yoke_derive",
+rust_library(
+    name = "icu_collections",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,21 +30,25 @@ rust_proc_macro(
     ),
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__displaydoc-0.2.5//:displaydoc",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=yoke-derive",
+        "crate-name=icu_collections",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.8.1",
+    version = "2.2.0",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.106//:proc_macro2",
-        "@crates_vendor__quote-1.0.45//:quote",
-        "@crates_vendor__syn-2.0.117//:syn",
-        "@crates_vendor__synstructure-0.13.2//:synstructure",
+        "@crates_vendor__potential_utf-0.1.5//:potential_utf",
+        "@crates_vendor__utf8_iter-1.0.4//:utf8_iter",
+        "@crates_vendor__yoke-0.8.2//:yoke",
+        "@crates_vendor__zerofrom-0.1.7//:zerofrom",
+        "@crates_vendor__zerovec-0.11.6//:zerovec",
     ],
 )

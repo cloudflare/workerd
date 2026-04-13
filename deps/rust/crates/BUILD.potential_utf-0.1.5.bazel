@@ -6,12 +6,12 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_proc_macro(
-    name = "zerofrom_derive",
+rust_library(
+    name = "potential_utf",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,9 @@ rust_proc_macro(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "zerovec",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,16 +38,13 @@ rust_proc_macro(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zerofrom-derive",
+        "crate-name=potential_utf",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.6",
+    version = "0.1.5",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.106//:proc_macro2",
-        "@crates_vendor__quote-1.0.45//:quote",
-        "@crates_vendor__syn-2.0.117//:syn",
-        "@crates_vendor__synstructure-0.13.2//:synstructure",
+        "@crates_vendor__zerovec-0.11.6//:zerovec",
     ],
 )

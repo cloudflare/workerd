@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "icu_normalizer_data",
+    name = "icu_properties_data",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -36,14 +36,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=icu_normalizer_data",
+        "crate-name=icu_properties_data",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.1.1",
+    version = "2.2.0",
     deps = [
-        "@crates_vendor__icu_normalizer_data-2.1.1//:build_script_build",
+        "@crates_vendor__icu_properties_data-2.2.0//:build_script_build",
     ],
 )
 
@@ -81,18 +81,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "icu_normalizer_data",
+    pkg_name = "icu_properties_data",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=icu_normalizer_data",
+        "crate-name=icu_properties_data",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.1.1",
+    version = "2.2.0",
     visibility = ["//visibility:private"],
 )
 

@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "indexmap",
+    name = "tinystr",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,24 +29,25 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
-        "std",
+        "zerovec",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__displaydoc-0.2.5//:displaydoc",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=indexmap",
+        "crate-name=tinystr",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.13.0",
+    version = "0.8.3",
     deps = [
-        "@crates_vendor__equivalent-1.0.2//:equivalent",
-        "@crates_vendor__hashbrown-0.16.1//:hashbrown",
+        "@crates_vendor__zerovec-0.11.6//:zerovec",
     ],
 )

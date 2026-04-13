@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "cc",
+    name = "tokio",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,37 +29,51 @@ rust_library(
         ],
     ),
     crate_features = [
-        "parallel",
-    ],
+        "libc",
+        "mio",
+        "net",
+        "rt",
+        "rt-multi-thread",
+        "socket2",
+        "time",
+    ] + select({
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "windows-sys",  # x86_64-pc-windows-msvc
+        ],
+        "//conditions:default": [],
+    }),
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cc",
+        "crate-name=tokio",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.58",
+    version = "1.51.1",
     deps = [
-        "@crates_vendor__find-msvc-tools-0.1.9//:find_msvc_tools",
-        "@crates_vendor__jobserver-0.1.34//:jobserver",
-        "@crates_vendor__shlex-1.3.0//:shlex",
+        "@crates_vendor__mio-1.2.0//:mio",
+        "@crates_vendor__pin-project-lite-0.2.17//:pin_project_lite",
+        "@crates_vendor__socket2-0.6.3//:socket2",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.183//:libc",  # aarch64-apple-darwin
+            "@crates_vendor__libc-0.2.185//:libc",  # aarch64-apple-darwin
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.183//:libc",  # aarch64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.185//:libc",  # aarch64-unknown-linux-gnu
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.183//:libc",  # x86_64-apple-darwin
+            "@crates_vendor__libc-0.2.185//:libc",  # x86_64-apple-darwin
+        ],
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__windows-sys-0.61.2//:windows_sys",  # x86_64-pc-windows-msvc
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.183//:libc",  # x86_64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.185//:libc",  # x86_64-unknown-linux-gnu
         ],
         "//conditions:default": [],
     }),

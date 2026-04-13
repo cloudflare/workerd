@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "wasm_bindgen_macro_support",
+    name = "semver",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,17 +39,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=wasm-bindgen-macro-support",
+        "crate-name=semver",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.115",
-    deps = [
-        "@crates_vendor__bumpalo-3.20.2//:bumpalo",
-        "@crates_vendor__proc-macro2-1.0.106//:proc_macro2",
-        "@crates_vendor__quote-1.0.45//:quote",
-        "@crates_vendor__syn-2.0.117//:syn",
-        "@crates_vendor__wasm-bindgen-shared-0.2.115//:wasm_bindgen_shared",
-    ],
+    version = "1.0.28",
 )

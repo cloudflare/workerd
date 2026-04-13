@@ -44,9 +44,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.25.2",
+    version = "0.25.3",
     deps = [
-        "@crates_vendor__capnp-0.25.3//:capnp",
+        "@crates_vendor__capnp-0.25.4//:capnp",
     ],
 )
 
@@ -80,10 +80,10 @@ rust_binary(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.25.2",
+    version = "0.25.3",
     deps = [
         ":capnpc",
-        "@crates_vendor__capnp-0.25.3//:capnp",
+        "@crates_vendor__capnp-0.25.4//:capnp",
     ],
 )
 
@@ -117,9 +117,9 @@ rust_binary(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.25.2",
+    version = "0.25.3",
     deps = [
         ":capnpc",
-        "@crates_vendor__capnp-0.25.3//:capnp",
+        "@crates_vendor__capnp-0.25.4//:capnp",
     ],
 )

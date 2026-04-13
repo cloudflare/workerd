@@ -46,7 +46,7 @@ rust_library(
     ],
     version = "0.13.1",
     deps = [
-        "@crates_vendor__fastrand-2.3.0//:fastrand",
+        "@crates_vendor__fastrand-2.4.1//:fastrand",
         "@crates_vendor__phf_shared-0.13.1//:phf_shared",
     ],
 )
@@ -84,7 +84,7 @@ rust_binary(
     version = "0.13.1",
     deps = [
         ":phf_generator",
-        "@crates_vendor__fastrand-2.3.0//:fastrand",
+        "@crates_vendor__fastrand-2.4.1//:fastrand",
         "@crates_vendor__phf_shared-0.13.1//:phf_shared",
     ],
 )

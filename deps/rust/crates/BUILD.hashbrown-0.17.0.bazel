@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "yoke",
+    name = "hashbrown",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,28 +28,17 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "derive",
-        "zerofrom",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__yoke-derive-0.8.1//:yoke_derive",
-    ],
+    edition = "2024",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=yoke",
+        "crate-name=hashbrown",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.8.1",
-    deps = [
-        "@crates_vendor__stable_deref_trait-1.2.1//:stable_deref_trait",
-        "@crates_vendor__zerofrom-0.1.6//:zerofrom",
-    ],
+    version = "0.17.0",
 )

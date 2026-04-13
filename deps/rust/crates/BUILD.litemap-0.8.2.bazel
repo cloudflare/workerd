@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "zerotrie",
+    name = "litemap",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,28 +28,17 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "yoke",
-        "zerofrom",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__displaydoc-0.2.5//:displaydoc",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zerotrie",
+        "crate-name=litemap",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.3",
-    deps = [
-        "@crates_vendor__yoke-0.8.1//:yoke",
-        "@crates_vendor__zerofrom-0.1.6//:zerofrom",
-    ],
+    version = "0.8.2",
 )

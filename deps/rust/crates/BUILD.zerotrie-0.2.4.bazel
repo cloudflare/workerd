@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "zerofrom",
+    name = "zerotrie",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,22 +29,27 @@ rust_library(
         ],
     ),
     crate_features = [
-        "derive",
+        "yoke",
+        "zerofrom",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
     proc_macro_deps = [
-        "@crates_vendor__zerofrom-derive-0.1.6//:zerofrom_derive",
+        "@crates_vendor__displaydoc-0.2.5//:displaydoc",
     ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zerofrom",
+        "crate-name=zerotrie",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.6",
+    version = "0.2.4",
+    deps = [
+        "@crates_vendor__yoke-0.8.2//:yoke",
+        "@crates_vendor__zerofrom-0.1.7//:zerofrom",
+    ],
 )

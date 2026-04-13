@@ -68,14 +68,14 @@ alias(
 )
 
 alias(
-    name = "capnp-0.25.3",
-    actual = "@crates_vendor__capnp-0.25.3//:capnp",
+    name = "capnp-0.25.4",
+    actual = "@crates_vendor__capnp-0.25.4//:capnp",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.25.3//:capnp",
+    actual = "@crates_vendor__capnp-0.25.4//:capnp",
     tags = ["manual"],
 )
 
@@ -92,26 +92,26 @@ alias(
 )
 
 alias(
-    name = "capnpc-0.25.2",
-    actual = "@crates_vendor__capnpc-0.25.2//:capnpc",
+    name = "capnpc-0.25.3",
+    actual = "@crates_vendor__capnpc-0.25.3//:capnpc",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc",
-    actual = "@crates_vendor__capnpc-0.25.2//:capnpc",
+    actual = "@crates_vendor__capnpc-0.25.3//:capnpc",
     tags = ["manual"],
 )
 
 alias(
-    name = "cc-1.2.58",
-    actual = "@crates_vendor__cc-1.2.58//:cc",
+    name = "cc-1.2.60",
+    actual = "@crates_vendor__cc-1.2.60//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.58//:cc",
+    actual = "@crates_vendor__cc-1.2.60//:cc",
     tags = ["manual"],
 )
 
@@ -398,14 +398,14 @@ alias(
 )
 
 alias(
-    name = "tokio-1.50.0",
-    actual = "@crates_vendor__tokio-1.50.0//:tokio",
+    name = "tokio-1.51.1",
+    actual = "@crates_vendor__tokio-1.51.1//:tokio",
     tags = ["manual"],
 )
 
 alias(
     name = "tokio",
-    actual = "@crates_vendor__tokio-1.50.0//:tokio",
+    actual = "@crates_vendor__tokio-1.51.1//:tokio",
     tags = ["manual"],
 )
 
@@ -424,13 +424,13 @@ alias(
 # Binaries
 alias(
     name = "capnpc__capnpc-rust",
-    actual = "@crates_vendor__capnpc-0.25.2//:capnpc-rust__bin",
+    actual = "@crates_vendor__capnpc-0.25.3//:capnpc-rust__bin",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc__capnpc-rust-bootstrap",
-    actual = "@crates_vendor__capnpc-0.25.2//:capnpc-rust-bootstrap__bin",
+    actual = "@crates_vendor__capnpc-0.25.3//:capnpc-rust-bootstrap__bin",
     tags = ["manual"],
 )
 

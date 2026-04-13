@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "icu_locale_core",
+    name = "capnp",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,28 +29,21 @@ rust_library(
         ],
     ),
     crate_features = [
-        "zerovec",
+        "alloc",
+        "default",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__displaydoc-0.2.5//:displaydoc",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=icu_locale_core",
+        "crate-name=capnp",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.1.1",
-    deps = [
-        "@crates_vendor__litemap-0.8.1//:litemap",
-        "@crates_vendor__tinystr-0.8.2//:tinystr",
-        "@crates_vendor__writeable-0.6.2//:writeable",
-        "@crates_vendor__zerovec-0.11.5//:zerovec",
-    ],
+    version = "0.25.4",
 )

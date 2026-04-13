@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "zerovec",
+    name = "writeable",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,28 +28,17 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "derive",
-        "yoke",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__zerovec-derive-0.11.2//:zerovec_derive",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zerovec",
+        "crate-name=writeable",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.11.5",
-    deps = [
-        "@crates_vendor__yoke-0.8.1//:yoke",
-        "@crates_vendor__zerofrom-0.1.6//:zerofrom",
-    ],
+    version = "0.6.3",
 )
