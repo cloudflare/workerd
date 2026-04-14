@@ -103,6 +103,15 @@ class WorkerInterface: public kj::HttpService {
   // Trigger an alarm event with the given scheduled (unix timestamp) time.
   virtual kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) = 0;
 
+  // Called when AlarmManager has given up retrying an alarm after too many counted failures.
+  // The actor should clear its alarm state so getAlarm() reflects the deletion.
+  // Returns the actor's stored alarm time if it differs from scheduledTime (i.e. the user set a
+  // new alarm), or kj::none if the alarm was cleared or no alarm was stored.
+  // Default is a no-op so subclasses that don't host actors need not override it.
+  virtual kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) {
+    return kj::Maybe<kj::Date>(kj::none);
+  }
+
   // Run the test handler. The returned promise resolves to true or false to indicate that the test
   // passed or failed. In the case of a failure, information should have already been written to
   // stderr and to the devtools; there is no need for the caller to write anything further. (If the
@@ -253,6 +262,16 @@ class LazyWorkerInterface final: public WorkerInterface {
     }
   }
 
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    ensureResolve();
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w->abandonAlarm(scheduledTime);
+    } else {
+      co_await KJ_ASSERT_NONNULL(promise);
+      co_return co_await KJ_ASSERT_NONNULL(worker)->abandonAlarm(scheduledTime);
+    }
+  }
+
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     ensureResolve();
     KJ_IF_SOME(w, worker) {
@@ -312,6 +331,7 @@ class RpcWorkerInterface final: public WorkerInterface {
   kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
  private:

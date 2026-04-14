@@ -200,7 +200,7 @@ template <typename T>
 class IoOwn {
 
  public:
-  IoOwn(IoOwn&& other);
+  IoOwn(IoOwn&& other) noexcept;
   IoOwn(decltype(nullptr)): item(nullptr) {}
   ~IoOwn() noexcept(false);
   KJ_DISALLOW_COPY(IoOwn);
@@ -276,7 +276,7 @@ class IoPtr {
 template <typename T>
 class ReverseIoOwn {
  public:
-  ReverseIoOwn(ReverseIoOwn&& other);
+  ReverseIoOwn(ReverseIoOwn&& other) noexcept;
   ReverseIoOwn(decltype(nullptr)): item(nullptr) {}
   ~ReverseIoOwn() noexcept(false);
   KJ_DISALLOW_COPY(ReverseIoOwn);
@@ -312,8 +312,8 @@ class ReverseIoOwn {
 };
 
 template <typename T>
-IoOwn<T>::IoOwn(IoOwn&& other): deleteQueue(kj::mv(other.deleteQueue)),
-                                item(other.item) {
+IoOwn<T>::IoOwn(IoOwn&& other) noexcept: deleteQueue(kj::mv(other.deleteQueue)),
+                                         item(other.item) {
   other.item = nullptr;
 }
 
@@ -383,7 +383,7 @@ inline T* IoPtr<T>::operator->() {
 }
 
 template <typename T>
-ReverseIoOwn<T>::ReverseIoOwn(ReverseIoOwn&& other)
+ReverseIoOwn<T>::ReverseIoOwn(ReverseIoOwn&& other) noexcept
     : weakRef(kj::mv(other.weakRef)),
       item(other.item) {
   other.item = nullptr;

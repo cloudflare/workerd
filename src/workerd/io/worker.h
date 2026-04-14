@@ -46,6 +46,7 @@ struct CryptoAlgorithm;
 struct QueueExportedHandler;
 class WebSocket;
 class WebSocketRequestResponsePair;
+class CacheContext;
 class ExecutionContext;
 namespace pyodide {
 struct ArtifactBundler_State;
@@ -376,12 +377,14 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
 
   // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
-  // The signal offset is optional: when kj::none, the module will only receive the terminated
-  // flag but will not get the SIGXCPU warning. See TrackedWasmInstanceList::registerSignal().
+  // At least one of signalOffset or terminatedOffset must be provided. The instance handle is
+  // used to create a weak reference for GC-based cleanup. See
+  // TrackedWasmInstanceList::registerSignal().
   void registerTrackedWasmInstance(jsg::Lock& js,
+      v8::Local<v8::Object> instance,
       kj::Array<kj::byte> memory,
       kj::Maybe<uint32_t> signalOffset,
-      uint32_t terminatedOffset) const;
+      kj::Maybe<uint32_t> terminatedOffset) const;
 
   inline IsolateObserver& getMetrics() {
     return *metrics;
@@ -662,6 +665,10 @@ class Worker::Api {
   // params.
   virtual jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
+
+  // Hook for the embedding application to provide a CacheContext for the ctx.cache property.
+  // The default implementation returns kj::none (undefined).
+  virtual jsg::Optional<jsg::Ref<api::CacheContext>> getCtxCacheProperty(jsg::Lock& js) const;
 
   virtual const jsg::IsolateObserver& getObserver() const = 0;
   virtual void setIsolateObserver(IsolateObserver&) = 0;

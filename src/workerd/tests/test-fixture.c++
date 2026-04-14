@@ -97,55 +97,6 @@ struct RealTimerChannel final: public TimerChannel {
   kj::Timer& timer;
 };
 
-struct DummyIoChannelFactory final: public IoChannelFactory {
-  DummyIoChannelFactory(TimerChannel& timer): timer(timer) {}
-
-  kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
-    KJ_FAIL_ASSERT("no subrequests");
-  }
-
-  kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
-      kj::Maybe<Frankenvalue> props,
-      kj::Maybe<VersionRequest> versionRequest) override {
-    KJ_FAIL_ASSERT("no subrequests");
-  }
-
-  capnp::Capability::Client getCapability(uint channel) override {
-    KJ_FAIL_ASSERT("no capabilities");
-  }
-
-  kj::Own<CacheClient> getCache() override {
-    return kj::heap<MockCacheClient>();
-  }
-
-  TimerChannel& getTimer() override {
-    return timer;
-  }
-
-  kj::Promise<void> writeLogfwdr(
-      uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) override {
-    KJ_FAIL_ASSERT("no log channels");
-  }
-
-  kj::Own<ActorChannel> getGlobalActor(uint channel,
-      const ActorIdFactory::ActorId& id,
-      kj::Maybe<kj::String> locationHint,
-      ActorGetMode mode,
-      bool enableReplicaRouting,
-      ActorRoutingMode routingMode,
-      SpanParent parentSpan,
-      kj::Maybe<ActorVersion> version) override {
-    KJ_FAIL_REQUIRE("no actor channels");
-  }
-
-  kj::Own<ActorChannel> getColoLocalActor(
-      uint channel, kj::StringPtr id, SpanParent parentSpan) override {
-    KJ_FAIL_REQUIRE("no actor channels");
-  }
-
-  TimerChannel& timer;
-};
-
 static constexpr kj::StringPtr mainModuleSource = R"SCRIPT(
   export default {
     fetch(request) { return new Response("OK"); },
@@ -206,6 +157,9 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
     return 0 * kj::SECONDS;
+  }
+  size_t getSqliteMemoryUsage() const override {
+    return 0;
   }
 };
 
@@ -341,6 +295,11 @@ class MockActorLoopback: public Worker::Actor::Loopback, public kj::Refcounted {
 
 }  // namespace
 
+// Out-of-line because it references file-local MockCacheClient from the anonymous namespace above.
+kj::Own<CacheClient> TestFixture::DummyIoChannelFactory::getCache() {
+  return kj::heap<MockCacheClient>();
+}
+
 using api::pyodide::PythonConfig;
 
 const PythonConfig defaultPythonConfig{.packageDiskCacheRoot = kj::none,
@@ -408,7 +367,8 @@ TestFixture::TestFixture(SetupParams&& params)
           Worker::LockType(Worker::Lock::TakeSynchronously(kj::none)))),
       errorHandler(kj::heap<DummyErrorHandler>()),
       waitUntilTasks(*errorHandler),
-      headerTable(headerTableBuilder.build()) {
+      headerTable(headerTableBuilder.build()),
+      ioChannelFactory(kj::mv(params.ioChannelFactory)) {
   KJ_IF_SOME(id, params.actorId) {
     auto makeActorCache = [](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
                               ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
@@ -462,9 +422,14 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
   auto context = kj::refcounted<IoContext>(
       threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
+  kj::Own<IoChannelFactory> channelFactory;
+  KJ_IF_SOME(factory, ioChannelFactory) {
+    channelFactory = factory(*timerChannel);
+  } else {
+    channelFactory = kj::heap<DummyIoChannelFactory>(*timerChannel);
+  }
   auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(*context),
-      kj::heap<DummyIoChannelFactory>(*timerChannel), kj::refcounted<RequestObserver>(), kj::none,
-      kj::none);
+      kj::mv(channelFactory), kj::refcounted<RequestObserver>(), kj::none, kj::none);
   incomingRequest->delivered();
   return incomingRequest;
 }

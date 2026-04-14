@@ -24,6 +24,14 @@
 namespace workerd {
 namespace {
 
+struct GlobalInit {
+  GlobalInit() {
+    installSqliteCustomAllocator();
+  }
+};
+
+static GlobalInit init;
+
 // Initialize the database with some data.
 void setupSql(SqliteDatabase& db) {
   // TODO(sqlite): Do this automatically and don't permit it via run().
@@ -271,6 +279,12 @@ KJ_TEST("Read-only database picks up on changes from mutable database (in-memory
 }
 
 KJ_TEST("Read-only database picks up on changes from mutable database (on-disk)") {
+#if !_WIN32
+  // doReadOnlyUpdateTest triggers the subsequent error in our memory metering because it creates
+  // two databases in the same thread. This will not happen in production. The on-disk test variant
+  // is impacted because it uses SQLite's native OS VFS, which can enable shared memory.
+  KJ_EXPECT_LOG(ERROR, "sqliteMemFree would have triggered a memoryBytes underflow.");
+#endif
   TempDirOnDisk dir;
   doReadOnlyUpdateTest(*dir);
 }
@@ -847,8 +861,8 @@ KJ_TEST("SQLite observer addQueryStats") {
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver = TestSqliteObserver();
   TestQueryStatsRegulator regulator;
-  SqliteDatabase db(
-      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, sqliteObserver);
 
   db.run(R"(
     CREATE TABLE things (
@@ -938,8 +952,8 @@ KJ_TEST("SQLite observer reportQueryEvent") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver;
-  SqliteDatabase db(
-      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, sqliteObserver);
 
   db.run("PRAGMA journal_mode=WAL;");
 
@@ -1586,6 +1600,59 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
     KJ_UNIMPLEMENTED("this method is unused by SQLite");
   }
 };
+
+KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  // 64 KiB is large enough for the database to open and run simple queries,
+  // but zeroblob(65536) requires allocating a 64 KiB buffer which, on top of
+  // the memory already consumed by opening the database, pushes total usage
+  // past the limit. This exercises our sqliteMemMalloc limit enforcement
+  // rather than SQLite's own hard_heap_limit pragma.
+  static constexpr size_t kTestMemoryLimit = 64 * 1024;
+  SqliteDatabase db(
+      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, kTestMemoryLimit);
+  KJ_EXPECT_THROW_MESSAGE("out of memory: SQLITE_NOMEM", db.run("SELECT hex(zeroblob(65536))"));
+}
+
+KJ_TEST("SQLite memory metering tracks allocations correctly") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/1024 * 1024);
+  size_t memoryBytes = db.getSqliteMemoryBytes();
+  KJ_EXPECT(memoryBytes > 0, "memory should be greater than zero after creating a database");
+  size_t memoryBytesSnapshot = memoryBytes;
+
+  db.run("CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)");
+  memoryBytes = db.getSqliteMemoryBytes();
+  KJ_EXPECT(memoryBytes >= memoryBytesSnapshot, "memory should not decrease when creating a table");
+  memoryBytesSnapshot = memoryBytes;
+
+  db.run("INSERT INTO test VALUES (1, 'hello world')");
+  memoryBytes = db.getSqliteMemoryBytes();
+  KJ_EXPECT(
+      memoryBytes >= memoryBytesSnapshot, "memory should not decrease when inserting into a table");
+  memoryBytesSnapshot = memoryBytes;
+
+  {
+    // Note that query has a different scope so that it does not prevent `PRAGMA shrink_memory`
+    // from taking effect.
+    auto query = db.run("SELECT * FROM test WHERE id = 1");
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getInt(0) == 1);
+    KJ_EXPECT(query.getText(1) == "hello world");
+    memoryBytes = db.getSqliteMemoryBytes();
+    KJ_EXPECT(
+        memoryBytes >= memoryBytesSnapshot, "memory should not decrease when querying a table");
+    memoryBytesSnapshot = memoryBytes;
+  }
+
+  db.run("PRAGMA shrink_memory");
+  memoryBytes = db.getSqliteMemoryBytes();
+  KJ_EXPECT(memoryBytes < memoryBytesSnapshot,
+      "memory should decrease when running `PRAGMA shrink_memory`");
+}
 
 KJ_TEST("I/O exceptions pass through SQLite") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();

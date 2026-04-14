@@ -481,6 +481,7 @@ export interface ExecutionContext<Props = unknown> {
   passThroughOnException(): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
+  cache?: CacheContext;
 }
 export type ExportedHandlerFetchHandler<
   Env = unknown,
@@ -563,6 +564,23 @@ export interface AlarmInvocationInfo {
 }
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
+}
+export interface CachePurgeError {
+  code: number;
+  message: string;
+}
+export interface CachePurgeResult {
+  success: boolean;
+  zoneTag: string;
+  errors: CachePurgeError[];
+}
+export interface CachePurgeOptions {
+  tags?: string[];
+  pathPrefixes?: string[];
+  purgeEverything?: boolean;
+}
+export interface CacheContext {
+  purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
 export declare abstract class ColoLocalActorNamespace {
   get(actorId: string): Fetcher;
@@ -3951,6 +3969,7 @@ export interface WorkerStub {
 }
 export interface WorkerStubEntrypointOptions {
   props?: any;
+  limits?: workerdResourceLimits;
 }
 export interface WorkerLoader {
   get(
@@ -3972,12 +3991,17 @@ export interface WorkerLoaderWorkerCode {
   compatibilityDate: string;
   compatibilityFlags?: string[];
   allowExperimental?: boolean;
+  limits?: workerdResourceLimits;
   mainModule: string;
   modules: Record<string, WorkerLoaderModule | string>;
   env?: any;
   globalOutbound?: Fetcher | null;
   tails?: Fetcher[];
   streamingTails?: Fetcher[];
+}
+export interface workerdResourceLimits {
+  cpuMs?: number;
+  subRequests?: number;
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
@@ -10340,6 +10364,10 @@ export declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+export declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -10495,6 +10523,9 @@ export type ChatCompletionsInput = XOR<
 export interface InferenceUpstreamError extends Error {}
 export interface AiInternalError extends Error {}
 export type AiModelListType = Record<string, any>;
+export type AiAsyncBatchResponse = {
+  request_id: string;
+};
 export declare abstract class Ai<
   AiModelList extends AiModelListType = AiModels,
 > {
@@ -10513,29 +10544,52 @@ export declare abstract class Ai<
    * @param autoragId Instance ID
    */
   autorag(autoragId: string): AutoRAG;
-  run<
-    Name extends keyof AiModelList,
-    Options extends AiOptions,
-    InputOptions extends AiModelList[Name]["inputs"],
-  >(
+  // Batch request
+  run<Name extends keyof AiModelList>(
     model: Name,
-    inputs: InputOptions,
-    options?: Options,
-  ): Promise<
-    Options extends
-      | {
-          returnRawResponse: true;
-        }
-      | {
-          websocket: true;
-        }
-      ? Response
-      : InputOptions extends {
-            stream: true;
-          }
-        ? ReadableStream
-        : AiModelList[Name]["postProcessedOutputs"]
-  >;
+    inputs: {
+      requests: AiModelList[Name]["inputs"][];
+    },
+    options: AiOptions & {
+      queueRequest: true;
+    },
+  ): Promise<AiAsyncBatchResponse>;
+  // Raw response
+  run<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]["inputs"],
+    options: AiOptions & {
+      returnRawResponse: true;
+    },
+  ): Promise<Response>;
+  // WebSocket
+  run<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]["inputs"],
+    options: AiOptions & {
+      websocket: true;
+    },
+  ): Promise<Response>;
+  // Streaming
+  run<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]["inputs"] & {
+      stream: true;
+    },
+    options?: AiOptions,
+  ): Promise<ReadableStream>;
+  // Normal (default) - known model
+  run<Name extends keyof AiModelList>(
+    model: Name,
+    inputs: AiModelList[Name]["inputs"],
+    options?: AiOptions,
+  ): Promise<AiModelList[Name]["postProcessedOutputs"]>;
+  // Unknown model (gateway fallback)
+  run(
+    model: string & {},
+    inputs: Record<string, unknown>,
+    options?: AiOptions,
+  ): Promise<Record<string, unknown>>;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
   toMarkdown(): ToMarkdownService;
   toMarkdown(
@@ -10664,6 +10718,7 @@ export declare abstract class AiGateway {
     options?: {
       gateway?: UniversalGatewayOptions;
       extraHeaders?: object;
+      signal?: AbortSignal;
     },
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line

@@ -115,9 +115,71 @@ namespace {
 jsg::JsObject ProcessModule::getVersions(jsg::Lock& js) const {
   // Node.js version - represents the most current Node.js version supported
   // by the platform, as defined in node-version.h
-  static const kj::StringPtr key = "node"_kj;
-  jsg::JsValue value = js.str(nodeVersion);
-  return js.obj(kj::arrayPtr(key), kj::arrayPtr(value));
+  // We don't want to provide real versions, these are provided as empty strings just for compat.
+
+  static const kj::StringPtr keys[] = {
+    "node"_kj,
+    "v8"_kj,
+    "modules"_kj,
+    "zlib"_kj,
+    "brotli"_kj,
+    "zstd"_kj,
+    "ares"_kj,
+    "napi"_kj,
+    "llhttp"_kj,
+    "nghttp2"_kj,
+    "acorn"_kj,
+    "ada"_kj,
+    "simdutf"_kj,
+    "nbytes"_kj,
+    "ncrypto"_kj,
+    "uvwasi"_kj,
+    "uv"_kj,
+    "openssl"_kj,
+    "sqlite"_kj,
+    "icu"_kj,
+    "undici"_kj,
+    "simdjson"_kj,
+    "unicode"_kj,
+    "cldr"_kj,
+    "tz"_kj,
+    "cjs_module_lexer"_kj,
+    "amaro"_kj,
+    "merve"_kj,
+  };
+
+  jsg::JsValue values[] = {
+    js.str(nodeVersion),  // node
+    js.str(""_kj),        // v8
+    js.str(""_kj),        // modules (Node.js ABI version)
+    js.str(""_kj),        // zlib
+    js.str(""_kj),        // brotli
+    js.str(""_kj),        // zstd
+    js.str(""_kj),        // ares
+    js.str(""_kj),        // napi
+    js.str(""_kj),        // llhttp
+    js.str(""_kj),        // nghttp2
+    js.str(""_kj),        // acorn
+    js.str(""_kj),        // ada
+    js.str(""_kj),        // simdutf
+    js.str(""_kj),        // nbytes
+    js.str(""_kj),        // ncrypto
+    js.str(""_kj),        // uvwasi
+    js.str(""_kj),        // uv
+    js.str(""_kj),        // openssl (BoringSSL compat)
+    js.str(""_kj),        // sqlite
+    js.str(""_kj),        // icu
+    js.str(""_kj),        // undici
+    js.str(""_kj),        // simdjson
+    js.str(""_kj),        // unicode
+    js.str(""_kj),        // cldr
+    js.str(""_kj),        // tz
+    js.str(""_kj),        // cjs_module_lexer
+    js.str(""_kj),        // amaro
+    js.str(""_kj),        // merve
+  };
+
+  return js.obj(kj::arrayPtr(keys, kj::size(keys)), kj::arrayPtr(values, kj::size(values)));
 }
 
 kj::StringPtr ProcessModule::getPlatform(jsg::Lock& js) const {

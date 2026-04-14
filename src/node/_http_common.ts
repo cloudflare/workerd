@@ -16,14 +16,20 @@ export {
   chunkExpression,
   kIncomingMessage,
 };
+export const CRLF = '\r\n';
 export const continueExpression = /(?:^|\W)100-continue(?:$|\W)/i;
 export const methods = METHODS;
+// In Node.js, parsers is a FreeList instance for managing HTTP parser objects.
+// We provide a stub with the expected properties for compatibility.
+export const parsers = { name: 'parsers', max: 1000 };
 
 export default {
   _checkIsHttpToken,
   _checkInvalidHeaderChar,
   chunkExpression,
+  CRLF,
   continueExpression,
   methods,
+  parsers,
   kIncomingMessage,
 };

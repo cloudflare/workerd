@@ -207,11 +207,25 @@ export const features = Object.freeze({
   debug: false,
   // A boolean value that is true if the current Node.js build includes the inspector.
   inspector: false,
+  // A boolean value that is true if the current Node.js build supports IPv6.
+  ipv6: true,
+  // A boolean value that is true if the current Node.js build uses BoringSSL instead of OpenSSL.
+  openssl_is_boringssl: true,
   // A boolean value that is true if the current Node.js build supports loading ECMAScript modules using require().
   // TODO(soon): Update this when we support ESM modules through require().
   require_module: false,
   // A boolean value that is true if the current Node.js build includes support for TLS.
   tls: true,
+  // A boolean value that is true if the current Node.js build supports TLS ALPN.
+  tls_alpn: true,
+  // A boolean value that is true if the current Node.js build supports TLS OCSP.
+  tls_ocsp: true,
+  // A boolean value that is true if the current Node.js build supports TLS SNI.
+  tls_sni: true,
+  // A string indicating the level of TypeScript support. 'strip' means type stripping only.
+  typescript: false as string | boolean,
+  // A boolean value that is true if the current Node.js build includes libuv.
+  uv: true,
 });
 
 export function emitWarning(

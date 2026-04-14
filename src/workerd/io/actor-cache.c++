@@ -178,7 +178,7 @@ kj::OneOf<ActorCache::CancelAlarmHandler, ActorCache::RunAlarmHandler> ActorCach
       if (t.status == KnownAlarmTime::Status::CLEAN) {
         // If there's a clean scheduledTime that is different from ours, this run should be
         // canceled.
-        LOG_WARNING_PERIODICALLY("NOSENTRY CRDB alarm handler canceled.", scheduledTime,
+        LOG_WARNING_PERIODICALLY("NOSENTRY actor-cache alarm handler canceled.", scheduledTime,
             t.time.orDefault(kj::UNIX_EPOCH), actorId);
         return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
       } else {
@@ -208,6 +208,27 @@ void ActorCache::cancelDeferredAlarmDeletion() {
       .time = deferredDelete.timeToDelete,
       .noCache = deferredDelete.noCache};
   }
+}
+
+kj::Promise<kj::Maybe<kj::Date>> ActorCache::abandonAlarm(kj::Date scheduledTime) {
+  // Called when AlarmManager has given up retrying an alarm after too many counted failures.
+  // Reset the in-memory alarm state to unknown so the next getAlarm() refetches from storage
+  // rather than serving a potentially stale cached value.
+  // Only act if we still have a clean KnownAlarmTime whose time matches the abandoned alarm.
+  KJ_IF_SOME(t, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+    KJ_IF_SOME(storedTime, t.time) {
+      if (t.status == KnownAlarmTime::Status::CLEAN) {
+        if (storedTime == scheduledTime) {
+          currentAlarmTime = UnknownAlarmTime{};
+          return kj::Maybe<kj::Date>(kj::none);
+        } else {
+          // The user set a different alarm. Return it so AlarmManager can re-register.
+          return kj::Maybe<kj::Date>(storedTime);
+        }
+      }
+    }
+  }
+  return kj::Maybe<kj::Date>(kj::none);
 }
 
 kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {

@@ -76,6 +76,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override;
   kj::Promise<bool> test() override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
@@ -804,11 +805,11 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         if (result.outcome == EventOutcome::OK) {
           // When an alarm handler completes its execution, the alarm is marked ready for deletion in
           // actor-cache. This alarm change will only be reflected in the alarmsXX table, once cache
-          // flushes and changes are written to CRDB.
+          // flushes and changes are written to storage.
           // If there are any pending flushes, they are locked with the actor output gate until
           // they complete. We should wait until the output gate locks are released.
           // If we don't wait, it's possible for alarm manager to pull the wrong alarm value (the
-          // same alarm that just completed) from CRDB before these changes are actually made,
+          // same alarm that just completed) from storage before these changes are actually made,
           // rerunning it, when it shouldn't.
           co_await actor.getOutputGate().wait(context.getCurrentTraceSpan());
         }
@@ -849,6 +850,19 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
     t.setReturn(context.now());
   }
   co_return result;
+}
+
+kj::Promise<kj::Maybe<kj::Date>> WorkerEntrypoint::abandonAlarm(kj::Date scheduledTime) {
+  TRACE_EVENT("workerd", "WorkerEntrypoint::abandonAlarm()");
+  // This does not require running the user's alarm handler -- it's a pure actor-state cleanup.
+  // Access the actor directly from the IoContext without going through the JS dispatch machinery.
+  auto& req =
+      KJ_REQUIRE_NONNULL(incomingRequest, "abandonAlarm() called without an incoming request");
+  auto& actor = KJ_REQUIRE_NONNULL(
+      req->getContext().getActor(), "abandonAlarm() should only work with actors");
+  auto& persistent = KJ_REQUIRE_NONNULL(
+      actor.getPersistent(), "abandonAlarm() requires actor with persistent storage");
+  return persistent.abandonAlarm(scheduledTime);
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {

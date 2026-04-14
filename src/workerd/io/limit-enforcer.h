@@ -188,6 +188,9 @@ class LimitEnforcer {
 
   // Only used downstream for internal metrics.
   virtual kj::Duration consumeTimeElapsedForPeriodicLogging() = 0;
+
+  // Only used for internal metrics.
+  virtual size_t getSqliteMemoryUsage() const = 0;
 };
 
 }  // namespace workerd

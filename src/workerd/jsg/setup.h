@@ -353,7 +353,7 @@ class IsolateBase {
         wrappable->removeStrongRef();
       }
     }
-    RefToDelete(RefToDelete&&) = default;
+    RefToDelete(RefToDelete&&) noexcept = default;
 
     // Default move ctor okay because ownWrappable.get() will be null if moved-from.
     KJ_DISALLOW_COPY(RefToDelete);
@@ -365,7 +365,17 @@ class IsolateBase {
     Wrappable* wrappable;
   };
 
-  using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete, kj::Own<void>>;
+  class GlobalToDelete {
+    // wrapper around v8::Global<v8::Data> with noexcept move constructor.
+   public:
+    GlobalToDelete(v8::Global<v8::Data> handle) noexcept: handle(kj::mv(handle)) {}
+    GlobalToDelete(GlobalToDelete&&) noexcept = default;
+    KJ_DISALLOW_COPY(GlobalToDelete);
+
+   private:
+    v8::Global<v8::Data> handle;
+  };
+  using Item = kj::OneOf<GlobalToDelete, RefToDelete, kj::Own<void>>;
 
   V8System& v8System;
   // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
@@ -472,6 +482,7 @@ class IsolateBase {
   }
 
   // Add an item to the deferred destruction queue. Safe to call from any thread at any time.
+  void deferDestruction(v8::Global<v8::Data> item);
   void deferDestruction(Item item);
 
   // Destroy everything in the deferred destruction queue and apply deferred external memory

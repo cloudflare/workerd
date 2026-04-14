@@ -816,6 +816,15 @@ interface EventDispatcher @0xf20697475ec1752d {
   obsolete7 @7();
   # Deleted methods, do not reuse these numbers.
 
+  abandonAlarm @11 (scheduledTimeMs :Int64) -> (storedAlarmTimeMs :Int64) $Cxx.allowCancellation;
+  # Called by AlarmManager when it has given up retrying an alarm after too many counted failures.
+  # The actor should clear its alarm state (ActorCache / SQLite) so that getAlarm() correctly
+  # reflects that no alarm will ever fire for this scheduled time again.
+  #
+  # Returns the actor's current alarm time (in ms since epoch) if it differs from scheduledTimeMs,
+  # indicating the user set a new alarm that should still fire. Returns 0 if the alarm was cleared
+  # or no alarm was stored.
+
   # Other methods might be added to handle other kinds of events, e.g. TCP connections, or maybe
   # even native Cap'n Proto RPC eventually.
 }

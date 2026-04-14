@@ -30,6 +30,7 @@ namespace workerd::api {
 class TailEvent;
 class Cache;
 class CacheStorage;
+class JsRpcProperty;
 class Crypto;
 class CryptoKey;
 class ErrorEvent;
@@ -191,6 +192,46 @@ class TestController: public jsg::Object {
   JSG_RESOURCE_TYPE(TestController) {}
 };
 
+// Structured types for the cache purge API (ctx.cache.purge()).
+// These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
+struct CachePurgeError {
+  int code;
+  kj::String message;
+  JSG_STRUCT(code, message);
+};
+
+struct CachePurgeResult {
+  bool success;
+  kj::String zoneTag;
+  kj::Array<CachePurgeError> errors;
+  JSG_STRUCT(success, zoneTag, errors);
+};
+
+struct CachePurgeOptions {
+  jsg::Optional<kj::Array<kj::String>> tags;
+  jsg::Optional<kj::Array<kj::String>> pathPrefixes;
+  jsg::Optional<bool> purgeEverything;
+  JSG_STRUCT(tags, pathPrefixes, purgeEverything);
+};
+
+// Base class for the ctx.cache object on cache enabled Workers.
+// Subclass when embedding to provide an implementation.
+class CacheContext: public jsg::Object {
+ public:
+  // Purge cached content.
+  //
+  // The default implementation throws without an overriding IoContext.
+  virtual jsg::Promise<CachePurgeResult> purge(jsg::Lock& js,
+      CachePurgeOptions options,
+      const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
+      const jsg::TypeHandler<CachePurgeResult>& resultHandler,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
+
+  JSG_RESOURCE_TYPE(CacheContext) {
+    JSG_METHOD(purge);
+  }
+};
+
 class ExecutionContext: public jsg::Object {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
@@ -228,6 +269,11 @@ class ExecutionContext: public jsg::Object {
     return props.getHandle(js);
   }
 
+  // Returns a CacheContext for cache-enabled workers, or empty jsg::Optional otherwise.
+  // However, by default this always returns undefined unless the embedding application overrides
+  // the IoContext.
+  jsg::Optional<jsg::Ref<CacheContext>> getCache(jsg::Lock& js);
+
   jsg::JsValue getVersion(jsg::Lock& js) {
     // TODO(soon): We should be able to assert for `version != kj::none` in the constructor when the
     //   `enable_version_api` compat flag is enabled, but currently dynamic workers and "reusable
@@ -246,6 +292,7 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
+    JSG_LAZY_INSTANCE_PROPERTY(cache, getCache);
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
@@ -1024,6 +1071,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
-      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

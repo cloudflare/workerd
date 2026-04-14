@@ -77,6 +77,15 @@ class PromisedWorkerInterface final: public WorkerInterface {
     }
   }
 
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w->abandonAlarm(scheduledTime);
+    } else {
+      co_await promise;
+      co_return co_await KJ_ASSERT_NONNULL(worker)->abandonAlarm(scheduledTime);
+    }
+  }
+
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     KJ_IF_SOME(w, worker) {
       co_return co_await w->customEvent(kj::mv(event));
@@ -429,6 +438,17 @@ kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(
       .outcome = respResult.getOutcome(),
       .errorDescription = kj::mv(errorDescription)};
   });
+}
+
+kj::Promise<kj::Maybe<kj::Date>> RpcWorkerInterface::abandonAlarm(kj::Date scheduledTime) {
+  auto req = dispatcher.abandonAlarmRequest();
+  req.setScheduledTimeMs((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+  auto response = co_await req.send();
+  auto storedAlarmTimeMs = response.getStoredAlarmTimeMs();
+  if (storedAlarmTimeMs != 0) {
+    co_return kj::UNIX_EPOCH + storedAlarmTimeMs* kj::MILLISECONDS;
+  }
+  co_return kj::Maybe<kj::Date>(kj::none);
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> RpcWorkerInterface::customEvent(

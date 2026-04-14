@@ -236,6 +236,10 @@ void IsolateBase::deferDestruction(Item item) {
   queue.lockExclusive()->push(kj::mv(item));
 }
 
+void IsolateBase::deferDestruction(v8::Global<v8::Data> item) {
+  deferDestruction(Item(GlobalToDelete(kj::mv(item))));
+}
+
 kj::Arc<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
   return externalMemoryTarget.addRef();
 }

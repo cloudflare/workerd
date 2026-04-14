@@ -239,6 +239,8 @@ struct ActorCacheTest: public ActorCacheConvenienceWrappers {
         gateBrokenPromise(options.monitorOutputGate ? eagerlyReportExceptions(gate.onBroken())
                                                     : kj::Promise<void>(kj::READY_NOW)) {}
 
+  // Simulates `count` counted alarm handler failures for `alarmTime`, leaving the cache
+  // in KnownAlarmTime{CLEAN, alarmTime} as AlarmManager would after each retry.
   ~ActorCacheTest() noexcept(false) {
     // Make sure if the output gate has been broken, the exception was reported. This is important
     // to report errors thrown inside flush(), since those won't otherwise propagate into the test
@@ -5771,6 +5773,160 @@ KJ_TEST("ActorCache can shutdown") {
     // Nothing else should have made it to storage.
     test.mockStorage->expectNoActivity(test.ws);
   });
+}
+
+KJ_TEST("ActorCache alarm cleared by abandonAlarm") {
+  // After the alarm scheduler calls abandonAlarm(), the cache correctly forgets the alarm.
+
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  test.setAlarm(oneMs);
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+  // Drive the event loop so the flush completes and transitions DIRTY -> CLEAN.
+  ws.poll();
+
+  // abandonAlarm() resets currentAlarmTime to UnknownAlarmTime so the next getAlarm()
+  // refetches from storage rather than serving a stale cached value.
+  auto result = test.cache.abandonAlarm(oneMs).wait(ws);
+
+  // Returns kj::none: alarm was cleared, AlarmManager should not re-register.
+  KJ_ASSERT(result == kj::none);
+
+  // getAlarm() now triggers a storage read (cache was reset to unknown).
+  auto promise = expectUncached(test.getAlarm());
+  mockStorage->expectCall("getAlarm", ws).thenReturn(CAPNP(scheduledTimeMs = 0));
+  auto time = promise.wait(ws);
+  KJ_ASSERT(time == kj::none);
+}
+
+KJ_TEST("ActorCache alarm preserved after ALARM_RETRY_MAX_TRIES uncounted (internal) failures") {
+  // When all ALARM_RETRY_MAX_TRIES failures are uncounted (retryCountsAgainstLimit=false,
+  // i.e. infrastructure errors), the alarm scheduler's countedRetry never reaches the limit and
+  // abandonAlarm is NEVER called.  The alarm must remain set throughout so that the scheduler
+  // can keep retrying indefinitely until the infrastructure issue resolves.
+
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+  auto testCurrentTime = kj::UNIX_EPOCH;
+
+  test.setAlarm(oneMs);
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  // Simulate uncounted failures well past ALARM_RETRY_MAX_TRIES (= 6).
+  // countedRetry stays at 0; AlarmManager never gives up; abandonAlarm is never called.
+  // We've seen alarms fail hundreds of times due to infrastructure errors in production,
+  // so we check both at the boundary (6) and well beyond it (100).
+  for (auto i = 0; i < 100; i++) {
+    auto armResult = test.cache.armAlarmHandler(oneMs, nullptr, testCurrentTime);
+    KJ_ASSERT(armResult.is<ActorCache::RunAlarmHandler>());
+    test.cache.cancelDeferredAlarmDeletion();
+
+    // Check at the ALARM_RETRY_MAX_TRIES boundary and at the end.
+    if (i == 5 || i == 99) {
+      auto time = expectCached(test.getAlarm());
+      KJ_ASSERT(time == oneMs);
+    }
+  }
+}
+
+KJ_TEST("ActorCache abandonAlarm is a no-op when a newer alarm has replaced the abandoned one") {
+  // If the user sets a new alarm between the last retry failure and the abandonAlarm() call,
+  // and that new alarm has already flushed to CLEAN, abandonAlarm() must compare the time
+  // and leave the new alarm untouched.
+
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+  auto twoMs = 2 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  // Set the original alarm and flush it to storage.
+  test.setAlarm(oneMs);
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  // User sets a new alarm (twoMs). It flushes to CLEAN, leaving KnownAlarmTime{CLEAN, twoMs}.
+  test.setAlarm(twoMs);
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 2))
+      .thenReturn(CAPNP());
+  // Advance the event loop to process the storage response and complete the FLUSHING→CLEAN
+  // transition. Without this poll, the state is still FLUSHING when abandonAlarm runs, and
+  // the existing status check would protect it by accident, hiding the time-check regression.
+  ws.poll();
+
+  // abandonAlarm() for the original oneMs alarm must be a no-op: storedTime (twoMs) !=
+  // scheduledTime (oneMs), so the time check prevents clearing the new alarm.
+  // Returns twoMs so AlarmManager can re-register the actor's real alarm.
+  auto result = test.cache.abandonAlarm(oneMs).wait(ws);
+
+  KJ_ASSERT(KJ_ASSERT_NONNULL(result) == twoMs);
+
+  // getAlarm() must still return twoMs -- the new alarm was NOT incorrectly cleared.
+  auto time = expectCached(test.getAlarm());
+  KJ_ASSERT(time == twoMs);
+}
+
+KJ_TEST("ActorCache abandonAlarm returns kj::none when no alarm is stored") {
+  ActorCacheTest test;
+  auto& ws = test.ws;
+
+  // No alarm ever set. abandonAlarm should return kj::none.
+  auto result = test.cache.abandonAlarm(1 * kj::MILLISECONDS + kj::UNIX_EPOCH).wait(ws);
+  KJ_ASSERT(result == kj::none);
+}
+
+KJ_TEST("ActorCache abandonAlarm returns kj::none when alarm is DIRTY, not the uncommitted time") {
+  // If the user set a new alarm T2 that hasn't flushed to storage yet (DIRTY state),
+  // abandonAlarm must NOT return T2 to AlarmManager for re-registration.
+  // Returning an uncommitted time would let AlarmManager fire an alarm that was never
+  // acknowledged by storage, potentially racing with the flush. Returns kj::none instead.
+
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+  auto twoMs = 2 * kj::MILLISECONDS + kj::UNIX_EPOCH;
+
+  // Flush T0 to storage.
+  test.setAlarm(oneMs);
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 1))
+      .thenReturn(CAPNP());
+
+  // User sets T2. State becomes DIRTY (flush task queued but not yet delivered to storage).
+  test.setAlarm(twoMs);
+
+  // Set up expectation for the T2 flush before driving the event loop.
+  mockStorage->expectCall("setAlarm", ws)
+      .withParams(CAPNP(scheduledTimeMs = 2))
+      .thenReturn(CAPNP());
+
+  // abandonAlarm(T0) arrives while T2 is DIRTY. The CLEAN status guard prevents returning
+  // the uncommitted T2 time -- AlarmManager must not re-register based on it.
+  auto result = test.cache.abandonAlarm(oneMs).wait(ws);
+  KJ_ASSERT(result == kj::none);
+
+  // Let the T2 flush complete normally.
+  ws.poll();
+
+  // T2 is still in cache -- the DIRTY alarm was preserved, not cleared.
+  auto time = expectCached(test.getAlarm());
+  KJ_ASSERT(time == twoMs);
 }
 
 }  // namespace

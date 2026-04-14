@@ -749,6 +749,64 @@ KJ_TEST("bundle installed works") {
 }
 
 // ========================================================================================
+// Regression test for https://github.com/cloudflare/workerd/issues/4147
+
+struct InspectableObject: public Object {
+  double value;
+
+  explicit InspectableObject(double value): value(value) {}
+
+  static Ref<InspectableObject> constructor(jsg::Lock& js, double value) {
+    return js.alloc<InspectableObject>(value);
+  }
+
+  double getValue() {
+    return value;
+  }
+
+  kj::String inspectState() {
+    return kj::str("active");
+  }
+
+  JSG_RESOURCE_TYPE(InspectableObject) {
+    JSG_METHOD(getValue);
+    JSG_READONLY_PROTOTYPE_PROPERTY(value, getValue);
+    JSG_INSPECT_PROPERTY(state, inspectState);
+  }
+};
+
+struct InspectContext: public ContextGlobalObject {
+  JSG_RESOURCE_TYPE(InspectContext) {
+    JSG_NESTED_TYPE(InspectableObject);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(InspectIsolate, InspectContext, InspectableObject);
+
+KJ_TEST("Object.getOwnPropertyDescriptors does not throw on prototype with inspect properties") {
+  Evaluator<InspectContext, InspectIsolate> e(v8System);
+
+  // The core regression: getOwnPropertyDescriptors must not throw.
+  e.expectEval("JSON.stringify(typeof Object.getOwnPropertyDescriptors("
+               "  InspectableObject.prototype))",
+      "string", "\"object\"");
+
+  // Methods should appear as data descriptors.
+  e.expectEval("typeof Object.getOwnPropertyDescriptors("
+               "  InspectableObject.prototype).getValue.value",
+      "string", "function");
+
+  // The prototype property 'value' should appear as an accessor descriptor.
+  e.expectEval("typeof Object.getOwnPropertyDescriptors("
+               "  InspectableObject.prototype).value.get",
+      "string", "function");
+
+  // Instances should also tolerate getOwnPropertyDescriptors.
+  e.expectEval("JSON.stringify(typeof Object.getOwnPropertyDescriptors("
+               "  new InspectableObject(42)))",
+      "string", "\"object\"");
+}
+
+// ========================================================================================
 
 }  // namespace
 }  // namespace workerd::jsg::test

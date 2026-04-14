@@ -1692,6 +1692,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     }
   }
 
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    co_return co_await KJ_ASSERT_NONNULL(inner).abandonAlarm(scheduledTime);
+  }
+
  private:
   kj::Maybe<kj::Own<WorkerTracer>> tracer;
   kj::Maybe<WorkerInterface&> inner;
@@ -3568,6 +3572,9 @@ class Server::WorkerService final: public Service,
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
     return 0 * kj::SECONDS;
   }
+  size_t getSqliteMemoryUsage() const override {
+    return 0;
+  }
 };
 
 struct FutureSubrequestChannel {
@@ -4135,12 +4142,12 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
     }
 
     kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
-        kj::Maybe<kj::String> name, Frankenvalue props) override {
+        kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
       return kj::refcounted<SubrequestChannelImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
     }
 
     kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
-        kj::Maybe<kj::String> name, Frankenvalue props) override {
+        kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
       return kj::refcounted<ActorClassImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
     }
 
@@ -4250,9 +4257,12 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
       kj::Own<WorkerInterface> startRequest(
           IoChannelFactory::SubrequestMetadata metadata) override {
         if (isolate->service == kj::none) {
-          return newPromisedWorkerInterface(
-              isolate->startupTask.addBranch().then([this, metadata = kj::mv(metadata)]() mutable {
-            return startRequestImpl(kj::mv(metadata));
+          // Capture a refcounted reference rather than a raw `this` pointer so that the
+          // SubrequestChannelImpl is kept alive until the startup task resolves, even if the
+          // owning Fetcher is garbage-collected while the deferred promise is pending.
+          return newPromisedWorkerInterface(isolate->startupTask.addBranch().then(
+              [self = kj::addRef(*this), metadata = kj::mv(metadata)]() mutable {
+            return self->startRequestImpl(kj::mv(metadata));
           }));
         } else {
           return startRequestImpl(kj::mv(metadata));
@@ -4276,7 +4286,17 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           entrypointService = service->getEntrypoint(entrypointName, kj::mv(props));
         }
         KJ_IF_SOME(ep, entrypointService) {
-          return ep->startRequest(kj::mv(metadata));
+          // Attach a refcounted reference to `this` (SubrequestChannelImpl) to the returned
+          // WorkerInterface. This keeps the SubrequestChannelImpl alive for the duration of
+          // the request, which in turn keeps the WorkerStubImpl alive (via Rc), preventing
+          // WorkerStubImpl::unlink() from destroying the WorkerService's I/O channels while
+          // the request's IoContext still holds raw pointers to the WorkerService.
+          //
+          // Without this, if the JS Fetcher object is garbage-collected mid-request (e.g.
+          // because it was a temporary expression), the SubrequestChannelImpl is destroyed,
+          // the WorkerStubImpl refcount drops to zero, unlink() clears the WorkerService's
+          // LinkedIoChannels, and the child worker's IoContext crashes accessing them.
+          return ep->startRequest(kj::mv(metadata)).attach(kj::addRef(*this));
         } else {
           KJ_IF_SOME(en, entrypointName) {
             JSG_FAIL_REQUIRE(Error, "Worker has no such entrypoint: ", en);
@@ -4307,11 +4327,13 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           return kj::none;
         }
 
-        // Have to wait for the isolate to start up.
-        return isolate->startupTask.addBranch().then([this]() {
-          if (inner == kj::none) {
-            inner =
-                KJ_ASSERT_NONNULL(isolate->service)->getActorClass(entrypointName, kj::mv(props));
+        // Have to wait for the isolate to start up. Capture a refcounted reference rather than
+        // a raw `this` pointer so that the ActorClassImpl stays alive until the startup task
+        // resolves, even if the owning object is garbage-collected while waiting.
+        return isolate->startupTask.addBranch().then([self = kj::addRef(*this)]() mutable {
+          if (self->inner == kj::none) {
+            self->inner = KJ_ASSERT_NONNULL(self->isolate->service)
+                              ->getActorClass(self->entrypointName, kj::mv(self->props));
           }
         });
       }

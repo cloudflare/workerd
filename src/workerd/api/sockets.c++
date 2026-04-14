@@ -8,9 +8,11 @@
 #include "streams/standard.h"
 #include "system-streams.h"
 
+#include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 
@@ -247,7 +249,6 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
 
   // Set up the connection.
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());
-  auto httpClient = asHttpClient(kj::mv(client));
   kj::HttpConnectSettings httpConnectSettings = {.useTls = false};
   SecureTransportKind secureTransport = SecureTransportKind::OFF;
   KJ_IF_SOME(opts, options) {
@@ -256,6 +257,18 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   }
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
   httpConnectSettings.tlsStarter = tlsStarter;
+
+  KJ_IF_SOME(promise,
+      util::Autogate::isEnabled(util::AutogateKey::TCP_SOCKET_CONNECT_OUTPUT_GATE)
+          ? ioContext.waitForOutputLocksIfNecessary()
+          : kj::none) {
+    // Wrap the real WorkerInterface in a promised interface that defers connect
+    // until the DO output gate clears.
+    client = newPromisedWorkerInterface(
+        kj::mv(promise).then([client = kj::mv(client)]() mutable { return kj::mv(client); }));
+  }
+
+  auto httpClient = asHttpClient(kj::mv(client));
   auto request = httpClient->connect(addressStr, *headers, httpConnectSettings);
   request.connection = request.connection.attach(kj::mv(httpClient));
 
@@ -273,8 +286,9 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     AnySocketAddress address,
     jsg::Optional<SocketOptions> options) {
-  // TODO(soon): Doesn't this need to check for the presence of an output lock, and if it finds one
-  // then wait on it, before calling into connectImplNoOutputLock?
+  // When the TCP_SOCKET_CONNECT_OUTPUT_GATE autogate is enabled, the output gate wait is
+  // handled inside connectImplNoOutputLock via a deferred connect task, so no separate wait
+  // is needed here. TODO(cleanup): rename connectImplNoOutputLock once the autogate is removed.
   return connectImplNoOutputLock(js, kj::mv(fetcher), kj::mv(address), kj::mv(options));
 }
 
@@ -552,7 +566,9 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
   // caller is done with it.
   auto& dataConn = JSG_REQUIRE_NONNULL(
       connectionData, TypeError, "The socket connection is closed or was already taken.");
-  auto wrapper = dataConn->connectionStream->addWrappedRef();
+  // Attach tlsStarter to the wrapper so it survives as long as the connection stream
+  // and is destroyed before the stream itself.
+  auto wrapper = dataConn->connectionStream->addWrappedRef().attach(kj::mv(dataConn->tlsStarter));
   connectionData = kj::none;
   closedResolver.resolve(js);
   return wrapper;
@@ -636,8 +652,11 @@ class StreamWorkerInterface final: public WorkerInterface {
 kj::Own<WorkerInterface> StreamOutgoingFactory::newSingleUseClient(kj::Maybe<kj::String> cfStr) {
   JSG_ASSERT(stream.get() != nullptr, Error,
       "Fetcher created from internalNewHttpClient can only be used once");
-  // Create a WorkerInterface that wraps the stream
-  return kj::heap<StreamWorkerInterface>(kj::addRef(*this));
+  // Create a WorkerInterface that wraps the stream, routing through getSubrequestNoChecks to apply
+  // external memory adjustment for GC pressure.
+  return IoContext::current().getSubrequestNoChecks([&](auto& tracing, auto& channelFactory) {
+    return kj::heap<StreamWorkerInterface>(kj::addRef(*this));
+  }, {.inHouse = false, .wrapMetrics = false});
 }
 
 jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(

@@ -154,6 +154,9 @@ def _clang_tidy_aspect_impl(target, ctx):
 
         # macOS includes
         args.add("-isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1")
+
+        # Xcode 26.4 bumps the Apple Clang version from 17 to 21, support both for now
+        args.add("-isystem/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/21/include")
         args.add("-isystem/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/17/include")
         args.add("-isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include")
 

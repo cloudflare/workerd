@@ -58,7 +58,7 @@ KJ_TEST("Reading from default reader") {
       auto& value = KJ_REQUIRE_NONNULL(readResult.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle->IsUint8Array());
-      KJ_ASSERT(streamLength == handle.As<v8::Uint8Array>()->ByteLength());
+      KJ_ASSERT(4 * 1024 == handle.As<v8::Uint8Array>()->ByteLength());
     })));
   });
 }

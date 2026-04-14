@@ -103,7 +103,7 @@ struct UnderlyingSource {
   // per the streams spec but our implementation will always enable it. Specifically,
   // if user code does not provide an explicit autoAllocateChunkSize, we'll assume
   // this default.
-  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 64 * 1024;
+  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 4096;
 
   // Per the spec, the type property for the UnderlyingSource should be either
   // undefined, the empty string, or "bytes". When undefined, the empty string is
@@ -115,7 +115,7 @@ struct UnderlyingSource {
   // the size of automatically allocated buffer that is created when a default
   // mode read is performed on a byte-oriented ReadableStream that supports
   // BYOB reads. The stream standard makes this optional to support and defines
-  // no default value. We've chosen to use a default value of 64 * 1024. If given,
+  // no default value. We've chosen to use a default value of 4096. If given,
   // the value must be greater than zero.
   jsg::Optional<int> autoAllocateChunkSize;
 

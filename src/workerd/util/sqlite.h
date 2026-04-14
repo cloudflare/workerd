@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/util/account-limits.h>
+#include <workerd/util/sqlite-metering.h>
 
 #include <kj/filesystem.h>
 #include <kj/function.h>
@@ -89,8 +90,15 @@ class SqliteDatabase {
   SqliteDatabase(const Vfs& vfs,
       kj::Path path,
       kj::Maybe<kj::WriteMode> maybeMode = kj::none,
+      size_t sqliteMaxMemoryBytes = kj::maxValue,
       SqliteObserver& sqliteObserver = SqliteObserver::DEFAULT,
       kj::Maybe<const ActorAccountLimits&> actorAccountLimits = kj::none);
+
+  // Returns the current value of the per-actor SQLite memory byte counter for metrics reporting.
+  size_t getSqliteMemoryBytes() const {
+    return sqliteMemoryBytes;
+  }
+
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
@@ -219,6 +227,8 @@ class SqliteDatabase {
     onCriticalErrorCallback = kj::mv(callback);
   }
 
+  SqliteMemoryScope enterMemoryScope();
+
   // Returns true if a transaction was automatically rolled due to a critical error.
   bool observedCriticalError();
 
@@ -315,6 +325,15 @@ class SqliteDatabase {
   kj::Path path;
   bool readOnly;
   SqliteObserver& sqliteObserver;
+
+  // The amount of memory in bytes used by this database for use by sqlite3_mem_methods.
+  size_t sqliteMemoryBytes = 0;
+
+  // The maximum amount of memory in bytes that can be used by this database for use by
+  // sqlite3_mem_methods (from WorkerLimits::sqliteMaxMemoryMb). This is set to kj::maxValue to
+  // when running in workerd local development mode.
+  size_t sqliteMaxMemoryBytes;
+
   kj::Maybe<const ActorAccountLimits&> actorAccountLimits;
 
   // This pointer can be left null if a call to reset() failed to re-open the database.
@@ -433,6 +452,15 @@ class SqliteDatabase {
 // Represents a prepared SQL statement, which can be executed many times.
 class SqliteDatabase::Statement final: private ResetListener {
  public:
+  Statement(Statement&& other)
+      : ResetListener(kj::mv(other)),
+        regulator(other.regulator),
+        stmt(kj::mv(other.stmt)),
+        prelude(kj::mv(other.prelude)) {}
+
+  // Destructor needs to install a memory scope for sqlite3_finalize.
+  ~Statement() noexcept(false);
+
   // Convenience method to start a query. This is equivalent to:
   //
   //     SqliteDatabase::Query(db, statement, bindings...);

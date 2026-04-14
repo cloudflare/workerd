@@ -316,14 +316,14 @@ struct FetchEventInfo final {
   explicit FetchEventInfo(
       kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
   FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
-  FetchEventInfo(FetchEventInfo&&) = default;
+  FetchEventInfo(FetchEventInfo&&) noexcept = default;
   FetchEventInfo& operator=(FetchEventInfo&&) = default;
   KJ_DISALLOW_COPY(FetchEventInfo);
 
   struct Header final {
     explicit Header(kj::String name, kj::String value);
     Header(rpc::Trace::FetchEventInfo::Header::Reader reader);
-    Header(Header&&) = default;
+    Header(Header&&) noexcept = default;
     Header& operator=(Header&&) = default;
     KJ_DISALLOW_COPY(Header);
 
@@ -355,7 +355,7 @@ struct FetchEventInfo final {
 struct JsRpcEventInfo final {
   explicit JsRpcEventInfo(kj::String methodName);
   JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
-  JsRpcEventInfo(JsRpcEventInfo&&) = default;
+  JsRpcEventInfo(JsRpcEventInfo&&) noexcept = default;
   JsRpcEventInfo& operator=(JsRpcEventInfo&&) = default;
   KJ_DISALLOW_COPY(JsRpcEventInfo);
 
@@ -379,7 +379,7 @@ class ConnectEventInfo {
 struct ScheduledEventInfo final {
   explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
   ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
-  ScheduledEventInfo(ScheduledEventInfo&&) = default;
+  ScheduledEventInfo(ScheduledEventInfo&&) noexcept = default;
   ScheduledEventInfo& operator=(ScheduledEventInfo&&) = default;
   KJ_DISALLOW_COPY(ScheduledEventInfo);
 
@@ -394,7 +394,7 @@ struct ScheduledEventInfo final {
 struct AlarmEventInfo final {
   explicit AlarmEventInfo(kj::Date scheduledTime);
   AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
-  AlarmEventInfo(AlarmEventInfo&&) = default;
+  AlarmEventInfo(AlarmEventInfo&&) noexcept = default;
   AlarmEventInfo& operator=(AlarmEventInfo&&) = default;
   KJ_DISALLOW_COPY(AlarmEventInfo);
 
@@ -408,7 +408,7 @@ struct AlarmEventInfo final {
 struct QueueEventInfo final {
   explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
   QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
-  QueueEventInfo(QueueEventInfo&&) = default;
+  QueueEventInfo(QueueEventInfo&&) noexcept = default;
   QueueEventInfo& operator=(QueueEventInfo&&) = default;
   KJ_DISALLOW_COPY(QueueEventInfo);
 
@@ -423,7 +423,7 @@ struct QueueEventInfo final {
 struct EmailEventInfo final {
   explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
   EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
-  EmailEventInfo(EmailEventInfo&&) = default;
+  EmailEventInfo(EmailEventInfo&&) noexcept = default;
   EmailEventInfo& operator=(EmailEventInfo&&) = default;
   KJ_DISALLOW_COPY(EmailEventInfo);
 
@@ -439,7 +439,7 @@ struct EmailEventInfo final {
 struct TracePreview final {
   explicit TracePreview(kj::String id, kj::String slug, kj::String name);
   TracePreview(rpc::Trace::TracePreviewInfo::Reader reader);
-  TracePreview(TracePreview&&) = default;
+  TracePreview(TracePreview&&) noexcept = default;
   TracePreview& operator=(TracePreview&&) = default;
   KJ_DISALLOW_COPY(TracePreview);
 
@@ -457,14 +457,14 @@ struct TraceEventInfo final {
   explicit TraceEventInfo(kj::ArrayPtr<const kj::Own<Trace>> traces);
   TraceEventInfo(kj::Array<TraceItem> traces): traces(kj::mv(traces)) {}
   TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
-  TraceEventInfo(TraceEventInfo&&) = default;
+  TraceEventInfo(TraceEventInfo&&) noexcept = default;
   TraceEventInfo& operator=(TraceEventInfo&&) = default;
   KJ_DISALLOW_COPY(TraceEventInfo);
 
   struct TraceItem final {
     explicit TraceItem(kj::Maybe<kj::String> scriptName);
     TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
-    TraceItem(TraceItem&&) = default;
+    TraceItem(TraceItem&&) noexcept = default;
     TraceItem& operator=(TraceItem&&) = default;
     KJ_DISALLOW_COPY(TraceItem);
 
@@ -493,7 +493,7 @@ struct HibernatableWebSocketEventInfo final {
 
   explicit HibernatableWebSocketEventInfo(Type type);
   HibernatableWebSocketEventInfo(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
-  HibernatableWebSocketEventInfo(HibernatableWebSocketEventInfo&&) = default;
+  HibernatableWebSocketEventInfo(HibernatableWebSocketEventInfo&&) noexcept = default;
   HibernatableWebSocketEventInfo& operator=(HibernatableWebSocketEventInfo&&) = default;
   KJ_DISALLOW_COPY(HibernatableWebSocketEventInfo);
 
@@ -514,7 +514,7 @@ struct CustomEventInfo final {
 struct FetchResponseInfo final {
   explicit FetchResponseInfo(uint16_t statusCode);
   FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
-  FetchResponseInfo(FetchResponseInfo&&) = default;
+  FetchResponseInfo(FetchResponseInfo&&) noexcept = default;
   FetchResponseInfo& operator=(FetchResponseInfo&&) = default;
   KJ_DISALLOW_COPY(FetchResponseInfo);
 
@@ -529,7 +529,7 @@ struct DiagnosticChannelEvent final {
   explicit DiagnosticChannelEvent(
       kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
   DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader);
-  DiagnosticChannelEvent(DiagnosticChannelEvent&&) = default;
+  DiagnosticChannelEvent(DiagnosticChannelEvent&&) noexcept = default;
   KJ_DISALLOW_COPY(DiagnosticChannelEvent);
 
   kj::Date timestamp;
@@ -544,7 +544,7 @@ struct DiagnosticChannelEvent final {
 struct StreamDiagnosticsEvent final {
   explicit StreamDiagnosticsEvent(uint32_t droppedEventsCount);
   StreamDiagnosticsEvent(rpc::Trace::StreamDiagnosticsEvent::Reader reader);
-  StreamDiagnosticsEvent(StreamDiagnosticsEvent&&) = default;
+  StreamDiagnosticsEvent(StreamDiagnosticsEvent&&) noexcept = default;
   KJ_DISALLOW_COPY(StreamDiagnosticsEvent);
 
   // The count of dropped events for the "droppedEvents" diagnostic. When we support other event
@@ -559,7 +559,7 @@ struct StreamDiagnosticsEvent final {
 struct Log final {
   explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
   Log(rpc::Trace::Log::Reader reader);
-  Log(Log&&) = default;
+  Log(Log&&) noexcept = default;
   KJ_DISALLOW_COPY(Log);
   ~Log() noexcept(false) = default;
 
@@ -579,7 +579,7 @@ struct Exception final {
   explicit Exception(
       kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
   Exception(rpc::Trace::Exception::Reader reader);
-  Exception(Exception&&) = default;
+  Exception(Exception&&) noexcept = default;
   KJ_DISALLOW_COPY(Exception);
   ~Exception() noexcept(false) = default;
 
@@ -634,7 +634,7 @@ struct Attribute final {
       : Attribute(kj::mv(name), kj::heapArray<V>(list)) {}
 
   Attribute(rpc::Trace::Attribute::Reader reader);
-  Attribute(Attribute&&) = default;
+  Attribute(Attribute&&) noexcept = default;
   Attribute& operator=(Attribute&&) = default;
   KJ_DISALLOW_COPY(Attribute);
 
@@ -724,7 +724,7 @@ struct SpanEndData {
 struct Return final {
   explicit Return(kj::Maybe<FetchResponseInfo> info = kj::none);
   Return(rpc::Trace::Return::Reader reader);
-  Return(Return&&) = default;
+  Return(Return&&) noexcept = default;
   Return& operator=(Return&&) = default;
   KJ_DISALLOW_COPY(Return);
 
@@ -744,7 +744,7 @@ struct SpanOpen final {
 
   explicit SpanOpen(SpanId spanId, kj::ConstString operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
-  SpanOpen(SpanOpen&&) = default;
+  SpanOpen(SpanOpen&&) noexcept = default;
   SpanOpen& operator=(SpanOpen&&) = default;
   KJ_DISALLOW_COPY(SpanOpen);
 
@@ -763,7 +763,7 @@ struct SpanOpen final {
 struct SpanClose final {
   explicit SpanClose(EventOutcome outcome = EventOutcome::OK);
   SpanClose(rpc::Trace::SpanClose::Reader reader);
-  SpanClose(SpanClose&&) = default;
+  SpanClose(SpanClose&&) noexcept = default;
   SpanClose& operator=(SpanClose&&) = default;
   KJ_DISALLOW_COPY(SpanClose);
 
@@ -799,7 +799,7 @@ struct Onset final {
       tracing::SpanId spanId, Info&& info, WorkerInfo&& workerInfo, CustomInfo attributes);
 
   Onset(rpc::Trace::Onset::Reader reader);
-  Onset(Onset&&) = default;
+  Onset(Onset&&) noexcept = default;
   Onset& operator=(Onset&&) = default;
   KJ_DISALLOW_COPY(Onset);
 
@@ -819,7 +819,7 @@ void writeOnsetInfo(const tracing::Onset::Info& info, rpc::Trace::Onset::Info::B
 struct Outcome final {
   explicit Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
   Outcome(rpc::Trace::Outcome::Reader reader);
-  Outcome(Outcome&&) = default;
+  Outcome(Outcome&&) noexcept = default;
   Outcome& operator=(Outcome&&) = default;
   KJ_DISALLOW_COPY(Outcome);
 

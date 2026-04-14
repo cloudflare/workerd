@@ -280,6 +280,10 @@ class Fetcher: public JsRpcClientProvider {
   // Used by Fetchers that use ad-hoc, single-use WorkerInterface instances, such as ones
   // created for Actors.
   //
+  // Implementations that create HTTP connections should route through
+  // IoContext::getSubrequestNoChecks() (or getSubrequest()) internally, to ensure external memory
+  // adjustment and other subrequest accounting are applied.
+  //
   // TODO(cleanup): Consider removing this in favor of `IoChannelFactory::SubrequestChannel`, which
   //   is almost the same thing.
   class OutgoingFactory {
@@ -297,6 +301,9 @@ class Fetcher: public JsRpcClientProvider {
   // Used by Fetchers that obtain their HttpClient in a custom way, but which aren't tied
   // to a specific I/O context. The factory object moves with the isolate across threads and
   // contexts, and must work from any context.
+  //
+  // Same as OutgoingFactory: implementations that create HTTP connections should route through
+  // IoContext::getSubrequestNoChecks() internally.
   class CrossContextOutgoingFactory {
    public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(

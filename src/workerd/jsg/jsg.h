@@ -823,13 +823,11 @@ class Data {
   ~Data() noexcept(false) {
     destroy();
   }
-  Data(Data&& other): isolate(other.isolate), handle(kj::mv(other.handle)) {
+  Data(Data&& other) noexcept: isolate(other.isolate), handle(kj::mv(other.handle)) {
     KJ_IF_SOME(t, other.tracedHandle) {
       moveFromTraced(other, t);
     }
     other.isolate = nullptr;
-    assertInvariant();
-    other.assertInvariant();
   }
   Data& operator=(Data&& other) {
     if (this != &other) {
@@ -916,7 +914,7 @@ class V8Ref: private Data {
  public:
   V8Ref(decltype(nullptr)): Data(nullptr) {}
   V8Ref(v8::Isolate* isolate, v8::Local<T> handle): Data(isolate, handle) {}
-  V8Ref(V8Ref&& other): Data(kj::mv(other)) {}
+  V8Ref(V8Ref&& other) noexcept: Data(kj::mv(other)) {}
   V8Ref& operator=(V8Ref&& other) {
     Data::operator=(kj::mv(other));
     return *this;
@@ -1259,7 +1257,7 @@ template <typename T>
 class Ref {
  public:
   Ref(decltype(nullptr)): strong(false) {}
-  Ref(Ref&& other): inner(kj::mv(other.inner)), strong(true) {
+  Ref(Ref&& other) noexcept: inner(kj::mv(other.inner)), strong(true) {
     if (other.strong) {
       other.strong = false;
     } else {
@@ -1275,8 +1273,8 @@ class Ref {
     inner->addStrongRef();
   }
   template <typename U, typename = kj::EnableIf<kj::canConvert<U&, T&>()>>
-  Ref(Ref<U>&& other): inner(kj::mv(other.inner)),
-                       strong(true) {
+  Ref(Ref<U>&& other) noexcept: inner(kj::mv(other.inner)),
+                                strong(true) {
     if (other.strong) {
       other.strong = false;
     } else {
@@ -2265,7 +2263,7 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
 class ExternalMemoryAdjustment final {
  public:
   ExternalMemoryAdjustment(kj::Arc<const ExternalMemoryTarget> externalMemory, size_t amount);
-  ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other);
+  ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other) noexcept;
   ExternalMemoryAdjustment& operator=(ExternalMemoryAdjustment&& other);
   KJ_DISALLOW_COPY(ExternalMemoryAdjustment);
   ~ExternalMemoryAdjustment() noexcept(false);

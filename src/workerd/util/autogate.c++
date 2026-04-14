@@ -19,6 +19,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
     case AutogateKey::TEST_WORKERD:
       return "test-workerd"_kj;
+    case AutogateKey::TCP_SOCKET_CONNECT_OUTPUT_GATE:
+      return "tcp-socket-connect-output-gate"_kj;
     case AutogateKey::V8_FAST_API:
       return "v8-fast-api"_kj;
     case AutogateKey::STREAMING_TAIL_WORKER:
@@ -37,6 +39,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "enable-draining-read-on-standard-streams"_kj;
     case AutogateKey::SQL_RESTRICT_RESERVED_NAMES:
       return "sql-restrict-reserved-names"_kj;
+    case AutogateKey::INCREASE_SQLITE_HARD_HEAP_LIMIT:
+      return "increase-sqlite-hard-heap-limit"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

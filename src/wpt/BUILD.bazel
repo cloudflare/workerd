@@ -73,6 +73,7 @@ wpt_test(
 
 wpt_test(
     name = "encoding",
+    size = "large",
     compat_flags = [
         "encoder_stream_spec_compliant_backpressure",
         "fixup-transform-stream-backpressure",

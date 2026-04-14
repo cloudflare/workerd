@@ -761,6 +761,11 @@ class ZlibUtil final: public jsg::Object {
     // Zstd mode constants
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_ENCODE, static_cast<ZlibModeValue>(ZlibMode::ZSTD_ENCODE));
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_DECODE, static_cast<ZlibModeValue>(ZlibMode::ZSTD_DECODE));
+    // Node.js aliases for mode constants (ZSTD_COMPRESS/ZSTD_DECOMPRESS)
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_COMPRESS, static_cast<ZlibModeValue>(ZlibMode::ZSTD_ENCODE));
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_DECOMPRESS, static_cast<ZlibModeValue>(ZlibMode::ZSTD_DECODE));
 
     // Zstd flush directives
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_e_continue, ZSTD_e_continue);
@@ -805,6 +810,49 @@ class ZlibUtil final: public jsg::Object {
 
     // Zstd default compression level
     JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_CLEVEL_DEFAULT, ZSTD_CLEVEL_DEFAULT);
+
+    // Zstd error codes
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_no_error, ZSTD_error_no_error);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_GENERIC, ZSTD_error_GENERIC);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_prefix_unknown, ZSTD_error_prefix_unknown);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_version_unsupported, ZSTD_error_version_unsupported);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_frameParameter_unsupported, ZSTD_error_frameParameter_unsupported);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_frameParameter_windowTooLarge, ZSTD_error_frameParameter_windowTooLarge);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_corruption_detected, ZSTD_error_corruption_detected);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_checksum_wrong, ZSTD_error_checksum_wrong);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_literals_headerWrong, ZSTD_error_literals_headerWrong);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_dictionary_corrupted, ZSTD_error_dictionary_corrupted);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_dictionary_wrong, ZSTD_error_dictionary_wrong);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_dictionaryCreation_failed, ZSTD_error_dictionaryCreation_failed);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_parameter_unsupported, ZSTD_error_parameter_unsupported);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_parameter_combination_unsupported,
+        ZSTD_error_parameter_combination_unsupported);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_parameter_outOfBound, ZSTD_error_parameter_outOfBound);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_tableLog_tooLarge, ZSTD_error_tableLog_tooLarge);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_maxSymbolValue_tooLarge, ZSTD_error_maxSymbolValue_tooLarge);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_maxSymbolValue_tooSmall, ZSTD_error_maxSymbolValue_tooSmall);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_stabilityCondition_notRespected,
+        ZSTD_error_stabilityCondition_notRespected);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_stage_wrong, ZSTD_error_stage_wrong);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_init_missing, ZSTD_error_init_missing);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_memory_allocation, ZSTD_error_memory_allocation);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_workSpace_tooSmall, ZSTD_error_workSpace_tooSmall);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_dstSize_tooSmall, ZSTD_error_dstSize_tooSmall);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_srcSize_wrong, ZSTD_error_srcSize_wrong);
+    JSG_STATIC_CONSTANT_NAMED(CONST_ZSTD_error_dstBuffer_null, ZSTD_error_dstBuffer_null);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_noForwardProgress_destFull, ZSTD_error_noForwardProgress_destFull);
+    JSG_STATIC_CONSTANT_NAMED(
+        CONST_ZSTD_error_noForwardProgress_inputEmpty, ZSTD_error_noForwardProgress_inputEmpty);
   }
 };
 

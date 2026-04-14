@@ -54,6 +54,10 @@ jobs:
           body: |
             This is an automated pull request for updating the dependencies of workerd.
           delete-branch: true
+          add-paths: |
+            build/deps/gen
+            deps/rust
+            .github/workflows
       - name: Enable Pull Request Automerge
         run: gh pr merge --rebase --auto ${{ steps.create-pr.outputs.pull-request-number }}
         env:

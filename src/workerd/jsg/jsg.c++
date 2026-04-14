@@ -483,7 +483,7 @@ ExternalMemoryAdjustment::ExternalMemoryAdjustment(
   if (amount == 0) return;
   maybeDeferAdjustment(amount);
 }
-ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other)
+ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other) noexcept
     : externalMemory(kj::mv(other.externalMemory)),
       amount(other.amount) {
   other.amount = 0;

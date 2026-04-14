@@ -22,6 +22,9 @@ WD_STRONG_BOOL(IgnoreAllAutogatesEnv);
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
+  // Defers TCP socket connect() to wait for DO output gate, preventing
+  // network outputs while storage writes are pending.
+  TCP_SOCKET_CONNECT_OUTPUT_GATE,
   V8_FAST_API,
   // Enables support for the streaming tail worker. Note that this is currently also guarded behind
   // an experimental compat flag.
@@ -41,6 +44,8 @@ enum class AutogateKey {
   ENABLE_DRAINING_READ_ON_STANDARD_STREAMS,
   // Make SqlStorage::isAllowedName case-insensitive and enforce it on virtual tables (FTS5).
   SQL_RESTRICT_RESERVED_NAMES,
+  // Increase the SQLite hard heap limit from 512 MiB to 8 GiB.
+  INCREASE_SQLITE_HARD_HEAP_LIMIT,
   NumOfKeys  // Reserved for iteration.
 };
 

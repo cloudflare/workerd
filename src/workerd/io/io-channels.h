@@ -297,6 +297,19 @@ class IoChannelFactory {
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 };
 
+// ResourceLimits provides a means to control the resource allocation for a worker stage via a
+// set of optionally overridden parameters.
+struct ResourceLimits {
+  jsg::Optional<uint32_t> cpuMs;
+  jsg::Optional<uint32_t> subRequests;
+
+  JSG_STRUCT(cpuMs, subRequests);
+
+  ResourceLimits clone() const {
+    return {cpuMs, subRequests};
+  }
+};
+
 // Represents a dynamically-loaded Worker to which requests can be sent.
 //
 // This object is returned before the Worker actually loads, so if any errors occur while loading,
@@ -304,10 +317,10 @@ class IoChannelFactory {
 class WorkerStubChannel {
  public:
   virtual kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
-      kj::Maybe<kj::String> name, Frankenvalue props) = 0;
+      kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) = 0;
 
   virtual kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
-      kj::Maybe<kj::String> name, Frankenvalue props) = 0;
+      kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) = 0;
 
   // TODO(someday): Allow caller to enumerate entrypoints?
 };
@@ -316,6 +329,8 @@ class WorkerStubChannel {
 struct DynamicWorkerSource {
   WorkerSource source;
   CompatibilityFlags::Reader compatibilityFlags;
+
+  kj::Maybe<ResourceLimits> limits;
 
   // `env` object to pass to the loaded worker. Can contain anything that can be serialized to
   // a `Frankenvalue` (which should eventually include all binding types, RPC stubs, etc.).
@@ -347,6 +362,7 @@ struct DynamicWorkerSource {
     return {
       .source = source.clone(),
       .compatibilityFlags = compatibilityFlags,
+      .limits = limits.map([](auto& limits) { return limits.clone(); }),
       .env = env.clone(),
       .globalOutbound = mapAddRef(globalOutbound),
       .tails = KJ_MAP(t, tails) { return kj::addRef(*t); },

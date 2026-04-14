@@ -176,6 +176,10 @@ export const CONST_BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2: number;
 export const CONST_BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES: number;
 export const CONST_BROTLI_DECODER_ERROR_UNREACHABLE: number;
 
+// Zstd mode aliases (Node.js naming)
+export const CONST_ZSTD_COMPRESS: number;
+export const CONST_ZSTD_DECOMPRESS: number;
+
 // Zstd flush directives
 export const CONST_ZSTD_e_continue: number;
 export const CONST_ZSTD_e_flush: number;
@@ -218,6 +222,36 @@ export const CONST_ZSTD_btultra2: number;
 
 // Zstd default compression level
 export const CONST_ZSTD_CLEVEL_DEFAULT: number;
+
+// Zstd error codes
+export const CONST_ZSTD_error_no_error: number;
+export const CONST_ZSTD_error_GENERIC: number;
+export const CONST_ZSTD_error_prefix_unknown: number;
+export const CONST_ZSTD_error_version_unsupported: number;
+export const CONST_ZSTD_error_frameParameter_unsupported: number;
+export const CONST_ZSTD_error_frameParameter_windowTooLarge: number;
+export const CONST_ZSTD_error_corruption_detected: number;
+export const CONST_ZSTD_error_checksum_wrong: number;
+export const CONST_ZSTD_error_literals_headerWrong: number;
+export const CONST_ZSTD_error_dictionary_corrupted: number;
+export const CONST_ZSTD_error_dictionary_wrong: number;
+export const CONST_ZSTD_error_dictionaryCreation_failed: number;
+export const CONST_ZSTD_error_parameter_unsupported: number;
+export const CONST_ZSTD_error_parameter_combination_unsupported: number;
+export const CONST_ZSTD_error_parameter_outOfBound: number;
+export const CONST_ZSTD_error_tableLog_tooLarge: number;
+export const CONST_ZSTD_error_maxSymbolValue_tooLarge: number;
+export const CONST_ZSTD_error_maxSymbolValue_tooSmall: number;
+export const CONST_ZSTD_error_stabilityCondition_notRespected: number;
+export const CONST_ZSTD_error_stage_wrong: number;
+export const CONST_ZSTD_error_init_missing: number;
+export const CONST_ZSTD_error_memory_allocation: number;
+export const CONST_ZSTD_error_workSpace_tooSmall: number;
+export const CONST_ZSTD_error_dstSize_tooSmall: number;
+export const CONST_ZSTD_error_srcSize_wrong: number;
+export const CONST_ZSTD_error_dstBuffer_null: number;
+export const CONST_ZSTD_error_noForwardProgress_destFull: number;
+export const CONST_ZSTD_error_noForwardProgress_inputEmpty: number;
 
 export interface ZlibOptions {
   flush?: number | undefined;

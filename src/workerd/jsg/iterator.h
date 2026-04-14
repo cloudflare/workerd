@@ -175,7 +175,7 @@ class AsyncGenerator final {
   AsyncGenerator(Lock& js, JsObject object, TypeWrapper*)
       : maybeActive(Active(js, object, static_cast<TypeWrapper*>(nullptr))),
         maybeSelfRef(kj::rc<WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this)) {}
-  AsyncGenerator(AsyncGenerator&& other)
+  AsyncGenerator(AsyncGenerator&& other) noexcept
       : maybeActive(kj::mv(other.maybeActive)),
         maybeSelfRef(kj::rc<WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this)) {
     // Invalidate the old WeakRef since it's being moved.

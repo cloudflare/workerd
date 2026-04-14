@@ -19,6 +19,7 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/util.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -63,6 +64,23 @@ void ExecutionContext::waitUntil(kj::Promise<void> promise) {
 
 void ExecutionContext::passThroughOnException() {
   IoContext::current().setFailOpen();
+}
+
+jsg::Optional<jsg::Ref<CacheContext>> ExecutionContext::getCache(jsg::Lock& js) {
+  // Hook for the embedding application to provide a CacheContext.
+  // The default Worker::Api implementation returns kj::none.
+  if (IoContext::hasCurrent()) {
+    return Worker::Isolate::from(js).getApi().getCtxCacheProperty(js);
+  }
+  return kj::none;
+}
+
+jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
+    CachePurgeOptions options,
+    const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
+    const jsg::TypeHandler<CachePurgeResult>& resultHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
+  JSG_FAIL_REQUIRE(Error, "Cache purge is not available in this context.");
 }
 
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {

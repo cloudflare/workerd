@@ -758,6 +758,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     kj::Maybe<TraceContext&> existingTraceContext;
   };
 
+  // Wraps a WorkerInterface factory with subrequest accounting: tracing, optional metrics wrapping,
+  // and an external memory adjustment to pressure V8's GC. All code paths that create HTTP
+  // connections (including those built from capnp capabilities via getHttpOverCapnpFactory())
+  // should route through this function or getSubrequest().
   kj::Own<WorkerInterface> getSubrequestNoChecks(
       kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
       SubrequestOptions options);
@@ -834,6 +838,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // TODO(cleanup): Make it the caller's job to call asHttpClient() on the result of
   //   getSubrequest*().
 
+  // Get a raw Cap'n Proto capability for the given channel. This is appropriate for pure RPC use
+  // cases (e.g. actor operations, email dispatch) that don't create HTTP connections. If you're
+  // converting the capability to an HTTP service via getHttpOverCapnpFactory(), use
+  // getSubrequestNoChecks() instead and call channelFactory.getCapability() from the callback,
+  // so that the external memory adjustment and other subrequest accounting are applied.
   capnp::Capability::Client getCapnpChannel(uint channel) {
     return getIoChannelFactory().getCapability(channel);
   }

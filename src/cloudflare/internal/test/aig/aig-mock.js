@@ -113,6 +113,11 @@ export default {
     if (request.method === 'POST') {
       const body = await request.json();
 
+      if (body[0]?.endpoint === 'hang') {
+        // Never resolve unless the fetch is aborted.
+        await scheduler.wait(1e8);
+      }
+
       return Response.json({
         success: true,
         result: body,

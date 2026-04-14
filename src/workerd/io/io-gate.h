@@ -64,7 +64,10 @@ class InputGate {
   class Lock {
    public:
     KJ_DISALLOW_COPY(Lock);
-    Lock(Lock&& other): gate(other.gate), cs(kj::mv(other.cs)), lockSpan(kj::mv(other.lockSpan)) {
+    Lock(Lock&& other) noexcept
+        : gate(other.gate),
+          cs(kj::mv(other.cs)),
+          lockSpan(kj::mv(other.lockSpan)) {
       other.gate = nullptr;
     }
     ~Lock() noexcept(false) {

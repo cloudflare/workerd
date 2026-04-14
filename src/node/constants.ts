@@ -5,6 +5,7 @@ export const RTLD_LAZY = 1;
 export const RTLD_NOW = 2;
 export const RTLD_GLOBAL = 8;
 export const RTLD_LOCAL = 4;
+export const RTLD_DEEPBIND = 8;
 export const E2BIG = 7;
 export const EACCES = 13;
 export const EADDRINUSE = 48;
@@ -121,6 +122,9 @@ export const SIGWINCH = 28;
 export const SIGIO = 23;
 export const SIGINFO = 29;
 export const SIGSYS = 12;
+export const SIGPOLL = 29;
+export const SIGPWR = 30;
+export const SIGSTKFLT = 16;
 export const UV_FS_SYMLINK_DIR = 1;
 export const UV_FS_SYMLINK_JUNCTION = 2;
 export const O_RDONLY = 0;
@@ -154,6 +158,8 @@ export const O_SYNC = 128;
 export const O_DSYNC = 4194304;
 export const O_SYMLINK = 2097152;
 export const O_NONBLOCK = 4;
+export const O_DIRECT = 16384;
+export const O_NOATIME = 262144;
 export const S_IRWXU = 448;
 export const S_IRUSR = 256;
 export const S_IWUSR = 128;
@@ -224,6 +230,9 @@ export const RSA_PSS_SALTLEN_DIGEST = -1;
 export const RSA_PSS_SALTLEN_MAX_SIGN = -2;
 export const RSA_PSS_SALTLEN_AUTO = -2;
 export const defaultCoreCipherList = '';
+export const defaultCipherList = '';
+export const EXTENSIONLESS_FORMAT_JAVASCRIPT = 0;
+export const EXTENSIONLESS_FORMAT_WASM = 1;
 export const TLS1_VERSION = 769;
 export const TLS1_1_VERSION = 770;
 export const TLS1_2_VERSION = 771;
@@ -237,6 +246,7 @@ const constants = {
   RTLD_NOW,
   RTLD_GLOBAL,
   RTLD_LOCAL,
+  RTLD_DEEPBIND,
   E2BIG,
   EACCES,
   EADDRINUSE,
@@ -353,6 +363,9 @@ const constants = {
   SIGIO,
   SIGINFO,
   SIGSYS,
+  SIGPOLL,
+  SIGPWR,
+  SIGSTKFLT,
   UV_FS_SYMLINK_DIR,
   UV_FS_SYMLINK_JUNCTION,
   O_RDONLY,
@@ -386,6 +399,8 @@ const constants = {
   O_DSYNC,
   O_SYMLINK,
   O_NONBLOCK,
+  O_DIRECT,
+  O_NOATIME,
   S_IRWXU,
   S_IRUSR,
   S_IWUSR,
@@ -456,6 +471,9 @@ const constants = {
   RSA_PSS_SALTLEN_MAX_SIGN,
   RSA_PSS_SALTLEN_AUTO,
   defaultCoreCipherList,
+  defaultCipherList,
+  EXTENSIONLESS_FORMAT_JAVASCRIPT,
+  EXTENSIONLESS_FORMAT_WASM,
   TLS1_VERSION,
   TLS1_1_VERSION,
   TLS1_2_VERSION,
