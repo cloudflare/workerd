@@ -5,7 +5,6 @@
 
 #include "requirements.h"
 
-#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -588,14 +587,6 @@ void DiskCache::putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> d
   } else {
     return;
   }
-}
-
-jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
-  return emscriptenRuntime.emscriptenRuntime.getHandle(js);
-}
-
-void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(emscriptenRuntime.emscriptenRuntime);
 }
 
 }  // namespace workerd::api::pyodide

@@ -483,15 +483,6 @@ void registerPythonCommonModules(jsg::Lock& lock,
   using namespace workerd::api::pyodide;
   auto pythonRelease = KJ_REQUIRE_NONNULL(getPythonSnapshotRelease(featureFlags));
 
-  // Inject SetupEmscripten module
-  {
-    auto emscriptenRuntime = api::pyodide::EmscriptenRuntime::initialize(
-        lock, isWorkerd == api::pyodide::IsWorkerd::YES, pyodideBundle);
-    modules.addBuiltinModule("internal:setup-emscripten",
-        lock.alloc<api::pyodide::SetupEmscripten>(kj::mv(emscriptenRuntime)),
-        workerd::jsg::ModuleRegistry::Type::INTERNAL);
-  }
-
   // Inject pyodide bundle.
   modules.addBuiltinBundle(pyodideBundle);
 

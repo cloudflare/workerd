@@ -27,13 +27,6 @@ import {
 } from 'pyodide-internal:metadata';
 import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
 
-/**
- * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
- * emscripten seperately from this code in another context.
- * The underlying code for it can be found in pool/emscriptenSetup.ts.
- */
-import { default as SetupEmscripten } from 'internal:setup-emscripten';
-
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import {
   PythonUserError,
@@ -44,9 +37,12 @@ import {
 } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
-import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
+import { TRANSITIVE_REQUIREMENTS, IS_WORKERD } from 'pyodide-internal:metadata';
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
+import { default as pythonStdlibZip} from 'pyodideRuntime-internal:python_stdlib.zip';
+import { default as pyodideAsmWasmReader} from 'pyodideRuntime-internal:pyodide.asm.wasm';
+import { instantiateEmscriptenModule } from 'pyodideRuntime-internal:emscriptenSetup';
 
 // Wire the PythonWorkersInternalError constructor's reporter to the C++ FatalReporter module.
 // See util.ts for why this indirection is needed (pool bundling constraints).
@@ -243,21 +239,20 @@ function compileModuleFromReadOnlyFS(
   return UnsafeEval.newWasmModule(buffer);
 }
 
-export function loadPyodide(
+export async function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
   customSerializedObjects: CustomSerializedObjects
-): Pyodide {
+): Promise<Pyodide> {
   try {
-    const Module = enterJaegerSpan('instantiate_emscripten', () =>
-      SetupEmscripten.getModule()
+    const Module = await enterJaegerSpan('instantiate_emscripten', () =>
+      instantiateEmscriptenModule(IS_WORKERD, pythonStdlibZip, pyodideAsmWasmReader)
     );
     Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
     Module.API.config.jsglobals = globalThis;
     if (isWorkerd) {
       Module.API.config.resolveLockFilePromise!(lockfile);
     }
-    Module.setUnsafeEval(UnsafeEval);
     Module.setGetRandomValues(getRandomValues);
     Module.setSetTimeout(
       makeSetTimeout(Module),
@@ -291,8 +286,6 @@ export function loadPyodide(
 
     validatePyodideVersion(pyodide);
 
-    // Need to set these here so that the logs go to the right context. If we don't they will go
-    // to SetupEmscripten's context and end up being KJ_LOG'd, which we do not want.
     Module.API.initializeStreams(
       null,
       (msg) => {

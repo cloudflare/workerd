@@ -12,7 +12,6 @@
 import { _createPyodideModule } from 'pyodide-internal:generated/pyodide.asm';
 
 import {
-  setUnsafeEval,
   setGetRandomValues,
   setSetTimeout,
   finishSetup,
@@ -247,7 +246,6 @@ export async function instantiateEmscriptenModule(
 
   // Wait until we've executed all the preRun hooks before proceeding
   const emscriptenModule = await emscriptenSettings.readyPromise;
-  emscriptenModule.setUnsafeEval = setUnsafeEval;
   emscriptenModule.setGetRandomValues = setGetRandomValues;
   emscriptenModule.setSetTimeout = setSetTimeout;
   finishSetup();

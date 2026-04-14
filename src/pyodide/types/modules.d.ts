@@ -10,19 +10,18 @@ declare module 'pyodide-internal:introspection.py' {
 declare module 'pyodideRuntime-internal:emscriptenSetup' {
   function instantiateEmscriptenModule(
     isWorkerd: boolean,
-    a: any,
-    b: any,
-    UnsafeEval: any
+    pythonStdlib: ArrayBuffer,
+    pyodideWasmModule: WebAssembly.Module
   ): Promise<Module>;
   export { instantiateEmscriptenModule };
 }
 
 declare module 'pyodideRuntime-internal:python_stdlib.zip' {
-  const value: Uint8Array;
+  const value: ArrayBuffer;
   export default value;
 }
 
 declare module 'pyodideRuntime-internal:pyodide.asm.wasm' {
-  const value: Uint8Array;
+  const value: WebAssembly.Module;
   export default value;
 }

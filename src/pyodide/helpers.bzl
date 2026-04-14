@@ -281,6 +281,8 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         deps = ["pyodide.asm.js@rule@" + version],
     )
 
+    print(_out_path("emscriptenSetup.js", version))
+
     if emscripten_setup_override:
         _copy_to_generated(out_name = "emscriptenSetup.js", name = "emscriptenSetup", src = emscripten_setup_override, version = version)
     else:
@@ -311,6 +313,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
                 "node:path",
                 "node:url",
                 "node:vm",
+                "internal:unsafe-eval",
             ],
             format = "esm",
             output = _out_path("emscriptenSetup.js", version),
@@ -324,10 +327,14 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         import_name = import_name,
         builtin_modules = [],
         schema_id = "0xbcc8f57c63814005",
+        internal_modules = [
+            _out_path("emscriptenSetup.js", version),
+        ],
+        internal_wasm_modules = [
+            _out_path("pyodide.asm.wasm", version),
+        ],
         internal_data_modules = [
             _out_path("python_stdlib.zip", version),
-            _out_path("pyodide.asm.wasm", version),
-            _out_path("emscriptenSetup.js", version),
         ],
         deps = [
             "emscriptenSetup@" + version,
@@ -343,7 +350,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         srcs = [
             ":pyodide@%s.capnp" % version,
             "//src/workerd/jsg:modules.capnp",
-            _ts_bundle_out(import_name + "-internal_", "emscriptenSetup.js", version),
+            _ts_bundle_out(import_name + "-internal_", "emscriptenSetup", version),
             _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
             _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
         ],
