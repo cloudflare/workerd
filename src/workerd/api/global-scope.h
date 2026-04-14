@@ -95,7 +95,7 @@ class Navigator: public jsg::Object {
   }
 
   kj::StringPtr getPlatform() {
-    return "Linux"_kj;
+    return ""_kj;
   }
 
   kj::StringPtr getLanguage() {
