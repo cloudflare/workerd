@@ -56,10 +56,6 @@
 #include <cstdlib>
 #include <ctime>
 
-#if _WIN32
-#include <thread>
-#endif
-
 namespace workerd::server {
 
 namespace {
@@ -2516,6 +2512,21 @@ class Server::WorkerService final: public Service,
         }
       }
 
+      // Wipe the actor's database contents while the connection is still open.
+      // Uses SqliteDatabase::reset() which does close→delete→recreate atomically,
+      // avoiding the Windows file-locking issue where DeleteFileW fails with
+      // ERROR_SHARING_VIOLATION when called after the connection is already closed
+      // by a destructor (the OS may defer handle release).
+      void resetStorage() {
+        KJ_IF_SOME(a, actor) {
+          KJ_IF_SOME(cache, a->getPersistent()) {
+            KJ_IF_SOME(db, cache.getSqliteDatabase()) {
+              kj::runCatchingExceptions([&]() { db.reset(); });
+            }
+          }
+        }
+      }
+
       kj::Own<ActorContainer> getFacetContainer(
           kj::String childKey, kj::Function<kj::Promise<StartInfo>()> getStartInfo) {
         auto makeContainer = [&]() {
@@ -2980,51 +2991,26 @@ class Server::WorkerService final: public Service,
       actors.clear();
     }
 
-    // Aborts all actors, cancels all alarms, and deletes all underlying storage files so that
-    // DOs can be recreated with completely clean state. Useful for test isolation.
+    // Resets all actor databases, aborts all actors, and cancels all alarms so that DOs can
+    // be recreated with completely clean state. Useful for test isolation.
     void deleteAll(kj::Maybe<const kj::Exception&> reason) {
-      // Abort all running actors so they release their file handles.
+      // Reset each actor's database while the actor still owns its connection.
+      // SqliteDatabase::reset() does close→delete→recreate atomically within a
+      // single function call, so the gap between sqlite3_close() and DeleteFileW
+      // is only microseconds. This avoids the Windows ERROR_SHARING_VIOLATION
+      // that occurs when trying to delete files after connections are closed by
+      // destructors (the OS may defer handle release, especially under load or
+      // when anti-virus is scanning recently-closed files).
+      for (auto& actor: actors) {
+        actor.value->resetStorage();
+      }
+
       abortAll(reason);
 
       // Cancel all pending alarms (in-memory tasks + persistent DB rows).
       KJ_IF_SOME(scheduler, ownAlarmScheduler) {
         scheduler->deleteAll();
       }
-
-      // Delete per-actor storage files from disk. Skip metadata.sqlite (and its WAL/journal
-      // companions) because the AlarmScheduler still has it open — its rows were already
-      // wiped by deleteAll() above.
-      KJ_IF_SOME(as, actorStorage) {
-        for (auto& entry: as.directory->listNames()) {
-          if (!entry.startsWith("metadata.sqlite")) {
-            removeActorFile(*as.directory, kj::Path({entry}));
-          }
-        }
-      }
-    }
-
-    static void removeActorFile(const kj::Directory& dir, kj::Path path) {
-#if _WIN32
-      // On Windows, even after sqlite3_close() returns SQLITE_OK, the OS may not
-      // immediately release the file handle. The native SQLite VFS (used on Windows per
-      // the special-case in SqliteDatabase::init()) opens files without FILE_SHARE_DELETE,
-      // so DeleteFileW() fails with ERROR_SHARING_VIOLATION until the handle is fully
-      // released. This is only called from deleteAllDurableObjects(), a workerd:unsafe
-      // test API, so a brief blocking retry is acceptable.
-      for (uint attempt = 0;; ++attempt) {
-        auto result = kj::runCatchingExceptions([&]() { dir.remove(path); });
-        KJ_IF_SOME(exception, result) {
-          if (attempt >= 10) {
-            kj::throwFatalException(kj::mv(exception));
-          }
-          std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        } else {
-          return;
-        }
-      }
-#else
-      dir.remove(path);
-#endif
     }
 
    private:

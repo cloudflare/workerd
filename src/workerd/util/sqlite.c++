@@ -632,17 +632,9 @@ SqliteDatabase::~SqliteDatabase() noexcept(false) {
   auto err = sqlite3_close(db);
   if (err == SQLITE_BUSY) {
     KJ_LOG(ERROR, "sqlite database destroyed while dependent objects still exist");
-
-    // Force-finalize any remaining prepared statements so that sqlite3_close() can succeed.
-    // Without this, sqlite3_close_v2() would defer the close, leaving file handles and
-    // memory-mapped sections active. On Windows this prevents file deletion
-    // (ERROR_SHARING_VIOLATION / ERROR_USER_MAPPED_FILE), and on Linux truncating a still-mapped
-    // file causes SIGBUS.
-    while (auto* stmt = sqlite3_next_stmt(db, nullptr)) {
-      sqlite3_finalize(stmt);
-    }
-
-    err = sqlite3_close(db);
+    // SQLite actually provides a lazy-close API which we might as well use here instead of leaking
+    // memory.
+    err = sqlite3_close_v2(db);
   }
 
   KJ_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err)) {
