@@ -16,15 +16,7 @@ COPY . .
 
 RUN echo "build:linux --repo_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
 COPY .bazel-cache /bazel-disk-cache
-# pnpm version will be different depending on the value of `packageManager` field in package.json
-RUN npm install -g pnpm@$(node -e " \
-  const pm = require('./package.json').packageManager; \
-  if (!pm || !pm.startsWith('pnpm@')) { \
-    console.error('Expected packageManager to start with pnpm@, got:', pm); \
-    process.exit(1); \
-  } \
-  console.log(pm.split('@')[1]); \
-")
+RUN corepack enable
 RUN pnpm install
 
 RUN pnpm exec bazel build --disk_cache=/bazel-disk-cache --config=release_linux //src/workerd/server:workerd
