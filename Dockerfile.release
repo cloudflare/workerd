@@ -16,8 +16,8 @@ COPY . .
 
 RUN echo "build:linux --repo_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
 COPY .bazel-cache /bazel-disk-cache
-RUN npm install -g --force corepack
-RUN corepack enable
+# pnpm version will be different depending on the value of `packageManager` field in package.json
+RUN npm install -g pnpm@latest
 RUN pnpm install
 
 RUN pnpm exec bazel build --disk_cache=/bazel-disk-cache --config=release_linux //src/workerd/server:workerd
