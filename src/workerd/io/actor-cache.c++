@@ -8,6 +8,7 @@
 #include <workerd/io/io-gate.h>
 #include <workerd/jsg/exception.h>
 #include <workerd/util/duration-exceeded-logger.h>
+#include <workerd/util/exception.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/debug.h>
@@ -285,6 +286,7 @@ void ActorCache::evictOrOomIfNeeded(Lock& lock) {
     // We know this exception happens due to user error. Let's add an exception detail so we can
     // parse it later.
     exception.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<byte>(0));
+    exception.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<byte>(0));
 
     if (maybeTerminalException == kj::none) {
       maybeTerminalException.emplace(kj::cp(exception));
