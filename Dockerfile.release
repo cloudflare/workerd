@@ -16,6 +16,7 @@ COPY . .
 
 RUN echo "build:linux --repo_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
 COPY .bazel-cache /bazel-disk-cache
+RUN npm install -g --force corepack
 RUN corepack enable
 RUN pnpm install
 
