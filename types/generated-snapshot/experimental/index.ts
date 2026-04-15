@@ -3961,23 +3961,28 @@ export interface ExecOutput {
   readonly stdout: ArrayBuffer;
   readonly stderr: ArrayBuffer;
   readonly exitCode: number;
+  readonly __stdoutp: ArrayBuffer;
+  readonly __stderrp: ArrayBuffer;
 }
 export interface ContainerExecOptions {
   cwd?: string;
   env?: Record<string, string>;
   user?: string;
-  stdin?: ReadableStream | "pipe";
-  stdout?: "pipe" | "ignore";
-  stderr?: "pipe" | "ignore" | "combined";
+  __stdinp?: ReadableStream | "pipe";
+  __stdoutp?: "pipe" | "ignore";
+  __stderrp?: "pipe" | "ignore" | "combined";
 }
 export interface ExecProcess {
-  readonly stdin: WritableStream | null;
-  readonly stdout: ReadableStream | null;
-  readonly stderr: ReadableStream | null;
+  get stdin(): WritableStream | undefined;
+  get stdout(): ReadableStream | undefined;
+  get stderr(): ReadableStream | undefined;
   readonly pid: number;
   readonly exitCode: Promise<number>;
   output(): Promise<ExecOutput>;
   kill(signal?: number): void;
+  readonly __stdinp: WritableStream | null;
+  readonly __stdoutp: ReadableStream | null;
+  readonly __stderrp: ReadableStream | null;
 }
 export interface Container {
   get running(): boolean;
@@ -12832,8 +12837,11 @@ export declare type EmailExportedHandler<Env = unknown, Props = unknown> = (
  * Evaluation context for targeting rules.
  * Keys are attribute names (e.g. "userId", "country"), values are the attribute values.
  */
-export type EvaluationContext = Record<string, string | number | boolean>;
-export interface EvaluationDetails<T> {
+export type FlagshipEvaluationContext = Record<
+  string,
+  string | number | boolean
+>;
+export interface FlagshipEvaluationDetails<T> {
   flagKey: string;
   value: T;
   variant?: string | undefined;
@@ -12841,7 +12849,7 @@ export interface EvaluationDetails<T> {
   errorCode?: string | undefined;
   errorMessage?: string | undefined;
 }
-export interface FlagEvaluationError extends Error {}
+export interface FlagshipEvaluationError extends Error {}
 /**
  * Feature flags binding for evaluating feature flags from a Cloudflare Workers script.
  *
@@ -12861,7 +12869,7 @@ export interface FlagEvaluationError extends Error {}
  * console.log(details.variant, details.reason);
  * ```
  */
-export declare abstract class Flags {
+export declare abstract class Flagship {
   /**
    * Get a flag value without type checking.
    * @param flagKey The key of the flag to evaluate.
@@ -12871,7 +12879,7 @@ export declare abstract class Flags {
   get(
     flagKey: string,
     defaultValue?: unknown,
-    context?: EvaluationContext,
+    context?: FlagshipEvaluationContext,
   ): Promise<unknown>;
   /**
    * Get a boolean flag value.
@@ -12882,7 +12890,7 @@ export declare abstract class Flags {
   getBooleanValue(
     flagKey: string,
     defaultValue: boolean,
-    context?: EvaluationContext,
+    context?: FlagshipEvaluationContext,
   ): Promise<boolean>;
   /**
    * Get a string flag value.
@@ -12893,7 +12901,7 @@ export declare abstract class Flags {
   getStringValue(
     flagKey: string,
     defaultValue: string,
-    context?: EvaluationContext,
+    context?: FlagshipEvaluationContext,
   ): Promise<string>;
   /**
    * Get a number flag value.
@@ -12904,7 +12912,7 @@ export declare abstract class Flags {
   getNumberValue(
     flagKey: string,
     defaultValue: number,
-    context?: EvaluationContext,
+    context?: FlagshipEvaluationContext,
   ): Promise<number>;
   /**
    * Get an object flag value.
@@ -12915,7 +12923,7 @@ export declare abstract class Flags {
   getObjectValue<T extends object>(
     flagKey: string,
     defaultValue: T,
-    context?: EvaluationContext,
+    context?: FlagshipEvaluationContext,
   ): Promise<T>;
   /**
    * Get a boolean flag value with full evaluation details.
@@ -12926,8 +12934,8 @@ export declare abstract class Flags {
   getBooleanDetails(
     flagKey: string,
     defaultValue: boolean,
-    context?: EvaluationContext,
-  ): Promise<EvaluationDetails<boolean>>;
+    context?: FlagshipEvaluationContext,
+  ): Promise<FlagshipEvaluationDetails<boolean>>;
   /**
    * Get a string flag value with full evaluation details.
    * @param flagKey The key of the flag to evaluate.
@@ -12937,8 +12945,8 @@ export declare abstract class Flags {
   getStringDetails(
     flagKey: string,
     defaultValue: string,
-    context?: EvaluationContext,
-  ): Promise<EvaluationDetails<string>>;
+    context?: FlagshipEvaluationContext,
+  ): Promise<FlagshipEvaluationDetails<string>>;
   /**
    * Get a number flag value with full evaluation details.
    * @param flagKey The key of the flag to evaluate.
@@ -12948,8 +12956,8 @@ export declare abstract class Flags {
   getNumberDetails(
     flagKey: string,
     defaultValue: number,
-    context?: EvaluationContext,
-  ): Promise<EvaluationDetails<number>>;
+    context?: FlagshipEvaluationContext,
+  ): Promise<FlagshipEvaluationDetails<number>>;
   /**
    * Get an object flag value with full evaluation details.
    * @param flagKey The key of the flag to evaluate.
@@ -12959,8 +12967,8 @@ export declare abstract class Flags {
   getObjectDetails<T extends object>(
     flagKey: string,
     defaultValue: T,
-    context?: EvaluationContext,
-  ): Promise<EvaluationDetails<T>>;
+    context?: FlagshipEvaluationContext,
+  ): Promise<FlagshipEvaluationDetails<T>>;
 }
 /**
  * Hello World binding to serve as an explanatory example. DO NOT USE
