@@ -1276,6 +1276,31 @@ class Server::ActorNamespace final {
       KJ_IF_SOME(config, containerOptions) {
         KJ_ASSERT(config.hasImageName(), "Image name is required");
         auto imageName = config.getImageName();
+        auto privilegeConfig = config.getPrivileges();
+        auto capabilities =
+            kj::heapArrayBuilder<kj::String>(privilegeConfig.getCapabilities().size());
+        for (auto capability: privilegeConfig.getCapabilities()) {
+          capabilities.add(kj::str(capability));
+        }
+        auto devices =
+            kj::heapArrayBuilder<ContainerPrivileges::Device>(privilegeConfig.getDevices().size());
+        for (auto device: privilegeConfig.getDevices()) {
+          devices.add(ContainerPrivileges::Device{
+            .pathOnHost = kj::str(device.getPathOnHost()),
+            .pathInContainer = kj::str(device.getPathInContainer()),
+            .cgroupPermissions = kj::str(device.getCgroupPermissions()),
+          });
+        }
+        auto securityOpt =
+            kj::heapArrayBuilder<kj::String>(privilegeConfig.getSecurityOpt().size());
+        for (auto option: privilegeConfig.getSecurityOpt()) {
+          securityOpt.add(kj::str(option));
+        }
+        ContainerPrivileges privileges{
+          .capabilities = capabilities.finish(),
+          .devices = devices.finish(),
+          .securityOpt = securityOpt.finish(),
+        };
         kj::String containerId;
         KJ_SWITCH_ONEOF(id) {
           KJ_CASE_ONEOF(globalId, kj::Own<ActorIdFactory::ActorId>) {
@@ -1287,7 +1312,8 @@ class Server::ActorNamespace final {
         }
 
         container = ns.getContainerClient(
-            kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName);
+            kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName,
+            kj::mv(privileges));
       }
 
       auto actor =
@@ -1342,7 +1368,8 @@ class Server::ActorNamespace final {
     })->addRef();
   }
 
-  kj::Own<ContainerClient> getContainerClient(kj::StringPtr containerId, kj::StringPtr imageName) {
+  kj::Own<ContainerClient> getContainerClient(
+      kj::StringPtr containerId, kj::StringPtr imageName, ContainerPrivileges privileges) {
     KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
       return existingClient->addRef();
     }
@@ -1400,7 +1427,8 @@ class Server::ActorNamespace final {
         kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
         kj::str(KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
             "containerEgressInterceptorImage must be configured for containers.")),
-        waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler);
+        waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler,
+        kj::mv(privileges));
 
     // Store raw pointer in map (does not own)
     containerClients.insert(kj::str(containerId), client.get());

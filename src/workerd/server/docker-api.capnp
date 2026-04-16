@@ -32,9 +32,9 @@ struct Docker {
   }
 
   struct DeviceMapping {
-    pathOnHost @0 :Text;
-    pathInContainer @1 :Text;
-    cgroupPermissions @2 :Text;
+    pathOnHost @0 :Text $Json.name("PathOnHost");
+    pathInContainer @1 :Text $Json.name("PathInContainer");
+    cgroupPermissions @2 :Text $Json.name("CgroupPermissions");
   }
 
   struct DeviceRequest {
