@@ -351,7 +351,7 @@ jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
 // A membrane which attaches some object until it is destroyed.
 //
 // TODO(cleanup): This is generally useful, should it be part of capnp?
-class AttachmentMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+class AttachmentMembrane final: public capnp::MembranePolicy {
  public:
   explicit AttachmentMembrane(kj::Own<void> attachment): attachment(kj::mv(attachment)) {}
 
@@ -363,10 +363,6 @@ class AttachmentMembrane final: public capnp::MembranePolicy, public kj::Refcoun
   kj::Maybe<capnp::Capability::Client> outboundCall(
       uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
     return kj::none;
-  }
-
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
   }
 
  private:
@@ -580,8 +576,8 @@ class JsRpcCallRetryState final: public kj::Refcounted {
 
   void setPipeline(rpc::JsRpcTarget::CallResults::Pipeline value) {
     auto paf = kj::newPromiseAndFulfiller<void>();
-    auto membrane = kj::refcounted<RevokerMembrane>(kj::mv(paf.promise));
-    pipeline = capnp::membranePipeline(kj::mv(value), membrane->addRef());
+    auto membrane = kj::rc<RevokerMembrane>(kj::mv(paf.promise));
+    pipeline = capnp::membranePipeline(kj::mv(value), membrane.addRef());
     pipelineMembrane = kj::mv(membrane);
     pipelineRevoker = kj::mv(paf.fulfiller);
   }
@@ -593,7 +589,7 @@ class JsRpcCallRetryState final: public kj::Refcounted {
   kj::Maybe<kj::Rc<ActorCallRetryState>> retryState;
   kj::Own<JsRpcReplayMemoryTracker> replayMemoryTracker;
   rpc::JsRpcTarget::CallResults::Pipeline pipeline;
-  kj::Own<RevokerMembrane> pipelineMembrane;
+  kj::Rc<RevokerMembrane> pipelineMembrane;
   kj::Own<kj::PromiseFulfiller<void>> pipelineRevoker;
   kj::Maybe<kj::Rc<JsRpcCallAttemptObserver>> attemptObserver;
   kj::Maybe<kj::Rc<kj::Canceler>> attemptCanceler;
@@ -1795,8 +1791,8 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       // to getClient() will force it to be created, invoking the restore chain, just so the stub
       // can be sent over RPC. Maybe we should actually leave it null and leave it up to the
       // receiving end to invoke the restore chain if desired?
-      auto cap = capnp::membrane(
-          getClient(), kj::refcounted<AttachmentMembrane>(ioctx.registerPendingEvent()));
+      auto cap =
+          capnp::membrane(getClient(), kj::rc<AttachmentMembrane>(ioctx.registerPendingEvent()));
 
       // If a channel is present, send a channel token for it.
       kj::Maybe<kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>>> channelToken;
@@ -3478,7 +3474,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
     capFulfiller->fulfill(capnp::membrane(
-        revocableTarget.getClient(), kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))));
+        revocableTarget.getClient(), kj::rc<CompletionMembrane>(kj::mv(doneFulfiller))));
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
@@ -3528,7 +3524,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
 
   rpc::JsRpcTarget::Client cap = sent.getTopLevel();
 
-  cap = capnp::membrane(kj::mv(cap), kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
+  cap = capnp::membrane(kj::mv(cap), kj::rc<RevokerMembrane>(kj::mv(revokePaf.promise)));
 
   // When no more capabilities exist on the connection, we want to proactively cancel the RPC.
   // This is needed in particular for the case where the client is dropped without making any calls
@@ -3541,8 +3537,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
   // TODO(cleanup): It feels like there's something wrong with the design here. Can we make this
   //   less ugly?
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
-  cap = capnp::membrane(
-      kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+  cap = capnp::membrane(kj::mv(cap), kj::rc<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
 
   this->capFulfiller->fulfill(kj::mv(cap));
 
