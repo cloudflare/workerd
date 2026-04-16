@@ -238,8 +238,11 @@ Module.prototype._compile = function _compile(): void {
   // Acts as a no-op.
 };
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-Module.prototype.isPreloading = false;
+Object.defineProperty(Module.prototype, 'isPreloading', {
+  get() {
+    return false;
+  },
+});
 
 Object.defineProperties(Module, {
   register: {

@@ -48,7 +48,6 @@ export const testUnimplemented = {
       'load',
       'require',
       '_compile',
-      'isPreloading',
     ]);
   },
 };
