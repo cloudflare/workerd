@@ -195,5 +195,79 @@ KJ_TEST("ContainerCreateRequest encodes HostConfig Dns") {
   KJ_EXPECT(decodedDns[1] == "8.8.8.8");
 }
 
+KJ_TEST("ContainerCreateRequest encodes privileged FUSE HostConfig") {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
+
+  capnp::MallocMessageBuilder message;
+  auto root = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
+  root.setImage("test-image");
+
+  auto hostConfig = root.initHostConfig();
+  configurePrivilegedContainerHostConfig(hostConfig, true);
+
+  auto json = codec.encode(root);
+  auto jsonText = json.asPtr();
+
+  KJ_EXPECT(jsonText.contains("\"CapAdd\""));
+  KJ_EXPECT(jsonText.contains("\"SYS_ADMIN\""));
+  KJ_EXPECT(jsonText.contains("\"Devices\""));
+  KJ_EXPECT(jsonText.contains("\"PathOnHost\":\"/dev/fuse\""));
+  KJ_EXPECT(jsonText.contains("\"PathInContainer\":\"/dev/fuse\""));
+  KJ_EXPECT(jsonText.contains("\"CgroupPermissions\":\"rwm\""));
+  KJ_EXPECT(jsonText.contains("\"SecurityOpt\""));
+  KJ_EXPECT(jsonText.contains("\"apparmor:unconfined\""));
+
+  auto decoded = decodeJsonResponse<docker_api::Docker::ContainerCreateRequest>(jsonText);
+  auto decodedRoot = decoded->getRoot<docker_api::Docker::ContainerCreateRequest>();
+  auto decodedHostConfig = decodedRoot.getHostConfig();
+  auto decodedCapAdd = decodedHostConfig.getCapAdd();
+  auto decodedDevices = decodedHostConfig.getDevices();
+  auto decodedSecurityOpt = decodedHostConfig.getSecurityOpt();
+
+  KJ_REQUIRE(decodedCapAdd.size() == 1);
+  KJ_EXPECT(decodedCapAdd[0] == "SYS_ADMIN");
+
+  KJ_REQUIRE(decodedDevices.size() == 1);
+  KJ_EXPECT(decodedDevices[0].getPathOnHost() == "/dev/fuse");
+  KJ_EXPECT(decodedDevices[0].getPathInContainer() == "/dev/fuse");
+  KJ_EXPECT(decodedDevices[0].getCgroupPermissions() == "rwm");
+
+  KJ_REQUIRE(decodedSecurityOpt.size() == 1);
+  KJ_EXPECT(decodedSecurityOpt[0] == "apparmor:unconfined");
+}
+
+KJ_TEST("ContainerCreateRequest does not encode privileged FUSE HostConfig when disabled") {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
+
+  capnp::MallocMessageBuilder message;
+  auto root = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
+  root.setImage("test-image");
+
+  auto hostConfig = root.initHostConfig();
+  configurePrivilegedContainerHostConfig(hostConfig, false);
+
+  auto json = codec.encode(root);
+  auto jsonText = json.asPtr();
+
+  KJ_EXPECT(!jsonText.contains("\"CapAdd\""));
+  KJ_EXPECT(!jsonText.contains("\"SYS_ADMIN\""));
+  KJ_EXPECT(!jsonText.contains("\"Devices\""));
+  KJ_EXPECT(!jsonText.contains("\"PathOnHost\""));
+  KJ_EXPECT(!jsonText.contains("\"PathInContainer\""));
+  KJ_EXPECT(!jsonText.contains("\"CgroupPermissions\""));
+  KJ_EXPECT(!jsonText.contains("\"SecurityOpt\""));
+  KJ_EXPECT(!jsonText.contains("\"apparmor:unconfined\""));
+
+  auto decoded = decodeJsonResponse<docker_api::Docker::ContainerCreateRequest>(jsonText);
+  auto decodedRoot = decoded->getRoot<docker_api::Docker::ContainerCreateRequest>();
+  auto decodedHostConfig = decodedRoot.getHostConfig();
+
+  KJ_EXPECT(decodedHostConfig.getCapAdd().size() == 0);
+  KJ_EXPECT(decodedHostConfig.getDevices().size() == 0);
+  KJ_EXPECT(decodedHostConfig.getSecurityOpt().size() == 0);
+}
+
 }  // namespace
 }  // namespace workerd::server

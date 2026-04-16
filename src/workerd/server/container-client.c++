@@ -912,6 +912,33 @@ kj::Maybe<uint16_t> tryParsePublishedHostPort(capnp::json::Value::Reader portMap
 
 }  // namespace
 
+void configurePrivilegedContainerHostConfig(
+    docker_api::Docker::ContainerCreateRequest::HostConfig::Builder hostConfig,
+    bool allowPrivileged) {
+  if (!allowPrivileged) {
+    return;
+  }
+
+  // Docker doesn't grant FUSE access by default. When the user opts in via
+  // ContainerOptions.allowPrivileged, enable the minimum permissions for it.
+  {
+    auto capAdd = hostConfig.initCapAdd(1);
+    capAdd.set(0, "SYS_ADMIN");
+  }
+  {
+    auto devices = hostConfig.initDevices(1);
+    auto fuseDev = devices[0];
+    fuseDev.setPathOnHost("/dev/fuse");
+    fuseDev.setPathInContainer("/dev/fuse");
+    fuseDev.setCgroupPermissions("rwm");
+  }
+  {
+    // Linux-only: no-op on hosts without AppArmor (e.g. macOS).
+    auto securityOpt = hostConfig.initSecurityOpt(1);
+    securityOpt.set(0, "apparmor:unconfined");
+  }
+}
+
 // Represents a parsed egress mapping. IP/CIDR mappings match destination IPs,
 // while hostnameGlob mappings match either HTTP hostnames or TLS SNI depending on protocol.
 // Defined here (not in the header) to avoid pulling kj::OneOf, kj::CidrRange, and
@@ -939,7 +966,8 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::TaskSet& waitUntilTasks,
     kj::Promise<void> pendingCleanup,
     kj::Function<void(kj::Promise<void>)> cleanupCallback,
-    ChannelTokenHandler& channelTokenHandler)
+    ChannelTokenHandler& channelTokenHandler,
+    bool allowPrivileged)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
       network(network),
@@ -948,6 +976,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       sidecarContainerName(kj::encodeUriComponent(kj::str(containerName, "-proxy"))),
       imageName(kj::mv(imageName)),
       containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImage)),
+      allowPrivileged(allowPrivileged),
       waitUntilTasks(waitUntilTasks),
       pendingCleanup(kj::mv(pendingCleanup).fork()),
       cleanupCallback(kj::mv(cleanupCallback)),
@@ -1721,6 +1750,8 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
       mount.initVolumeOptions().setNoCopy(true);
     }
   }
+
+  configurePrivilegedContainerHostConfig(hostConfig, allowPrivileged);
 
   auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
       kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
