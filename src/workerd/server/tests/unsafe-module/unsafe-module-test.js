@@ -22,8 +22,7 @@ export const TestEphemeralObjectPreventEviction = createTestObject(
   'ephemeral-prevent-eviction'
 );
 
-// A DO with persistent key-value storage, used to test that deleteAllDurableObjects()
-// actually wipes data from disk.
+// DO with persistent storage for verifying deleteAllDurableObjects() wipes data.
 export class StorageObject extends DurableObject {
   async getValue() {
     return (await this.ctx.storage.get('key')) ?? null;
@@ -33,7 +32,7 @@ export class StorageObject extends DurableObject {
   }
 }
 
-// A DO with an alarm, used to test that deleteAllDurableObjects() cancels alarms.
+// DO with an alarm for verifying deleteAllDurableObjects() cancels alarms.
 let alarmTriggers = 0;
 export class AlarmObject extends DurableObject {
   get scheduledTime() {

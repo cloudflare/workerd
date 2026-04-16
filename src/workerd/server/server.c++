@@ -2512,11 +2512,8 @@ class Server::WorkerService final: public Service,
         }
       }
 
-      // Wipe the actor's database contents while the connection is still open.
-      // Uses SqliteDatabase::reset() which does close→delete→recreate atomically,
-      // avoiding the Windows file-locking issue where DeleteFileW fails with
-      // ERROR_SHARING_VIOLATION when called after the connection is already closed
-      // by a destructor (the OS may defer handle release).
+      // Resets the actor's SQLite database while the connection is still open,
+      // avoiding file-locking issues on Windows.
       void resetStorage() {
         KJ_IF_SOME(a, actor) {
           KJ_IF_SOME(cache, a->getPersistent()) {
@@ -2991,23 +2988,17 @@ class Server::WorkerService final: public Service,
       actors.clear();
     }
 
-    // Resets all actor databases, aborts all actors, and cancels all alarms so that DOs can
-    // be recreated with completely clean state. Useful for test isolation.
+    // Resets all actor databases, aborts all actors, and cancels all alarms so DOs
+    // can be recreated with clean state.
     void deleteAll(kj::Maybe<const kj::Exception&> reason) {
-      // Reset each actor's database while the actor still owns its connection.
-      // SqliteDatabase::reset() does close→delete→recreate atomically within a
-      // single function call, so the gap between sqlite3_close() and DeleteFileW
-      // is only microseconds. This avoids the Windows ERROR_SHARING_VIOLATION
-      // that occurs when trying to delete files after connections are closed by
-      // destructors (the OS may defer handle release, especially under load or
-      // when anti-virus is scanning recently-closed files).
+      // Reset databases before aborting so connections are still open (avoids
+      // Windows file-locking issues with deferred handle release).
       for (auto& actor: actors) {
         actor.value->resetStorage();
       }
 
       abortAll(reason);
 
-      // Cancel all pending alarms (in-memory tasks + persistent DB rows).
       KJ_IF_SOME(scheduler, ownAlarmScheduler) {
         scheduler->deleteAll();
       }
