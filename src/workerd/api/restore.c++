@@ -476,7 +476,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::run
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
     capFulfiller->fulfill(
-        capnp::membrane(kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))));
+        capnp::membrane(kj::mv(cap), kj::rc<CompletionMembrane>(kj::mv(doneFulfiller))));
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
@@ -516,11 +516,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::sen
 
   rpc::JsRpcTarget::Client cap = sent.getTarget();
 
-  cap = capnp::membrane(kj::mv(cap), kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
+  cap = capnp::membrane(kj::mv(cap), kj::rc<RevokerMembrane>(kj::mv(revokePaf.promise)));
 
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
-  cap = capnp::membrane(
-      kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+  cap = capnp::membrane(kj::mv(cap), kj::rc<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
 
   capFulfiller->fulfill(kj::mv(cap));
 
