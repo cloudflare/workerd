@@ -22,6 +22,10 @@ PYODIDE_VERSIONS = [
         "version": "0.28.2",
         "sha256": "c9f6dd067d119e50850849f7428e3c636ecbc2684a0d2ff992f3bd48a1062b6c",
     },
+    {
+        "version": "314.0.0a1",
+        "sha256": "7cceacea2efb493f30667192f0380e1fc6955c38fe34897b2d5be98023758073",
+    },
 ]
 
 # This is the list of all the package metadata that we use.
@@ -34,6 +38,8 @@ PYODIDE_VERSIONS = [
 _package_lockfiles = [
     PACKAGES_20240829_4,
     PACKAGES_20250808,
+    # As of Pyodide 314, we don't bundle any packages by default
+    # So this list does not need to be updated anymore.
 ]
 
 # The below is a list of pyodide-lock.json files for each package bundle version that we support.
@@ -69,6 +75,7 @@ def _add_integrity(entry):
 def _make_vendored_packages(entry):
     if entry["name"] == "development":
         return
+
     vendor_tests = {}
     for e in entry["vendored_packages_for_tests"]:
         vendor_tests[e["name"]] = e
@@ -158,6 +165,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
     },
     {
         "name": "0.28.2",
+        "released": True,
         "pyodide_version": "0.28.2",
         "pyodide_date": "2025-01-16",
         "packages": PACKAGES_20250808,
@@ -181,11 +189,6 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "abi": "3.13",
                 "sha256": "955091f1bd2eb33255ff2633df990bedc96e2f6294e78f2b416078777394f942",
             },
-            # {
-            #     "name": "scipy",
-            #     "abi": "3.13",
-            #     "sha256": "4f1b6fc179bd5c6d3de68abc4aa9fca2aaecd09c5c8d357c2ecfedce7d621f3d",
-            # },
             {
                 "name": "shapely",
                 "abi": "3.13",
@@ -194,7 +197,32 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         ],
     },
     {
-        "real_pyodide_version": "0.28.2",
+        "name": "314.0.0a1",
+        "pyodide_version": "314.0.0a1",
+        "pyodide_date": "2026-04-09",
+        "backport": "2",
+        "integrity": "sha256-cW/v1umsHLB6jWspcPA0L4JY8SC06gGE3PyNWgLR62k=",
+        "flag": "pythonWorkersDevPyodide",
+        "enable_flag_name": "python_workers_development",
+        "emscripten_version": "5.0.3",
+        "python_version": "3.14.2",
+        "baseline_snapshot": "",
+        "baseline_snapshot_hash": "",
+        "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT + [
+            {
+                "name": "fastapi",
+                "abi": "3.13",
+                "sha256": "955091f1bd2eb33255ff2633df990bedc96e2f6294e78f2b416078777394f942",
+            },
+            {
+                "name": "shapely",
+                "abi": "3.13",
+                "sha256": "2e5c462cb32ee8697b3647dfc9d5c88dcdfd0702da34a2d7dc6b07b8090dd321",
+            },
+        ],
+    },
+    {
+        "real_pyodide_version": "314.0.0a1",
         "name": "development",
         "pyodide_version": "dev",
         "pyodide_date": "dev",

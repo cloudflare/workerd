@@ -73,12 +73,20 @@ py_wd_test("default-class-with-legacy-global-handlers")
 py_wd_test(
     "fastapi",
     make_snapshot = False,
+    skip_python_flags = [
+        "314.0.0a1",
+        "development",
+    ],
     use_snapshot = "fastapi",
 )
 
 py_wd_test(
     "numpy",
     make_snapshot = False,
+    skip_python_flags = [
+        "314.0.0a1",
+        "development",
+    ],
     use_snapshot = "numpy",
 )
 

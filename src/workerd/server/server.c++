@@ -5811,14 +5811,17 @@ kj::Promise<void> Server::preloadPython(
       // Fetch the Pyodide bundle.
       co_await server::fetchPyodideBundle(pythonConfig, kj::mv(version), network, timer);
 
-      // Preload Python packages.
-      KJ_IF_SOME(modulesSource, workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {
-        if (modulesSource.isPython) {
-          auto pythonRequirements = getPythonRequirements(modulesSource);
+      // Preload Python packages for older Pyodide versions that use package lock files.
+      auto pyodideVersion = release.getPyodide();
+      if (pyodideVersion == "0.26.0a2" || pyodideVersion == "0.28.2") {
+        KJ_IF_SOME(modulesSource,
+            workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {
+          if (modulesSource.isPython) {
+            auto pythonRequirements = getPythonRequirements(modulesSource);
 
-          // Store the packages in the package manager that is stored in the pythonConfig
-          co_await server::fetchPyodidePackages(pythonConfig, pythonConfig.pyodidePackageManager,
-              pythonRequirements, release, network, timer);
+            co_await server::fetchPyodidePackages(pythonConfig, pythonConfig.pyodidePackageManager,
+                pythonRequirements, release, network, timer);
+          }
         }
       }
     }

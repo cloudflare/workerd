@@ -30,15 +30,17 @@ def _py_wd_test_helper(
     templated_src = name_flag.replace("/", "-") + "@template"
     templated_src = "/".join(src.split("/")[:-1] + [templated_src])
 
-    pkg_tag = BUNDLE_VERSION_INFO[python_flag]["packages"]
-    data = data + ["@all_pyodide_wheels_%s//:whls" % pkg_tag]
-    args = args + ["--pyodide-package-disk-cache-dir"]
+    pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
 
-    # +pyodide+ is a bzlmod canonical repository name
-    args.append("../+pyodide+all_pyodide_wheels_%s" % pkg_tag)
+    if pyodide_version in ("0.26.0a2", "0.28.2"):
+        pkg_tag = BUNDLE_VERSION_INFO[python_flag]["packages"]
+        data = data + ["@all_pyodide_wheels_%s//:whls" % pkg_tag]
+        args = args + ["--pyodide-package-disk-cache-dir"]
+
+        # +pyodide+ is a bzlmod canonical repository name
+        args.append("../+pyodide+all_pyodide_wheels_%s" % pkg_tag)
 
     load_snapshot = None
-    pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
     if use_snapshot == "stacked":
         if pyodide_version == "0.26.0a2":
             use_snapshot = None
@@ -49,9 +51,10 @@ def _py_wd_test_helper(
     if use_snapshot:
         version_info = BUNDLE_VERSION_INFO[python_flag]
 
-        snapshot = version_info[use_snapshot + "_snapshot"]
-        data = data + [":python_snapshots"]
-        load_snapshot = snapshot
+        snapshot = version_info.get(use_snapshot + "_snapshot", "")
+        if snapshot:
+            data = data + [":python_snapshots"]
+            load_snapshot = snapshot
 
     if load_snapshot and not make_snapshot:
         args += ["--python-load-snapshot", "load_snapshot.bin"]

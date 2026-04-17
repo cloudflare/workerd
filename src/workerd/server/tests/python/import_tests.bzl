@@ -84,8 +84,13 @@ def _gen_import_tests(to_test, python_version, pkg_skip_versions):
             skip_python_flags = skip_python_flags,
         )
 
+# TODO: Remove after built-in packages support is removed
 def gen_import_tests(*, pkg_skip_versions = {}):
     for python_version, info in BUNDLE_VERSION_INFO.items():
+        if "packages" not in info:
+            # from Pyodide 314, we don't bundle any packages by default
+            # so we don't need to generate import tests for it
+            continue
         to_test = PYTHON_IMPORTS_TO_TEST[info["packages"]]
         _gen_import_tests(to_test, python_version, pkg_skip_versions = pkg_skip_versions)
 

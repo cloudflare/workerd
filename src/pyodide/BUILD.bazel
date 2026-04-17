@@ -6,7 +6,12 @@ load(":helpers.bzl", "pyodide_extra", "pyodide_static", "python_bundles")
 
 pyodide_extra()
 
-python_bundles()
+python_bundles(overrides = {
+    # As of Pyodide 314, pyodide.asm.js is renamed to pyodide.asm.mjs.
+    # For older versions, we still have pyodide.asm.js
+    "0.26.0a2": {"pyodide_asm_js": "@pyodide-0.26.0a2//:pyodide/pyodide.asm.js"},
+    "0.28.2": {"pyodide_asm_js": "@pyodide-0.28.2//:pyodide/pyodide.asm.js"},
+})
 
 pyodide_static()
 

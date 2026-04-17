@@ -19,6 +19,15 @@ jsg::JsValue resolvePromise(jsg::Lock& js, jsg::JsValue prom) {
   if (promise.state() == jsg::PromiseState::PENDING) {
     js.runMicrotasks();
   }
+
+  // Should not happen normally, but helps you debugging initialization issue
+  // e.g. when upgrading the Pyodide version
+  if (promise.state() == jsg::PromiseState::REJECTED) {
+    auto reason = promise.result();
+    auto str = reason.toString(js);
+    KJ_LOG(ERROR, "Promise rejected", str);
+  }
+
   KJ_ASSERT(promise.state() == jsg::PromiseState::FULFILLED);
   return promise.result();
 }

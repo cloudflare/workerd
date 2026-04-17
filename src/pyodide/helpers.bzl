@@ -42,7 +42,6 @@ def _copy_and_capnp_embed(src):
 def _fmt_python_snapshot_release(
         pyodide_version,
         pyodide_date,
-        packages,
         backport,
         baseline_snapshot_hash,
         flag,
@@ -53,7 +52,6 @@ def _fmt_python_snapshot_release(
             'pyodide = "%s"' % pyodide_version,
             'realPyodideVersion = "%s"' % real_pyodide_version,
             'pyodideRevision = "%s"' % pyodide_date,
-            'packages = "%s"' % packages,
             "backport = %s" % backport,
             'baselineSnapshotHash = "%s"' % baseline_snapshot_hash,
             'flagName = "%s"' % flag,
@@ -162,9 +160,10 @@ import {
 } from "pyodide-internal:pool/builtin_wrappers";
 """
 
-# pyodide.asm.js patches
+# pyodide.asm.mjs patches
 # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
 _REPLACEMENTS = [
+    # for 0.28.2 or earlier, pyodide.asm.js was a commonjs module
     [
         # Convert pyodide.asm.js into an es6 module.
         # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
@@ -175,6 +174,12 @@ _REPLACEMENTS = [
     [
         "globalThis._createPyodideModule = _createPyodideModule;",
         "",
+    ],
+    # for 314 or later, pyodide.asm.mjs is es6 module
+    [
+        "export default _createPyodideModule;",
+        # still expose _createPyodideModule for compatibility (import { _createPyodideModule })
+        _PRELUDE + "export default _createPyodideModule; export { _createPyodideModule };",
     ],
     [
         "new WebAssembly.Module",
@@ -259,7 +264,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         pyodide_asm_wasm = pyodide_package + ":pyodide/pyodide.asm.wasm"
 
     if not pyodide_asm_js:
-        pyodide_asm_js = pyodide_package + ":pyodide/pyodide.asm.js"
+        pyodide_asm_js = pyodide_package + ":pyodide/pyodide.asm.mjs"
 
     if not python_stdlib_zip:
         python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
@@ -269,16 +274,16 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     _copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
 
     expand_template(
-        name = "pyodide.asm.js@rule@" + version,
-        out = _out_path("pyodide.asm.js", version),
+        name = "pyodide.asm.mjs@rule@" + version,
+        out = _out_path("pyodide.asm.mjs", version),
         substitutions = dict(_REPLACEMENTS),
         template = pyodide_asm_js,
     )
 
     js_file(
-        name = "pyodide.asm.js@rule_js@" + version,
-        srcs = [_out_path("pyodide.asm.js", version)],
-        deps = ["pyodide.asm.js@rule@" + version],
+        name = "pyodide.asm.mjs@rule_js@" + version,
+        srcs = [_out_path("pyodide.asm.mjs", version)],
+        deps = ["pyodide.asm.mjs@rule@" + version],
     )
 
     if emscripten_setup_override:
@@ -291,7 +296,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             srcs = native.glob([
                 "internal/pool/*.ts",
             ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
-                _out_path("pyodide.asm.js", version),
+                _out_path("pyodide.asm.mjs", version),
                 "internal/util.ts",
                 "internal/const.ts",
             ],
@@ -311,11 +316,15 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
                 "node:path",
                 "node:url",
                 "node:vm",
+                "node:stream",
+                "node:tls",
+                "node:net",
+                "node:module",
             ],
             format = "esm",
             output = _out_path("emscriptenSetup.js", version),
             target = "esnext",
-            deps = ["pyodide.asm.js@rule_js@" + version],
+            deps = ["pyodide.asm.mjs@rule_js@" + version],
         )
 
     import_name = "pyodideRuntime"

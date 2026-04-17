@@ -15,14 +15,19 @@ let resolvePlugin = {
       let path;
       if (rest.startsWith('generated')) {
         // I couldn't figure out how to pass down the version, so instead we'll look through the
-        // directories in `pyodideRootDir` and find one that starts with a 0. This will work until
-        // Pyodide has a 1.0 release.
-        const dir = readdirSync(pyodideRootDir).filter((x) =>
-          x.startsWith('0')
+        // directories in `pyodideRootDir` and find one that starts with a 0 or 3
+        const dir = readdirSync(pyodideRootDir).filter(
+          (x) =>
+            // Support both 0.x and 314.x versions
+            x.startsWith('0') || x.startsWith('3')
         )[0];
         path = join(pyodideRootDir, dir, rest);
         if (!existsSync(path)) {
-          path += '.js';
+          if (existsSync(path + '.js')) {
+            path += '.js';
+          } else {
+            path += '.mjs';
+          }
         }
       } else {
         path = join(pyodideRootDir, 'internal', rest);

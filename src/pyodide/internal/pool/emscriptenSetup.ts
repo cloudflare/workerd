@@ -169,7 +169,15 @@ function getEmscriptenSettings(
       (res) => (config.resolveLockFilePromise = res)
     );
   }
-  const API = { config, lockFilePromise };
+  const API = {
+    config,
+    lockFilePromise,
+    runtimeEnv: {
+      IN_WORKERD: true,
+      IN_BROWSER: true,
+      IN_BROWSER_MAIN_THREAD: true,
+    },
+  };
   let resolveReadyPromise: (mod: Module) => void;
   let rejectReadyPromise: (e: any) => void = () => {};
   const readyPromise: Promise<Module> = new Promise((res, rej) => {
