@@ -693,7 +693,7 @@ class AbortSignal final: public EventTarget {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
 
   static kj::Exception abortException(
-      jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> reason);
+      jsg::Lock& js, const jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>>& reason);
 
   void visitForGc(jsg::GcVisitor& visitor);
 

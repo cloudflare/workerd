@@ -774,7 +774,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
           t.setReturn(context.now());
         }
       }, [event = event.addRef()](kj::Exception&& e) mutable {
-        event->setCompletionStatus(QueueEvent::CompletedWithError{kj::cp(e)});
+        event->setCompletionStatus(QueueEvent::CompletedWithError{e.clone()});
         return kj::mv(e);
       });
       if (FeatureFlags::get(js).getQueueConsumerNoWaitForWaitUntil()) {

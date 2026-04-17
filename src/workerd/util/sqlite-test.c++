@@ -1437,7 +1437,7 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
 
   void write(uint64_t offset, kj::ArrayPtr<const byte> data) const override {
     KJ_IF_SOME(e, error) {
-      kj::throwFatalException(kj::cp(e));
+      kj::throwFatalException(e.clone());
     }
     inner->write(offset, data);
   }

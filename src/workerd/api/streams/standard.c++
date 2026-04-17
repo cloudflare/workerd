@@ -3362,7 +3362,7 @@ class PumpToReader {
         return KJ_EXCEPTION(FAILED, "stream has already been consumed");
       }
       KJ_CASE_ONEOF(errored, kj::Exception) {
-        return kj::cp(errored);
+        return errored.clone();
       }
     }
     KJ_UNREACHABLE;
@@ -3406,9 +3406,9 @@ class PumpToReader {
       }
       KJ_CASE_ONEOF(errored, kj::Exception) {
         if (end) {
-          sink->abort(kj::cp(errored));
+          sink->abort(errored.clone());
         }
-        return js.rejectedPromise<void>(kj::cp(errored));
+        return js.rejectedPromise<void>(errored.clone());
       }
       KJ_CASE_ONEOF(pumping, Pumping) {
         using Result = kj::OneOf<Pumping, kj::Array<kj::byte>, StreamStates::Closed, jsg::Value>;
@@ -3567,10 +3567,10 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
   }
   KJ_CATCH(exception) {
     if (!writeFailed) {
-      sink->abort(kj::cp(exception));
+      sink->abort(exception.clone());
     }
 
-    co_await ioContext.run([&reader, ex = kj::cp(exception)](jsg::Lock& js) mutable {
+    co_await ioContext.run([&reader, ex = exception.clone()](jsg::Lock& js) mutable {
       auto& ioContext = IoContext::current();
       auto error = js.exceptionToJsValue(kj::mv(ex));
       return ioContext.awaitJs(js, reader->cancel(js, error.getHandle(js)));

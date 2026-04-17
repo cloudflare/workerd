@@ -274,7 +274,7 @@ void reportStartupError(kj::StringPtr id,
         } else {
           // We should never get here in production if we've validated scripts before deployment.
           KJ_LOG(WARNING, "script startup exceeded resource limits", id, ex);
-          kj::throwFatalException(kj::cp(ex));
+          kj::throwFatalException(ex.clone());
         }
       }
       KJ_CASE_ONEOF_DEFAULT {
@@ -316,7 +316,7 @@ void reportStartupError(kj::StringPtr id,
                       kj::str("script startup threw exception", id, description, trace)));
               if (isDynamicWorker) {
                 // Rethrow the tunneled JSG exception so it converts back to a JS Error.
-                kj::throwFatalException(kj::cp(KJ_ASSERT_NONNULL(permanentException)));
+                kj::throwFatalException(KJ_ASSERT_NONNULL(permanentException).clone());
               } else {
                 KJ_LOG(ERROR, "script startup threw exception", id, description, trace);
                 KJ_FAIL_REQUIRE("script startup threw exception");
@@ -324,8 +324,10 @@ void reportStartupError(kj::StringPtr id,
             }
           });
         } else {
-          kj::throwFatalException(kj::cp(permanentException.emplace(
-              KJ_EXCEPTION(FAILED, "returned empty handle but didn't throw exception?", id))));
+          kj::throwFatalException(permanentException
+                                      .emplace(KJ_EXCEPTION(FAILED,
+                                          "returned empty handle but didn't throw exception?", id))
+                                      .clone());
         }
       }
     }
@@ -1511,7 +1513,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 
             parseMetrics->done();
           } catch (const kj::Exception& e) {
-            lock.throwException(kj::cp(e));
+            lock.throwException(e.clone());
             // lock.throwException() here will throw a jsg::JsExceptionThrown which we catch
             // in the outer try/catch.
           }
@@ -1908,7 +1910,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       if (script->impl->unboundScriptOrMainModule == nullptr) {
         // Script failed to parse. Act as if the script was empty -- i.e. do nothing.
         impl->permanentException =
-            script->impl->permanentException.map([](auto& e) { return kj::cp(e); });
+            script->impl->permanentException.map([](auto& e) { return e.clone(); });
         return;
       }
 
@@ -2044,7 +2046,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             }
             startupMetrics->done();
           } catch (const kj::Exception& e) {
-            lock.throwException(kj::cp(e));
+            lock.throwException(e.clone());
             // lock.throwException() here will throw a jsg::JsExceptionThrown which we catch
             // in the outer try/catch.
           }
@@ -2307,7 +2309,7 @@ Worker::Lock::~Lock() noexcept(false) {
 void Worker::Lock::requireNoPermanentException() {
   KJ_IF_SOME(e, worker.impl->permanentException) {
     // Block taking lock when worker failed to start up.
-    kj::throwFatalException(kj::cp(e));
+    kj::throwFatalException(e.clone());
   }
 }
 
@@ -2507,7 +2509,7 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source, kj::Exce
     // so let's try exceptionToJs again but this time ignoring the detail, and
     // if it throws again, we'll give up and propagate that exception to the
     // caller.
-    auto jsError = js.exceptionToJsValue(kj::cp(exception), {.ignoreDetail = true});
+    auto jsError = js.exceptionToJsValue(exception.clone(), {.ignoreDetail = true});
     logUncaughtException(source, jsError.getHandle(js));
   }
 }
@@ -3967,7 +3969,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       e.setDescription(kj::mv(description));
     }
 
-    context.abort(kj::cp(e));
+    context.abort(e.clone());
     impl->classInstance = kj::mv(e);
   }
 }
@@ -4108,7 +4110,7 @@ void Worker::Actor::assertCanSetAlarm() {
     }
     KJ_CASE_ONEOF(exception, kj::Exception) {
       // We've failed in the ctor, might as well just throw that exception for now.
-      kj::throwFatalException(kj::cp(exception));
+      kj::throwFatalException(exception.clone());
     }
   }
   KJ_UNREACHABLE;
@@ -4251,7 +4253,7 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
       return handler;
     }
     KJ_CASE_ONEOF(exception, kj::Exception) {
-      kj::throwFatalException(kj::cp(exception));
+      kj::throwFatalException(exception.clone());
     }
   }
   KJ_UNREACHABLE;

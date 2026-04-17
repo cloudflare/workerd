@@ -625,8 +625,8 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
 AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
     jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason,
     Flag flag)
-    : canceler(
-          IoContext::current().addObject(kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
+    : canceler(IoContext::current().addObject(kj::refcounted<RefcountedCanceler>(
+          exception.map([](const kj::Exception& e) { return e.clone(); })))),
       flag(flag),
       reason(kj::mv(maybeReason)) {}
 
@@ -675,14 +675,14 @@ jsg::JsValue AbortSignal::getReason(jsg::Lock& js) {
 }
 
 kj::Exception AbortSignal::abortException(
-    jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
+    jsg::Lock& js, const jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>>& maybeReason) {
   KJ_IF_SOME(reason, maybeReason) {
     KJ_SWITCH_ONEOF(reason) {
       KJ_CASE_ONEOF(reason, jsg::JsValue) {
         return js.exceptionToKj(reason);
       }
       KJ_CASE_ONEOF(reason, kj::Exception) {
-        return kj::cp(reason);
+        return reason.clone();
       }
     }
   }
@@ -695,7 +695,7 @@ jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsVal
   KJ_IF_SOME(reason, maybeReason) {
     return js.alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
   }
-  return js.alloc<AbortSignal>(kj::cp(exception), js.exceptionToJsValue(kj::mv(exception)));
+  return js.alloc<AbortSignal>(exception.clone(), js.exceptionToJsValue(kj::mv(exception)));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
@@ -808,7 +808,7 @@ void AbortSignal::triggerAbort(
       }
     }
   } else {
-    reason = js.exceptionToJsValue(kj::cp(exception));
+    reason = js.exceptionToJsValue(exception.clone());
   }
 
   canceler->cancel(kj::mv(exception));
@@ -981,7 +981,7 @@ kj::Maybe<jsg::JsValue> AbortSignal::deserializePendingReason(jsg::Lock& js) {
       }
 
       KJ_CASE_ONEOF(exception, kj::Exception) {
-        return kj::some(js.exceptionToJsValue(kj::cp(exception)).getHandle(js));
+        return kj::some(js.exceptionToJsValue(exception.clone()).getHandle(js));
       }
     }
   }

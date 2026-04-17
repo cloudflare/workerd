@@ -567,7 +567,7 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
         tryReleaseNative(js);
       } else {
         native.closedIncoming = true;
-        reportError(js, kj::cp(e));
+        reportError(js, e.clone());
       }
     }
   })));
@@ -1116,7 +1116,7 @@ jsg::Ref<WebSocketPair::PairIterator> WebSocketPair::entries(jsg::Lock& js) {
 }
 
 void WebSocket::reportError(jsg::Lock& js, kj::Exception&& e) {
-  reportError(js, js.exceptionToJsValue(kj::cp(e)));
+  reportError(js, js.exceptionToJsValue(e.clone()));
 }
 
 void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {

@@ -310,8 +310,8 @@ class ReadableSourceImpl: public ReadableSource {
     }
 
     KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
-      output.abort(kj::cp(errored));
-      kj::throwFatalException(kj::cp(errored));
+      output.abort(errored.clone());
+      kj::throwFatalException(errored.clone());
     }
 
     if (state.is<Closed>()) {
@@ -377,15 +377,15 @@ class ReadableSourceImpl: public ReadableSource {
   }
 
   void cancel(kj::Exception reason) override {
-    canceler.cancel(kj::cp(reason));
+    canceler.cancel(reason.clone());
     setErrored(kj::mv(reason));
   }
 
   Tee tee(size_t limit) override {
     KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
       return Tee{
-        .branch1 = newErroredReadableSource(kj::cp(errored)),
-        .branch2 = newErroredReadableSource(kj::cp(errored)),
+        .branch1 = newErroredReadableSource(errored.clone()),
+        .branch2 = newErroredReadableSource(errored.clone()),
       };
     }
 
@@ -418,14 +418,14 @@ class ReadableSourceImpl: public ReadableSource {
   // Throws the stored exception if in error state.
   void throwIfErrored() {
     KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-      kj::throwFatalException(kj::cp(exception));
+      kj::throwFatalException(exception.clone());
     }
   }
 
   // Handles exceptions from read operations: stores the error and rethrows.
   [[noreturn]] void handleOperationException() {
     auto exception = kj::getCaughtExceptionAsKj();
-    setErrored(kj::cp(exception));
+    setErrored(exception.clone());
     kj::throwFatalException(kj::mv(exception));
   }
 
@@ -605,7 +605,7 @@ class ReadableSourceImpl: public ReadableSource {
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       if (readFailed) {
-        output.abort(kj::cp(exception));
+        output.abort(exception.clone());
       }
       kj::throwFatalException(kj::mv(exception));
     }

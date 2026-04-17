@@ -384,7 +384,7 @@ KJ_TEST("newClosedWritableSink (aborted)") {
   TestFixture fixture;
   auto exception = KJ_EXCEPTION(FAILED, "test error");
   auto sink = newClosedWritableSink();
-  sink->abort(kj::cp(exception));
+  sink->abort(exception.clone());
 
   try {
     fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
@@ -401,7 +401,7 @@ KJ_TEST("newClosedWritableSink (aborted)") {
 KJ_TEST("newErroredWritableSink (write)") {
   TestFixture fixture;
   auto exception = KJ_EXCEPTION(FAILED, "test error");
-  auto sink = newErroredWritableSink(kj::cp(exception));
+  auto sink = newErroredWritableSink(exception.clone());
 
   try {
     fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
@@ -418,7 +418,7 @@ KJ_TEST("newErroredWritableSink (write)") {
 KJ_TEST("newErroredWritableSink (end)") {
   TestFixture fixture;
   auto exception = KJ_EXCEPTION(FAILED, "test error");
-  auto sink = newErroredWritableSink(kj::cp(exception));
+  auto sink = newErroredWritableSink(exception.clone());
 
   try {
     fixture.runInIoContext(

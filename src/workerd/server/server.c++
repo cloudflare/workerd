@@ -2525,7 +2525,7 @@ class Server::WorkerService final: public Service,
         containerClient = kj::none;
 
         KJ_IF_SOME(r, reason) {
-          brokenReason = kj::cp(r);
+          brokenReason = r.clone();
         } else {
           brokenReason = JSG_KJ_EXCEPTION(FAILED, Error, "Actor aborted for uknown reason.");
         }
@@ -2691,7 +2691,7 @@ class Server::WorkerService final: public Service,
 
       void requireNotBroken() {
         KJ_IF_SOME(e, brokenReason) {
-          kj::throwFatalException(kj::cp(e));
+          kj::throwFatalException(e.clone());
         }
       }
 

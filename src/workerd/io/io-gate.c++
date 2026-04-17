@@ -54,7 +54,7 @@ InputGate::Waiter::~Waiter() noexcept(false) {
 kj::Promise<InputGate::Lock> InputGate::wait(SpanParent parentSpan) {
   auto methodSpan = parentSpan.newChild("input_gate_wait_attempt"_kjc);
   KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
-    return kj::cp(e);
+    return e.clone();
   } else if (lockCount == 0) {
     return Lock(*this, methodSpan);
   } else {
@@ -64,7 +64,7 @@ kj::Promise<InputGate::Lock> InputGate::wait(SpanParent parentSpan) {
 
 kj::Promise<void> InputGate::onBroken() {
   KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
-    return kj::cp(e);
+    return e.clone();
   } else {
     return brokenPromise.addBranch();
   }
@@ -184,7 +184,7 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
         KJ_IF_SOME(e, target.brokenState.tryGet<kj::Exception>()) {
           // Oops, we're broken.
           setBroken(e);
-          kj::throwFatalException(kj::cp(e));
+          kj::throwFatalException(e.clone());
         }
 
         // Add ourselves to this parent's child waiter list.
@@ -277,17 +277,17 @@ void InputGate::CriticalSection::failed(const kj::Exception& e) {
 
 void InputGate::setBroken(const kj::Exception& e) {
   for (auto& waiter: waitingChildren) {
-    waiter.fulfiller.reject(kj::cp(e));
+    waiter.fulfiller.reject(e.clone());
     waitingChildren.remove(waiter);
   }
   for (auto& waiter: waiters) {
-    waiter.fulfiller.reject(kj::cp(e));
+    waiter.fulfiller.reject(e.clone());
     waiters.remove(waiter);
   }
   KJ_IF_SOME(f, brokenState.tryGet<kj::Own<kj::PromiseFulfiller<void>>>()) {
-    f.get()->reject(kj::cp(e));
+    f.get()->reject(e.clone());
   }
-  brokenState = kj::cp(e);
+  brokenState = e.clone();
 }
 
 InputGate& InputGate::CriticalSection::parentAsInputGate() {
@@ -337,7 +337,7 @@ kj::Promise<void> OutputGate::onBroken() {
       !brokenState.is<kj::Own<kj::PromiseFulfiller<void>>>(), "onBroken() can only be called once");
 
   KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
-    return kj::cp(e);
+    return e.clone();
   } else {
     auto paf = kj::newPromiseAndFulfiller<void>();
     brokenState = kj::mv(paf.fulfiller);
@@ -366,9 +366,9 @@ void OutputGate::setBroken(const kj::Exception& e) {
   // We assume the exception is already propagated into `pastLocksPromise`, so all we need to do
   // is handle onBroken().
   KJ_IF_SOME(f, brokenState.tryGet<kj::Own<kj::PromiseFulfiller<void>>>()) {
-    f.get()->reject(kj::cp(e));
+    f.get()->reject(e.clone());
   }
-  brokenState = kj::cp(e);
+  brokenState = e.clone();
 }
 
 }  // namespace workerd

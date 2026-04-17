@@ -102,7 +102,7 @@ class WritableSinkImpl: public WritableSink {
   }
 
   void abort(kj::Exception reason) override final {
-    canceler.cancel(kj::cp(reason));
+    canceler.cancel(reason.clone());
     setErrored(kj::mv(reason));
   }
 
@@ -120,14 +120,14 @@ class WritableSinkImpl: public WritableSink {
   // Throws the stored exception if in error state.
   void throwIfErrored() {
     KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-      kj::throwFatalException(kj::cp(exception));
+      kj::throwFatalException(exception.clone());
     }
   }
 
   // Handles exceptions from write/end operations: stores the error and rethrows.
   [[noreturn]] void handleOperationException() {
     auto exception = kj::getCaughtExceptionAsKj();
-    setErrored(kj::cp(exception));
+    setErrored(exception.clone());
     kj::throwFatalException(kj::mv(exception));
   }
 

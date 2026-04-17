@@ -37,7 +37,7 @@ jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
     return kj::mv(stream);
   }, [&f = *paf.fulfiller](kj::Exception e) {
     KJ_LOG(WARNING, "failed to connect to local database", e);
-    f.fulfill(kj::cp(e));
+    f.fulfill(e.clone());
     return kj::mv(e);
   }).attach(kj::mv(paf.fulfiller)));
 

@@ -85,7 +85,7 @@ class NeuterableInputStreamImpl final: public NeuterableInputStream {
 
   void neuter(kj::Exception exception) override {
     if (inner.is<kj::AsyncInputStream*>()) {
-      inner = kj::cp(exception);
+      inner = exception.clone();
       if (!canceler.isEmpty()) {
         canceler.cancel(kj::mv(exception));
       }
@@ -112,7 +112,7 @@ class NeuterableInputStreamImpl final: public NeuterableInputStream {
         return *stream;
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
-        kj::throwFatalException(kj::cp(exception));
+        kj::throwFatalException(exception.clone());
       }
     }
     KJ_UNREACHABLE;
@@ -125,7 +125,7 @@ class NeuterableIoStreamImpl final: public NeuterableIoStream {
 
   void neuter(kj::Exception reason) override {
     if (inner.is<kj::AsyncIoStream*>()) {
-      inner = kj::cp(reason);
+      inner = reason.clone();
       if (!canceler.isEmpty()) {
         canceler.cancel(kj::mv(reason));
       }
@@ -194,13 +194,13 @@ class NeuterableIoStreamImpl final: public NeuterableIoStream {
     KJ_IF_SOME(stream, inner.tryGet<kj::AsyncIoStream*>()) {
       return *stream;
     }
-    kj::throwFatalException(kj::cp(inner.get<kj::Exception>()));
+    kj::throwFatalException(inner.get<kj::Exception>().clone());
   }
   kj::AsyncIoStream& getStream() const {
     KJ_IF_SOME(stream, inner.tryGet<kj::AsyncIoStream*>()) {
       return *stream;
     }
-    kj::throwFatalException(kj::cp(inner.get<kj::Exception>()));
+    kj::throwFatalException(inner.get<kj::Exception>().clone());
   }
 };
 

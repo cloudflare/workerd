@@ -774,7 +774,7 @@ KJ_TEST("newClosedReadableSource") {
 KJ_TEST("newErroredReadableSource") {
   TestFixture fixture;
   auto exception = KJ_EXCEPTION(FAILED, "test error");
-  auto source = newErroredReadableSource(kj::cp(exception));
+  auto source = newErroredReadableSource(exception.clone());
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     kj::byte buffer[10];

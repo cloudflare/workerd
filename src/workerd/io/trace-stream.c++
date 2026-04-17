@@ -1053,7 +1053,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
   } catch (...) {
     auto e = kj::getCaughtExceptionAsKj();
     if (revokePaf.fulfiller->isWaiting()) {
-      revokePaf.fulfiller->reject(kj::cp(e));
+      revokePaf.fulfiller->reject(e.clone());
     }
     kj::throwFatalException(kj::mv(e));
   }

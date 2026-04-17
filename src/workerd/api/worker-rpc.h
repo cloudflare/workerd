@@ -502,7 +502,7 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
   }
 
   void failed(const kj::Exception& e) override {
-    capFulfiller->reject(kj::cp(e));
+    capFulfiller->reject(e.clone());
   }
 
   // Event ID for jsRpcSession.

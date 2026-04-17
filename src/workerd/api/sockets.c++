@@ -502,8 +502,8 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
 }
 
 void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
-  resolveFulfiller(js, kj::cp(e));
-  openedResolver.reject(js, kj::cp(e));
+  resolveFulfiller(js, e.clone());
+  openedResolver.reject(js, e.clone());
   readable->getController().cancel(js, kj::none).markAsHandled(js);
   writable->getController().abort(js, js.error(e.getDescription())).markAsHandled(js);
 }

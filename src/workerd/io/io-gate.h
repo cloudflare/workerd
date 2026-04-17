@@ -342,8 +342,8 @@ kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise, SpanParent parentSp
   } catch (kj::Exception& e) {
     setBroken(e);
     lockSpan.setTag("error"_kjc, true);
-    fulfiller->reject(kj::cp(e));
-    kj::throwFatalException(kj::cp(e));
+    fulfiller->reject(e.clone());
+    kj::throwFatalException(e.clone());
   }
 }
 

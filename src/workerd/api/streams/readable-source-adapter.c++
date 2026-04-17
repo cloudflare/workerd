@@ -72,11 +72,11 @@ struct ReadableStreamSourceJsAdapter::Active {
     if (canceled) return;
     canceled = true;
     // 1. Cancel our in-flight "runLoop", if any.
-    pendingCancel = kj::cp(exception);
-    canceler.cancel(kj::cp(exception));
+    pendingCancel = exception.clone();
+    canceler.cancel(exception.clone());
     // 2. Drop our queue of pending tasks.
     queue.drainTo(
-        [&exception](kj::Own<Task>&& task) { task->fulfiller->reject(kj::cp(exception)); });
+        [&exception](kj::Own<Task>&& task) { task->fulfiller->reject(exception.clone()); });
     // 3. Cancel and drop the source itself. We're done with it.
     if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
       source->cancel(kj::mv(exception));
@@ -135,7 +135,7 @@ ReadableStreamSourceJsAdapter::~ReadableStreamSourceJsAdapter() noexcept(false) 
 
 void ReadableStreamSourceJsAdapter::cancel(kj::Exception exception) {
   KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-    open.active->cancel(kj::cp(exception));
+    open.active->cancel(exception.clone());
   }
   state.forceTransitionTo<kj::Exception>(kj::mv(exception));
 }
@@ -165,7 +165,7 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<ReadResult>(js.exceptionToJs(kj::cp(exception)));
+    return js.rejectedPromise<ReadResult>(js.exceptionToJs(exception.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -283,7 +283,7 @@ jsg::Promise<void> ReadableStreamSourceJsAdapter::close(jsg::Lock& js) {
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<void>(js.exceptionToJs(kj::cp(exception)));
+    return js.rejectedPromise<void>(js.exceptionToJs(exception.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -322,7 +322,7 @@ jsg::Promise<jsg::JsRef<jsg::JsString>> ReadableStreamSourceJsAdapter::readAllTe
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<jsg::JsRef<jsg::JsString>>(js.exceptionToJs(kj::cp(exception)));
+    return js.rejectedPromise<jsg::JsRef<jsg::JsString>>(js.exceptionToJs(exception.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -382,7 +382,7 @@ jsg::Promise<jsg::BufferSource> ReadableStreamSourceJsAdapter::readAllBytes(
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<jsg::BufferSource>(js.exceptionToJs(kj::cp(exception)));
+    return js.rejectedPromise<jsg::BufferSource>(js.exceptionToJs(exception.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -452,7 +452,7 @@ kj::Maybe<uint64_t> ReadableStreamSourceJsAdapter::tryGetLength(StreamEncoding e
 kj::Maybe<ReadableStreamSourceJsAdapter::Tee> ReadableStreamSourceJsAdapter::tryTee(
     jsg::Lock& js, uint64_t limit) {
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-    js.throwException(js.exceptionToJs(kj::cp(exception)));
+    js.throwException(js.exceptionToJs(exception.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -698,8 +698,8 @@ void ReadableSourceKjAdapter::Active::cancel(kj::Exception reason) {
     return;
   }
   bool wasDone = state.is<Done>();
-  state.forceTransitionTo<Canceled>(kj::cp(reason));
-  canceler.cancel(kj::cp(reason));
+  state.forceTransitionTo<Canceled>(reason.clone());
+  canceler.cancel(reason.clone());
   if (!wasDone) {
     // If the previous read indicated that it was the last read, then
     // the reader will have already been dropped. We do not need to
@@ -966,7 +966,7 @@ kj::Promise<size_t> ReadableSourceKjAdapter::readImpl(
     self->runIfAlive([&](ReadableSourceKjAdapter& self) {
       KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {
         open.active->state.forceTransitionTo<Active::Canceling>(Active::Canceling{
-          .exception = kj::cp(exception),
+          .exception = exception.clone(),
         });
       }
     });
@@ -987,7 +987,7 @@ kj::Promise<size_t> ReadableSourceKjAdapter::read(kj::ArrayPtr<kj::byte> buffer,
       "minBytes must be less than or equal to the buffer size.");
 
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-    return kj::cp(exception);
+    return exception.clone();
   }
 
   if (state.is<KjClosed>()) {
@@ -1051,7 +1051,7 @@ kj::Maybe<size_t> ReadableSourceKjAdapter::tryGetLength(StreamEncoding encoding)
 
 void ReadableSourceKjAdapter::cancel(kj::Exception reason) {
   KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-    open.active->cancel(kj::cp(reason));
+    open.active->cancel(reason.clone());
   }
   state.forceTransitionTo<kj::Exception>(kj::mv(reason));
 }
@@ -1059,12 +1059,12 @@ void ReadableSourceKjAdapter::cancel(kj::Exception reason) {
 kj::Maybe<kj::Exception> ReadableSourceKjAdapter::checkCancelingOrCanceled(Active& active) {
   KJ_IF_SOME(canceling, active.state.tryGetUnsafe<Active::Canceling>()) {
     auto exception = kj::mv(canceling.exception);
-    state.forceTransitionTo<kj::Exception>(kj::cp(exception));
+    state.forceTransitionTo<kj::Exception>(exception.clone());
     return kj::mv(exception);
   }
   KJ_IF_SOME(canceled, active.state.tryGetUnsafe<Active::Canceled>()) {
     auto exception = kj::mv(canceled.exception);
-    state.forceTransitionTo<kj::Exception>(kj::cp(exception));
+    state.forceTransitionTo<kj::Exception>(exception.clone());
     return kj::mv(exception);
   }
   return kj::none;
@@ -1160,7 +1160,7 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
     auto exception = kj::getCaughtExceptionAsKj();
     if (!writeFailed) {
       // If we got an error and it wasn't the write that failed, abort the output.
-      output.abort(kj::cp(exception));
+      output.abort(exception.clone());
     }
     // Store the exception to handle after the catch block.
     pendingException = kj::mv(exception);
@@ -1169,7 +1169,7 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
   // If there was an error, cancel the reader and propagate the exception.
   KJ_IF_SOME(exception, pendingException) {
     DrainingReader* readerPtr = reader.get();
-    co_await active->ioContext.run([readerPtr, ex = kj::cp(exception)](jsg::Lock& js) mutable {
+    co_await active->ioContext.run([readerPtr, ex = exception.clone()](jsg::Lock& js) mutable {
       auto& ioContext = IoContext::current();
       auto error = js.exceptionToJsValue(kj::mv(ex));
       return ioContext.awaitJs(js, readerPtr->cancel(js, error.getHandle(js)));
@@ -1187,7 +1187,7 @@ kj::Promise<DeferredProxy<void>> ReadableSourceKjAdapter::pumpTo(
   // operation.
 
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{kj::cp(exception)});
+    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{exception.clone()});
   }
 
   if (state.is<KjClosed>()) {
@@ -1256,7 +1256,7 @@ kj::Promise<kj::String> ReadableSourceKjAdapter::readAllText(size_t limit) {
 template <typename T>
 kj::Promise<kj::Array<T>> ReadableSourceKjAdapter::readAllImpl(size_t limit) {
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-    kj::throwFatalException(kj::cp(exception));
+    kj::throwFatalException(exception.clone());
   }
 
   if (state.is<KjClosed>()) {

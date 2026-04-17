@@ -48,7 +48,7 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
   tracing::EventInfo getEventInfo() const override;
 
   void failed(const kj::Exception& e) override {
-    capFulfiller->reject(kj::cp(e));
+    capFulfiller->reject(e.clone());
   }
 
   // Specify same type as with TraceCustomEvent here by default.

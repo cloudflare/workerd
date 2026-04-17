@@ -271,7 +271,7 @@ void ActorSqlite::onCriticalError(
       return JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
     });
     exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
-    broken.emplace(kj::cp(exception));
+    broken.emplace(exception.clone());
 
     // Also ensure output gate is explicitly broken.
     commitTasks.add(
@@ -592,7 +592,7 @@ void ActorSqlite::taskFailed(kj::Exception&& exception) {
 
 void ActorSqlite::requireNotBroken() {
   KJ_IF_SOME(e, broken) {
-    kj::throwFatalException(kj::cp(e));
+    kj::throwFatalException(e.clone());
   }
 }
 
@@ -895,7 +895,7 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
     auto exception = [&]() {
       KJ_IF_SOME(e, maybeException) {
         // We were given an exception, use it.
-        return kj::cp(e);
+        return e.clone();
       }
 
       // Use the direct constructor so that we can reuse the constexpr message variable for testing.

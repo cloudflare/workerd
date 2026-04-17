@@ -107,12 +107,12 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
         if (amount > l) {
           auto exception = JSG_KJ_EXCEPTION(
               FAILED, TypeError, "Attempt to write too many bytes through a FixedLengthStream.");
-          cancel(kj::cp(exception));
+          cancel(exception.clone());
           return kj::mv(exception);
         } else if (amount == 0 && l != 0) {
           auto exception = JSG_KJ_EXCEPTION(FAILED, TypeError,
               "FixedLengthStream did not see all expected bytes before close().");
-          cancel(kj::cp(exception));
+          cancel(exception.clone());
           return kj::mv(exception);
         }
         l -= amount;
@@ -155,7 +155,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     KJ_IF_SOME(request, state.tryGetUnsafe<ReadRequest>()) {
       request.fulfiller->fulfill(static_cast<size_t>(0));
     } else KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
-      request.fulfiller->reject(kj::cp(reason));
+      request.fulfiller->reject(reason.clone());
     }
     // Idle state is fine, just transition to error.
 
@@ -191,7 +191,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     if (state.isErrored()) return;
 
     KJ_IF_SOME(request, state.tryGetUnsafe<ReadRequest>()) {
-      request.fulfiller->reject(kj::cp(reason));
+      request.fulfiller->reject(reason.clone());
     } else KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
       // If the fulfiller is not waiting, the write promise was already
       // canceled and no one is waiting on it.
@@ -210,7 +210,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
   kj::Promise<size_t> readHelper(kj::ArrayPtr<kj::byte> bytes) {
     // Handle error state first.
     KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-      return kj::cp(exception);
+      return exception.clone();
     }
 
     // Handle closed state.
@@ -253,7 +253,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
   kj::Promise<void> writeHelper(kj::ArrayPtr<const kj::byte> bytes) {
     // Handle error state first.
     KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-      return kj::cp(exception);
+      return exception.clone();
     }
 
     // Handle closed state.

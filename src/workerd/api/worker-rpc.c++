@@ -626,7 +626,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
     // Catch KJ exceptions and make them async, since we don't want async calls to throw
     // synchronously.
     auto e = kj::getCaughtExceptionAsKj();
-    auto pipeline = capnp::newBrokenPipeline(kj::cp(e));
+    auto pipeline = capnp::newBrokenPipeline(e.clone());
     return {
       .promise = jsg::JsPromise(js.wrapSimplePromise(js.rejectedPromise<jsg::Value>(kj::mv(e)))),
       .weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>(),
@@ -2198,7 +2198,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // Make sure the top-level capability is revoked with the same exception that `run()` is
     // throwing, rather than some generic revocation exception.
     auto e = kj::getCaughtExceptionAsKj();
-    revcableTarget.revoke(kj::cp(e));
+    revcableTarget.revoke(e.clone());
     kj::throwFatalException(kj::mv(e));
   }
 }
@@ -2249,7 +2249,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
   } catch (...) {
     auto e = kj::getCaughtExceptionAsKj();
     if (revokePaf.fulfiller->isWaiting()) {
-      revokePaf.fulfiller->reject(kj::cp(e));
+      revokePaf.fulfiller->reject(e.clone());
     }
     kj::throwFatalException(kj::mv(e));
   }

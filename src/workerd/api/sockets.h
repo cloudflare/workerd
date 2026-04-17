@@ -226,7 +226,7 @@ class Socket: public jsg::Object {
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_SOME(err, maybeErr) {
-      closedResolver.reject(js, kj::cp(err));
+      closedResolver.reject(js, err.clone());
     } else {
       closedResolver.resolve(js);
     }

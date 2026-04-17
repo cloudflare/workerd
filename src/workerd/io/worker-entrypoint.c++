@@ -382,7 +382,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, kj::cp(exception));
+    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
 
     // Do not allow the exception to escape the isolate without waiting for the output gate to
     // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
@@ -606,7 +606,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, kj::cp(exception));
+    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
 
     // Do not allow the exception to escape the isolate without waiting for the output gate to
     // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.

@@ -320,11 +320,11 @@ class CompressionStreamBase: public kj::Refcounted,
       auto pending = kj::mv(pendingReads.front());
       pendingReads.pop_front();
       if (pending.promise->isWaiting()) {
-        pending.promise->reject(kj::cp(reason));
+        pending.promise->reject(reason.clone());
       }
     }
 
-    canceler.cancel(kj::cp(reason));
+    canceler.cancel(reason.clone());
     transitionToErrored(kj::mv(reason));
   }
 
@@ -374,7 +374,7 @@ class CompressionStreamBase: public kj::Refcounted,
       KJ_IF_SOME(exception, kj::runCatchingExceptions([this, flush, &result]() {
         result = context.pumpOnce(flush);
       })) {
-        cancelInternal(kj::cp(exception));
+        cancelInternal(exception.clone());
         kj::throwFatalException(kj::mv(exception));
       }
 
@@ -412,12 +412,12 @@ class CompressionStreamBase: public kj::Refcounted,
         // so we need to report an error here and error the stream.
         if (pending.filled > 0) {
           auto ex = JSG_KJ_EXCEPTION(FAILED, Error, "A partially fulfilled read was canceled.");
-          cancelInternal(kj::cp(ex));
+          cancelInternal(ex.clone());
           kj::throwFatalException(kj::mv(ex));
         }
 
         auto ex = JSG_KJ_EXCEPTION(FAILED, Error, "The pending read was canceled.");
-        cancelInternal(kj::cp(ex));
+        cancelInternal(ex.clone());
         kj::throwFatalException(kj::mv(ex));
       }
 
@@ -478,7 +478,7 @@ class CompressionStreamImpl final: public CompressionStreamBase<mode> {
  protected:
   void requireActive(kj::StringPtr errorMessage) override {
     KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-      kj::throwFatalException(kj::cp(exception));
+      kj::throwFatalException(exception.clone());
     }
     // isActive() returns true only if in Open state (the ActiveState)
     JSG_REQUIRE(state.isActive(), Error, errorMessage);
@@ -500,7 +500,7 @@ class CompressionStreamImpl final: public CompressionStreamBase<mode> {
 
   void throwIfException() override {
     KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-      kj::throwFatalException(kj::cp(exception));
+      kj::throwFatalException(exception.clone());
     }
   }
 

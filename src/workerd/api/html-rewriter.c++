@@ -505,7 +505,7 @@ kj::Promise<void> Rewriter::end() {
 
 void Rewriter::abort(kj::Exception reason) {
   // End the rewriter and forward the error to the wrapped output stream.
-  maybeException = kj::cp(reason);
+  maybeException = reason.clone();
 
   inner->abort(kj::mv(reason));
 }
@@ -530,8 +530,8 @@ kj::Promise<void> Rewriter::flushWrite() {
   }
 
   KJ_IF_SOME(exception, maybeException) {
-    inner->abort(kj::cp(exception));
-    kj::throwFatalException(kj::cp(exception));
+    inner->abort(exception.clone());
+    kj::throwFatalException(exception.clone());
   }
 }
 template <typename T, typename CType>

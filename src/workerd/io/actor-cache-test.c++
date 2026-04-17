@@ -5644,7 +5644,7 @@ KJ_TEST("ActorCache can shutdown") {
     afterShutdown(test, kj::mv(res.maybeReq));
 
     auto error = options.maybeError.map([](const kj::Exception& e) {
-      return kj::cp(e);
+      return e.clone();
     }).orDefault(KJ_EXCEPTION(DISCONNECTED, kj::str(ActorCache::SHUTDOWN_ERROR_MESSAGE)));
 
     if (res.shouldBreakOutputGate) {

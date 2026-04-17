@@ -801,10 +801,10 @@ kj::Promise<void> demuxDockerExecOutput(kj::AsyncInputStream& input,
     auto exception = kj::getCaughtExceptionAsKj();
 
     KJ_IF_SOME(out, stdoutWriter) {
-      out->abortWrite(kj::cp(exception));
+      out->abortWrite(exception.clone());
     }
     KJ_IF_SOME(err, stderrWriter) {
-      err->abortWrite(kj::cp(exception));
+      err->abortWrite(exception.clone());
     }
     kj::throwFatalException(kj::mv(exception));
   }

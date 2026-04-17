@@ -468,11 +468,11 @@ void IoContext::abort(kj::Exception&& e) {
   if (abortException != kj::none) {
     return;
   }
-  abortException = kj::cp(e);
+  abortException = e.clone();
   KJ_IF_SOME(a, actor) {
     // Stop the ActorCache from flushing any scheduled write operations to prevent any unnecessary
     // or unintentional async work
-    a.shutdownActorCache(kj::cp(e));
+    a.shutdownActorCache(e.clone());
   }
   abortFulfiller->reject(kj::mv(e));
 }
@@ -648,7 +648,7 @@ kj::Own<void> IoContext::registerPendingEvent() {
     return kj::addRef(pe);
   } else {
     KJ_IF_SOME(e, abortException) {
-      kj::throwFatalException(kj::cp(e));
+      kj::throwFatalException(e.clone());
     }
 
     // Cancel any already-scheduled finalization.
@@ -1299,7 +1299,7 @@ void IoContext::runImpl(Runnable& runnable,
         // Check if we were aborted. TerminateExecution() may be called after abort() in order
         // to prevent any more JavaScript from executing.
         KJ_IF_SOME(e, abortException) {
-          kj::throwFatalException(kj::cp(e));
+          kj::throwFatalException(e.clone());
         }
 
         // That should have thrown, so we shouldn't get here.

@@ -57,7 +57,7 @@ class RefcountedCanceler: public kj::Refcounted {
   template <typename T>
   kj::Promise<T> wrap(kj::Promise<T> promise) {
     KJ_IF_SOME(ex, reason) {
-      return kj::cp(ex);
+      return ex.clone();
     }
     return canceler.wrap(kj::mv(promise));
   }
@@ -71,7 +71,7 @@ class RefcountedCanceler: public kj::Refcounted {
 
   void cancel(const kj::Exception& exception) {
     if (reason == kj::none) {
-      reason = kj::cp(exception);
+      reason = exception.clone();
       canceler.cancel(exception);
       for (auto& listener: listeners) {
         listener.fn();
@@ -85,7 +85,7 @@ class RefcountedCanceler: public kj::Refcounted {
 
   void throwIfCanceled() {
     KJ_IF_SOME(ex, reason) {
-      kj::throwFatalException(kj::cp(ex));
+      kj::throwFatalException(ex.clone());
     }
   }
 

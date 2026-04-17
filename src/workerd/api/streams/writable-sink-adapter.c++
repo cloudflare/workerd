@@ -66,11 +66,11 @@ struct WritableStreamSinkJsAdapter::Active final {
     if (aborted) return;
     aborted = true;
     // 1. Cancel our in-flight "runLoop", if any.
-    pendingAbort = kj::cp(exception);
-    canceler.cancel(kj::cp(exception));
+    pendingAbort = exception.clone();
+    canceler.cancel(exception.clone());
     // 2. Drop our queue of pending tasks.
     queue.drainTo(
-        [&exception](kj::Own<Task>&& task) { task->fulfiller->reject(kj::cp(exception)); });
+        [&exception](kj::Own<Task>&& task) { task->fulfiller->reject(exception.clone()); });
     // 3. Abort and drop the sink itself. We're done with it.
     sink->abort(kj::mv(exception));
     auto dropped KJ_UNUSED = kj::mv(sink);
@@ -176,7 +176,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
   KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<void>(js.exceptionToJs(kj::cp(exc)));
+    return js.rejectedPromise<void>(js.exceptionToJs(exc.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -306,7 +306,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::flush(jsg::Lock& js) {
   KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<void>(js.exceptionToJs(kj::cp(exc)));
+    return js.rejectedPromise<void>(js.exceptionToJs(exc.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -343,7 +343,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::end(jsg::Lock& js) {
   KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<void>(js.exceptionToJs(kj::cp(exc)));
+    return js.rejectedPromise<void>(js.exceptionToJs(exc.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -392,7 +392,7 @@ void WritableStreamSinkJsAdapter::abort(kj::Exception&& exception) {
   // state. This ensures that any pending writes are interrupted and do not
   // complete.
   KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-    open.active->abort(kj::cp(exception));
+    open.active->abort(exception.clone());
   }
   // Use forceTransitionTo because abort can be called from any state.
   state.forceTransitionTo<kj::Exception>(kj::mv(exception));
@@ -544,9 +544,9 @@ WritableStreamSinkKjAdapter::Active::~Active() noexcept(false) {
 void WritableStreamSinkKjAdapter::Active::abort(kj::Exception reason) {
   if (aborted) return;
   aborted = true;
-  canceler.cancel(kj::cp(reason));
+  canceler.cancel(reason.clone());
   ioContext.addTask(ioContext.run([writable = kj::mv(stream), writer = kj::mv(writer),
-                                      exception = kj::cp(reason)](jsg::Lock& js) mutable {
+                                      exception = reason.clone()](jsg::Lock& js) mutable {
     auto& ioContext = IoContext::current();
     auto error = js.exceptionToJsValue(kj::mv(exception));
     auto promise = writer->abort(js, error.getHandle(js));
@@ -572,7 +572,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(kj::ArrayPtr<const byte> bu
 kj::Promise<void> WritableStreamSinkKjAdapter::write(
     kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
   KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
-    kj::throwFatalException(kj::cp(exc));
+    kj::throwFatalException(exc.clone());
   }
 
   if (state.is<KjClosed>()) {
@@ -583,8 +583,8 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
   auto& active = *open.active;
   KJ_REQUIRE(!active.writePending, "Cannot have multiple concurrent writes.");
   KJ_IF_SOME(exception, active.pendingAbort) {
-    auto exc = kj::cp(exception);
-    state.forceTransitionTo<kj::Exception>(kj::cp(exc));
+    auto exc = exception.clone();
+    state.forceTransitionTo<kj::Exception>(exc.clone());
     return kj::mv(exc);
   }
   if (active.closePending) {
@@ -632,7 +632,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
     self->runIfAlive([&](WritableStreamSinkKjAdapter& self) {
       KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {
         open.active->writePending = false;
-        open.active->pendingAbort = kj::cp(exception);
+        open.active->pendingAbort = exception.clone();
       }
     });
     kj::throwFatalException(kj::mv(exception));
@@ -641,7 +641,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
 
 kj::Promise<void> WritableStreamSinkKjAdapter::end() {
   KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
-    return kj::cp(exc);
+    return exc.clone();
   }
 
   if (state.is<KjClosed>()) {
@@ -653,7 +653,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::end() {
   KJ_REQUIRE(!active.writePending, "Cannot have multiple concurrent writes.");
   KJ_IF_SOME(exception, active.pendingAbort) {
     auto exc = kj::mv(exception);
-    state.forceTransitionTo<kj::Exception>(kj::cp(exc));
+    state.forceTransitionTo<kj::Exception>(exc.clone());
     return kj::mv(exc);
   }
   if (active.closePending) {
@@ -669,7 +669,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::end() {
   })).catch_([self = selfRef.addRef()](kj::Exception exception) {
     self->runIfAlive([&](WritableStreamSinkKjAdapter& self) {
       KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {
-        open.active->pendingAbort = kj::cp(exception);
+        open.active->pendingAbort = exception.clone();
       }
     });
     kj::throwFatalException(kj::mv(exception));
@@ -678,7 +678,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::end() {
 
 void WritableStreamSinkKjAdapter::abort(kj::Exception reason) {
   KJ_IF_SOME(open, state.tryGetActiveUnsafe()) {
-    open.active->abort(kj::cp(reason));
+    open.active->abort(reason.clone());
   }
   // Use forceTransitionTo because abort can be called from any state.
   state.forceTransitionTo<kj::Exception>(kj::mv(reason));

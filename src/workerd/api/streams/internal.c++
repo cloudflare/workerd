@@ -814,7 +814,7 @@ void ReadableStreamInternalController::doCancel(
   auto exception = reasonToException(js, maybeReason);
   KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     KJ_IF_SOME(canceler, locked.getCanceler()) {
-      canceler->cancel(kj::cp(exception));
+      canceler->cancel(exception.clone());
     }
   }
   KJ_IF_SOME(readable, state.tryGetUnsafe<Readable>()) {
@@ -990,7 +990,7 @@ void ReadableStreamInternalController::releaseReader(
 }
 
 void WritableStreamInternalController::Writable::abort(kj::Exception&& ex) {
-  canceler.cancel(kj::cp(ex));
+  canceler.cancel(ex.clone());
   sink->abort(kj::mv(ex));
 }
 
@@ -1245,14 +1245,14 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
       // stream will be put into an errored state immediately after draining the
       // queue. All pending writes and other operations in the queue will be rejected
       // immediately and an immediately resolved or rejected promise will be returned.
-      writable->abort(kj::cp(exception));
+      writable->abort(exception.clone());
       drain(js, reason);
       return options.reject ? rejectedMaybeHandledPromise<void>(js, reason, options.handled)
                             : js.resolvedPromise();
     }
 
     if (queue.empty()) {
-      writable->abort(kj::cp(exception));
+      writable->abort(exception.clone());
       doError(js, reason);
       return options.reject ? rejectedMaybeHandledPromise<void>(js, reason, options.handled)
                             : js.resolvedPromise();
@@ -2350,8 +2350,8 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
     holder->done = true;
     return kj::mv(proxy);
   }, [holder = holder.addRef()](kj::Exception&& ex) mutable {
-    holder->sink->abort(kj::cp(ex));
-    holder->source->cancel(kj::cp(ex));
+    holder->sink->abort(ex.clone());
+    holder->source->cancel(ex.clone());
     holder->done = true;
     return kj::mv(ex);
   });

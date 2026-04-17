@@ -682,7 +682,7 @@ void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
         if (sqlite3_get_autocommit(db) != 0) {
           criticalErrorOccurred = true;
           KJ_IF_SOME(cb, onCriticalErrorCallback) {
-            cb(errorMessage, maybeException);
+            cb(errorMessage, maybeException.map([](const kj::Exception& e) { return e.clone(); }));
           }
         }
       }
