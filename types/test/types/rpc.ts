@@ -784,6 +784,44 @@ export default <ExportedHandler<Env>>{
       >;
     }
 
+    // Verify the shape of WorkersRpcError and DurableObjectError matches what
+    // the runtime stamps onto tunneled exceptions from RPC / DO stubs.
+    {
+      try {
+        const stub = env.RPC_OBJECT.get(env.RPC_OBJECT.newUniqueId());
+        await stub.fetch('https://example.com');
+      } catch (e) {
+        // Base RPC error: retryable / overloaded / remote apply to any
+        // tunneled Workers RPC exception (Fetcher, service binding,
+        // WorkerEntrypoint, RpcTarget, Durable Object, Workflow).
+        const rpcErr = e as WorkersRpcError;
+        expectTypeOf(rpcErr).toExtend<Error>();
+        expectTypeOf(rpcErr.retryable).toEqualTypeOf<boolean | undefined>();
+        expectTypeOf(rpcErr.overloaded).toEqualTypeOf<boolean | undefined>();
+        expectTypeOf(rpcErr.remote).toEqualTypeOf<boolean | undefined>();
+
+        // `durableObjectReset` is DO-specific and not on the base RPC error.
+        expectTypeOf<WorkersRpcError>().not.toHaveProperty(
+          'durableObjectReset'
+        );
+
+        // Durable-Object-specific error adds `durableObjectReset`.
+        const doErr = e as DurableObjectError;
+        expectTypeOf(doErr).toExtend<WorkersRpcError>();
+        expectTypeOf(doErr).toExtend<Error>();
+        expectTypeOf(doErr.retryable).toEqualTypeOf<boolean | undefined>();
+        expectTypeOf(doErr.overloaded).toEqualTypeOf<boolean | undefined>();
+        expectTypeOf(doErr.remote).toEqualTypeOf<boolean | undefined>();
+        expectTypeOf(doErr.durableObjectReset).toEqualTypeOf<
+          boolean | undefined
+        >();
+
+        // Both are assignable to Error (they extend it).
+        const asError: Error = doErr;
+        expectTypeOf(asError).toExtend<Error>();
+      }
+    }
+
     return new Response();
   },
 };
