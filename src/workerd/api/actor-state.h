@@ -688,6 +688,9 @@ class DurableObjectState: public jsg::Object {
   jsg::Promise<void> configureReadReplication(
       jsg::Lock& js, DurableObjectStorage::ReadReplicationOptions options);
 
+  // Returns a stub for the primary if there is one.
+  jsg::Optional<jsg::Ref<DurableObject>> getPrimary(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     if (flags.getEnableCtxExports()) {
@@ -701,6 +704,11 @@ class DurableObjectState: public jsg::Object {
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(primaryStub, getPrimary);
+    }
+
     JSG_METHOD(blockConcurrencyWhile);
     JSG_METHOD(acceptWebSocket);
     JSG_METHOD(getWebSockets);

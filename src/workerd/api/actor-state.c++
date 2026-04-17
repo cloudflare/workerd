@@ -1307,6 +1307,13 @@ jsg::Promise<void> DurableObjectState::configureReadReplication(
       ->configureReadReplication(js, kj::mv(options));
 }
 
+jsg::Optional<jsg::Ref<DurableObject>> DurableObjectState::getPrimary(jsg::Lock& js) {
+  KJ_IF_SOME(s, storage) {
+    return s->getPrimary(js);
+  }
+  return kj::none;
+}
+
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value) {
   jsg::Serializer serializer(js,
       jsg::Serializer::Options{
