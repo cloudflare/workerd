@@ -45,10 +45,8 @@ interface ArtifactsCreateRepoResult {
   defaultBranch: string;
   /** HTTPS git remote URL. */
   remote: string;
-  /** Plaintext access token (only returned at creation time). */
+  /** Plaintext access token (only returned at creation time). The token encodes its expiry as `art_v1_<secret>?expires=<unix_seconds>`. */
   token: string;
-  /** ISO 8601 token expiry timestamp. */
-  tokenExpiresAt: string;
 }
 
 /** Paginated list of repositories. */
