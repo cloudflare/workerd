@@ -3,7 +3,14 @@ load(":vendor_test.bzl", "vendored_py_wd_test")
 
 python_test_setup()
 
-vendored_py_wd_test("fastapi")
+vendored_py_wd_test(
+    "fastapi",
+    # FIXME: Pyodide 314 throws when the empty url is given to the response
+    skip_python_flags = [
+        "314.0.0a1",
+        "development",
+    ],
+)
 
 vendored_py_wd_test("beautifulsoup4")
 

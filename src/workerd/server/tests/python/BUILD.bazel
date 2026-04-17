@@ -35,6 +35,11 @@ py_wd_test("subdirectory")
 py_wd_test(
     "sdk",
     compat_date = "2026-01-01",
+    # FIXME: Pyodide 314 throws when the empty url is given to the response
+    python_flags = [
+        "0.26.0a2",
+        "0.28.2",
+    ],
 )
 
 gen_rust_import_tests()
@@ -43,9 +48,23 @@ py_wd_test("undefined-handler")
 
 py_wd_test("vendor_dir")
 
-py_wd_test("dont-snapshot-pyodide")
+py_wd_test(
+    "dont-snapshot-pyodide",
+    python_flags = [
+        "0.26.0a2",
+        "0.28.2",
+        # Uses builtin packages. Should be removed/updated when we drop supporting builtin packages.
+    ],
+)
 
-py_wd_test("filter-non-py-files")
+py_wd_test(
+    "filter-non-py-files",
+    python_flags = [
+        "0.26.0a2",
+        "0.28.2",
+        # Uses builtin packages. Should be removed/updated when we drop supporting builtin packages.
+    ],
+)
 
 py_wd_test("durable-object")
 
@@ -74,12 +93,20 @@ py_wd_test("default-class-with-legacy-global-handlers")
 py_wd_test(
     "fastapi",
     make_snapshot = False,
+    python_flags = [
+        "0.26.0a2",
+        "0.28.2",
+    ],
     use_snapshot = "fastapi",
 )
 
 py_wd_test(
     "numpy",
     make_snapshot = False,
+    python_flags = [
+        "0.26.0a2",
+        "0.28.2",
+    ],
     use_snapshot = "numpy",
 )
 

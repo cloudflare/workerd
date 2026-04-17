@@ -22,6 +22,10 @@ PYODIDE_VERSIONS = [
         "version": "0.28.2",
         "sha256": "c9f6dd067d119e50850849f7428e3c636ecbc2684a0d2ff992f3bd48a1062b6c",
     },
+    {
+        "version": "314.0.0a1",
+        "sha256": "7cceacea2efb493f30667192f0380e1fc6955c38fe34897b2d5be98023758073",
+    },
 ]
 
 # This is the list of all the package metadata that we use.
@@ -34,6 +38,8 @@ PYODIDE_VERSIONS = [
 _package_lockfiles = [
     PACKAGES_20240829_4,
     PACKAGES_20250808,
+    # As of Pyodide 314, we don't bundle any packages by default
+    # So this list does not need to be updated anymore.
 ]
 
 # The below is a list of pyodide-lock.json files for each package bundle version that we support.
@@ -69,6 +75,7 @@ def _add_integrity(entry):
 def _make_vendored_packages(entry):
     if entry["name"] == "development":
         return
+
     vendor_tests = {}
     for e in entry["vendored_packages_for_tests"]:
         vendor_tests[e["name"]] = e
@@ -190,7 +197,21 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         ],
     },
     {
-        "real_pyodide_version": "0.28.2",
+        "name": "314.0.0a1",
+        "pyodide_version": "314.0.0a1",
+        "pyodide_date": "2026-04-09",
+        "backport": "4",
+        "integrity": "sha256-T8JMW0IoonHdZTqlvHgkQrHT6ndyXXfnbbUP3UO15ag=",
+        "flag": "pythonWorkersDevPyodide",
+        "enable_flag_name": "python_workers_development",
+        "emscripten_version": "5.0.3",
+        "python_version": "3.14.2",
+        "baseline_snapshot": "baseline-52636df0a.bin",
+        "baseline_snapshot_hash": "52636df0a566fe69bc762796c458603bc69aad434b59e16e1d46c9bc8a2f04bf",
+        "vendored_packages_for_tests": VENDORED_VERSION_INDEPENDENT,
+    },
+    {
+        "real_pyodide_version": "314.0.0a1",
         "name": "development",
         "pyodide_version": "dev",
         "pyodide_date": "dev",

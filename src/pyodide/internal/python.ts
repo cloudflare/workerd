@@ -167,7 +167,11 @@ function getSignalClockAddr(Module: Module): number {
 function setupRuntimeSignalHandling(Module: Module): void {
   Module.Py_EmscriptenSignalBuffer = new Uint8Array(1);
   const version = Module.API.version;
-  if (version === PyodideVersion.V0_26_0a2) {
+  if (
+    version === PyodideVersion.V0_26_0a2 ||
+    /* TODO(before 314 release): Handle this in upstream Pyodide */
+    version === PyodideVersion.V314_0_0a1
+  ) {
     return;
   }
   if (version === PyodideVersion.V0_28_2) {

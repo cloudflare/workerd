@@ -42,11 +42,11 @@ def _copy_and_capnp_embed(src):
 def _fmt_python_snapshot_release(
         pyodide_version,
         pyodide_date,
-        packages,
         backport,
         baseline_snapshot_hash,
         flag,
         real_pyodide_version,
+        packages = "",
         **_kwds):
     content = ", ".join(
         [
@@ -162,20 +162,9 @@ import {
 } from "pyodide-internal:pool/builtin_wrappers";
 """
 
-# pyodide.asm.js patches
+# pyodide.asm.mjs patches
 # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
-_REPLACEMENTS = [
-    [
-        # Convert pyodide.asm.js into an es6 module.
-        # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
-        # automatically.
-        "var _createPyodideModule",
-        _PRELUDE + "export const _createPyodideModule",
-    ],
-    [
-        "globalThis._createPyodideModule = _createPyodideModule;",
-        "",
-    ],
+_REPLACEMENTS_COMMON = [
     [
         "new WebAssembly.Module",
         "newWasmModule",
@@ -227,15 +216,6 @@ _REPLACEMENTS = [
         "getMemory(",
         "Module.getMemoryPatched(Module, libName, ",
     ],
-    # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
-    [
-        "nullToUndefined(func.apply(",
-        "nullToUndefined(patchedApplyFunc(API, func, ",
-    ],
-    [
-        "nullToUndefined(Function.prototype.apply.apply",
-        "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
-    ],
     [
         "function _PyEM_CountFuncParams(func){",
         "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
@@ -253,13 +233,74 @@ _REPLACEMENTS = [
     ],
 ]
 
-def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
+_REPLACEMENTS = {
+    "0.26.0a2": _REPLACEMENTS_COMMON + [
+        # for 0.28.2 or earlier, pyodide.asm.js was a commonjs module
+        [
+            # Convert pyodide.asm.js into an es6 module.
+            # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
+            # automatically.
+            "var _createPyodideModule",
+            _PRELUDE + "export const _createPyodideModule",
+        ],
+        [
+            "globalThis._createPyodideModule = _createPyodideModule;",
+            "",
+        ],
+        # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
+        [
+            "nullToUndefined(func.apply(",
+            "nullToUndefined(patchedApplyFunc(API, func, ",
+        ],
+        [
+            "nullToUndefined(Function.prototype.apply.apply",
+            "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
+        ],
+    ],
+    "0.28.2": _REPLACEMENTS_COMMON + [
+        # for 0.28.2 or earlier, pyodide.asm.js was a commonjs module
+        [
+            # Convert pyodide.asm.js into an es6 module.
+            # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
+            # automatically.
+            "var _createPyodideModule",
+            _PRELUDE + "export const _createPyodideModule",
+        ],
+        [
+            "globalThis._createPyodideModule = _createPyodideModule;",
+            "",
+        ],
+        # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
+        [
+            "nullToUndefined(func.apply(",
+            "nullToUndefined(patchedApplyFunc(API, func, ",
+        ],
+        [
+            "nullToUndefined(Function.prototype.apply.apply",
+            "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
+        ],
+    ],
+    "314.0.0a1": _REPLACEMENTS_COMMON + [
+        # for 314 or later, pyodide.asm.mjs is es6 module
+        [
+            "export default _createPyodideModule;",
+            # still expose _createPyodideModule for compatibility (import { _createPyodideModule })
+            _PRELUDE + "export default _createPyodideModule; export { _createPyodideModule };",
+        ],
+    ],
+}
+
+def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, python_stdlib_zip = None, emscripten_setup_override = None):
     pyodide_package = "@pyodide-%s//" % version
     if not pyodide_asm_wasm:
         pyodide_asm_wasm = pyodide_package + ":pyodide/pyodide.asm.wasm"
 
-    if not pyodide_asm_js:
-        pyodide_asm_js = pyodide_package + ":pyodide/pyodide.asm.js"
+    if not pyodide_asm_mjs:
+        if version in ("0.26.0a2", "0.28.2"):
+            pyodide_asm_mjs = pyodide_package + ":pyodide/pyodide.asm.js"
+        else:
+            # for 314 or later, pyodide.asm.mjs is es6 module
+            pyodide_asm_mjs = pyodide_package + ":pyodide/pyodide.asm.mjs"
 
     if not python_stdlib_zip:
         python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
@@ -269,16 +310,16 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     _copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
 
     expand_template(
-        name = "pyodide.asm.js@rule@" + version,
-        out = _out_path("pyodide.asm.js", version),
-        substitutions = dict(_REPLACEMENTS),
-        template = pyodide_asm_js,
+        name = "pyodide.asm.mjs@rule@" + version,
+        out = _out_path("pyodide.asm.mjs", version),
+        substitutions = dict(_REPLACEMENTS[version]),
+        template = pyodide_asm_mjs,
     )
 
     js_file(
-        name = "pyodide.asm.js@rule_js@" + version,
-        srcs = [_out_path("pyodide.asm.js", version)],
-        deps = ["pyodide.asm.js@rule@" + version],
+        name = "pyodide.asm.mjs@rule_js@" + version,
+        srcs = [_out_path("pyodide.asm.mjs", version)],
+        deps = ["pyodide.asm.mjs@rule@" + version],
     )
 
     if emscripten_setup_override:
@@ -300,7 +341,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             srcs = native.glob([
                 "internal/pool/*.ts",
             ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
-                _out_path("pyodide.asm.js", version),
+                _out_path("pyodide.asm.mjs", version),
                 "internal/util.ts",
                 "internal/const.ts",
             ],
@@ -321,11 +362,15 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
                 "node:url",
                 "node:vm",
                 "internal:unsafe-eval",
+                "node:stream",
+                "node:tls",
+                "node:net",
+                "node:module",
             ],
             format = "esm",
             output = _out_path("emscriptenSetup.js", version),
             target = "esnext",
-            deps = ["pyodide.asm.js@rule_js@" + version],
+            deps = ["pyodide.asm.mjs@rule_js@" + version],
         )
 
     import_name = "pyodideRuntime"
