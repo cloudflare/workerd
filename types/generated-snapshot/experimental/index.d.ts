@@ -699,6 +699,7 @@ interface DurableObjectState<Props = unknown> {
   container?: Container;
   facets: DurableObjectFacets;
   version?: DurableObjectStateVersion;
+  readonly primaryStub?: DurableObjectStub;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): WebSocket[];
@@ -782,6 +783,7 @@ interface DurableObjectStorage {
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
   waitForBookmark(bookmark: string): Promise<void>;
+  /** @deprecated Use `ctx.primaryStub` instead. */
   readonly primary?: DurableObjectStub;
   ensureReplicas(): void;
   disableReplicas(): void;

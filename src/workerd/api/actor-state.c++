@@ -914,6 +914,7 @@ jsg::Promise<void> DurableObjectStorage::configureReadReplication(
 }
 
 jsg::Optional<jsg::Ref<DurableObject>> DurableObjectStorage::getPrimary(jsg::Lock& js) {
+  // TODO(srs): the primary stub should live on DurableObjectState instead of DurableObjectStorage.
   KJ_IF_SOME(primary, maybePrimary) {
     return primary.addRef();
   }
@@ -1299,6 +1300,13 @@ kj::Maybe<uint32_t> DurableObjectState::getHibernatableWebSocketEventTimeout() {
 
 kj::Array<kj::StringPtr> DurableObjectState::getTags(jsg::Lock& js, jsg::Ref<api::WebSocket> ws) {
   return ws->getHibernatableTags();
+}
+
+jsg::Optional<jsg::Ref<DurableObject>> DurableObjectState::getPrimary(jsg::Lock& js) {
+  KJ_IF_SOME(s, storage) {
+    return s->getPrimary(js);
+  }
+  return kj::none;
 }
 
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value) {

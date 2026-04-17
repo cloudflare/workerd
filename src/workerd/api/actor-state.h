@@ -682,6 +682,9 @@ class DurableObjectState: public jsg::Object {
   // hibernatable, we'll throw an error because regular websockets do not have tags.
   kj::Array<kj::StringPtr> getTags(jsg::Lock& js, jsg::Ref<api::WebSocket> ws);
 
+  // Returns a stub for the primary if there is one.
+  jsg::Optional<jsg::Ref<DurableObject>> getPrimary(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     if (flags.getEnableCtxExports()) {
@@ -695,6 +698,11 @@ class DurableObjectState: public jsg::Object {
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(primaryStub, getPrimary);
+    }
+
     JSG_METHOD(blockConcurrencyWhile);
     JSG_METHOD(acceptWebSocket);
     JSG_METHOD(getWebSockets);
