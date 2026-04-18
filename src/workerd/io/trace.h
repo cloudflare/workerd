@@ -32,6 +32,7 @@ using kj::uint;
 
 using LogLevel = rpc::Trace::Log::Level;
 using ExecutionModel = rpc::Trace::ExecutionModel;
+using SpanKind = rpc::SpanKind;
 
 class Trace;
 
@@ -683,17 +684,20 @@ struct SpanOpenData {
 
   kj::ConstString operationName;
   kj::Date startTime;
+  SpanKind spanKind = SpanKind::INTERNAL;
 
   SpanOpenData(rpc::SpanOpenData::Reader reader);
   void copyTo(rpc::SpanOpenData::Builder builder) const;
   explicit SpanOpenData(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
-      kj::Date startTime)
+      kj::Date startTime,
+      SpanKind spanKind = SpanKind::INTERNAL)
       : spanId(spanId),
         parentSpanId(parentSpanId),
         operationName(kj::mv(operationName)),
-        startTime(startTime) {}
+        startTime(startTime),
+        spanKind(spanKind) {}
 };
 
 struct SpanEndData {
@@ -742,7 +746,10 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(SpanId spanId, kj::ConstString operationName, kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(SpanId spanId,
+      kj::ConstString operationName,
+      SpanKind spanKind = SpanKind::INTERNAL,
+      kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) noexcept = default;
   SpanOpen& operator=(SpanOpen&&) = default;
@@ -751,6 +758,7 @@ struct SpanOpen final {
   kj::ConstString operationName;
   kj::Maybe<Info> info = kj::none;
   SpanId spanId;
+  SpanKind spanKind = SpanKind::INTERNAL;
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
@@ -795,8 +803,11 @@ struct Onset final {
     WorkerInfo clone() const;
   };
 
-  explicit Onset(
-      tracing::SpanId spanId, Info&& info, WorkerInfo&& workerInfo, CustomInfo attributes);
+  explicit Onset(tracing::SpanId spanId,
+      Info&& info,
+      WorkerInfo&& workerInfo,
+      CustomInfo attributes,
+      SpanKind spanKind = SpanKind::INTERNAL);
 
   Onset(rpc::Trace::Onset::Reader reader);
   Onset(Onset&&) noexcept = default;
@@ -807,6 +818,7 @@ struct Onset final {
   Info info;
   WorkerInfo workerInfo;
   CustomInfo attributes;
+  SpanKind spanKind = SpanKind::INTERNAL;
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;
@@ -1013,6 +1025,8 @@ struct Span {
   TagMap tags;
   kj::Vector<Log> logs;
 
+  SpanKind spanKind = SpanKind::INTERNAL;
+
   // We set an arbitrary (-ish) cap on log messages for safety. If we drop logs because of this,
   // we report how many in a final "dropped_logs" log.
   //
@@ -1152,6 +1166,8 @@ class SpanBuilder {
 
   void setTag(kj::ConstString key, TagInitValue value);
 
+  void setSpanKind(SpanKind kind);
+
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
   //
@@ -1185,7 +1201,9 @@ class SpanObserver: public kj::Refcounted {
   // This should always be called exactly once per observer at span completion time.
   virtual void report(const Span& span) = 0;
   // Report information about the span onset.
-  virtual void reportStart(kj::ConstString operationName, kj::Date startTime) = 0;
+  virtual void reportStart(kj::ConstString operationName,
+      kj::Date startTime,
+      SpanKind spanKind = SpanKind::INTERNAL) = 0;
 
   // The current time to be provided for the span. For user tracing, we will override this to
   // provide I/O time. This *requires* that spans are only created when an IOContext is available
@@ -1228,6 +1246,8 @@ class TraceContext {
 
   // Set a tag on both the internal span and user span.
   void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
+  // Set the semantic kind on both the internal span and user span.
+  void setSpanKind(SpanKind kind);
   bool isObserved() {
     return span.isObserved() || userSpan.isObserved();
   }

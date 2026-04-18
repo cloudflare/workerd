@@ -442,7 +442,7 @@ KJ_TEST("Read/Write SpanOpen works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanOpen>();
 
-  SpanOpen info(0x2a2a2a2a2a2a2a2a, "foo"_kjc, kj::none);
+  SpanOpen info(0x2a2a2a2a2a2a2a2a, "foo"_kjc);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -453,6 +453,21 @@ KJ_TEST("Read/Write SpanOpen works") {
   SpanOpen info3 = info.clone();
   KJ_ASSERT(info3.operationName == "foo"_kj);
   KJ_ASSERT(info3.info == kj::none);
+}
+
+KJ_TEST("SpanOpen preserves SpanKind through serialization and clone") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::SpanOpen>();
+
+  SpanOpen info(0x2a2a2a2a2a2a2a2a, "foo"_kjc, SpanKind::CLIENT);
+  KJ_ASSERT(info.spanKind == SpanKind::CLIENT);
+  info.copyTo(infoBuilder);
+
+  SpanOpen info2(infoBuilder.asReader());
+  KJ_ASSERT(info2.spanKind == SpanKind::CLIENT);
+
+  SpanOpen info3 = info.clone();
+  KJ_ASSERT(info3.spanKind == SpanKind::CLIENT);
 }
 
 KJ_TEST("Read/Write SpanClose works") {
@@ -507,6 +522,25 @@ KJ_TEST("Read/Write Onset works") {
   KJ_ASSERT(preview3.id == "63bafce9179948688866bb22268eb1c6"_kj);
   KJ_ASSERT(preview3.slug == "feature-my-branch"_kj);
   KJ_ASSERT(preview3.name == "feature/my-branch"_kj);
+}
+
+KJ_TEST("Onset preserves SpanKind through serialization and clone") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::Onset>();
+
+  FetchEventInfo fetchInfo(
+      kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr);
+
+  Onset info(staticSpanId, Onset::Info(kj::mv(fetchInfo)), {.scriptName = kj::str("foo")}, nullptr,
+      SpanKind::SERVER);
+  KJ_ASSERT(info.spanKind == SpanKind::SERVER);
+  info.copyTo(infoBuilder);
+
+  Onset info2(infoBuilder.asReader());
+  KJ_ASSERT(info2.spanKind == SpanKind::SERVER);
+
+  Onset info3 = info.clone();
+  KJ_ASSERT(info3.spanKind == SpanKind::SERVER);
 }
 
 KJ_TEST("Read/Write Outcome works") {
