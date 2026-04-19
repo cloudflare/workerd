@@ -250,4 +250,30 @@ kj::Promise<void> ExternalPusherImpl::unwrapAbortSignalImpl(
   co_await paf.promise;
 }
 
+// =======================================================================================
+// DelayedChannelToken handling
+
+class ExternalPusherImpl::DelayedChannelTokenImpl final
+    : public ExternalPusher::DelayedChannelToken::Server {
+ public:
+  DelayedChannelTokenImpl(kj::Array<byte> token): token(kj::mv(token)) {}
+
+  kj::Array<byte> token;
+};
+
+kj::Promise<void> ExternalPusherImpl::pushDelayedChannelToken(
+    PushDelayedChannelTokenContext context) {
+  auto token = kj::heapArray(context.getParams().getToken());
+  auto cap = delayedChannelTokenSet.add(kj::heap<DelayedChannelTokenImpl>(kj::mv(token)));
+  context.getResults(capnp::MessageSize{2, 1}).setCap(kj::mv(cap));
+  return kj::READY_NOW;
+}
+
+kj::Promise<kj::Array<byte>> ExternalPusherImpl::unwrapDelayedChannelToken(
+    rpc::JsValue::ExternalPusher::DelayedChannelToken::Client cap) {
+  auto& unwrapped = KJ_REQUIRE_NONNULL(co_await delayedChannelTokenSet.getLocalServer(cap),
+      "pushed external is not a DelayedChannelToken");
+  co_return kj::mv(kj::downcast<DelayedChannelTokenImpl>(unwrapped).token);
+}
+
 }  // namespace workerd

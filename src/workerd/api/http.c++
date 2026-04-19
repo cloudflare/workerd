@@ -2141,7 +2141,8 @@ rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
 }
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  auto channel = getSubrequestChannel(IoContext::current());
+  auto& ioctx = IoContext::current();
+  auto channel = getSubrequestChannel(ioctx);
   channel->requireAllowsTransfer();
 
   KJ_IF_SOME(handler, serializer.getExternalHandler()) {
@@ -2153,10 +2154,34 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), DOMDataCloneError,
           "ServiceStub serialization requires the 'experimental' compat flag.");
 
-      auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
-      rpcHandler.write([token = kj::mv(token)](rpc::JsValue::External::Builder builder) {
-        builder.setSubrequestChannelToken(token);
-      });
+      KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
+        KJ_CASE_ONEOF(token, kj::Array<byte>) {
+          rpcHandler.write([token = kj::mv(token)](rpc::JsValue::External::Builder builder) {
+            builder.setSubrequestChannelToken(token);
+          });
+        }
+        KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+          // Token isn't available synchronously, so we have to send a promise.
+          auto paf = kj::newPromiseAndFulfiller<
+              rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
+
+          // Arrange to send the token when it's ready.
+          ioctx.addTask(promise
+              .then([pusher = rpcHandler.getExternalPusher(), fulfiller = kj::mv(paf.fulfiller)]
+                    (kj::Array<byte> token) mutable {
+            auto req = pusher.pushDelayedChannelTokenRequest(
+                capnp::MessageSize { 4 + token.size() / sizeof(capnp::word), 0 });
+            req.setToken(token);
+            fulfiller->fulfill(req.send().getCap());
+          }));
+
+          // Write the promise for now.
+          rpcHandler.write([promise = kj::mv(paf.promise)]
+                           (rpc::JsValue::External::Builder builder) mutable{
+            builder.setDelayedSubrequestChannelToken(kj::mv(promise));
+          });
+        }
+      }
       return;
     }
     // TODO(someday): structuredClone() should have special handling that just reproduces the same
@@ -2167,7 +2192,16 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // is temporary, anyone using this will lose their data later.
   JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
       "ServiceStub cannot be serialized in this context.");
-  serializer.writeLengthDelimited(channel->getToken(IoChannelFactory::ChannelTokenUsage::STORAGE));
+  KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::STORAGE)) {
+    KJ_CASE_ONEOF(token, kj::Array<byte>) {
+      serializer.writeLengthDelimited(token);
+    }
+    KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+      // TODO(stub-storage): Eventually we'll serialize by pointing to an external table.
+      KJ_UNIMPLEMENTED(
+          "tried to store SubrequestChannel whose token is not synchronously available");
+    }
+  }
 }
 
 jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
@@ -2194,11 +2228,22 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
           "ServiceStub serialization requires the 'experimental' compat flag.");
 
       auto external = rpcHandler.read();
-      KJ_REQUIRE(external.isSubrequestChannelToken());
       auto& ioctx = IoContext::current();
-      auto channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
-          IoChannelFactory::ChannelTokenUsage::RPC,
-          external.getSubrequestChannelToken());
+      kj::Own<IoChannelFactory::SubrequestChannel> channel;
+
+      if (external.isDelayedSubrequestChannelToken()) {
+        auto prmoise = ioctx.getExternalPusher()->unwrapDelayedChannelToken(
+            external.getDelayedSubrequestChannelToken());
+        channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
+            IoChannelFactory::ChannelTokenUsage::RPC, kj::mv(prmoise));
+      } else if (external.isSubrequestChannelToken()) {
+        channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
+            IoChannelFactory::ChannelTokenUsage::RPC,
+            external.getSubrequestChannelToken());
+      } else {
+        KJ_FAIL_REQUIRE("wrong external type for Fetcher", external.which());
+      }
+
       return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
     }
   }

@@ -297,6 +297,15 @@ class Container: public jsg::Object {
 
   class TcpPortWorkerInterface;
   class TcpPortOutgoingFactory;
+
+  kj::Promise<void> interceptOutboundHttpImpl(
+      kj::String addr, kj::Own<IoChannelFactory::SubrequestChannel> channel);
+  kj::Promise<void> interceptAllOutboundHttpImpl(
+      kj::Own<IoChannelFactory::SubrequestChannel> channel);
+  kj::Promise<void> interceptOutboundHttpsImpl(
+      kj::String addr, kj::Own<IoChannelFactory::SubrequestChannel> channel);
+  kj::Promise<void> interceptOutboundTcpImpl(
+      kj::String addr, kj::Own<IoChannelFactory::SubrequestChannel> channel);
 };
 
 #define EW_CONTAINER_ISOLATE_TYPES                                                                 \

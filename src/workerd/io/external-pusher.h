@@ -41,14 +41,19 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
 
   AbortSignal unwrapAbortSignal(ExternalPusher::AbortSignal::Client cap);
 
+  kj::Promise<kj::Array<byte>> unwrapDelayedChannelToken(
+      rpc::JsValue::ExternalPusher::DelayedChannelToken::Client cap);
+
   kj::Promise<void> pushByteStream(PushByteStreamContext context) override;
   kj::Promise<void> pushAbortSignal(PushAbortSignalContext context) override;
+  kj::Promise<void> pushDelayedChannelToken(PushDelayedChannelTokenContext context) override;
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
 
   capnp::CapabilityServerSet<ExternalPusher::InputStream> inputStreamSet;
   capnp::CapabilityServerSet<ExternalPusher::AbortSignal> abortSignalSet;
+  capnp::CapabilityServerSet<ExternalPusher::DelayedChannelToken> delayedChannelTokenSet;
 
   kj::Promise<kj::Own<kj::AsyncInputStream>> unwrapStreamImpl(
       ExternalPusher::InputStream::Client cap);
@@ -58,6 +63,7 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
 
   class InputStreamImpl;
   class AbortSignalImpl;
+  class DelayedChannelTokenImpl;
 };
 
 }  // namespace workerd
