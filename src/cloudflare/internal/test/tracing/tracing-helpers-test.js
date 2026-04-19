@@ -75,3 +75,109 @@ export const asyncError = {
     assert(errorCaught, 'Async error should have been caught');
   },
 };
+
+// Verify the JS-visible class name is exactly "Span" - no internal-implementation names
+// should leak into JavaScript.
+export const spanClassName = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    withSpan('class-name-op', (span) => {
+      span.setAttribute('test', 'spanClassName');
+      assert.strictEqual(span.constructor.name, 'Span');
+    });
+  },
+};
+
+// Verify isTraced reflects the state of the span: true while the span is live, false
+// after it has been auto-ended by withSpan.
+export const isTraced = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    let capturedSpan = null;
+    withSpan('is-traced-op', (span) => {
+      capturedSpan = span;
+      // While inside the callback, the span should be traced (we're inside a tailed
+      // request - the streamingTails binding is configured for this worker).
+      assert.strictEqual(
+        span.isTraced,
+        true,
+        'Span should be traced inside withSpan callback'
+      );
+      span.setAttribute('test', 'isTraced');
+    });
+
+    // After withSpan returns, the span has been auto-ended -> isTraced should be false.
+    assert.strictEqual(
+      capturedSpan.isTraced,
+      false,
+      'Span should no longer be traced after auto-end'
+    );
+  },
+};
+
+// Verify that setAttribute with undefined is a no-op (the attribute is simply not set),
+// which is the idiomatic pattern for optional attributes.
+export const setAttributeUndefined = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    const result = withSpan('undefined-attr-op', (span) => {
+      span.setAttribute('test', 'setAttributeUndefined');
+      // Passing undefined should not throw and should not record the attribute.
+      span.setAttribute('skipped', undefined);
+      return 'undefined-attr-value';
+    });
+
+    assert.strictEqual(result, 'undefined-attr-value');
+  },
+};
+
+// Verify that nested withSpan calls produce correctly nested spans. This exercises the
+// AsyncContextFrame push path in enterSpan: the inner span should be parented on the
+// outer span.
+export const nestedSyncSpans = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    const result = withSpan('nested-outer-op', (outerSpan) => {
+      outerSpan.setAttribute('test', 'nestedSyncSpans');
+      outerSpan.setAttribute('level', 'outer');
+      return withSpan('nested-inner-op', (innerSpan) => {
+        innerSpan.setAttribute('test', 'nestedSyncSpans');
+        innerSpan.setAttribute('level', 'inner');
+        return 'nested-value';
+      });
+    });
+
+    assert.strictEqual(result, 'nested-value');
+  },
+};
+
+// Async analog of the nested test: inner span lives inside an await that spans a
+// microtask boundary, so the inner span's parent is preserved only if the
+// AsyncContextFrame push correctly follows the async continuation.
+export const nestedAsyncSpans = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+
+    const result = await withSpan(
+      'nested-async-outer-op',
+      async (outerSpan) => {
+        outerSpan.setAttribute('test', 'nestedAsyncSpans');
+        outerSpan.setAttribute('level', 'outer');
+        // Crossing a microtask boundary before creating the inner span.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return await withSpan('nested-async-inner-op', async (innerSpan) => {
+          innerSpan.setAttribute('test', 'nestedAsyncSpans');
+          innerSpan.setAttribute('level', 'inner');
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return 'nested-async-value';
+        });
+      }
+    );
+
+    assert.strictEqual(result, 'nested-async-value');
+  },
+};

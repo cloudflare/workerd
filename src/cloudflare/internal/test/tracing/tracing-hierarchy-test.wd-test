@@ -1,0 +1,48 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Validates that enterSpan-produced user spans have the correct parent/child
+# relationships in the streaming-tail event stream. Covers nested enterSpan (sync/async),
+# fetch-inside-enterSpan, and sibling enterSpans.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "tracing-hierarchy-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tracing-hierarchy-test.js"),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+        streamingTails = ["tail"],
+        bindings = [
+          (
+            name = "fetchTarget",
+            service = "tracing-hierarchy-mock"
+          ),
+          (
+            name = "tracingTest",
+            wrapped = (
+              moduleName = "cloudflare-internal:test-tracing-wrapper"
+            )
+          )
+        ],
+      )
+    ),
+    ( name = "tracing-hierarchy-mock",
+      worker = (
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+        modules = [
+          (name = "worker", esModule = embed "tracing-hierarchy-mock.js"),
+        ],
+      )
+    ),
+    ( name = "tail", worker = .tailWorker, ),
+  ]
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tracing-hierarchy-instrumentation-test.js"),
+    (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);
