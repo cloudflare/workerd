@@ -48,6 +48,11 @@ class WorkerdBootstrapSubrequestChannel final: public IoChannelFactory::Subreque
     JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings cannot be transferred to other workers");
   }
 
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    JSG_FAIL_REQUIRE(Error, "WorkerdDebugPort bindings cannot be transferred to other workers");
+  }
+
  private:
   rpc::WorkerdBootstrap::Client bootstrap;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
