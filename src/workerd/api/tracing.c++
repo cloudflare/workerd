@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "tracing-module.h"
+#include "tracing.h"
 
 #include <workerd/io/trace.h>
 #include <workerd/io/tracer.h>
@@ -197,11 +197,11 @@ void Span::end() {
 }  // namespace workerd::api::user_tracing
 
 // ======================================================================================
-// TracingModule
+// Tracing
 
 namespace workerd::api {
 
-v8::Local<v8::Value> TracingModule::enterSpan(jsg::Lock& js,
+v8::Local<v8::Value> Tracing::enterSpan(jsg::Lock& js,
     kj::String operationName,
     v8::Local<v8::Function> callback,
     jsg::Arguments<jsg::Value> args,
