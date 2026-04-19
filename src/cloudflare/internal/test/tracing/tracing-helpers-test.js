@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import { tracing as publicTracing } from 'cloudflare:workers';
 
 export const syncFunction = {
   async test(ctrl, env, ctx) {
@@ -179,5 +180,39 @@ export const nestedAsyncSpans = {
     );
 
     assert.strictEqual(result, 'nested-async-value');
+  },
+};
+
+// Verify the public import path: `import { tracing } from 'cloudflare:workers'`.
+// Hitting enterSpan via the public import should behave identically to the internal path.
+export const publicImportTracing = {
+  async test(ctrl, env, ctx) {
+    const result = publicTracing.enterSpan('public-import-op', (span) => {
+      span.setAttribute('test', 'publicImportTracing');
+      span.setAttribute('path', 'import-from-cloudflare-workers');
+      assert.strictEqual(span.isTraced, true);
+      return 'public-import-value';
+    });
+    assert.strictEqual(result, 'public-import-value');
+  },
+};
+
+// Verify ctx.tracing: same Tracing instance should be reachable off the execution context.
+export const ctxTracing = {
+  async test(ctrl, env, ctx) {
+    assert.ok(ctx.tracing, 'ctx.tracing should be defined');
+    assert.strictEqual(
+      typeof ctx.tracing.enterSpan,
+      'function',
+      'ctx.tracing.enterSpan should be a function'
+    );
+
+    const result = ctx.tracing.enterSpan('ctx-tracing-op', (span) => {
+      span.setAttribute('test', 'ctxTracing');
+      span.setAttribute('path', 'ctx.tracing');
+      assert.strictEqual(span.isTraced, true);
+      return 'ctx-tracing-value';
+    });
+    assert.strictEqual(result, 'ctx-tracing-value');
   },
 };

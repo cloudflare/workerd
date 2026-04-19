@@ -18,6 +18,7 @@
 #include <workerd/api/sockets.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/tracing.h>
 #include <workerd/api/util.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/compatibility-date.h>
@@ -81,6 +82,13 @@ jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
     const jsg::TypeHandler<CachePurgeResult>& resultHandler,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
   JSG_FAIL_REQUIRE(Error, "Cache purge is not available in this context.");
+}
+
+jsg::Optional<jsg::Ref<Tracing>> ExecutionContext::getTracing(jsg::Lock& js) {
+  if (!FeatureFlags::get(js).getWorkerdExperimental()) {
+    return kj::none;
+  }
+  return js.alloc<Tracing>();
 }
 
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {

@@ -33,6 +33,7 @@ filegroup(
         "sync-kv.c++",
         "system-streams.c++",
         "trace.c++",
+        "tracing.c++",
         "unsafe.c++",
         "url-standard.c++",
         "web-socket.c++",
@@ -80,6 +81,7 @@ filegroup(
         "sync-kv.h",
         "system-streams.h",
         "trace.h",
+        "tracing.h",
         "unsafe.h",
         "url-standard.h",
         "web-socket.h",
@@ -301,17 +303,6 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "tracing",
-    srcs = ["tracing.c++"],
-    hdrs = ["tracing.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-    ],
-)
-
-wd_cc_library(
     name = "rtti",
     srcs = [
         "modules.c++",
@@ -340,7 +331,6 @@ wd_cc_library(
         ":hyperdrive",
         ":memory-cache",
         ":r2",
-        ":tracing",
         ":workers-module",
         "//src/cloudflare",
         "//src/node",
