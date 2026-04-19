@@ -33,8 +33,6 @@ enum class AutogateKey {
   TAIL_STREAM_REFACTOR,
   // Enable Rust-backed Node.js DNS implementation
   RUST_BACKED_NODE_DNS,
-  // Use ExternalPusher instead of StreamSink to handle streams in RPC.
-  RPC_USE_EXTERNAL_PUSHER,
   // Enable the WebAssembly.instantiate shim that detects modules exporting __instance_signal /
   // __instance_terminated and registers them for receiving the CPU-limit shutdown signal.
   WASM_SHUTDOWN_SIGNAL_SHIM,
