@@ -35,14 +35,15 @@ ChannelTokenHandler::ChannelTokenHandler(Resolver& resolver): resolver(resolver)
   kj::arrayPtr(keyId).copyFrom(kj::arrayPtr(hash).first(KEY_ID_SIZE));
 }
 
-kj::Array<byte> ChannelTokenHandler::encodeChannelTokenImpl(ChannelToken::Type type,
-    IoChannelFactory::ChannelTokenUsage usage,
-    kj::StringPtr serviceName,
-    kj::Maybe<kj::StringPtr> entrypoint,
-    Frankenvalue& props) {
-  capnp::word scratch[128]{};
-  capnp::MallocMessageBuilder message(scratch);
-  auto builder = message.getRoot<ChannelToken>();
+kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
+    encodeChannelTokenImpl(ChannelToken::Type type,
+        IoChannelFactory::ChannelTokenUsage usage,
+        kj::StringPtr serviceName,
+        kj::Maybe<kj::StringPtr> entrypoint,
+        Frankenvalue& props) {
+  auto message = kj::heap<capnp::MallocMessageBuilder>(128);
+  auto builder = message->getRoot<ChannelToken>();
+  kj::Vector<kj::Promise<void>> promises;
 
   builder.setType(type);
 
@@ -64,10 +65,28 @@ kj::Array<byte> ChannelTokenHandler::encodeChannelTokenImpl(ChannelToken::Type t
 
       for (auto i: kj::indices(capTable)) {
         KJ_IF_SOME(subreq, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*capTable[i])) {
-          caps[i].setSubrequestChannel(subreq.getToken(usage));
+          KJ_SWITCH_ONEOF(subreq.getTokenMaybeSync(usage)) {
+            KJ_CASE_ONEOF(token, kj::Array<byte>) {
+              caps[i].setSubrequestChannel(token);
+            }
+            KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+              promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
+                slot.setSubrequestChannel(token);
+              }));
+            }
+          }
         } else KJ_IF_SOME(actorClass,
             kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*capTable[i])) {
-          caps[i].setActorClassChannel(actorClass.getToken(usage));
+          KJ_SWITCH_ONEOF(actorClass.getTokenMaybeSync(usage)) {
+            KJ_CASE_ONEOF(token, kj::Array<byte>) {
+              caps[i].setActorClassChannel(token);
+            }
+            KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+              promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
+                slot.setActorClassChannel(token);
+              }));
+            }
+          }
         } else {
           KJ_FAIL_REQUIRE("unknown type in props");
         }
@@ -75,6 +94,18 @@ kj::Array<byte> ChannelTokenHandler::encodeChannelTokenImpl(ChannelToken::Type t
     }
   }
 
+  if (promises.empty()) {
+    return serializeTokenImpl(usage, *message);
+  } else {
+    return kj::joinPromisesFailFast(promises.releaseAsArray())
+        .then([this, usage, message = kj::mv(message)]() mutable {
+      return serializeTokenImpl(usage, *message);
+    });
+  }
+}
+
+kj::Array<byte> ChannelTokenHandler::serializeTokenImpl(
+    IoChannelFactory::ChannelTokenUsage usage, capnp::MessageBuilder& message) {
   kj::VectorOutputStream out;
   capnp::writePackedMessage(out, message);
 
@@ -135,20 +166,20 @@ kj::Array<byte> ChannelTokenHandler::encodeChannelTokenImpl(ChannelToken::Type t
   KJ_UNREACHABLE;
 }
 
-kj::Array<byte> ChannelTokenHandler::encodeSubrequestChannelToken(
-    IoChannelFactory::ChannelTokenUsage usage,
-    kj::StringPtr serviceName,
-    kj::Maybe<kj::StringPtr> entrypoint,
-    Frankenvalue& props) {
+kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
+    encodeSubrequestChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+        kj::StringPtr serviceName,
+        kj::Maybe<kj::StringPtr> entrypoint,
+        Frankenvalue& props) {
   return encodeChannelTokenImpl(
       ChannelToken::Type::SUBREQUEST, usage, serviceName, entrypoint, props);
 }
 
-kj::Array<byte> ChannelTokenHandler::encodeActorClassChannelToken(
-    IoChannelFactory::ChannelTokenUsage usage,
-    kj::StringPtr serviceName,
-    kj::Maybe<kj::StringPtr> entrypoint,
-    Frankenvalue& props) {
+kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
+    encodeActorClassChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+        kj::StringPtr serviceName,
+        kj::Maybe<kj::StringPtr> entrypoint,
+        Frankenvalue& props) {
   return encodeChannelTokenImpl(
       ChannelToken::Type::ACTOR_CLASS, usage, serviceName, entrypoint, props);
 }

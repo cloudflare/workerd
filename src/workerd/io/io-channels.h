@@ -198,9 +198,26 @@ class IoChannelFactory {
     virtual void requireAllowsTransfer() = 0;
 
     // Get a token representing this SubrequestChannel which can be converted back into a
-    // SubrequestChannel using subrequestChannelFromToken(). Default implementation throws a
-    // TypeError.
-    virtual kj::Array<byte> getToken(ChannelTokenUsage usage);
+    // SubrequestChannel using subrequestChannelFromToken(). This is a convenience wrapper around
+    // getTokenMaybeSync() for callers that don't care about the synchronous optimization.
+    kj::Promise<kj::Array<byte>> getToken(ChannelTokenUsage usage);
+
+    // Like getToken() but may return the token synchronously. This is what subclasses must
+    // implement. The synchronous optimization is important because there is significant additional
+    // overhead in the RPC system when the token cannot be created synchronously (need to use
+    // ExternalPusher to send a DelayedChannelToken).
+    virtual kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        ChannelTokenUsage usage) = 0;
+
+    // If this SubrequestChannel is just a wrapper around a promise for some later
+    // SubrequestChannel, return the inner channel -- synchronously if the promise has resolved
+    // already, otherwise asynchronously.
+    //
+    // Default implementation returns self.
+    virtual kj::OneOf<kj::Own<SubrequestChannel>, kj::Promise<kj::Own<SubrequestChannel>>>
+    getResolved() {
+      return kj::addRef(*this);
+    }
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -226,6 +243,8 @@ class IoChannelFactory {
 
     // For now, actor stubs are not transferrable -- but we do intend to change that at some point.
     void requireAllowsTransfer() override final;
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        ChannelTokenUsage usage) override final;
   };
 
   // Get an actor stub from the given namespace for the actor with the given ID.
@@ -258,7 +277,13 @@ class IoChannelFactory {
 
     // Same as the corresponding methods on SubrequestChannel.
     virtual void requireAllowsTransfer() = 0;
-    virtual kj::Array<byte> getToken(ChannelTokenUsage usage);
+    kj::Promise<kj::Array<byte>> getToken(ChannelTokenUsage usage);
+    virtual kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        ChannelTokenUsage usage) = 0;
+    virtual kj::OneOf<kj::Own<ActorClassChannel>, kj::Promise<kj::Own<ActorClassChannel>>>
+    getResolved() {
+      return kj::addRef(*this);
+    }
 
     // This class has no functional methods, since it serves as a token to be passed to other
     // interfaces (namely the facets API).
@@ -309,6 +334,13 @@ class IoChannelFactory {
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
   virtual kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+
+  // Overloads which accept a promise. Any attempts to use the channel will have to wait for the
+  // token to arrive first, but this should be transparent.
+  kj::Own<SubrequestChannel> subrequestChannelFromToken(
+      ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
+  kj::Own<ActorClassChannel> actorClassFromToken(
+      ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
 };
 
 // ResourceLimits provides a means to control the resource allocation for a worker stage via a

@@ -37,11 +37,13 @@ class ChannelTokenHandler {
   explicit ChannelTokenHandler(Resolver& resolver);
 
   // Helpers to implement `IoChannelFactory::{SubrequestChannel,ActorClassChannel}::getToken()`.
-  kj::Array<byte> encodeSubrequestChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeSubrequestChannelToken(
+      IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
       Frankenvalue& props);
-  kj::Array<byte> encodeActorClassChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeActorClassChannelToken(
+      IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
       Frankenvalue& props);
@@ -73,11 +75,14 @@ class ChannelTokenHandler {
   static_assert(sizeof(TokenHeader) == 32);
 
   // Implementation for both `encode` methods.
-  kj::Array<byte> encodeChannelTokenImpl(ChannelToken::Type type,
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeChannelTokenImpl(
+      ChannelToken::Type type,
       IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
       Frankenvalue& props);
+  kj::Array<byte> serializeTokenImpl(
+      IoChannelFactory::ChannelTokenUsage usage, capnp::MessageBuilder& message);
 
   // Implementation that dynamically returns either SubrequestChannel or ActorClassChannel, which
   // both happen to inherit CapTableEntry. The caller will immediately downcast to the right type.
