@@ -386,6 +386,8 @@ declare namespace CloudflareWorkersModule {
 
   export const env: Cloudflare.Env;
   export const exports: Cloudflare.Exports;
+
+  export const tracing: Tracing;
 }
 
 declare module 'cloudflare:workers' {
