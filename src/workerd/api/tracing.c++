@@ -156,7 +156,7 @@ void Span::end() {
 
 namespace workerd::api {
 
-v8::Local<v8::Value> TracingModule::enterSpan(jsg::Lock& js,
+v8::Local<v8::Value> Tracing::enterSpan(jsg::Lock& js,
     kj::String operationName,
     v8::Local<v8::Function> callback,
     jsg::Arguments<jsg::Value> args,

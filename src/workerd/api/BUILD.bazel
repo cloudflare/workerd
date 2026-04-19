@@ -301,9 +301,9 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "tracing-module",
-    srcs = ["tracing-module.c++"],
-    hdrs = ["tracing-module.h"],
+    name = "tracing",
+    srcs = ["tracing.c++"],
+    hdrs = ["tracing.h"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
@@ -340,7 +340,7 @@ wd_cc_library(
         ":hyperdrive",
         ":memory-cache",
         ":r2",
-        ":tracing-module",
+        ":tracing",
         ":workers-module",
         "//src/cloudflare",
         "//src/node",

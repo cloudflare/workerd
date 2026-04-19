@@ -9,7 +9,7 @@
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
-class TracingModule;  // Forward decl; defined further down after user_tracing::Span.
+class Tracing;  // Forward decl; defined further down after user_tracing::Span.
 }  // namespace workerd::api
 
 // The `Span` class exposed to user JavaScript lives in this sub-namespace purely to avoid
@@ -46,7 +46,7 @@ class SpanImpl final: public kj::Refcounted {
   bool getIsTraced();
 
   // Returns a SpanParent wrapping this span's observer, or a null SpanParent if the span has
-  // ended or has no observer. Used by TracingModule::enterSpan() to push onto the AsyncContextFrame.
+  // ended or has no observer. Used by Tracing::enterSpan() to push onto the AsyncContextFrame.
   workerd::SpanParent makeSpanParent();
 
   // Sets a single attribute on the span. If value is kj::none, the attribute is not set.
@@ -83,7 +83,7 @@ class Span: public jsg::Object {
   void setAttribute(jsg::Lock& js, kj::String key, jsg::Optional<TagValue> value);
 
   // Ends the span and submits its content to the tracing system. Not exposed to JS - only
-  // called by TracingModule::enterSpan when the user callback returns / throws / its promise
+  // called by Tracing::enterSpan when the user callback returns / throws / its promise
   // settles. Callers outside this file should not need it.
   void end();
 
@@ -109,7 +109,7 @@ namespace workerd::api {
 // is what shows up in `.d.ts` output and in `typeof ctx.tracing` — historically this was
 // called `TracingModule` back when the API was only reachable via an ES module import;
 // that suffix is vestigial now that it's also a property on `ctx`.
-class TracingModule: public jsg::Object {
+class Tracing: public jsg::Object {
  public:
   Tracing() = default;
   Tracing(jsg::Lock&, const jsg::Url&) {}
@@ -134,7 +134,7 @@ class TracingModule: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
       const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler);
 
-  JSG_RESOURCE_TYPE(TracingModule) {
+  JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
