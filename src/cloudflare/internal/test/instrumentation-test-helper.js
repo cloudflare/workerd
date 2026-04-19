@@ -72,6 +72,98 @@ export function createTailStreamHandler(state) {
 }
 
 /**
+ * Creates a tail-stream handler that records span parent/child relationships in addition
+ * to the span attributes. Use this when your test needs to assert on hierarchy (e.g.,
+ * "the fetch span's parent is the enterSpan I just opened").
+ *
+ * The returned state shape is:
+ *   state.spans: Map<spanKey, {
+ *     name, spanId, parentSpanId, invocationId, closed, ...attributes
+ *   }>
+ *   state.topLevelSpans: Map<invocationId, topLevelSpanId>
+ *     (the span ID from the onset event, i.e. the implicit request root)
+ *
+ * @returns {{state: Object, tailStream: Function, waitForCompletion: Function}}
+ */
+export function createHierarchyAwareCollector() {
+  const state = {
+    invocationPromises: [],
+    spans: new Map(),
+    topLevelSpans: new Map(),
+  };
+
+  const tailStream = (event, env, ctx) => {
+    // Record the onset event's spanId as the top-level span for this invocation.
+    state.topLevelSpans.set(event.invocationId, event.event.spanId);
+
+    let resolveFn;
+    state.invocationPromises.push(
+      new Promise((resolve) => {
+        resolveFn = resolve;
+      })
+    );
+
+    return (event) => {
+      const spanKey = `${event.invocationId}#${event.event.spanId || event.spanContext.spanId}`;
+      switch (event.event.type) {
+        case 'spanOpen':
+          // event.event.spanId is the new span's id; event.spanContext.spanId is the
+          // span that was active when this one was opened (i.e., its parent).
+          state.spans.set(spanKey, {
+            name: event.event.name,
+            spanId: event.event.spanId,
+            parentSpanId: event.spanContext.spanId,
+            invocationId: event.invocationId,
+          });
+          break;
+        case 'attributes': {
+          const span = state.spans.get(spanKey);
+          if (!span) break;
+          for (const { name, value } of event.event.info) {
+            span[name] = value;
+          }
+          break;
+        }
+        case 'spanClose': {
+          const span = state.spans.get(spanKey);
+          if (!span) break;
+          span.closed = true;
+          break;
+        }
+        case 'outcome':
+          resolveFn();
+          break;
+      }
+    };
+  };
+
+  const waitForCompletion = () => Promise.allSettled(state.invocationPromises);
+
+  return { state, tailStream, waitForCompletion };
+}
+
+/**
+ * Find a span whose `name` field matches (after an optional filter function).
+ * Throws if there is not exactly one such span in the collector's state.
+ */
+export function findSpanByName(state, name, filterFn = () => true) {
+  const matches = [];
+  for (const span of state.spans.values()) {
+    if (span.name === name && filterFn(span)) matches.push(span);
+  }
+  if (matches.length === 0) {
+    throw new Error(`No span found with name='${name}'`);
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Expected exactly one span with name='${name}', found ${matches.length}: ` +
+        JSON.stringify(matches, null, 2)
+    );
+  }
+  return matches[0];
+}
+
+/**
  * Runs instrumentation test assertions.
  * This mirrors the original test logic exactly.
  * @param {Object} state - The state object from createInstrumentationState
