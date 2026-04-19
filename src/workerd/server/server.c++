@@ -2182,7 +2182,7 @@ class Server::WorkerService final: public Service,
       // it simple and just check the direct dependency.
       // If service refers to an EntrypointService, we need to compare with the underlying
       // WorkerService to match this.
-      auto& service = KJ_UNWRAP_OR(kj::dynamicDowncastIfAvailable<Service>(channel), {
+      auto& service = KJ_UNWRAP_OR(kj::tryDowncast<Service>(channel), {
         // Not a Service, probably not self-referential.
         workers.add(channel.startRequest({}));
         return;
@@ -2191,9 +2191,9 @@ class Server::WorkerService final: public Service,
       if (service.service() == this) {
         if (!isTracer) {
           // This is a self-reference. Create a request with isTracer=true.
-          KJ_IF_SOME(s, kj::dynamicDowncastIfAvailable<WorkerService>(service)) {
+          KJ_IF_SOME(s, kj::tryDowncast<WorkerService>(service)) {
             workers.add(s.startRequest({}, kj::none, {}, kj::none, true));
-          } else KJ_IF_SOME(s, kj::dynamicDowncastIfAvailable<EntrypointService>(service)) {
+          } else KJ_IF_SOME(s, kj::tryDowncast<EntrypointService>(service)) {
             workers.add(s.startRequest({}, true));
           } else {
             KJ_FAIL_ASSERT("Unexpected service type in recursive tail worker declaration");
@@ -3538,8 +3538,8 @@ class Server::WorkerService final: public Service,
 
     KJ_IF_SOME(p, props) {
       // Requesting specialization of loopback (ctx.exports) entrypoint with props.
-      auto& service = KJ_REQUIRE_NONNULL(kj::dynamicDowncastIfAvailable<Service>(channelRef),
-          "referenced channel is not a loopback channel");
+      auto& service = KJ_REQUIRE_NONNULL(
+          kj::tryDowncast<Service>(channelRef), "referenced channel is not a loopback channel");
       return service.forProps(kj::mv(p));
     }
 
@@ -4152,8 +4152,8 @@ uint startInspector(
 
 void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
   for (auto& service: services) {
-    if (WorkerService* worker = dynamic_cast<WorkerService*>(&*service.value)) {
-      for (auto& [className, ns]: worker->getActorNamespaces()) {
+    KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
+      for (auto& [className, ns]: worker.getActorNamespaces()) {
         bool isEvictable = true;
         KJ_SWITCH_ONEOF(ns->getConfig()) {
           KJ_CASE_ONEOF(c, Durable) {
@@ -4171,8 +4171,8 @@ void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
 
 void Server::deleteAllActors(kj::Maybe<const kj::Exception&> reason) {
   for (auto& service: services) {
-    if (WorkerService* worker = dynamic_cast<WorkerService*>(&*service.value)) {
-      for (auto& [className, ns]: worker->getActorNamespaces()) {
+    KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
+      for (auto& [className, ns]: worker.getActorNamespaces()) {
         bool isEvictable = true;
         KJ_SWITCH_ONEOF(ns->getConfig()) {
           KJ_CASE_ONEOF(c, Durable) {
@@ -4364,19 +4364,19 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
       kj::Vector<FutureSubrequestChannel> subrequestChannels;
       kj::Vector<FutureActorClassChannel> actorClassChannels;
       source.env.rewriteCaps([&](kj::Own<Frankenvalue::CapTableEntry> entry) {
-        if (auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(entry.get())) {
+        KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*entry)) {
           uint channelNumber =
               subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
           subrequestChannels.add(FutureSubrequestChannel{
-            .designator = kj::addRef(*channel),
+            .designator = kj::addRef(channel),
             .errorContext = kj::str("Worker's env"),
           });
           return kj::heap<IoChannelCapTableEntry>(
               IoChannelCapTableEntry::SUBREQUEST, channelNumber);
-        } else if (auto channel = dynamic_cast<IoChannelFactory::ActorClassChannel*>(entry.get())) {
+        } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*entry)) {
           uint channelNumber = subrequestChannels.size();
           actorClassChannels.add(FutureActorClassChannel{
-            .designator = kj::addRef(*channel),
+            .designator = kj::addRef(channel),
             .errorContext = kj::str("Worker's env"),
           });
           return kj::heap<IoChannelCapTableEntry>(
@@ -4992,12 +4992,11 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
           linkedActorChannels.add(kj::none);
           continue;
         });
-        targetService = dynamic_cast<WorkerService*>(svc.get());
-        if (targetService == nullptr) {
+        targetService = &KJ_UNWRAP_OR(kj::tryDowncast<WorkerService>(*svc), {
           // error was reported earlier
           linkedActorChannels.add(kj::none);
           continue;
-        }
+        });
       }
 
       // (If getActorNamespace() returns null, an error was reported earlier.)
@@ -5028,16 +5027,17 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     if (def.actorStorageConf.isLocalDisk()) {
       kj::StringPtr diskName = def.actorStorageConf.getLocalDisk();
       KJ_IF_SOME(svc, this->services.find(def.actorStorageConf.getLocalDisk())) {
-        auto diskSvc = dynamic_cast<DiskDirectoryService*>(svc.get());
-        if (diskSvc == nullptr) {
+        KJ_IF_SOME(diskSvc, kj::tryDowncast<DiskDirectoryService>(*svc)) {
+          KJ_IF_SOME(dir, diskSvc.getWritable()) {
+            result.actorStorage = dir;
+          } else {
+            errorReporter.addError(
+                kj::str("durableObjectStorage config refers to the disk service \"", diskName,
+                    "\", but that service is defined read-only."));
+          }
+        } else {
           errorReporter.addError(kj::str("durableObjectStorage config refers to the service \"",
               diskName, "\", but that service is not a local disk service."));
-        } else KJ_IF_SOME(dir, diskSvc->getWritable()) {
-          result.actorStorage = dir;
-        } else {
-          errorReporter.addError(
-              kj::str("durableObjectStorage config refers to the disk service \"", diskName,
-                  "\", but that service is defined read-only."));
         }
       } else {
         errorReporter.addError(kj::str("durableObjectStorage config refers to a service \"",
@@ -5165,8 +5165,8 @@ kj::Own<Server::Service> Server::lookupService(
     return {};
   }();
 
-  if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
-    KJ_IF_SOME(ep, worker->getEntrypoint(entrypointName, kj::mv(props))) {
+  KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service)) {
+    KJ_IF_SOME(ep, worker.getEntrypoint(entrypointName, kj::mv(props))) {
       return kj::mv(ep);
     } else KJ_IF_SOME(ep, entrypointName) {
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
@@ -5224,8 +5224,8 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
     return {};
   }();
 
-  if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
-    KJ_IF_SOME(ep, worker->getActorClass(entrypointName, kj::mv(props))) {
+  KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service)) {
+    KJ_IF_SOME(ep, worker.getActorClass(entrypointName, kj::mv(props))) {
       return kj::mv(ep);
     } else KJ_IF_SOME(ep, entrypointName) {
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
@@ -5437,8 +5437,7 @@ class Server::HttpListener final: public kj::Refcounted {
 
         kj::PeerIdentity* peerId;
 
-        KJ_IF_SOME(tlsId,
-            kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
+        KJ_IF_SOME(tlsId, kj::tryDowncast<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
           peerId = &tlsId.getNetworkIdentity();
 
           // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
@@ -5448,9 +5447,9 @@ class Server::HttpListener final: public kj::Refcounted {
           peerId = stream.peerIdentity;
         }
 
-        KJ_IF_SOME(remote, kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
+        KJ_IF_SOME(remote, kj::tryDowncast<kj::NetworkPeerIdentity>(*peerId)) {
           cfBlobJson = kj::str("{\"clientIp\": ", escapeJsonString(remote.toString()), "}");
-        } else KJ_IF_SOME(local, kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
+        } else KJ_IF_SOME(local, kj::tryDowncast<kj::LocalPeerIdentity>(*peerId)) {
           auto creds = local.getCredentials();
 
           kj::Vector<kj::String> parts;
@@ -5737,8 +5736,7 @@ class Server::DebugPortListener {
       kj::Own<Service> targetService;
 
       // Try to cast to WorkerService to support entrypoints and props
-      auto* workerService = dynamic_cast<WorkerService*>(service);
-      if (workerService != nullptr) {
+      KJ_IF_SOME(workerService, kj::tryDowncast<WorkerService>(*service)) {
         // This is a WorkerService, use getEntrypoint which supports both entrypoints and props
         kj::Maybe<kj::StringPtr> maybeEntrypoint;
         if (params.hasEntrypoint()) {
@@ -5746,7 +5744,7 @@ class Server::DebugPortListener {
         }
 
         targetService =
-            KJ_ASSERT_NONNULL(workerService->getEntrypoint(maybeEntrypoint, kj::mv(props)),
+            KJ_ASSERT_NONNULL(workerService.getEntrypoint(maybeEntrypoint, kj::mv(props)),
                 kj::str("jsg.Error: Worker does not export an entrypoint named \"",
                     maybeEntrypoint.orDefault("(default)"), "\""));
       } else {
@@ -5781,11 +5779,11 @@ class Server::DebugPortListener {
       auto service = serviceEntry->service();
 
       // Try to cast to WorkerService
-      auto* workerService = dynamic_cast<WorkerService*>(service);
-      KJ_REQUIRE(workerService != nullptr, "jsg.Error: Worker does not support Durable Objects");
+      auto& workerService = KJ_REQUIRE_NONNULL(kj::tryDowncast<WorkerService>(*service),
+          "jsg.Error: Worker does not support Durable Objects");
 
       // Look up the actor namespace
-      auto& actorNamespace = KJ_ASSERT_NONNULL(workerService->getActorNamespace(entrypointName),
+      auto& actorNamespace = KJ_ASSERT_NONNULL(workerService.getActorNamespace(entrypointName),
           kj::str("jsg.Error: Worker does not export a Durable Object class named \"",
               entrypointName, "\""));
 
@@ -6359,10 +6357,10 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
         co_await doTest(*service.value, service.key);
       }
 
-      if (WorkerService* worker = dynamic_cast<WorkerService*>(service.value.get())) {
-        for (auto& name: worker->getEntrypointNames()) {
+      KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
+        for (auto& name: worker.getEntrypointNames()) {
           if (entrypointGlob.matches(name)) {
-            kj::Own<Service> ep = KJ_ASSERT_NONNULL(worker->getEntrypoint(name, /*props=*/{}));
+            kj::Own<Service> ep = KJ_ASSERT_NONNULL(worker.getEntrypoint(name, /*props=*/{}));
             if (ep->hasHandler("test"_kj)) {
               co_await doTest(*ep, kj::str(service.key, ':', name));
             }
