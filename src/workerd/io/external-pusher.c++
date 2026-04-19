@@ -12,10 +12,6 @@ namespace workerd {
 
 namespace {
 
-// TODO(cleanup): These classes have been copied from streams/readable.c++. The copies there can be
-//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
-//   StreamSink-related code. For now I'm not trying to avoid duplication.
-
 // HACK: We need as async pipe, like kj::newOneWayPipe(), except supporting explicit end(). So we
 //   wrap the two ends of the pipe in special adapters that track whether end() was called.
 class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream {
@@ -149,10 +145,6 @@ kj::Promise<kj::Own<kj::AsyncInputStream>> ExternalPusherImpl::unwrapStreamImpl(
 namespace {
 
 // The jsrpc handler that receives aborts from the remote and triggers them locally
-//
-// TODO(cleanup): This class has been copied from basics.c++. The copy there can be
-//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
-//   StreamSink-related code. For now I'm not trying to avoid duplication.
 class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
  public:
   AbortTriggerRpcServer(kj::Own<kj::PromiseFulfiller<void>> fulfiller,
