@@ -34,6 +34,8 @@ export const validateSpans = {
         test: 'setAttributeUndefined',
         expectedSpan: 'undefined-attr-op',
       },
+      { test: 'publicImportTracing', expectedSpan: 'public-import-op' },
+      { test: 'ctxTracing', expectedSpan: 'ctx-tracing-op' },
     ];
 
     for (const { test, expectedSpan } of testValidations) {
