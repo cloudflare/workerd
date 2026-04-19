@@ -164,7 +164,7 @@ static inline kj::Own<T> fakeOwn(T& ref) {
   return kj::Own<T>(&ref, kj::NullDisposer::instance);
 }
 
-void throwDynamicEntrypointTransferError() {
+[[noreturn]] void throwDynamicEntrypointTransferError() {
   JSG_FAIL_REQUIRE(DOMDataCloneError,
       "Entrypoints to dynamically-loaded workers cannot be transferred to other Workers, "
       "because the system does not know how to reload this Worker from scratch. Instead, "
@@ -552,11 +552,22 @@ class Server::InvalidConfigService final: public Service {
   bool hasHandler(kj::StringPtr handlerName) override {
     return false;
   }
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    // Can't get here because workerd would have failed to start.
+    KJ_UNREACHABLE;
+  }
 };
 
 class Server::InvalidConfigActorClass final: public ActorClass {
  public:
   void requireAllowsTransfer() override {
+    // Can't get here because workerd would have failed to start.
+    KJ_UNREACHABLE;
+  }
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
     // Can't get here because workerd would have failed to start.
     KJ_UNREACHABLE;
   }
@@ -644,6 +655,11 @@ class Server::ExternalTcpService final: public Service, private WorkerInterface 
     return handlerName == "fetch"_kj || handlerName == "connect"_kj;
   }
 
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    JSG_FAIL_REQUIRE(DOMDataCloneError, "ExternalService can't be passed over RPC.");
+  }
+
  private:
   kj::Own<kj::NetworkAddress> addr;
 
@@ -726,6 +742,11 @@ class Server::ExternalHttpService final: public Service {
 
   bool hasHandler(kj::StringPtr handlerName) override {
     return handlerName == "fetch"_kj || handlerName == "connect"_kj;
+  }
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    JSG_FAIL_REQUIRE(DOMDataCloneError, "ExternalService can't be passed over RPC.");
   }
 
  private:
@@ -964,6 +985,11 @@ class Server::NetworkService final: public Service, private WorkerInterface {
     return handlerName == "fetch"_kj || handlerName == "connect"_kj;
   }
 
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    JSG_FAIL_REQUIRE(DOMDataCloneError, "NetworkService can't be passed over RPC.");
+  }
+
  private:
   kj::Own<kj::Network> network;
   kj::Maybe<kj::Own<kj::Network>> tlsNetwork;
@@ -1058,6 +1084,11 @@ class Server::DiskDirectoryService final: public Service, private WorkerInterfac
 
   bool hasHandler(kj::StringPtr handlerName) override {
     return handlerName == "fetch"_kj;
+  }
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    JSG_FAIL_REQUIRE(DOMDataCloneError, "DiskDirectoryService can't be passed over RPC.");
   }
 
  private:
@@ -1978,6 +2009,20 @@ class Server::WorkerService final: public Service,
 
   void requireAllowsTransfer() override {
     if (isDynamic) throwDynamicEntrypointTransferError();
+  }
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    requireAllowsTransfer();
+
+    // encodeSubrequestChannelToken wants a reference to the props. It needs this reference to
+    // be non-const because it might refcount things. But if it's an empty object then there's
+    // nothing to refcount. So we can just declare this statically...
+    static Frankenvalue EMPTY_PROPS;
+
+    // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
+    return channelTokenHandler.encodeSubrequestChannelToken(
+        usage, KJ_ASSERT_NONNULL(serviceName), kj::none, EMPTY_PROPS);
   }
 
   kj::Maybe<kj::Own<Service>> getEntrypoint(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
@@ -2910,6 +2955,18 @@ class Server::WorkerService final: public Service,
       static kj::Promise<ClassAndId> callFacetStartCallback(
           kj::Function<kj::Promise<StartInfo>()> getStartInfo) {
         auto info = co_await getStartInfo();
+
+        // Wait for the provided ActorClassChannel to be fully resolved, so that we will be able to
+        // downcast it to our `ActorClass` type.
+        KJ_SWITCH_ONEOF(info.actorClass->getResolved()) {
+          KJ_CASE_ONEOF(resolved, kj::Own<IoChannelFactory::ActorClassChannel>) {
+            info.actorClass = kj::mv(resolved);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>>) {
+            info.actorClass = co_await promise;
+          }
+        }
+
         co_return ClassAndId(info.actorClass.downcast<ActorClass>(), kj::mv(info.id));
       }
     };
@@ -3216,7 +3273,8 @@ class Server::WorkerService final: public Service,
       worker->requireAllowsTransfer();
     }
 
-    kj::Array<byte> getToken(ChannelTokenUsage usage) override {
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        ChannelTokenUsage usage) override {
       worker->requireAllowsTransfer();
 
       // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
@@ -3288,7 +3346,8 @@ class Server::WorkerService final: public Service,
       return kj::refcounted<ActorClassImpl>(*service, className, kj::mv(props));
     }
 
-    kj::Array<byte> getToken(ChannelTokenUsage usage) override {
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        ChannelTokenUsage usage) override {
       service->requireAllowsTransfer();
 
       // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
@@ -4219,7 +4278,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
   class WorkerStubImpl;
   kj::HashMap<kj::String, kj::Rc<WorkerStubImpl>> isolates;
 
-  class NullGlobalOutboundChannel: public IoChannelFactory::SubrequestChannel {
+  class NullGlobalOutboundChannel final: public IoChannelFactory::SubrequestChannel {
    public:
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       JSG_FAIL_REQUIRE(Error,
@@ -4237,6 +4296,11 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
       // is needed for some reason, it wouldn't be hard to support. But we might want to change
       // the error message it throws from startRequest(), since the error would be somewhat
       // misleading after the channel has been transferred.
+      JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
+    }
+
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        IoChannelFactory::ChannelTokenUsage usage) override {
       JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
     }
   };
@@ -4407,6 +4471,11 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         throwDynamicEntrypointTransferError();
       }
 
+      kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+          IoChannelFactory::ChannelTokenUsage usage) override {
+        throwDynamicEntrypointTransferError();
+      }
+
      private:
       kj::Rc<WorkerStubImpl> isolate;
       kj::Maybe<kj::String> entrypointName;
@@ -4450,6 +4519,11 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
             props(kj::mv(props)) {}
 
       void requireAllowsTransfer() override {
+        throwDynamicEntrypointTransferError();
+      }
+
+      kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+          IoChannelFactory::ChannelTokenUsage usage) override {
         throwDynamicEntrypointTransferError();
       }
 

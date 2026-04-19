@@ -872,6 +872,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   kj::Promise<void> pushAbortSignal(PushAbortSignalContext context) override {
     return externalPusher->pushAbortSignal(context);
   }
+  kj::Promise<void> pushDelayedChannelToken(PushDelayedChannelTokenContext context) override {
+    return externalPusher->pushDelayedChannelToken(context);
+  }
 
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
 

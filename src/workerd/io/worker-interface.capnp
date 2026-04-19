@@ -541,6 +541,14 @@ struct JsValue {
       actorClassChannelToken @9 :Data;
       # Encoded ChannelTokens. See channel-token.capnp.
 
+      delayedSubrequestChannelToken @12 :ExternalPusher.DelayedChannelToken;
+      delayedActorClassChannelToken @13 :ExternalPusher.DelayedChannelToken;
+      # Channel tokens which will be delivered asynchronously. This is sometimes needed in cases
+      # where the calling worker needs to invoke an asynchronous task to construct the channel
+      # token. We do not want to delay sending the RPC (especially as this could violate ordering
+      # guarantees), so instead we send it with a placeholder representing the token to be provided
+      # later.
+
       # TODO(soon): WebSocket, Request, Response
     }
   }
@@ -586,6 +594,19 @@ struct JsValue {
     interface AbortSignal {
       # No methods. This can be unwrapped by the recipient to obtain a Promise<void> which
       # rejects when the signal is aborted.
+    }
+
+    pushDelayedChannelToken @2 (token :Data) -> (cap :DelayedChannelToken);
+    # Use with `delayed*ChannelToken` members of `External`.
+    #
+    # Generally, this `push` method is actually called some time *after* the initial RPC is sent.
+    # In the initial RPC, the caller fills in the `DelayedChannelToken` with a promise capability.
+    # Later, when it has the final channel token, it calls `pushDelayedChannelToken()`, then
+    # resolves the earlier promise to the result.
+
+    interface DelayedChannelToken {
+      # No methods. This can be unwrapped by the recipient to obtain the channel token passed to
+      # `pushDelayedChannelToken()`.
     }
 
     # TODO(soon):
