@@ -1940,7 +1940,7 @@ class Server::WorkerService final: public Service,
   struct LinkedIoChannels {
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> subrequest;
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
-    kj::Array<kj::Own<ActorClass>> actorClass;
+    kj::Array<kj::Own<IoChannelFactory::ActorClassChannel>> actorClass;
     kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> cache;
     kj::Maybe<const kj::Directory&> actorStorage;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
@@ -3605,10 +3605,13 @@ class Server::WorkerService final: public Service,
 
     KJ_REQUIRE(channel < channels.actorClass.size(), "invalid actor class channel number");
 
-    ActorClass& cls = *channels.actorClass[channel];
+    ActorClassChannel& cls = *channels.actorClass[channel];
 
     KJ_IF_SOME(p, props) {
-      return cls.forProps(kj::mv(p));
+      // Requesting specialization of loopback (ctx.exports) actor class with props.
+      auto& typed = KJ_REQUIRE_NONNULL(
+          kj::tryDowncast<ActorClass>(cls), "referenced channel is not a loopback channel");
+      return typed.forProps(kj::mv(p));
     }
 
     return kj::addRef(cls);
@@ -3758,15 +3761,16 @@ struct FutureActorChannel {
 };
 
 struct FutureActorClassChannel {
-  kj::OneOf<config::ServiceDesignator::Reader, kj::Own<Server::ActorClass>> designator;
+  kj::OneOf<config::ServiceDesignator::Reader, kj::Own<IoChannelFactory::ActorClassChannel>>
+      designator;
   kj::String errorContext;
 
-  kj::Own<Server::ActorClass> lookup(Server& server) && {
+  kj::Own<IoChannelFactory::ActorClassChannel> lookup(Server& server) && {
     KJ_SWITCH_ONEOF(designator) {
       KJ_CASE_ONEOF(conf, config::ServiceDesignator::Reader) {
         return server.lookupActorClass(conf, kj::mv(errorContext));
       }
-      KJ_CASE_ONEOF(channel, kj::Own<Server::ActorClass>) {
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::ActorClassChannel>) {
         return kj::mv(channel);
       }
     }
@@ -4413,7 +4417,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
           });
           return kj::heap<IoChannelCapTableEntry>(
               IoChannelCapTableEntry::SUBREQUEST, channelNumber);
-        } else if (auto channel = dynamic_cast<ActorClass*>(entry.get())) {
+        } else if (auto channel = dynamic_cast<IoChannelFactory::ActorClassChannel*>(entry.get())) {
           uint channelNumber = actorClassChannels.size();
           actorClassChannels.add(FutureActorClassChannel{
             .designator = kj::addRef(*channel),
@@ -5014,7 +5018,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     result.subrequest = services.finish();
 
     // Set up actor class channels
-    auto actorClasses = kj::heapArrayBuilder<kj::Own<ActorClass>>(
+    auto actorClasses = kj::heapArrayBuilder<kj::Own<IoChannelFactory::ActorClassChannel>>(
         def.actorClassChannels.size() + actorClassNames.size());
 
     for (auto& channel: def.actorClassChannels) {
