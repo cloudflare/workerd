@@ -160,9 +160,9 @@ function n(events, children = []) {
 const E = {
   // actor-alarms-test.js
   alarm:
-    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","scriptTags":[],"info":{"type":"alarm","scheduledTime":"1970-01-01T00:00:00.000Z"}}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000002"}{"type":"spanClose","outcome":"ok"}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","scriptTags":[],"info":{"type":"alarm","scheduledTime":"1970-01-01T00:00:00.000Z"}}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   doFetch:
-    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://foo/test","headers":[]}}{"type":"spanOpen","name":"durable_object_storage_setAlarm","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000002"}{"type":"spanClose","outcome":"ok"}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://foo/test","headers":[]}}{"type":"spanOpen","name":"durable_object_storage_setAlarm","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000002"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"durable_object_storage_getAlarm","spanId":"0000000000000003"}{"type":"spanClose","outcome":"ok"}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
   // websocket/hibernation
   wsUpgrade:

@@ -98,3 +98,18 @@ export const siblingEnterSpans = {
     });
   },
 };
+
+export const abandonedPromiseSpan = {
+  async test(ctrl, env, ctx) {
+    const { withSpan } = env.tracingTest;
+    // Wrap an async callback whose returned Promise never settles, and discard the
+    // outer promise. The validator asserts that the request's outcome event still
+    // fires in order; without BaseTracer::WeakRef, the abandoned SpanImpl would pin
+    // the tracer via its SpanSubmitter and delay outcome until V8 GC.
+    void withSpan('hierarchy-abandoned', async (span) => {
+      span.setAttribute('case', 'abandonedPromiseSpan');
+      await new Promise(() => {});
+      span.setAttribute('reached', true); // unreachable
+    });
+  },
+};

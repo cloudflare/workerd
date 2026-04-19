@@ -503,6 +503,7 @@ export interface ExecutionContext<Props = unknown> {
     readonly key?: string;
     readonly override?: string;
   };
+  tracing?: Tracing;
   abort(reason?: any): void;
 }
 export type ExportedHandlerFetchHandler<
@@ -4718,6 +4719,18 @@ export interface EventCounts {
     param2?: any,
   ): void;
   [Symbol.iterator](): IterableIterator<string[]>;
+}
+export interface Tracing {
+  enterSpan<T, A extends unknown[]>(
+    name: string,
+    callback: (span: Span, ...args: A) => T,
+    ...args: A
+  ): T;
+  Span: typeof Span;
+}
+export declare abstract class Span {
+  get isTraced(): boolean;
+  setAttribute(key: string, value?: boolean | number | string): void;
 }
 // ============ AI Search Error Interfaces ============
 export interface AiSearchInternalError extends Error {}
@@ -14365,6 +14378,7 @@ export declare namespace CloudflareWorkersModule {
   export const env: Cloudflare.Env;
   export const exports: Cloudflare.Exports;
   export const cache: CacheContext;
+  export const tracing: Tracing;
 }
 export interface SecretsStoreSecret {
   /**

@@ -137,6 +137,12 @@ export const validateHierarchy = {
       assertTopLevelParent(b, 'siblingEnterSpans (b)');
     }
 
+    // ---------- Case 6: abandonedPromiseSpan ----------
+    // Reaching this point proves the outcome event for the abandoned-promise invocation
+    // was emitted in order: invocationPromises only resolve on "outcome", and
+    // waitForCompletion() awaits them all. BaseTracer::WeakRef prevents the abandoned
+    // SpanImpl from pinning the tracer past end-of-request.
+
     console.log('All tracing-hierarchy tests passed!');
   },
 };
