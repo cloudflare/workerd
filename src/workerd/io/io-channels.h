@@ -337,9 +337,9 @@ class IoChannelFactory {
 
   // Overloads which accept a promise. Any attempts to use the channel will have to wait for the
   // token to arrive first, but this should be transparent.
-  virtual kj::Own<SubrequestChannel> subrequestChannelFromToken(
+  kj::Own<SubrequestChannel> subrequestChannelFromToken(
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
-  virtual kj::Own<ActorClassChannel> actorClassFromToken(
+  kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
 };
 
