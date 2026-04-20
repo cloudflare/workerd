@@ -2959,10 +2959,10 @@ class Server::WorkerService final: public Service,
         // Wait for the provided ActorClassChannel to be fully resolved, so that we will be able to
         // downcast it to our `ActorClass` type.
         KJ_SWITCH_ONEOF(info.actorClass->getResolved()) {
-          KJ_CASE_ONEOF(resolved, kj::Own<ActorClassChannel>) {
+          KJ_CASE_ONEOF(resolved, kj::Own<IoChannelFactory::ActorClassChannel>) {
             info.actorClass = kj::mv(resolved);
           }
-          KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<ActorClassChannel>>) {
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>>) {
             info.actorClass = co_await promise;
           }
         }
