@@ -399,6 +399,34 @@ export function _exceptionWithHostPort(): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('_exceptionWithHostPort');
 }
 
+// `util.diff()` in Node produces a human-readable diff between two values.
+// Reimplementing it faithfully would require porting a non-trivial amount of
+// code; until then, throw so callers fall back to their own path rather than
+// silently getting a bogus empty string.
+export function diff(
+  _actual: unknown,
+  _expected: unknown,
+  _options?: unknown
+): string {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('diff');
+}
+
+// `util.setTraceSigInt()` toggles a debug flag in Node. workerd has no
+// equivalent signal handling, so accept the call and do nothing.
+export function setTraceSigInt(_enabled: boolean): void {
+  // Intentionally no-op.
+}
+
+// `util.convertProcessSignalToExitCode()` maps a POSIX signal name/number to
+// the "128 + signal" shutdown exit code convention. We do not model process
+// signals in workerd; throw instead of returning a value that could be
+// misinterpreted by callers.
+export function convertProcessSignalToExitCode(
+  _signal: string | number
+): number {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('convertProcessSignalToExitCode');
+}
+
 export default {
   types,
   callbackify,
@@ -434,6 +462,9 @@ export default {
   isDeepStrictEqual,
   _errnoException,
   _exceptionWithHostPort,
+  diff,
+  setTraceSigInt,
+  convertProcessSignalToExitCode,
 
   isArray,
   // EOL methods

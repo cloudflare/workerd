@@ -9,6 +9,7 @@ import type {
   LookupAllOptions,
   LookupOneOptions,
   LookupOptions,
+  TlsaRecord,
 } from 'node:dns';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 import {
@@ -32,6 +33,7 @@ import {
   lookupService,
   resolve,
   resolveAny,
+  resolveTlsa,
 } from 'node-internal:internal_dns';
 import type {
   CAA,
@@ -63,6 +65,7 @@ export {
   lookupService,
   resolve,
   resolveAny,
+  resolveTlsa,
 } from 'node-internal:internal_dns';
 
 export class Resolver implements dns.Resolver {
@@ -142,6 +145,10 @@ export class Resolver implements dns.Resolver {
     return resolveTxt(name);
   }
 
+  resolveTlsa(name: string): Promise<TlsaRecord[]> {
+    return resolveTlsa(name);
+  }
+
   reverse(name: string): Promise<string[]> {
     return reverse(name);
   }
@@ -186,6 +193,7 @@ export default {
   resolveNaptr,
   resolve4,
   resolve6,
+  resolveTlsa,
   getServers,
   setServers,
   getDefaultResultOrder,

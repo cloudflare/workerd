@@ -244,6 +244,19 @@ Object.defineProperty(Module.prototype, 'isPreloading', {
   },
 });
 
+// Deprecated (DEP0144) and always undefined. Non-enumerable, as in Node.js.
+Object.defineProperty(Module.prototype, 'parent', {
+  value: undefined,
+  writable: true,
+  configurable: true,
+});
+
+// The CommonJS wrapper template. Node.js exposes it only as `Module.wrapper`.
+const wrapper: [string, string] = [
+  '(function (exports, require, module, __filename, __dirname) { ',
+  '\n});',
+];
+
 Object.defineProperties(Module, {
   register: {
     value: register,
@@ -397,6 +410,11 @@ Object.defineProperties(Module, {
   },
   registerHooks: {
     value: registerHooks,
+    writable: true,
+    enumerable: true,
+  },
+  wrapper: {
+    value: wrapper,
     writable: true,
     enumerable: true,
   },

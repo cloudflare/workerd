@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "sqlite-session-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "sqlite-session-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          "experimental",
+          "enable_nodejs_sqlite_module"
+        ]
+      )
+    ),
+  ],
+);

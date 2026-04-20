@@ -41,6 +41,7 @@ import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
   ERR_INVALID_RETURN_VALUE,
+  ERR_METHOD_NOT_IMPLEMENTED,
   ERR_MISSING_ARGS,
 } from 'node-internal:internal_errors';
 
@@ -77,8 +78,8 @@ function assert(actual: unknown, message?: string | Error): asserts actual {
   }
 }
 
-type Assert = (actual: unknown, message?: string | Error) => asserts actual;
-export const ok: Assert = assert;
+type AssertFn = (actual: unknown, message?: string | Error) => asserts actual;
+export const ok: AssertFn = assert;
 
 export function throws(
   fn: () => void,
@@ -1060,7 +1061,17 @@ function isValidThenable(maybeThennable: any): boolean {
 
 export { AssertionError };
 
+// Node's class-style assertion API (`new assert.Assert(options)`) is not
+// implemented. The class is exported so that modules importing it still
+// link, but constructing it throws.
+export class Assert {
+  constructor(_options?: unknown) {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Assert');
+  }
+}
+
 Object.assign(strict, {
+  Assert,
   AssertionError,
   deepEqual: deepStrictEqual,
   deepStrictEqual,
@@ -1084,6 +1095,7 @@ Object.assign(strict, {
 });
 
 export default Object.assign(assert, {
+  Assert,
   AssertionError,
   deepEqual,
   deepStrictEqual,

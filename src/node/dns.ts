@@ -33,6 +33,8 @@ export const lookupService = callbackify(dns.lookupService.bind(this));
 export const resolve = callbackify(dns.resolve.bind(this));
 export const resolveAny = callbackify(dns.resolveAny.bind(this));
 
+export const resolveTlsa = callbackify(dns.resolveTlsa.bind(dns));
+
 export class Resolver implements nodejsDns.Resolver {
   cancel(): void {
     // TODO(soon): Implement this.
@@ -113,6 +115,11 @@ export class Resolver implements nodejsDns.Resolver {
     resolveTxt(...args);
   }
 
+  // @ts-expect-error TS2416 Type mismatch.
+  resolveTlsa(...args: Parameters<typeof resolveTlsa>): void {
+    resolveTlsa(...args);
+  }
+
   reverse(...args: Parameters<typeof reverse>): void {
     reverse(...args);
   }
@@ -138,6 +145,7 @@ export default {
   resolvePtr,
   resolveSoa,
   resolveSrv,
+  resolveTlsa,
   resolveTxt,
   reverse,
   setDefaultResultOrder,

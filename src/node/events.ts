@@ -5,3 +5,8 @@
 
 export * from 'node-internal:events';
 export { default } from 'node-internal:events';
+import { EventEmitter } from 'node-internal:events';
+
+// `require('node:events')` is the EventEmitter constructor itself, so Node
+// exposes its static `init` as a named export as well.
+export const init = EventEmitter.init;

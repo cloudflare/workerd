@@ -28,6 +28,7 @@ import {
   ERR_INVALID_ARG_TYPE,
   ERR_OPTION_NOT_IMPLEMENTED,
   ERR_INVALID_ARG_VALUE,
+  ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import {
   validateString,
@@ -311,6 +312,8 @@ export function resolve(
       return resolveSoa(name);
     case 'SRV':
       return resolveSrv(name);
+    case 'TLSA':
+      return resolveTlsa(name);
     case 'TXT':
       return resolveTxt(name);
     default: {
@@ -478,6 +481,12 @@ export function resolveSrv(name: string): Promise<SRV[]> {
 
     return json.Answer.map(normalizeSrv);
   });
+}
+
+// TLSA (DANE) lookups are not implemented.
+export function resolveTlsa(name: string): Promise<dns.TlsaRecord[]> {
+  validateString(name, 'name');
+  return Promise.reject(new ERR_METHOD_NOT_IMPLEMENTED('resolveTlsa'));
 }
 
 export function resolveTxt(name: string): Promise<string[][]> {

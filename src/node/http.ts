@@ -73,6 +73,12 @@ export function setMaxIdleHTTPParsers(max: unknown): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('setMaxIdleHTTPParsers');
 }
 
+// Proxy configuration from environment variables is not supported. Ignoring
+// the call would silently send traffic around the proxy, so it throws.
+export function setGlobalProxyFromEnv(_proxyEnv?: unknown): never {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('setGlobalProxyFromEnv');
+}
+
 export {
   validateHeaderName,
   validateHeaderValue,
@@ -104,6 +110,7 @@ export default {
   createServer,
   maxHeaderSize,
   setMaxIdleHTTPParsers,
+  setGlobalProxyFromEnv,
   _connectionListener,
   WebSocket,
   CloseEvent,

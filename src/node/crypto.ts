@@ -531,6 +531,47 @@ Object.defineProperties(constants, {
 // Deprecated but required for backwards compatibility.
 export const pseudoRandomBytes = randomBytes;
 
+// Reports that `name` is not implemented, through `callback` when one is
+// given and by throwing otherwise.
+function notImplemented(name: string, callback: unknown): void {
+  const err = new ERR_METHOD_NOT_IMPLEMENTED(name);
+  if (typeof callback !== 'function') throw err;
+  queueMicrotask((): void => {
+    (callback as (err: Error) => void)(err);
+  });
+}
+
+// Key encapsulation (ML-KEM and friends) is not implemented.
+export function encapsulate(_key: unknown, callback?: unknown): void {
+  notImplemented('encapsulate', callback);
+}
+
+export function decapsulate(
+  _key: unknown,
+  _ciphertext: unknown,
+  callback?: unknown
+): void {
+  notImplemented('decapsulate', callback);
+}
+
+// Argon2 password hashing is not implemented.
+export function argon2(
+  _algorithm: unknown,
+  _parameters: unknown,
+  callback?: unknown
+): void {
+  notImplemented('argon2', callback);
+}
+
+export function argon2Sync(_algorithm: unknown, _parameters: unknown): never {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('argon2Sync');
+}
+
+// Deprecated aliases of randomBytes (DEP0115). Like Node.js, these are only
+// reachable through the default export.
+const prng = randomBytes;
+const rng = randomBytes;
+
 export const CryptoKey = globalThis.CryptoKey;
 
 export let createCipher: (() => void) | undefined = undefined;
@@ -560,6 +601,7 @@ export default {
   createDiffieHellman,
   createDiffieHellmanGroup,
   getDiffieHellman,
+  diffieHellman,
   ECDH,
   createECDH,
   // Keys,
@@ -577,6 +619,8 @@ export default {
   // Random
   getRandomValues,
   pseudoRandomBytes,
+  prng,
+  rng,
   randomBytes,
   randomFillSync,
   randomFill,
@@ -602,6 +646,12 @@ export default {
   // Scrypt
   scrypt,
   scryptSync,
+  // ML-KEM (stub)
+  encapsulate,
+  decapsulate,
+  // Argon2 (stub)
+  argon2,
+  argon2Sync,
   // Misc
   getCiphers,
   getCurves,

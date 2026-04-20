@@ -3,7 +3,17 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { default as sqliteUtil } from 'node-internal:sqlite';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import type sqlite from 'node:sqlite';
+
+// node:sqlite Session is used for change-tracking and changeset generation.
+// Not implementable on top of DatabaseSync's current surface; exported for
+// feature-detection parity and throws on construction.
+export class Session {
+  constructor() {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Session');
+  }
+}
 
 const {
   DatabaseSync,
@@ -116,4 +126,5 @@ export default {
   StatementSync,
   constants,
   backup,
-} satisfies typeof sqlite;
+  Session,
+} satisfies typeof sqlite & { Session: typeof Session };

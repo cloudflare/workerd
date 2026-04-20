@@ -36,7 +36,11 @@ import {
 } from 'node-internal:internal_tls_common';
 import * as constants from 'node-internal:internal_tls_constants';
 import { TLSSocket, connect } from 'node-internal:internal_tls_wrap';
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+import {
+  ERR_INVALID_ARG_VALUE,
+  ERR_METHOD_NOT_IMPLEMENTED,
+} from 'node-internal:internal_errors';
+import { validateString } from 'node-internal:validators';
 
 let createSecurePair = undefined;
 
@@ -44,6 +48,31 @@ if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_v24) {
   createSecurePair = function createSecurePair(): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('createSecurePair');
   };
+}
+
+// Workers do not expose the certificate authorities that the runtime trusts,
+// so every CA list is reported as empty.
+export function getCACertificates(type: string = 'default'): string[] {
+  validateString(type, 'type');
+  switch (type) {
+    case 'default':
+    case 'bundled':
+    case 'extra':
+    case 'system':
+      return [];
+    default:
+      throw new ERR_INVALID_ARG_VALUE(
+        'type',
+        type,
+        'must be "default", "bundled", "extra", or "system"'
+      );
+  }
+}
+
+// The set of trusted certificate authorities cannot be changed. Ignoring the
+// call would leave the caller trusting CAs it meant to exclude, so it throws.
+export function setDefaultCACertificates(_certs: unknown): never {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('setDefaultCACertificates');
 }
 
 export * from 'node-internal:internal_tls_constants';
@@ -70,5 +99,7 @@ export default {
   convertALPNProtocols,
   getCiphers,
   createSecurePair,
+  getCACertificates,
+  setDefaultCACertificates,
   ...constants,
 };
