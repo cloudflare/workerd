@@ -189,6 +189,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
+  class ActorNamespace;
+
   class WorkerLoaderNamespace;
   kj::HashMap<kj::String, kj::Rc<WorkerLoaderNamespace>> workerLoaderNamespaces;
   kj::Vector<kj::Rc<WorkerLoaderNamespace>> anonymousWorkerLoaderNamespaces;
