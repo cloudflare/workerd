@@ -11143,8 +11143,8 @@ export interface ArtifactsCreateRepoResult {
 }
 /** Paginated list of repositories. */
 export interface ArtifactsRepoListResult {
-  /** Repositories in this page (without the `remote` field). */
-  repos: Omit<ArtifactsRepoInfo, "remote">[];
+  /** Repositories in this page. */
+  repos: ArtifactsRepoInfo[];
   /** Total number of repositories in the namespace. */
   total: number;
   /** Cursor for the next page, if there are more results. */
