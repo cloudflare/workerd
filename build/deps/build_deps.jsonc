@@ -70,6 +70,10 @@
     },
     // rust
     {
+      "name": "rules_rust",
+      "type": "bazel_dep"
+    },
+    {
       "name": "cargo_bazel_linux_x64",
       "type": "github_release",
       "owner": "bazelbuild",
