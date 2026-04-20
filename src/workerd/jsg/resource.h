@@ -1777,8 +1777,8 @@ class ResourceWrapper {
       return {wrapper.getTemplate(isolate, static_cast<T*>(nullptr)), rinit};
     });
 
-    if constexpr (static_cast<uint>(T::jsgSerializeTag) !=
-        static_cast<uint>(T::jsgSuper::jsgSerializeTag)) {
+    if constexpr (static_cast<uint>(T::jsgSerializeLevel) !=
+        static_cast<uint>(T::jsgSuper::jsgSerializeLevel)) {
       // This type is declared JSG_SERIALIZABLE.
       // HACK: The type of `serializer` should be `Serializer&`, not `auto&`, but Clang complains
       //   about the `writeRawUint32()` call being made on an incomplete type if `ser.h` hasn't been

@@ -540,7 +540,7 @@ using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
 
 // Declares the type serializable. See jsg::Serializer for usage.
 #define JSG_SERIALIZABLE(TAG, ...)                                                                 \
-  static_assert(static_cast<uint>(jsgSuper::jsgSerializeTag) != static_cast<uint>(TAG));           \
+  static constexpr auto jsgSerializeLevel = jsgSuper::jsgSerializeLevel + 1;                       \
   static constexpr auto jsgSerializeTag = TAG;                                                     \
   static constexpr decltype(jsgSerializeTag) jsgSerializeOldTags[] = {__VA_ARGS__};                \
   static constexpr auto jsgSerializeOneway = false
@@ -551,7 +551,7 @@ using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
 //
 // Used e.g. for JsRpcTarget, which becomes JsRpcStub after serialization.
 #define JSG_ONEWAY_SERIALIZABLE(TAG)                                                               \
-  static_assert(static_cast<uint>(jsgSuper::jsgSerializeTag) != static_cast<uint>(TAG));           \
+  static constexpr auto jsgSerializeLevel = jsgSuper::jsgSerializeLevel + 1;                       \
   static constexpr auto jsgSerializeTag = TAG;                                                     \
   static constexpr decltype(jsgSerializeTag) jsgSerializeOldTags[] = {};                           \
   static constexpr auto jsgSerializeOneway = true
@@ -1202,9 +1202,8 @@ class Object: private Wrappable {
   template <typename TypeWrapper>
   inline void jsgInitReflection(TypeWrapper& wrapper) {}
 
-  // Dummy invalid serialization tag. This is only used to detect when a subclass has defined their
-  // own tag.
-  static constexpr uint jsgSerializeTag = kj::maxValue;
+  // This is used to detect when a subclass has defined a custom serializer.
+  static constexpr uint jsgSerializeLevel = 0;
 
  private:
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
