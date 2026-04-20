@@ -78,6 +78,8 @@ def wd_rust_crate(
         test_tags: additional test tags.
         test_deps: test-only dependencies.
         test_proc_macro_deps: test-only proc_macro dependencies.
+        cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
+            bridge source => dependency list.
     """
     srcs = native.glob(["**/*.rs"])
     crate_name = name.replace("-", "_")
@@ -85,12 +87,18 @@ def wd_rust_crate(
     if cxx_bridge_src:
         cxx_bridge_srcs = cxx_bridge_srcs + [cxx_bridge_src]
 
+    if type(cxx_bridge_deps) == "dict":
+        invalid_bridge_srcs = [bridge_src for bridge_src in cxx_bridge_deps.keys() if bridge_src not in cxx_bridge_srcs]
+        if invalid_bridge_srcs:
+            fail("cxx_bridge_deps contains keys not present in cxx_bridge_srcs: %s" % sorted(invalid_bridge_srcs))
+    else:
+        cxx_bridge_deps = {
+            bridge_src: cxx_bridge_deps + []
+            for bridge_src in cxx_bridge_srcs
+        }
+
     # Add cxx dependency if there are any cxx bridges
     if len(cxx_bridge_srcs) > 0:
-        cxx_bridge_deps = cxx_bridge_deps + [
-            "@workerd-cxx//kj-rs",
-            "@workerd-cxx//:cxx",
-        ]
         deps = deps + [
             "@workerd-cxx//kj-rs",
             "@workerd-cxx//:cxx",
@@ -108,7 +116,10 @@ def wd_rust_crate(
             strip_include_prefix = "",
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
-            deps = cxx_bridge_deps,
+            deps = cxx_bridge_deps.get(bridge_src, []) + [
+                "@workerd-cxx//kj-rs",
+                "@workerd-cxx//:cxx",
+            ],
             tags = cxx_bridge_tags,
             local_defines = cxx_bridge_local_defines,
             features = cxx_bridge_features,
