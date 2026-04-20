@@ -177,6 +177,14 @@ export class MyService extends WorkerEntrypoint {
     return await counter.increment(i);
   }
 
+  async getMyActor(name) {
+    return this.env.MyActor.get(this.env.MyActor.idFromName(name));
+  }
+
+  async getMyActorInObject(name) {
+    return { actor: this.env.MyActor.get(this.env.MyActor.idFromName(name)) };
+  }
+
   async getAnObject(i) {
     return { foo: 123 + i, counter: new MyCounter(i) };
   }
@@ -507,6 +515,14 @@ export class MyService extends WorkerEntrypoint {
 export class MyServiceProxy extends WorkerEntrypoint {
   makeCounter(i) {
     return this.env.MyService.makeCounter(i);
+  }
+
+  getMyActor(name) {
+    return this.env.MyService.getMyActor(name);
+  }
+
+  getMyActorInObject(name) {
+    return this.env.MyService.getMyActorInObject(name);
   }
 
   getAnObject(i) {
@@ -996,6 +1012,12 @@ export let sendStubOverRpc = {
     });
 
     assert.strictEqual(await stubDup.increment(7), 16);
+
+    let actor = env.MyActor.get(
+      env.MyActor.idFromName('send-durable-object-stub')
+    );
+    assert.strictEqual(await env.MyService.incrementCounter(actor, 5), 5);
+    assert.strictEqual(await actor.increment(7), 12);
   },
 };
 
@@ -1013,17 +1035,33 @@ export let receiveStubOverRpc = {
       await Promise.all([promise1, promise2, promise3]),
       [15, 19, 22]
     );
+
+    let actor = await env.MyService.getMyActor('receive-durable-object-stub');
+    assert.strictEqual(await actor.increment(2), 2);
+    assert.strictEqual(await actor.increment(6), 8);
   },
 };
 
 export let promisePipelining = {
   async test(controller, env, ctx) {
     assert.strictEqual(await env.MyService.makeCounter(12).increment(3), 15);
+    assert.strictEqual(
+      await env.MyService.getMyActor(
+        'promise-pipeline-durable-object-stub'
+      ).increment(3),
+      3
+    );
 
     assert.strictEqual(await env.MyService.getAnObject(5).foo, 128);
     assert.strictEqual(
       await env.MyService.getAnObject(5).counter.increment(7),
       12
+    );
+    assert.strictEqual(
+      await env.MyService.getMyActorInObject(
+        'promise-pipeline-durable-object-stub-wrapped'
+      ).actor.increment(4),
+      4
     );
 
     assert.rejects(() => env.MyService.oneArgMethod(5).foo(), {
@@ -1059,6 +1097,16 @@ export let promisePipeliningProxy = {
       assert.strictEqual(await promise2, 20);
     }
 
+    {
+      let actor = env.MyServiceProxy.getMyActor(
+        'promise-pipeline-proxy-durable-object-stub'
+      );
+      let promise1 = actor.increment(3);
+      let promise2 = actor.increment(5);
+      assert.strictEqual(await promise1, 3);
+      assert.strictEqual(await promise2, 8);
+    }
+
     // Pipeline on a proxied call that returns an object containing an object that contains a
     // stub. (This ensures that pipelining can traverse JsRpcProperty values.)
     {
@@ -1067,6 +1115,16 @@ export let promisePipeliningProxy = {
       let promise2 = counter.increment(5);
       assert.strictEqual(await promise1, 15);
       assert.strictEqual(await promise2, 20);
+    }
+
+    {
+      let actor = env.MyServiceProxy.getMyActorInObject(
+        'promise-pipeline-proxy-durable-object-stub-wrapped'
+      ).actor;
+      let promise1 = actor.increment(2);
+      let promise2 = actor.increment(6);
+      assert.strictEqual(await promise1, 2);
+      assert.strictEqual(await promise2, 8);
     }
   },
 };

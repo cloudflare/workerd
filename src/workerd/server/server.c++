@@ -669,6 +669,34 @@ class Server::ActorNamespace final {
       }
     }
 
+    void requireTransferrableStub() {
+      JSG_REQUIRE(parent == kj::none, DOMDataCloneError,
+          "Stubs pointing to Durable Object facets are not serializable.");
+      JSG_REQUIRE(ns.getConfig().is<Durable>(), DOMDataCloneError,
+          "Stubs pointing to ephemeral objects are not serializable.");
+    }
+
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getChannelToken(
+        IoChannelFactory::ChannelTokenUsage usage) {
+      requireTransferrableStub();
+
+      kj::StringPtr uniqueKey = ns.getConfig().get<Durable>().uniqueKey;
+
+      KJ_SWITCH_ONEOF(classAndId) {
+        KJ_CASE_ONEOF(c, ClassAndId) {
+          return getChannelTokenImpl(usage, c.id);
+        }
+        KJ_CASE_ONEOF(promise, kj::ForkedPromise<void>) {
+          return promise.addBranch().then([this, usage]() {
+            return getChannelTokenImpl(
+                usage, KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).id);
+          });
+        }
+      }
+
+      KJ_UNREACHABLE;
+    }
+
    private:
     // The actor is constructed after the ActorContainer so it starts off empty.
     kj::Maybe<kj::Own<Worker::Actor>> actor;
@@ -989,6 +1017,16 @@ class Server::ActorNamespace final {
 
       co_return ClassAndId(info.actorClass.downcast<ActorClass>(), kj::mv(info.id));
     }
+
+    kj::Array<byte> getChannelTokenImpl(
+        IoChannelFactory::ChannelTokenUsage usage, const Worker::Actor::Id& id) {
+      kj::StringPtr uniqueKey = KJ_ASSERT_NONNULL(ns.getConfig().tryGet<Durable>()).uniqueKey;
+      auto& abstractId = *KJ_ASSERT_NONNULL(id.tryGet<kj::Own<ActorIdFactory::ActorId>>());
+      auto& idImpl =
+          KJ_ASSERT_NONNULL(kj::tryDowncast<const ActorIdFactoryImpl::ActorIdImpl>(abstractId));
+      return ns.channelTokenHandler.encodeActorChannelToken(
+          usage, uniqueKey, idImpl.getRaw(), idImpl.getName());
+    }
   };
 
   kj::Own<ActorContainer> getActorContainer(Worker::Actor::Id id) {
@@ -1211,6 +1249,15 @@ class Server::ActorNamespace final {
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       return newPromisedWorkerInterface(actorContainer->startRequest(kj::mv(metadata)));
+    }
+
+    void requireAllowsTransfer() override {
+      actorContainer->requireTransferrableStub();
+    }
+
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        IoChannelFactory::ChannelTokenUsage usage) override {
+      return actorContainer->getChannelToken(usage);
     }
 
    private:
@@ -2935,8 +2982,9 @@ class Server::WorkerService final: public Service,
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
   // done during the constructor.
-  void initActorNamespaces(
-      const kj::HashMap<kj::String, ActorConfig>& actorClasses, kj::Network& network) {
+  void initActorNamespaces(const kj::HashMap<kj::String, ActorConfig>& actorClasses,
+      kj::HashMap<kj::StringPtr, ActorNamespace*>& actorNamespacesByUniqueKey,
+      kj::Network& network) {
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
       if (!actorClassEntrypoints.contains(entry.key)) {
@@ -2954,6 +3002,9 @@ class Server::WorkerService final: public Service,
           kj::systemPreciseCalendarClock(), threadContext.getUnsafeTimer(),
           threadContext.getByteStreamFactory(), channelTokenHandler, network, dockerPath,
           containerEgressInterceptorImage, waitUntilTasks);
+      KJ_IF_SOME(d, entry.value.tryGet<Durable>()) {
+        actorNamespacesByUniqueKey.insert(d.uniqueKey, ns.get());
+      }
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -5093,7 +5144,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
           kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors),
           KJ_BIND_METHOD(*this, deleteAllActors), kj::mv(dockerPath),
           kj::mv(containerEgressInterceptorImage), def.isDynamic, kj::mv(abortIsolateCallback));
-  result->initActorNamespaces(def.localActorConfigs, network);
+  result->initActorNamespaces(def.localActorConfigs, actorNamespacesByUniqueKey, network);
   co_return result;
 }
 
@@ -5272,6 +5323,17 @@ kj::Own<IoChannelFactory::ActorClassChannel> Server::resolveActorClass(
   return JSG_REQUIRE_NONNULL(worker.getActorClass(entrypoint, kj::mv(props)), Error,
       "Stub refers to a an entrypoint of the target service that doesn't exist: ",
       entrypoint.orDefault("default"));
+}
+
+kj::Own<IoChannelFactory::ActorChannel> Server::resolveActor(
+    kj::StringPtr namespaceKey, kj::ArrayPtr<const byte> id, kj::Maybe<kj::StringPtr> name) {
+  auto& ns = *KJ_REQUIRE_NONNULL(actorNamespacesByUniqueKey.find(namespaceKey),
+      "couldn't deserialize actor stub poniting at unknown namespace", namespaceKey);
+
+  auto idFactory = kj::heap<ActorIdFactoryImpl>(namespaceKey);
+  auto idObj = idFactory->idFromRaw(id, name.clone());
+
+  return ns.getActorChannel(kj::mv(idObj));
 }
 
 // =======================================================================================

@@ -241,10 +241,11 @@ class IoChannelFactory {
     // easy to imagine that actor stubs may have more functionality than just sending requests
     // someday, so we keep this as a separate type.
 
-    // For now, actor stubs are not transferrable -- but we do intend to change that at some point.
-    void requireAllowsTransfer() override final;
+    // These just throw an exception saying actors aren't serializable.
+    // TODO(cleanup): Delete once all implementations implement these.
+    void requireAllowsTransfer() override;
     kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-        ChannelTokenUsage usage) override final;
+        ChannelTokenUsage usage) override;
   };
 
   // Get an actor stub from the given namespace for the actor with the given ID.

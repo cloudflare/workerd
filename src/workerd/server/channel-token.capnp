@@ -59,15 +59,38 @@ struct ChannelToken {
     actorClass @1;  # token for IoChannelFactory::ActorClassChannel
   }
 
-  name @1 :Text;
-  # Name of the service in the workerd config's services list.
+  union {
+    service :group {
+      # This points to an etrypoint exported by a service, with no associated storage.
 
-  entrypoint @2 :Text;
-  # Name of the entrypoint the channel points at. For subrequest channels this must be a
-  # WorkerEntrypoint derivative (or plain object implementing `ExportedHandlers`). For actor class
-  # channels this must be a `DurableObject` implementation.
+      name @1 :Text;
+      # Name of the service in the workerd config's services list.
 
-  props @3 :Frankenvalue;
+      entrypoint @2 :Text;
+      # Name of the entrypoint the channel points at. For subrequest channels this must be a
+      # WorkerEntrypoint derivative (or plain object implementing `ExportedHandlers`). For actor
+      # class channels this must be a `DurableObject` implementation.
+
+      props @3 :Frankenvalue;
+    }
+
+    actor :group {
+      # This points to a specific actor instance.
+      #
+      # Note that `type` must be `subrequest` in this case.
+
+      namespaceKey @4 :Text;
+      # The `uniqueKey` for the namespace, as defined in workerd.capnp.
+      #
+      # This identifies the specific namespace that the token points at.
+
+      id @5 :Data;
+      # Raw DO ID bytes (not hex).
+
+      name @6 :Text;
+      # Name, if known, otherwise null.
+    }
+  }
 
   struct FrankenvalueCapTable {
     # CapTable representation for `ChannelToken.props`.
