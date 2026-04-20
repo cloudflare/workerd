@@ -156,7 +156,7 @@ jobs:
           bazel coverage --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
       - name: Upload coverage to Codecov
         if: inputs.run_coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4
         with:
           # Use bazel info to get the actual output path, avoiding symlink issues
           files: ${{ github.workspace }}/bazel-out/_coverage/_coverage_report.dat
