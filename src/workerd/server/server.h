@@ -190,6 +190,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
   class ActorNamespace;
+  kj::HashMap<kj::StringPtr, ActorNamespace*> actorNamespacesByUniqueKey;
 
   class WorkerLoaderNamespace;
   kj::HashMap<kj::String, kj::Rc<WorkerLoaderNamespace>> workerLoaderNamespaces;
@@ -275,6 +276,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override;
   kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(
       kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override;
+  kj::Own<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
+      kj::ArrayPtr<const byte> id,
+      kj::Maybe<kj::StringPtr> name) override;
 
   kj::Array<byte> encodeChannelToken(IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,

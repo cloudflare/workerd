@@ -32,6 +32,9 @@ class ChannelTokenHandler {
 
     virtual kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(
         kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) = 0;
+
+    virtual kj::Own<IoChannelFactory::ActorChannel> resolveActor(
+        kj::StringPtr namespaceKey, kj::ArrayPtr<const byte> id, kj::Maybe<kj::StringPtr> name) = 0;
   };
 
   explicit ChannelTokenHandler(Resolver& resolver);
@@ -47,6 +50,10 @@ class ChannelTokenHandler {
       kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
       Frankenvalue& props);
+  kj::Array<byte> encodeActorChannelToken(IoChannelFactory::ChannelTokenUsage usage,
+      kj::StringPtr namespaceKey,
+      kj::ArrayPtr<const byte> id,
+      kj::Maybe<kj::StringPtr> name);
 
   // Helpers to implement `IoChannelFactory::{subrequestChannel,actorClass}FromToken()`.
   kj::Own<IoChannelFactory::SubrequestChannel> decodeSubrequestChannelToken(

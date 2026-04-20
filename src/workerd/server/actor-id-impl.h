@@ -5,6 +5,9 @@
 #include <openssl/sha.h>
 
 namespace workerd::server {
+
+using kj::byte;
+
 class ActorIdFactoryImpl final: public ActorIdFactory {
  public:
   ActorIdFactoryImpl(kj::StringPtr uniqueKey);
@@ -13,6 +16,10 @@ class ActorIdFactoryImpl final: public ActorIdFactory {
   class ActorIdImpl final: public ActorId {
    public:
     ActorIdImpl(const kj::byte idParam[SHA256_DIGEST_LENGTH], kj::Maybe<kj::String> name);
+
+    kj::ArrayPtr<const byte> getRaw() const {
+      return id;
+    }
 
     kj::String toString() const override;
     kj::Maybe<kj::StringPtr> getName() const override;
@@ -28,6 +35,8 @@ class ActorIdFactoryImpl final: public ActorIdFactory {
     kj::byte id[SHA256_DIGEST_LENGTH];
     kj::Maybe<kj::String> name;
   };
+
+  kj::Own<ActorId> idFromRaw(kj::ArrayPtr<const byte> bytes, kj::Maybe<kj::String> name);
 
   kj::Own<ActorId> newUniqueId(kj::Maybe<kj::StringPtr> jurisdiction) override;
   kj::Own<ActorId> idFromName(kj::String name) override;
