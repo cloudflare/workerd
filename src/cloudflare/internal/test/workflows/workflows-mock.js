@@ -39,6 +39,10 @@ export default {
       );
     }
 
+    if (reqUrl.pathname === '/restart' && request.method === 'POST') {
+      return Response.json({}, { status: 200 });
+    }
+
     if (reqUrl.pathname === '/createBatch' && request.method === 'POST') {
       return Response.json(
         {

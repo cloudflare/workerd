@@ -37,4 +37,21 @@ export const tests = {
       assert.deepStrictEqual(instances[1].id, 'bar');
     }
   },
+
+  async testRestartNoOptions(_, env) {
+    const instance = await env.workflow.get('restart-basic');
+    await instance.restart();
+  },
+
+  async testRestartFromStepNameOnly(_, env) {
+    const instance = await env.workflow.get('restart-step');
+    await instance.restart({ from: { name: 'fetch data' } });
+  },
+
+  async testRestartFromStepAllOptions(_, env) {
+    const instance = await env.workflow.get('restart-full');
+    await instance.restart({
+      from: { name: 'process item', count: 3, type: 'do' },
+    });
+  },
 };
