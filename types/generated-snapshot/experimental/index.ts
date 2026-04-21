@@ -3972,23 +3972,28 @@ export interface ExecOutput {
   readonly stdout: ArrayBuffer;
   readonly stderr: ArrayBuffer;
   readonly exitCode: number;
+  readonly __stdoutp: ArrayBuffer;
+  readonly __stderrp: ArrayBuffer;
 }
 export interface ContainerExecOptions {
   cwd?: string;
   env?: Record<string, string>;
   user?: string;
-  stdin?: ReadableStream | "pipe";
-  stdout?: "pipe" | "ignore";
-  stderr?: "pipe" | "ignore" | "combined";
+  __stdinp?: ReadableStream | "pipe";
+  __stdoutp?: "pipe" | "ignore";
+  __stderrp?: "pipe" | "ignore" | "combined";
 }
 export interface ExecProcess {
-  readonly stdin: WritableStream | null;
-  readonly stdout: ReadableStream | null;
-  readonly stderr: ReadableStream | null;
+  get stdin(): WritableStream | undefined;
+  get stdout(): ReadableStream | undefined;
+  get stderr(): ReadableStream | undefined;
   readonly pid: number;
   readonly exitCode: Promise<number>;
   output(): Promise<ExecOutput>;
   kill(signal?: number): void;
+  readonly __stdinp: WritableStream | null;
+  readonly __stdoutp: ReadableStream | null;
+  readonly __stderrp: ReadableStream | null;
 }
 export interface Container {
   get running(): boolean;
@@ -15831,6 +15836,20 @@ export interface WorkflowError {
   code?: number;
   message: string;
 }
+export interface WorkflowInstanceRestartOptions {
+  /**
+   * Restart from a specific step. If omitted, the instance restarts from the beginning.
+   * The step must exist in the instance's execution history.
+   */
+  from?: {
+    /** The step name as defined in your workflow code. */
+    name: string;
+    /** 1-indexed occurrence of this step name. Defaults to 1. Use when the same step name appears multiple times (e.g. in a loop). */
+    count?: number;
+    /** Step type filter. Use when different step types share the same name. */
+    type?: "do" | "sleep" | "waitForEvent";
+  };
+}
 export declare abstract class WorkflowInstance {
   public id: string;
   /**
@@ -15846,9 +15865,11 @@ export declare abstract class WorkflowInstance {
    */
   public terminate(): Promise<void>;
   /**
-   * Restart the instance.
+   * Restart the instance. Optionally restart from a specific step, preserving
+   * cached results for all steps before it.
+   * @param options Options for the restart, including an optional step to restart from.
    */
-  public restart(): Promise<void>;
+  public restart(options?: WorkflowInstanceRestartOptions): Promise<void>;
   /**
    * Returns the current status of the instance.
    */

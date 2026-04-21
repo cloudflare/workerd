@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+let lastRestartBody = null;
+
 export default {
   async fetch(request, env, ctx) {
     const data = await request.json();
@@ -37,6 +39,16 @@ export default {
           },
         }
       );
+    }
+
+    if (reqUrl.pathname === '/restart' && request.method === 'POST') {
+      lastRestartBody = data;
+      return Response.json({}, { status: 200 });
+    }
+
+    // Test-only: returns the body from the last /restart call
+    if (reqUrl.pathname === '/last-restart' && request.method === 'POST') {
+      return Response.json({ result: lastRestartBody }, { status: 200 });
     }
 
     if (reqUrl.pathname === '/createBatch' && request.method === 'POST') {
