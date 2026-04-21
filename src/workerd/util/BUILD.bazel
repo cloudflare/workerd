@@ -453,3 +453,8 @@ kj_test(
     src = "state-machine-test.c++",
     deps = [":state-machine"],
 )
+
+sh_test(
+    name = "debug_env_test",
+    srcs = ["debug_env.sh"],
+)
