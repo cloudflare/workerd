@@ -67,7 +67,7 @@ export function createImportProxy(
   if (!IS_CREATING_SNAPSHOT) {
     return mod;
   }
-  if (!mod || typeof mod !== 'object') {
+  if (!mod || !['object', 'function'].includes(typeof mod)) {
     return mod;
   }
   return new Proxy(mod, {
