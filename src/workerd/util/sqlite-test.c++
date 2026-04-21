@@ -862,7 +862,8 @@ KJ_TEST("SQLite observer addQueryStats") {
   TestSqliteObserver sqliteObserver = TestSqliteObserver();
   TestQueryStatsRegulator regulator;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
-      /*sqliteMaxMemoryBytes=*/kj::maxValue, sqliteObserver);
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
+      sqliteObserver);
 
   db.run(R"(
     CREATE TABLE things (
@@ -953,7 +954,8 @@ KJ_TEST("SQLite observer reportQueryEvent") {
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
-      /*sqliteMaxMemoryBytes=*/kj::maxValue, sqliteObserver);
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
+      sqliteObserver);
 
   db.run("PRAGMA journal_mode=WAL;");
 

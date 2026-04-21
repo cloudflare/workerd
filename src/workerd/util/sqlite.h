@@ -91,6 +91,7 @@ class SqliteDatabase {
       kj::Path path,
       kj::Maybe<kj::WriteMode> maybeMode = kj::none,
       size_t sqliteMaxMemoryBytes = kj::maxValue,
+      size_t sqliteMaxMemoryPerProcessBytes = kj::maxValue,
       SqliteObserver& sqliteObserver = SqliteObserver::DEFAULT,
       kj::Maybe<const ActorAccountLimits&> actorAccountLimits = kj::none);
 
@@ -333,6 +334,11 @@ class SqliteDatabase {
   // sqlite3_mem_methods (from WorkerLimits::sqliteMaxMemoryMb). This is set to kj::maxValue to
   // when running in workerd local development mode.
   size_t sqliteMaxMemoryBytes;
+
+  // The maximum amount of memory in bytes that can be used by this database's process for use by
+  // SqliteDatabase::setupSecurity. This is set to kj::maxValue to when running in workerd local
+  // development mode.
+  size_t sqliteMaxMemoryPerProcessBytes;
 
   kj::Maybe<const ActorAccountLimits&> actorAccountLimits;
 

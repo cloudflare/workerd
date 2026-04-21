@@ -572,6 +572,7 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs,
     kj::Path path,
     kj::Maybe<kj::WriteMode> maybeMode,
     size_t sqliteMaxMemoryBytes,
+    size_t sqliteMaxMemoryPerProcessBytes,
     SqliteObserver& sqliteObserver,
     kj::Maybe<const ActorAccountLimits&> actorAccountLimits)
     : vfs(vfs),
@@ -579,6 +580,7 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs,
       readOnly(maybeMode == kj::none),
       sqliteObserver(sqliteObserver),
       sqliteMaxMemoryBytes(sqliteMaxMemoryBytes),
+      sqliteMaxMemoryPerProcessBytes(sqliteMaxMemoryPerProcessBytes),
       actorAccountLimits(actorAccountLimits) {
   init(maybeMode);
 }
@@ -1402,17 +1404,14 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // 4. Set a progress handler or use interrupt() to limit CPU time.
   // This happens inside LimitEnforcer.
 
-  // 5. Limit process-wide heap size.
+  // 5. Limit heap size.
   // Set a 128MB "soft" limit so that SQLite will purge the page cache when per-process memory
-  // consumption exceeds this value, and an 8 GiB "hard" limit as a defense in depth mechanism to
-  // prevent SQLite from consuming too much per-process memory. The primary mechanism for limiting
-  // SQLite memory consumption is the metering done in the sqlite-metering module.
-  static bool doOnce KJ_UNUSED = []() {
+  // consumption exceeds this value, and an configurable "hard" limit as a defense in depth
+  // mechanism to prevent SQLite from consuming too much per-process memory. The primary mechanism
+  // for limiting SQLite memory consumption is the metering done in the sqlite-metering module.
+  static bool doOnce KJ_UNUSED = [&]() {
     sqlite3_soft_heap_limit64(128u << 20);
-    sqlite3_hard_heap_limit64(
-        util::Autogate::isEnabled(util::AutogateKey::INCREASE_SQLITE_HARD_HEAP_LIMIT)
-            ? (8ull << 30)    // 8 GiB
-            : (512u << 20));  // 512 MiB
+    sqlite3_hard_heap_limit64(sqliteMaxMemoryPerProcessBytes);
     return false;
   }();
 

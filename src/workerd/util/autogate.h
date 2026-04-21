@@ -44,8 +44,6 @@ enum class AutogateKey {
   ENABLE_DRAINING_READ_ON_STANDARD_STREAMS,
   // Make SqlStorage::isAllowedName case-insensitive and enforce it on virtual tables (FTS5).
   SQL_RESTRICT_RESERVED_NAMES,
-  // Increase the SQLite hard heap limit from 512 MiB to 8 GiB.
-  INCREASE_SQLITE_HARD_HEAP_LIMIT,
   NumOfKeys  // Reserved for iteration.
 };
 
