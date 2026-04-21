@@ -3505,8 +3505,17 @@ class Server::WorkerService final: public Service,
     JSG_REQUIRE(mode == ActorGetMode::GET_OR_CREATE, Error,
         "workerd only supports GET_OR_CREATE mode for getting actor stubs");
     JSG_REQUIRE(!enableReplicaRouting, Error, "workerd does not support replica routing.");
-    JSG_REQUIRE(routingMode == ActorRoutingMode::DEFAULT, Error,
-        "workerd does not support replica routing.");
+
+    // Compile-time assert that we have considered every routing mode here.
+    switch (routingMode) {
+      case ActorRoutingMode::PRIMARY_ONLY:
+        // Workerd-only configs only supports primaries anyway.
+        break;
+      case ActorRoutingMode::DEFAULT:
+        // In workerd-only configs, DEFAULT means PRIMARY_ONLY.
+        break;
+    }
+
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
