@@ -526,6 +526,10 @@ jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg:
   return kj::none;
 }
 
+jsg::Optional<jsg::Ref<api::AccessContext>> Worker::Api::getCtxAccessProperty(jsg::Lock& js) const {
+  return kj::none;
+}
+
 struct Worker::Impl {
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> context;
 

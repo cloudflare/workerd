@@ -236,6 +236,29 @@ class CacheContext: public jsg::Object {
   }
 };
 
+// Base class for the ctx.access object providing Cloudflare Access authentication context.
+// Subclass when embedding to provide an implementation.
+class AccessContext: public jsg::Object {
+ public:
+  // Returns the audience claim from the Access JWT.
+  //
+  // The default implementation throws — only meaningful when overridden by the embedding.
+  virtual kj::StringPtr getAud();
+
+  // Fetches the full identity information for the authenticated user.
+  //
+  // The default implementation throws — only meaningful when overridden by the embedding.
+  virtual jsg::Promise<jsg::JsValue> getIdentity(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(AccessContext) {
+    JSG_READONLY_INSTANCE_PROPERTY(aud, getAud);
+    JSG_METHOD(getIdentity);
+    JSG_TS_OVERRIDE(CloudflareAccessContext {
+      readonly aud: string;
+      getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
+    });
+  }
+};
 class ExecutionContext: public jsg::Object {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
@@ -289,6 +312,10 @@ class ExecutionContext: public jsg::Object {
     return js.undefined();
   }
 
+  // Returns an AccessContext for the current request, or empty jsg::Optional otherwise.
+  // Called by the runtime to provide Cloudflare Access authentication context.
+  jsg::Optional<jsg::Ref<AccessContext>> getAccess(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
@@ -300,6 +327,7 @@ class ExecutionContext: public jsg::Object {
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
+    JSG_LAZY_INSTANCE_PROPERTY(access, getAccess);
 
     if (flags.getWorkerdExperimental()) {
       // TODO(soon): Before making this generally available we need to:
@@ -327,11 +355,13 @@ class ExecutionContext: public jsg::Object {
             readonly key?: string;
             readonly override?: string;
           };
+          readonly access?: CloudflareAccessContext;
         });
       } else {
         JSG_TS_OVERRIDE(<Props = unknown> {
           readonly props: Props;
           readonly exports: Cloudflare.Exports;
+          readonly access?: CloudflareAccessContext;
         });
       }
     } else {
@@ -344,10 +374,12 @@ class ExecutionContext: public jsg::Object {
             readonly key?: string;
             readonly override?: string;
           };
+          readonly access?: CloudflareAccessContext;
         });
       } else {
         JSG_TS_OVERRIDE(<Props = unknown> {
           readonly props: Props;
+          readonly access?: CloudflareAccessContext;
         });
       }
     }
@@ -1076,6 +1108,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
       api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
-      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

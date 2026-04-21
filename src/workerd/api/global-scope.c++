@@ -83,6 +83,22 @@ jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
   JSG_FAIL_REQUIRE(Error, "Cache purge is not available in this context.");
 }
 
+kj::StringPtr AccessContext::getAud() {
+  JSG_FAIL_REQUIRE(Error, "Access context is not available.");
+}
+
+jsg::Promise<jsg::JsValue> AccessContext::getIdentity(jsg::Lock& js) {
+  JSG_FAIL_REQUIRE(Error, "Access context is not available.");
+}
+
+jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js) {
+  // Hook for the embedding application to provide an AccessContext.
+  // The default Worker::Api implementation returns kj::none.
+  if (IoContext::hasCurrent()) {
+    return Worker::Isolate::from(js).getApi().getCtxAccessProperty(js);
+  }
+  return kj::none;
+}
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   KJ_IF_SOME(r, reason) {
     IoContext::current().abort(js.exceptionToKj(kj::mv(r)));

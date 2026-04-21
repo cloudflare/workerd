@@ -501,6 +501,7 @@ interface ExecutionContext<Props = unknown> {
     readonly key?: string;
     readonly override?: string;
   };
+  readonly access?: CloudflareAccessContext;
   abort(reason?: any): void;
 }
 type ExportedHandlerFetchHandler<
@@ -602,6 +603,10 @@ interface CachePurgeOptions {
 }
 interface CacheContext {
   purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
+}
+interface CloudflareAccessContext {
+  readonly aud: string;
+  getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
 }
 declare abstract class ColoLocalActorNamespace {
   get(actorId: string): Fetcher;
@@ -4712,6 +4717,51 @@ interface EventCounts {
     param2?: any,
   ): void;
   [Symbol.iterator](): IterableIterator<string[]>;
+}
+/**
+ * Represents the identity of a user authenticated via Cloudflare Access.
+ * This matches the result of calling /cdn-cgi/access/get-identity.
+ *
+ * The exact structure of the returned object depends on the identity provider
+ * configuration for the Access application. The fields below represent commonly
+ * available properties, but additional provider-specific fields may be present.
+ */
+interface CloudflareAccessIdentity extends Record<string, unknown> {
+  /** The user's email address, if available from the identity provider. */
+  email?: string;
+  /** The user's display name. */
+  name?: string;
+  /** The user's unique identifier. */
+  user_uuid?: string;
+  /** The Cloudflare account ID. */
+  account_id?: string;
+  /** Login timestamp (Unix epoch seconds). */
+  iat?: number;
+  /** The user's IP address at authentication time. */
+  ip?: string;
+  /** Authentication methods used (e.g., "pwd"). */
+  amr?: string[];
+  /** Identity provider information. */
+  idp?: {
+    id: string;
+    type: string;
+  };
+  /** Geographic information about where the user authenticated. */
+  geo?: {
+    country: string;
+  };
+  /** Group memberships from the identity provider. */
+  groups?: Array<{
+    id: string;
+    name: string;
+    email?: string;
+  }>;
+  /** Device posture check results, keyed by check ID. */
+  devicePosture?: Record<string, unknown>;
+  /** True if the user connected via Cloudflare WARP. */
+  is_warp?: boolean;
+  /** True if the user is authenticated via Cloudflare Gateway. */
+  is_gateway?: boolean;
 }
 // ============ AI Search Error Interfaces ============
 interface AiSearchInternalError extends Error {}
@@ -13328,6 +13378,140 @@ declare module "cloudflare:email" {
     new (from: string, to: string, raw: ReadableStream | string): EmailMessage;
   };
   export { _EmailMessage as EmailMessage };
+}
+/**
+ * Evaluation context for targeting rules.
+ * Keys are attribute names (e.g. "userId", "country"), values are the attribute values.
+ */
+type EvaluationContext = Record<string, string | number | boolean>;
+interface EvaluationDetails<T> {
+  flagKey: string;
+  value: T;
+  variant?: string | undefined;
+  reason?: string | undefined;
+  errorCode?: string | undefined;
+  errorMessage?: string | undefined;
+}
+interface FlagEvaluationError extends Error {}
+/**
+ * Feature flags binding for evaluating feature flags from a Cloudflare Workers script.
+ *
+ * @example
+ * ```typescript
+ * // Get a boolean flag value with a default
+ * const enabled = await env.FLAGS.getBooleanValue('my-feature', false);
+ *
+ * // Get a flag value with evaluation context for targeting
+ * const variant = await env.FLAGS.getStringValue('experiment', 'control', {
+ *   userId: 'user-123',
+ *   country: 'US',
+ * });
+ *
+ * // Get full evaluation details including variant and reason
+ * const details = await env.FLAGS.getBooleanDetails('my-feature', false);
+ * console.log(details.variant, details.reason);
+ * ```
+ */
+declare abstract class Flags {
+  /**
+   * Get a flag value without type checking.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Optional default value returned when evaluation fails.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  get(
+    flagKey: string,
+    defaultValue?: unknown,
+    context?: EvaluationContext,
+  ): Promise<unknown>;
+  /**
+   * Get a boolean flag value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getBooleanValue(
+    flagKey: string,
+    defaultValue: boolean,
+    context?: EvaluationContext,
+  ): Promise<boolean>;
+  /**
+   * Get a string flag value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getStringValue(
+    flagKey: string,
+    defaultValue: string,
+    context?: EvaluationContext,
+  ): Promise<string>;
+  /**
+   * Get a number flag value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getNumberValue(
+    flagKey: string,
+    defaultValue: number,
+    context?: EvaluationContext,
+  ): Promise<number>;
+  /**
+   * Get an object flag value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getObjectValue<T extends object>(
+    flagKey: string,
+    defaultValue: T,
+    context?: EvaluationContext,
+  ): Promise<T>;
+  /**
+   * Get a boolean flag value with full evaluation details.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getBooleanDetails(
+    flagKey: string,
+    defaultValue: boolean,
+    context?: EvaluationContext,
+  ): Promise<EvaluationDetails<boolean>>;
+  /**
+   * Get a string flag value with full evaluation details.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getStringDetails(
+    flagKey: string,
+    defaultValue: string,
+    context?: EvaluationContext,
+  ): Promise<EvaluationDetails<string>>;
+  /**
+   * Get a number flag value with full evaluation details.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getNumberDetails(
+    flagKey: string,
+    defaultValue: number,
+    context?: EvaluationContext,
+  ): Promise<EvaluationDetails<number>>;
+  /**
+   * Get an object flag value with full evaluation details.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getObjectDetails<T extends object>(
+    flagKey: string,
+    defaultValue: T,
+    context?: EvaluationContext,
+  ): Promise<EvaluationDetails<T>>;
 }
 /**
  * Evaluation context for targeting rules.

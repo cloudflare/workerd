@@ -124,6 +124,11 @@ wd_test(
 )
 
 wd_test(
+    src = "ctx-access-test.wd-test",
+    data = ["ctx-access-test.js"],
+)
+
+wd_test(
     src = "cache-test.wd-test",
     args = ["--experimental"],
     data = [

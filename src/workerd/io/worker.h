@@ -46,6 +46,7 @@ struct CryptoAlgorithm;
 struct QueueExportedHandler;
 class WebSocket;
 class WebSocketRequestResponsePair;
+class AccessContext;
 class CacheContext;
 class ExecutionContext;
 namespace pyodide {
@@ -669,6 +670,10 @@ class Worker::Api {
   // Hook for the embedding application to provide a CacheContext for the ctx.cache property.
   // The default implementation returns kj::none (undefined).
   virtual jsg::Optional<jsg::Ref<api::CacheContext>> getCtxCacheProperty(jsg::Lock& js) const;
+
+  // Hook for the embedding application to provide an AccessContext for the ctx.access property.
+  // The default implementation returns kj::none (undefined).
+  virtual jsg::Optional<jsg::Ref<api::AccessContext>> getCtxAccessProperty(jsg::Lock& js) const;
 
   virtual const jsg::IsolateObserver& getObserver() const = 0;
   virtual void setIsolateObserver(IsolateObserver&) = 0;
