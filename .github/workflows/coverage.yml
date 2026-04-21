@@ -36,6 +36,7 @@ jobs:
       build_container_images: false
       run_coverage: true
       run_tests: false
+      test_target: "//src/workerd/..."
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}

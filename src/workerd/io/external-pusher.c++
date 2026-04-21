@@ -132,10 +132,15 @@ kj::Promise<void> ExternalPusherImpl::pushByteStream(PushByteStreamContext conte
 
 kj::Own<kj::AsyncInputStream> ExternalPusherImpl::unwrapStream(
     ExternalPusher::InputStream::Client cap) {
-  auto& unwrapped = KJ_REQUIRE_NONNULL(
-      inputStreamSet.tryGetLocalServerSync(cap), "pushed external is not a byte stream");
+  return kj::newPromisedStream(unwrapStreamImpl(kj::mv(cap)));
+}
 
-  return KJ_REQUIRE_NONNULL(kj::mv(kj::downcast<InputStreamImpl>(unwrapped).stream),
+kj::Promise<kj::Own<kj::AsyncInputStream>> ExternalPusherImpl::unwrapStreamImpl(
+    ExternalPusher::InputStream::Client cap) {
+  auto& unwrapped = KJ_REQUIRE_NONNULL(
+      co_await inputStreamSet.getLocalServer(cap), "pushed external is not a byte stream");
+
+  co_return KJ_REQUIRE_NONNULL(kj::mv(kj::downcast<InputStreamImpl>(unwrapped).stream),
       "pushed byte stream has already been consumed");
 }
 
@@ -146,7 +151,7 @@ namespace {
 
 // The jsrpc handler that receives aborts from the remote and triggers them locally
 //
-// TODO(cleanup): This class has been copied from external-pusher.c++. The copy there can be
+// TODO(cleanup): This class has been copied from basics.c++. The copy there can be
 //   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
 //   StreamSink-related code. For now I'm not trying to avoid duplication.
 class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
@@ -196,32 +201,62 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
 
 class ExternalPusherImpl::AbortSignalImpl final: public ExternalPusher::AbortSignal::Server {
  public:
-  AbortSignalImpl(AbortSignal content): content(kj::mv(content)) {}
+  AbortSignalImpl(kj::Own<kj::PromiseFulfiller<rpc::AbortTrigger::Client>> triggerFulfiller)
+      : triggerFulfiller(kj::mv(triggerFulfiller)) {}
 
-  kj::Maybe<AbortSignal> content;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<rpc::AbortTrigger::Client>>> triggerFulfiller;
 };
 
 kj::Promise<void> ExternalPusherImpl::pushAbortSignal(PushAbortSignalContext context) {
-  auto paf = kj::newPromiseAndFulfiller<void>();
-  auto pendingReason = kj::refcounted<PendingAbortReason>();
+  // We can't allocate the `AbortTriggerRpcServer` yet because we don't have the
+  // `PendingAbortReason` box, because that MUST be allocated inside unwrapAbortSignal() so it
+  // can be returned synchronously. So, we'll return a promise for a future `AbortTrigger`, and
+  // we'll put the fulfiller into the `AbortSignalImpl` where `unwrapAbortSignalImpl()` can find
+  // and fulfill it.
+  auto triggerPaf = kj::newPromiseAndFulfiller<rpc::AbortTrigger::Client>();
 
   auto results = context.initResults(capnp::MessageSize{4, 2});
-
-  results.setTrigger(
-      kj::heap<AbortTriggerRpcServer>(kj::mv(paf.fulfiller), kj::addRef(*pendingReason)));
-  results.setSignal(abortSignalSet.add(
-      kj::heap<AbortSignalImpl>(AbortSignal{kj::mv(paf.promise), kj::mv(pendingReason)})));
+  results.setTrigger(kj::mv(triggerPaf.promise));
+  results.setSignal(abortSignalSet.add(kj::heap<AbortSignalImpl>(kj::mv(triggerPaf.fulfiller))));
 
   return kj::READY_NOW;
 }
 
 ExternalPusherImpl::AbortSignal ExternalPusherImpl::unwrapAbortSignal(
     ExternalPusher::AbortSignal::Client cap) {
-  auto& unwrapped = KJ_REQUIRE_NONNULL(
-      abortSignalSet.tryGetLocalServerSync(cap), "pushed external is not an AbortSignal");
+  // We need to return a result synchronously, including the PendingAbortReason box. But,
+  // pushAbortSignal() might not have been received yet. So, we have to allocate the box here, so
+  // we can return it. Then we can try to wire it up to the right trigger later, in
+  // unwrapAbortSignalImpl().
+  auto pendingReason = kj::refcounted<PendingAbortReason>();
+  auto promise = unwrapAbortSignalImpl(kj::mv(cap), kj::addRef(*pendingReason));
 
-  return KJ_REQUIRE_NONNULL(kj::mv(kj::downcast<AbortSignalImpl>(unwrapped).content),
-      "pushed AbortSignal has already been consumed");
+  return {
+    .signal = kj::mv(promise),
+    .reason = kj::mv(pendingReason),
+  };
+}
+
+kj::Promise<void> ExternalPusherImpl::unwrapAbortSignalImpl(
+    ExternalPusher::AbortSignal::Client cap, kj::Own<PendingAbortReason> pendingReason) {
+  auto paf = kj::newPromiseAndFulfiller<void>();
+
+  {
+    auto& unwrapped = KJ_REQUIRE_NONNULL(
+        co_await abortSignalSet.getLocalServer(cap), "pushed external is not an AbortSignal");
+
+    auto triggerFulfiller =
+        KJ_REQUIRE_NONNULL(kj::mv(kj::downcast<AbortSignalImpl>(unwrapped).triggerFulfiller),
+            "pushed AbortSignal has already been consumed");
+
+    triggerFulfiller->fulfill(
+        kj::heap<AbortTriggerRpcServer>(kj::mv(paf.fulfiller), kj::mv(pendingReason)));
+
+    // We don't need `cap` anymore.
+    auto drop = kj::mv(cap);
+  }
+
+  co_await paf.promise;
 }
 
 }  // namespace workerd

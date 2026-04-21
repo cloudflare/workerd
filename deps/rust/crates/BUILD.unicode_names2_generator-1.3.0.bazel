@@ -48,6 +48,6 @@ rust_library(
         "@crates_vendor__getopts-0.2.24//:getopts",
         "@crates_vendor__log-0.4.29//:log",
         "@crates_vendor__phf_codegen-0.11.3//:phf_codegen",
-        "@crates_vendor__rand-0.8.5//:rand",
+        "@crates_vendor__rand-0.8.6//:rand",
     ],
 )

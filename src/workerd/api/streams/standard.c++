@@ -2279,6 +2279,11 @@ void ReadableStreamDefaultController::close(jsg::Lock& js) {
 
 void ReadableStreamDefaultController::enqueue(
     jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk) {
+  // Hold a strong reference to prevent this controller from being freed if the
+  // user-provided size algorithm (below) re-enters JS and errors the controller
+  // through a side-channel (e.g. TransformStreamDefaultController::error()
+  // dropping all external jsg::Refs to this controller).
+  auto self = JSG_THIS;
   auto value = chunk.orDefault(js.undefined());
 
   JSG_REQUIRE(impl.canCloseOrEnqueue(), TypeError, "Unable to enqueue");
@@ -2292,8 +2297,11 @@ void ReadableStreamDefaultController::enqueue(
     });
   }
 
-  if (!errored) {
-    impl.enqueue(js, kj::rc<ValueQueue::Entry>(js.v8Ref(value), size), JSG_THIS);
+  // Re-check canCloseOrEnqueue: the size callback may have errored us without
+  // throwing (e.g. by calling transformController.error()), in which case
+  // `errored` is still false but the impl state has transitioned to Errored.
+  if (!errored && impl.canCloseOrEnqueue()) {
+    impl.enqueue(js, kj::rc<ValueQueue::Entry>(js.v8Ref(value), size), kj::mv(self));
   }
 }
 
@@ -2550,6 +2558,11 @@ void ReadableByteStreamController::close(jsg::Lock& js) {
 }
 
 void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chunk) {
+  // Hold a strong reference up front. Operations below (invalidate, detach) touch
+  // the JS heap and C++ argument evaluation order is unspecified, so JSG_THIS as a
+  // function argument would not reliably precede chunk.detach(js).
+  auto self = JSG_THIS;
+
   JSG_REQUIRE(chunk.size() > 0, TypeError, "Cannot enqueue a zero-length ArrayBuffer.");
   JSG_REQUIRE(chunk.canDetach(js), TypeError, "The provided ArrayBuffer must be detachable.");
   JSG_REQUIRE(impl.canCloseOrEnqueue(), TypeError, "This ReadableByteStreamController is closed.");
@@ -2562,7 +2575,7 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chun
     byobRequest->invalidate(js);
   }
 
-  impl.enqueue(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, chunk.detach(js))), JSG_THIS);
+  impl.enqueue(js, kj::rc<ByteQueue::Entry>(jsg::BufferSource(js, chunk.detach(js))), kj::mv(self));
 }
 
 void ReadableByteStreamController::error(jsg::Lock& js, v8::Local<v8::Value> reason) {
@@ -4326,12 +4339,27 @@ kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
 void TransformStreamDefaultController::enqueue(jsg::Lock& js, v8::Local<v8::Value> chunk) {
   auto& readableController = JSG_REQUIRE_NONNULL(tryGetReadableController(), TypeError,
       "The readable side of this TransformStream is no longer readable.");
+  // Hold a strong reference to the readable controller for the duration of this
+  // method. The readableController.enqueue() call below invokes the user-provided
+  // size algorithm, which can re-enter JS and call error() on this transform
+  // controller, dropping the jsg::Ref held by this->readable and the one held by
+  // the ReadableStreamJsController's ValueReadable. Without this ref the
+  // ReadableStreamDefaultController would be freed while its enqueue() method is
+  // still on the stack.
+  auto readableControllerRef = kj::addRef(readableController);
+
   JSG_REQUIRE(readableController.canCloseOrEnqueue(), TypeError,
       "The readable side of this TransformStream is no longer readable.");
   js.tryCatch([&] { readableController.enqueue(js, chunk); }, [&](jsg::Value exception) {
     errorWritableAndUnblockWrite(js, exception.getHandle(js));
     js.throwException(kj::mv(exception));
   });
+
+  // If the controller was errored during the enqueue (e.g. by the size callback
+  // calling error()), skip the backpressure update — the stream is already torn down.
+  if (!readableController.canCloseOrEnqueue()) {
+    return;
+  }
 
   bool newBackpressure = readableController.hasBackpressure();
   if (newBackpressure != backpressure) {

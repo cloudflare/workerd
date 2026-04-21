@@ -563,6 +563,8 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       }
       auto bytes = kj::arrayPtr(readPtr, byteLength);
 
+      KJ_ASSERT(atLeast <= bytes.size(), "minBytes must not exceed maxBytes in tryRead");
+
       auto promise = kj::evalNow([&] {
         return readable->tryRead(bytes.begin(), atLeast, bytes.size()).attach(kj::mv(backing));
       });

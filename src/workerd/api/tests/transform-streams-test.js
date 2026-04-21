@@ -433,6 +433,89 @@ export const transformRoundtrip = {
   },
 };
 
+// Regression test: calling controller.error() from inside a readableStrategy size()
+// callback during TransformStream enqueue must not cause a use-after-free.
+// The size() callback is invoked by ReadableStreamDefaultController::enqueue().
+// Calling transformController.error() from within it drops all jsg::Ref references
+// to the ReadableStreamDefaultController, which would free it while its enqueue()
+// method is still on the stack.
+export const sizeCallbackErrorDoesNotUAF = {
+  async test() {
+    let transformCtrl;
+    const ts = new TransformStream(
+      {
+        start(controller) {
+          transformCtrl = controller;
+        },
+        transform(chunk, controller) {
+          controller.enqueue(chunk);
+        },
+      },
+      {},
+      {
+        size(_chunk) {
+          // Calling error() here drops the ReadableStreamDefaultController refs.
+          // Without the fix this is a use-after-free.
+          transformCtrl.error(new Error('errored from size'));
+          return 1;
+        },
+        highWaterMark: 1,
+      }
+    );
+
+    const writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader();
+
+    // The write triggers transform -> enqueue -> size() -> error().
+    // The key assertion: we reach this point without crashing (no UAF).
+    const results = await Promise.allSettled([
+      writer.write('hello'),
+      reader.read(),
+    ]);
+
+    // The read must reject because the readable side was errored.
+    strictEqual(results[1].status, 'rejected');
+    ok(results[1].reason.message.includes('errored from size'));
+  },
+};
+
+// Same as above, but the size callback throws after calling error().
+export const sizeCallbackErrorAndThrowDoesNotUAF = {
+  async test() {
+    let transformCtrl;
+    const ts = new TransformStream(
+      {
+        start(controller) {
+          transformCtrl = controller;
+        },
+        transform(chunk, controller) {
+          controller.enqueue(chunk);
+        },
+      },
+      {},
+      {
+        size(_chunk) {
+          transformCtrl.error(new Error('errored from size'));
+          throw new Error('size threw');
+        },
+        highWaterMark: 1,
+      }
+    );
+
+    const writer = ts.writable.getWriter();
+    const reader = ts.readable.getReader();
+
+    // The key assertion: we reach this point without crashing (no UAF).
+    const results = await Promise.allSettled([
+      writer.write('hello'),
+      reader.read(),
+    ]);
+
+    // The read must reject because the readable side was errored.
+    strictEqual(results[1].status, 'rejected');
+  },
+};
+
 // Regression test: iterating over globalThis properties should not crash.
 // This tests that constructing and inspecting various global objects works correctly.
 //

@@ -128,14 +128,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.6.0",
-    actual = "@crates_vendor__clap-4.6.0//:clap",
+    name = "clap-4.6.1",
+    actual = "@crates_vendor__clap-4.6.1//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.6.0//:clap",
+    actual = "@crates_vendor__clap-4.6.1//:clap",
     tags = ["manual"],
 )
 
@@ -398,14 +398,14 @@ alias(
 )
 
 alias(
-    name = "tokio-1.51.1",
-    actual = "@crates_vendor__tokio-1.51.1//:tokio",
+    name = "tokio-1.52.1",
+    actual = "@crates_vendor__tokio-1.52.1//:tokio",
     tags = ["manual"],
 )
 
 alias(
     name = "tokio",
-    actual = "@crates_vendor__tokio-1.51.1//:tokio",
+    actual = "@crates_vendor__tokio-1.52.1//:tokio",
     tags = ["manual"],
 )
 
@@ -436,7 +436,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.6.0//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.6.1//:stdio-fixture__bin",
     tags = ["manual"],
 )
 

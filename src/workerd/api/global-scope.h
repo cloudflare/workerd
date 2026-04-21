@@ -207,9 +207,8 @@ struct CachePurgeError {
 
 struct CachePurgeResult {
   bool success;
-  kj::String zoneTag;
   kj::Array<CachePurgeError> errors;
-  JSG_STRUCT(success, zoneTag, errors);
+  JSG_STRUCT(success, errors);
 };
 
 struct CachePurgeOptions {

@@ -206,6 +206,7 @@ wd_cc_library(
         "//src/workerd/util:duration-exceeded-logger",
         "//src/workerd/util:exception",
         "//src/workerd/util:sqlite",
+        "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj:kj-async",
     ],

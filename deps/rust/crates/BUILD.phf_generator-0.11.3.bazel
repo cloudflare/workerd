@@ -47,7 +47,7 @@ rust_library(
     version = "0.11.3",
     deps = [
         "@crates_vendor__phf_shared-0.11.3//:phf_shared",
-        "@crates_vendor__rand-0.8.5//:rand",
+        "@crates_vendor__rand-0.8.6//:rand",
     ],
 )
 
@@ -85,6 +85,6 @@ rust_binary(
     deps = [
         ":phf_generator",
         "@crates_vendor__phf_shared-0.11.3//:phf_shared",
-        "@crates_vendor__rand-0.8.5//:rand",
+        "@crates_vendor__rand-0.8.6//:rand",
     ],
 )

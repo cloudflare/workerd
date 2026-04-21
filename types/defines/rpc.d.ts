@@ -318,7 +318,12 @@ declare namespace CloudflareWorkersModule {
   };
 
   export type WorkflowStepContext = {
+    step: {
+      name: string;
+      count: number;
+    };
     attempt: number;
+    config: WorkflowStepConfig;
   };
 
   export abstract class WorkflowStep {

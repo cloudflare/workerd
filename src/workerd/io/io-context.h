@@ -867,6 +867,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     getIoChannelFactory().abortAllActors(reason);
   }
 
+  void deleteAllActors(kj::Maybe<kj::Exception&> reason) {
+    getIoChannelFactory().deleteAllActors(reason);
+  }
+
   // Get an HttpClient to use for Cache API subrequests.
   kj::Own<CacheClient> getCacheClient();
 

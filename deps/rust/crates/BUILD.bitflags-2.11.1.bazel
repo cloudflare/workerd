@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "wasip2",
+    name = "bitflags",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,13 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=wasip2",
+        "crate-name=bitflags",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.2+wasi-0.2.9",
-    deps = [
-        "@crates_vendor__wit-bindgen-0.51.0//:wit_bindgen",
-    ],
+    version = "2.11.1",
 )

@@ -572,20 +572,9 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       // here, which is filled in later on to point at the JsRpcPromise, if and when one is created.
       auto weakRef = kj::atomicRefcounted<JsRpcPromise::WeakRef>();
 
-      // HACK: Make sure that any calls to the ExternalPusher get to us before we try to
-      // deserialize the result. A weird quirk of Cap'n Proto is that return values arrive faster
-      // than calls by 1 turn of the event loop, so if we just insert a turn here we should be OK.
-      //
-      // Note that key to this working is the fact that the continuation returns a Promise, even
-      // though it is initialized with an immediate value. This forces the extra turn.
-      auto promise = callResult.then(
-          [](auto resp) -> kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> {
-        return kj::mv(resp);
-      });
-
       // RemotePromise lets us consume its pipeline and promise portions independently; we consume
       // the promise here and we consume the pipeline below, both via kj::mv().
-      auto jsPromise = ioContext.awaitIo(js, kj::mv(promise),
+      auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
           [weakRef = kj::atomicAddRef(*weakRef), resultStreamSink = kj::mv(resultStreamSink)](
               jsg::Lock& js,
               capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable -> jsg::Value {

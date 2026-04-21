@@ -819,6 +819,110 @@ KJ_TEST("ReadableStreamBYOBReader rejects read when atLeast exceeds buffer size"
   });
 }
 
+KJ_TEST("ReadableStreamBYOBReader readAtLeast with element count within capacity succeeds") {
+  // readAtLeast() treats its first argument as an element count.
+  // readAtLeast(10, Uint32Array(10)) → 10 elements * 4 bytes = 40 bytes, buffer is 40 → OK.
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto rs = makeByteStream(env.js);
+    auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
+
+    // Uint32Array: element size 4, byteLength 40, length 10
+    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 40);
+    auto view = v8::Uint32Array::New(buffer, 0, 10);
+
+    bool rejected = false;
+    reader->readAtLeast(env.js, 10, view)
+        .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
+      rejected = true;
+      auto ex = js.exceptionToKj(kj::mv(reason));
+      KJ_FAIL_ASSERT("readAtLeast(10) on 10-element Uint32Array should not reject", ex);
+      return {.done = true};
+    });
+    env.js.runMicrotasks();
+    KJ_ASSERT(!rejected);
+  });
+}
+
+KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects when element count exceeds capacity") {
+  // Regression test for the bug: before the fix, validation compared
+  // the raw element count against byteLength (mixed units), so large element
+  // counts slipped through and produced an impossible (minBytes > maxBytes) pair
+  // that caused stack overflow in decoders like brotli.
+  // readAtLeast(11, Uint32Array(10)) → 11 * 4 = 44 bytes > 40 byte buffer → reject.
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto rs = makeByteStream(env.js);
+    auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
+
+    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 40);
+    auto view = v8::Uint32Array::New(buffer, 0, 10);
+
+    bool rejected = false;
+    reader->readAtLeast(env.js, 11, view)
+        .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
+      rejected = true;
+      auto ex = js.exceptionToKj(kj::mv(reason));
+      KJ_ASSERT(ex.getDescription().contains("exceeds size of buffer"), ex);
+      return {.done = true};
+    });
+    env.js.runMicrotasks();
+    KJ_ASSERT(rejected, "readAtLeast(11) on 10-element Uint32Array should reject");
+  });
+}
+
+KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects byteLength as element count") {
+  // readAtLeast(view.byteLength, view) with a Uint32Array.
+  // byteLength=4096, element count interpretation → 4096 * 4 = 16384 > 4096 → must reject.
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto rs = makeByteStream(env.js);
+    auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
+
+    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 4096);
+    auto view = v8::Uint32Array::New(buffer, 0, 1024);
+
+    bool rejected = false;
+    reader->readAtLeast(env.js, 4096, view)
+        .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
+      rejected = true;
+      auto ex = js.exceptionToKj(kj::mv(reason));
+      KJ_ASSERT(ex.getDescription().contains("exceeds size of buffer"), ex);
+      return {.done = true};
+    });
+    env.js.runMicrotasks();
+    KJ_ASSERT(rejected, "readAtLeast(4096) on 1024-element Uint32Array must reject");
+  });
+}
+
+KJ_TEST("ReadableStreamBYOBReader read() with min exceeding element capacity rejects") {
+  // read(view, {min: N}) where N is in elements. Before the fix, validation
+  // compared element count against byte length (mixed units), so large values
+  // slipped through.
+  // min=11 elements on Uint32Array(10) → 44 bytes > 40 → reject.
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto rs = makeByteStream(env.js);
+    auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
+
+    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 40);
+    auto view = v8::Uint32Array::New(buffer, 0, 10);
+
+    ReadableStreamBYOBReader::ReadableStreamBYOBReaderReadOptions opts;
+    opts.min = 11;
+    bool rejected = false;
+    reader->read(env.js, view, kj::mv(opts))
+        .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
+      rejected = true;
+      auto ex = js.exceptionToKj(kj::mv(reason));
+      KJ_ASSERT(ex.getDescription().contains("exceeds size of buffer"), ex);
+      return {.done = true};
+    });
+    env.js.runMicrotasks();
+    KJ_ASSERT(rejected, "read() with min=11 on 10-element Uint32Array should reject");
+  });
+}
+
 KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
   auto fixture = makeStreamTestFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) {

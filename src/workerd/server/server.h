@@ -252,6 +252,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // Aborts all actors in this server except those in namespaces marked with `preventEviction`.
   void abortAllActors(kj::Maybe<const kj::Exception&> reason);
 
+  // Aborts all actors, cancels all alarms, and deletes all underlying storage for evictable
+  // namespaces. After this, DOs can be recreated with clean state. Useful for test isolation.
+  void deleteAllActors(kj::Maybe<const kj::Exception&> reason);
+
   // Can only be called in the link stage.
   //
   // May return a new object or may return a fake-own around a long-lived object.

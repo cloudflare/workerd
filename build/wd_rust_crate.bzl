@@ -144,7 +144,7 @@ def wd_rust_crate(
             # our tests are usually very heavy and do not support concurrent invocation
             "RUST_TEST_THREADS": "1",
         } | test_env,
-        tags = test_tags,
+        tags = test_tags + ["no-coverage"],
         crate_features = crate_features,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,

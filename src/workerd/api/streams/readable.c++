@@ -94,13 +94,19 @@ jsg::Promise<ReadResult> ReaderImpl::read(
       return js.rejectedPromise<ReadResult>(js.v8TypeError(
           kj::str("Requested invalid minimum number of bytes to read (", atLeast, ").")));
     }
+
+    // Both read() and readAtLeast() pass atLeast in element count.
+    // Convert to bytes before validation and forwarding to the controller.
+    jsg::BufferSource source(js, options.bufferView.getHandle(js));
+    auto elementSize = source.getElementSize();
+    atLeast = atLeast * elementSize;
+
     if (atLeast > options.byteLength) {
       return js.rejectedPromise<ReadResult>(js.v8TypeError(kj::str("Minimum bytes to read (",
           atLeast, ") exceeds size of buffer (", options.byteLength, ").")));
     }
 
-    jsg::BufferSource source(js, options.bufferView.getHandle(js));
-    options.atLeast = atLeast * source.getElementSize();
+    options.atLeast = atLeast;
   }
 
   return KJ_ASSERT_NONNULL(attached.stream->getController().read(js, kj::mv(byobOptions)));
@@ -232,12 +238,12 @@ jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
 }
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::readAtLeast(
-    jsg::Lock& js, int minBytes, v8::Local<v8::ArrayBufferView> byobBuffer) {
+    jsg::Lock& js, int minElements, v8::Local<v8::ArrayBufferView> byobBuffer) {
   auto options = ReadableStreamController::ByobOptions{
     .bufferView = js.v8Ref(byobBuffer),
     .byteOffset = byobBuffer->ByteOffset(),
     .byteLength = byobBuffer->ByteLength(),
-    .atLeast = minBytes,
+    .atLeast = minElements,
     .detachBuffer = true,
   };
   return impl.read(js, kj::mv(options));

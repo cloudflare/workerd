@@ -276,6 +276,12 @@ class IoChannelFactory {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
 
+  // Aborts all actors, cancels all alarms, and deletes all underlying storage for evictable
+  // namespaces. After this, DOs can be recreated with clean state. Useful for test isolation.
+  virtual void deleteAllActors(kj::Maybe<kj::Exception&> reason) {
+    KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
+  }
+
   // Use a dynamic Worker loader binding to obtain an Worker by name. If name is null, or if the named Worker doesn't already exist, the callback will be called to fetch the source code from which the Worker should be created.
   virtual kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
       kj::Maybe<kj::String> name,

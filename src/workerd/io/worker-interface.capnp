@@ -593,8 +593,14 @@ struct JsValue {
     # unwrapped to obtain the underlying local object, which the recipient then uses to back the
     # external value delivered to the application.
     #
-    # Note that externals must be pushed BEFORE the JsValue that uses them is sent, so that they
-    # can be unwrapped immediately when deserializing the value.
+    # Typically, externals are pushed before the JsValue that uses them is sent. However, this
+    # is not strictly required, as all pushable externals deserialize into an object that can wait
+    # for the push as a first step. For example, if a ReadableStream is received in a JsValue
+    # before pushByteStream() has been called, the resulting stream will simply wait for the push
+    # as part of its first read() call. This is important as Cap'n Proto doesn't strictly guarantee
+    # call ordering between calls on different capabilities, or a call vs. a return, so it's
+    # difficult for the sender to guarantee that a push arrives before the JsValue that refers
+    # to it.
 
     pushByteStream @0 (lengthPlusOne :UInt64 = 0) -> (source :InputStream, sink :ByteStream);
     # Creates a readable stream within the remote's memory space. `source` should be placed in a
@@ -617,7 +623,6 @@ struct JsValue {
     }
 
     # TODO(soon):
-    # - AbortTrigger
     # - Promises
   }
 }

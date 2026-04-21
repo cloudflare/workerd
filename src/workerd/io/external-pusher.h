@@ -50,6 +50,12 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
   capnp::CapabilityServerSet<ExternalPusher::InputStream> inputStreamSet;
   capnp::CapabilityServerSet<ExternalPusher::AbortSignal> abortSignalSet;
 
+  kj::Promise<kj::Own<kj::AsyncInputStream>> unwrapStreamImpl(
+      ExternalPusher::InputStream::Client cap);
+
+  kj::Promise<void> unwrapAbortSignalImpl(
+      ExternalPusher::AbortSignal::Client cap, kj::Own<PendingAbortReason> pendingReason);
+
   class InputStreamImpl;
   class AbortSignalImpl;
 };

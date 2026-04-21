@@ -392,9 +392,10 @@ class ReadableStreamController {
     size_t byteOffset = 0;
     size_t byteLength;
 
-    // The minimum number of bytes that should be read. When not specified, the default
+    // The minimum number of elements that should be read. When not specified, the default
     // is DEFAULT_AT_LEAST. This is a non-standard, Workers-specific extension to
     // support the readAtLeast method on the ReadableStreamBYOBReader object.
+    // ReaderImpl::read() converts this to bytes by multiplying by element size.
     kj::Maybe<size_t> atLeast = DEFAULT_AT_LEAST;
 
     // True if the given buffer should be detached. Per the spec, we should always be

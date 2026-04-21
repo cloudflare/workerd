@@ -204,6 +204,15 @@ jsg::Promise<void> UnsafeModule::abortAllDurableObjects(jsg::Lock& js) {
   return js.resolvedPromise();
 }
 
+jsg::Promise<void> UnsafeModule::deleteAllDurableObjects(jsg::Lock& js) {
+  auto& context = IoContext::current();
+
+  auto exception = JSG_KJ_EXCEPTION(FAILED, Error, "Application called deleteAllDurableObjects().");
+  context.deleteAllActors(exception);
+
+  return js.resolvedPromise();
+}
+
 bool UnsafeModule::isTestAutogateEnabled() {
   return util::Autogate::isEnabled(util::AutogateKey::TEST_WORKERD);
 }

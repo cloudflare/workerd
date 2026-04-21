@@ -1194,7 +1194,20 @@ kj::Own<CryptoKey::Impl> fromEcKey(kj::Own<EVP_PKEY> key) {
     return fromEd25519Key(kj::mv(key));
   }
 
-  auto curveName = OBJ_nid2sn(nid);
+  // EVP_PKEY_id() returns the key type NID (e.g. EVP_PKEY_EC / "id-ecPublicKey"), not the curve
+  // NID. We must extract the actual named curve from the EC key's group instead.
+  auto ec = EVP_PKEY_get0_EC_KEY(key.get());
+  KJ_ASSERT(ec != nullptr, "Expected an EC key");
+  auto group = EC_KEY_get0_group(ec);
+  KJ_ASSERT(group != nullptr, "EC key has no group");
+  auto curveNid = EC_GROUP_get_curve_name(group);
+
+  // Prefer NIST names ("P-256", "P-384", "P-521") since that is what lookupEllipticCurve()
+  // recognizes, falling back to the short OID name for other curves.
+  auto curveName = EC_curve_nid2nist(curveNid);
+  if (curveName == nullptr) {
+    curveName = OBJ_nid2sn(curveNid);
+  }
   if (curveName == nullptr) {
     curveName = "unknown";
   }

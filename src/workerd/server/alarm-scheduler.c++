@@ -126,6 +126,13 @@ bool AlarmScheduler::setAlarm(ActorKey actor, kj::Date scheduledTime) {
   return query.changeCount() > 0;
 }
 
+void AlarmScheduler::deleteAll() {
+  // Cancel all in-memory alarm tasks.
+  alarms.clear();
+  // Wipe the persistent store.
+  db->run("DELETE FROM _cf_ALARM;");
+}
+
 bool AlarmScheduler::deleteAlarm(ActorKey actor) {
   auto query = stmtDeleteAlarm.run(actor.actorId);
 

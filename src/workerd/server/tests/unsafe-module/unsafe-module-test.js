@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
 import unsafe from 'workerd:unsafe';
+import { DurableObject } from 'cloudflare:workers';
 
 function createTestObject(type) {
   return class {
@@ -20,6 +21,30 @@ export const TestEphemeralObject = createTestObject('ephemeral');
 export const TestEphemeralObjectPreventEviction = createTestObject(
   'ephemeral-prevent-eviction'
 );
+
+// DO with persistent storage for verifying deleteAllDurableObjects() wipes data.
+export class StorageObject extends DurableObject {
+  async getValue() {
+    return (await this.ctx.storage.get('key')) ?? null;
+  }
+  async setValue(value) {
+    await this.ctx.storage.put('key', value);
+  }
+}
+
+// DO with an alarm for verifying deleteAllDurableObjects() cancels alarms.
+let alarmTriggers = 0;
+export class AlarmObject extends DurableObject {
+  get scheduledTime() {
+    return this.ctx.storage.getAlarm();
+  }
+  async scheduleIn(delay) {
+    await this.ctx.storage.setAlarm(Date.now() + delay);
+  }
+  alarm() {
+    alarmTriggers++;
+  }
+}
 
 export const test_abort_all_durable_objects = {
   async test(ctrl, env, ctx) {
@@ -86,5 +111,58 @@ export const test_abort_all_durable_objects = {
       ephemeralPreventEvictionRes1,
       ephemeralPreventEvictionRes2
     );
+  },
+};
+
+export const test_delete_all_durable_objects = {
+  async test(ctrl, env, ctx) {
+    // Write some data to a durable object.
+    const id = env.STORAGE.idFromName('test-delete');
+    let stub = env.STORAGE.get(id);
+    await stub.setValue('hello');
+    assert.strictEqual(await stub.getValue(), 'hello');
+
+    // Delete all durable objects.
+    await unsafe.deleteAllDurableObjects();
+
+    // Old stub should be broken.
+    await assert.rejects(() => stub.getValue(), {
+      name: 'Error',
+      message: 'Application called deleteAllDurableObjects().',
+    });
+
+    // Recreate the stub — storage should be gone (files were deleted from disk).
+    stub = env.STORAGE.get(id);
+    assert.strictEqual(await stub.getValue(), null);
+  },
+};
+
+export const test_delete_all_durable_objects_alarms = {
+  async test(ctrl, env, ctx) {
+    const id = env.ALARM.newUniqueId();
+    const stub = env.ALARM.get(id);
+
+    const alarmsBefore = alarmTriggers;
+    await stub.scheduleIn(500);
+    assert.notStrictEqual(await stub.scheduledTime, null);
+
+    // Delete everything — alarms should be cancelled and not fire.
+    await unsafe.deleteAllDurableObjects();
+    await scheduler.wait(1000);
+    assert.strictEqual(alarmTriggers, alarmsBefore); // alarm did not fire
+  },
+};
+
+export const test_delete_all_durable_objects_respects_prevent_eviction = {
+  async test(ctrl, env, ctx) {
+    const id = env.DURABLE_PREVENT_EVICTION.newUniqueId();
+    const stub = env.DURABLE_PREVENT_EVICTION.get(id);
+    const res1 = await (await stub.fetch('http://x')).text();
+
+    await unsafe.deleteAllDurableObjects();
+
+    // preventEviction namespace should be untouched — same response (same instance).
+    const res2 = await (await stub.fetch('http://x')).text();
+    assert.strictEqual(res1, res2);
   },
 };

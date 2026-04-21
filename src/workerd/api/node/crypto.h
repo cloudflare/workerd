@@ -213,7 +213,7 @@ class CryptoImpl final: public jsg::Object {
   jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData);
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
-  static kj::Maybe<const ncrypto::EVPKeyPointer&> tryGetKey(jsg::Ref<CryptoKey>& key);
+  static kj::Maybe<ncrypto::EVPKeyPointer> tryGetKey(jsg::Ref<CryptoKey>& key);
   static kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSecretKeyData(jsg::Ref<CryptoKey>& key);
 
   struct RsaKeyPairOptions {
