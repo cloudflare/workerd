@@ -788,7 +788,9 @@ interface DurableObjectStorage {
   waitForBookmark(bookmark: string): Promise<void>;
   /** @deprecated Use `ctx.primaryStub` instead. */
   readonly primary?: DurableObjectStub;
+  /** @deprecated Use `ctx.configureReadReplication()` instead. */
   ensureReplicas(): void;
+  /** @deprecated Use `ctx.configureReadReplication()` instead. */
   disableReplicas(): void;
 }
 interface DurableObjectReadReplicationOptions {

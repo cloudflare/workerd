@@ -53,6 +53,8 @@ export default {
   },
   DurableObjectStorage: {
     primary: `* @deprecated Use \`ctx.primaryStub\` instead. `,
+    ensureReplicas: `* @deprecated Use \`ctx.configureReadReplication()\` instead. `,
+    disableReplicas: `* @deprecated Use \`ctx.configureReadReplication()\` instead. `,
   },
   performance: {
     $: `*
