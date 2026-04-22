@@ -117,6 +117,15 @@ wd_cc_benchmark(
     deps = [":test-fixture"],
 )
 
+# Benchmark: v8::ValueSerializer round-trip cost across 5 workload sizes.
+# Measures the CPU floor for any continuation-style suspend/resume scheme.
+# Context: cloudflare/workerd#6595
+wd_cc_benchmark(
+    name = "bench-value-serializer",
+    srcs = ["bench-value-serializer.c++"],
+    deps = [":test-fixture"],
+)
+
 wd_cc_benchmark(
     name = "bench-jsstring",
     srcs = ["bench-jsstring.c++"],
