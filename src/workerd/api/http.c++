@@ -687,7 +687,10 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   bool hasCacheMode = (cacheMode != CacheMode::NONE);
   bool needsSynthesizedCacheControl = false;
 
-  if (!hasCacheMode) {
+  // TODO(cleanup): Remove the workerdExperimental gate once validated in production.
+  bool experimentalCacheControl = FeatureFlags::get(js).getWorkerdExperimental();
+
+  if (!hasCacheMode && experimentalCacheControl) {
     // Check if cf has cacheTtl but no cacheControl — we'll need to synthesize cacheControl.
     KJ_IF_SOME(cfObj, cf.get(js)) {
       if (!cfObj.has(js, "cacheControl") && cfObj.has(js, "cacheTtl")) {
@@ -736,7 +739,8 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
 
   // Synthesize cacheControl from cacheTtl or cacheMode when cacheControl is not explicitly set.
   // This dual-writes both fields so downstream can migrate to cacheControl incrementally.
-  if (!obj.has(js, "cacheControl")) {
+  // TODO(cleanup): Remove the workerdExperimental gate once validated in production.
+  if (experimentalCacheControl && !obj.has(js, "cacheControl")) {
     if (hasCacheMode) {
       // Synthesize from the cache request option.
       switch (cacheMode) {
@@ -787,25 +791,28 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
   // cacheControl provides explicit Cache-Control header override and cannot be combined with
   // cacheTtl (which sets a simplified TTL) or the cache option (which maps to cacheTtl internally).
   // cacheTtlByStatus is allowed alongside cacheControl since they serve different purposes.
-  KJ_IF_SOME(cfRef, cf) {
-    auto cfObj = jsg::JsObject(cfRef.getHandle(js));
-    if (cfObj.has(js, "cacheControl")) {
-      auto cacheControlVal = cfObj.get(js, "cacheControl");
-      if (!cacheControlVal.isUndefined()) {
-        // cacheControl + cacheTtl → throw
-        if (cfObj.has(js, "cacheTtl")) {
-          auto cacheTtlVal = cfObj.get(js, "cacheTtl");
-          JSG_REQUIRE(cacheTtlVal.isUndefined(), TypeError,
-              "The 'cacheControl' and 'cacheTtl' options on cf are mutually exclusive. "
-              "Use 'cacheControl' for explicit Cache-Control header directives, "
-              "or 'cacheTtl' for a simplified TTL, but not both.");
+  // TODO(cleanup): Remove the workerdExperimental gate once validated in production.
+  if (FeatureFlags::get(js).getWorkerdExperimental()) {
+    KJ_IF_SOME(cfRef, cf) {
+      auto cfObj = jsg::JsObject(cfRef.getHandle(js));
+      if (cfObj.has(js, "cacheControl")) {
+        auto cacheControlVal = cfObj.get(js, "cacheControl");
+        if (!cacheControlVal.isUndefined()) {
+          // cacheControl + cacheTtl → throw
+          if (cfObj.has(js, "cacheTtl")) {
+            auto cacheTtlVal = cfObj.get(js, "cacheTtl");
+            JSG_REQUIRE(cacheTtlVal.isUndefined(), TypeError,
+                "The 'cacheControl' and 'cacheTtl' options on cf are mutually exclusive. "
+                "Use 'cacheControl' for explicit Cache-Control header directives, "
+                "or 'cacheTtl' for a simplified TTL, but not both.");
+          }
+          // cacheControl + cache option (no-store/no-cache) → throw
+          // The cache request option maps to cacheTtl internally, so they conflict.
+          JSG_REQUIRE(cache == kj::none, TypeError,
+              "The 'cacheControl' option on cf cannot be used together with the 'cache' "
+              "request option. The 'cache' option ('no-store'/'no-cache') maps to cache TTL "
+              "behavior internally, which conflicts with explicit Cache-Control directives.");
         }
-        // cacheControl + cache option (no-store/no-cache) → throw
-        // The cache request option maps to cacheTtl internally, so they conflict.
-        JSG_REQUIRE(cache == kj::none, TypeError,
-            "The 'cacheControl' option on cf cannot be used together with the 'cache' "
-            "request option. The 'cache' option ('no-store'/'no-cache') maps to cache TTL "
-            "behavior internally, which conflicts with explicit Cache-Control directives.");
       }
     }
   }

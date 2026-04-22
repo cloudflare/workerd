@@ -10,7 +10,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           ( name = "CACHE_ENABLED", json = "false" ),
         ],
-        compatibilityFlags = ["nodejs_compat", "cache_option_disabled"],
+        compatibilityFlags = ["nodejs_compat", "cache_option_disabled", "experimental"],
       )
     ),
     ( name = "cf-cache-control-test-cache-enabled",
@@ -21,7 +21,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           ( name = "CACHE_ENABLED", json = "true" ),
         ],
-        compatibilityFlags = ["nodejs_compat", "cache_option_enabled"],
+        compatibilityFlags = ["nodejs_compat", "cache_option_enabled", "experimental"],
       )
     ),
   ],

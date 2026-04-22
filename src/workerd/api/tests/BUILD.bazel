@@ -114,6 +114,7 @@ wd_test(
 
 wd_test(
     src = "cf-cache-control-test.wd-test",
+    args = ["--experimental"],
     data = ["cf-cache-control-test.js"],
 )
 
