@@ -940,6 +940,7 @@ KJ_TEST("SQLite observer reportQueryEvent") {
         kj::Duration,
         uint64_t dbWalBytesWritten,
         int queryError,
+        int extendedErrorCode,
         bool isInternalQuery,
         kj::Maybe<kj::String> queryErrorDescription) override {
       KJ_IF_SOME(err, queryErrorDescription) {

@@ -1,6 +1,7 @@
 #include <workerd/api/streams/readable.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <kj/test.h>
 
@@ -58,7 +59,12 @@ KJ_TEST("Reading from default reader") {
       auto& value = KJ_REQUIRE_NONNULL(readResult.value);
       auto handle = value.getHandle(js);
       KJ_ASSERT(handle->IsUint8Array());
-      KJ_ASSERT(4 * 1024 == handle.As<v8::Uint8Array>()->ByteLength());
+      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
+        // With 16KB buffer, the entire 10KB stream fits in one read.
+        KJ_ASSERT(streamLength == handle.As<v8::Uint8Array>()->ByteLength());
+      } else {
+        KJ_ASSERT(4 * 1024 == handle.As<v8::Uint8Array>()->ByteLength());
+      }
     })));
   });
 }

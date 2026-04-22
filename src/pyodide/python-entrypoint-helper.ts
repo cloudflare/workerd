@@ -80,6 +80,7 @@ export type PyodideEntrypointHelper = {
   workerEntrypoint: any;
   patchWaitUntil: typeof patchWaitUntil;
   patch_env_helper: (patch: unknown) => Generator<void>;
+  TEST_ONLY_THROW_PYTHON_WORKERS_INTERNAL_ERROR: (message: string) => never;
 };
 
 // Function to import JavaScript modules from Python
@@ -105,6 +106,14 @@ export async function setDoAnImport(
     workerEntrypoint,
     patchWaitUntil,
     patch_env_helper,
+    TEST_ONLY_THROW_PYTHON_WORKERS_INTERNAL_ERROR(message: string): never {
+      if (!COMPATIBILITY_FLAGS.experimental) {
+        throw new Error(
+          'TEST_ONLY_THROW_PYTHON_WORKERS_INTERNAL_ERROR requires the experimental compatibility flag'
+        );
+      }
+      throw new PythonWorkersInternalError(message);
+    },
   };
 }
 

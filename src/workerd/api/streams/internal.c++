@@ -11,6 +11,7 @@
 #include <workerd/api/util.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/string-buffer.h>
 
 #include <kj/vector.h>
@@ -469,8 +470,13 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
 
   auto getOrInitStore = [&](bool errorCase = false) {
     if (store.IsEmpty()) {
-      // In an error case, where store is not provided, we can use zero length
-      byteLength = errorCase ? 0 : UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;
+      if (errorCase) {
+        byteLength = 0;
+      } else if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
+        byteLength = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2;
+      } else {
+        byteLength = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;
+      }
 
       if (!v8::ArrayBuffer::MaybeNew(js.v8Isolate, byteLength).ToLocal(&store)) {
         return v8::Local<v8::ArrayBuffer>();

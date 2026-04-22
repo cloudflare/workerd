@@ -48,6 +48,7 @@ class SqliteObserver {
       kj::Duration queryLatency,
       uint64_t dbWalBytesWritten,
       int queryResult,
+      int extendedErrorCode,
       bool isInternalQuery,
       kj::Maybe<kj::String> queryErrorDescription) {}
 
@@ -623,7 +624,8 @@ class SqliteDatabase::Query final: private ResetListener {
       kj::Duration queryLatency = observer.now() - startTime;
 
       observer.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten, queryLatency,
-          dbWalBytesWritten, queryResult, isInternalQuery, kj::mv(queryErrorDescription));
+          dbWalBytesWritten, queryResult, extendedErrorCode, isInternalQuery,
+          kj::mv(queryErrorDescription));
     }
 
     void setQueryEventStats(uint64_t rowsRead, uint64_t rowsWritten, bool isInternalQuery) {
@@ -644,6 +646,10 @@ class SqliteDatabase::Query final: private ResetListener {
       queryResult = res;
     }
 
+    void setQueryExtendedCode(int res) {
+      extendedErrorCode = res;
+    }
+
    private:
     SqliteObserver& observer;
     kj::Maybe<kj::String> queryStatement = kj::none;
@@ -653,6 +659,7 @@ class SqliteDatabase::Query final: private ResetListener {
     uint64_t rowsRead = 0;
     uint64_t rowsWritten = 0;
     int queryResult = 0;
+    int extendedErrorCode = 0;
     kj::Maybe<kj::String> queryErrorDescription = kj::none;
   };
 

@@ -43,6 +43,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "increase-sqlite-hard-heap-limit"_kj;
     case AutogateKey::USER_SPAN_CONTEXT_PROPAGATION:
       return "user-span-context-propagation"_kj;
+    case AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE:
+      return "updated-auto-allocate-chunk-size"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

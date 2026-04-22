@@ -105,6 +105,11 @@ struct UnderlyingSource {
   // this default.
   static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 4096;
 
+  // We want to increase the default auto allocate chunk size but we need to do
+  // so carefully to avoid introducing memory regressions and causing workers to
+  // hit OOM errors. We'll use an autogate to roll out the new default.
+  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2 = 16 * 1024;
+
   // Per the spec, the type property for the UnderlyingSource should be either
   // undefined, the empty string, or "bytes". When undefined, the empty string is
   // used as the default. When type is the empty string, the stream is considered

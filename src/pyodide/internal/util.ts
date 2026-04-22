@@ -2,12 +2,39 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+// Callback used to report PythonWorkersInternalError construction to C++ metrics (via the
+// WorkerFatalReporter module). Registered by `python.ts` at module init in the main workerd
+// context.
+//
+// We can't `import` `pyodide-internal:fatal-reporter` (a C++ extension module) directly here
+// because `util.ts` is also esbuild-bundled into the pool context (`pool/emscriptenSetup.ts`
+// runs in a vanilla V8 isolate with no C++ extension module support). A static import would fail
+// esbuild's resolver; a dynamic import fails at runtime because workerd's dynamic module
+// resolver doesn't surface INTERNAL C++-backed modules. The callback indirection keeps
+// `util.ts` free of any reference to the C++ module while still letting the main context wire
+// in the real reporter.
+//
+// TODO: If we ever remove the Python pool, `util.ts` will no longer be pool-bundled and we can
+// drop this callback in favor of a direct static import of FatalReporter.
+let _reportInternalError: (() => void) | null = null;
+
+export function setInternalErrorReporter(cb: () => void): void {
+  _reportInternalError = cb;
+}
+
 /**
  * This is an exception we should be throwing whenever there is something unexpected in our runtime
  * that is **not** a result of the user doing something wrong, i.e. it's an internal error that is
  * a result of a bug in our runtime.
  */
 export class PythonWorkersInternalError extends Error {
+  constructor(message?: string) {
+    super(message);
+    try {
+      _reportInternalError?.();
+    } catch (_) {}
+  }
+
   override get name(): string {
     return this.constructor.name;
   }

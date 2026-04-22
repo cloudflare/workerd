@@ -883,6 +883,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
             auto dbWalSizeBefore = sqliteObserver.getDbWalSize();
 
             int err = sqlite3_step(result);
+            int extendedCode = sqlite3_extended_errcode(db);
 
             kj::Duration queryLatency = sqliteObserver.now() - start;
             auto dbWalBytesWritten = sqliteObserver.getDbWalSize() - dbWalSizeBefore;
@@ -903,7 +904,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
 
             // Report queryEvent for this statement
             sqliteObserver.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten,
-                queryLatency, dbWalBytesWritten, err, regulator.shouldAddQueryStats(),
+                queryLatency, dbWalBytesWritten, err, extendedCode, regulator.shouldAddQueryStats(),
                 kj::mv(queryErrorDescription));
 
             if (err == SQLITE_DONE) {
@@ -1655,6 +1656,10 @@ void SqliteDatabase::Query::nextRow(bool first) {
   SQLITE_CALL_SCOPE {
     int err = sqlite3_step(statement);
     queryEvent.setQueryResult(err);
+
+    int extendedCode = sqlite3_extended_errcode(db);
+    queryEvent.setQueryExtendedCode(extendedCode);
+
     // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
     // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
     // in the Dtor, and handle the case where the statement could be null when the Query gets

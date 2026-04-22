@@ -7,6 +7,7 @@
 
 import entrypoints from 'cloudflare-internal:workers';
 import innerEnv from 'cloudflare-internal:env';
+import innerTracing from 'cloudflare-internal:tracing';
 
 export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;
@@ -202,3 +203,5 @@ export const cache = new Proxy(
     },
   }
 );
+
+export const tracing = innerTracing;

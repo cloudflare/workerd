@@ -4,6 +4,7 @@
 
 declare namespace MetadataReader {
   export interface CompatibilityFlags {
+    experimental?: boolean;
     python_workflows?: boolean;
     python_no_global_handlers?: boolean;
     python_workers_force_new_vendor_path?: boolean;

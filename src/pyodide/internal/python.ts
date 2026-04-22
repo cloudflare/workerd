@@ -39,6 +39,7 @@ import {
   PythonUserError,
   PythonWorkersInternalError,
   reportError,
+  setInternalErrorReporter,
   unreachable,
 } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
@@ -46,6 +47,13 @@ import { default as MetadataReader } from 'pyodide-internal:runtime-generated/me
 import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
+
+// Wire the PythonWorkersInternalError constructor's reporter to the C++ FatalReporter module.
+// See util.ts for why this indirection is needed (pool bundling constraints).
+// TODO: Remove once the Python pool is gone and util.ts can import FatalReporter directly.
+setInternalErrorReporter(() => {
+  FatalReporter.reportPythonWorkersInternalError();
+});
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C

@@ -850,6 +850,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
           &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
           props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
     auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),

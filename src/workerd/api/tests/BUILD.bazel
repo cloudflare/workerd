@@ -478,6 +478,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-consumer-reentry-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-consumer-reentry-gc-test.js"],
+)
+
+wd_test(
     src = "pipe-streams-test.wd-test",
     args = ["--experimental"],
     data = ["pipe-streams-test.js"],

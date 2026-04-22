@@ -1723,26 +1723,33 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
 class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
-  SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
+  SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer)
+      : weakTracer(kj::mv(weakTracer)) {}
   void submitSpanClose(
       tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) override {
-    tracing::SpanEndData spanEnd(spanId, endTime, kj::mv(tags));
-    if (isPredictableModeForTest()) {
-      startTime = spanEnd.endTime = kj::UNIX_EPOCH;
-    }
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      tracing::SpanEndData spanEnd(spanId, endTime, kj::mv(tags));
+      if (isPredictableModeForTest()) {
+        startTime = spanEnd.endTime = kj::UNIX_EPOCH;
+      }
 
-    workerTracer->addSpanClose(kj::mv(spanEnd), startTime);
+      tracer.addSpanClose(kj::mv(spanEnd), startTime);
+    });
   }
 
   bool submitSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override {
-    if (isPredictableModeForTest()) {
-      startTime = kj::UNIX_EPOCH;
-    }
-    workerTracer->addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
-    return true;
+    bool submitted = false;
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      if (isPredictableModeForTest()) {
+        startTime = kj::UNIX_EPOCH;
+      }
+      tracer.addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+      submitted = true;
+    });
+    return submitted;
   }
 
   tracing::SpanId makeSpanId() override {
@@ -1752,7 +1759,7 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
 
  private:
   uint64_t nextSpanId = 1;
-  kj::Own<WorkerTracer> workerTracer;
+  kj::Own<BaseTracer::WeakRef> weakTracer;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
@@ -2214,7 +2221,7 @@ class Server::WorkerService final: public Service,
     KJ_IF_SOME(w, workerTracer) {
       w->setMakeUserRequestSpanFunc([&w = *w](tracing::TraceId traceId) {
         return SpanParent(kj::refcounted<UserSpanObserver>(
-            kj::refcounted<SequentialSpanSubmitter>(kj::addRef(w)), kj::mv(traceId)));
+            kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef()), kj::mv(traceId)));
       });
     }
     kj::Own<RequestObserver> observer =

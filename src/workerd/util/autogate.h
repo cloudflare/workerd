@@ -48,6 +48,8 @@ enum class AutogateKey {
   INCREASE_SQLITE_HARD_HEAP_LIMIT,
   // Enable user span context propagation across worker-to-worker subrequests.
   USER_SPAN_CONTEXT_PROPAGATION,
+  // Apply an updated default autoAllocateChunkSize for ReadableStreams
+  UPDATED_AUTO_ALLOCATE_CHUNK_SIZE,
   NumOfKeys  // Reserved for iteration.
 };
 

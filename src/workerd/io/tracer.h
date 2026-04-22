@@ -6,6 +6,7 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
+#include <workerd/util/weak-refs.h>
 
 #include <kj/refcount.h>
 
@@ -24,7 +25,16 @@ class WorkerTracer;
 // there will be plenty of cleanup potential.
 class BaseTracer: public kj::Refcounted {
  public:
-  virtual ~BaseTracer() noexcept(false) {};
+  virtual ~BaseTracer() noexcept(false) {
+    selfRef->invalidate();
+  };
+
+  // Weak reference to this tracer, used by user-tracing SpanSubmitter implementations so
+  // abandoned user promises cannot pin tracer lifetime.
+  using WeakRef = workerd::WeakRef<BaseTracer>;
+  kj::Own<WeakRef> getWeakRef() {
+    return kj::addRef(*selfRef);
+  }
 
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   virtual void addLog(const tracing::InvocationSpanContext& context,
@@ -109,6 +119,10 @@ class BaseTracer: public kj::Refcounted {
   // When true, the destructor will not log a warning about missing Onset event.
   // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
   bool markedUnused = false;
+
+ private:
+  friend class workerd::WeakRef<BaseTracer>;
+  kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<BaseTracer>(), *this);
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the

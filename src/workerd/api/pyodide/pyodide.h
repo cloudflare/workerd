@@ -466,9 +466,11 @@ class WorkerFatalReporter: public jsg::Object {
   WorkerFatalReporter() {}
 
   void reportFatal(jsg::Lock& js, kj::String error);
+  void reportPythonWorkersInternalError(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(WorkerFatalReporter) {
     JSG_METHOD(reportFatal);
+    JSG_METHOD(reportPythonWorkersInternalError);
   }
 };
 

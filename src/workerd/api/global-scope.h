@@ -27,6 +27,7 @@ class DOMException;
 
 namespace workerd::api {
 
+class Tracing;
 class TailEvent;
 class Cache;
 class CacheStorage;
@@ -292,6 +293,8 @@ class ExecutionContext: public jsg::Object {
     return js.undefined();
   }
 
+  jsg::Optional<jsg::Ref<Tracing>> getTracing(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
@@ -303,6 +306,13 @@ class ExecutionContext: public jsg::Object {
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
+
+    // ctx.tracing - user tracing API. The *type* is always visible (so the generated
+    // `Tracing` / `Span` types exist in every compat-date snapshot, not only the
+    // experimental one). The *value* is `undefined` outside the `workerdExperimental`
+    // compat flag - the gate lives in `getTracing()` in global-scope.c++.
+    // TODO: Remove this comment once the feature is stable.
+    JSG_LAZY_INSTANCE_PROPERTY(tracing, getTracing);
 
     if (flags.getWorkerdExperimental()) {
       // TODO(soon): Before making this generally available we need to:

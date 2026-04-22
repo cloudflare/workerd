@@ -126,7 +126,11 @@ class IoContext_IncomingRequest final {
     return workerTracer;
   }
 
-  SpanParent getCurrentUserTraceSpan();
+  // Returns a new reference to the root user trace span for this incoming request, or
+  // SpanParent(nullptr) if the request has no user-tracing root span.
+  SpanParent getRootUserTraceSpan() {
+    return rootUserTraceSpan.addRef();
+  }
 
   // The invocation span context is a unique identifier for a specific
   // worker invocation.
@@ -138,7 +142,13 @@ class IoContext_IncomingRequest final {
   kj::Maybe<kj::Own<BaseTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
 
-  SpanParent currentUserTraceSpan = nullptr;
+  // Root user trace span for this request. Populated during delivered() via
+  // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references
+  // is owned by workerTracer above; because user-tracing SpanSubmitters hold only a
+  // BaseTracer::WeakRef, stale SpanParent references (e.g. in AsyncContextFrame storage via
+  // IoOwn, kept alive past ~IncomingRequest by the IoContext's delete queue) cannot extend
+  // tracer lifetime.
+  SpanParent rootUserTraceSpan = SpanParent(nullptr);
 
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
@@ -223,6 +233,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Maybe<BaseTracer&> getWorkerTracer() {
     if (incomingRequests.empty()) return kj::none;
     return getCurrentIncomingRequest().getWorkerTracer();
+  }
+
+  // Returns the root user trace span for the current incoming request, if any.
+  SpanParent getRootUserTraceSpan() {
+    if (incomingRequests.empty()) return SpanParent(nullptr);
+    return getCurrentIncomingRequest().getRootUserTraceSpan();
   }
 
   LimitEnforcer& getLimitEnforcer() {
@@ -878,6 +894,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // given trace span, or the current request's trace span, if no span is given.
   jsg::AsyncContextFrame::StorageScope makeAsyncTraceScope(
       Worker::Lock& lock, kj::Maybe<SpanParent> spanParent = kj::none) KJ_WARN_UNUSED_RESULT;
+
+  // Returns an object that ensures an async JS operation started in the current scope captures
+  // the given user trace span, or the current incoming request's root user trace span if none is
+  // given. Storing the span in the AsyncContextFrame (which on actors outlives individual
+  // requests via the IoContext's delete queue) is safe because user-tracing SpanSubmitter
+  // implementations hold only a BaseTracer::WeakRef - stale references cannot extend tracer
+  // lifetime.
+  jsg::AsyncContextFrame::StorageScope makeUserAsyncTraceScope(
+      Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
