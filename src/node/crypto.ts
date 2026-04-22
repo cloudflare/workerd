@@ -531,6 +531,80 @@ Object.defineProperties(constants, {
 // Deprecated but required for backwards compatibility.
 export const pseudoRandomBytes = randomBytes;
 
+// ML-KEM encapsulation/decapsulation — not yet implemented.
+export function encapsulate(_key: unknown, _options?: unknown): never {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('encapsulate');
+}
+
+export function decapsulate(
+  _privateKey: unknown,
+  _ciphertext: unknown,
+  _options?: unknown
+): never {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('decapsulate');
+}
+
+// Argon2 password hashing — not yet implemented.
+export function argon2(
+  _password: unknown,
+  _salt: unknown,
+  _options: unknown,
+  callback?: (err: Error | null, derivedKey?: Buffer) => void
+): void {
+  const err = new ERR_METHOD_NOT_IMPLEMENTED('argon2');
+  if (typeof callback === 'function') {
+    queueMicrotask((): void => callback(err));
+    return;
+  }
+  throw err;
+}
+
+export function argon2Sync(
+  _password: unknown,
+  _salt: unknown,
+  _options?: unknown
+): never {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('argon2Sync');
+}
+
+// prng/rng are exposed via the default export only (to match Node.js shape).
+function prng(..._args: unknown[]): never {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('prng');
+}
+
+function rng(..._args: unknown[]): never {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('rng');
+}
+
+// SubtleCrypto stubs — mount missing methods on the shared global so that
+// both `crypto.subtle` and `crypto.webcrypto.subtle` (which reference the same
+// object) expose them. These methods are data-producing crypto primitives
+// that need real implementations, so they reject with ERR_METHOD_NOT_IMPLEMENTED.
+function notImplementedSubtle(
+  name: string
+): (...args: unknown[]) => Promise<never> {
+  return (..._args: unknown[]): Promise<never> => {
+    return Promise.reject(new ERR_METHOD_NOT_IMPLEMENTED(`subtle.${name}`));
+  };
+}
+
+for (const name of [
+  'encapsulateKey',
+  'decapsulateKey',
+  'encapsulateBits',
+  'decapsulateBits',
+  'getPublicKey',
+]) {
+  if (!(name in subtle)) {
+    Object.defineProperty(subtle, name, {
+      value: notImplementedSubtle(name),
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+  }
+}
+
 export const CryptoKey = globalThis.CryptoKey;
 
 export let createCipher: (() => void) | undefined = undefined;
@@ -560,6 +634,7 @@ export default {
   createDiffieHellman,
   createDiffieHellmanGroup,
   getDiffieHellman,
+  diffieHellman,
   ECDH,
   createECDH,
   // Keys,
@@ -577,6 +652,8 @@ export default {
   // Random
   getRandomValues,
   pseudoRandomBytes,
+  prng,
+  rng,
   randomBytes,
   randomFillSync,
   randomFill,
@@ -602,6 +679,12 @@ export default {
   // Scrypt
   scrypt,
   scryptSync,
+  // ML-KEM (stub)
+  encapsulate,
+  decapsulate,
+  // Argon2 (stub)
+  argon2,
+  argon2Sync,
   // Misc
   getCiphers,
   getCurves,

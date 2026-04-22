@@ -73,6 +73,14 @@ export function setMaxIdleHTTPParsers(max: unknown): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('setMaxIdleHTTPParsers');
 }
 
+// Node v24 added `http.setGlobalProxyFromEnv()` to configure the global agent
+// based on HTTP_PROXY / HTTPS_PROXY / NO_PROXY environment variables. We do
+// not honour those env vars in workerd; treat this as a no-op feature-
+// detection stub so user code that opts in keeps working.
+export function setGlobalProxyFromEnv(): void {
+  // Intentionally empty.
+}
+
 export {
   validateHeaderName,
   validateHeaderValue,
@@ -104,6 +112,7 @@ export default {
   createServer,
   maxHeaderSize,
   setMaxIdleHTTPParsers,
+  setGlobalProxyFromEnv,
   _connectionListener,
   WebSocket,
   CloseEvent,

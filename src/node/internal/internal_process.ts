@@ -232,7 +232,12 @@ export const features = Object.freeze({
 // the current Node.js executable. We stub it with representative values for compatibility.
 export const config = Object.freeze({
   target_defaults: Object.freeze({
+    cflags: Object.freeze([]),
+    configurations: Object.freeze({}),
     default_configuration: 'Release',
+    defines: Object.freeze([]),
+    include_dirs: Object.freeze([]),
+    libraries: Object.freeze([]),
   }),
   variables: Object.freeze({
     asan: 0,
@@ -259,7 +264,9 @@ export const config = Object.freeze({
     libdir: 'lib',
     llvm_version: '',
     napi_build_version: '9',
+    node_builtin_shareable_builtins: Object.freeze([]),
     node_byteorder: 'little',
+    node_cctest_sources: Object.freeze([]),
     node_debug_lib: false,
     node_enable_d8: false,
     node_enable_v8_vtunejit: false,
@@ -267,6 +274,7 @@ export const config = Object.freeze({
     node_fipsinstall: false,
     node_install_corepack: false,
     node_install_npm: false,
+    node_library_files: Object.freeze([]),
     node_module_version: 127,
     node_no_browser_globals: false,
     node_prefix: '/usr/local',

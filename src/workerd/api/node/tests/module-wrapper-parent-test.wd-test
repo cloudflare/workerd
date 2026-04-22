@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "module-wrapper-parent-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "module-wrapper-parent-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          "experimental"
+        ]
+      )
+    ),
+  ],
+);

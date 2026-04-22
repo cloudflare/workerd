@@ -41,6 +41,7 @@ import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
   ERR_INVALID_RETURN_VALUE,
+  ERR_METHOD_NOT_IMPLEMENTED,
   ERR_MISSING_ARGS,
 } from 'node-internal:internal_errors';
 
@@ -1060,8 +1061,51 @@ function isValidThenable(maybeThennable: any): boolean {
 
 export { AssertionError };
 
+// Stub of Node's class-style assertion API. In Node, instances of `Assert`
+// expose all of the assertion functions as instance methods. We currently
+// provide only the shape so that feature-detecting code keeps working.
+export class Assert {
+  constructor(_options?: {
+    message?: string;
+    actual?: unknown;
+    expected?: unknown;
+    operator?: string;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+    stackStartFn?: Function;
+  }) {}
+}
+
+// Stub of Node's `assert.CallTracker`. The class is deprecated in Node, but
+// some code still feature-detects it. We provide enough of the surface to
+// match shape; `.calls()` throws ERR_METHOD_NOT_IMPLEMENTED, while the other
+// inspection methods are inert (they cannot lie about tracked calls because
+// `.calls()` never returns a wrapped function).
+export class CallTracker {
+  constructor() {}
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  calls(_fn?: Function, _exact?: number): never {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('CallTracker.calls');
+  }
+
+  report(): unknown[] {
+    return [];
+  }
+
+  reset(): void {}
+
+  verify(): void {}
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  getCalls(_fn: Function): unknown[] {
+    return [];
+  }
+}
+
 Object.assign(strict, {
+  Assert,
   AssertionError,
+  CallTracker,
   deepEqual: deepStrictEqual,
   deepStrictEqual,
   doesNotMatch,
@@ -1084,7 +1128,9 @@ Object.assign(strict, {
 });
 
 export default Object.assign(assert, {
+  Assert,
   AssertionError,
+  CallTracker,
   deepEqual,
   deepStrictEqual,
   doesNotMatch,

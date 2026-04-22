@@ -36,7 +36,10 @@ import {
 } from 'node-internal:internal_tls_common';
 import * as constants from 'node-internal:internal_tls_constants';
 import { TLSSocket, connect } from 'node-internal:internal_tls_wrap';
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+import {
+  ERR_INVALID_ARG_TYPE,
+  ERR_METHOD_NOT_IMPLEMENTED,
+} from 'node-internal:internal_errors';
 
 let createSecurePair = undefined;
 
@@ -44,6 +47,38 @@ if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_v24) {
   createSecurePair = function createSecurePair(): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('createSecurePair');
   };
+}
+
+// Node introduced `tls.getCACertificates()` to expose the bundled, extra, and
+// system CA lists. workerd does not ship its own CA bundles at the JS layer,
+// so we return an empty array — code that iterates the result will simply see
+// "no CAs of that type" rather than crashing on a missing export.
+export function getCACertificates(
+  type?: 'bundled' | 'extra' | 'system'
+): string[] {
+  if (
+    type !== undefined &&
+    type !== 'bundled' &&
+    type !== 'extra' &&
+    type !== 'system'
+  ) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'type',
+      ['"bundled"', '"extra"', '"system"'],
+      type
+    );
+  }
+  return [];
+}
+
+// No-op stub for `tls.setDefaultCACertificates()`. We still validate the input
+// shape so applications relying on argument checking behave the same way they
+// would in Node.
+export function setDefaultCACertificates(certs: string[]): void {
+  if (!Array.isArray(certs)) {
+    throw new ERR_INVALID_ARG_TYPE('certs', 'string[]', certs);
+  }
+  // Intentionally no-op: workerd has no mutable default CA list to update.
 }
 
 export * from 'node-internal:internal_tls_constants';
@@ -70,5 +105,7 @@ export default {
   convertALPNProtocols,
   getCiphers,
   createSecurePair,
+  getCACertificates,
+  setDefaultCACertificates,
   ...constants,
 };

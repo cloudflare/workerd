@@ -38,6 +38,10 @@ export async function buffer(stream) {
   return Buffer.from(await arrayBuffer(stream));
 }
 
+export async function bytes(stream) {
+  return new Uint8Array(await arrayBuffer(stream));
+}
+
 export async function text(stream) {
   const dec = new TextDecoder();
   let str = '';
@@ -60,6 +64,7 @@ export default {
   arrayBuffer,
   blob,
   buffer,
+  bytes,
   text,
   json,
 };

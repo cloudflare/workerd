@@ -18,6 +18,7 @@ wd_ts_bundle(
         "path/*.ts",
         "readline/*.ts",
         "stream/*.js",
+        "test/*.ts",
         "timers/*.ts",
         "util/*.ts",
     ]),

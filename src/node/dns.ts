@@ -8,6 +8,7 @@ import * as errorCodes from 'node-internal:internal_dns_constants';
 import * as dns from 'node-internal:internal_dns';
 import { callbackify } from 'node-internal:internal_utils';
 import * as dnsPromises from 'node-internal:internal_dns_promises';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
 export * from 'node-internal:internal_dns_constants';
 
@@ -32,6 +33,17 @@ export const lookup = dns.lookup.bind(dns);
 export const lookupService = callbackify(dns.lookupService.bind(this));
 export const resolve = callbackify(dns.resolve.bind(this));
 export const resolveAny = callbackify(dns.resolveAny.bind(this));
+
+// TLSA (DANE) lookups are rare and require DNS infrastructure we do not
+// currently plumb through to workerd. Synchronously throw so feature-detection
+// (`typeof dns.resolveTlsa === 'function'`) still works but any real use
+// surfaces a clear error.
+export function resolveTlsa(
+  _hostname: string,
+  _callback: (err: Error | null, records: unknown[]) => void
+): void {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('resolveTlsa');
+}
 
 export class Resolver implements nodejsDns.Resolver {
   cancel(): void {
@@ -113,6 +125,10 @@ export class Resolver implements nodejsDns.Resolver {
     resolveTxt(...args);
   }
 
+  resolveTlsa(...args: Parameters<typeof resolveTlsa>): void {
+    resolveTlsa(...args);
+  }
+
   reverse(...args: Parameters<typeof reverse>): void {
     reverse(...args);
   }
@@ -138,6 +154,7 @@ export default {
   resolvePtr,
   resolveSoa,
   resolveSrv,
+  resolveTlsa,
   resolveTxt,
   reverse,
   setDefaultResultOrder,

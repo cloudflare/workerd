@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-post-quantum-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-post-quantum-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental"]
+      )
+    ),
+  ],
+);

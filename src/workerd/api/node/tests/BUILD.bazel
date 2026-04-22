@@ -149,6 +149,102 @@ wd_test(
 )
 
 wd_test(
+    src = "assert-class-calltracker-test.wd-test",
+    args = ["--experimental"],
+    data = ["assert-class-calltracker-test.js"],
+)
+
+wd_test(
+    src = "crypto-post-quantum-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto-post-quantum-test.js"],
+)
+
+wd_test(
+    src = "dns-resolve-tlsa-test.wd-test",
+    args = ["--experimental"],
+    data = ["dns-resolve-tlsa-test.js"],
+)
+
+wd_test(
+    src = "events-init-test.wd-test",
+    args = ["--experimental"],
+    data = ["events-init-test.js"],
+)
+
+wd_test(
+    src = "fs-disposable-temp-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-disposable-temp-test.js"],
+)
+
+wd_test(
+    src = "http-set-global-proxy-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-set-global-proxy-test.js"],
+)
+
+wd_test(
+    src = "module-wrapper-parent-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-wrapper-parent-test.js"],
+)
+
+wd_test(
+    src = "process-config-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-config-test.js"],
+)
+
+wd_test(
+    src = "sea-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["sea-nodejs-test.js"],
+)
+
+wd_test(
+    src = "sqlite-session-test.wd-test",
+    args = ["--experimental"],
+    data = ["sqlite-session-test.js"],
+)
+
+wd_test(
+    src = "stream-consumers-bytes-test.wd-test",
+    args = ["--experimental"],
+    data = ["stream-consumers-bytes-test.js"],
+)
+
+wd_test(
+    src = "test-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["test-nodejs-test.js"],
+)
+
+wd_test(
+    src = "test-reporters-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["test-reporters-nodejs-test.js"],
+)
+
+wd_test(
+    src = "tls-ca-certificates-test.wd-test",
+    args = ["--experimental"],
+    data = ["tls-ca-certificates-test.js"],
+)
+
+wd_test(
+    src = "url-extras-test.wd-test",
+    args = ["--experimental"],
+    data = ["url-extras-test.js"],
+)
+
+wd_test(
+    src = "util-sys-extras-test.wd-test",
+    args = ["--experimental"],
+    data = ["util-sys-extras-test.js"],
+)
+
+wd_test(
     src = "mimetype-test.wd-test",
     args = ["--experimental"],
     data = ["mimetype-test.js"],

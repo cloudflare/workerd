@@ -244,6 +244,16 @@ Object.defineProperty(Module.prototype, 'isPreloading', {
   },
 });
 
+// Deprecated Node.js property; always undefined on the prototype.
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+(Module.prototype as { parent?: undefined }).parent = undefined;
+
+// Node.js CJS wrapper template (deprecated, exposed for feature-detection).
+export const wrapper: [string, string] = [
+  '(function (exports, require, module, __filename, __dirname) { ',
+  '\n});',
+];
+
 Object.defineProperties(Module, {
   register: {
     value: register,
@@ -397,6 +407,11 @@ Object.defineProperties(Module, {
   },
   registerHooks: {
     value: registerHooks,
+    writable: true,
+    enumerable: true,
+  },
+  wrapper: {
+    value: wrapper,
     writable: true,
     enumerable: true,
   },

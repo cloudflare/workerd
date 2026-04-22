@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fs-disposable-temp-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "fs-disposable-temp-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          "experimental",
+          "enable_nodejs_fs_module"
+        ]
+      )
+    ),
+  ],
+);

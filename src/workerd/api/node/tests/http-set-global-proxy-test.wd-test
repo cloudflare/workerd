@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "http-set-global-proxy-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "http-set-global-proxy-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          "experimental"
+        ]
+      )
+    ),
+  ],
+);

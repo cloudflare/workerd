@@ -11,6 +11,7 @@ import type {
   LookupOptions,
 } from 'node:dns';
 import * as errorCodes from 'node-internal:internal_dns_constants';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import {
   reverse,
   resolveTxt,
@@ -64,6 +65,12 @@ export {
   resolve,
   resolveAny,
 } from 'node-internal:internal_dns';
+
+// TLSA (DANE) lookups are rare and unsupported in workerd. Reject rather than
+// silently resolve so callers see a clear error.
+export function resolveTlsa(_hostname: string): Promise<unknown[]> {
+  return Promise.reject(new ERR_METHOD_NOT_IMPLEMENTED('resolveTlsa'));
+}
 
 export class Resolver implements dns.Resolver {
   cancel(): void {
@@ -142,6 +149,10 @@ export class Resolver implements dns.Resolver {
     return resolveTxt(name);
   }
 
+  resolveTlsa(name: string): Promise<unknown[]> {
+    return resolveTlsa(name);
+  }
+
   reverse(name: string): Promise<string[]> {
     return reverse(name);
   }
@@ -186,6 +197,7 @@ export default {
   resolveNaptr,
   resolve4,
   resolve6,
+  resolveTlsa,
   getServers,
   setServers,
   getDefaultResultOrder,

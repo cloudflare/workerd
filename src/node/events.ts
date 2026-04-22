@@ -5,3 +5,7 @@
 
 export * from 'node-internal:events';
 export { default } from 'node-internal:events';
+
+// Node-internal no-op hook used for async tracking bootstrapping. Exposed for
+// feature-detection parity with Node.js; we do not track async resources here.
+export function init(): void {}

@@ -7,6 +7,7 @@ import * as constants from 'node-internal:internal_fs_constants';
 import * as callbackMethods from 'node-internal:internal_fs_callback';
 import { Dirent, Dir } from 'node-internal:internal_fs';
 import { Stats } from 'node-internal:internal_fs_utils';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
 export * from 'node-internal:internal_fs_callback';
 import {
@@ -67,6 +68,40 @@ const { F_OK, R_OK, W_OK, X_OK } = constants;
 // Node.js exports these as aliases
 export const FileWriteStream = WriteStream;
 export const FileReadStream = ReadStream;
+
+// fs.Utf8Stream is a writable stream for utf-8 text (Node >=24). We export
+// the class for feature-detection parity but do not implement it.
+export class Utf8Stream {
+  constructor() {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Utf8Stream');
+  }
+}
+
+export interface DisposableMkdtempSyncResult {
+  path: string;
+  remove(): void;
+  [Symbol.dispose](): void;
+}
+
+// Node.js fs.mkdtempDisposableSync: mkdtempSync + an explicit-resource-mgmt
+// wrapper that removes the directory on dispose.
+export function mkdtempDisposableSync(
+  prefix: Parameters<typeof mkdtempSync>[0],
+  options?: Parameters<typeof mkdtempSync>[1]
+): DisposableMkdtempSyncResult {
+  const path = mkdtempSync(prefix, options);
+  let removed = false;
+  const remove = (): void => {
+    if (removed) return;
+    removed = true;
+    rmSync(path, { recursive: true, force: true });
+  };
+  return {
+    path,
+    remove,
+    [Symbol.dispose]: remove,
+  };
+}
 
 export {
   constants,
@@ -189,4 +224,6 @@ export default {
   createReadStream,
   createWriteStream,
   openAsBlob,
+  Utf8Stream,
+  mkdtempDisposableSync,
 };
