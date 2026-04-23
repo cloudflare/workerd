@@ -47,5 +47,5 @@ thiserror = "2"
 # tokio is huge, let's enable only features when we actually need them.
 tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "time"] }
 tracing = { version = "0", default-features = false, features = ["std"] }
-swc_common = "18"
-swc_ts_fast_strip = "43"
+swc_common = "21"
+swc_ts_fast_strip = "49"

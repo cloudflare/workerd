@@ -10,7 +10,5 @@ mod ffi {
 
 #[must_use]
 pub fn canonicalize_ip(input: &str) -> String {
-    IpAddr::from_str(input)
-        .map(|ip| ip.to_string())
-        .unwrap_or(String::new())
+    IpAddr::from_str(input).map_or(String::new(), |ip| ip.to_string())
 }
