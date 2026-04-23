@@ -8,6 +8,15 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto-secp256k1-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "crypto-secp256k1-no-flag-test.js",
+        "crypto-secp256k1-with-flag-test.js",
+    ],
+)
+
+wd_test(
     src = "deserialize-hardening-test.wd-test",
     args = ["--experimental"],
     data = ["deserialize-hardening-test.js"],

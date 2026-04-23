@@ -433,17 +433,52 @@ struct EllipticCurveInfo {
   uint rsSize;  // size of "r" and "s" in the signature
 };
 
-EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
+// Sentinel curveId for secp256k1. BoringSSL does not implement secp256k1, so
+// there is no NID_* constant we can use. We pick a negative value (real
+// BoringSSL NIDs are non-negative) and dispatch to a dedicated backend at
+// every call site that would otherwise hand the curveId to BoringSSL.
+//
+// TODO(secp256k1): replace this sentinel with a proper backend handle once the
+// dispatch path to libsecp256k1 / k256 / similar is wired up.
+constexpr int kWorkerdSecp256k1CurveId = -1;
+
+// BoringSSL-backed curves. The table is used by both the WebCrypto entry points
+// (which additionally honour the compatibility flag for secp256k1 via the
+// `jsg::Lock&` overload below) and by `fromEcKey()`, which receives an already-
+// constructed `EVP_PKEY` from the Node.js crypto API and therefore cannot
+// produce a secp256k1 key in the first place.
+kj::Maybe<const EllipticCurveInfo&> lookupBoringSslCurve(kj::StringPtr curveName) {
   static const std::map<kj::StringPtr, EllipticCurveInfo, CiLess> registeredCurves{
     {"P-256", {"P-256", NID_X9_62_prime256v1, 32}},
     {"P-384", {"P-384", NID_secp384r1, 48}},
     {"P-521", {"P-521", NID_secp521r1, 66}},
   };
-
   auto iter = registeredCurves.find(curveName);
-  JSG_REQUIRE(iter != registeredCurves.end(), DOMNotSupportedError,
-      "Unrecognized or unimplemented EC curve \"", curveName, "\" requested.");
+  if (iter == registeredCurves.end()) return kj::none;
   return iter->second;
+}
+
+EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
+  KJ_IF_SOME(info, lookupBoringSslCurve(curveName)) {
+    return info;
+  }
+  JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized or unimplemented EC curve \"", curveName,
+      "\" requested.");
+}
+
+EllipticCurveInfo lookupEllipticCurve(jsg::Lock& js, kj::StringPtr curveName) {
+  KJ_IF_SOME(info, lookupBoringSslCurve(curveName)) {
+    return info;
+  }
+
+  // secp256k1 is gated behind a compatibility flag while the backend is landing.
+  if (FeatureFlags::get(js).getSecp256k1EcdsaCurve() &&
+      strcasecmp(curveName.cStr(), "secp256k1") == 0) {
+    return EllipticCurveInfo{"secp256k1"_kj, kWorkerdSecp256k1CurveId, 32};
+  }
+
+  JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized or unimplemented EC curve \"", curveName,
+      "\" requested.");
 }
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(jsg::Lock& js,
@@ -455,7 +490,14 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(jsg:
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(
       algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(namedCurve);
+  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
+
+  // TODO(secp256k1): once a backend is wired up, dispatch generation here
+  // instead of falling through to BoringSSL, which does not implement the
+  // secp256k1 curve.
+  JSG_REQUIRE(curveId != kWorkerdSecp256k1CurveId, DOMNotSupportedError,
+      "Key generation for \"secp256k1\" is not yet implemented. The curve is recognized but the "
+      "backend is not available in this build.");
 
   auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm{
     normalizedName,
@@ -700,7 +742,12 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(jsg::Lock& js,
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(
       algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(namedCurve);
+  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
+
+  // TODO(secp256k1): dispatch import to the dedicated backend.
+  JSG_REQUIRE(curveId != kWorkerdSecp256k1CurveId, DOMNotSupportedError,
+      "Key import for \"secp256k1\" is not yet implemented. The curve is recognized but the "
+      "backend is not available in this build.");
 
   auto importedKey = [&, curveId = curveId] {
     if (format != "raw") {
@@ -758,7 +805,13 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(jsg::Lock& js,
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(
       algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(namedCurve);
+  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
+
+  // The secp256k1 compatibility flag scopes support to ECDSA only; ECDH over
+  // secp256k1 is not part of this work. Reject explicitly rather than falling
+  // through to the BoringSSL path with a sentinel curveId.
+  JSG_REQUIRE(curveId != kWorkerdSecp256k1CurveId, DOMNotSupportedError,
+      "ECDH is not supported for curve \"secp256k1\".");
 
   auto importedKey = [&, curveId = curveId] {
     auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();
