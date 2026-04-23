@@ -1,0 +1,82 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+# Bazel BUILD file for libsecp256k1 (Bitcoin Core's reference implementation).
+#
+# Upstream normally uses autotools. Its `./configure` step picks field / scalar
+# widths based on compiler features and writes a `libsecp256k1-config.h` that
+# `src/secp256k1.c` includes. We skip all of that and set the equivalent
+# `-D` flags directly.
+#
+# Source layout rationale: `src/secp256k1.c` is the only real translation unit —
+# every other `.c` under src/ is either test / benchmark scaffolding or a
+# precomputed-table generator. The two files that *are* compiled into the
+# library in addition to `secp256k1.c` are the prebuilt tables:
+# `src/precomputed_ecmult.c` and `src/precomputed_ecmult_gen.c`. Upstream
+# checks these in so downstream builds don't need Python / codegen at build
+# time.
+#
+# Modules such as recovery / ECDH / schnorrsig are deliberately NOT enabled
+# here. The initial scope for workerd is ECDSA over secp256k1 (sign / verify /
+# key handling), which the core library provides. When a caller needs
+# `secp256k1_ecdsa_recover` (Ethereum's ecrecover) or similar, flip on the
+# matching `ENABLE_MODULE_*` define below and list any extra sources from
+# `src/modules/<name>/Makefile.am.include`.
+
+cc_library(
+    name = "secp256k1",
+    srcs = [
+        "src/precomputed_ecmult.c",
+        "src/precomputed_ecmult_gen.c",
+        "src/secp256k1.c",
+    ],
+    hdrs = [
+        "include/secp256k1.h",
+        "include/secp256k1_preallocated.h",
+    ],
+    copts = [
+        # Silence upstream warnings without masking ours. libsecp256k1 is
+        # extensively reviewed and using it as-is keeps the cert story clean.
+        "-Wno-unused-function",
+        "-Wno-nonnull",
+    ],
+    # `local_defines` applies these flags only when compiling this target's
+    # own sources, not when compiling anything that depends on us. This matches
+    # how `BUILD.zlib` handles its configuration knobs — they are internal to
+    # the library's translation units and should not leak onto consumers.
+    local_defines = [
+        # Standard flag when building the library as a static archive.
+        # Equivalent to what autotools' configure would have set.
+        "SECP256K1_STATIC",
+        # Field representation. On 64-bit targets (all workerd platforms)
+        # libsecp256k1's 5x52 representation using native `__int128` is
+        # dramatically faster than the 10x26 fallback. workerd only supports
+        # 64-bit targets (see README's supported platforms list).
+        "USE_FIELD_5X52=1",
+        # Scalar representation to match the 64-bit field.
+        "USE_SCALAR_4X64=1",
+        # Use native 128-bit integer type (__int128) — required for 5x52 /
+        # 4x64. Clang and GCC both support this on every 64-bit target
+        # workerd builds for.
+        "USE_FORCE_WIDEMUL_INT128=1",
+        # Ecmult window size for signed point multiplication. Upstream default
+        # when autotools can't probe otherwise; trades a few KB of code size
+        # for performance.
+        "ECMULT_WINDOW_SIZE=15",
+        # Precomputed generator-multiplication table size. 4 is the upstream
+        # default and produces a ~64KB table.
+        "ECMULT_GEN_PREC_BITS=4",
+    ],
+    # Public include prefix so consumers write `#include <secp256k1.h>`.
+    strip_include_prefix = "include",
+    # Private headers (everything under src/) need to be visible to the
+    # compiler when building src/secp256k1.c, but are NOT part of the public
+    # API. `textual_hdrs` is the idiomatic way to express "include these from
+    # .c sources but don't expose them to downstream consumers".
+    #
+    # Note: libsecp256k1 splits its logic across `*.h` (declarations) and
+    # `*_impl.h` (inline implementations that get `#include`d from the
+    # single `src/secp256k1.c` translation unit). Both are plain headers, so
+    # one glob covers everything.
+    textual_hdrs = glob(["src/**/*.h"]),
+    visibility = ["//visibility:public"],
+)

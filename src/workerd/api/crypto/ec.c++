@@ -427,31 +427,44 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
   uint rsSize;
 };
 
-struct EllipticCurveInfo {
-  kj::StringPtr normalizedName;
-  int opensslCurveId;
-  uint rsSize;  // size of "r" and "s" in the signature
+// Identifies which backend owns a given curve. WebCrypto's ECDSA surface is
+// parametric over the curve, but not every curve is handled by the same
+// implementation:
+//
+//   - `BoringSsl` — the NIST curves (P-256/P-384/P-521). BoringSSL provides
+//     full curve arithmetic, and `opensslCurveId` holds the NID that its
+//     `EC_KEY_*` / `EVP_PKEY_*` APIs key on.
+//   - `Libsecp256k1` — secp256k1 (used by Bitcoin / Ethereum / EVM chains).
+//     BoringSSL does not implement this curve, so operations are routed to
+//     libsecp256k1. `opensslCurveId` is not meaningful in this case.
+//
+// Every call site that dispatches a curve operation should `switch` on the
+// backend, not compare `opensslCurveId` against sentinel values. This keeps
+// new backends grep-able and makes missing branches a compiler warning.
+enum class CurveBackend {
+  BoringSsl,
+  Libsecp256k1,
 };
 
-// Sentinel curveId for secp256k1. BoringSSL does not implement secp256k1, so
-// there is no NID_* constant we can use. We pick a negative value (real
-// BoringSSL NIDs are non-negative) and dispatch to a dedicated backend at
-// every call site that would otherwise hand the curveId to BoringSSL.
-//
-// TODO(secp256k1): replace this sentinel with a proper backend handle once the
-// dispatch path to libsecp256k1 / k256 / similar is wired up.
-constexpr int kWorkerdSecp256k1CurveId = -1;
+struct EllipticCurveInfo {
+  kj::StringPtr normalizedName;
+  CurveBackend backend;
+  int opensslCurveId;  // Only meaningful when `backend == BoringSsl`. Set to
+                       // zero for non-BoringSSL backends to avoid any accidental
+                       // handoff to an `EC_KEY_new_by_curve_name(0)` call site.
+  uint rsSize;         // Size of "r" and "s" in the signature.
+};
 
 // BoringSSL-backed curves. The table is used by both the WebCrypto entry points
 // (which additionally honour the compatibility flag for secp256k1 via the
 // `jsg::Lock&` overload below) and by `fromEcKey()`, which receives an already-
 // constructed `EVP_PKEY` from the Node.js crypto API and therefore cannot
-// produce a secp256k1 key in the first place.
+// produce a non-BoringSSL curve in the first place.
 kj::Maybe<const EllipticCurveInfo&> lookupBoringSslCurve(kj::StringPtr curveName) {
   static const std::map<kj::StringPtr, EllipticCurveInfo, CiLess> registeredCurves{
-    {"P-256", {"P-256", NID_X9_62_prime256v1, 32}},
-    {"P-384", {"P-384", NID_secp384r1, 48}},
-    {"P-521", {"P-521", NID_secp521r1, 66}},
+    {"P-256", {"P-256", CurveBackend::BoringSsl, NID_X9_62_prime256v1, 32}},
+    {"P-384", {"P-384", CurveBackend::BoringSsl, NID_secp384r1, 48}},
+    {"P-521", {"P-521", CurveBackend::BoringSsl, NID_secp521r1, 66}},
   };
   auto iter = registeredCurves.find(curveName);
   if (iter == registeredCurves.end()) return kj::none;
@@ -474,7 +487,7 @@ EllipticCurveInfo lookupEllipticCurve(jsg::Lock& js, kj::StringPtr curveName) {
   // secp256k1 is gated behind a compatibility flag while the backend is landing.
   if (FeatureFlags::get(js).getSecp256k1EcdsaCurve() &&
       strcasecmp(curveName.cStr(), "secp256k1") == 0) {
-    return EllipticCurveInfo{"secp256k1"_kj, kWorkerdSecp256k1CurveId, 32};
+    return EllipticCurveInfo{"secp256k1"_kj, CurveBackend::Libsecp256k1, 0, 32};
   }
 
   JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized or unimplemented EC curve \"", curveName,
@@ -490,14 +503,14 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(jsg:
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(
       algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
+  auto [normalizedNamedCurve, backend, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
 
-  // TODO(secp256k1): once a backend is wired up, dispatch generation here
-  // instead of falling through to BoringSSL, which does not implement the
-  // secp256k1 curve.
-  JSG_REQUIRE(curveId != kWorkerdSecp256k1CurveId, DOMNotSupportedError,
-      "Key generation for \"secp256k1\" is not yet implemented. The curve is recognized but the "
-      "backend is not available in this build.");
+  // TODO(secp256k1): add a `case CurveBackend::Libsecp256k1` branch that
+  // generates a key via libsecp256k1 once the backend is wired up.
+  JSG_REQUIRE(backend == CurveBackend::BoringSsl, DOMNotSupportedError, "Key generation for \"",
+      normalizedNamedCurve,
+      "\" is not yet implemented. The curve is recognized but the backend is not available in "
+      "this build.");
 
   auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm{
     normalizedName,
@@ -742,12 +755,14 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(jsg::Lock& js,
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(
       algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
+  auto [normalizedNamedCurve, backend, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
 
-  // TODO(secp256k1): dispatch import to the dedicated backend.
-  JSG_REQUIRE(curveId != kWorkerdSecp256k1CurveId, DOMNotSupportedError,
-      "Key import for \"secp256k1\" is not yet implemented. The curve is recognized but the "
-      "backend is not available in this build.");
+  // TODO(secp256k1): add a `case CurveBackend::Libsecp256k1` branch that
+  // imports a key via libsecp256k1 once the backend is wired up.
+  JSG_REQUIRE(backend == CurveBackend::BoringSsl, DOMNotSupportedError, "Key import for \"",
+      normalizedNamedCurve,
+      "\" is not yet implemented. The curve is recognized but the backend is not available in "
+      "this build.");
 
   auto importedKey = [&, curveId = curveId] {
     if (format != "raw") {
@@ -805,13 +820,13 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(jsg::Lock& js,
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(
       algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
+  auto [normalizedNamedCurve, backend, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
 
   // The secp256k1 compatibility flag scopes support to ECDSA only; ECDH over
   // secp256k1 is not part of this work. Reject explicitly rather than falling
-  // through to the BoringSSL path with a sentinel curveId.
-  JSG_REQUIRE(curveId != kWorkerdSecp256k1CurveId, DOMNotSupportedError,
-      "ECDH is not supported for curve \"secp256k1\".");
+  // through to the BoringSSL path with a non-BoringSSL curve.
+  JSG_REQUIRE(backend == CurveBackend::BoringSsl, DOMNotSupportedError,
+      "ECDH is not supported for curve \"", normalizedNamedCurve, "\".");
 
   auto importedKey = [&, curveId = curveId] {
     auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();
@@ -1265,7 +1280,11 @@ kj::Own<CryptoKey::Impl> fromEcKey(kj::Own<EVP_PKEY> key) {
     curveName = "unknown";
   }
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(curveName);
+  // `fromEcKey()` receives an already-constructed BoringSSL `EVP_PKEY`, so the
+  // backend is always `BoringSsl` here and the lock-less lookup is the right
+  // choice. Only `normalizedNamedCurve` and `rsSize` are consumed below; the
+  // other bindings exist to match the tuple shape.
+  auto [normalizedNamedCurve, backend, curveId, rsSize] = lookupEllipticCurve(curveName);
 
   return kj::heap<EllipticKey>(
       AsymmetricKeyData{

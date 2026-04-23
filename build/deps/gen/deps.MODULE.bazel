@@ -83,6 +83,17 @@ archive_override(
     url = "https://github.com/google/highway/tarball/84379d1c73de9681b54fbe1c035a23c7bd5d272d",
 )
 
+# libsecp256k1
+http.archive(
+    name = "libsecp256k1",
+    build_file = "//:build/BUILD.libsecp256k1",
+    sha256 = "8ab7b72826f8c843e3ce25ca0d33f76cf1f96a4418ebd0168a33a2281d23c5de",
+    strip_prefix = "bitcoin-core-secp256k1-ea174fe",
+    type = "tgz",
+    url = "https://github.com/bitcoin-core/secp256k1/tarball/ea174fe045e1832548cd3b7090958afe9573ad2b",
+)
+use_repo(http, "libsecp256k1")
+
 # nbytes
 http.archive(
     name = "nbytes",
