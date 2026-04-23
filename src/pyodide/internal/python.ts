@@ -43,6 +43,7 @@ import { PyodideVersion } from 'pyodide-internal:const';
 import { default as pythonStdlibZip } from 'pyodideRuntime-internal:python_stdlib.zip';
 import { default as pyodideAsmWasm } from 'pyodideRuntime-internal:pyodide.asm.wasm';
 import { instantiateEmscriptenModule } from 'pyodideRuntime-internal:emscriptenSetup';
+import { createImportProxy } from 'pyodide-internal:serializeJsModule';
 
 // Wire the PythonWorkersInternalError constructor's reporter to the C++ FatalReporter module.
 // See util.ts for why this indirection is needed (pool bundling constraints).
@@ -249,7 +250,14 @@ export async function loadPyodide(
       instantiateEmscriptenModule(IS_WORKERD, pythonStdlibZip, pyodideAsmWasm)
     );
     Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
-    Module.API.config.jsglobals = globalThis;
+    if (Module.API.version === PyodideVersion.V0_28_2) {
+      Module.API.config.jsglobals = createImportProxy(
+        'global this',
+        globalThis
+      );
+    } else {
+      Module.API.config.jsglobals = globalThis;
+    }
     if (isWorkerd) {
       Module.API.config.resolveLockFilePromise!(lockfile);
     }

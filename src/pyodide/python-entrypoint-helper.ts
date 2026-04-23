@@ -27,6 +27,7 @@ import {
 } from 'pyodide-internal:python';
 import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
+  fillSnapshotJsModules,
   LOADED_SNAPSHOT_TYPE,
   maybeCollectDedicatedSnapshot,
 } from 'pyodide-internal:snapshot';
@@ -115,6 +116,7 @@ export async function setDoAnImport(
       throw new PythonWorkersInternalError(message);
     },
   };
+  await fillSnapshotJsModules(doAnImport);
 }
 
 function handleSrcImport(pyodide: Pyodide, e: any): never {
