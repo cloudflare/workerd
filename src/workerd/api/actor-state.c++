@@ -1301,6 +1301,12 @@ kj::Array<kj::StringPtr> DurableObjectState::getTags(jsg::Lock& js, jsg::Ref<api
   return ws->getHibernatableTags();
 }
 
+jsg::Promise<void> DurableObjectState::configureReadReplication(
+    jsg::Lock& js, DurableObjectStorage::ReadReplicationOptions options) {
+  return JSG_REQUIRE_NONNULL(storage, TypeError, "This actor does not support read replication.")
+      ->configureReadReplication(js, kj::mv(options));
+}
+
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value) {
   jsg::Serializer serializer(js,
       jsg::Serializer::Options{

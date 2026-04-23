@@ -709,6 +709,9 @@ interface DurableObjectState<Props = unknown> {
   getHibernatableWebSocketEventTimeout(): number | null;
   getTags(ws: WebSocket): string[];
   abort(reason?: string): void;
+  configureReadReplication(
+    options: DurableObjectReadReplicationOptions,
+  ): Promise<void>;
 }
 interface DurableObjectTransaction {
   get<T = unknown>(
@@ -785,9 +788,6 @@ interface DurableObjectStorage {
   readonly primary?: DurableObjectStub;
   ensureReplicas(): void;
   disableReplicas(): void;
-  configureReadReplication(
-    options: DurableObjectReadReplicationOptions,
-  ): Promise<void>;
 }
 interface DurableObjectReadReplicationOptions {
   mode: "auto" | "disabled";

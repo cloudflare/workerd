@@ -331,7 +331,6 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
     if (flags.getReplicaRouting()) {
       JSG_METHOD(ensureReplicas);
       JSG_METHOD(disableReplicas);
-      JSG_METHOD(configureReadReplication);
     }
 
     JSG_TS_OVERRIDE({
@@ -682,6 +681,13 @@ class DurableObjectState: public jsg::Object {
   // hibernatable, we'll throw an error because regular websockets do not have tags.
   kj::Array<kj::StringPtr> getTags(jsg::Lock& js, jsg::Ref<api::WebSocket> ws);
 
+  // Change replica settings for this Durable Object.
+  //
+  // Must be called with a mode of "auto" or "disabled". Repeat calls that set the same settings are
+  // idempotent.
+  jsg::Promise<void> configureReadReplication(
+      jsg::Lock& js, DurableObjectStorage::ReadReplicationOptions options);
+
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     if (flags.getEnableCtxExports()) {
@@ -706,6 +712,10 @@ class DurableObjectState: public jsg::Object {
     JSG_METHOD(getTags);
 
     JSG_METHOD(abort);
+
+    if (flags.getReplicaRouting()) {
+      JSG_METHOD(configureReadReplication);
+    }
 
     JSG_TS_ROOT();
 
