@@ -144,7 +144,7 @@ class ExecProcess: public jsg::Object {
 // etc.
 class Container: public jsg::Object {
  public:
-  Container(rpc::Container::Client rpcClient, bool running);
+  Container(rpc::Container::Client rpcClient, bool running, kj::Maybe<kj::String> instanceId);
 
   struct DirectorySnapshot {
     kj::String id;
@@ -230,6 +230,12 @@ class Container: public jsg::Object {
     return running;
   }
 
+  // Returns the unique instance identifier for the current container,
+  // or JS undefined if no container is running or ID is unavailable.
+  jsg::Optional<kj::StringPtr> getInstanceId() const {
+    return instanceId.map([](const kj::String& s) -> kj::StringPtr { return s; });
+  }
+
   // Methods correspond closely to the RPC interface in `container.capnp`.
   void start(jsg::Lock& js, jsg::Optional<StartupOptions> options);
   jsg::Promise<void> monitor(jsg::Lock& js);
@@ -254,6 +260,7 @@ class Container: public jsg::Object {
 
   JSG_RESOURCE_TYPE(Container, CompatibilityFlags::Reader flags) {
     JSG_READONLY_PROTOTYPE_PROPERTY(running, getRunning);
+    JSG_READONLY_PROTOTYPE_PROPERTY(instanceId, getInstanceId);
     JSG_METHOD(start);
     JSG_METHOD(monitor);
     JSG_METHOD(destroy);
@@ -274,11 +281,14 @@ class Container: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("destroyReason", destroyReason);
+    KJ_IF_SOME(i, instanceId) { tracker.trackField("instanceId", i); }
   }
 
  private:
   IoOwn<rpc::Container::Client> rpcClient;
   bool running;
+  kj::Maybe<kj::String> instanceId;
+  uint64_t lifecycleEpoch = 0;
 
   kj::Maybe<jsg::Value> destroyReason;
 

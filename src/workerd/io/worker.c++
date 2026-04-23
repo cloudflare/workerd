@@ -3919,6 +3919,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
 
   try {
     bool containerRunning = false;
+    kj::Maybe<kj::String> containerInstanceId;
     KJ_IF_SOME(c, impl->container) {
       // We need to do an RPC to check if the container is running.
       // TODO(perf): It would be nice if we could have started this RPC earlier, e.g. in parallel
@@ -3927,9 +3928,17 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       //   not a huge deal.
       auto status = co_await c.statusRequest(capnp::MessageSize{4, 0}).send();
       containerRunning = status.getRunning();
+      // Defense-in-depth: only accept instanceId when running AND field is present.
+      // This protects the JS invariant (instanceId !== undefined → running === true)
+      // even if a producer regresses and sends instanceId for non-running containers.
+      if (containerRunning && status.hasInstanceId()) {
+        containerInstanceId = kj::str(status.getInstanceId());
+      }
     }
 
-    co_await context.run([this, &info, containerRunning](Worker::Lock& lock) {
+    co_await context.run([this, &info, containerRunning,
+                          containerInstanceId = kj::mv(containerInstanceId)](
+                             Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
@@ -3940,6 +3949,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
           jsg::JsValue(KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).getHandle(js)),
           impl->props.toJs(js), kj::mv(storage), kj::mv(impl->container), containerRunning,
+          kj::mv(containerInstanceId),
           impl->facetManager, impl->version.map([](ActorVersion& v) {
         return ActorVersion{.cohort = v.cohort.map([](kj::String& s) { return kj::str(s); })};
       }));

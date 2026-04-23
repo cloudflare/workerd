@@ -1520,7 +1520,7 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   // We check if the container with the given name exist, and if it's not,
   // we simply return false while avoiding an unnecessary error.
   if (response.statusCode == 404) {
-    co_return InspectResponse{.isRunning = false};
+    co_return InspectResponse{.isRunning = false, .id = kj::none};
   }
 
   JSG_REQUIRE(response.statusCode == 200, Error, "Container inspect failed");
@@ -1538,7 +1538,7 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   // perspective, a restarting container is still "alive" and should be treated as running
   // so that start() correctly refuses to start a duplicate and destroy() can clean it up.
   bool running = status == "running" || status == "restarting";
-  co_return InspectResponse{.isRunning = running};
+  co_return InspectResponse{.isRunning = running, .id = kj::str(jsonRoot.getId())};
 }
 
 kj::Promise<kj::Maybe<ContainerClient::SidecarInspectResponse>> ContainerClient::inspectSidecar() {
@@ -2161,12 +2161,12 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
   co_await ready;
   KJ_DEFER(done->fulfill());
 
-  const auto [isRunning] = co_await inspectContainer();
-  containerStarted.store(isRunning, std::memory_order_release);
+  auto inspect = co_await inspectContainer();
+  containerStarted.store(inspect.isRunning, std::memory_order_release);
   containerSidecarStarted.store(false, std::memory_order_release);
   this->sidecarIngressHostPort = kj::none;
 
-  if (isRunning) {
+  if (inspect.isRunning) {
     // If the sidecar container is already running (e.g. workerd restarted while
     // containers stayed up), recover its published ingress port, then configure
     // it to use our current egress listener port.
@@ -2179,7 +2179,14 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
     co_await readCACert();
   }
 
-  context.getResults().setRunning(isRunning);
+  auto results = context.getResults();
+  results.setRunning(inspect.isRunning);
+  // Only set instanceId when running (preserves JS invariant)
+  if (inspect.isRunning) {
+    KJ_IF_SOME(id, inspect.id) {
+      results.setInstanceId(id);
+    }
+  }
 }
 
 kj::Promise<void> ContainerClient::start(StartContext context) {
@@ -2261,6 +2268,12 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   co_await startContainer();
 
   containerStarted.store(true, std::memory_order_release);
+
+  // Set the Docker container ID as instanceId
+  auto inspect = co_await inspectContainer();
+  KJ_IF_SOME(id, inspect.id) {
+    context.getResults().setInstanceId(id);
+  }
 }
 
 kj::Promise<void> ContainerClient::monitor(MonitorContext context) {

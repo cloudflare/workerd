@@ -79,6 +79,7 @@ export class DurableObjectExample extends DurableObject {
     }
 
     assert.strictEqual(container.running, false);
+    assert.strictEqual(container.instanceId, undefined);
 
     // Start container with valid configuration
     container.start({
@@ -90,10 +91,29 @@ export class DurableObjectExample extends DurableObject {
 
     await this.waitUntilContainerIsHealthy();
 
+    assert.strictEqual(typeof container.instanceId, 'string');
+    assert.ok(container.instanceId.length > 0);
+    const firstInstanceId = container.instanceId;
+
     await container.destroy();
 
     await monitor;
     assert.strictEqual(container.running, false);
+    assert.strictEqual(container.instanceId, undefined);
+
+    // Restart — instanceId must change (new container provisioned)
+    container.start({
+      env: { A: 'B', C: 'D', L: 'F' },
+      enableInternet: true,
+    });
+    const monitor2 = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    assert.strictEqual(typeof container.instanceId, 'string');
+    assert.notStrictEqual(container.instanceId, firstInstanceId);
+
+    await container.destroy();
+    await monitor2;
   }
 
   async testExec() {
