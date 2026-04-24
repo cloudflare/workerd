@@ -45,11 +45,21 @@ class Secp256k1Key final: public CryptoKey::Impl {
       bool extractable,
       CryptoKeyUsageSet usages);
 
+  // Import a secp256k1 public key from a JSON Web Key (RFC 7517 / RFC 7518).
+  // The JWK must have `kty` = "EC" and `crv` = "secp256k1". The `x` and `y`
+  // coordinates are base64url-encoded 32-byte scalars. Private-key JWKs
+  // (those with a `d` field) are rejected until the signing path lands.
+  static kj::Own<CryptoKey::Impl> importJwk(jsg::Lock& js,
+      SubtleCrypto::JsonWebKey&& jwk,
+      CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
+      bool extractable,
+      CryptoKeyUsageSet usages);
+
   // ---------------------------------------------------------------------
   // CryptoKey::Impl overrides
 
   kj::StringPtr getAlgorithmName() const override {
-    return "ECDSA"_kj;
+    return "ECDSA";
   }
 
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
@@ -57,7 +67,7 @@ class Secp256k1Key final: public CryptoKey::Impl {
   }
 
   kj::StringPtr getType() const override {
-    return "public"_kj;
+    return "public";
   }
 
   bool verify(jsg::Lock& js,

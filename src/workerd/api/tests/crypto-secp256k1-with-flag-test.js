@@ -197,17 +197,153 @@ export const generateKeyNotYetImplemented = {
   },
 };
 
-export const importJwkNotYetImplemented = {
+// -----------------------------------------------------------------------
+// JWK import/export — RFC 7517 + RFC 7518 + RFC 8812
+// -----------------------------------------------------------------------
+//
+// Instead of hardcoding base64url coordinate values (which is easy to get
+// wrong), we derive a known-good JWK via a raw import + JWK export, then
+// exercise import/round-trip against that. The raw input is the secp256k1
+// generator point G (SEC 2 §2.4.1) — a well-defined constant we already
+// use above.
+
+async function makeGeneratorJwk() {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    GENERATOR_PUBKEY_COMPRESSED,
+    { name: 'ECDSA', namedCurve: 'secp256k1' },
+    true,
+    ['verify']
+  );
+  return await crypto.subtle.exportKey('jwk', key);
+}
+
+export const exportJwkShape = {
   async test() {
+    const jwk = await makeGeneratorJwk();
+    strictEqual(jwk.kty, 'EC');
+    strictEqual(jwk.crv, 'secp256k1');
+    strictEqual(typeof jwk.x, 'string');
+    strictEqual(typeof jwk.y, 'string');
+    strictEqual(jwk.d, undefined);
+    strictEqual(jwk.ext, true);
+    ok(Array.isArray(jwk.key_ops));
+    ok(jwk.key_ops.includes('verify'));
+    // base64url-decoding a 32-byte value yields a string of length
+    // ceil(32 * 4 / 3) with '=' padding stripped = 43 characters.
+    strictEqual(jwk.x.length, 43);
+    strictEqual(jwk.y.length, 43);
+    // base64url uses [A-Za-z0-9_-], never '+', '/', or '='.
+    ok(/^[A-Za-z0-9_-]+$/.test(jwk.x));
+    ok(/^[A-Za-z0-9_-]+$/.test(jwk.y));
+  },
+};
+
+export const importJwkPublic = {
+  async test() {
+    const jwk = await makeGeneratorJwk();
+    const key = await crypto.subtle.importKey(
+      'jwk',
+      jwk,
+      { name: 'ECDSA', namedCurve: 'secp256k1' },
+      true,
+      ['verify']
+    );
+    strictEqual(key.type, 'public');
+    strictEqual(key.algorithm.name, 'ECDSA');
+    strictEqual(key.algorithm.namedCurve, 'secp256k1');
+    ok(key.usages.includes('verify'));
+  },
+};
+
+export const jwkRoundTrip = {
+  async test() {
+    // raw -> JWK export -> JWK import -> raw export: should equal original.
+    const fromRaw = await crypto.subtle.importKey(
+      'raw',
+      GENERATOR_PUBKEY_COMPRESSED,
+      { name: 'ECDSA', namedCurve: 'secp256k1' },
+      true,
+      ['verify']
+    );
+    const exportedJwk = await crypto.subtle.exportKey('jwk', fromRaw);
+    const fromJwk = await crypto.subtle.importKey(
+      'jwk',
+      exportedJwk,
+      { name: 'ECDSA', namedCurve: 'secp256k1' },
+      true,
+      ['verify']
+    );
+    const reExportedRaw = new Uint8Array(
+      await crypto.subtle.exportKey('raw', fromJwk)
+    );
+    strictEqual(reExportedRaw.byteLength, GENERATOR_PUBKEY_COMPRESSED.length);
+    for (let i = 0; i < reExportedRaw.length; i++) {
+      strictEqual(
+        reExportedRaw[i],
+        GENERATOR_PUBKEY_COMPRESSED[i],
+        `byte ${i} did not round-trip`
+      );
+    }
+  },
+};
+
+export const importJwkRejectsWrongKty = {
+  async test() {
+    const jwk = await makeGeneratorJwk();
+    // OKP is for Ed25519/X25519, EC is for secp256k1.
+    jwk.kty = 'OKP';
     await rejects(
       crypto.subtle.importKey(
         'jwk',
-        {
-          kty: 'EC',
-          crv: 'secp256k1',
-          x: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-          y: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-        },
+        jwk,
+        { name: 'ECDSA', namedCurve: 'secp256k1' },
+        true,
+        ['verify']
+      ),
+      (err) => {
+        strictEqual(err.name, 'DataError');
+        return true;
+      }
+    );
+  },
+};
+
+export const importJwkRejectsWrongCrv = {
+  async test() {
+    const jwk = await makeGeneratorJwk();
+    jwk.crv = 'P-256';
+    await rejects(
+      crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        { name: 'ECDSA', namedCurve: 'secp256k1' },
+        true,
+        ['verify']
+      ),
+      (err) => {
+        strictEqual(err.name, 'DataError');
+        return true;
+      }
+    );
+  },
+};
+
+export const importJwkRejectsPrivateKey = {
+  // Private key support (JWK with `d`) isn't wired up yet. Must reject
+  // clearly rather than silently dropping the private material.
+  //
+  // Use `['verify']` as the requested usage so that WebCrypto's usage
+  // validation (which rejects `['sign']` on a public key with a
+  // `SyntaxError` before we ever look at `d`) doesn't mask the error we
+  // actually want to test.
+  async test() {
+    const jwk = await makeGeneratorJwk();
+    jwk.d = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE';
+    await rejects(
+      crypto.subtle.importKey(
+        'jwk',
+        jwk,
         { name: 'ECDSA', namedCurve: 'secp256k1' },
         true,
         ['verify']
@@ -215,7 +351,7 @@ export const importJwkNotYetImplemented = {
       (err) => {
         strictEqual(err.name, 'NotSupportedError');
         ok(
-          /Key import format "jwk" is not yet implemented for secp256k1/.test(
+          /Importing secp256k1 private keys \(JWKs with a "d" field\) is not yet implemented/.test(
             err.message
           ),
           `unexpected message: ${err.message}`

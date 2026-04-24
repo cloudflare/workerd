@@ -36,7 +36,7 @@ const secp256k1_context* getSecp256k1Context() {
 }
 
 // Serialize a `secp256k1_pubkey` to its 33-byte compressed SEC1 form.
-// Used for equality comparison and potentially raw export.
+// Used for equality comparison and raw export.
 kj::Array<kj::byte> serializePubkeyCompressed(const secp256k1_pubkey& pubkey) {
   auto out = kj::heapArray<kj::byte>(33);
   size_t outLen = out.size();
@@ -44,6 +44,19 @@ kj::Array<kj::byte> serializePubkeyCompressed(const secp256k1_pubkey& pubkey) {
       getSecp256k1Context(), out.begin(), &outLen, &pubkey, SECP256K1_EC_COMPRESSED);
   KJ_ASSERT(ret == 1, "secp256k1_ec_pubkey_serialize should never fail on a valid parsed pubkey");
   KJ_ASSERT(outLen == 33, "compressed secp256k1 pubkey should always be 33 bytes");
+  return out;
+}
+
+// Serialize a `secp256k1_pubkey` to its 65-byte uncompressed SEC1 form:
+// `04 || x (32 bytes) || y (32 bytes)`. Used by JWK export, which needs the
+// `x` and `y` coordinates separately.
+kj::Array<kj::byte> serializePubkeyUncompressed(const secp256k1_pubkey& pubkey) {
+  auto out = kj::heapArray<kj::byte>(65);
+  size_t outLen = out.size();
+  auto ret = secp256k1_ec_pubkey_serialize(
+      getSecp256k1Context(), out.begin(), &outLen, &pubkey, SECP256K1_EC_UNCOMPRESSED);
+  KJ_ASSERT(ret == 1, "secp256k1_ec_pubkey_serialize should never fail on a valid parsed pubkey");
+  KJ_ASSERT(outLen == 65, "uncompressed secp256k1 pubkey should always be 65 bytes");
   return out;
 }
 
@@ -72,6 +85,63 @@ Secp256k1Key::Secp256k1Key(secp256k1_pubkey parsedPubkey,
     : CryptoKey::Impl(extractable, usages),
       parsedPubkey(parsedPubkey),
       keyAlgorithm(kj::mv(keyAlgorithm)) {}
+
+kj::Own<CryptoKey::Impl> Secp256k1Key::importJwk(jsg::Lock& js,
+    SubtleCrypto::JsonWebKey&& jwk,
+    CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
+    bool extractable,
+    CryptoKeyUsageSet usages) {
+  // RFC 7518 §6.2: EC public keys use `kty`=EC and carry `crv`, `x`, `y`.
+  // secp256k1 is not one of the NIST curves registered in the IANA JOSE
+  // registry, but RFC 8812 defines `crv`="secp256k1" (and `alg`="ES256K")
+  // for JOSE / COSE usage. We accept that curve string directly.
+
+  JSG_REQUIRE(jwk.kty == "EC", DOMDataError,
+      "secp256k1 \"jwk\" import requires a JSON Web Key with Key Type parameter \"kty\" (\"",
+      jwk.kty, "\") equal to \"EC\".");
+
+  auto& crv = JSG_REQUIRE_NONNULL(
+      jwk.crv, DOMDataError, "Missing \"crv\" field in JSON Web Key for secp256k1 import.");
+  JSG_REQUIRE(crv == "secp256k1", DOMDataError, "\"crv\" field in JSON Web Key (\"", crv,
+      "\") does not match expected \"secp256k1\".");
+
+  // If an `alg` field is present, it must be the secp256k1 JOSE identifier
+  // defined by RFC 8812. We don't require it (many JWKs omit `alg`).
+  KJ_IF_SOME(alg, jwk.alg) {
+    JSG_REQUIRE(alg == "ES256K", DOMDataError, "JSON Web Key Algorithm parameter \"alg\" (\"", alg,
+        "\") does not match the expected value \"ES256K\" for secp256k1.");
+  }
+
+  // Private-key JWKs carry a `d` component. Private keys are not yet
+  // supported for secp256k1; reject clearly rather than silently discarding
+  // the private material.
+  JSG_REQUIRE(jwk.d == kj::none, DOMNotSupportedError,
+      "Importing secp256k1 private keys (JWKs with a \"d\" field) is not yet implemented.");
+
+  // Decode the base64url-encoded coordinates. RFC 7518 §6.2.1.2/.3 requires
+  // both `x` and `y` to be the full 32-byte scalar, left-padded with zeros
+  // if necessary. We accept shorter encodings and zero-pad, matching what
+  // the NIST-curve ECDSA path does.
+  auto xBytes = JSG_REQUIRE_NONNULL(decodeBase64Url(JSG_REQUIRE_NONNULL(kj::mv(jwk.x), DOMDataError,
+                                        "Missing \"x\" field in secp256k1 JSON Web Key.")),
+      DOMDataError, "Invalid base64url encoding in JSON Web Key \"x\" field.");
+  auto yBytes = JSG_REQUIRE_NONNULL(decodeBase64Url(JSG_REQUIRE_NONNULL(kj::mv(jwk.y), DOMDataError,
+                                        "Missing \"y\" field in secp256k1 JSON Web Key.")),
+      DOMDataError, "Invalid base64url encoding in JSON Web Key \"y\" field.");
+
+  JSG_REQUIRE(xBytes.size() <= 32 && yBytes.size() <= 32, DOMDataError,
+      "secp256k1 JSON Web Key coordinates must be at most 32 bytes each.");
+
+  // Reconstruct the 65-byte uncompressed SEC1 encoding (0x04 || x || y),
+  // left-padding x and y if the JWK provided shorter encodings. Hand the
+  // result to the existing raw-import path for point validation.
+  kj::byte sec1[65] = {};
+  sec1[0] = 0x04;
+  kj::arrayPtr(sec1).slice(1 + 32 - xBytes.size(), 1 + 32).copyFrom(xBytes);
+  kj::arrayPtr(sec1).slice(1 + 32 + 32 - yBytes.size(), 65).copyFrom(yBytes);
+
+  return importRawPublic(js, kj::arrayPtr(sec1, 65), kj::mv(keyAlgorithm), extractable, usages);
+}
 
 kj::Own<CryptoKey::Impl> Secp256k1Key::importRawPublic(jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> keyData,
@@ -141,22 +211,44 @@ bool Secp256k1Key::verify(jsg::Lock& js,
 }
 
 SubtleCrypto::ExportKeyData Secp256k1Key::exportKey(jsg::Lock& js, kj::StringPtr format) const {
-  // For now we support only the "raw" format for public keys, emitting the
-  // 33-byte compressed SEC1 form. This matches what the rest of the
-  // WebCrypto ECDSA implementation does for public keys (see
+  // "raw" emits the 33-byte compressed SEC1 form, matching what the rest
+  // of the WebCrypto ECDSA implementation does for public keys (see
   // `EllipticKey::exportRaw` for the NIST curve analogue).
-  //
-  // TODO(secp256k1): implement "jwk" and "spki" public-key export.
-  JSG_REQUIRE(format == "raw", DOMNotSupportedError,
-      "Unsupported key export format for secp256k1: \"", format,
-      "\" (only \"raw\" is supported "
-      "for now).");
+  if (format == "raw") {
+    auto serialized = serializePubkeyCompressed(parsedPubkey);
+    // `ExportKeyData` is a `OneOf<jsg::JsRef<JsArrayBuffer>, JsonWebKey>`,
+    // so we need to wrap the freshly-created JsArrayBuffer in a JsRef via
+    // `.addRef(js)` — a plain JsArrayBuffer won't implicitly convert.
+    return jsg::JsArrayBuffer::create(js, serialized.asPtr()).addRef(js);
+  }
 
-  auto serialized = serializePubkeyCompressed(parsedPubkey);
-  // `ExportKeyData` is a `OneOf<jsg::JsRef<JsArrayBuffer>, JsonWebKey>`, so
-  // we need to wrap the freshly-created JsArrayBuffer in a JsRef via
-  // `.addRef(js)` — a plain JsArrayBuffer won't implicitly convert.
-  return jsg::JsArrayBuffer::create(js, serialized.asPtr()).addRef(js);
+  // "jwk" emits RFC 7517 / RFC 7518 / RFC 8812 JSON Web Key form.
+  if (format == "jwk") {
+    auto uncompressed = serializePubkeyUncompressed(parsedPubkey);
+    // uncompressed[0] is the 0x04 SEC1 tag; the following 32 bytes are x,
+    // then 32 bytes of y.
+    auto xBytes = uncompressed.slice(1, 33);
+    auto yBytes = uncompressed.slice(33, 65);
+
+    SubtleCrypto::JsonWebKey jwk;
+    jwk.kty = kj::str("EC");
+    jwk.crv = kj::str("secp256k1");
+    jwk.x = fastEncodeBase64Url(xBytes);
+    jwk.y = fastEncodeBase64Url(yBytes);
+    // `ext` and `key_ops` are set by `SubtleCrypto::exportKey`'s caller in
+    // the AsymmetricKeyCryptoKeyImpl path, but since we inherit directly
+    // from `CryptoKey::Impl`, we set them ourselves here. See the parallel
+    // code in AsymmetricKeyCryptoKeyImpl::exportKey.
+    jwk.ext = true;
+    jwk.key_ops = getUsages().map([](auto usage) { return kj::str(usage.name()); });
+    return jwk;
+  }
+
+  // TODO(secp256k1): implement "spki" public-key export (requires writing
+  // a small DER emitter since BoringSSL's EVP_marshal_public_key can't
+  // handle this curve).
+  JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unsupported key export format for secp256k1: \"", format,
+      "\" (only \"raw\" and \"jwk\" are supported).");
 }
 
 bool Secp256k1Key::equals(const CryptoKey::Impl& other) const {
