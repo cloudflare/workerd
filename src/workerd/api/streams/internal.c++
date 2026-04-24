@@ -954,8 +954,11 @@ bool ReadableStreamInternalController::lockReader(jsg::Lock& js, Reader& reader)
   auto prp = js.newPromiseAndResolver<void>();
   prp.promise.markAsHandled(js);
 
-  auto lock = ReaderLocked(reader, kj::mv(prp.resolver), reader.addRef(),
-      IoContext::current().addObject(kj::heap<kj::Canceler>()));
+  auto& ioctx = IoContext::current();
+  auto readerRef = reader.addRef().map(
+      [&ioctx](kj::Own<void> ref) { return ioctx.addObject(kj::heap(kj::mv(ref))); });
+  auto lock = ReaderLocked(
+      reader, kj::mv(prp.resolver), kj::mv(readerRef), ioctx.addObject(kj::heap<kj::Canceler>()));
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
@@ -1479,8 +1482,10 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   auto readyPrp = js.newPromiseAndResolver<void>();
   readyPrp.promise.markAsHandled(js);
 
-  auto lock =
-      WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver), writer.addRef());
+  auto writerRef = writer.addRef().map(
+      [](kj::Own<void> ref) { return IoContext::current().addObject(kj::heap(kj::mv(ref))); });
+  auto lock = WriterLocked(
+      writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver), kj::mv(writerRef));
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {

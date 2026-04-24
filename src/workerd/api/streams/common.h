@@ -825,7 +825,7 @@ class ReaderLocked {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "reader-locked"_kj;
   ReaderLocked(ReadableStreamController::Reader& reader,
       jsg::Promise<void>::Resolver closedFulfiller,
-      kj::Maybe<kj::Own<void>> readerRef = kj::none,
+      kj::Maybe<IoOwn<kj::Own<void>>> readerRef = kj::none,
       kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
       : reader(reader),
         closedFulfiller(kj::mv(closedFulfiller)),
@@ -870,6 +870,7 @@ class ReaderLocked {
   // Release the ref-counted reference to the Reader. Should be called when the
   // closedFulfiller is settled to eagerly break the ref cycle. Also released
   // automatically as a backup in visitForGc when the fulfiller has been consumed.
+  // Also released automatically by IoContext teardown since the ref is IoOwn-managed.
   void releaseReaderRef() {
     readerRef_ = kj::none;
   }
@@ -889,11 +890,13 @@ class ReaderLocked {
  private:
   kj::Maybe<ReadableStreamController::Reader&> reader;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
-  // Ref-counted reference to the Reader. Keeps the Reader's C++ object alive
-  // independently of its JS wrapper, so that a reader created as a temporary (e.g.,
-  // `rs.getReader().closed.then(...)`) is not collected by GC before the stream has
-  // a chance to settle the closedFulfiller.
-  kj::Maybe<kj::Own<void>> readerRef_;
+  // Ref-counted reference to the Reader, managed by the IoContext. Keeps the Reader's
+  // C++ object alive independently of its JS wrapper, so that a reader created as a
+  // temporary (e.g., `rs.getReader().closed.then(...)`) is not collected by GC before
+  // the stream has a chance to settle the closedFulfiller. Using IoOwn ensures the ref
+  // is released when the IoContext is torn down, breaking the cycle and preventing leaks
+  // when streams never reach a terminal state.
+  kj::Maybe<IoOwn<kj::Own<void>>> readerRef_;
   kj::Maybe<IoOwn<kj::Canceler>> canceler;
 };
 
@@ -905,7 +908,7 @@ class WriterLocked {
   WriterLocked(WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none,
-      kj::Maybe<kj::Own<void>> writerRef = kj::none)
+      kj::Maybe<IoOwn<kj::Own<void>>> writerRef = kj::none)
       : writer(writer),
         closedFulfiller(kj::mv(closedFulfiller)),
         readyFulfiller(kj::mv(readyFulfiller)),
@@ -954,6 +957,7 @@ class WriterLocked {
   // Release the ref-counted reference to the Writer. Should be called when the
   // closedFulfiller is settled to eagerly break the ref cycle. Also released
   // automatically as a backup in visitForGc when the fulfiller has been consumed.
+  // Also released automatically by IoContext teardown since the ref is IoOwn-managed.
   void releaseWriterRef() {
     writerRef_ = kj::none;
   }
@@ -974,11 +978,9 @@ class WriterLocked {
   kj::Maybe<WritableStreamController::Writer&> writer;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
   kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller;
-  // Ref-counted reference to the Writer. Keeps the Writer's C++ object alive
-  // independently of its JS wrapper, so that a writer created as a temporary (e.g.,
-  // `ws.getWriter().closed.then(...)`) is not collected by GC before the stream has
-  // a chance to settle the closedFulfiller.
-  kj::Maybe<kj::Own<void>> writerRef_;
+  // Ref-counted reference to the Writer, managed by the IoContext. See ReaderLocked
+  // for detailed explanation.
+  kj::Maybe<IoOwn<kj::Own<void>>> writerRef_;
 };
 
 template <typename T>

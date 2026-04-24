@@ -244,7 +244,9 @@ bool ReadableLockImpl<Controller>::lockReader(jsg::Lock& js, Controller& self, R
   auto prp = js.newPromiseAndResolver<void>();
   prp.promise.markAsHandled(js);
 
-  auto lock = ReaderLocked(reader, kj::mv(prp.resolver), reader.addRef());
+  auto readerRef = reader.addRef().map(
+      [](kj::Own<void> ref) { return IoContext::current().addObject(kj::heap(kj::mv(ref))); });
+  auto lock = ReaderLocked(reader, kj::mv(prp.resolver), kj::mv(readerRef));
 
   if (self.state.template is<StreamStates::Closed>()) {
     maybeResolvePromise(js, lock.getClosedFulfiller());
@@ -384,8 +386,10 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   auto readyPrp = js.newPromiseAndResolver<void>();
   readyPrp.promise.markAsHandled(js);
 
-  auto lock =
-      WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver), writer.addRef());
+  auto writerRef = writer.addRef().map(
+      [](kj::Own<void> ref) { return IoContext::current().addObject(kj::heap(kj::mv(ref))); });
+  auto lock = WriterLocked(
+      writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver), kj::mv(writerRef));
 
   if (self.state.template is<StreamStates::Closed>()) {
     maybeResolvePromise(js, lock.getClosedFulfiller());
