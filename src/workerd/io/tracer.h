@@ -247,7 +247,7 @@ class UserSpanObserver final: public SpanObserver {
   void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   kj::Date getTime() override;
   kj::Maybe<tracing::SpanContext> toSpanContext() override;
-  tracing::SpanId getSpanId();
+  tracing::SpanId getSpanId() override;
 
  private:
   kj::Own<SpanSubmitter> submitter;

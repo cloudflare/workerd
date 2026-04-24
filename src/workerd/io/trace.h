@@ -1051,6 +1051,9 @@ class SpanParent {
   // Return the serializable identity of this span for cross-boundary propagation.
   kj::Maybe<tracing::SpanContext> toSpanContext();
 
+  // Returns the observer's spanId, or SpanId::nullId if there is none.
+  tracing::SpanId getSpanId();
+
  private:
   kj::Maybe<kj::Own<SpanObserver>> observer;
 };
@@ -1186,6 +1189,14 @@ class SpanObserver: public kj::Refcounted {
   virtual kj::Maybe<tracing::SpanContext> toSpanContext() {
     return kj::none;
   }
+
+  // Returns this observer's spanId, or SpanId::nullId if it has no identity (top-level
+  // root observer). Unlike toSpanContext(), no traceId is required: user-tracing
+  // observers carry a spanId even when the USER_SPAN_CONTEXT_PROPAGATION autogate is
+  // disabled.
+  virtual tracing::SpanId getSpanId() {
+    return tracing::SpanId::nullId;
+  }
 };
 
 inline kj::Maybe<tracing::SpanContext> SpanParent::toSpanContext() {
@@ -1193,6 +1204,13 @@ inline kj::Maybe<tracing::SpanContext> SpanParent::toSpanContext() {
     return obs->toSpanContext();
   }
   return kj::none;
+}
+
+inline tracing::SpanId SpanParent::getSpanId() {
+  KJ_IF_SOME(obs, observer) {
+    return obs->getSpanId();
+  }
+  return tracing::SpanId::nullId;
 }
 
 inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}

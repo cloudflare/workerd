@@ -1119,6 +1119,16 @@ SpanParent IoContext::getCurrentTraceSpan() {
 }
 
 SpanParent IoContext::getCurrentUserTraceSpan() {
+  // Skip the AsyncContextFrame probe when user tracing isn't wired up: an unobserved
+  // root means enterSpan can't have pushed anything (see Tracing::enterSpan).
+  if (incomingRequests.empty()) {
+    return SpanParent(nullptr);
+  }
+  SpanParent root = getCurrentIncomingRequest().getRootUserTraceSpan();
+  if (!root.isObserved()) {
+    return kj::mv(root);
+  }
+
   // If called while lock is held, try to use the trace info stored in the async context.
   KJ_IF_SOME(lock, currentLock) {
     KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
@@ -1130,11 +1140,7 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
       }
     }
   }
-  // If async context is unavailable, fall back to the root user span of the current request.
-  if (incomingRequests.empty()) {
-    return SpanParent(nullptr);
-  }
-  return getCurrentIncomingRequest().getRootUserTraceSpan();
+  return kj::mv(root);
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {

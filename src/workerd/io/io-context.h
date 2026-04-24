@@ -909,8 +909,16 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentTraceSpan();
   SpanParent getCurrentUserTraceSpan();
 
-  tracing::InvocationSpanContext& getInvocationSpanContext() {
-    return getCurrentIncomingRequest().getInvocationSpanContext();
+  // Returns the invocation's traceId/invocationId paired with the currently-active user
+  // span's spanId (as pushed by `ctx.tracing.enterSpan`), falling back to the invocation
+  // root's spanId when no user span is active.
+  tracing::InvocationSpanContext getInvocationSpanContext() {
+    auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
+    tracing::SpanId sid = getCurrentUserTraceSpan().getSpanId();
+    if (sid != tracing::SpanId::nullId) {
+      return tracing::InvocationSpanContext(base.getTraceId(), base.getInvocationId(), sid);
+    }
+    return base.clone();
   }
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
