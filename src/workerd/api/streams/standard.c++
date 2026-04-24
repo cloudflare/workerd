@@ -384,14 +384,17 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   auto readyPrp = js.newPromiseAndResolver<void>();
   readyPrp.promise.markAsHandled(js);
 
-  auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
+  auto lock =
+      WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver), writer.addRef());
 
   if (self.state.template is<StreamStates::Closed>()) {
     maybeResolvePromise(js, lock.getClosedFulfiller());
     maybeResolvePromise(js, lock.getReadyFulfiller());
+    lock.releaseWriterRef();
   } else KJ_IF_SOME(errored, self.state.template tryGetUnsafe<StreamStates::Errored>()) {
     maybeRejectPromise<void>(js, lock.getClosedFulfiller(), errored.getHandle(js));
     maybeRejectPromise<void>(js, lock.getReadyFulfiller(), errored.getHandle(js));
+    lock.releaseWriterRef();
   } else {
     if (FeatureFlags::get(js).getWritableStreamSpecCompliantWriter()) {
       // Per spec (SetUpWritableStreamDefaultWriter step 4), the ready promise
@@ -3956,6 +3959,7 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
   KJ_IF_SOME(locked, lock.state.tryGetUnsafe<WriterLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
     maybeResolvePromise(js, locked.getReadyFulfiller());
+    locked.releaseWriterRef();
   } else {
     (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
   }
@@ -3974,6 +3978,7 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   KJ_IF_SOME(locked, lock.state.tryGetUnsafe<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
+    locked.releaseWriterRef();
   } else KJ_IF_SOME(pipeLocked, lock.state.tryGetUnsafe<WritableLockImpl::PipeLocked>()) {
     // When the writable side of a pipe errors, we need to release the source stream.
     // The pipeLoop may be waiting on a read from the source that will never complete,

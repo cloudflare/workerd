@@ -1479,16 +1479,19 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   auto readyPrp = js.newPromiseAndResolver<void>();
   readyPrp.promise.markAsHandled(js);
 
-  auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
+  auto lock =
+      WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver), writer.addRef());
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       maybeResolvePromise(js, lock.getClosedFulfiller());
       maybeResolvePromise(js, lock.getReadyFulfiller());
+      lock.releaseWriterRef();
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       maybeRejectPromise<void>(js, lock.getClosedFulfiller(), errored.getHandle(js));
       maybeRejectPromise<void>(js, lock.getReadyFulfiller(), errored.getHandle(js));
+      lock.releaseWriterRef();
     }
     KJ_CASE_ONEOF(writable, IoOwn<Writable>) {
       maybeResolvePromise(js, lock.getReadyFulfiller());
@@ -1544,6 +1547,7 @@ void WritableStreamInternalController::doClose(jsg::Lock& js) {
   KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
     maybeResolvePromise(js, locked.getReadyFulfiller());
+    locked.releaseWriterRef();
     writeState.transitionTo<Locked>();
   } else {
     (void)writeState.transitionFromTo<PipeLocked, Unlocked>();
@@ -1559,6 +1563,7 @@ void WritableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
   KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
+    locked.releaseWriterRef();
     writeState.transitionTo<Locked>();
   } else {
     (void)writeState.transitionFromTo<PipeLocked, Unlocked>();

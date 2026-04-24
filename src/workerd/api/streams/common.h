@@ -676,6 +676,13 @@ class WritableStreamController {
     // The ready promise can be replaced whenever backpressure is signaled by the underlying
     // controller.
     virtual void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) = 0;
+
+    // Returns a ref-counted reference to this Writer, keeping it alive independently of
+    // its JS wrapper. Used by WriterLocked to prevent premature GC of the writer while
+    // the stream still needs it. Returns kj::none for non-ref-counted writers.
+    virtual kj::Maybe<kj::Own<void>> addRef() {
+      return kj::none;
+    }
   };
 
   struct PendingAbort {
@@ -897,20 +904,32 @@ class WriterLocked {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "writer-locked"_kj;
   WriterLocked(WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
-      kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
+      kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none,
+      kj::Maybe<kj::Own<void>> writerRef = kj::none)
       : writer(writer),
         closedFulfiller(kj::mv(closedFulfiller)),
-        readyFulfiller(kj::mv(readyFulfiller)) {}
+        readyFulfiller(kj::mv(readyFulfiller)),
+        writerRef_(kj::mv(writerRef)) {}
 
   WriterLocked(WriterLocked&&) = default;
   ~WriterLocked() noexcept(false) {
-    KJ_IF_SOME(w, writer) {
-      w.detach();
-    }
+    // Note: we intentionally do NOT call writer.detach() here. In the normal flow, the
+    // controller settles the closedFulfiller and the writer is detached explicitly via
+    // releaseWriter(). If we get here with the writer still set, it means the stream is
+    // being torn down — calling detach() on a potentially-destroyed writer would be
+    // undefined behavior (the writer may already be mid-destruction if this is part of a
+    // GC cascade). The writerRef_ prevents premature destruction of JSG writers.
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(closedFulfiller, readyFulfiller);
+    // Once the closedFulfiller has been settled (consumed by maybeResolvePromise or
+    // maybeRejectPromise, which set it to kj::none), the writer ref is no longer needed.
+    // Release it to break the ref cycle: WriterLocked → Writer → Ref<WritableStream> →
+    // controller → WriterLocked.
+    if (closedFulfiller == kj::none) {
+      writerRef_ = kj::none;
+    }
   }
 
   WritableStreamController::Writer& getWriter() {
@@ -932,10 +951,18 @@ class WriterLocked {
     }
   }
 
+  // Release the ref-counted reference to the Writer. Should be called when the
+  // closedFulfiller is settled to eagerly break the ref cycle. Also released
+  // automatically as a backup in visitForGc when the fulfiller has been consumed.
+  void releaseWriterRef() {
+    writerRef_ = kj::none;
+  }
+
   void clear() {
     writer = kj::none;
     closedFulfiller = kj::none;
     readyFulfiller = kj::none;
+    writerRef_ = kj::none;
   }
 
   JSG_MEMORY_INFO(WriterLocked) {
@@ -947,6 +974,11 @@ class WriterLocked {
   kj::Maybe<WritableStreamController::Writer&> writer;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
   kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller;
+  // Ref-counted reference to the Writer. Keeps the Writer's C++ object alive
+  // independently of its JS wrapper, so that a writer created as a temporary (e.g.,
+  // `ws.getWriter().closed.then(...)`) is not collected by GC before the stream has
+  // a chance to settle the closedFulfiller.
+  kj::Maybe<kj::Own<void>> writerRef_;
 };
 
 template <typename T>

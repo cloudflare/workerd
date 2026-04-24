@@ -72,6 +72,10 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   void detach() override;
 
+  kj::Maybe<kj::Own<void>> addRef() override {
+    return kj::addRef(*this);
+  }
+
   void lockToStream(jsg::Lock& js, WritableStream& stream);
 
   void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) override;
