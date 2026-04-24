@@ -1534,14 +1534,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   secp256k1EcdsaCurve @176 :Bool
       $compatEnableFlag("secp256k1_ecdsa_curve")
       $experimental;
-  # When enabled, adds "secp256k1" as a supported namedCurve for the WebCrypto
-  # ECDSA algorithm (crypto.subtle.generateKey / importKey / sign / verify /
-  # exportKey). secp256k1 is the elliptic curve used by Bitcoin, Ethereum, and
-  # other EVM-compatible chains (see SEC 2 v1.0 / RFC 5480). BoringSSL does not
-  # implement secp256k1; when this flag is enabled, curve operations are routed
-  # to a dedicated secp256k1 backend. The curve is usable anywhere the existing
-  # NIST curves (P-256 / P-384 / P-521) are usable: keys may be generated,
-  # imported (JWK with `"crv": "secp256k1"`, raw, spki, pkcs8), exported, and
-  # used to sign and verify. This flag is experimental while the backend is
-  # being landed; once stable, a $compatEnableDate will be set.
+  # When enabled, the WebCrypto ECDSA algorithm accepts "secp256k1" as a
+  # namedCurve, allowing import, export, sign, verify, and generateKey on
+  # secp256k1 keys. ECDH over secp256k1 remains unsupported.
 }

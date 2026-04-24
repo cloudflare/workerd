@@ -430,8 +430,8 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 
 struct EllipticCurveInfo {
   kj::StringPtr normalizedName;
-  int opensslCurveId;  // NOTE: Not used by sepc256k1 (set to 0)
-  uint rsSize;         // size of "r" and "s" in the signature.
+  int opensslCurveId;  // 0 for curves BoringSSL doesn't support (e.g. secp256k1).
+  uint rsSize;         // Size of "r" and "s" in the signature.
 };
 
 EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
@@ -447,12 +447,11 @@ EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
   return iter->second;
 }
 
-// Overload that additionally honours the `secp256k1_ecdsa_curve` compatibility flag
+// Overload that adds secp256k1 to the table when the compat flag is set.
 EllipticCurveInfo lookupEllipticCurve(jsg::Lock& js, kj::StringPtr curveName) {
-  // secp256k1 is not available via BoringSSL, so we route it to libsecp256k1.
   if (FeatureFlags::get(js).getSecp256k1EcdsaCurve() &&
       strcasecmp(curveName.cStr(), "secp256k1") == 0) {
-    return {"secp256k1"_kj, 0, 32};
+    return {"secp256k1", 0, 32};
   }
   return lookupEllipticCurve(curveName);
 }
@@ -468,10 +467,14 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(jsg:
 
   auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
 
-  // TODO: Implement secp256k1 key generation via libsecp256k1
-  JSG_REQUIRE(strcasecmp(normalizedNamedCurve.cStr(), "secp256k1") != 0, DOMNotSupportedError,
-      "Key generation for \"secp256k1\" is not yet implemented. The curve is recognized but the "
-      "backend is not available in this build.");
+  // The compat flag scopes secp256k1 support to ECDSA; ECDH is rejected.
+  if (strcasecmp(normalizedNamedCurve.cStr(), "secp256k1") == 0) {
+    JSG_REQUIRE(normalizedName == "ECDSA", DOMNotSupportedError, "\"", normalizedName,
+        "\" is not supported for curve \"secp256k1\".");
+    return Secp256k1Key::generatePair(js,
+        CryptoKey::EllipticKeyAlgorithm{normalizedName, normalizedNamedCurve}, extractable,
+        privateKeyUsages, publicKeyUsages);
+  }
 
   auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm{
     normalizedName,
@@ -718,30 +721,10 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(jsg::Lock& js,
 
   auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
 
-  // secp256k1 is not available via BoringSSL, so we route it to libsecp256k1.
-  // "raw" and "jwk" are the two formats EVM ecosystem tooling uses in
-  // practice; "spki" and "pkcs8" are not yet implemented for this curve.
   if (strcasecmp(normalizedNamedCurve.cStr(), "secp256k1") == 0) {
-    auto usages = CryptoKeyUsageSet::validate(normalizedName,
-        CryptoKeyUsageSet::Context::importPublic, keyUsages, CryptoKeyUsageSet::verify());
-    auto keyAlg = CryptoKey::EllipticKeyAlgorithm{normalizedName, normalizedNamedCurve};
-
-    if (format == "raw") {
-      JSG_REQUIRE(keyData.is<kj::Array<kj::byte>>(), DOMDataError,
-          "Expected raw secp256k1 key but got a JSON Web Key.");
-      return Secp256k1Key::importRawPublic(
-          js, keyData.get<kj::Array<kj::byte>>().asPtr(), kj::mv(keyAlg), extractable, usages);
-    }
-
-    if (format == "jwk") {
-      JSG_REQUIRE(keyData.is<SubtleCrypto::JsonWebKey>(), DOMDataError,
-          "Expected JSON Web Key but got raw bytes.");
-      return Secp256k1Key::importJwk(
-          js, kj::mv(keyData.get<SubtleCrypto::JsonWebKey>()), kj::mv(keyAlg), extractable, usages);
-    }
-
-    JSG_FAIL_REQUIRE(DOMNotSupportedError, "Key import format \"", format,
-        "\" is not yet implemented for secp256k1 (only \"raw\" and \"jwk\" are supported).");
+    return Secp256k1Key::import(js, normalizedName, format, kj::mv(keyData),
+        CryptoKey::EllipticKeyAlgorithm{normalizedName, normalizedNamedCurve}, extractable,
+        keyUsages);
   }
 
   auto importedKey = [&, curveId = curveId] {

@@ -113,11 +113,6 @@
       "build_file": "//:build/BUILD.simdutf",
       "file_regex": "singleheader.zip"
     },
-    // libsecp256k1 is Bitcoin Core's optimized implementation of ECDSA (and
-    // more) over the secp256k1 curve. BoringSSL does not implement secp256k1,
-    // so workerd vendors libsecp256k1 separately and routes WebCrypto ECDSA
-    // operations for `namedCurve: "secp256k1"` through it. The compat flag
-    // `secp256k1_ecdsa_curve` gates user-visible exposure.
     {
       "name": "libsecp256k1",
       "type": "github_tarball",

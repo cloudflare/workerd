@@ -1,12 +1,10 @@
 using Workerd = import "/workerd/workerd.capnp";
 
-# secp256k1 ECDSA support tests. Two services because the compatibility flag
-# is per-worker, and each service has its own JS file so assertions only run
-# against the scenario they apply to.
+# Two services so each side can run against a different setting of the secp256k1_ecdsa_curve
+# compat flag. The flag is per-worker.
 
 const unitTests :Workerd.Config = (
   services = [
-    # Flag disabled: exercises the "unrecognized curve" regression path.
     ( name = "crypto-secp256k1-no-flag",
       worker = (
         modules = [
@@ -15,9 +13,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat"],
       )
     ),
-    # Flag enabled but backend not wired: exercises the "recognized curve,
-    # backend missing" path. Once the backend lands the test assertions flip
-    # from "asserts failure" to "asserts success".
     ( name = "crypto-secp256k1-with-flag",
       worker = (
         modules = [

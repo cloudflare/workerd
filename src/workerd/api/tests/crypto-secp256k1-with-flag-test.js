@@ -1,221 +1,197 @@
 // Copyright (c) 2026 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-//
-// secp256k1 ECDSA — behaviour when the `secp256k1_ecdsa_curve` compatibility
-// flag is enabled. The curve is dispatched through libsecp256k1 (BoringSSL
-// does not implement secp256k1).
-//
-// Current scope: `importKey("raw", publicKey)` and `verify(signature, data)`.
-// Other operations (generateKey, sign, JWK import/export, SPKI, PKCS8) are
-// not yet wired to the libsecp256k1 backend; tests for those assert the
-// explicit "not yet implemented" rejections so the stubs can't regress
-// silently.
-//
-// When sign/generate/JWK lands, flip the matching asserts from "must fail"
-// to "must succeed" and add end-to-end round-trip tests.
+import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert';
 
-import { rejects, strictEqual, ok } from 'node:assert';
-
-// -----------------------------------------------------------------------
-// Known-good secp256k1 public key for positive tests.
-//
-// 33-byte SEC1 compressed encoding of the secp256k1 generator point G
-// (i.e. the public key for private key d = 1). This is not secret —
-// it's literally the curve's generator. It's a stable, well-documented
-// point that lets us exercise the import path without needing to ship
-// test-only signing machinery.
-// -----------------------------------------------------------------------
+// secp256k1 generator G (the public key for private key d = 1), defined in SEC 2 §2.4.1.
 const GENERATOR_PUBKEY_COMPRESSED = new Uint8Array([
   0x02, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95,
   0xce, 0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59,
   0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98,
 ]);
+const GENERATOR_PUBKEY_UNCOMPRESSED = new Uint8Array([
+  0x04, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95,
+  0xce, 0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59,
+  0xf2, 0x81, 0x5b, 0x16, 0xf8, 0x17, 0x98, 0x48, 0x3a, 0xda, 0x77, 0x26, 0xa3,
+  0xc4, 0x65, 0x5d, 0xa4, 0xfb, 0xfc, 0x0e, 0x11, 0x08, 0xa8, 0xfd, 0x17, 0xb4,
+  0x48, 0xa6, 0x85, 0x54, 0x19, 0x9c, 0x47, 0xd0, 0x8f, 0xfb, 0x10, 0xd4, 0xb8,
+]);
 
-// -----------------------------------------------------------------------
-// importKey — supported paths
-// -----------------------------------------------------------------------
+const ECDSA = { name: 'ECDSA', namedCurve: 'secp256k1' };
+const ECDSA_SHA256 = { name: 'ECDSA', hash: 'SHA-256' };
+
+async function importGeneratorPublic() {
+  return crypto.subtle.importKey(
+    'raw',
+    GENERATOR_PUBKEY_COMPRESSED,
+    ECDSA,
+    true,
+    ['verify']
+  );
+}
+
+async function generatePair() {
+  return crypto.subtle.generateKey(ECDSA, true, ['sign', 'verify']);
+}
 
 export const importRawCompressedPublicKey = {
   async test() {
-    const key = await crypto.subtle.importKey(
-      'raw',
-      GENERATOR_PUBKEY_COMPRESSED,
-      { name: 'ECDSA', namedCurve: 'secp256k1' },
-      true,
-      ['verify']
-    );
+    const key = await importGeneratorPublic();
     strictEqual(key.type, 'public');
     strictEqual(key.algorithm.name, 'ECDSA');
     strictEqual(key.algorithm.namedCurve, 'secp256k1');
-    // Usages should be restricted to 'verify' since this is a public key.
     ok(key.usages.includes('verify'));
     ok(!key.usages.includes('sign'));
   },
 };
 
-export const exportRawRoundTrip = {
+export const importCompressedExportUncompressed = {
+  // WebCrypto raw export is uncompressed SEC1; compressed input is accepted on import.
+  async test() {
+    const key = await importGeneratorPublic();
+    const exported = new Uint8Array(await crypto.subtle.exportKey('raw', key));
+    deepStrictEqual(exported, GENERATOR_PUBKEY_UNCOMPRESSED);
+  },
+};
+
+export const importUncompressedRoundTrip = {
   async test() {
     const key = await crypto.subtle.importKey(
       'raw',
-      GENERATOR_PUBKEY_COMPRESSED,
-      { name: 'ECDSA', namedCurve: 'secp256k1' },
+      GENERATOR_PUBKEY_UNCOMPRESSED,
+      ECDSA,
       true,
       ['verify']
     );
     const exported = new Uint8Array(await crypto.subtle.exportKey('raw', key));
-    strictEqual(exported.byteLength, 33);
-    for (let i = 0; i < GENERATOR_PUBKEY_COMPRESSED.length; i++) {
-      strictEqual(
-        exported[i],
-        GENERATOR_PUBKEY_COMPRESSED[i],
-        `exported byte ${i} did not match input`
-      );
-    }
+    deepStrictEqual(exported, GENERATOR_PUBKEY_UNCOMPRESSED);
   },
 };
 
 export const importRejectsWrongLength = {
   async test() {
-    // 32 bytes is not a valid SEC1 public key length.
     await rejects(
-      crypto.subtle.importKey(
-        'raw',
-        new Uint8Array(32),
-        { name: 'ECDSA', namedCurve: 'secp256k1' },
-        true,
-        ['verify']
-      ),
-      (err) => {
-        strictEqual(err.name, 'DataError');
-        return true;
-      }
+      crypto.subtle.importKey('raw', new Uint8Array(32), ECDSA, true, [
+        'verify',
+      ]),
+      { name: 'DataError' }
     );
   },
 };
 
 export const importRejectsInvalidPoint = {
   async test() {
-    // 33 bytes with the right prefix but a garbage x-coordinate. The
-    // prefix 0x02 says "compressed, y is even" but the payload won't
-    // correspond to a point on secp256k1.
+    // 0x02 prefix claims compressed even-y, but the rest isn't on the curve.
     const bogus = new Uint8Array(33);
     bogus[0] = 0x02;
     bogus.fill(0xff, 1);
     await rejects(
-      crypto.subtle.importKey(
-        'raw',
-        bogus,
-        { name: 'ECDSA', namedCurve: 'secp256k1' },
-        true,
-        ['verify']
-      ),
-      (err) => {
-        strictEqual(err.name, 'DataError');
-        return true;
-      }
+      crypto.subtle.importKey('raw', bogus, ECDSA, true, ['verify']),
+      { name: 'DataError' }
     );
   },
 };
 
-// -----------------------------------------------------------------------
-// verify — negative cases
-//
-// Until sign() is wired up for secp256k1 we can't produce a signature
-// inside the test, so we can't do a positive verify assertion here.
-// What we CAN assert is that malformed / clearly-wrong signatures
-// return false (not true, and not a thrown exception).
-// -----------------------------------------------------------------------
+export const generateKeyProducesPair = {
+  async test() {
+    const pair = await generatePair();
+    strictEqual(pair.publicKey.type, 'public');
+    strictEqual(pair.privateKey.type, 'private');
+    strictEqual(pair.publicKey.algorithm.namedCurve, 'secp256k1');
+    strictEqual(pair.privateKey.algorithm.namedCurve, 'secp256k1');
+    ok(pair.privateKey.usages.includes('sign'));
+    ok(pair.publicKey.usages.includes('verify'));
+    ok(!pair.privateKey.usages.includes('verify'));
+    ok(!pair.publicKey.usages.includes('sign'));
+  },
+};
+
+export const signVerifyRoundTrip = {
+  async test() {
+    const { privateKey, publicKey } = await generatePair();
+    const message = new TextEncoder().encode('hello secp256k1');
+    const signature = await crypto.subtle.sign(
+      ECDSA_SHA256,
+      privateKey,
+      message
+    );
+    strictEqual(signature.byteLength, 64);
+    strictEqual(
+      await crypto.subtle.verify(ECDSA_SHA256, publicKey, signature, message),
+      true
+    );
+
+    const tampered = new Uint8Array(message);
+    tampered[0] ^= 0x01;
+    strictEqual(
+      await crypto.subtle.verify(ECDSA_SHA256, publicKey, signature, tampered),
+      false
+    );
+  },
+};
+
+export const signIsDeterministic = {
+  // libsecp256k1 uses RFC 6979 deterministic nonces; same key + message must produce the same
+  // signature bytes.
+  async test() {
+    const { privateKey } = await generatePair();
+    const message = new TextEncoder().encode('determinism test');
+    const sig1 = new Uint8Array(
+      await crypto.subtle.sign(ECDSA_SHA256, privateKey, message)
+    );
+    const sig2 = new Uint8Array(
+      await crypto.subtle.sign(ECDSA_SHA256, privateKey, message)
+    );
+    deepStrictEqual(sig1, sig2);
+  },
+};
+
+export const signRejectsPublicKey = {
+  async test() {
+    const { publicKey } = await generatePair();
+    await rejects(
+      crypto.subtle.sign(ECDSA_SHA256, publicKey, new Uint8Array([0])),
+      { name: 'InvalidAccessError' }
+    );
+  },
+};
 
 export const verifyRejectsWrongLengthSignature = {
   async test() {
-    const key = await crypto.subtle.importKey(
-      'raw',
-      GENERATOR_PUBKEY_COMPRESSED,
-      { name: 'ECDSA', namedCurve: 'secp256k1' },
-      true,
-      ['verify']
+    const key = await importGeneratorPublic();
+    strictEqual(
+      await crypto.subtle.verify(
+        ECDSA_SHA256,
+        key,
+        new Uint8Array(63),
+        new Uint8Array([0])
+      ),
+      false
     );
-    // 63 bytes is not a valid ECDSA-raw signature (must be 64).
-    const result = await crypto.subtle.verify(
-      { name: 'ECDSA', hash: 'SHA-256' },
-      key,
-      new Uint8Array(63),
-      new Uint8Array([0x00])
-    );
-    strictEqual(result, false);
   },
 };
 
 export const verifyRejectsAllZeroSignature = {
   async test() {
-    const key = await crypto.subtle.importKey(
-      'raw',
-      GENERATOR_PUBKEY_COMPRESSED,
-      { name: 'ECDSA', namedCurve: 'secp256k1' },
-      true,
-      ['verify']
-    );
-    // All-zero is not a valid signature (r = 0, s = 0 both fail the
-    // parser's range check).
-    const result = await crypto.subtle.verify(
-      { name: 'ECDSA', hash: 'SHA-256' },
-      key,
-      new Uint8Array(64),
-      new Uint8Array([0x00])
-    );
-    strictEqual(result, false);
-  },
-};
-
-// -----------------------------------------------------------------------
-// Paths NOT yet implemented — these MUST still reject until the
-// follow-up PRs wire them in. If any of these starts passing, the
-// error messages below need to be reviewed for consistency before the
-// test is flipped to a positive assertion.
-// -----------------------------------------------------------------------
-
-export const generateKeyNotYetImplemented = {
-  async test() {
-    await rejects(
-      crypto.subtle.generateKey(
-        { name: 'ECDSA', namedCurve: 'secp256k1' },
-        true,
-        ['sign', 'verify']
+    const key = await importGeneratorPublic();
+    strictEqual(
+      await crypto.subtle.verify(
+        ECDSA_SHA256,
+        key,
+        new Uint8Array(64),
+        new Uint8Array([0])
       ),
-      (err) => {
-        strictEqual(err.name, 'NotSupportedError');
-        ok(
-          /Key generation for "secp256k1" is not yet implemented/.test(
-            err.message
-          ),
-          `unexpected message: ${err.message}`
-        );
-        return true;
-      }
+      false
     );
   },
 };
 
-// -----------------------------------------------------------------------
-// JWK import/export — RFC 7517 + RFC 7518 + RFC 8812
-// -----------------------------------------------------------------------
-//
-// Instead of hardcoding base64url coordinate values (which is easy to get
-// wrong), we derive a known-good JWK via a raw import + JWK export, then
-// exercise import/round-trip against that. The raw input is the secp256k1
-// generator point G (SEC 2 §2.4.1) — a well-defined constant we already
-// use above.
+// JWK assertions derive known-good JWKs by round-tripping through raw/generate paths and mutate
+// from there, rather than hardcoding base64url coordinate strings.
 
 async function makeGeneratorJwk() {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    GENERATOR_PUBKEY_COMPRESSED,
-    { name: 'ECDSA', namedCurve: 'secp256k1' },
-    true,
-    ['verify']
-  );
-  return await crypto.subtle.exportKey('jwk', key);
+  const key = await importGeneratorPublic();
+  return crypto.subtle.exportKey('jwk', key);
 }
 
 export const exportJwkShape = {
@@ -227,13 +203,10 @@ export const exportJwkShape = {
     strictEqual(typeof jwk.y, 'string');
     strictEqual(jwk.d, undefined);
     strictEqual(jwk.ext, true);
-    ok(Array.isArray(jwk.key_ops));
     ok(jwk.key_ops.includes('verify'));
-    // base64url-decoding a 32-byte value yields a string of length
-    // ceil(32 * 4 / 3) with '=' padding stripped = 43 characters.
+    // base64url of 32 bytes is 43 chars, alphabet [A-Za-z0-9_-].
     strictEqual(jwk.x.length, 43);
     strictEqual(jwk.y.length, 43);
-    // base64url uses [A-Za-z0-9_-], never '+', '/', or '='.
     ok(/^[A-Za-z0-9_-]+$/.test(jwk.x));
     ok(/^[A-Za-z0-9_-]+$/.test(jwk.y));
   },
@@ -242,15 +215,10 @@ export const exportJwkShape = {
 export const importJwkPublic = {
   async test() {
     const jwk = await makeGeneratorJwk();
-    const key = await crypto.subtle.importKey(
-      'jwk',
-      jwk,
-      { name: 'ECDSA', namedCurve: 'secp256k1' },
-      true,
-      ['verify']
-    );
+    const key = await crypto.subtle.importKey('jwk', jwk, ECDSA, true, [
+      'verify',
+    ]);
     strictEqual(key.type, 'public');
-    strictEqual(key.algorithm.name, 'ECDSA');
     strictEqual(key.algorithm.namedCurve, 'secp256k1');
     ok(key.usages.includes('verify'));
   },
@@ -258,53 +226,25 @@ export const importJwkPublic = {
 
 export const jwkRoundTrip = {
   async test() {
-    // raw -> JWK export -> JWK import -> raw export: should equal original.
-    const fromRaw = await crypto.subtle.importKey(
-      'raw',
-      GENERATOR_PUBKEY_COMPRESSED,
-      { name: 'ECDSA', namedCurve: 'secp256k1' },
-      true,
-      ['verify']
-    );
-    const exportedJwk = await crypto.subtle.exportKey('jwk', fromRaw);
-    const fromJwk = await crypto.subtle.importKey(
-      'jwk',
-      exportedJwk,
-      { name: 'ECDSA', namedCurve: 'secp256k1' },
-      true,
-      ['verify']
-    );
-    const reExportedRaw = new Uint8Array(
+    const fromRaw = await importGeneratorPublic();
+    const jwk = await crypto.subtle.exportKey('jwk', fromRaw);
+    const fromJwk = await crypto.subtle.importKey('jwk', jwk, ECDSA, true, [
+      'verify',
+    ]);
+    const reExported = new Uint8Array(
       await crypto.subtle.exportKey('raw', fromJwk)
     );
-    strictEqual(reExportedRaw.byteLength, GENERATOR_PUBKEY_COMPRESSED.length);
-    for (let i = 0; i < reExportedRaw.length; i++) {
-      strictEqual(
-        reExportedRaw[i],
-        GENERATOR_PUBKEY_COMPRESSED[i],
-        `byte ${i} did not round-trip`
-      );
-    }
+    deepStrictEqual(reExported, GENERATOR_PUBKEY_UNCOMPRESSED);
   },
 };
 
 export const importJwkRejectsWrongKty = {
   async test() {
     const jwk = await makeGeneratorJwk();
-    // OKP is for Ed25519/X25519, EC is for secp256k1.
     jwk.kty = 'OKP';
     await rejects(
-      crypto.subtle.importKey(
-        'jwk',
-        jwk,
-        { name: 'ECDSA', namedCurve: 'secp256k1' },
-        true,
-        ['verify']
-      ),
-      (err) => {
-        strictEqual(err.name, 'DataError');
-        return true;
-      }
+      crypto.subtle.importKey('jwk', jwk, ECDSA, true, ['verify']),
+      { name: 'DataError' }
     );
   },
 };
@@ -314,57 +254,125 @@ export const importJwkRejectsWrongCrv = {
     const jwk = await makeGeneratorJwk();
     jwk.crv = 'P-256';
     await rejects(
-      crypto.subtle.importKey(
-        'jwk',
-        jwk,
-        { name: 'ECDSA', namedCurve: 'secp256k1' },
-        true,
-        ['verify']
-      ),
-      (err) => {
-        strictEqual(err.name, 'DataError');
-        return true;
-      }
+      crypto.subtle.importKey('jwk', jwk, ECDSA, true, ['verify']),
+      { name: 'DataError' }
     );
   },
 };
 
-export const importJwkRejectsPrivateKey = {
-  // Private key support (JWK with `d`) isn't wired up yet. Must reject
-  // clearly rather than silently dropping the private material.
-  //
-  // Use `['verify']` as the requested usage so that WebCrypto's usage
-  // validation (which rejects `['sign']` on a public key with a
-  // `SyntaxError` before we ever look at `d`) doesn't mask the error we
-  // actually want to test.
+export const importJwkRejectsWrongAlg = {
+  // RFC 8812: if `alg` is present on a secp256k1 JWK it must be "ES256K".
   async test() {
     const jwk = await makeGeneratorJwk();
-    jwk.d = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE';
+    jwk.alg = 'ES256';
     await rejects(
-      crypto.subtle.importKey(
-        'jwk',
-        jwk,
-        { name: 'ECDSA', namedCurve: 'secp256k1' },
-        true,
-        ['verify']
-      ),
-      (err) => {
-        strictEqual(err.name, 'NotSupportedError');
-        ok(
-          /Importing secp256k1 private keys \(JWKs with a "d" field\) is not yet implemented/.test(
-            err.message
-          ),
-          `unexpected message: ${err.message}`
-        );
-        return true;
+      crypto.subtle.importKey('jwk', jwk, ECDSA, true, ['verify']),
+      { name: 'DataError' }
+    );
+  },
+};
+
+export const importJwkAcceptsShortCoordinate = {
+  // RFC 7518 permits omitting leading zero bytes in `d`. The generator point's private scalar is
+  // 1, encoded minimally as a single 0x01 byte ("AQ" in base64url). Our impl zero-pads to 32
+  // bytes; the import should succeed and the resulting key should sign in a way the original
+  // generator public key can verify.
+  async test() {
+    const generatorJwk = await makeGeneratorJwk();
+    const shortPrivateJwk = {
+      kty: 'EC',
+      crv: 'secp256k1',
+      x: generatorJwk.x,
+      y: generatorJwk.y,
+      d: 'AQ',
+      ext: true,
+    };
+    const privateKey = await crypto.subtle.importKey(
+      'jwk',
+      shortPrivateJwk,
+      ECDSA,
+      true,
+      ['sign']
+    );
+    const publicKey = await importGeneratorPublic();
+    const message = new TextEncoder().encode('short-d test');
+    const sig = await crypto.subtle.sign(ECDSA_SHA256, privateKey, message);
+    strictEqual(
+      await crypto.subtle.verify(ECDSA_SHA256, publicKey, sig, message),
+      true
+    );
+  },
+};
+
+export const importJwkRejectsOutOfRangePrivateScalar = {
+  // d = 0xFF...FF is greater than the secp256k1 curve order n, so secp256k1_ec_seckey_verify
+  // must reject it.
+  async test() {
+    const generatorJwk = await makeGeneratorJwk();
+    const allOnes = new Uint8Array(32).fill(0xff);
+    const dB64 = btoa(String.fromCharCode(...allOnes))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    const badJwk = {
+      kty: 'EC',
+      crv: 'secp256k1',
+      x: generatorJwk.x,
+      y: generatorJwk.y,
+      d: dB64,
+      ext: true,
+    };
+    await rejects(
+      crypto.subtle.importKey('jwk', badJwk, ECDSA, true, ['sign']),
+      { name: 'DataError' }
+    );
+  },
+};
+
+export const jwkPrivateRoundTrip = {
+  async test() {
+    const { privateKey, publicKey } = await generatePair();
+    const jwk = await crypto.subtle.exportKey('jwk', privateKey);
+    strictEqual(jwk.kty, 'EC');
+    strictEqual(jwk.crv, 'secp256k1');
+    strictEqual(typeof jwk.d, 'string');
+    strictEqual(jwk.d.length, 43);
+    ok(jwk.key_ops.includes('sign'));
+
+    const reimported = await crypto.subtle.importKey('jwk', jwk, ECDSA, true, [
+      'sign',
+    ]);
+    strictEqual(reimported.type, 'private');
+
+    const message = new TextEncoder().encode('round-trip via JWK');
+    const sig = await crypto.subtle.sign(ECDSA_SHA256, reimported, message);
+    strictEqual(
+      await crypto.subtle.verify(ECDSA_SHA256, publicKey, sig, message),
+      true
+    );
+  },
+};
+
+export const jwkPrivateRejectsMismatchedHalves = {
+  // A JWK whose (x, y) doesn't match the point derived from `d` must be rejected, not silently
+  // produce a broken key.
+  async test() {
+    const a = await generatePair();
+    const b = await generatePair();
+    const jwkA = await crypto.subtle.exportKey('jwk', a.privateKey);
+    const jwkB = await crypto.subtle.exportKey('jwk', b.privateKey);
+    const mixed = { ...jwkA, d: jwkB.d };
+    await rejects(
+      crypto.subtle.importKey('jwk', mixed, ECDSA, true, ['sign']),
+      {
+        name: 'DataError',
+        message: /inconsistent|do not match/,
       }
     );
   },
 };
 
 export const ecdhRejectedExplicitly = {
-  // The secp256k1 compat flag is scoped to ECDSA only. ECDH over
-  // secp256k1 must fail with a specific error even when the flag is on.
   async test() {
     await rejects(
       crypto.subtle.importKey(
@@ -374,14 +382,24 @@ export const ecdhRejectedExplicitly = {
         true,
         ['deriveBits']
       ),
-      (err) => {
-        strictEqual(err.name, 'NotSupportedError');
-        ok(
-          /ECDH is not supported for curve "secp256k1"/.test(err.message),
-          `unexpected message: ${err.message}`
-        );
-        return true;
+      {
+        name: 'NotSupportedError',
+        message: /ECDH is not supported for curve "secp256k1"/,
       }
+    );
+  },
+};
+
+export const ecdhGenerateRejectedExplicitly = {
+  // secp256k1 over ECDH must reject at generateKey too, not just at importKey.
+  async test() {
+    await rejects(
+      crypto.subtle.generateKey(
+        { name: 'ECDH', namedCurve: 'secp256k1' },
+        true,
+        ['deriveBits']
+      ),
+      { name: 'NotSupportedError' }
     );
   },
 };
