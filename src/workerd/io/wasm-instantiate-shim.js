@@ -60,7 +60,7 @@
   //   instantiate(bytes, imports?, compileOptions?) -> Promise<{module, instance}>
   //   instantiate(module, imports?, compileOptions?) -> Promise<Instance>
   // NOTE: Exactly 1 argument defined to match WebAssembly.instantiate length
-  function instantiate(moduleOrBytes) {
+  WebAssembly.instantiate = function instantiate(moduleOrBytes) {
     const importObj = arguments[1];
     return Reflect.apply(originalInstantiate, this, arguments).then(
       function (result) {
@@ -75,13 +75,7 @@
         return result;
       }
     );
-  }
-  Object.defineProperty(WebAssembly, 'instantiate', {
-    value: instantiate,
-    writable: true,
-    configurable: true,
-    enumerable: false,
-  });
+  };
 
   // new WebAssembly.Instance(module, imports?)
   // Forward all arguments and new.target so subclassing works correctly.
@@ -109,6 +103,5 @@
     value: Instance,
     writable: true,
     configurable: true,
-    enumerable: false,
   });
 });
