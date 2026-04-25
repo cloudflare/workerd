@@ -108,7 +108,7 @@ void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTrace
 
   // `other` is a traced `Data`, but once moved, we don't assume the new location is traced.
   // So, we need to make the handle strong.
-  handle.ClearWeak();
+  handle.ClearWeak<void>();
 
   // Presumably, `other` is about to be destroyed. The destructor of `TracedReference`, though,
   // does nothing, because it doesn't know if the reference is even still valid, since it

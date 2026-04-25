@@ -69,10 +69,10 @@ void UnhandledRejectionHandler::report(
 
 UnhandledRejectionHandler::UnhandledRejection::~UnhandledRejection() {
   if (promise.IsWeak()) {
-    promise.ClearWeak();
+    promise.ClearWeak<void>();
   }
   if (value.IsWeak()) {
-    value.ClearWeak();
+    value.ClearWeak<void>();
   }
 }
 
