@@ -377,20 +377,20 @@ jsg::Promise<jsg::JsRef<jsg::JsString>> ReadableStreamSourceJsAdapter::readAllTe
   });
 }
 
-jsg::Promise<jsg::BufferSource> ReadableStreamSourceJsAdapter::readAllBytes(
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> ReadableStreamSourceJsAdapter::readAllBytes(
     jsg::Lock& js, uint64_t limit) {
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<jsg::BufferSource>(js.exceptionToJs(exception.clone()));
+    return js.rejectedPromise<jsg::JsRef<jsg::JsArrayBuffer>>(js.exceptionToJs(exception.clone()));
   }
 
   if (state.is<Closed>()) {
     // We are already in a closed state. This is a no-op. This really
     // should not have been called if closed but just in case, return
     // a resolved promise.
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-    return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
+    auto ab = jsg::JsArrayBuffer::create(js, 0);
+    return js.resolvedPromise(ab.addRef(js));
   }
 
   auto& open = state.requireActiveUnsafe();
@@ -398,7 +398,7 @@ jsg::Promise<jsg::BufferSource> ReadableStreamSourceJsAdapter::readAllBytes(
   auto& active = *open.active;
 
   if (active.closePending) {
-    return js.rejectedPromise<jsg::BufferSource>(
+    return js.rejectedPromise<jsg::JsRef<jsg::JsArrayBuffer>>(
         js.typeError("Close already pending, cannot read."));
   }
   active.closePending = true;
@@ -424,16 +424,16 @@ jsg::Promise<jsg::BufferSource> ReadableStreamSourceJsAdapter::readAllBytes(
       KJ_DASSERT(result.size() == amount);
       // We have to copy the data into the backing store because of the
       // v8 sandboxing rules.
-      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, amount);
-      backing.asArrayPtr().copyFrom(result);
-      return jsg::BufferSource(js, kj::mv(backing));
+      auto ab = jsg::JsArrayBuffer::create(js, result);
+      return ab.addRef(js);
     } else {
-      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-      return jsg::BufferSource(js, kj::mv(backing));
+      auto ab = jsg::JsArrayBuffer::create(js, 0);
+      return ab.addRef(js);
     }
   })
       .catch_(js,
-          [self = selfRef.addRef()](jsg::Lock& js, jsg::Value&& exception) -> jsg::BufferSource {
+          [self = selfRef.addRef()](
+              jsg::Lock& js, jsg::Value&& exception) -> jsg::JsRef<jsg::JsArrayBuffer> {
     // Likewise, while nothing should be waiting on the ready promise, we
     // should still reject it just in case.
     auto error = jsg::JsValue(exception.getHandle(js));

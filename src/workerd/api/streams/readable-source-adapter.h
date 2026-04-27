@@ -210,7 +210,8 @@ class ReadableStreamSourceJsAdapter final {
   // If there are pending reads when this is called, those reads
   // will be allowed to complete first, and then the stream will
   // be read to the end.
-  jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit = kj::maxValue);
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> readAllBytes(
+      jsg::Lock& js, uint64_t limit = kj::maxValue);
 
   // If the stream is still active, tries to get the total length,
   // if known. If the length is not known, the encoding does not

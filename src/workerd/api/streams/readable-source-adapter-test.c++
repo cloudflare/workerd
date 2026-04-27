@@ -838,10 +838,10 @@ KJ_TEST("Read all bytes") {
 
     return env.context
         .awaitJs(env.js,
-            adapter->readAllBytes(env.js).then(
-                env.js, [&adapter = *adapter](jsg::Lock& js, jsg::BufferSource result) {
+            adapter->readAllBytes(env.js).then(env.js,
+                [&adapter = *adapter](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> result) {
       // With exponential growth strategy: 1024 + 2048 + 4096 + 8192 = 15360
-      KJ_ASSERT(result.size() == 15360);
+      KJ_ASSERT(result.getHandle(js).size() == 15360);
       KJ_ASSERT(adapter.isClosed(), "Adapter should be closed after readAllText()");
     })).attach(kj::mv(adapter));
   });

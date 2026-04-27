@@ -387,8 +387,8 @@ class R2Bucket: public jsg::Object {
       return body->isDisturbed();
     }
 
-    jsg::Promise<jsg::BufferSource> arrayBuffer(jsg::Lock& js);
-    jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
+    jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> arrayBuffer(jsg::Lock& js);
+    jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> bytes(jsg::Lock& js);
     jsg::Promise<kj::String> text(jsg::Lock& js);
     jsg::Promise<jsg::Value> json(jsg::Lock& js);
     jsg::Promise<jsg::Ref<Blob>> blob(jsg::Lock& js);
