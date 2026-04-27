@@ -11,6 +11,8 @@ wd_rust_crate(
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",
+        "@crates_vendor//:hmac",
+        "@crates_vendor//:sha3",
         "@crates_vendor//:thiserror",
     ],
 )

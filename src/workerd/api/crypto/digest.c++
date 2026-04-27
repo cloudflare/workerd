@@ -10,11 +10,38 @@
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/io/io-context.h>
 
+#include <kj-rs/convert.h>
 #include <openssl/hmac.h>
 #include <openssl/mem.h>
+#include <rust/cxx.h>
+
+#include <cstring>
 
 namespace workerd::api {
 namespace {
+using Sha3Algorithm = workerd::rust::api::Sha3Algorithm;
+
+kj::Maybe<Sha3Algorithm> lookupSha3Algorithm(kj::StringPtr algorithm) {
+  if (strcasecmp(algorithm.cStr(), "sha3-224") == 0) {
+    return Sha3Algorithm::Sha3_224;
+  }
+  if (strcasecmp(algorithm.cStr(), "sha3-256") == 0) {
+    return Sha3Algorithm::Sha3_256;
+  }
+  if (strcasecmp(algorithm.cStr(), "sha3-384") == 0) {
+    return Sha3Algorithm::Sha3_384;
+  }
+  if (strcasecmp(algorithm.cStr(), "sha3-512") == 0) {
+    return Sha3Algorithm::Sha3_512;
+  }
+  return kj::none;
+}
+
+jsg::JsUint8Array makeUint8Array(jsg::Lock& js, ::rust::Vec<uint8_t> data) {
+  auto buf = jsg::JsUint8Array::create(js, data.size());
+  memcpy(buf.asArrayPtr().begin(), data.data(), data.size());
+  return buf;
+}
 
 class HmacKey final: public CryptoKey::Impl {
  public:
@@ -133,8 +160,36 @@ void zeroOutTrailingKeyBits(kj::Array<kj::byte>& keyDataArray, int keyBitLength)
   }
 }
 
-kj::Own<HMAC_CTX> initHmacContext(
+HmacContext::State initHmacContext(
     jsg::Lock& js, kj::StringPtr algorithm, HmacContext::KeyData& key) {
+  KJ_IF_SOME(sha3, lookupSha3Algorithm(algorithm)) {
+    auto handle = [](Sha3Algorithm algorithm, kj::ArrayPtr<kj::byte> key) {
+      JSG_REQUIRE(key.size() <= INT_MAX, RangeError, "key is too long");
+      return workerd::rust::api::new_sha3_hmac(algorithm, key.as<kj_rs::Rust>());
+    };
+
+    KJ_SWITCH_ONEOF(key) {
+      KJ_CASE_ONEOF(buf, kj::ArrayPtr<kj::byte>) {
+        return handle(sha3, buf);
+      }
+      KJ_CASE_ONEOF(key2, CryptoKey::Impl*) {
+        // We already checked that the key is a secret key, so the following should succeed.
+        SubtleCrypto::ExportKeyData keyData = key2->exportKey(js, "raw"_kj);
+
+        KJ_SWITCH_ONEOF(keyData) {
+          KJ_CASE_ONEOF(key_data, jsg::JsRef<jsg::JsArrayBuffer>) {
+            auto buf = key_data.getHandle(js);
+            return handle(sha3, buf.asArrayPtr());
+          }
+          KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
+            KJ_UNREACHABLE;
+          }
+        }
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
   static constexpr auto handle = [](kj::StringPtr algorithm, kj::ArrayPtr<kj::byte> key) {
     ClearErrorOnReturn clearErrorOnReturn;
     JSG_REQUIRE(key.size() <= INT_MAX, RangeError, "key is too long");
@@ -180,6 +235,10 @@ void HmacContext::update(kj::ArrayPtr<kj::byte> data) {
       JSG_REQUIRE(data.size() <= INT_MAX, RangeError, "data is too long");
       KJ_ASSERT(HMAC_Update(ctx.get(), data.begin(), data.size()) == 1);
     }
+    KJ_CASE_ONEOF(ctx, ::rust::Box<workerd::rust::api::Sha3Hmac>) {
+      JSG_REQUIRE(data.size() <= INT_MAX, RangeError, "data is too long");
+      workerd::rust::api::sha3_hmac_update(*ctx, data.as<kj_rs::Rust>());
+    }
     KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
       JSG_FAIL_REQUIRE(DOMOperationError, "HMAC context has already been finalized.");
     }
@@ -198,6 +257,11 @@ jsg::JsUint8Array HmacContext::digest(jsg::Lock& js) {
       state = buf.addRef(js);
       return buf;
     }
+    KJ_CASE_ONEOF(ctx, ::rust::Box<workerd::rust::api::Sha3Hmac>) {
+      auto buf = makeUint8Array(js, workerd::rust::api::sha3_hmac_digest(*ctx));
+      state = buf.addRef(js);
+      return buf;
+    }
     KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
       auto cached = digest.getHandle(js);
       return jsg::JsUint8Array::create(js, cached.asArrayPtr());
@@ -210,6 +274,9 @@ jsg::JsUint8Array HmacContext::digest(jsg::Lock& js) {
 size_t HmacContext::size() const {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(ctx, kj::Own<HMAC_CTX>) {
+      return 0;
+    }
+    KJ_CASE_ONEOF(ctx, ::rust::Box<workerd::rust::api::Sha3Hmac>) {
       return 0;
     }
     KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
@@ -325,7 +392,11 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(jsg::Lock& js,
 // ======================================================================================
 
 namespace {
-kj::Own<EVP_MD_CTX> initDigestCtx(kj::StringPtr algorithm) {
+HashContext::State initDigestCtx(kj::StringPtr algorithm) {
+  KJ_IF_SOME(sha3, lookupSha3Algorithm(algorithm)) {
+    return workerd::rust::api::new_sha3_hash(sha3);
+  }
+
   const EVP_MD* md = EVP_get_digestbyname(algorithm.begin());
   JSG_REQUIRE(md != nullptr, Error, "Digest method not supported");
   auto ctx = OSSL_NEW(EVP_MD_CTX);
@@ -341,13 +412,27 @@ void checkXofLen(EVP_MD_CTX* ctx, kj::Maybe<uint32_t>& maybeXof) {
     }
   }
 }
+
+void checkSha3XofLen(workerd::rust::api::Sha3Hash& hash, kj::Maybe<uint32_t>& maybeXof) {
+  KJ_IF_SOME(xof, maybeXof) {
+    JSG_REQUIRE(
+        xof == workerd::rust::api::sha3_hash_digest_size(hash), Error, "invalid digest size");
+  }
+}
 }  // namespace
 
-HashContext::HashContext(kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::JsRef<jsg::JsUint8Array>> state,
-    kj::Maybe<uint32_t> maybeXof)
+HashContext::HashContext(State state, kj::Maybe<uint32_t> maybeXof)
     : state(kj::mv(state)),
       maybeXof(kj::mv(maybeXof)) {
-  checkXofLen(this->state.get<kj::Own<EVP_MD_CTX>>().get(), this->maybeXof);
+  KJ_SWITCH_ONEOF(this->state) {
+    KJ_CASE_ONEOF(ctx, kj::Own<EVP_MD_CTX>) {
+      checkXofLen(ctx.get(), this->maybeXof);
+    }
+    KJ_CASE_ONEOF(ctx, ::rust::Box<workerd::rust::api::Sha3Hash>) {
+      checkSha3XofLen(*ctx, this->maybeXof);
+    }
+    KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {}
+  }
 }
 
 HashContext::HashContext(kj::StringPtr algorithm, kj::Maybe<uint32_t> maybeXof)
@@ -358,6 +443,10 @@ void HashContext::update(kj::ArrayPtr<kj::byte> data) {
     KJ_CASE_ONEOF(ctx, kj::Own<EVP_MD_CTX>) {
       JSG_REQUIRE(data.size() <= INT_MAX, RangeError, "data is too long");
       OSSLCALL(EVP_DigestUpdate(ctx.get(), data.begin(), data.size()));
+    }
+    KJ_CASE_ONEOF(ctx, ::rust::Box<workerd::rust::api::Sha3Hash>) {
+      JSG_REQUIRE(data.size() <= INT_MAX, RangeError, "data is too long");
+      workerd::rust::api::sha3_hash_update(*ctx, data.as<kj_rs::Rust>());
     }
     KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
       JSG_FAIL_REQUIRE(DOMOperationError, "Hash context has already been finalized.");
@@ -394,6 +483,11 @@ jsg::JsUint8Array HashContext::digest(jsg::Lock& js) {
       state = buf.addRef(js);
       return buf;
     }
+    KJ_CASE_ONEOF(ctx, ::rust::Box<workerd::rust::api::Sha3Hash>) {
+      auto buf = makeUint8Array(js, workerd::rust::api::sha3_hash_digest(*ctx));
+      state = buf.addRef(js);
+      return buf;
+    }
     KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
       auto cached = digest.getHandle(js);
       return jsg::JsUint8Array::create(js, cached.asArrayPtr());
@@ -411,6 +505,9 @@ HashContext HashContext::clone(jsg::Lock& js, kj::Maybe<uint32_t> xofLen) {
       OSSLCALL(EVP_MD_CTX_copy_ex(newCtx, ctx.get()));
       return HashContext(kj::mv(newCtx), kj::mv(xofLen));
     }
+    KJ_CASE_ONEOF(ctx, ::rust::Box<workerd::rust::api::Sha3Hash>) {
+      return HashContext(workerd::rust::api::sha3_hash_clone(*ctx), kj::mv(xofLen));
+    }
     KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
       JSG_FAIL_REQUIRE(DOMOperationError, "Hash context has already been finalized.");
     }
@@ -421,6 +518,9 @@ HashContext HashContext::clone(jsg::Lock& js, kj::Maybe<uint32_t> xofLen) {
 size_t HashContext::size() const {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(ctx, kj::Own<EVP_MD_CTX>) {
+      return 0;
+    }
+    KJ_CASE_ONEOF(ctx, ::rust::Box<workerd::rust::api::Sha3Hash>) {
       return 0;
     }
     KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {

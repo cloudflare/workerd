@@ -152,6 +152,13 @@ export const hmac_correctness_tests = {
       for (const hash in hmac) testHmac(hash, key, data, hmac[hash]);
     }
 
+    testHmac(
+      'sha3-256',
+      'key',
+      'The quick brown fox jumps over the lazy dog',
+      '8c6e0683409427f8931711b10ca92a506eb1fafa48fadd66d76126f47ac2c333'
+    );
+
     // Test HMAC-SHA-* (rfc 4231 Test Cases)
     const rfc4231 = [
       {
