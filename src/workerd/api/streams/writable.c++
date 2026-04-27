@@ -409,9 +409,8 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     if (buffer == nullptr) return kj::READY_NOW;
     return canceler.wrap(context.run([this, buffer](Worker::Lock& lock) mutable {
       auto& writer = getInner();
-      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, buffer.size()));
-      source.asArrayPtr().copyFrom(buffer);
-      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+      auto source = jsg::JsArrayBuffer::create(lock, buffer);
+      return context.awaitJs(lock, writer.write(lock, source));
     }));
   }
 
@@ -430,7 +429,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       // guaranteed to live until the returned promise is resolved, but the application code
       // may hold onto the ArrayBuffer for longer. We need to make sure that the backing store
       // for the ArrayBuffer remains valid.
-      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, amount));
+      auto source = jsg::JsArrayBuffer::create(lock, amount);
       auto ptr = source.asArrayPtr();
       for (auto& piece: pieces) {
         KJ_DASSERT(ptr.size() > 0);
@@ -440,7 +439,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         ptr = ptr.slice(piece.size());
       }
 
-      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+      return context.awaitJs(lock, writer.write(lock, source));
     }));
   }
 
