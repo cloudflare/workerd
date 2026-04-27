@@ -34,6 +34,9 @@ import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
 
 import { validateObject } from 'node-internal:validators';
 
+const hasSubscribersGetter =
+  !!Cloudflare.compatibilityFlags['diagnostics_channel_has_subscribers_getter'];
+
 export const { Channel } = diagnosticsChannel;
 
 export function hasSubscribers(name: string | symbol): boolean {
@@ -107,6 +110,47 @@ export class TracingChannel {
   }
   get error(): ChannelType | undefined {
     return this[kError];
+  }
+
+  // `hasSubscribers` is installed on the prototype below, gated by the
+  // `diagnostics_channel_has_subscribers_getter` compatibility flag. When the
+  // flag is enabled it's a getter property (matching Node.js); when disabled
+  // it's a method (preserving the original workerd behavior).
+  static {
+    if (hasSubscribersGetter) {
+      Object.defineProperty(this.prototype, 'hasSubscribers', {
+        get(this: TracingChannel): boolean {
+          return [
+            this.start,
+            this.end,
+            this.asyncStart,
+            this.asyncEnd,
+            this.error,
+          ].some((c) => c != null && (c.hasSubscribers as unknown as boolean));
+        },
+        configurable: true,
+        enumerable: false,
+      });
+    } else {
+      Object.defineProperty(this.prototype, 'hasSubscribers', {
+        value: function hasSubscribers(this: TracingChannel): boolean {
+          return [
+            this.start,
+            this.end,
+            this.asyncStart,
+            this.asyncEnd,
+            this.error,
+          ].some(
+            (c) =>
+              c != null &&
+              (c.hasSubscribers as unknown as () => boolean).call(c)
+          );
+        },
+        writable: true,
+        configurable: true,
+        enumerable: false,
+      });
+    }
   }
 
   subscribe(subscriptions: TracingChannelSubscriptions): void {

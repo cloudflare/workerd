@@ -208,71 +208,7 @@ jsg::JsValue deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
 }
 }  // namespace
 
-kj::Promise<void> WorkerQueue::send(
-    jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options) {
-  auto& context = IoContext::current();
-
-  JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
-
-  auto headers = kj::HttpHeaders(context.getHeaderTable());
-  headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::OCTET_STREAM.toString());
-
-  kj::Maybe<kj::StringPtr> contentType;
-  KJ_IF_SOME(opts, options) {
-    KJ_IF_SOME(type, opts.contentType) {
-      auto validatedType = validateContentType(type);
-      headers.addPtrPtr(HDR_MSG_FORMAT, validatedType);
-      contentType = validatedType;
-    }
-    KJ_IF_SOME(secs, opts.delaySeconds) {
-      headers.addPtr(HDR_MSG_DELAY, kj::str(secs));
-    }
-  }
-
-  Serialized serialized;
-  KJ_IF_SOME(type, contentType) {
-    serialized = serialize(js, body, type, SerializeArrayBufferBehavior::DEEP_COPY);
-  } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
-    headers.addPtrPtr("X-Msg-Fmt", IncomingQueueMessage::ContentType::JSON);
-    serialized = serialize(
-        js, body, IncomingQueueMessage::ContentType::JSON, SerializeArrayBufferBehavior::DEEP_COPY);
-  } else {
-    // TODO(cleanup) send message format header (v8) by default
-    serialized = serializeV8(js, body);
-  }
-
-  // The stage that we're sending a subrequest to provides a base URL that includes a scheme, the
-  // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
-  // we have to do is provide the end of the path (which is "/message") to send a single message.
-
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
-  auto req = client->request(
-      kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
-
-  const auto& headerIds = context.getHeaderIds();
-  const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
-
-  static constexpr auto handleSend = [](auto req, auto serialized, auto client, auto& headerIds,
-                                         bool exposeErrorCodes) -> kj::Promise<void> {
-    co_await req.body->write(serialized.data);
-    auto response = co_await req.response;
-
-    if (exposeErrorCodes) {
-      JSG_REQUIRE(response.statusCode == 200, Error, buildQueueErrorMessage(response, headerIds));
-    } else {
-      JSG_REQUIRE(
-          response.statusCode == 200, Error, kj::str("Queue send failed: ", response.statusText));
-    }
-
-    // Read and discard response body, otherwise we might burn the HTTP connection.
-    co_await response.body->readAllBytes().ignoreResult();
-  };
-
-  return handleSend(kj::mv(req), kj::mv(serialized), kj::mv(client), headerIds, exposeErrorCodes)
-      .attach(context.registerPendingEvent());
-};
-
-jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::sendWithResponse(jsg::Lock& js,
+jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::send(jsg::Lock& js,
     jsg::JsValue body,
     jsg::Optional<SendOptions> options,
     const jsg::TypeHandler<SendResponse>& responseHandler) {
@@ -337,125 +273,6 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::sendWithResponse(jsg::Lock&
           [](SendResponse& r) -> auto& { return r.metadata.metrics.oldestMessageTimestamp; }));
 }
 
-kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
-    jsg::Sequence<MessageSendRequest> batch,
-    jsg::Optional<SendBatchOptions> options) {
-  auto& context = IoContext::current();
-
-  JSG_REQUIRE(batch.size() > 0, TypeError, "sendBatch() requires at least one message");
-
-  size_t totalSize = 0;
-  size_t largestMessage = 0;
-  auto messageCount = batch.size();
-  auto builder = kj::heapArrayBuilder<SerializedWithOptions>(messageCount);
-  for (auto& message: batch) {
-    auto body = message.body.getHandle(js);
-    JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
-
-    SerializedWithOptions item;
-    KJ_IF_SOME(secs, message.delaySeconds) {
-      item.delaySeconds = secs;
-    }
-
-    KJ_IF_SOME(contentType, message.contentType) {
-      item.contentType = validateContentType(contentType);
-      item.body = serialize(js, body, contentType, SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
-    } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
-      item.contentType = IncomingQueueMessage::ContentType::JSON;
-      item.body = serialize(js, body, IncomingQueueMessage::ContentType::JSON,
-          SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
-    } else {
-      item.body = serializeV8(js, body);
-    }
-
-    builder.add(kj::mv(item));
-    totalSize += builder.back().body.data.size();
-    largestMessage = kj::max(largestMessage, builder.back().body.data.size());
-  }
-  auto serializedBodies = builder.finish();
-
-  // Construct the request body by concatenating the messages together into a JSON message.
-  // Done manually to minimize copies, although it'd be nice to make this safer.
-  // (totalSize + 2) / 3 * 4 is equivalent to ceil(totalSize / 3) * 4 for base64 encoding overhead.
-  auto estimatedSize = (totalSize + 2) / 3 * 4 + messageCount * 64 + 32;
-  kj::Vector<char> bodyBuilder(estimatedSize);
-  bodyBuilder.addAll("{\"messages\":["_kj);
-  for (size_t i = 0; i < messageCount; ++i) {
-    bodyBuilder.addAll("{\"body\":\""_kj);
-    // TODO(perf): We should be able to encode the data directly into bodyBuilder's buffer to
-    // eliminate a lot of data copying (whereas now encodeBase64 allocates a new buffer of its own
-    // to hold its result, which we then have to copy into bodyBuilder).
-    bodyBuilder.addAll(kj::encodeBase64(serializedBodies[i].body.data));
-    bodyBuilder.add('"');
-
-    KJ_IF_SOME(contentType, serializedBodies[i].contentType) {
-      bodyBuilder.addAll(",\"contentType\":\""_kj);
-      bodyBuilder.addAll(contentType);
-      bodyBuilder.add('"');
-    }
-
-    KJ_IF_SOME(delaySecs, serializedBodies[i].delaySeconds) {
-      bodyBuilder.addAll(",\"delaySecs\": "_kj);
-      bodyBuilder.addAll(kj::str(delaySecs));
-    }
-
-    bodyBuilder.addAll("}"_kj);
-    if (i < messageCount - 1) {
-      bodyBuilder.add(',');
-    }
-  }
-  bodyBuilder.addAll("]}"_kj);
-  bodyBuilder.add('\0');
-  KJ_DASSERT(bodyBuilder.size() <= estimatedSize);
-  kj::String body(bodyBuilder.releaseAsArray());
-  KJ_DASSERT(jsg::JsValue::fromJson(js, body).isObject());
-
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
-
-  // We add info about the size of the batch to the headers so that the queue implementation can
-  // decide whether it's too large.
-  // TODO(someday): Enforce the size limits here instead for very slightly better performance.
-  auto headers = kj::HttpHeaders(context.getHeaderTable());
-  headers.addPtr("CF-Queue-Batch-Count"_kj, kj::str(messageCount));
-  headers.addPtr("CF-Queue-Batch-Bytes"_kj, kj::str(totalSize));
-  headers.addPtr("CF-Queue-Largest-Msg"_kj, kj::str(largestMessage));
-  headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
-
-  KJ_IF_SOME(opts, options) {
-    KJ_IF_SOME(secs, opts.delaySeconds) {
-      headers.addPtr(HDR_MSG_DELAY, kj::str(secs));
-    }
-  }
-
-  // The stage that we're sending a subrequest to provides a base URL that includes a scheme, the
-  // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
-  // we have to do is provide the end of the path (which is "/batch") to send a message batch.
-
-  auto req =
-      client->request(kj::HttpMethod::POST, "https://fake-host/batch"_kjc, headers, body.size());
-
-  const auto& headerIds = context.getHeaderIds();
-  const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
-  static constexpr auto handleWrite = [](auto req, auto body, auto client, auto& headerIds,
-                                          bool exposeErrorCodes) -> kj::Promise<void> {
-    co_await req.body->write(body.asBytes());
-    auto response = co_await req.response;
-
-    if (exposeErrorCodes) {
-      JSG_REQUIRE(response.statusCode == 200, Error, buildQueueErrorMessage(response, headerIds));
-    } else {
-      JSG_REQUIRE(response.statusCode == 200, Error,
-          kj::str("Queue sendBatch failed: ", response.statusText));
-    }
-
-    // Read and discard response body, otherwise we might burn the HTTP connection.
-    co_await response.body->readAllBytes().ignoreResult();
-  };
-
-  return handleWrite(kj::mv(req), kj::mv(body), kj::mv(client), headerIds, exposeErrorCodes)
-      .attach(context.registerPendingEvent());
-};
-
 jsg::Promise<WorkerQueue::Metrics> WorkerQueue::metrics(
     jsg::Lock& js, const jsg::TypeHandler<Metrics>& metricsHandler) {
   auto& context = IoContext::current();
@@ -483,7 +300,7 @@ jsg::Promise<WorkerQueue::Metrics> WorkerQueue::metrics(
           [](Metrics& m) -> auto& { return m.oldestMessageTimestamp; }));
 }
 
-jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatchWithResponse(jsg::Lock& js,
+jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatch(jsg::Lock& js,
     jsg::Sequence<MessageSendRequest> batch,
     jsg::Optional<SendBatchOptions> options,
     const jsg::TypeHandler<SendBatchResponse>& responseHandler) {
@@ -850,6 +667,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
           &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
           props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
     auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),

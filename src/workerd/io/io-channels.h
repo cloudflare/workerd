@@ -107,6 +107,9 @@ class IoChannelFactory {
     // Specifies the parent span for the subrequest for tracing purposes.
     SpanParent parentSpan = SpanParent(nullptr);
 
+    // User Span Parent for trace propagation. Call toSpanContext() to serialize.
+    SpanParent userSpanParent = SpanParent(nullptr);
+
     // Serialized JSON value to pass in ew_compat field of control header to FL. If this subrequest
     // does not go directly to FL, this value is ignored. Flags marked with `$neededByFl` in
     // `compatibility-date.capnp` end up here.

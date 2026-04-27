@@ -188,7 +188,7 @@ EventEmitter.errorMonitor = kErrorMonitor;
 EventEmitter.EventEmitterAsyncResource = EventEmitterAsyncResource;
 
 export const captureRejectionSymbol = EventEmitter.captureRejectionSymbol;
-export const captureRejections = EventEmitter.captureRejections;
+export const captureRejections = false;
 export const errorMonitor = EventEmitter.errorMonitor;
 export const getMaxListeners = _getMaxListeners;
 export const usingDomains = EventEmitter.usingDomains;

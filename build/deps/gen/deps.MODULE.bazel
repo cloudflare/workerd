@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.1")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "3b0cb96441f2d72dab755e87b2ab8969fdfa096d62b5eb6f4bedd271d391967a",
-    strip_prefix = "capnproto-capnproto-59a195f/c++",
+    sha256 = "1a9f2c7153a4a8e41ea69c4a912118d43d2e89105d5bd58b7edc97e8cf4bda89",
+    strip_prefix = "capnproto-capnproto-78bd96c/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/59a195f011f259484acc71255bab8e1b67ef54d3",
+    url = "https://github.com/capnproto/capnproto/tarball/78bd96cef23811ea899d8f60f3d43082152acb36",
 )
 use_repo(http, "capnp-cpp")
 
@@ -136,10 +136,10 @@ bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
 # workerd-cxx
 http.archive(
     name = "workerd-cxx",
-    sha256 = "ee0867e96d70a37e2bb596f60051665ba828ad5f9237fe752811bb18f4f9fe07",
-    strip_prefix = "cloudflare-workerd-cxx-acbc654",
+    sha256 = "979f8ffc98f8a8577264167f4c7d07ec08ec790dd085110dadbebc476a1d1d7f",
+    strip_prefix = "cloudflare-workerd-cxx-5b4e067",
     type = "tgz",
-    url = "https://github.com/cloudflare/workerd-cxx/tarball/acbc6548b09d50f20ac8fdcf252e802b8cbfc054",
+    url = "https://github.com/cloudflare/workerd-cxx/tarball/5b4e067b5180b6a791443ef16b0068b57bbc88bd",
 )
 use_repo(http, "workerd-cxx")
 
@@ -148,7 +148,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "b80f1d1e5256ac25f6aea3f31f13d458981cb1f9",
+    commit = "89921383f1f51331f48a2dc843403779770ea3a9",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",

@@ -7,6 +7,7 @@
 
 interface FatalReporter {
   reportFatal: (error: string) => void;
+  reportPythonWorkersInternalError: () => void;
 }
 
 declare const fatalReporter: FatalReporter;

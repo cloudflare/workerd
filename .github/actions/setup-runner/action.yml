@@ -61,9 +61,12 @@ runs:
       shell: bash
       # Configure git to quell an irrelevant warning for runners (they never commit / push).
       run: git config core.hooksPath githooks
+    # Skip when the cookie is empty (forks, Dependabot PRs, local runs). Bazel will
+    # fall back to the unauthenticated googlesource endpoint, which is slower / more
+    # rate-limited but works without credentials.
     - name: Configure Googlesource credentials (Unix)
       shell: bash
-      if: github.event.pull_request.head.repo.fork == false && runner.os != 'Windows'
+      if: inputs.GOOGLESOURCE_COOKIE != '' && runner.os != 'Windows'
       env:
         GOOGLESOURCE_COOKIE: ${{ inputs.GOOGLESOURCE_COOKIE }}
       run: |
@@ -74,7 +77,7 @@ runs:
         __END__
     - name: Configure Googlesource credentials (Windows)
       shell: pwsh
-      if: github.event.pull_request.head.repo.fork == false && runner.os == 'Windows'
+      if: inputs.GOOGLESOURCE_COOKIE != '' && runner.os == 'Windows'
       env:
         GOOGLESOURCE_COOKIE: ${{ inputs.GOOGLESOURCE_COOKIE }}
       run: |

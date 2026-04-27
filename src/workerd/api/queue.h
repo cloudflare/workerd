@@ -119,18 +119,12 @@ class WorkerQueue: public jsg::Object {
     // NOTE: Any new fields added to SendOptions must also be added here.
   };
 
-  kj::Promise<void> send(jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options);
-
-  jsg::Promise<SendResponse> sendWithResponse(jsg::Lock& js,
+  jsg::Promise<SendResponse> send(jsg::Lock& js,
       jsg::JsValue body,
       jsg::Optional<SendOptions> options,
       const jsg::TypeHandler<SendResponse>& responseHandler);
 
-  kj::Promise<void> sendBatch(jsg::Lock& js,
-      jsg::Sequence<MessageSendRequest> batch,
-      jsg::Optional<SendBatchOptions> options);
-
-  jsg::Promise<SendBatchResponse> sendBatchWithResponse(jsg::Lock& js,
+  jsg::Promise<SendBatchResponse> sendBatch(jsg::Lock& js,
       jsg::Sequence<MessageSendRequest> batch,
       jsg::Optional<SendBatchOptions> options,
       const jsg::TypeHandler<SendBatchResponse>& responseHandler);
@@ -139,8 +133,8 @@ class WorkerQueue: public jsg::Object {
 
   JSG_RESOURCE_TYPE(WorkerQueue, CompatibilityFlags::Reader flags) {
     JSG_METHOD(metrics);
-    JSG_METHOD_NAMED(send, sendWithResponse);
-    JSG_METHOD_NAMED(sendBatch, sendBatchWithResponse);
+    JSG_METHOD(send);
+    JSG_METHOD(sendBatch);
 
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE(Queue<Body = unknown> {

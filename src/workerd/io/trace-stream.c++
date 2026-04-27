@@ -49,6 +49,7 @@ namespace {
   V(HIBERNATABLEWEBSOCKET, "hibernatableWebSocket")                                                \
   V(ID, "id")                                                                                      \
   V(INFO, "info")                                                                                  \
+  V(INTERNALERROR, "internalError")                                                                \
   V(INVOCATIONID, "invocationId")                                                                  \
   V(JSRPC, "jsrpc")                                                                                \
   V(KILLSWITCH, "killSwitch")                                                                      \
@@ -184,9 +185,10 @@ jsg::JsValue ToJs(jsg::Lock& js, kj::ArrayPtr<const Attribute> attributes, Strin
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cache) {
-  static const kj::StringPtr keys[] = {TYPE_STR, STATUSCODE_STR};
-  jsg::JsValue values[] = {cache.get(js, FETCH_STR), js.num(info.statusCode)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
+  obj.set(js, STATUSCODE_STR, js.num(info.statusCode));
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache) {
@@ -213,9 +215,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache)
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const JsRpcEventInfo& info, StringCache& cache) {
-  static const kj::StringPtr keys[] = {TYPE_STR};
-  jsg::JsValue values[] = {cache.get(js, JSRPC_STR)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, JSRPC_STR));
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const ScheduledEventInfo& info, StringCache& cache) {
@@ -242,17 +244,20 @@ jsg::JsValue ToJs(jsg::Lock& js, const AlarmEventInfo& info, StringCache& cache)
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const QueueEventInfo& info, StringCache& cache) {
-  static const kj::StringPtr keys[] = {TYPE_STR, QUEUENAME_STR, BATCHSIZE_STR};
-  jsg::JsValue values[] = {
-    cache.get(js, QUEUE_STR), js.str(info.queueName), js.num(info.batchSize)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, QUEUE_STR));
+  obj.set(js, QUEUENAME_STR, js.str(info.queueName));
+  obj.set(js, BATCHSIZE_STR, js.num(info.batchSize));
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const EmailEventInfo& info, StringCache& cache) {
-  static const kj::StringPtr keys[] = {TYPE_STR, MAILFROM_STR, RCPTTO_STR, RAWSIZE_STR};
-  jsg::JsValue values[] = {
-    cache.get(js, EMAIL_STR), js.str(info.mailFrom), js.str(info.rcptTo), js.num(info.rawSize)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, EMAIL_STR));
+  obj.set(js, MAILFROM_STR, js.str(info.mailFrom));
+  obj.set(js, RCPTTO_STR, js.str(info.rcptTo));
+  obj.set(js, RAWSIZE_STR, js.num(info.rawSize));
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const TraceEventInfo& info, StringCache& cache) {
@@ -329,6 +334,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
       return cache.get(js, RESPONSESTREAMDISCONNECTED_STR);
     case EventOutcome::SCRIPT_NOT_FOUND:
       return cache.get(js, SCRIPTNOTFOUND_STR);
+    case EventOutcome::INTERNAL_ERROR:
+      return cache.get(js, INTERNALERROR_STR);
     case EventOutcome::UNKNOWN:
       return cache.get(js, UNKNOWN_STR);
   }
@@ -1096,8 +1103,8 @@ bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
       // event indicating how many events were dropped if applicable.
       if (event.event.is<Outcome>() && active->droppedEvents > 0) {
         StreamDiagnosticsEvent diag(active->droppedEvents);
-        TailEvent diagTailEvent(event.spanContext.clone(), event.invocationId, event.timestamp,
-            event.sequence, kj::mv(diag));
+        TailEvent diagTailEvent(SpanContext::clone(event.spanContext), event.invocationId,
+            event.timestamp, event.sequence, kj::mv(diag));
         active->queue.push(kj::mv(diagTailEvent));
         // Increment the outcome sequence number to keep things consistent.
         event.sequence++;

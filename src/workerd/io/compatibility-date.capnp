@@ -1481,7 +1481,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   workflowsPreserveNonRetryableErrorMessage @170 :Bool
       $compatEnableFlag("workflows_preserve_non_retryable_error_message")
-      $experimental;
+      $compatDisableFlag("workflows_replace_non_retryable_error_message")
+      $compatEnableDate("2026-05-14");
   # When enabled, if a Workflow step throws a NonRetryableError, the error message
   # and name are preserved on the thrown exception instead of being replaced with
   # a generic "NonRetryableError" string.
@@ -1504,8 +1505,29 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # `ctx.version` is much more well defined. The behaviour of this flag will change in the future.
 
   noResizableArrayBufferInBlob @173 :Bool
-    $compatEnableFlag("no_resizable_array_buffer_in_blob")
-    $compatDisableFlag("resizable_array_buffer_in_blob");
+      $compatEnableFlag("no_resizable_array_buffer_in_blob")
+      $compatDisableFlag("resizable_array_buffer_in_blob");
   # When enabled, creating a Blob with a resizable ArrayBuffer will throw a TypeError, matching
   # expected spec behavior.
+
+  diagnosticsChannelHasSubscribersGetter @174 :Bool
+      $compatEnableFlag("diagnostics_channel_has_subscribers_getter")
+      $compatDisableFlag("no_diagnostics_channel_has_subscribers_getter")
+      $compatEnableDate("2026-05-19");
+  # Node.js' `diagnostics_channel.Channel.hasSubscribers` and
+  # `TracingChannel.hasSubscribers` are boolean getter properties, not methods.
+  # Originally, workerd registered `Channel.hasSubscribers` as a method (so users
+  # had to call `ch.hasSubscribers()` with parentheses). When this flag is
+  # enabled, `hasSubscribers` becomes a read-only getter that evaluates directly
+  # to a boolean, matching Node.js behavior.
+  # See: https://nodejs.org/dist/latest-v20.x/docs/api/diagnostics_channel.html#channelhassubscribers
+
+  workflowsStepRollback @175 :Bool
+    $compatEnableFlag("workflows_step_rollback")
+    $experimental;
+  # When enabled, WorkflowEntrypoint wraps the step object so that step.do()
+  # and step.waitForEvent() return a StepPromise with a .rollback() method.
+  # The rollback function is bundled into the RPC call for the engine to invoke
+  # as a compensation action on failure. Without this flag, the step object is
+  # passed through unwrapped and .rollback() is not available.
 }

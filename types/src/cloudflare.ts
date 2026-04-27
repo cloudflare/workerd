@@ -51,6 +51,11 @@ export default {
 * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
 `,
   },
+  DurableObjectStorage: {
+    primary: `* @deprecated Use \`ctx.primaryStub\` instead. `,
+    ensureReplicas: `* @deprecated Use \`ctx.configureReadReplication()\` instead. `,
+    disableReplicas: `* @deprecated Use \`ctx.configureReadReplication()\` instead. `,
+  },
   performance: {
     $: `*
 * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,

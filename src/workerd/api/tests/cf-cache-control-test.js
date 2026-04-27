@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Tests for cf.cacheControl mutual exclusion, synthesis, and additional cache settings.
-// These require the workerd_experimental compat flag.
 
 import assert from 'node:assert';
 

@@ -227,7 +227,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
       if (bytes.size() >= request.bytes.size()) {
         // The write buffer will entirely fit into our read buffer; fulfill both requests.
-        memcpy(bytes.begin(), request.bytes.begin(), request.bytes.size());
+        memmove(bytes.begin(), request.bytes.begin(), request.bytes.size());
         auto result = request.bytes.size();
         request.fulfiller->fulfill();
 
@@ -238,7 +238,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
       }
 
       // The write buffer won't quite fit into our read buffer; fulfill only the read request.
-      memcpy(bytes.begin(), request.bytes.begin(), bytes.size());
+      memmove(bytes.begin(), request.bytes.begin(), bytes.size());
       request.bytes = request.bytes.slice(bytes.size(), request.bytes.size());
       return bytes.size();
     }
@@ -293,14 +293,14 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
 
       if (request.bytes.size() >= bytes.size()) {
         // Our write buffer will entirely fit into the read buffer; fulfill both requests.
-        memcpy(request.bytes.begin(), bytes.begin(), bytes.size());
+        memmove(request.bytes.begin(), bytes.begin(), bytes.size());
         request.fulfiller->fulfill(bytes.size());
         state.transitionTo<Idle>();
         return kj::READY_NOW;
       }
 
       // Our write buffer won't quite fit into the read buffer; fulfill only the read request.
-      memcpy(request.bytes.begin(), bytes.begin(), request.bytes.size());
+      memmove(request.bytes.begin(), bytes.begin(), request.bytes.size());
       bytes = bytes.slice(request.bytes.size(), bytes.size());
       request.fulfiller->fulfill(request.bytes.size());
 

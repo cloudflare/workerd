@@ -553,19 +553,85 @@ export class DurableObjectExample extends DurableObject {
 
     assert.strictEqual(container.running, false);
 
-    container.start({
-      enableInternet: true,
-      labels: { team: 'workers', environment: 'testing' },
-    });
+    const labels = {
+      team: 'workers',
+      environment: 'testing',
+      'my.label/key': 'value',
+      'workerd-foo': 'bar',
+      kv: 'a=b=c',
+      emoji: '🧪',
+    };
+    container.start({ enableInternet: true, labels });
 
     const monitor = container.monitor().catch((_err) => {});
     await this.waitUntilContainerIsHealthy();
 
     assert.strictEqual(container.running, true);
 
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, labels);
+
     await container.destroy();
     await monitor;
     assert.strictEqual(container.running, false);
+  }
+
+  async testInspectBeforeStart() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    const info = await container.inspect();
+    assert.strictEqual(info, null);
+  }
+
+  async testInspectEmptyLabels() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({ enableInternet: true });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+
+    const info = await container.inspect();
+    assert.deepStrictEqual(info.labels, {});
+
+    await container.destroy();
+    await monitor;
+  }
+
+  async testInspectAfterDestroy() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+
+    assert.strictEqual(container.running, false);
+
+    container.start({
+      enableInternet: true,
+      labels: { foo: 'bar' },
+    });
+    const monitor = container.monitor().catch((_err) => {});
+    await this.waitUntilContainerIsHealthy();
+    await container.destroy();
+    await monitor;
+
+    const info = await container.inspect();
+    assert.strictEqual(info, null);
   }
 
   async testLabelValidation() {
@@ -2548,6 +2614,36 @@ export const testLabelValidation = {
     );
     const stub = env.MY_CONTAINER.get(id);
     await stub.testLabelValidation();
+  },
+};
+
+export const testInspectBeforeStart = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testInspectBeforeStart')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testInspectBeforeStart();
+  },
+};
+
+export const testInspectEmptyLabels = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testInspectEmptyLabels')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testInspectEmptyLabels();
+  },
+};
+
+export const testInspectAfterDestroy = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testInspectAfterDestroy')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testInspectAfterDestroy();
   },
 };
 

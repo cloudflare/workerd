@@ -128,10 +128,12 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
   // deserializing results. If omitted, it will be constructed on-demand.
   RpcDeserializerExternalHandler(capnp::List<rpc::JsValue::External>::Reader externals,
       RpcStubDisposalGroup& disposalGroup,
-      kj::Maybe<StreamSinkImpl&> streamSink)
+      kj::Maybe<StreamSinkImpl&> streamSink,
+      kj::LiteralStringConst debugContext)
       : externals(externals),
         disposalGroup(disposalGroup),
-        streamSink(streamSink) {}
+        streamSink(streamSink),
+        debugContext(debugContext) {}
   ~RpcDeserializerExternalHandler() noexcept(false);
 
   // Read and return the next external.
@@ -154,6 +156,12 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
     return kj::mv(streamSinkCap);
   }
 
+  // Return a string literal to include in deserialization errors for debugging. (In particular
+  // this specifies if it's params or return.)
+  kj::LiteralStringConst getDebugContext() {
+    return debugContext;
+  }
+
  private:
   capnp::List<rpc::JsValue::External>::Reader externals;
   uint i = 0;
@@ -163,6 +171,8 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
 
   kj::Maybe<StreamSinkImpl&> streamSink;
   kj::Maybe<rpc::JsValue::StreamSink::Client> streamSinkCap;
+
+  kj::LiteralStringConst debugContext;
 };
 
 // Base class for objects which can be sent over RPC, but doing so actually sends a stub which

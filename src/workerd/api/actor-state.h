@@ -277,7 +277,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // Once a Durable Object instance calls `ensureReplicas`, all subsequent calls will be no-ops,
   // making it idempotent, unless `disableReplicas` has been called between `ensureReplicas` calls.
   //
-  // Deprecated: See configureReadReplication.
+  // Deprecated: See DurableObjectState::configureReadReplication.
   void ensureReplicas();
 
   // Arrange to disable replicas for this Durable Object.
@@ -285,23 +285,16 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // If replicas have never been created, this is a no-op. Similar to `ensureReplicas`, repeated
   // calls are no-ops unless `ensureReplicas` re-enabled the replicas.
   //
-  // Deprecated: See configureReadReplication.
+  // Deprecated: See DurableObjectState::configureReadReplication.
   void disableReplicas();
 
-  struct ReadReplicationOptions {
-    kj::String mode;
-
-    JSG_STRUCT(mode);
-    JSG_STRUCT_TS_OVERRIDE(DurableObjectReadReplicationOptions { mode: "auto" | "disabled"; });
-  };
-
-  // Arrange to change replica settings for this Durable Object.
-  //
-  // Must be called with a mode of "auto" or "disabled". Repeat calls that set the same settings are
-  // idempotent.
-  jsg::Promise<void> configureReadReplication(jsg::Lock& js, ReadReplicationOptions options);
-
+  // getPrimary returns a new jsg::Ref to the primary stub, if there is one.
+  // If you only need to find out if we're a replica, isReplica does so without additional
+  // refcounting requirements.
   jsg::Optional<jsg::Ref<DurableObject>> getPrimary(jsg::Lock& js);
+
+  // isReplica returns whether we are a replica.
+  bool isReplica();
 
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
@@ -331,7 +324,6 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
     if (flags.getReplicaRouting()) {
       JSG_METHOD(ensureReplicas);
       JSG_METHOD(disableReplicas);
-      JSG_METHOD(configureReadReplication);
     }
 
     JSG_TS_OVERRIDE({
@@ -682,6 +674,22 @@ class DurableObjectState: public jsg::Object {
   // hibernatable, we'll throw an error because regular websockets do not have tags.
   kj::Array<kj::StringPtr> getTags(jsg::Lock& js, jsg::Ref<api::WebSocket> ws);
 
+  // Returns a stub for the primary if there is one.
+  jsg::Optional<jsg::Ref<DurableObject>> getPrimaryStub(jsg::Lock& js);
+
+  struct ReadReplicationOptions {
+    kj::String mode;
+
+    JSG_STRUCT(mode);
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectReadReplicationOptions { mode: "auto" | "disabled"; });
+  };
+
+  // Change replica settings for this Durable Object.
+  //
+  // Must be called with a mode of "auto" or "disabled". Repeat calls that set the same settings are
+  // idempotent.
+  jsg::Promise<void> configureReadReplication(jsg::Lock& js, ReadReplicationOptions options);
+
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     if (flags.getEnableCtxExports()) {
@@ -695,6 +703,11 @@ class DurableObjectState: public jsg::Object {
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(primaryStub, getPrimaryStub);
+    }
+
     JSG_METHOD(blockConcurrencyWhile);
     JSG_METHOD(acceptWebSocket);
     JSG_METHOD(getWebSockets);
@@ -706,6 +719,10 @@ class DurableObjectState: public jsg::Object {
     JSG_METHOD(getTags);
 
     JSG_METHOD(abort);
+
+    if (flags.getReplicaRouting()) {
+      JSG_METHOD(configureReadReplication);
+    }
 
     JSG_TS_ROOT();
 
@@ -764,7 +781,7 @@ class DurableObjectState: public jsg::Object {
 
 #define EW_ACTOR_STATE_ISOLATE_TYPES                                                               \
   api::ActorState, api::DurableObjectState, api::DurableObjectTransaction,                         \
-      api::DurableObjectStorage, api::DurableObjectStorage::ReadReplicationOptions,                \
+      api::DurableObjectStorage, api::DurableObjectState::ReadReplicationOptions,                  \
       api::DurableObjectStorage::TransactionOptions,                                               \
       api::DurableObjectStorageOperations::ListOptions,                                            \
       api::DurableObjectStorageOperations::GetOptions,                                             \

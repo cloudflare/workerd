@@ -146,6 +146,10 @@ class RequestObserver: public kj::Refcounted {
   // for other language runtimes in the future.
   virtual void setWorkerFatal() {}
 
+  // Called when PythonWorkersInternalError is constructed in JS. Used to track internal errors
+  // in Python workers without relying solely on substring checks.
+  virtual void setPythonWorkersInternalError() {}
+
   virtual uint64_t clockRead() {
     return 0;
   }

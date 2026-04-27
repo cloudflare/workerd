@@ -738,6 +738,12 @@ void WorkerFatalReporter::reportFatal(jsg::Lock& js, kj::String error) {
   }
 }
 
+void WorkerFatalReporter::reportPythonWorkersInternalError(jsg::Lock& js) {
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    kj::runCatchingExceptions([&]() { ioContext.getMetrics().setPythonWorkersInternalError(); });
+  }
+}
+
 }  // namespace api::pyodide
 
 }  // namespace workerd

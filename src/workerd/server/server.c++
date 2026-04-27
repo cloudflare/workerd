@@ -1613,6 +1613,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     } else if (source == RequestObserver::FailureSource::DEFERRED_PROXY &&
         exception.getType() == kj::Exception::Type::DISCONNECTED) {
       outcome = EventOutcome::RESPONSE_STREAM_DISCONNECTED;
+    } else if (exception.getType() == kj::Exception::Type::OVERLOADED) {
+      // We use exception details to describe some overloaded exceptions accurately, if no such
+      // detail is present report internalError.
+      outcome = EventOutcome::INTERNAL_ERROR;
     } else {
       outcome = EventOutcome::EXCEPTION;
     }
@@ -1723,31 +1727,33 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
 class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
-  SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
-  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
-    // This code path is workerd-only, we can safely utilize submitSpanOpen here.
-    submitSpanOpen(spanId, parentSpanId, span.operationName.clone(), span.startTime);
-    kj::Date startTime = span.startTime;
-    tracing::SpanEndData span2(spanId, span.endTime);
-    span2.tags.reserve(span.tags.size());
-    for (auto& tag: span.tags) {
-      span2.tags.insert(tag.key.clone(), spanTagClone(tag.value));
-    }
-    if (isPredictableModeForTest()) {
-      startTime = span2.endTime = kj::UNIX_EPOCH;
-    }
+  SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer)
+      : weakTracer(kj::mv(weakTracer)) {}
+  void submitSpanClose(
+      tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) override {
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      tracing::SpanEndData spanEnd(spanId, endTime, kj::mv(tags));
+      if (isPredictableModeForTest()) {
+        startTime = spanEnd.endTime = kj::UNIX_EPOCH;
+      }
 
-    workerTracer->addSpanEnd(kj::mv(span2), startTime);
+      tracer.addSpanClose(kj::mv(spanEnd), startTime);
+    });
   }
 
-  void submitSpanOpen(tracing::SpanId spanId,
+  bool submitSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override {
-    if (isPredictableModeForTest()) {
-      startTime = kj::UNIX_EPOCH;
-    }
-    workerTracer->addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+    bool submitted = false;
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      if (isPredictableModeForTest()) {
+        startTime = kj::UNIX_EPOCH;
+      }
+      tracer.addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+      submitted = true;
+    });
+    return submitted;
   }
 
   tracing::SpanId makeSpanId() override {
@@ -1757,7 +1763,7 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
 
  private:
   uint64_t nextSpanId = 1;
-  kj::Own<WorkerTracer> workerTracer;
+  kj::Own<BaseTracer::WeakRef> weakTracer;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
@@ -2217,24 +2223,32 @@ class Server::WorkerService final: public Service,
     }
 
     KJ_IF_SOME(w, workerTracer) {
-      w->setMakeUserRequestSpanFunc([&w = *w]() {
+      w->setMakeUserRequestSpanFunc([&w = *w](tracing::TraceId traceId) {
         return SpanParent(kj::refcounted<UserSpanObserver>(
-            kj::refcounted<SequentialSpanSubmitter>(kj::addRef(w))));
+            kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef()), kj::mv(traceId)));
       });
     }
     kj::Own<RequestObserver> observer =
         kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
 
-    return newWorkerEntrypoint(
-        threadContext, kj::atomicAddRef(*worker), entrypointName, kj::mv(props), kj::mv(actor),
-        kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance), {},  // ioContextDependency
+    kj::Maybe<tracing::InvocationSpanContext> triggerContext;
+    KJ_IF_SOME(ctx, metadata.userSpanParent.toSpanContext()) {
+      KJ_IF_SOME(spanId, ctx.getSpanId()) {
+        triggerContext =
+            tracing::InvocationSpanContext(ctx.getTraceId(), tracing::TraceId::nullId, spanId);
+      }
+    }
+
+    return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
+        kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
+        {},  // ioContextDependency
         kj::Own<IoChannelFactory>(this, kj::NullDisposer::instance), kj::mv(observer),
         waitUntilTasks,
         true,                  // tunnelExceptions
         kj::mv(workerTracer),  // workerTracer
         kj::mv(metadata.cfBlobJson),
-        kj::none  // versionInfo
-    );
+        kj::none,  // versionInfo
+        kj::mv(triggerContext));
   }
 
   class ActorNamespace final {
@@ -3495,8 +3509,17 @@ class Server::WorkerService final: public Service,
     JSG_REQUIRE(mode == ActorGetMode::GET_OR_CREATE, Error,
         "workerd only supports GET_OR_CREATE mode for getting actor stubs");
     JSG_REQUIRE(!enableReplicaRouting, Error, "workerd does not support replica routing.");
-    JSG_REQUIRE(routingMode == ActorRoutingMode::DEFAULT, Error,
-        "workerd does not support replica routing.");
+
+    // Compile-time assert that we have considered every routing mode here.
+    switch (routingMode) {
+      case ActorRoutingMode::PRIMARY_ONLY:
+        // Workerd-only configs only supports primaries anyway.
+        break;
+      case ActorRoutingMode::DEFAULT:
+        // In workerd-only configs, DEFAULT means PRIMARY_ONLY.
+        break;
+    }
+
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 

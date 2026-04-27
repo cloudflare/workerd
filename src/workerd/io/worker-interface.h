@@ -53,18 +53,21 @@ class WorkerInterface: public kj::HttpService {
   // If prewarm() has to do anything asynchronous, it should use "waitUntil" tasks.
   virtual kj::Promise<void> prewarm(kj::StringPtr url) = 0;
 
+  // keep in sync with `src/rust/worker/ffi.rs`
   struct ScheduledResult {
     bool retry = true;
     EventOutcome outcome = EventOutcome::UNKNOWN;
   };
 
   // Copyable subset of AlarmResult, used by ForkedPromise for alarm deduplication in Worker::Actor.
+  // keep in sync with `src/rust/worker/ffi.rs`
   struct AlarmOutcome {
     bool retry = true;
     bool retryCountsAgainstLimit = true;
     EventOutcome outcome = EventOutcome::UNKNOWN;
   };
 
+  // keep in sync with `src/rust/worker/ffi.rs`
   struct AlarmResult {
     bool retry = true;
     bool retryCountsAgainstLimit = true;

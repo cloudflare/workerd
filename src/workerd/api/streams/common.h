@@ -105,6 +105,11 @@ struct UnderlyingSource {
   // this default.
   static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 4096;
 
+  // We want to increase the default auto allocate chunk size but we need to do
+  // so carefully to avoid introducing memory regressions and causing workers to
+  // hit OOM errors. We'll use an autogate to roll out the new default.
+  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2 = 16 * 1024;
+
   // Per the spec, the type property for the UnderlyingSource should be either
   // undefined, the empty string, or "bytes". When undefined, the empty string is
   // used as the default. When type is the empty string, the stream is considered
@@ -392,9 +397,10 @@ class ReadableStreamController {
     size_t byteOffset = 0;
     size_t byteLength;
 
-    // The minimum number of bytes that should be read. When not specified, the default
+    // The minimum number of elements that should be read. When not specified, the default
     // is DEFAULT_AT_LEAST. This is a non-standard, Workers-specific extension to
     // support the readAtLeast method on the ReadableStreamBYOBReader object.
+    // ReaderImpl::read() converts this to bytes by multiplying by element size.
     kj::Maybe<size_t> atLeast = DEFAULT_AT_LEAST;
 
     // True if the given buffer should be detached. Per the spec, we should always be

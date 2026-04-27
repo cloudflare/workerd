@@ -344,6 +344,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
     auto featureFlags = FeatureFlags::get(lock);
 
     kj::Maybe<jsg::Ref<api::AbortSignal>> signal;
@@ -592,6 +593,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
           [this, &headers, &context, &connection, &response, entrypointName = entrypointName,
               versionInfo = kj::mv(versionInfo), host = kj::str(host)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     return lock.getGlobalScope().connect(kj::mv(host), headers, connection, response, lock,
         lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
@@ -708,6 +710,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
                       &metrics = incomingRequest->getMetrics()](Worker::Lock& lock) mutable {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() run");
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(
@@ -787,6 +790,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
                                      versionInfo = kj::mv(versionInfo), props = kj::mv(props),
                                      &context](Worker::Lock& lock) mutable {
           jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+          jsg::AsyncContextFrame::StorageScope userTraceScope =
+              context.makeUserAsyncTraceScope(lock);
 
           // If we have an invalid timeout, set it to the default value of 15 minutes.
           auto timeout = context.getLimitEnforcer().getAlarmLimit();
@@ -883,6 +888,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
                       Worker::Lock& lock) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() run");
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     return context.awaitJs(lock,
         lock.getGlobalScope().test(lock,

@@ -35,7 +35,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Update rust dependencies
-        run: bazel run //deps/rust:crates_vendor -- --repin full
+        run: bazel run @rules_rust//tools/upstream_wrapper:cargo -- update --manifest-path=deps/rust/Cargo.toml
       - name: Update opencode version
         run: python3 tools/update_opencode_version.py
         continue-on-error: true

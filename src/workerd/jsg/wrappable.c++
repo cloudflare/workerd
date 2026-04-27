@@ -482,7 +482,7 @@ void GcVisitor::visit(Data& value) {
       // This is directly reachable by a strong ref, so mark the handle strong.
       if (value.tracedHandle != kj::none) {
         // Convert the handle back to strong and discard the traced reference.
-        value.handle.ClearWeak();
+        value.handle.ClearWeak<void>();
         value.tracedHandle = kj::none;
       }
     } else {
@@ -523,7 +523,7 @@ void GcVisitor::visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Dat
     // Parent has strong Rust refs and no JS wrapper — keep handle strong,
     // discard any traced ref.
     if (!traced.IsEmpty()) {
-      strong.ClearWeak();
+      strong.ClearWeak<void>();
       traced.Reset();
     }
   } else {

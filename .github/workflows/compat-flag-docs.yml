@@ -1,0 +1,33 @@
+name: Compat Flag Docs
+
+on:
+  pull_request:
+    paths:
+      - 'src/workerd/io/compatibility-date.capnp'
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-flag-docs-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  check-compat-flag-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Only run on internal PRs – forks can't query the docs repo.
+    if: >-
+      github.event_name == 'merge_group' ||
+      github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          show-progress: false
+      - name: Check that new compat flags have documentation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 .github/scripts/check-compat-flag-docs.py

@@ -676,6 +676,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
             versionInfo = kj::mv(versionInfo), props = kj::mv(props),
             isDynamicDispatch](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+      jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
       auto handler = lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
           context.getActor(), isDynamicDispatch);

@@ -208,7 +208,7 @@ jobs:
           repository: cloudflare/workers-sdk
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
       - name: Use Node.js
         uses: actions/setup-node@v6
         with:

@@ -6,6 +6,7 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
+#include <workerd/util/weak-refs.h>
 
 #include <kj/refcount.h>
 
@@ -24,22 +25,29 @@ class WorkerTracer;
 // there will be plenty of cleanup potential.
 class BaseTracer: public kj::Refcounted {
  public:
-  virtual ~BaseTracer() noexcept(false) {};
+  virtual ~BaseTracer() noexcept(false) {
+    selfRef->invalidate();
+  };
+
+  // Weak reference to this tracer, used by user-tracing SpanSubmitter implementations so
+  // abandoned user promises cannot pin tracer lifetime.
+  using WeakRef = workerd::WeakRef<BaseTracer>;
+  kj::Own<WeakRef> getWeakRef() {
+    return kj::addRef(*selfRef);
+  }
 
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   virtual void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) = 0;
-  // Add a complete span.
-  virtual void addSpan(tracing::CompleteSpan&& span) = 0;
-  // Add information about a span when it is opened, corresponds to SpanOpen event.
+  // Add a span open event.
   virtual void addSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) = 0;
-  // Add span events when the span is complete (Attributes and SpanClose).
-  virtual void addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
+  // Add a span close event.
+  virtual void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -71,9 +79,9 @@ class BaseTracer: public kj::Refcounted {
   // be available afterwards.
   virtual void recordTimestamp(kj::Date timestamp) = 0;
 
-  SpanParent makeUserRequestSpan();
+  SpanParent makeUserRequestSpan(tracing::TraceId traceId);
 
-  using MakeUserRequestSpanFunc = kj::Function<SpanParent()>;
+  using MakeUserRequestSpanFunc = kj::Function<SpanParent(tracing::TraceId)>;
 
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
@@ -95,8 +103,7 @@ class BaseTracer: public kj::Refcounted {
   // acordingly.
   kj::Date getTime();
 
-  // helper method for addSpan() implementations
-  void adjustSpanTime(tracing::CompleteSpan& span);
+  // helper method for addSpanEnd() implementations
   void adjustSpanTime(tracing::SpanEndData& span, kj::Maybe<kj::Date> maybeStartTime);
 
   // Function to create the root span for the new tracing format.
@@ -112,6 +119,10 @@ class BaseTracer: public kj::Refcounted {
   // When true, the destructor will not log a warning about missing Onset event.
   // Set via markUnused() when a tracer is intentionally not used (e.g., duplicate alarm requests).
   bool markedUnused = false;
+
+ private:
+  friend class workerd::WeakRef<BaseTracer>;
+  kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<BaseTracer>(), *this);
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
@@ -134,12 +145,11 @@ class WorkerTracer final: public BaseTracer {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) override;
-  void addSpan(tracing::CompleteSpan&& span) override;
   void addSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) override;
-  void addSpanEnd(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
+  void addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date> maybeStartTime) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
@@ -195,11 +205,25 @@ class WorkerTracer final: public BaseTracer {
 
 class SpanSubmitter: public kj::Refcounted {
  public:
-  virtual void submitSpanOpen(tracing::SpanId spanId,
+  // Called when a span is opened. Submitters may buffer this for later assembly or stream it
+  // immediately.
+  virtual bool submitSpanOpen(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime) = 0;
-  virtual void submitSpan(tracing::SpanId context, tracing::SpanId spanId, const Span& span) = 0;
+
+  // Variant for spans opened directly by user JS (`ctx.tracing.enterSpan`). Submitters can
+  // apply different policies (e.g. bypass operation-name allowlists for user spans).
+  virtual bool submitUserSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) {
+    return submitSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+  }
+
+  // Called when a span is closed. Together with the open data, provides all span information.
+  virtual void submitSpanClose(
+      tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) = 0;
 
   virtual tracing::SpanId makeSpanId() = 0;
 };
@@ -211,23 +235,50 @@ class UserSpanObserver final: public SpanObserver {
   UserSpanObserver(kj::Own<SpanSubmitter> submitter)
       : submitter(kj::mv(submitter)),
         spanId(tracing::SpanId::nullId),
-        parentSpanId(tracing::SpanId::nullId) {}
-  // constructor for subsequent observers attached to a span
-  UserSpanObserver(kj::Own<SpanSubmitter> submitter, tracing::SpanId parentSpanId)
+        parentSpanId(tracing::SpanId::nullId),
+        traceId(nullptr) {}
+  // constructor for top-level observer with trace ID
+  UserSpanObserver(kj::Own<SpanSubmitter> submitter, tracing::TraceId traceId)
+      : submitter(kj::mv(submitter)),
+        spanId(tracing::SpanId::nullId),
+        parentSpanId(tracing::SpanId::nullId),
+        traceId(kj::mv(traceId)) {}
+  // constructor for subsequent observers attached to a span. `fromUserCode` is true for
+  // spans created directly via `ctx.tracing.enterSpan`; this routes onOpen() through
+  // submitUserSpanOpen() so submitters can apply different policies than for runtime spans.
+  UserSpanObserver(kj::Own<SpanSubmitter> submitter,
+      tracing::SpanId parentSpanId,
+      tracing::TraceId traceId,
+      bool fromUserCode = false)
       : submitter(kj::mv(submitter)),
         spanId(this->submitter->makeSpanId()),
-        parentSpanId(parentSpanId) {}
+        parentSpanId(parentSpanId),
+        traceId(kj::mv(traceId)),
+        fromUserCode(fromUserCode) {}
   KJ_DISALLOW_COPY(UserSpanObserver);
 
   kj::Own<SpanObserver> newChild() override;
-  void report(const Span& span) override;
-  void reportStart(kj::ConstString operationName, kj::Date startTime) override;
+  kj::Own<SpanObserver> newChildFromUserCode() override;
+  void onOpen(kj::ConstString operationName, kj::Date startTime) override;
+  void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override;
   kj::Date getTime() override;
+  kj::Maybe<tracing::SpanContext> toSpanContext() override;
+  tracing::SpanId getSpanId() override;
 
  private:
   kj::Own<SpanSubmitter> submitter;
   tracing::SpanId spanId;
   tracing::SpanId parentSpanId;
+  tracing::TraceId traceId;
+  // Ideally, the span observer wouldn't need to maintain startTime, but we still need it at present
+  // for timestamp adjustments.
+  kj::Date startTime = kj::UNIX_EPOCH;
+  // Allow the submitter to reject spans, causing them to not be reported.
+  bool wasAccepted = true;
+  // True only for spans created directly via `ctx.tracing.enterSpan`. Not inherited by
+  // children created via `newChild()` — runtime sub-operations nested inside an enterSpan
+  // callback (e.g. `kv_get`) should remain subject to runtime-span policies.
+  bool fromUserCode = false;
 };
 
 }  // namespace workerd

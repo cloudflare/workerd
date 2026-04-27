@@ -1103,7 +1103,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
       impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
-      traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
+      traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()),
+      userTraceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
@@ -1575,6 +1576,7 @@ Worker::Isolate::~Isolate() noexcept(false) {
     metrics->teardownLockAcquired();
     auto inspector = kj::mv(impl->inspector);
     auto dropTraceAsyncContextKey = kj::mv(traceAsyncContextKey);
+    auto dropUserTraceAsyncContextKey = kj::mv(userTraceAsyncContextKey);
     // The Rust Realm must be dropped under lock since Realm::drop() accesses V8 globals
     // and calls drop functions that may interact with V8.
     auto dropRealm = kj::mv(impl->realm);
@@ -1679,9 +1681,6 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   // context is not yet entered at this point.
   v8::Context::Scope contextScope(context);
 
-  auto webAssembly =
-      KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
-
   // Create a C++ callback that the JS shims call to register a {instance, memory, signalOffset,
   // terminatedOffset} tuple.
   // __registerTrackedWasmInstance(instance: WebAssembly.Instance,
@@ -1732,13 +1731,8 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
       jsg::NonModuleScript::compile(lock, WASM_INSTANTIATE_SHIM, "wasm-instantiate-shim.js"_kj);
   auto shimFn = KJ_ASSERT_NONNULL(shimScript.runAndReturn(lock).tryCast<jsg::JsFunction>());
 
-  // Grab the originals before they are replaced.
-  auto originalInstantiate = webAssembly.get(lock, "instantiate");
-  auto originalInstance = webAssembly.get(lock, "Instance");
-
-  // Call the factory — it mutates `wa` in place.
-  shimFn.call(lock, lock.global(), originalInstantiate, originalInstance,
-      jsg::JsFunction(registerFn), jsg::JsObject(webAssembly));
+  // Call the factory — it mutates `WebAssembly` in place.
+  shimFn.call(lock, lock.global(), jsg::JsFunction(registerFn));
 }
 
 void Worker::setupContext(
@@ -2424,6 +2418,12 @@ jsg::AsyncContextFrame::StorageKey& Worker::Lock::getTraceAsyncContextKey() {
   // const_cast OK because we are a lock on this isolate.
   auto& isolate = const_cast<Isolate&>(worker.getIsolate());
   return *(isolate.traceAsyncContextKey);
+}
+
+jsg::AsyncContextFrame::StorageKey& Worker::Lock::getUserTraceAsyncContextKey() {
+  // const_cast OK because we are a lock on this isolate.
+  auto& isolate = const_cast<Isolate&>(worker.getIsolate());
+  return *(isolate.userTraceAsyncContextKey);
 }
 
 bool Worker::Lock::isInspectorEnabled() {

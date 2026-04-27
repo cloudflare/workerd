@@ -249,4 +249,17 @@ interface Container @0x9aaceefc06523bca {
   #
   # If stdoutWriter/stderrWriter are not provided, output is discarded. If params.combinedOutput
   # is true, stderr is merged into stdout and the stderrWriter capability is ignored.
+
+  inspect @14 () -> (info :InspectInfo);
+  # Returns information about the container, or `none` if the container has not been started.
+
+  struct InspectInfo {
+    union {
+      none @0 :Void;
+      started :group {
+        labels @1 :List(Label);
+        # Echo of StartParams.labels. Empty list means start() was called with no labels.
+      }
+    }
+  }
 }

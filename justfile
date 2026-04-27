@@ -95,8 +95,8 @@ update-deps prefix="":
   ./build/deps/update-deps.py {{prefix}}
 
 # equivalent to `cargo update`; use `workspace` or <package> to limit update scope
-update-rust package="full":
-  bazel run //deps/rust:crates_vendor -- --repin {{package}}
+update-rust package="":
+  bazel run @rules_rust//tools/upstream_wrapper:cargo -- update --manifest-path=deps/rust/Cargo.toml {{package}}
 
 # example: just bench mimetype
 bench path:

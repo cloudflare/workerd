@@ -621,6 +621,21 @@ class ConsumerImpl final {
     }, false);
   }
 
+  // Extract all pending read requests from the ready state into a locally-owned vector.
+  // This is used by maybeDrainAndSetState to take ownership of pending reads before
+  // performing operations that may trigger V8 GC (resolve/reject calls use wrapOpaque
+  // which does V8 allocations). Without this, GC could collect the ReadableStream that
+  // owns this ConsumerImpl (through the ownership gap: QueueImpl only holds WeakRefs),
+  // destroying the readRequests ring buffer while we're iterating it.
+  static kj::Vector<kj::Own<ReadRequest>> extractPendingReads(Ready& ready) {
+    kj::Vector<kj::Own<ReadRequest>> result(ready.readRequests.size());
+    while (!ready.readRequests.empty()) {
+      result.add(kj::mv(ready.readRequests.front()));
+      ready.readRequests.pop_front();
+    }
+    return result;
+  }
+
   void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = kj::none) {
     // If the state is already errored or closed then there is nothing to drain.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
@@ -629,16 +644,35 @@ class ConsumerImpl final {
         // If maybeReason != nullptr, then we are draining because of an error.
         // In that case, we want to reset/clear the buffer and reject any remaining
         // pending read requests using the given reason.
-        for (auto& request: ready.readRequests) {
+
+        // We extract pending reads to local ownership before rejecting. The reject
+        // calls perform V8 allocations (wrapOpaque) which can trigger GC. If GC
+        // collects the ReadableStream that owns this ConsumerImpl (see the ownership
+        // gap: QueueImpl only holds WeakRefs to consumers, actual ownership is through
+        // ReadableStream → ReadableStreamJsController → ValueReadable → Consumer),
+        // the ConsumerImpl and its readRequests would be destroyed mid-iteration.
+        // By extracting to a local vector, the ReadRequests survive even if `this`
+        // is destroyed during the reject calls.
+        //
+        // We preserve the original ordering (reject reads, then transition state,
+        // then notify listener) and use selfRef to check if `this` is still alive
+        // after the reject calls before accessing any members.
+        auto pendingReads = extractPendingReads(ready);
+        auto weak = selfRef.addRef();
+        for (auto& request: pendingReads) {
           request->reject(js, reason);
         }
-        state.template transitionTo<Errored>(reason.addRef(js));
-        KJ_IF_SOME(listener, stateListener) {
-          listener.onConsumerError(js, kj::mv(reason));
-          // After this point, we should not assume that this consumer can
-          // be safely used at all. It's most likely the stateListener has
-          // released it.
-        }
+        // After the reject calls, `this` may have been destroyed by GC.
+        // Use the weak ref to safely access members only if still alive.
+        weak->runIfAlive([&](ConsumerImpl& self) {
+          self.state.template transitionTo<Errored>(reason.addRef(js));
+          KJ_IF_SOME(listener, self.stateListener) {
+            listener.onConsumerError(js, kj::mv(reason));
+            // After this point, we should not assume that this consumer can
+            // be safely used at all. It's most likely the stateListener has
+            // released it.
+          }
+        });
       } else {
         // Otherwise, if isClosing() is true...
         if (isClosing()) {
@@ -653,16 +687,24 @@ class ConsumerImpl final {
 
           KJ_ASSERT(empty());
           KJ_REQUIRE(ready.buffer.size() == 1);  // The close should be the only item remaining.
-          for (auto& request: ready.readRequests) {
+
+          // Extract pending reads and resolve them as done. Same GC safety concern
+          // as the error path above — see detailed comment there.
+          auto pendingReads = extractPendingReads(ready);
+          auto weak = selfRef.addRef();
+          for (auto& request: pendingReads) {
             request->resolveAsDone(js);
           }
-          state.template transitionTo<Closed>();
-          KJ_IF_SOME(listener, stateListener) {
-            listener.onConsumerClose(js);
-            // After this point, we should not assume that this consumer can
-            // be safely used at all. It's most likely the stateListener has
-            // released it.
-          }
+          // After the resolve calls, `this` may have been destroyed by GC.
+          weak->runIfAlive([&](ConsumerImpl& self) {
+            self.state.template transitionTo<Closed>();
+            KJ_IF_SOME(listener, self.stateListener) {
+              listener.onConsumerClose(js);
+              // After this point, we should not assume that this consumer can
+              // be safely used at all. It's most likely the stateListener has
+              // released it.
+            }
+          });
         }
       }
     }

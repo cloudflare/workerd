@@ -3,12 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import {
+  cache,
   DurableObject,
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
 } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
+
+// Check `cache` export from `cloudflare:workers` has the expected type.
+expectTypeOf(cache).toEqualTypeOf<CacheContext>();
+expectTypeOf(cache.purge).toEqualTypeOf<
+  (options: CachePurgeOptions) => Promise<CachePurgeResult>
+>();
 
 type TestType = {
   fieldString: string;

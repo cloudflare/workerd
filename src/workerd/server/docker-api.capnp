@@ -277,6 +277,7 @@ struct Docker {
     args @3 :List(Text) $Json.name("Args");
     state @4 :ContainerState $Json.name("State");
     networkSettings @5 :NetworkSettings $Json.name("NetworkSettings");
+    config @6 :ContainerConfig $Json.name("Config");
   }
 
   struct ImageInspectResponse {

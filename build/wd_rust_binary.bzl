@@ -75,4 +75,5 @@ def wd_rust_binary(
             "//conditions:default": [],
         }),
         size = test_size,
+        tags = ["no-coverage"],
     )

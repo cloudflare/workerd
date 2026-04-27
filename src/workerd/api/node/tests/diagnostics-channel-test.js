@@ -178,3 +178,54 @@ export const DiagChannelUnbindDuringRunStores = {
     strictEqual(transformCallCount, 1);
   },
 };
+
+// Legacy-method behavior: when the `diagnostics_channel_has_subscribers_getter`
+// compat flag is NOT enabled, `Channel.hasSubscribers` and
+// `TracingChannel.hasSubscribers` are registered as methods. The associated
+// `.wd-test` opts out of the flag explicitly so that this behavior is exercised
+// under both the default and `@all-compat-flags` test variants.
+export const test_channel_hasSubscribers_is_a_method = {
+  async test() {
+    const ch = channel('method-test');
+
+    // It is a method, not a boolean property.
+    strictEqual(typeof ch.hasSubscribers, 'function');
+    strictEqual(ch.hasSubscribers(), false);
+
+    const listener = () => {};
+    ch.subscribe(listener);
+    strictEqual(ch.hasSubscribers(), true);
+
+    ch.unsubscribe(listener);
+    strictEqual(ch.hasSubscribers(), false);
+
+    // Defined on the prototype as a method (value descriptor, no getter).
+    const desc = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(ch),
+      'hasSubscribers'
+    );
+    ok(desc);
+    strictEqual(typeof desc.value, 'function');
+    strictEqual(desc.get, undefined);
+    strictEqual(desc.set, undefined);
+  },
+};
+
+export const test_tracingChannel_hasSubscribers_is_a_method = {
+  async test() {
+    const tc = tracingChannel('tracing-method-test');
+
+    strictEqual(typeof tc.hasSubscribers, 'function');
+    strictEqual(tc.hasSubscribers(), false);
+
+    const listener = () => {};
+
+    // Each sub-channel independently flips the aggregate method result.
+    for (const sub of ['start', 'end', 'asyncStart', 'asyncEnd', 'error']) {
+      tc[sub].subscribe(listener);
+      strictEqual(tc.hasSubscribers(), true, `via ${sub}`);
+      tc[sub].unsubscribe(listener);
+      strictEqual(tc.hasSubscribers(), false, `after unsubscribing ${sub}`);
+    }
+  },
+};

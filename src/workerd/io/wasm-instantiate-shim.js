@@ -7,21 +7,28 @@
 // not quite work since it runs BEFORE instantiation, when the operations we want to do must happen
 // after.
 
-(function (originalInstantiate, originalInstance, registerShutdown, wa) {
-  // Find memory from exports or imports. Returns Memory instance or undefined.
-  // When searching imports, only considers entries whose declared import kind is
-  // 'memory' (via WebAssembly.Module.imports), so that a Memory passed as an
-  // externref is not mistaken for the module's linear memory.
-  function findMemory(instance, imports, module) {
-    // First, check if memory is exported
-    const importedMemory = wa.Module.imports(module).find(
+(function (registerShutdown) {
+  const {
+    Instance: originalInstance,
+    instantiate: originalInstantiate,
+    Module,
+    Memory,
+    Global,
+  } = WebAssembly;
+
+  // Finds the first imported or exported memory with type kind 'memory'.
+  function findMemory(instance, importObj, module) {
+    const importedMemory = Module.imports(module).find(
       ({ kind }) => kind === 'memory'
     );
     if (importedMemory) {
-      const value = imports[importedMemory.module][importedMemory.name];
-      return value instanceof wa.Memory && value;
+      // instantiation was already successful => importObj is known to
+      // have the right shape, and checkAndRegisterShutdown is wrapped
+      // in try-catch in case this fails anyway.
+      const value = importObj[importedMemory.module][importedMemory.name];
+      return value instanceof Memory ? value : undefined;
     }
-    const exportedMemory = wa.Module.exports(module).find(
+    const exportedMemory = Module.exports(module).find(
       ({ kind }) => kind === 'memory'
     );
     if (exportedMemory) return instance.exports[exportedMemory.name];
@@ -33,8 +40,8 @@
     if (!exports) return;
     const terminatedGlobal = exports['__instance_terminated'];
     const signalGlobal = exports['__instance_signal'];
-    const hasTerminated = terminatedGlobal instanceof wa.Global;
-    const hasSignal = signalGlobal instanceof wa.Global;
+    const hasTerminated = terminatedGlobal instanceof Global;
+    const hasSignal = signalGlobal instanceof Global;
     // Register if at least one is present.
     if (!hasTerminated && !hasSignal) return;
     const memory = findMemory(instance, imports, module);
@@ -52,34 +59,48 @@
   // WebAssembly.instantiate has two overloads:
   //   instantiate(bytes, imports?, compileOptions?) -> Promise<{module, instance}>
   //   instantiate(module, imports?, compileOptions?) -> Promise<Instance>
-  // Use apply to forward all arguments so compileOptions (and any future args) are not dropped.
-  wa.instantiate = function instantiate() {
-    var args = arguments;
-    return originalInstantiate.apply(wa, args).then(function (result) {
-      // Called with bytes: result is {module, instance}.
-      // Called with a Module: result is just the Instance.
-      var instance = result.instance || result;
-      var module = result.module || args[0];
-      checkAndRegisterShutdown(instance, args[1], module);
-      return result;
-    });
+  // NOTE: Exactly 1 argument defined to match WebAssembly.instantiate length
+  WebAssembly.instantiate = function instantiate(moduleOrBytes) {
+    const importObj = arguments[1];
+    return Reflect.apply(originalInstantiate, this, arguments).then(
+      function (result) {
+        // never fail instantiation for failed registration
+        try {
+          // Called with bytes: result is {module, instance}.
+          // Called with a Module: result is just the Instance.
+          const instance = result.instance || result;
+          const module = result.module || moduleOrBytes;
+          checkAndRegisterShutdown(instance, importObj, module);
+        } catch {}
+        return result;
+      }
+    );
   };
 
   // new WebAssembly.Instance(module, imports?)
   // Forward all arguments and new.target so subclassing works correctly.
-  wa.Instance = function Instance() {
-    var instance = Reflect.construct(
+  // NOTE: Exactly 1 argument defined to match WebAssembly.Instance length
+  function Instance(module) {
+    const instance = Reflect.construct(
       originalInstance,
       arguments,
       new.target || originalInstance
     );
-    checkAndRegisterShutdown(instance, arguments[1], arguments[0]);
+    // never fail instantiation for failed registration
+    try {
+      checkAndRegisterShutdown(instance, arguments[1], module);
+    } catch {}
     return instance;
-  };
+  }
   // Point the shim's prototype at the original so instanceof checks continue to work.
-  wa.Instance.prototype = originalInstance.prototype;
-  Object.defineProperty(wa.Instance.prototype, 'constructor', {
-    value: wa.Instance,
+  Instance.prototype = originalInstance.prototype;
+  Object.defineProperty(Instance.prototype, 'constructor', {
+    value: Instance,
+    writable: true,
+    configurable: true,
+  });
+  Object.defineProperty(WebAssembly, 'Instance', {
+    value: Instance,
     writable: true,
     configurable: true,
   });

@@ -91,7 +91,9 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
 def _ensure_bazel_tool(tool_name: str, build_target: str | None = None) -> Path:
     """Ensure a bazel-built formatter tool exists and return its path."""
     tool_suffix = Path("build") / "deps" / "formatters" / tool_name
-    internal_tool_path = BAZEL_BIN / "external" / "+dep_workerd+workerd" / tool_suffix
+    internal_tool_path = (
+        BAZEL_BIN / "external" / "+local_repository+workerd" / tool_suffix
+    )
     workerd_tool_path = BAZEL_BIN / tool_suffix
 
     if internal_tool_path.exists():

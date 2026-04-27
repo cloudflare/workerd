@@ -183,6 +183,12 @@ class Container: public jsg::Object {
     JSG_STRUCT(name);
   };
 
+  struct Info {
+    jsg::Dict<kj::String> labels;
+
+    JSG_STRUCT(labels);
+  };
+
   struct StartupOptions {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
     bool enableInternet = false;
@@ -250,6 +256,8 @@ class Container: public jsg::Object {
   jsg::Promise<jsg::Ref<ExecProcess>> exec(
       jsg::Lock& js, kj::Array<kj::String> cmd, jsg::Optional<ExecOptions> options);
 
+  jsg::Promise<kj::Maybe<Info>> inspect(jsg::Lock& js);
+
   // TODO(containers): listenTcp()
 
   JSG_RESOURCE_TYPE(Container, CompatibilityFlags::Reader flags) {
@@ -269,6 +277,7 @@ class Container: public jsg::Object {
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(exec);
       JSG_METHOD(interceptOutboundTcp);
+      JSG_METHOD(inspect);
     }
   }
 
@@ -294,6 +303,6 @@ class Container: public jsg::Object {
   api::ExecOutput, api::ExecOptions, api::ExecProcess, api::Container,                             \
       api::Container::DirectorySnapshot, api::Container::DirectorySnapshotOptions,                 \
       api::Container::DirectorySnapshotRestoreParams, api::Container::Snapshot,                    \
-      api::Container::SnapshotOptions, api::Container::StartupOptions
+      api::Container::SnapshotOptions, api::Container::StartupOptions, api::Container::Info
 
 }  // namespace workerd::api

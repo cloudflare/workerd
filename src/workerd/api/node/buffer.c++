@@ -161,17 +161,17 @@ jsg::JsUint8Array decodeStringImpl(
     case Encoding::BASE64:
       // Fall-through
     case Encoding::BASE64URL: {
-      // TODO(soon): Use simdutf for faster decoding for BASE64 and BASE64URL.
       // We do not use the kj::String conversion here because inline null-characters
       // need to be ignored.
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
       auto result = string.writeInto(js, buf, options);
       auto len = result.written;
-      auto dest = jsg::JsUint8Array::create(js, nbytes::Base64DecodedSize(buf.begin(), len));
-      len = nbytes::Base64Decode(
-          dest.asArrayPtr<char>().begin(), dest.size(), buf.begin(), buf.size());
-      if (len < dest.size()) {
-        return dest.slice(js, len);
+      auto dest = jsg::JsUint8Array::create(
+          js, simdutf::maximal_binary_length_from_base64(buf.asChars().begin(), len));
+      auto dec_result = simdutf::base64_to_binary(buf.asChars().begin(), len,
+          dest.asArrayPtr().asChars().begin(), simdutf::base64_default_or_url_accept_garbage);
+      if (dec_result.count < dest.size()) {
+        return dest.slice(js, dec_result.count);
       }
       return dest;
     }
@@ -655,7 +655,9 @@ jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::JsUint8Array bytes, jsg::Js
           // point (but still use the rest of the incomplete bytes from this
           // chunk) and assume that the new, unexpected byte starts a new one.
           statePtr[kMissingBytes] = 0;
-          memcpy(getIncompleteCharacterBuffer(statePtr) + getBufferedBytes(statePtr), data, i);
+          // Use memmove: data may point into the incomplete character buffer
+          // (e.g. when the caller passes decoder.lastChar as input).
+          memmove(getIncompleteCharacterBuffer(statePtr) + getBufferedBytes(statePtr), data, i);
           statePtr[kBufferedBytes] += i;
           data += i;
           nread -= i;
@@ -666,7 +668,9 @@ jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::JsUint8Array bytes, jsg::Js
 
     size_t found_bytes = std::min(nread, static_cast<size_t>(getMissingBytes(statePtr)));
     KJ_ASSERT(data != nullptr);
-    memcpy(getIncompleteCharacterBuffer(statePtr) + getBufferedBytes(statePtr), data, found_bytes);
+    // Use memmove: data may point into the incomplete character buffer
+    // (e.g. when the caller passes decoder.lastChar as input).
+    memmove(getIncompleteCharacterBuffer(statePtr) + getBufferedBytes(statePtr), data, found_bytes);
     // Adjust the two buffers.
     data += found_bytes;
     nread -= found_bytes;
@@ -757,7 +761,9 @@ jsg::JsString BufferUtil::decode(jsg::Lock& js, jsg::JsUint8Array bytes, jsg::Js
       // Copy the requested number of buffered bytes from the end of the
       // input into the incomplete character buffer.
       nread -= getBufferedBytes(statePtr);
-      memcpy(getIncompleteCharacterBuffer(statePtr), data + nread, getBufferedBytes(statePtr));
+      // Use memmove: data may point into the incomplete character buffer
+      // (e.g. when the caller passes decoder.lastChar as input).
+      memmove(getIncompleteCharacterBuffer(statePtr), data + nread, getBufferedBytes(statePtr));
     }
 
     if (nread > 0) {

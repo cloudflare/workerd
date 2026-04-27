@@ -500,18 +500,10 @@ export default {
   'readable-streams/reentrant-strategies.any.js': {
     comment: 'See individual comments',
     expectedFailures: [
-      // TODO(conform): In this edge case, the spec expects the chunk to still be successfully
-      // enqueued even tho the stream gets closed. We currently throw in this case. Whether or
-      // not that ultimately matters is something up for debate since in either case the chunk
-      // cannot be read.
-      'close() inside size() should not crash',
       // TODO(conform): Like the case above, the spec expects us to still successfully enqueue
       // the chunk here. Unlike the previous case, we should still be able to read this chunk
       // so this is a case we should definitely support.
       'close request inside size() should work',
-      // TODO(conform): The spec expects us to still enqueue the value but the read() should still
-      // reject.
-      'error() inside size() should work',
       // TODO(conform): The spec expects the enqueue() to still go through without an error
       // here but we currently throw an error here.
       'cancel() inside size() should work',

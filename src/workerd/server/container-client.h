@@ -87,6 +87,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<void> setEgressTcp(SetEgressTcpContext context) override;
   kj::Promise<void> snapshotDirectory(SnapshotDirectoryContext context) override;
   kj::Promise<void> snapshotContainer(SnapshotContainerContext context) override;
+  kj::Promise<void> inspect(InspectContext context) override;
 
   kj::Own<ContainerClient> addRef();
 
@@ -124,8 +125,14 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   // EgressHttpService handles CONNECT requests from proxy-anything sidecar
   friend class EgressHttpService;
 
+  struct Label {
+    kj::String name;
+    kj::String value;
+  };
+
   struct InspectResponse {
     bool isRunning;
+    kj::Array<Label> labels;
   };
 
   struct IPAMConfigResult {
@@ -154,7 +161,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
     uint32_t pid;
   };
 
-  kj::Promise<InspectResponse> inspectContainer();
+  kj::Promise<kj::Maybe<InspectResponse>> inspectContainer();
 
   kj::Promise<void> updateSidecarEgressPort(uint16_t ingressHostPort, uint16_t egressPort);
   kj::Promise<void> updateSidecarEgressConfig(uint16_t ingressHostPort, uint16_t egressPort);

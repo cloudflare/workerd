@@ -24,7 +24,8 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
 
   using ExternalPusher = rpc::JsValue::ExternalPusher;
 
-  kj::Own<kj::AsyncInputStream> unwrapStream(ExternalPusher::InputStream::Client cap);
+  kj::Own<kj::AsyncInputStream> unwrapStream(
+      ExternalPusher::InputStream::Client cap, kj::LiteralStringConst debugContext);
 
   // Box which holds the reason why an AbortSignal was aborted. May be either:
   // - A serialized V8 value if the signal was aborted from JavaScript.
@@ -49,6 +50,12 @@ class ExternalPusherImpl: public rpc::JsValue::ExternalPusher::Server, public kj
 
   capnp::CapabilityServerSet<ExternalPusher::InputStream> inputStreamSet;
   capnp::CapabilityServerSet<ExternalPusher::AbortSignal> abortSignalSet;
+
+  kj::Promise<kj::Own<kj::AsyncInputStream>> unwrapStreamImpl(
+      ExternalPusher::InputStream::Client cap, kj::LiteralStringConst debugContext);
+
+  kj::Promise<void> unwrapAbortSignalImpl(
+      ExternalPusher::AbortSignal::Client cap, kj::Own<PendingAbortReason> pendingReason);
 
   class InputStreamImpl;
   class AbortSignalImpl;

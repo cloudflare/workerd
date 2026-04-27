@@ -6,6 +6,7 @@
 
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/crypto/jwk.h>
+#include <workerd/api/crypto/keys.h>
 
 #include <ncrypto.h>
 #include <openssl/crypto.h>
@@ -862,10 +863,28 @@ jsg::JsUint8Array CryptoImpl::statelessDH(
   JSG_FAIL_REQUIRE(Error, "Unsupported keys for stateless diffie-hellman");
 }
 
-kj::Maybe<const ncrypto::EVPKeyPointer&> CryptoImpl::tryGetKey(jsg::Ref<CryptoKey>& key) {
-  KJ_IF_SOME(key, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*key->impl)) {
-    const ncrypto::EVPKeyPointer& evp = key;
-    return evp;
+kj::Maybe<ncrypto::EVPKeyPointer> CryptoImpl::tryGetKey(jsg::Ref<CryptoKey>& key) {
+  // AsymmetricKeyCryptoKeyImpl doesn't provide a reference like AsymmetricKey,
+  // so this function must return a value type since we create the EVPKeyPointer
+  // in here
+  KJ_IF_SOME(asymKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*key->impl)) {
+    const ncrypto::EVPKeyPointer& evp = asymKey;
+    // Internally just incrementing the ref count and returning a new pointer, no
+    // copied key data so impact should be minimal.
+    return evp.clone();
+  }
+  // Also handle keys created via the Web Crypto API (crypto.subtle), which use a
+  // different CryptoKey::Impl subclass.
+  KJ_IF_SOME(webCryptoKey, kj::dynamicDowncastIfAvailable<AsymmetricKeyCryptoKeyImpl>(*key->impl)) {
+    EVP_PKEY* raw = webCryptoKey.getEvpPkey();
+    // Mimicking the internal implementation of EVPKeyPointer::clone() since getEvpPkey()
+    // returns a raw pointer
+    if (raw != nullptr) {
+      if (!EVP_PKEY_up_ref(raw)) {
+        return kj::none;
+      }
+      return ncrypto::EVPKeyPointer(raw);
+    }
   }
   return kj::none;
 }

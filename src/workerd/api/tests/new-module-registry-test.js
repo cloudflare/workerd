@@ -29,6 +29,7 @@ strictEqual(typeof workers.WorkflowEntrypoint, 'function');
 strictEqual(typeof workers.waitUntil, 'function');
 strictEqual(typeof workers.withEnv, 'function');
 strictEqual(typeof workers.env, 'object');
+strictEqual(typeof workers.cache, 'object');
 
 await rejects(import('cloudflare-internal:env'), {
   message: /Module not found/,

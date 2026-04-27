@@ -1,0 +1,51 @@
+[package]
+name = "direct-cargo-bazel-deps"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+# This synthetic crate exists only to drive Cargo dependency resolution for Bazel.
+[lib]
+path = "fake.rs"
+
+[dependencies]
+# dependencies from workerd-cxx
+cc = "1"
+# clap also includes features needed by workerd
+clap = { version = "4", default-features = false, features = ["derive", "error-context", "help", "std", "usage"] }
+codespan-reporting = "0.13"
+foldhash = "0.2"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
+rustversion = "1"
+scratch = "1"
+static_assertions = "1"
+syn = { version = "2", features = ["full"] }
+
+# We prefer single-digit dependencies to stay up to date as much as possible
+# When adding packages here, please only enable features as needed to keep compile times and
+# binary sizes bounded.
+ada-url = "3"
+anyhow = "1"
+async-trait = { version = "0", default-features = false }
+capnp = "0"
+capnpc = "0"
+capnp-rpc = "0"
+clang-ast = "0"
+encoding_rs = "0"
+flate2 = "1"
+futures = "0"
+lol_html_c_api = { git = "https://github.com/cloudflare/lol-html", tag = "v2.7.2" }
+nix = "0"
+pico-args = "0"
+ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
+ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
+# param_extractor depends on unbounded_depth feature
+serde_json = { version = "1", features = ["unbounded_depth"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+# tokio is huge, let's enable only features when we actually need them.
+tokio = { version = "1", default-features = false, features = ["net", "rt", "rt-multi-thread", "time"] }
+tracing = { version = "0", default-features = false, features = ["std"] }
+swc_common = "21"
+swc_ts_fast_strip = "49"

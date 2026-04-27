@@ -503,6 +503,7 @@ export interface ExecutionContext<Props = unknown> {
     readonly key?: string;
     readonly override?: string;
   };
+  tracing?: Tracing;
   abort(reason?: any): void;
 }
 export type ExportedHandlerFetchHandler<
@@ -700,6 +701,7 @@ export interface DurableObjectState<Props = unknown> {
   container?: Container;
   facets: DurableObjectFacets;
   version?: DurableObjectStateVersion;
+  readonly primaryStub?: DurableObjectStub;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): WebSocket[];
@@ -710,6 +712,9 @@ export interface DurableObjectState<Props = unknown> {
   getHibernatableWebSocketEventTimeout(): number | null;
   getTags(ws: WebSocket): string[];
   abort(reason?: string): void;
+  configureReadReplication(
+    options: DurableObjectReadReplicationOptions,
+  ): Promise<void>;
 }
 export interface DurableObjectTransaction {
   get<T = unknown>(
@@ -783,12 +788,12 @@ export interface DurableObjectStorage {
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
   waitForBookmark(bookmark: string): Promise<void>;
+  /** @deprecated Use `ctx.primaryStub` instead. */
   readonly primary?: DurableObjectStub;
+  /** @deprecated Use `ctx.configureReadReplication()` instead. */
   ensureReplicas(): void;
+  /** @deprecated Use `ctx.configureReadReplication()` instead. */
   disableReplicas(): void;
-  configureReadReplication(
-    options: DurableObjectReadReplicationOptions,
-  ): Promise<void>;
 }
 export interface DurableObjectReadReplicationOptions {
   mode: "auto" | "disabled";
@@ -4004,6 +4009,7 @@ export interface Container {
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
   interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
+  inspect(): Promise<ContainerInfo | null>;
 }
 export interface ContainerDirectorySnapshot {
   id: string;
@@ -4035,6 +4041,9 @@ export interface ContainerStartupOptions {
   labels?: Record<string, string>;
   directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
   containerSnapshot?: ContainerSnapshot;
+}
+export interface ContainerInfo {
+  labels: Record<string, string>;
 }
 /**
  * The **`FileSystemHandle`** interface of the File System API is an object which represents a file or directory entry.
@@ -4718,6 +4727,18 @@ export interface EventCounts {
     param2?: any,
   ): void;
   [Symbol.iterator](): IterableIterator<string[]>;
+}
+export interface Tracing {
+  enterSpan<T, A extends unknown[]>(
+    name: string,
+    callback: (span: Span, ...args: A) => T,
+    ...args: A
+  ): T;
+  Span: typeof Span;
+}
+export declare abstract class Span {
+  get isTraced(): boolean;
+  setAttribute(key: string, value?: boolean | number | string): void;
 }
 // ============ AI Search Error Interfaces ============
 export interface AiSearchInternalError extends Error {}
@@ -14349,18 +14370,35 @@ export declare namespace CloudflareWorkersModule {
     type: string;
   };
   export type WorkflowStepContext = {
+    step: {
+      name: string;
+      count: number;
+    };
     attempt: number;
+    config: WorkflowStepConfig;
   };
+  export interface RollbackContext<T> {
+    error: Error;
+    output: NonNullable<T> | undefined;
+    stepName: string;
+  }
+  export interface StepPromise<T> extends Promise<T> {
+    rollback(fn: (ctx: RollbackContext<T>) => Promise<void>): StepPromise<T>;
+    rollback(
+      config: WorkflowStepConfig,
+      fn: (ctx: RollbackContext<T>) => Promise<void>,
+    ): StepPromise<T>;
+  }
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
-    ): Promise<T>;
+    ): StepPromise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
-    ): Promise<T>;
+    ): StepPromise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
     waitForEvent<T extends Rpc.Serializable<T>>(
@@ -14369,7 +14407,7 @@ export declare namespace CloudflareWorkersModule {
         type: string;
         timeout?: WorkflowTimeoutDuration | number;
       },
-    ): Promise<WorkflowStepEvent<T>>;
+    ): StepPromise<WorkflowStepEvent<T>>;
   }
   export type WorkflowInstanceStatus =
     | "queued"
@@ -14406,6 +14444,8 @@ export declare namespace CloudflareWorkersModule {
   ): unknown;
   export const env: Cloudflare.Env;
   export const exports: Cloudflare.Exports;
+  export const cache: CacheContext;
+  export const tracing: Tracing;
 }
 export interface SecretsStoreSecret {
   /**
@@ -15303,7 +15343,8 @@ export declare namespace TailStream {
     | "exceededMemory"
     | "loadShed"
     | "responseStreamDisconnected"
-    | "scriptNotFound";
+    | "scriptNotFound"
+    | "internalError";
   interface ScriptVersion {
     readonly id: string;
     readonly tag?: string;

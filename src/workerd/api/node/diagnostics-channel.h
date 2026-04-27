@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workerd/api/node/async-hooks.h>
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/map.h>
@@ -31,8 +32,12 @@ class Channel: public jsg::Object {
       jsg::Optional<v8::Local<v8::Value>> maybeReceiver,
       jsg::Arguments<jsg::Value> args);
 
-  JSG_RESOURCE_TYPE(Channel) {
-    JSG_METHOD(hasSubscribers);
+  JSG_RESOURCE_TYPE(Channel, CompatibilityFlags::Reader flags) {
+    if (flags.getDiagnosticsChannelHasSubscribersGetter()) {
+      JSG_READONLY_PROTOTYPE_PROPERTY(hasSubscribers, hasSubscribers);
+    } else {
+      JSG_METHOD(hasSubscribers);
+    }
     JSG_METHOD(publish);
     JSG_METHOD(subscribe);
     JSG_METHOD(unsubscribe);

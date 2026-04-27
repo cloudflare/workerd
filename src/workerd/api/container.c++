@@ -284,6 +284,29 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   running = true;
 }
 
+jsg::Promise<kj::Maybe<Container::Info>> Container::inspect(jsg::Lock& js) {
+  return IoContext::current().awaitIo(js, rpcClient->inspectRequest().send(),
+      [](jsg::Lock& js,
+          capnp::Response<rpc::Container::InspectResults> results) -> kj::Maybe<Info> {
+    auto info = results.getInfo();
+    if (info.isNone()) {
+      return kj::none;
+    }
+    return Info{
+      .labels =
+          jsg::Dict<kj::String>{
+            .fields =
+                KJ_MAP(label, info.getStarted().getLabels()) {
+      return jsg::Dict<kj::String>::Field{
+        .name = kj::str(label.getName()),
+        .value = kj::str(label.getValue()),
+      };
+    },
+          },
+    };
+  });
+}
+
 jsg::Promise<Container::DirectorySnapshot> Container::snapshotDirectory(
     jsg::Lock& js, DirectorySnapshotOptions options) {
   JSG_REQUIRE(

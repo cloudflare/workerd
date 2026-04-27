@@ -12,12 +12,10 @@ namespace workerd::tracing {
 // events to a tail worker.
 class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
  public:
-  TailStreamCustomEvent(uint16_t typeId = TYPE,
-      kj::PromiseFulfillerPair<rpc::TailStreamTarget::Client> paf =
-          kj::newPromiseAndFulfiller<rpc::TailStreamTarget::Client>())
+  TailStreamCustomEvent(kj::PromiseFulfillerPair<rpc::TailStreamTarget::Client> paf =
+                            kj::newPromiseAndFulfiller<rpc::TailStreamTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
-        clientCap(kj::mv(paf.promise)),
-        typeId(typeId) {}
+        clientCap(kj::mv(paf.promise)) {}
 
   ~TailStreamCustomEvent() noexcept(false) {
     if (capFulfiller->isWaiting()) {
@@ -42,7 +40,7 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
   }
 
   uint16_t getType() override {
-    return typeId;
+    return TYPE;
   }
 
   tracing::EventInfo getEventInfo() const override;
@@ -51,8 +49,8 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
     capFulfiller->reject(e.clone());
   }
 
-  // Specify same type as with TraceCustomEvent here by default.
-  static constexpr uint16_t TYPE = 2;
+  // Specify the event type for TailStreamCustomEvent (defined internally).
+  static constexpr uint16_t TYPE = 12;
 
   rpc::TailStreamTarget::Client getCap() {
     auto result = kj::mv(KJ_ASSERT_NONNULL(clientCap, "can only call getCap() once"));
@@ -63,7 +61,6 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
  private:
   kj::Own<kj::PromiseFulfiller<workerd::rpc::TailStreamTarget::Client>> capFulfiller;
   kj::Maybe<rpc::TailStreamTarget::Client> clientCap;
-  uint16_t typeId;
 };
 
 // A utility class that receives tracing events and generates/reports TailEvents.

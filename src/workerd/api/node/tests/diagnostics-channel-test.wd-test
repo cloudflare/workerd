@@ -7,7 +7,15 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "diagnostics-channel-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2"]
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          # Explicitly opt out of the `hasSubscribers` getter so this test file
+          # always exercises the legacy method behavior, even under
+          # `@all-compat-flags`. The getter behavior is covered by
+          # `diagnostics-channel-getter-test`.
+          "no_diagnostics_channel_has_subscribers_getter",
+        ]
       )
     ),
   ],

@@ -48,6 +48,11 @@ constexpr kj::StringPtr SNAPSHOT_VOLUME_PREFIX = "workerd-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_CLONE_VOLUME_PREFIX = "workerd-snap-clone-"_kj;
 constexpr kj::StringPtr CONTAINER_SNAPSHOT_IMAGE_PREFIX = "workerd-container-snap-"_kj;
 constexpr kj::StringPtr SNAPSHOT_VOLUME_CREATED_AT_LABEL = "dev.workerd.snapshot-created-at"_kj;
+
+// Prefix applied to user-supplied labels when writing them to the Docker container, and
+// stripped back out when reading them via inspect(). Lets us distinguish labels the worker
+// set via start() from labels that came from the image (via Dockerfile LABEL) or engine.
+constexpr kj::StringPtr WORKERD_LABEL_PREFIX = "workerd-"_kj;
 constexpr auto SNAPSHOT_STALE_AGE = 30 * kj::DAYS;
 
 // Maximum size of a snapshot tar archive held in memory during snapshot create/restore.
@@ -1512,7 +1517,7 @@ kj::Promise<void> ContainerClient::injectCACert() {
   succeeded = true;
 }
 
-kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer() {
+kj::Promise<kj::Maybe<ContainerClient::InspectResponse>> ContainerClient::inspectContainer() {
   auto endpoint = kj::str("/containers/", containerName, "/json");
 
   auto response = co_await dockerApiRequest(
@@ -1520,7 +1525,7 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   // We check if the container with the given name exist, and if it's not,
   // we simply return false while avoiding an unnecessary error.
   if (response.statusCode == 404) {
-    co_return InspectResponse{.isRunning = false};
+    co_return kj::none;
   }
 
   JSG_REQUIRE(response.statusCode == 200, Error, "Container inspect failed");
@@ -1538,7 +1543,25 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   // perspective, a restarting container is still "alive" and should be treated as running
   // so that start() correctly refuses to start a duplicate and destroy() can clean it up.
   bool running = status == "running" || status == "restarting";
-  co_return InspectResponse{.isRunning = running};
+
+  kj::Vector<Label> labels;
+  if (jsonRoot.hasConfig() && jsonRoot.getConfig().hasLabels()) {
+    auto labelsJson = jsonRoot.getConfig().getLabels();
+    if (labelsJson.isObject()) {
+      for (auto field: labelsJson.getObject()) {
+        kj::StringPtr name = field.getName();
+        if (!name.startsWith(WORKERD_LABEL_PREFIX)) continue;
+        auto value = field.getValue();
+        JSG_REQUIRE(value.isString(), Error, "Malformed ContainerInspect label value");
+        labels.add(Label{
+          .name = kj::str(name.slice(WORKERD_LABEL_PREFIX.size())),
+          .value = kj::str(value.getString()),
+        });
+      }
+    }
+  }
+
+  co_return InspectResponse{.isRunning = running, .labels = labels.releaseAsArray()};
 }
 
 kj::Promise<kj::Maybe<ContainerClient::SidecarInspectResponse>> ContainerClient::inspectSidecar() {
@@ -1663,12 +1686,13 @@ kj::Promise<void> ContainerClient::createContainer(kj::StringPtr effectiveImage,
     jsonEnv.set(envSize + i, defaultEnv[i]);
   }
 
-  // Pass user-supplied labels as Docker object labels, visible via `docker inspect`.
+  // Pass user-supplied labels as Docker object labels, prefixed so we can distinguish
+  // them from image/engine labels when reading back via inspect().
   if (params.hasLabels()) {
     auto lbls = params.getLabels();
     auto labelsObj = jsonRoot.initLabels().initObject(lbls.size());
     for (auto i: kj::zeroTo(lbls.size())) {
-      labelsObj[i].setName(lbls[i].getName());
+      labelsObj[i].setName(kj::str(WORKERD_LABEL_PREFIX, lbls[i].getName()));
       labelsObj[i].initValue().setString(lbls[i].getValue());
     }
   }
@@ -2161,7 +2185,10 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
   co_await ready;
   KJ_DEFER(done->fulfill());
 
-  const auto [isRunning] = co_await inspectContainer();
+  bool isRunning = false;
+  KJ_IF_SOME(info, co_await inspectContainer()) {
+    isRunning = info.isRunning;
+  }
   containerStarted.store(isRunning, std::memory_order_release);
   containerSidecarStarted.store(false, std::memory_order_release);
   this->sidecarIngressHostPort = kj::none;
@@ -2180,6 +2207,23 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
   }
 
   context.getResults().setRunning(isRunning);
+}
+
+kj::Promise<void> ContainerClient::inspect(InspectContext context) {
+  auto maybeResp = co_await inspectContainer();
+  auto info = context.getResults().initInfo();
+  KJ_IF_SOME(resp, maybeResp) {
+    if (resp.isRunning) {
+      auto started = info.initStarted();
+      auto list = started.initLabels(resp.labels.size());
+      for (auto i: kj::indices(resp.labels)) {
+        list[i].setName(resp.labels[i].name);
+        list[i].setValue(resp.labels[i].value);
+      }
+      co_return;
+    }
+  }
+  info.setNone();
 }
 
 kj::Promise<void> ContainerClient::start(StartContext context) {

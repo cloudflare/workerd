@@ -11,7 +11,7 @@
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
-#include <workerd/api/tracing-module.h>
+#include <workerd/api/tracing.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/jsg/modules-new.h>

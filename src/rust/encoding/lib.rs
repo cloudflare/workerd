@@ -13,7 +13,6 @@
 //! the pointer and length returned in `DecodeResult`.
 
 #[cxx::bridge(namespace = "workerd::rust::encoding")]
-#[expect(clippy::elidable_lifetime_names)] // CXX bridge requires named lifetimes on shared structs
 mod ffi {
     /// Legacy encoding types supported by the Rust decoder.
     /// Shared between C++ and Rust.

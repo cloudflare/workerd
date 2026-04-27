@@ -149,6 +149,12 @@ wd_test(
 )
 
 wd_test(
+    src = "diagnostics-channel-getter-test.wd-test",
+    args = ["--experimental"],
+    data = ["diagnostics-channel-getter-test.js"],
+)
+
+wd_test(
     src = "mimetype-test.wd-test",
     args = ["--experimental"],
     data = ["mimetype-test.js"],

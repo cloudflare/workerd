@@ -455,17 +455,12 @@ build:coverage --repo_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
 # GCOV is used by rules_cc to merge raw profile data (.profraw) into indexed profile data (.profdata)
 build:coverage --repo_env=GCOV=llvm-profdata
 # COVERAGE_GCOV_PATH is used by collect_cc_coverage.sh for merging .profraw files.
-build:coverage --action_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
 build:coverage --repo_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
-build:coverage --test_env=COVERAGE_GCOV_PATH=/usr/bin/llvm-profdata
-# BAZEL_LLVM_COV is used by rules_cc to generate coverage reports from profile data
+# BAZEL_LLVM_COV is used by collect_cc_coverage.sh to generate LCOV reports from profile data
 build:coverage --repo_env=BAZEL_LLVM_COV=llvm-cov
-# LLVM_COV is used by collect_cc_coverage.sh for generating LCOV output
-build:coverage --test_env=LLVM_COV=llvm-cov
-# GENERATE_LLVM_LCOV=1 tells collect_cc_coverage.sh to use llvm-cov export to generate LCOV format
-# instead of just outputting raw profdata. LLVM_COV specifies the llvm-cov binary to use.
-build:coverage --test_env=GENERATE_LLVM_LCOV=1
 build:coverage --experimental_use_llvm_covmap
+# experimental_generate_llvm_lcov tells collect_cc_coverage to use llvm-cov export to generate LCOV
+# format instead of just outputting raw profdata. LLVM_COV specifies the llvm-cov binary to use.
 build:coverage --experimental_generate_llvm_lcov
 # Ensure that we fetch coverage data from remote cache
 build:coverage --experimental_fetch_all_coverage_outputs

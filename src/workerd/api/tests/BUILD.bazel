@@ -86,6 +86,18 @@ wd_test(
     tags = ["no-coverage"],
 )
 
+# Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
+# serializable when forwarded over service-binding RPC, just like fetch onset.info.
+wd_test(
+    src = "stw-jsrpc-dataclone-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "stw-jsrpc-dataclone-callee.js",
+        "stw-jsrpc-dataclone-receiver.js",
+        "stw-jsrpc-dataclone-tail.js",
+    ],
+)
+
 # Test for a worker that can log to itself using the isTracer parameter
 wd_test(
     src = "self-logger-test.wd-test",
@@ -114,7 +126,6 @@ wd_test(
 
 wd_test(
     src = "cf-cache-control-test.wd-test",
-    args = ["--experimental"],
     data = ["cf-cache-control-test.js"],
 )
 
@@ -475,6 +486,12 @@ wd_test(
     src = "transform-streams-test.wd-test",
     args = ["--experimental"],
     data = ["transform-streams-test.js"],
+)
+
+wd_test(
+    src = "streams-consumer-reentry-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-consumer-reentry-gc-test.js"],
 )
 
 wd_test(

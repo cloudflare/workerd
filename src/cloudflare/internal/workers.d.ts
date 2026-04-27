@@ -36,3 +36,28 @@ export class RpcTarget {}
 export class ServiceStub {}
 
 export function waitUntil(promise: Promise<unknown>): void;
+
+// Stubs for the C++ CacheContext types (see src/workerd/api/global-scope.h).
+// The full interface is also generated in types/generated-snapshot/ from C++ RTTI.
+// If you change the C++ types, update these to match.
+export interface CachePurgeError {
+  code: number;
+  message: string;
+}
+
+export interface CachePurgeResult {
+  success: boolean;
+  errors: CachePurgeError[];
+}
+
+export interface CachePurgeOptions {
+  tags?: string[];
+  pathPrefixes?: string[];
+  purgeEverything?: boolean;
+}
+
+export interface CacheContext {
+  purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
+}
+
+export function getCtxCache(): CacheContext | undefined;
