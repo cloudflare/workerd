@@ -292,7 +292,7 @@ jsg::JsValue deserializeRpcReturnValue(jsg::Lock& js,
 // A membrane which attaches some object until it is destroyed.
 //
 // TODO(cleanup): This is generally useful, should it be part of capnp?
-class AttachmentMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+class AttachmentMembrane final: public capnp::MembranePolicy {
  public:
   explicit AttachmentMembrane(kj::Own<void> attachment): attachment(kj::mv(attachment)) {}
 
@@ -304,10 +304,6 @@ class AttachmentMembrane final: public capnp::MembranePolicy, public kj::Refcoun
   kj::Maybe<capnp::Capability::Client> outboundCall(
       uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
     return kj::none;
-  }
-
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
   }
 
  private:
@@ -886,7 +882,7 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   //   not necessarily (the subrequests could use waitUntil() to extend themselves). Anyway, this
   //   will be trickier to get right, so I'm punting with this work-around for now.
   auto cap = capnp::membrane(
-      getClient(), kj::refcounted<AttachmentMembrane>(IoContext::current().registerPendingEvent()));
+      getClient(), kj::rc<AttachmentMembrane>(IoContext::current().registerPendingEvent()));
 
   externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.setRpcTarget(kj::mv(cap));
@@ -2108,11 +2104,10 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 // completes, since it is actually returned as the result of the top-level RPC call, but that
 // call doesn't return until the `CompletionMembrane` says all capabilities were dropped, so this
 // would create a cycle.
-class JsRpcSessionCustomEvent::ServerTopLevelMembrane final: public capnp::MembranePolicy,
-                                                             public kj::Refcounted {
+class JsRpcSessionCustomEvent::ServerTopLevelMembrane final: public capnp::MembranePolicy {
  public:
   explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
-      : completionMembrane(kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))) {}
+      : completionMembrane(kj::rc<CompletionMembrane>(kj::mv(doneFulfiller))) {}
 
   ~ServerTopLevelMembrane() noexcept(false) {
     KJ_IF_SOME(cm, completionMembrane) {
@@ -2135,9 +2130,9 @@ class JsRpcSessionCustomEvent::ServerTopLevelMembrane final: public capnp::Membr
       // It's important that we use the same membrane that we'll use for call(), so that
       // capabilities returned by the ExternalPusher will be wrapped in the membrane, hence they
       // will be unwrapped when passed back through the membrane again to call().
-      auto& cm = *JSG_REQUIRE_NONNULL(
+      auto& cm = JSG_REQUIRE_NONNULL(
           completionMembrane, Error, "getExternalPusher() must be called before call()");
-      return capnp::membrane(kj::mv(target), kj::addRef(cm));
+      return capnp::membrane(kj::mv(target), cm.addRef());
     } else {
       KJ_FAIL_ASSERT("unkown interface ID for JsRpcTarget");
     }
@@ -2148,12 +2143,8 @@ class JsRpcSessionCustomEvent::ServerTopLevelMembrane final: public capnp::Membr
     KJ_FAIL_ASSERT("ServerTopLevelMembrane shouldn't have outgoing capabilities");
   }
 
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
-  }
-
  private:
-  kj::Maybe<kj::Own<CompletionMembrane>> completionMembrane;
+  kj::Maybe<kj::Rc<CompletionMembrane>> completionMembrane;
 };
 
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
@@ -2180,7 +2171,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
   try {
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
     capFulfiller->fulfill(capnp::membrane(
-        revcableTarget.getClient(), kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
+        revcableTarget.getClient(), kj::rc<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
@@ -2219,7 +2210,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
 
   rpc::JsRpcTarget::Client cap = sent.getTopLevel();
 
-  cap = capnp::membrane(kj::mv(cap), kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
+  cap = capnp::membrane(kj::mv(cap), kj::rc<RevokerMembrane>(kj::mv(revokePaf.promise)));
 
   // When no more capabilities exist on the connection, we want to proactively cancel the RPC.
   // This is needed in particular for the case where the client is dropped without making any calls
@@ -2232,8 +2223,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
   // TODO(cleanup): It feels like there's something wrong with the design here. Can we make this
   //   less ugly?
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
-  cap = capnp::membrane(
-      kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+  cap = capnp::membrane(kj::mv(cap), kj::rc<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
 
   this->capFulfiller->fulfill(kj::mv(cap));
 

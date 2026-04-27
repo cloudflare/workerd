@@ -1030,11 +1030,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
 
   rpc::TailStreamTarget::Client cap = sent.getTopLevel();
 
-  cap = capnp::membrane(kj::mv(cap), kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
+  cap = capnp::membrane(kj::mv(cap), kj::rc<RevokerMembrane>(kj::mv(revokePaf.promise)));
 
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
-  cap = capnp::membrane(
-      kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+  cap = capnp::membrane(kj::mv(cap), kj::rc<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
 
   capFulfiller->fulfill(kj::mv(cap));
 
