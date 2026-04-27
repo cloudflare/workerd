@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.1")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "1a9f2c7153a4a8e41ea69c4a912118d43d2e89105d5bd58b7edc97e8cf4bda89",
-    strip_prefix = "capnproto-capnproto-78bd96c/c++",
+    sha256 = "f471170924b07936b348e4e34b494563fc75f8d0e7ac651fcd1051ff9f119076",
+    strip_prefix = "capnproto-capnproto-0368024/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/78bd96cef23811ea899d8f60f3d43082152acb36",
+    url = "https://github.com/capnproto/capnproto/tarball/0368024276bb09fd6496d3d0e29b8c083f30df42",
 )
 use_repo(http, "capnp-cpp")
 
@@ -123,10 +123,10 @@ archive_override(
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "dce5756f20c03202ad48de43ff306629f7e0dd2bed204dfa2967ea13fcab296e",
+    sha256 = "c47c68cd51025ec66509bc36215b4c4f1f0f0a98129139ee55c541531b652526",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v8.2.0/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.0.0/singleheader.zip",
 )
 use_repo(http, "simdutf")
 
