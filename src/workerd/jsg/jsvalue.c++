@@ -1348,6 +1348,15 @@ JsBufferSource::operator JsUint8Array() const {
 // ======================================================================================
 // JsUint8Array
 
+kj::Maybe<JsUint8Array> JsUint8Array::tryCreate(Lock& js, size_t length) {
+  JSG_REQUIRE(length < v8::ArrayBuffer::kMaxByteLength, RangeError, "The length is too large");
+  auto backing = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, length,
+      v8::BackingStoreInitializationMode::kZeroInitialized,
+      v8::BackingStoreOnFailureMode::kReturnNull);
+  if (backing == nullptr) return kj::none;
+  return create(js, kj::mv(backing), 0, length);
+}
+
 JsUint8Array JsUint8Array::create(Lock& js, size_t length) {
   JSG_REQUIRE(length < v8::ArrayBuffer::kMaxByteLength, RangeError, "The length is too large");
   auto backing = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, length,

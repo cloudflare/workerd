@@ -753,8 +753,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read with zero-sized buffer") {
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 0);
-    auto view = v8::Uint8Array::New(buffer, 0, 0);
+    auto view = jsg::JsUint8Array::create(env.js, 0);
 
     bool rejected = false;
     reader->read(env.js, view, kj::none)
@@ -777,8 +776,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read with atLeast=0") {
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsUint8Array::create(env.js, 10);
 
     bool rejected = false;
     reader->readAtLeast(env.js, 0, view)
@@ -801,8 +799,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read when atLeast exceeds buffer size"
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsUint8Array::create(env.js, 10);
 
     bool rejected = false;
     reader->readAtLeast(env.js, 20, view)
@@ -832,7 +829,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast with element count within capacity
     auto view = v8::Uint32Array::New(buffer, 0, 10);
 
     bool rejected = false;
-    reader->readAtLeast(env.js, 10, view)
+    reader->readAtLeast(env.js, 10, jsg::JsArrayBufferView(view))
         .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
       rejected = true;
       auto ex = js.exceptionToKj(kj::mv(reason));
@@ -859,7 +856,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects when element count exceeds
     auto view = v8::Uint32Array::New(buffer, 0, 10);
 
     bool rejected = false;
-    reader->readAtLeast(env.js, 11, view)
+    reader->readAtLeast(env.js, 11, jsg::JsArrayBufferView(view))
         .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
       rejected = true;
       auto ex = js.exceptionToKj(kj::mv(reason));
@@ -883,7 +880,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects byteLength as element coun
     auto view = v8::Uint32Array::New(buffer, 0, 1024);
 
     bool rejected = false;
-    reader->readAtLeast(env.js, 4096, view)
+    reader->readAtLeast(env.js, 4096, jsg::JsArrayBufferView(view))
         .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
       rejected = true;
       auto ex = js.exceptionToKj(kj::mv(reason));
@@ -911,7 +908,7 @@ KJ_TEST("ReadableStreamBYOBReader read() with min exceeding element capacity rej
     ReadableStreamBYOBReader::ReadableStreamBYOBReaderReadOptions opts;
     opts.min = 11;
     bool rejected = false;
-    reader->read(env.js, view, kj::mv(opts))
+    reader->read(env.js, jsg::JsArrayBufferView(view), kj::mv(opts))
         .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
       rejected = true;
       auto ex = js.exceptionToKj(kj::mv(reason));
@@ -930,8 +927,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
     reader->releaseLock(env.js);
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsUint8Array::create(env.js, 10);
 
     bool rejected = false;
     reader->read(env.js, view, kj::none)

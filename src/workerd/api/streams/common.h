@@ -393,9 +393,7 @@ class ReadableStreamController {
   struct ByobOptions {
     static constexpr size_t DEFAULT_AT_LEAST = 1;
 
-    jsg::V8Ref<v8::ArrayBufferView> bufferView;
-    size_t byteOffset = 0;
-    size_t byteLength;
+    jsg::JsRef<jsg::JsArrayBufferView> bufferView;
 
     // The minimum number of elements that should be read. When not specified, the default
     // is DEFAULT_AT_LEAST. This is a non-standard, Workers-specific extension to

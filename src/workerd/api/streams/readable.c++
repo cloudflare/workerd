@@ -74,36 +74,35 @@ jsg::Promise<ReadResult> ReaderImpl::read(
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<ReadResult>(
-        js.v8TypeError("This ReadableStream reader has been released."_kj));
+        js.typeError("This ReadableStream reader has been released."_kj));
   }
   if (state.is<Closed>()) {
-    return js.rejectedPromise<ReadResult>(
-        js.v8TypeError("This ReadableStream has been closed."_kj));
+    return js.rejectedPromise<ReadResult>(js.typeError("This ReadableStream has been closed."_kj));
   }
   auto& attached = state.requireActiveUnsafe();
   KJ_IF_SOME(options, byobOptions) {
     // Per the spec, we must perform these checks before disturbing the stream.
     size_t atLeast = options.atLeast.orDefault(1);
+    auto view = options.bufferView.getHandle(js);
 
-    if (options.byteLength == 0) {
+    if (view.size() == 0) {
       return js.rejectedPromise<ReadResult>(
-          js.v8TypeError("You must call read() on a \"byob\" reader with a positive-sized "
-                         "TypedArray object."_kj));
+          js.typeError("You must call read() on a \"byob\" reader with a positive-sized "
+                       "TypedArray object."_kj));
     }
     if (atLeast == 0) {
-      return js.rejectedPromise<ReadResult>(js.v8TypeError(
+      return js.rejectedPromise<ReadResult>(js.typeError(
           kj::str("Requested invalid minimum number of bytes to read (", atLeast, ").")));
     }
 
     // Both read() and readAtLeast() pass atLeast in element count.
     // Convert to bytes before validation and forwarding to the controller.
-    jsg::BufferSource source(js, options.bufferView.getHandle(js));
-    auto elementSize = source.getElementSize();
+    auto elementSize = view.getElementSize();
     atLeast = atLeast * elementSize;
 
-    if (atLeast > options.byteLength) {
-      return js.rejectedPromise<ReadResult>(js.v8TypeError(kj::str("Minimum bytes to read (",
-          atLeast, ") exceeds size of buffer (", options.byteLength, ").")));
+    if (atLeast > view.size()) {
+      return js.rejectedPromise<ReadResult>(js.typeError(kj::str(
+          "Minimum bytes to read (", atLeast, ") exceeds size of buffer (", view.size(), ").")));
     }
 
     options.atLeast = atLeast;
@@ -224,13 +223,11 @@ void ReadableStreamBYOBReader::lockToStream(jsg::Lock& js, ReadableStream& strea
 }
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
-    v8::Local<v8::ArrayBufferView> byobBuffer,
+    jsg::JsArrayBufferView byobBuffer,
     jsg::Optional<ReadableStreamBYOBReaderReadOptions> maybeOptions) {
   static const ReadableStreamBYOBReaderReadOptions defaultOptions{};
   auto options = ReadableStreamController::ByobOptions{
-    .bufferView = js.v8Ref(byobBuffer),
-    .byteOffset = byobBuffer->ByteOffset(),
-    .byteLength = byobBuffer->ByteLength(),
+    .bufferView = byobBuffer.addRef(js),
     .atLeast = maybeOptions.orDefault(defaultOptions).min.orDefault(1),
     .detachBuffer = FeatureFlags::get(js).getStreamsByobReaderDetachesBuffer(),
   };
@@ -238,11 +235,9 @@ jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
 }
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::readAtLeast(
-    jsg::Lock& js, int minElements, v8::Local<v8::ArrayBufferView> byobBuffer) {
+    jsg::Lock& js, int minElements, jsg::JsArrayBufferView byobBuffer) {
   auto options = ReadableStreamController::ByobOptions{
-    .bufferView = js.v8Ref(byobBuffer),
-    .byteOffset = byobBuffer->ByteOffset(),
-    .byteLength = byobBuffer->ByteLength(),
+    .bufferView = byobBuffer.addRef(js),
     .atLeast = minElements,
     .detachBuffer = true,
   };
