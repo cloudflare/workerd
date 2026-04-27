@@ -796,7 +796,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   kj::Maybe<kj::OneOf<DefaultController, ByobController>> getController();
 
-  jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit) override;
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> readAllBytes(jsg::Lock& js, uint64_t limit) override;
   jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
@@ -3223,11 +3223,12 @@ class AllReader {
         limit(limit) {}
   KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
-  jsg::Promise<jsg::BufferSource> allBytes(jsg::Lock& js) {
-    return loop(js).then(js, [this](auto& js, PartList&& partPtrs) -> jsg::BufferSource {
-      auto out = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, runningTotal);
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
+    return loop(js).then(
+        js, [this](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
+      auto out = jsg::JsArrayBuffer::create(js, runningTotal);
       copyInto(out.asArrayPtr(), partPtrs.asPtr());
-      return jsg::BufferSource(js, kj::mv(out));
+      return out.addRef(js);
     });
   }
 
@@ -3267,13 +3268,13 @@ class AllReader {
       jsg::Ref<ReadableStream>>;
   State state;
   uint64_t limit;
-  kj::Vector<jsg::BufferSource> parts;
+  kj::Vector<jsg::JsRef<jsg::JsBufferSource>> parts;
   uint64_t runningTotal = 0;
 
   jsg::Promise<PartList> loop(jsg::Lock& js) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return js.resolvedPromise(KJ_MAP(p, parts) { return p.asArrayPtr(); });
+        return js.resolvedPromise(KJ_MAP(p, parts) { return p.getHandle(js).asArrayPtr(); });
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
         return js.template rejectedPromise<PartList>(errored.getHandle(js));
@@ -3300,7 +3301,7 @@ class AllReader {
                   js, [&](jsg::Lock& js) { return loop(js); });
               }
 
-              jsg::BufferSource bufferSource(js, handle);
+              jsg::JsBufferSource bufferSource(handle);
 
               if (bufferSource.size() == 0) {
               // Weird but allowed, we'll skip it.
@@ -3315,7 +3316,7 @@ class AllReader {
               }
 
               runningTotal += bufferSource.size();
-              parts.add(bufferSource.copy(js));
+              parts.add(bufferSource.addRef(js));
               return loop(js);
             });
 
@@ -3618,7 +3619,7 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
     auto reader = kj::heap<AllReader>(addRef(), limit);
 
     auto promise = ([&js, &reader, stripBom]() -> jsg::Promise<T> {
-      if constexpr (kj::isSameType<T, jsg::BufferSource>()) {
+      if constexpr (kj::isSameType<T, jsg::JsRef<jsg::JsArrayBuffer>>()) {
         (void)stripBom;  // Unused in this branch.
         return reader->allBytes(js);
       } else {
@@ -3647,17 +3648,17 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {
       // Stream not yet set up, treat as closed.
-      if constexpr (kj::isSameType<T, jsg::BufferSource>()) {
-        auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-        return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
+      if constexpr (kj::isSameType<T, jsg::JsRef<jsg::JsArrayBuffer>>()) {
+        auto ab = jsg::JsArrayBuffer::create(js, 0);
+        return js.resolvedPromise(ab.addRef(js));
       } else {
         return js.resolvedPromise(T());
       }
     }
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      if constexpr (kj::isSameType<T, jsg::BufferSource>()) {
-        auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-        return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
+      if constexpr (kj::isSameType<T, jsg::JsRef<jsg::JsArrayBuffer>>()) {
+        auto ab = jsg::JsArrayBuffer::create(js, 0);
+        return js.resolvedPromise(ab.addRef(js));
       } else {
         return js.resolvedPromise(T());
       }
@@ -3675,9 +3676,9 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
   KJ_UNREACHABLE;
 }
 
-jsg::Promise<jsg::BufferSource> ReadableStreamJsController::readAllBytes(
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> ReadableStreamJsController::readAllBytes(
     jsg::Lock& js, uint64_t limit) {
-  return readAll<jsg::BufferSource>(js, limit);
+  return readAll<jsg::JsRef<jsg::JsArrayBuffer>>(js, limit);
 }
 
 jsg::Promise<kj::String> ReadableStreamJsController::readAllText(jsg::Lock& js, uint64_t limit) {
