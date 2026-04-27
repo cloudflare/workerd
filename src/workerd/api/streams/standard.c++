@@ -2046,16 +2046,17 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
       auto prp = js.newPromiseAndResolver<ReadResult>();
 
       KJ_IF_SOME(byob, byobOptions) {
-        jsg::BufferSource source(js, byob.bufferView.getHandle(js));
+        auto view = byob.bufferView.getHandle(js);
+        auto elementSize = view.getElementSize();
         // If atLeast is not given, then by default it is the element size of the view
         // that we were given. If atLeast is given, we make sure that it is aligned
         // with the element size. No matter what, atLeast cannot be less than 1.
-        auto atLeast = kj::max(source.getElementSize(), byob.atLeast.orDefault(1));
-        atLeast = kj::max(1, atLeast - (atLeast % source.getElementSize()));
+        auto atLeast = kj::max(elementSize, byob.atLeast.orDefault(1));
+        atLeast = kj::max(1, atLeast - (atLeast % elementSize));
         s.consumer->read(js,
             ByteQueue::ReadRequest(kj::mv(prp.resolver),
                 {
-                  .store = jsg::BufferSource(js, source.detach(js)),
+                  .store = jsg::BufferSource(js, view.detachAndTake(js)),
                   .atLeast = atLeast,
                   .type = ByteQueue::ReadRequest::Type::BYOB,
                 }));
@@ -2098,11 +2099,9 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     KJ_IF_SOME(byob, byobOptions) {
       // If a BYOB buffer was given, we need to give it back wrapped in a TypedArray
       // whose size is set to zero.
-      jsg::BufferSource source(js, byob.bufferView.getHandle(js));
-      auto store = source.detach(js);
-      store.consume(store.size());
+      auto view = byob.bufferView.getHandle(js);
       return js.resolvedPromise(ReadResult{
-        .value = js.v8Ref(store.createHandle(js)),
+        .value = js.v8Ref(v8::Local<v8::Value>(view.slice(js, 0, 0))),
         .done = true,
       });
     } else {
@@ -2773,14 +2772,14 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
   KJ_IF_SOME(byobOptions, maybeByobOptions) {
     byobOptions.detachBuffer = true;
     auto view = byobOptions.bufferView.getHandle(js);
-    if (!view->Buffer()->IsDetachable()) {
+    if (!view.isDetachable()) {
       return js.rejectedPromise<ReadResult>(
-          js.v8TypeError("Unabled to use non-detachable ArrayBuffer."_kj));
+          js.typeError("Unabled to use non-detachable ArrayBuffer."_kj));
     }
 
-    if (view->ByteLength() == 0 || view->Buffer()->ByteLength() == 0) {
+    if (view.size() == 0) {
       return js.rejectedPromise<ReadResult>(
-          js.v8TypeError("Unable to use a zero-length ArrayBuffer."_kj));
+          js.typeError("Unable to use a zero-length ArrayBuffer."_kj));
     }
 
     // Check for pending error first (deferred error during a prior read operation)
@@ -2792,11 +2791,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // If it is a BYOB read, then the spec requires that we return an empty
       // view of the same type provided, that uses the same backing memory
       // as that provided, but with zero-length.
-      auto source = jsg::BufferSource(js, byobOptions.bufferView.getHandle(js));
-      auto store = source.detach(js);
-      store.consume(store.size());
+      auto view = byobOptions.bufferView.getHandle(js).detachAndTake(js);
       return js.resolvedPromise(ReadResult{
-        .value = js.v8Ref(store.createHandle(js)),
+        .value = js.v8Ref(v8::Local<v8::Value>(view.slice(js, 0, 0))),
         .done = true,
       });
     }
