@@ -15,13 +15,10 @@ namespace {
 // does that. It takes the original allocation and wraps it into a new ArrayBuffer
 // instance that is wrapped by a zero-length view of the same type as the original
 // TypedArray we were given.
-jsg::BufferSource transferToEmptyBuffer(jsg::Lock& js, jsg::BufferSource buffer) {
-  KJ_DASSERT(!buffer.isDetached() && buffer.canDetach(js));
-  auto backing = buffer.detach(js);
-  backing.limit(0);
-  auto buf = jsg::BufferSource(js, kj::mv(backing));
-  KJ_DASSERT(buf.size() == 0);
-  return kj::mv(buf);
+jsg::JsArrayBufferView transferToEmptyBuffer(jsg::Lock& js, jsg::JsArrayBufferView buffer) {
+  KJ_DASSERT(!buffer.isDetached() && buffer.isDetachable());
+  auto backing = buffer.detachAndTake(js);
+  return backing.slice(js, 0, 0);
 }
 }  // namespace
 
@@ -168,11 +165,12 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
     return js.rejectedPromise<ReadResult>(js.exceptionToJs(exception.clone()));
   }
 
+  auto buffer = options.buffer.getHandle(js);
   if (state.is<Closed>()) {
     // We are already in a closed state. This is a no-op, just return
     // an empty buffer.
     return js.resolvedPromise(ReadResult{
-      .buffer = transferToEmptyBuffer(js, kj::mv(options.buffer)),
+      .buffer = transferToEmptyBuffer(js, buffer).addRef(js),
       .done = true,
     });
   }
@@ -185,7 +183,7 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
   // Treat them as if the stream is closed.
   if (active.closePending) {
     return js.resolvedPromise(ReadResult{
-      .buffer = transferToEmptyBuffer(js, kj::mv(options.buffer)),
+      .buffer = transferToEmptyBuffer(js, buffer).addRef(js),
       .done = true,
     });
   }
@@ -193,14 +191,10 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
   // Ok, we are in a readable state, there are no pending closes.
   // Let's enqueue our read request.
   auto& ioContext = IoContext::current();
-
-  auto buffer = kj::mv(options.buffer);
   auto elementSize = buffer.getElementSize();
 
   // The buffer size should always be a multiple of the element size and should
-  // always be at least as large as minBytes. This should be handled for us by
-  // the jsg::BufferSource, but just to be safe, we will double-check with a
-  // debug assert here.
+  // always be at least as large as minBytes.
   KJ_DASSERT(buffer.size() % elementSize == 0);
 
   auto minBytes = kj::min(options.minBytes.orDefault(elementSize), buffer.size());
@@ -231,41 +225,43 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
   }));
   return ioContext
       .awaitIo(js, kj::mv(promise),
-          [buffer = kj::mv(buffer), self = selfRef.addRef()](jsg::Lock& js,
-              size_t bytesRead) mutable -> jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> {
-    // If the bytesRead is 0, that indicates the stream is closed. We will
-    // move the stream to a closed state and return the empty buffer.
-    if (bytesRead == 0) {
-      self->runIfAlive([](ReadableStreamSourceJsAdapter& self) {
-        KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {
-          open.active->closePending = true;
-        }
-      });
-      return js.resolvedPromise(ReadResult{
-        .buffer = transferToEmptyBuffer(js, kj::mv(buffer)),
-        .done = true,
-      });
-    }
-    KJ_DASSERT(bytesRead <= buffer.size());
+          JSG_VISITABLE_LAMBDA((buffer = buffer.addRef(js), self = selfRef.addRef()), (buffer),
+              (jsg::Lock & js, size_t bytesRead) mutable
+                  ->jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> {
+                    // If the bytesRead is 0, that indicates the stream is closed. We will
+                    // move the stream to a closed state and return the empty buffer.
+                    auto handle = buffer.getHandle(js);
+                    if (bytesRead == 0) {
+                    self->runIfAlive([](ReadableStreamSourceJsAdapter& self) {
+                      KJ_IF_SOME(open, self.state.tryGetActiveUnsafe()) {
+                      open.active->closePending = true;
+                      } else {
+                      }
+                    });
+                    return js.resolvedPromise(ReadResult{
+                      .buffer = transferToEmptyBuffer(js, handle).addRef(js),
+                      .done = true,
+                    });
+                    }
+                    KJ_DASSERT(bytesRead <= handle.size());
 
-    // If bytesRead is not a multiple of the element size, that indicates
-    // that the source either read less than minBytes (and ended), or is
-    // simply unable to satisfy the element size requirement. We cannot
-    // provide a partial element to the caller, so reject the read.
-    if (bytesRead % buffer.getElementSize() != 0) {
-      return js.rejectedPromise<ReadResult>(
-          js.typeError(kj::str("The underlying stream failed to provide a multiple of the "
-                               "target element size ",
-              buffer.getElementSize())));
-    }
+                    // If bytesRead is not a multiple of the element size, that indicates
+                    // that the source either read less than minBytes (and ended), or is
+                    // simply unable to satisfy the element size requirement. We cannot
+                    // provide a partial element to the caller, so reject the read.
+                    if (bytesRead % handle.getElementSize() != 0) {
+                    return js.rejectedPromise<ReadResult>(js.typeError(
+                        kj::str("The underlying stream failed to provide a multiple of the "
+                                "target element size ",
+                            handle.getElementSize())));
+                    }
 
-    auto backing = buffer.detach(js);
-    backing.limit(bytesRead);
-    return js.resolvedPromise(ReadResult{
-      .buffer = jsg::BufferSource(js, kj::mv(backing)),
-      .done = false,
-    });
-  })
+                    auto backing = handle.detachAndTake(js);
+                    return js.resolvedPromise(ReadResult{
+                      .buffer = backing.slice(js, 0, bytesRead).addRef(js),
+                      .done = false,
+                    });
+                  }))
       .catch_(js,
           [self = selfRef.addRef()](
               jsg::Lock& js, jsg::Value exception) -> ReadableStreamSourceJsAdapter::ReadResult {

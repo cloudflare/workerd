@@ -1145,23 +1145,32 @@ JsArrayBufferView JsArrayBufferView::slice(Lock& js, size_t offset, size_t lengt
   } else if (inner->IsUint8ClampedArray()) {
     return JsArrayBufferView(v8::Uint8ClampedArray::New(inner->Buffer(), offset, length));
   } else if (inner->IsUint16Array()) {
-    return JsArrayBufferView(v8::Uint16Array::New(inner->Buffer(), offset, length));
+    return JsArrayBufferView(
+        v8::Uint16Array::New(inner->Buffer(), offset, length / getElementSize()));
   } else if (inner->IsInt16Array()) {
-    return JsArrayBufferView(v8::Int16Array::New(inner->Buffer(), offset, length));
+    return JsArrayBufferView(
+        v8::Int16Array::New(inner->Buffer(), offset, length / getElementSize()));
   } else if (inner->IsUint32Array()) {
-    return JsArrayBufferView(v8::Uint32Array::New(inner->Buffer(), offset, length));
+    return JsArrayBufferView(
+        v8::Uint32Array::New(inner->Buffer(), offset, length / getElementSize()));
   } else if (inner->IsInt32Array()) {
-    return JsArrayBufferView(v8::Int32Array::New(inner->Buffer(), offset, length));
+    return JsArrayBufferView(
+        v8::Int32Array::New(inner->Buffer(), offset, length / getElementSize()));
   } else if (inner->IsFloat16Array()) {
-    return JsArrayBufferView(v8::Float16Array::New(inner->Buffer(), offset, length));
+    return JsArrayBufferView(
+        v8::Float16Array::New(inner->Buffer(), offset, length / getElementSize()));
   } else if (inner->IsFloat32Array()) {
-    return JsArrayBufferView(v8::Float32Array::New(inner->Buffer(), offset, length));
+    return JsArrayBufferView(
+        v8::Float32Array::New(inner->Buffer(), offset, length / getElementSize()));
   } else if (inner->IsFloat64Array()) {
-    return JsArrayBufferView(v8::Float64Array::New(inner->Buffer(), offset, length));
+    return JsArrayBufferView(
+        v8::Float64Array::New(inner->Buffer(), offset, length / getElementSize()));
   } else if (inner->IsBigInt64Array()) {
-    return JsArrayBufferView(v8::BigInt64Array::New(inner->Buffer(), offset, length));
+    return JsArrayBufferView(
+        v8::BigInt64Array::New(inner->Buffer(), offset, length / getElementSize()));
   } else if (inner->IsBigUint64Array()) {
-    return JsArrayBufferView(v8::BigUint64Array::New(inner->Buffer(), offset, length));
+    return JsArrayBufferView(
+        v8::BigUint64Array::New(inner->Buffer(), offset, length / getElementSize()));
   } else if (inner->IsDataView()) {
     return JsArrayBufferView(v8::DataView::New(inner->Buffer(), offset, length));
   }
