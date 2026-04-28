@@ -422,5 +422,23 @@ KJ_TEST("isTunneledException") {
   }
 }
 
+KJ_TEST("isTunneledException strips sentry prefixes") {
+  auto doError = tunneledErrorType("SENTRY_DO jsg.Error: tunneled from durable object"_kj);
+  KJ_EXPECT(doError.isJsgError);
+  KJ_EXPECT(!doError.isInternal);
+  KJ_EXPECT(doError.message == "Error: tunneled from durable object"_kj, doError.message);
+
+  auto rtError = tunneledErrorType("SENTRY_RT jsg.Error: tunneled from runtime"_kj);
+  KJ_EXPECT(rtError.isJsgError);
+  KJ_EXPECT(!rtError.isInternal);
+  KJ_EXPECT(rtError.message == "Error: tunneled from runtime"_kj, rtError.message);
+
+  auto remoteDoError = tunneledErrorType("remote.SENTRY_DO jsg.Error: tunneled from remote"_kj);
+  KJ_EXPECT(remoteDoError.isJsgError);
+  KJ_EXPECT(!remoteDoError.isInternal);
+  KJ_EXPECT(remoteDoError.isFromRemote);
+  KJ_EXPECT(remoteDoError.message == "Error: tunneled from remote"_kj, remoteDoError.message);
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test
