@@ -390,6 +390,8 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
   // Regardless of what kind of typed array view this is, we can always get it as a Uint8Array
   operator JsUint8Array() const;
 
+  JsArrayBufferView clone(jsg::Lock& js);
+
   using JsBase<v8::ArrayBufferView, JsArrayBufferView>::JsBase;
 };
 
@@ -403,6 +405,8 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
 
   // Create a Uint8Array view over the given ArrayBuffer.
   static JsUint8Array create(Lock& js, JsArrayBuffer& buffer);
+
+  static JsUint8Array create(Lock& js, JsSharedArrayBuffer& buffer);
 
   static JsUint8Array create(
       Lock& js, std::unique_ptr<v8::BackingStore> backingStore, size_t byteOffset, size_t length);
@@ -445,6 +449,8 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
   operator JsArrayBufferView() const;
   operator JsBufferSource() const;
 
+  JsUint8Array clone(jsg::Lock& js);
+
   using JsBase<v8::Uint8Array, JsUint8Array>::JsBase;
 };
 
@@ -466,6 +472,8 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
   kj::ArrayPtr<kj::byte> asArrayPtr();
 
   size_t size() const;
+  size_t getOffset() const;
+  size_t underlyingArrayBufferSize(Lock& js) const;
 
   // Returns true if the underlying value is an integer-typed TypedArray.
   bool isIntegerType() const;

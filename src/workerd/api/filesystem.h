@@ -103,8 +103,8 @@ class FileSystemModule final: public jsg::Object {
     JSG_STRUCT(position);
   };
 
-  uint32_t write(jsg::Lock& js, int fd, kj::Array<jsg::JsBufferSource> data, WriteOptions options);
-  uint32_t read(jsg::Lock& js, int fd, kj::Array<jsg::JsUint8Array> data, WriteOptions options);
+  uint32_t write(jsg::Lock& js, int fd, kj::Array<jsg::JsRef<jsg::JsBufferSource>> data, WriteOptions options);
+  uint32_t read(jsg::Lock& js, int fd, kj::Array<jsg::JsRef<jsg::JsUint8Array>> data, WriteOptions options);
 
   jsg::JsUint8Array readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd);
 

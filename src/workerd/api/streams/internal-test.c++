@@ -280,12 +280,12 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
           "is currently locked to a writer.");
     }
 
-    auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(10));
+    auto u8 = jsg::JsUint8Array::create(env.js, 10);
 
     bool writeFailed = false;
 
     auto write = sink->getController()
-                     .write(env.js, buffersource.getHandle(env.js))
+                     .write(env.js, u8)
                      .catch_(env.js, [&](jsg::Lock& js, jsg::Value value) {
       writeFailed = true;
       auto ex = js.exceptionToKj(kj::mv(value));
@@ -376,9 +376,9 @@ KJ_TEST("WritableStreamInternalController observability") {
     stream = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::mv(myObserver));
 
     auto write = [&](size_t size) {
-      auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(size));
-      return env.context.awaitJs(env.js,
-          KJ_ASSERT_NONNULL(stream)->getController().write(env.js, buffersource.getHandle(env.js)));
+      auto u8 = jsg::JsUint8Array::create(env.js, size);
+      return env.context.awaitJs(
+          env.js, KJ_ASSERT_NONNULL(stream)->getController().write(env.js, u8));
     };
 
     KJ_ASSERT(observer.queueSize == 0);
@@ -427,8 +427,7 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
       auto& c = KJ_ASSERT_NONNULL(controller.tryGet<jsg::Ref<ReadableStreamDefaultController>>());
       if (pullCount == 1) {
         // First pull: enqueue some data so the pipe loop can make progress
-        auto data = js.bytes(kj::heapArray<kj::byte>({1, 2, 3, 4}));
-        c->enqueue(js, data.getHandle(js));
+        c->enqueue(js, jsg::JsUint8Array::create(js, 4));
       }
       // Second pull onwards: don't enqueue anything, leaving the read pending.
       // This simulates an async data source that hasn't received data yet.
@@ -445,7 +444,7 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
     env.js.runMicrotasks();
 
     // Abort while pipeLoop is waiting for a pending read
-    auto abortPromise = sink->getController().abort(env.js, env.js.v8TypeError("Test abort"_kj));
+    auto abortPromise = sink->getController().abort(env.js, env.js.typeError("Test abort"_kj));
     abortPromise.markAsHandled(env.js);
     env.js.runMicrotasks();
 

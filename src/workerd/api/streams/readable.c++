@@ -39,12 +39,11 @@ void ReaderImpl::detach() {
   }
 }
 
-jsg::Promise<void> ReaderImpl::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+jsg::Promise<void> ReaderImpl::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This ReadableStream reader has been released."_kj));
+        js.typeError("This ReadableStream reader has been released."_kj));
   }
   if (state.is<Closed>()) {
     return js.resolvedPromise();
@@ -153,8 +152,8 @@ void ReadableStreamDefaultReader::attach(
 }
 
 jsg::Promise<void> ReadableStreamDefaultReader::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  return impl.cancel(js, kj::mv(maybeReason));
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
+  return impl.cancel(js, maybeReason);
 }
 
 void ReadableStreamDefaultReader::detach() {
@@ -206,8 +205,8 @@ void ReadableStreamBYOBReader::attach(
 }
 
 jsg::Promise<void> ReadableStreamBYOBReader::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  return impl.cancel(js, kj::mv(maybeReason));
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
+  return impl.cancel(js, maybeReason);
 }
 
 void ReadableStreamBYOBReader::detach() {
@@ -311,11 +310,11 @@ jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js, size_t maxR
         return kj::mv(result);
       }
       return js.rejectedPromise<DrainingReadResult>(
-          js.v8TypeError("Unable to perform draining read on this stream."_kj));
+          js.typeError("Unable to perform draining read on this stream."_kj));
     }
     KJ_CASE_ONEOF(r, Released) {
       return js.rejectedPromise<DrainingReadResult>(
-          js.v8TypeError("This ReadableStream reader has been released."_kj));
+          js.typeError("This ReadableStream reader has been released."_kj));
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {
       return js.resolvedPromise(DrainingReadResult{
@@ -327,8 +326,7 @@ jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js, size_t maxR
   KJ_UNREACHABLE;
 }
 
-jsg::Promise<void> DrainingReader::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+jsg::Promise<void> DrainingReader::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this reader was never attached");
@@ -339,7 +337,7 @@ jsg::Promise<void> DrainingReader::cancel(
     }
     KJ_CASE_ONEOF(r, Released) {
       return js.rejectedPromise<void>(
-          js.v8TypeError("This ReadableStream reader has been released."_kj));
+          js.typeError("This ReadableStream reader has been released."_kj));
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {
       return js.resolvedPromise();
@@ -426,11 +424,10 @@ ReadableStreamController& ReadableStream::getController() {
   return *controller;
 }
 
-jsg::Promise<void> ReadableStream::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+jsg::Promise<void> ReadableStream::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
+        js.typeError("This ReadableStream is currently locked to a reader."_kj));
   }
   return getController().cancel(js, maybeReason);
 }
@@ -491,12 +488,12 @@ jsg::Promise<void> ReadableStream::pipeTo(jsg::Lock& js,
     jsg::Optional<PipeToOptions> maybeOptions) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
+        js.typeError("This ReadableStream is currently locked to a reader."_kj));
   }
 
   if (destination->getController().isLockedToWriter()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream is currently locked to a writer"_kj));
+        js.typeError("This WritableStream is currently locked to a writer"_kj));
   }
 
   auto options = kj::mv(maybeOptions).orDefault({});
@@ -598,24 +595,28 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(jsg::Lock& js,
 }
 
 jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeValue) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeValue) {
   KJ_IF_SOME(value, maybeValue) {
-    if ((value)->IsArrayBuffer()) {
-      auto buffer = value.As<v8::ArrayBuffer>();
-      return buffer->ByteLength();
-    } else if ((value)->IsArrayBufferView()) {
-      auto view = value.As<v8::ArrayBufferView>();
-      return view->ByteLength();
-    } else {
-      // Per the WHATWG Streams spec, ByteLengthQueuingStrategy.size should return
-      // GetV(chunk, "byteLength"), which means getting the byteLength property
-      // from any object, not just ArrayBuffer/ArrayBufferView.
-      KJ_IF_SOME(obj, jsg::JsValue(value).tryCast<jsg::JsObject>()) {
-        auto byteLength = obj.get(js, "byteLength"_kj);
-        KJ_IF_SOME(num, byteLength.tryCast<jsg::JsNumber>()) {
-          KJ_IF_SOME(val, num.value(js)) {
-            return static_cast<uint32_t>(val);
-          }
+    KJ_IF_SOME(ab, value.tryCast<jsg::JsArrayBuffer>()) {
+      return ab.size();
+    }
+    KJ_IF_SOME(sab, value.tryCast<jsg::JsSharedArrayBuffer>()) {
+      return sab.size();
+    }
+    KJ_IF_SOME(view, value.tryCast<jsg::JsArrayBufferView>()) {
+      return view.size();
+    }
+    KJ_IF_SOME(str, value.tryCast<jsg::JsString>()) {
+      return str.utf8Length(js);
+    }
+    // Per the WHATWG Streams spec, ByteLengthQueuingStrategy.size should return
+    // GetV(chunk, "byteLength"), which means getting the byteLength property
+    // from any object, not just ArrayBuffer/ArrayBufferView.
+    KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
+      auto byteLength = obj.get(js, "byteLength"_kj);
+      KJ_IF_SOME(num, byteLength.tryCast<jsg::JsNumber>()) {
+        KJ_IF_SOME(val, num.value(js)) {
+          return static_cast<uint32_t>(val);
         }
       }
     }
