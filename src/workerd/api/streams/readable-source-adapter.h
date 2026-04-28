@@ -159,7 +159,7 @@ class ReadableStreamSourceJsAdapter final {
     // is equal to the length of this buffer. The actual number of
     // bytes read is indicated by the resolved value of the promise
     // but will never exceed the length of this buffer.
-    jsg::BufferSource buffer;
+    jsg::JsRef<jsg::JsArrayBufferView> buffer;
 
     // The optional minimum number of bytes to read. If not provided,
     // the read will complete as soon as at least the mininum number
@@ -179,7 +179,7 @@ class ReadableStreamSourceJsAdapter final {
     // of the same type as that provided in ReadOptions.
     // If the read produced no data because the stream is
     // closed, the type array will be zero length.
-    jsg::BufferSource buffer;
+    jsg::JsRef<jsg::JsArrayBufferView> buffer;
 
     // True if the stream is now closed and no further reads
     // are possible. If this is true, the buffer will be zero
