@@ -30,7 +30,6 @@
 #include <workerd/api/pyodide/requirements.h>
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/api/queue.h>
-#include <workerd/api/r2-admin.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
@@ -117,7 +116,6 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_KV_ISOLATE_TYPES,
     EW_PYODIDE_ISOLATE_TYPES,
     EW_QUEUE_ISOLATE_TYPES,
-    EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES,
     EW_R2_PUBLIC_BETA_ISOLATE_TYPES,
     EW_WORKER_RPC_ISOLATE_TYPES,
     EW_SCHEDULED_ISOLATE_TYPES,
@@ -623,11 +621,6 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
               featureFlags, r2.subrequestChannel, kj::str(r2.bucket), kj::str(r2.bindingName)));
     }
 
-    KJ_CASE_ONEOF(r2a, Global::R2Admin) {
-      value = lock.wrap(
-          context, lock.alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
-    }
-
     KJ_CASE_ONEOF(ns, Global::QueueBinding) {
       value = lock.wrap(context, lock.alloc<api::WorkerQueue>(ns.subrequestChannel));
     }
@@ -814,9 +807,6 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
     }
     KJ_CASE_ONEOF(r2Bucket, Global::R2Bucket) {
       result.value = r2Bucket.clone();
-    }
-    KJ_CASE_ONEOF(r2Admin, Global::R2Admin) {
-      result.value = r2Admin.clone();
     }
     KJ_CASE_ONEOF(queueBinding, Global::QueueBinding) {
       result.value = queueBinding.clone();

@@ -26,7 +26,6 @@
 #include <workerd/api/performance.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/queue.h>
-#include <workerd/api/r2-admin.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
@@ -70,7 +69,6 @@
   F("pyodide", EW_PYODIDE_ISOLATE_TYPES)                                                           \
   F("kv", EW_KV_ISOLATE_TYPES)                                                                     \
   F("queue", EW_QUEUE_ISOLATE_TYPES)                                                               \
-  F("r2-admin", EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES)                                             \
   F("r2", EW_R2_PUBLIC_BETA_ISOLATE_TYPES)                                                         \
   F("worker-rpc", EW_WORKER_RPC_ISOLATE_TYPES)                                                     \
   F("scheduled", EW_SCHEDULED_ISOLATE_TYPES)                                                       \

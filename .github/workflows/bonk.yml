@@ -38,7 +38,7 @@ jobs:
           model: 'cloudflare-ai-gateway/anthropic/claude-opus-4-6'
           mentions: '/bonk,@ask-bonk'
           permissions: write
-          opencode_version: "1.4.6"
+          opencode_version: "1.14.28"
           # token_permissions defaults to WRITE (i.e. Bonk can push commits).
           # We intentionally leave it that way here because users may ask Bonk
           # to update their PR via /bonk.

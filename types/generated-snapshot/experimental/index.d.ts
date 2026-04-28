@@ -2530,7 +2530,7 @@ interface R2ListOptions {
   startAfter?: string;
   include?: ("httpMetadata" | "customMetadata")[];
 }
-declare abstract class R2Bucket {
+interface R2Bucket {
   head(key: string): Promise<R2Object | null>;
   get(
     key: string,

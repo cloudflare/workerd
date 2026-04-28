@@ -571,7 +571,6 @@ class R2Bucket: public jsg::Object {
   kj::Maybe<kj::String> binding;
   kj::Maybe<kj::String> jwt;
 
-  friend class R2Admin;
   friend class R2MultipartUpload;
 };
 

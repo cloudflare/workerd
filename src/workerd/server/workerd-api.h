@@ -131,13 +131,6 @@ class WorkerdApi final: public Worker::Api {
         };
       }
     };
-    struct R2Admin {
-      uint subrequestChannel;
-
-      R2Admin clone() const {
-        return *this;
-      }
-    };
     struct QueueBinding {
       uint subrequestChannel;
 
@@ -296,7 +289,6 @@ class WorkerdApi final: public Worker::Api {
         LoopbackServiceStub,
         KvNamespace,
         R2Bucket,
-        R2Admin,
         CryptoKey,
         EphemeralActorNamespace,
         LoopbackEphemeralActorNamespace,
