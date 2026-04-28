@@ -58,12 +58,13 @@ KJ_TEST("Reading from default reader") {
       KJ_ASSERT(!readResult.done);
       auto& value = KJ_REQUIRE_NONNULL(readResult.value);
       auto handle = value.getHandle(js);
-      KJ_ASSERT(handle->IsUint8Array());
+      KJ_ASSERT(handle.isUint8Array());
+      jsg::JsBufferSource source(handle);
       if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
         // With 16KB buffer, the entire 10KB stream fits in one read.
-        KJ_ASSERT(streamLength == handle.As<v8::Uint8Array>()->ByteLength());
+        KJ_ASSERT(streamLength == source.size());
       } else {
-        KJ_ASSERT(4 * 1024 == handle.As<v8::Uint8Array>()->ByteLength());
+        KJ_ASSERT(4 * 1024 == source.size());
       }
     })));
   });
@@ -104,10 +105,9 @@ KJ_TEST("Reading from byob reader") {
 
         auto& value = KJ_REQUIRE_NONNULL(readResult.value);
         auto handle = value.getHandle(js);
-        KJ_ASSERT(handle->IsUint8Array());
-        auto view = handle.As<v8::Uint8Array>();
-        KJ_ASSERT(kj::min(test.streamLength, test.bufferSize) == view->ByteLength());
-        KJ_ASSERT(test.bufferSize == view->Buffer()->ByteLength());
+        auto view = KJ_REQUIRE_NONNULL(handle.tryCast<jsg::JsUint8Array>());
+        KJ_ASSERT(kj::min(test.streamLength, test.bufferSize) == view.size());
+        KJ_ASSERT(test.bufferSize, view.getBuffer().size());
       })));
       return kj::READY_NOW;
     });
@@ -177,7 +177,8 @@ KJ_TEST("PumpToReader regression") {
                              [](jsg::Lock& js, auto controller) {
       auto& c = KJ_REQUIRE_NONNULL(
           controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
-      c->enqueue(js, v8::ArrayBuffer::New(js.v8Isolate, 10));
+      auto ab = jsg::JsArrayBuffer::create(js, 10);
+      c->enqueue(js, ab);
       c->close(js);
       return js.resolvedPromise();
     }},

@@ -490,7 +490,7 @@ void FileSystemModule::close(jsg::Lock& js, int fd) {
 }
 
 uint32_t FileSystemModule::write(
-    jsg::Lock& js, int fd, kj::Array<jsg::JsBufferSource> data, WriteOptions options) {
+    jsg::Lock& js, int fd, kj::Array<jsg::JsRef<jsg::JsBufferSource>> data, WriteOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
 
   KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
@@ -513,7 +513,7 @@ uint32_t FileSystemModule::write(
         auto pos = getPosition(js, opened.addRef(), file.addRef(), options);
         uint32_t total = 0;
         for (auto& buffer: data) {
-          KJ_SWITCH_ONEOF(file->write(js, pos, buffer.asArrayPtr())) {
+          KJ_SWITCH_ONEOF(file->write(js, pos, buffer.getHandle(js).asArrayPtr())) {
             KJ_CASE_ONEOF(written, uint32_t) {
               pos += written;
               total += written;
@@ -546,7 +546,7 @@ uint32_t FileSystemModule::write(
 }
 
 uint32_t FileSystemModule::read(
-    jsg::Lock& js, int fd, kj::Array<jsg::JsUint8Array> data, WriteOptions options) {
+    jsg::Lock& js, int fd, kj::Array<jsg::JsRef<jsg::JsUint8Array>> data, WriteOptions options) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
     if (!opened->read) {
@@ -561,11 +561,12 @@ uint32_t FileSystemModule::read(
         }
         uint32_t total = 0;
         for (auto& buffer: data) {
-          auto read = file->read(js, pos, buffer.asArrayPtr());
+          auto handle = buffer.getHandle(js);
+          auto read = file->read(js, pos, handle.asArrayPtr());
           // if read is less than the size of the buffer, we are at EOF.
           pos += read;
           total += read;
-          if (read < buffer.size()) break;
+          if (read < handle.size()) break;
         }
         // We only update the position if the options.position is not set.
         if (options.position == kj::none) {
@@ -788,7 +789,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
           // If the file descriptor was opened in append mode, or if the append option
           // is set, then we'll use write instead to append to the end of the file.
           if (opened->append || options.append) {
-            return write(js, fd, kj::arr(kj::mv(data)),
+            return write(js, fd, kj::arr(data.addRef(js)),
                 {
                   .position = stat.size,
                 });

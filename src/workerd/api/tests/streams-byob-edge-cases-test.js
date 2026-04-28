@@ -109,6 +109,7 @@ export const byobFloat32Array = {
 
     ok(!done);
     ok(value instanceof Float32Array);
+
     strictEqual(value.length, 2);
     ok(Math.abs(value[0] - 3.14) < 0.001);
     ok(Math.abs(value[1] - 2.71) < 0.001);
