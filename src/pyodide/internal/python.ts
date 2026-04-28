@@ -23,6 +23,7 @@ import {
 } from 'pyodide-internal:topLevelEntropy/lib';
 import {
   LEGACY_VENDOR_PATH,
+  PROCESS_PTH_FILES,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
 import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
@@ -79,12 +80,11 @@ function prepareWasmLinearMemory(
 }
 
 function setupPythonSearchPath(pyodide: Pyodide): void {
-  pyodide.runPython(`
-    def _tmp():
+  const setup = pyodide.runPython(`
+    def _setup_python_search_path(*, LEGACY_VENDOR_PATH, PROCESS_PTH_FILES):
       import sys
-      from pathlib import Path
+      from site import addsitedir
 
-      LEGACY_VENDOR_PATH = "${LEGACY_VENDOR_PATH}" == "true"
       VENDOR_PATH = "/session/metadata/vendor"
       PYTHON_MODULES_PATH = "/session/metadata/python_modules"
 
@@ -113,9 +113,21 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
         # If no site-packages found, fail
         raise ValueError("No site-packages found in sys.path")
 
-    _tmp()
-    del _tmp
-  `);
+      if PROCESS_PTH_FILES:
+        # addsitedir processes any .pth files in PYTHON_MODULES_PATH, allowing
+        # packages to extend sys.path declaratively. It also re-adds the
+        # directory to sys.path, but it was already inserted above so this is a
+        # no-op for that purpose.
+        addsitedir(PYTHON_MODULES_PATH)
+
+    _setup_python_search_path
+  `) as PyCallable;
+  pyodide.runPython('del _setup_python_search_path');
+  setup.callKwargs({
+    LEGACY_VENDOR_PATH,
+    PROCESS_PTH_FILES,
+  });
+  setup.destroy();
 }
 
 /**

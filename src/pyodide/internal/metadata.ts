@@ -63,6 +63,7 @@ export const EXTERNAL_SDK = !!COMPATIBILITY_FLAGS.enable_python_external_sdk;
 export const LEGACY_GLOBAL_HANDLERS = !NO_GLOBAL_HANDLERS;
 export const LEGACY_VENDOR_PATH = !FORCE_NEW_VENDOR_PATH;
 export const CHECK_RNG_STATE = !!COMPATIBILITY_FLAGS.python_check_rng_state;
+export const PROCESS_PTH_FILES = !!COMPATIBILITY_FLAGS.python_process_pth_files;
 
 export const setCpuLimitNearlyExceededCallback =
   MetadataReader.setCpuLimitNearlyExceededCallback.bind(MetadataReader);

@@ -83,3 +83,5 @@ py_wd_test(
 )
 
 py_wd_test("python-compat-flag")
+
+py_wd_test("pth-file")

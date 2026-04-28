@@ -1530,4 +1530,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # The rollback function is bundled into the RPC call for the engine to invoke
   # as a compensation action on failure. Without this flag, the step object is
   # passed through unwrapped and .rollback() is not available.
+
+  pythonProcessPthFiles @176 :Bool
+      $compatEnableFlag("python_process_pth_files")
+      $compatDisableFlag("disable_python_process_pth_files");
+  # When enabled, Python Workers process `.pth` files placed in the
+  # `python_modules/` directory by calling `site.addsitedir()` on it during
+  # startup. This allows packages to extend `sys.path` declaratively (e.g. to
+  # add subdirectories or register import hooks). Without this flag, `.pth`
+  # files in `python_modules/` are ignored.
 }
