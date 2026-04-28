@@ -6,6 +6,7 @@
 
 #include "impl.h"
 #include "keys.h"
+#include "secp256k1-key.h"
 
 #include <workerd/api/util.h>
 #include <workerd/io/features.h>
@@ -429,8 +430,8 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 
 struct EllipticCurveInfo {
   kj::StringPtr normalizedName;
-  int opensslCurveId;
-  uint rsSize;  // size of "r" and "s" in the signature
+  int opensslCurveId;  // 0 for curves BoringSSL doesn't support (e.g. secp256k1).
+  uint rsSize;         // size of "r" and "s" in the signature
 };
 
 EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
@@ -446,6 +447,15 @@ EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
   return iter->second;
 }
 
+// Overload that adds secp256k1 to the table when the compat flag is set.
+EllipticCurveInfo lookupEllipticCurve(jsg::Lock& js, kj::StringPtr curveName) {
+  if (FeatureFlags::get(js).getSecp256k1EcdsaCurve() &&
+      strcasecmp(curveName.cStr(), "secp256k1") == 0) {
+    return {"secp256k1", 0, 32};
+  }
+  return lookupEllipticCurve(curveName);
+}
+
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(jsg::Lock& js,
     kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm&& algorithm,
@@ -455,7 +465,16 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(jsg:
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(
       algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(namedCurve);
+  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
+
+  // The compat flag scopes secp256k1 support to ECDSA; ECDH is rejected.
+  if (strcasecmp(normalizedNamedCurve.cStr(), "secp256k1") == 0) {
+    JSG_REQUIRE(normalizedName == "ECDSA", DOMNotSupportedError, "\"", normalizedName,
+        "\" is not supported for curve \"secp256k1\".");
+    return Secp256k1Key::generatePair(js,
+        CryptoKey::EllipticKeyAlgorithm{normalizedName, normalizedNamedCurve}, extractable,
+        privateKeyUsages, publicKeyUsages);
+  }
 
   auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm{
     normalizedName,
@@ -700,7 +719,13 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(jsg::Lock& js,
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(
       algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(namedCurve);
+  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
+
+  if (strcasecmp(normalizedNamedCurve.cStr(), "secp256k1") == 0) {
+    return Secp256k1Key::import(js, normalizedName, format, kj::mv(keyData),
+        CryptoKey::EllipticKeyAlgorithm{normalizedName, normalizedNamedCurve}, extractable,
+        keyUsages);
+  }
 
   auto importedKey = [&, curveId = curveId] {
     if (format != "raw") {
@@ -758,7 +783,10 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(jsg::Lock& js,
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(
       algorithm.namedCurve, TypeError, "Missing field \"namedCurve\" in \"algorithm\".");
 
-  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(namedCurve);
+  auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
+
+  JSG_REQUIRE(strcasecmp(normalizedNamedCurve.cStr(), "secp256k1") != 0, DOMNotSupportedError,
+      "ECDH is not supported for curve \"secp256k1\".");
 
   auto importedKey = [&, curveId = curveId] {
     auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();

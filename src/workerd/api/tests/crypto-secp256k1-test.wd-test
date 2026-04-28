@@ -1,0 +1,29 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Two services so each side can run against a different setting of the secp256k1_ecdsa_curve
+# compat flag. The flag is per-worker.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-secp256k1-no-flag",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-secp256k1-no-flag-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+    ( name = "crypto-secp256k1-with-flag",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-secp256k1-with-flag-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "experimental",
+          "secp256k1_ecdsa_curve",
+        ],
+      )
+    ),
+  ],
+);
