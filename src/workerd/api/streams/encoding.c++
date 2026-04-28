@@ -75,15 +75,13 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
     auto utf8Length = result.count;
     KJ_DASSERT(utf8Length > 0 && utf8Length >= end);
 
-    auto backingStore = js.allocBackingStore(utf8Length, jsg::Lock::AllocOption::UNINITIALIZED);
-    auto dest = kj::ArrayPtr<char>(static_cast<char*>(backingStore->Data()), utf8Length);
-    [[maybe_unused]] auto written =
-        simdutf::convert_utf16_to_utf8(slice.begin(), slice.size(), dest.begin());
+    auto dest = jsg::JsArrayBuffer::create(js, utf8Length);
+    [[maybe_unused]] auto written = simdutf::convert_utf16_to_utf8(
+        slice.begin(), slice.size(), dest.asArrayPtr().asChars().begin());
     KJ_DASSERT(written == utf8Length, "simdutf should write exactly utf8Length bytes");
 
-    auto array = v8::Uint8Array::New(
-        v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, utf8Length);
-    controller->enqueue(js, jsg::JsUint8Array(array));
+    auto u8 = jsg::JsUint8Array::create(js, dest);
+    controller->enqueue(js, u8);
     return js.resolvedPromise();
   };
 
@@ -91,9 +89,9 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
                    jsg::Lock& js, jsg::Ref<TransformStreamDefaultController> controller) mutable {
     // If stream ends with orphaned high surrogate, emit replacement character
     if (holder->pending != kj::none) {
-      auto backingStore = js.allocBackingStore(3, jsg::Lock::AllocOption::UNINITIALIZED);
-      memcpy(backingStore->Data(), REPLACEMENT_UTF8, 3);
-      controller->enqueue(js, jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, 3));
+      auto u8 = jsg::JsUint8Array::create(js, 3);
+      u8.asArrayPtr().copyFrom(REPLACEMENT_UTF8);
+      controller->enqueue(js, u8);
     }
     return js.resolvedPromise();
   };
@@ -150,7 +148,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
                         JSG_REQUIRE(chunk->IsArrayBuffer() || chunk->IsArrayBufferView(), TypeError,
                             "This TransformStream is being used as a byte stream, "
                             "but received a value that is not a BufferSource.");
-                        jsg::BufferSource source(js, chunk);
+                        jsg::JsBufferSource source(chunk);
                         auto decoded =
                             JSG_REQUIRE_NONNULL(decoder->decodePtr(js, source.asArrayPtr(), false),
                                 TypeError, "Failed to decode input.");
