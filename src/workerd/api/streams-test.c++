@@ -107,7 +107,7 @@ KJ_TEST("Reading from byob reader") {
         auto handle = value.getHandle(js);
         auto view = KJ_REQUIRE_NONNULL(handle.tryCast<jsg::JsUint8Array>());
         KJ_ASSERT(kj::min(test.streamLength, test.bufferSize) == view.size());
-        KJ_ASSERT(test.bufferSize, view.getBuffer().size());
+        KJ_ASSERT(test.bufferSize == view.getBuffer().size());
       })));
       return kj::READY_NOW;
     });
