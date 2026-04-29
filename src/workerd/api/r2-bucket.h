@@ -449,6 +449,48 @@ class R2Bucket: public jsg::Object {
     // from `R2BucketListOptions` to `R2ListOptions`.
   };
 
+  struct ListMultipartUploadsOptions {
+    jsg::Optional<int> limit;
+    jsg::Optional<jsg::NonCoercible<kj::String>> prefix;
+    jsg::Optional<jsg::NonCoercible<kj::String>> cursor;
+    jsg::Optional<jsg::NonCoercible<kj::String>> delimiter;
+    jsg::Optional<jsg::NonCoercible<kj::String>> startAfter;
+
+    JSG_STRUCT(limit, prefix, cursor, delimiter, startAfter);
+    JSG_STRUCT_TS_OVERRIDE(R2ListMultipartUploadsOptions);
+  };
+
+  struct MultipartUploadInfo {
+    kj::String key;
+    kj::String uploadId;
+    jsg::Optional<kj::Date> initiated;
+    jsg::Optional<kj::String> storageClass;
+
+    JSG_STRUCT(key, uploadId, initiated, storageClass);
+    JSG_STRUCT_TS_OVERRIDE(R2MultipartUploadListing {
+      key: string;
+      uploadId: string;
+      initiated?: Date;
+      storageClass?: string;
+    });
+  };
+
+  struct ListMultipartUploadsResult {
+    kj::Array<MultipartUploadInfo> uploads;
+    bool truncated;
+    jsg::Optional<kj::String> cursor;
+    kj::Array<kj::String> delimitedPrefixes;
+
+    JSG_STRUCT(uploads, truncated, cursor, delimitedPrefixes);
+    JSG_STRUCT_TS_OVERRIDE(type R2MultipartUploads = {
+      uploads: R2MultipartUploadListing[];
+      delimitedPrefixes: string[];
+    } & (
+      | { truncated: true; cursor: string }
+      | { truncated: false }
+    ));
+  };
+
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(jsg::Lock& js,
       kj::String key,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
@@ -478,6 +520,9 @@ class R2Bucket: public jsg::Object {
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
       CompatibilityFlags::Reader flags);
+  jsg::Promise<ListMultipartUploadsResult> listMultipartUploads(jsg::Lock& js,
+      jsg::Optional<ListMultipartUploadsOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
   JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {
     JSG_METHOD(head);
@@ -487,6 +532,7 @@ class R2Bucket: public jsg::Object {
     JSG_METHOD(resumeMultipartUpload);
     JSG_METHOD_NAMED(delete, delete_);
     JSG_METHOD(list);
+    JSG_METHOD(listMultipartUploads);
 
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE({

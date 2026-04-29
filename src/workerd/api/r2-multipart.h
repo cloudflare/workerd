@@ -26,6 +26,43 @@ class R2MultipartUpload: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(R2UploadPartOptions);
   };
 
+  struct ListPartsOptions {
+    jsg::Optional<int> maxParts;
+    jsg::Optional<int> partNumberMarker;
+
+    JSG_STRUCT(maxParts, partNumberMarker);
+    JSG_STRUCT_TS_OVERRIDE(R2ListPartsOptions);
+  };
+
+  struct UploadedPartInfo {
+    int partNumber;
+    kj::String etag;
+    double size;
+    kj::Date uploaded;
+
+    JSG_STRUCT(partNumber, etag, size, uploaded);
+    JSG_STRUCT_TS_OVERRIDE(R2UploadedPartInfo {
+      partNumber: number;
+      etag: string;
+      size: number;
+      uploaded: Date;
+    });
+  };
+
+  struct ListPartsResult {
+    kj::Array<UploadedPartInfo> parts;
+    bool truncated;
+    jsg::Optional<int> partNumberMarker;
+
+    JSG_STRUCT(parts, truncated, partNumberMarker);
+    JSG_STRUCT_TS_OVERRIDE(type R2UploadedParts = {
+      parts: R2UploadedPartInfo[];
+    } & (
+      | { truncated: true; partNumberMarker: number }
+      | { truncated: false }
+    ));
+  };
+
   R2MultipartUpload(kj::String key, kj::String uploadId, jsg::Ref<R2Bucket> bucket)
       : key(kj::mv(key)),
         uploadId(kj::mv(uploadId)),
@@ -47,6 +84,9 @@ class R2MultipartUpload: public jsg::Object {
   jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> complete(jsg::Lock& js,
       kj::Array<UploadedPart> uploadedParts,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+  jsg::Promise<ListPartsResult> listParts(jsg::Lock& js,
+      jsg::Optional<ListPartsOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
   JSG_RESOURCE_TYPE(R2MultipartUpload) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(key, getKey);
@@ -54,6 +94,7 @@ class R2MultipartUpload: public jsg::Object {
     JSG_METHOD(uploadPart);
     JSG_METHOD(abort);
     JSG_METHOD(complete);
+    JSG_METHOD(listParts);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
