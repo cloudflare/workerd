@@ -150,7 +150,7 @@ struct R2ListPartsRequest {
 }
 
 struct R2ListMultipartUploadsRequest {
-  limit @0 :UInt32 = 0xffffffff;
+  limit @0 :UInt32 = 0x3e8;
   prefix @1 :Text;
   cursor @2 :Text;
   delimiter @3 :Text;
