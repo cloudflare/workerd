@@ -140,8 +140,14 @@ class Tracing: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
       const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler);
 
+  // Enriches the caller's jsRpcSession user span with attributes carried back on the next
+  // RPC return. The special attribute key "span.name" renames the span; other keys become tags.
+  // Last call before the RPC method returns wins.
+  void setBindingSpan(jsg::Lock& js, jsg::Dict<jsg::Value> attributes);
+
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
+    JSG_METHOD(setBindingSpan);
 
     // Use the _NAMED variant so the property ends up as `tracing.Span` rather than
     // `tracing["user_tracing::Span"]`.

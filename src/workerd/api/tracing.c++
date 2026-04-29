@@ -270,4 +270,45 @@ v8::Local<v8::Value> Tracing::enterSpan(jsg::Lock& js,
   }
 }
 
+void Tracing::setBindingSpan(jsg::Lock& js, jsg::Dict<jsg::Value> attributes) {
+  // Buffers span enrichment from a callee-side binding to be shipped back to the caller on the
+  // next RPC return. The caller forwards it to the streaming tail worker. The special attribute
+  // key "span.name" is extracted as a separate `name` field on the wire; other keys are
+  // forwarded verbatim as attribute events. Last call before return wins.
+  if (!IoContext::hasCurrent()) return;
+  auto& ioCtx = IoContext::current();
+  if (!ioCtx.hasCurrentIncomingRequest()) return;
+
+  kj::Maybe<kj::String> name;
+  kj::Vector<tracing::Attribute> attrVec;
+  for (auto& field: attributes.fields) {
+    v8::Local<v8::Value> handle = field.value.getHandle(js);
+    if (field.name == "span.name"_kj && handle->IsString()) {
+      name = kj::str(jsg::JsValue(handle).toString(js));
+      continue;
+    }
+    tracing::Attribute::Value value;
+    if (handle->IsString()) {
+      value = kj::ConstString(kj::str(jsg::JsValue(handle).toString(js)));
+    } else if (handle->IsBoolean()) {
+      value = handle->BooleanValue(js.v8Isolate);
+    } else if (handle->IsNumber()) {
+      double d = handle->NumberValue(js.v8Context()).FromMaybe(0.0);
+      if (d == static_cast<double>(static_cast<int64_t>(d))) {
+        value = static_cast<int64_t>(d);
+      } else {
+        value = d;
+      }
+    } else {
+      continue;  // Skip unsupported types.
+    }
+    attrVec.add(tracing::Attribute(kj::ConstString(kj::str(field.name)), kj::mv(value)));
+  }
+
+  ioCtx.setPendingBindingSpanEnrichment(IoContext::IncomingRequest::PendingSpanEnrichment{
+    .name = kj::mv(name),
+    .attributes = attrVec.releaseAsArray(),
+  });
+}
+
 }  // namespace workerd::api

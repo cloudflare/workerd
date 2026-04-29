@@ -87,6 +87,21 @@ wd_test(
     tags = ["no-coverage"],
 )
 
+# TDD tests for binding span enrichment (ctx.tracing.setBindingSpan).
+# Test 1: no spanEnrichmentPolicy → ctx.tracing is undefined in the callee.
+# Test 2: spanEnrichmentPolicy present → callee renames the jsRpcSession span;
+#         the renamed span with its attributes appears in the caller's STW stream.
+wd_test(
+    src = "binding-span-enrichment-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "binding-span-enrichment-callee.js",
+        "binding-span-enrichment-caller.js",
+        "binding-span-enrichment-tail.js",
+        "//src/cloudflare/internal/test:instrumentation-test-helper.js",
+    ],
+)
+
 # Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
 # serializable when forwarded over service-binding RPC, just like fetch onset.info.
 wd_test(

@@ -173,6 +173,17 @@ class IoContext_IncomingRequest final {
   kj::Maybe<kj::SourceLocation> deliveredLocation;
 
   friend class IoContext;
+
+ public:
+  // Span enrichment buffered by the callee via ctx.tracing.setBindingSpan() for the caller to
+  // forward on RPC return. Last call before return wins. `name` is carried as a separate field
+  // on the wire so the caller can forward it as a synthetic 'span.name' attribute event to the
+  // streaming tail worker; the callee API still spells it as the attribute key 'span.name'.
+  struct PendingSpanEnrichment {
+    kj::Maybe<kj::String> name;
+    kj::Array<tracing::Attribute> attributes;
+  };
+  kj::Maybe<PendingSpanEnrichment> pendingBindingSpanEnrichment;
 };
 
 // IoContext holds state associated with a single I/O context. For stateless requests, each
@@ -384,6 +395,24 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // TODO(cleanup): This is a hack, remove after addressing the underlying issue.
   bool hasCurrentIncomingRequest() {
     return !incomingRequests.empty();
+  }
+
+  // Called by ctx.tracing.setBindingSpan() to buffer enrichment for the current invocation.
+  // Last-caller-wins; any previous pending enrichment is replaced.
+  void setPendingBindingSpanEnrichment(IncomingRequest::PendingSpanEnrichment enrichment) {
+    KJ_REQUIRE(!incomingRequests.empty());
+    getCurrentIncomingRequest().pendingBindingSpanEnrichment = kj::mv(enrichment);
+  }
+
+  // Drains and returns any pending span enrichment written by the callee.
+  // Called by the caller's runtime after CallResults arrive.
+  kj::Maybe<IncomingRequest::PendingSpanEnrichment> takePendingBindingSpanEnrichment() {
+    if (incomingRequests.empty()) return kj::none;
+    auto& req = getCurrentIncomingRequest();
+    kj::Maybe<IncomingRequest::PendingSpanEnrichment> result =
+        kj::mv(req.pendingBindingSpanEnrichment);
+    req.pendingBindingSpanEnrichment = kj::none;
+    return result;
   }
 
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.

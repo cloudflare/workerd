@@ -507,8 +507,8 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
         typeId(typeId),
-        wrapperModule(kj::mv(wrapperModule)),
-        jsRpcSessionSpan(kj::mv(jsRpcSessionSpan)) {}
+        jsRpcSessionSpan(kj::mv(jsRpcSessionSpan)),
+        wrapperModule(kj::mv(wrapperModule)) {}
 
   ~JsRpcSessionCustomEvent() noexcept(false) {
     if (capFulfiller->isWaiting()) {
@@ -565,12 +565,15 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
   kj::Maybe<rpc::JsRpcTarget::Client> clientCap;
   uint16_t typeId;
 
-  kj::Maybe<kj::String> wrapperModule;
-
+ public:
   // Span representing this jsRpc session. Created before startRequest() so the callee can
-  // reference its ID for trace context propagation. Lives until this event is destroyed
-  // (i.e., until the session ends), which gives the correct span lifetime.
+  // reference its ID for trace context propagation, and lives until this event is destroyed
+  // (i.e. until the session ends). Public so callImpl() can apply BindingSpanEnrichment from
+  // CallResults to it.
   SpanBuilder jsRpcSessionSpan;
+
+ private:
+  kj::Maybe<kj::String> wrapperModule;
 
   class ServerTopLevelMembrane;
 };
