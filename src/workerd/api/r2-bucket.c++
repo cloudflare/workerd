@@ -1188,18 +1188,16 @@ jsg::Promise<R2Bucket::ListMultipartUploadsResult> R2Bucket::listMultipartUpload
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto traceSpan = context.makeTraceSpan("r2_listMultipartUploads"_kjc);
-    auto userSpan = context.makeUserTraceSpan("r2_listMultipartUploads"_kjc);
-    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto traceContext = context.makeUserTraceSpan("r2_listMultipartUploads"_kjc);
     auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
-    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bindingName()) {
-      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, b);
+      traceContext.setTag("cloudflare.binding.name"_kjc, b);
     }
-    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, "ListMultipartUploads"_kjc);
+    traceContext.setTag("cloudflare.r2.operation"_kjc, "ListMultipartUploads"_kjc);
     KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, b);
+      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
     }
 
     capnp::JsonCodec json;
@@ -1214,23 +1212,23 @@ jsg::Promise<R2Bucket::ListMultipartUploadsResult> R2Bucket::listMultipartUpload
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(l, o.limit) {
         listBuilder.setLimit(l);
-        traceContext.userSpan.setTag("cloudflare.r2.request.limit"_kjc, static_cast<int64_t>(l));
+        traceContext.setTag("cloudflare.r2.request.limit"_kjc, static_cast<int64_t>(l));
       }
       KJ_IF_SOME(p, o.prefix) {
         listBuilder.setPrefix(p.value);
-        traceContext.userSpan.setTag("cloudflare.r2.request.prefix"_kjc, p.value.asPtr());
+        traceContext.setTag("cloudflare.r2.request.prefix"_kjc, p.value.asPtr());
       }
       KJ_IF_SOME(c, o.cursor) {
         listBuilder.setCursor(c.value);
-        traceContext.userSpan.setTag("cloudflare.r2.request.cursor"_kjc, c.value.asPtr());
+        traceContext.setTag("cloudflare.r2.request.cursor"_kjc, c.value.asPtr());
       }
       KJ_IF_SOME(d, o.delimiter) {
         listBuilder.setDelimiter(d.value);
-        traceContext.userSpan.setTag("cloudflare.r2.request.delimiter"_kjc, d.value.asPtr());
+        traceContext.setTag("cloudflare.r2.request.delimiter"_kjc, d.value.asPtr());
       }
       KJ_IF_SOME(s, o.startAfter) {
         listBuilder.setStartAfter(s.value);
-        traceContext.userSpan.setTag("cloudflare.r2.request.start_after"_kjc, s.value.asPtr());
+        traceContext.setTag("cloudflare.r2.request.start_after"_kjc, s.value.asPtr());
       }
     }
 
@@ -1270,7 +1268,7 @@ jsg::Promise<R2Bucket::ListMultipartUploadsResult> R2Bucket::listMultipartUpload
       result.truncated = responseBuilder.getTruncated();
       if (responseBuilder.hasCursor()) {
         result.cursor = kj::str(responseBuilder.getCursor());
-        traceContext.userSpan.setTag(
+        traceContext.setTag(
             "cloudflare.r2.response.cursor"_kjc, KJ_ASSERT_NONNULL(result.cursor).asPtr());
       }
       if (responseBuilder.hasDelimitedPrefixes()) {
@@ -1278,11 +1276,11 @@ jsg::Promise<R2Bucket::ListMultipartUploadsResult> R2Bucket::listMultipartUpload
           KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
       }
 
-      traceContext.userSpan.setTag("cloudflare.r2.response.returned_uploads"_kjc,
+      traceContext.setTag("cloudflare.r2.response.returned_uploads"_kjc,
           static_cast<int64_t>(result.uploads.size()));
-      traceContext.userSpan.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
+      traceContext.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
           static_cast<int64_t>(result.delimitedPrefixes.size()));
-      traceContext.userSpan.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
+      traceContext.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
       return kj::mv(result);
     });
   });

@@ -263,21 +263,19 @@ jsg::Promise<R2MultipartUpload::ListPartsResult> R2MultipartUpload::listParts(js
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto traceSpan = context.makeTraceSpan("r2_listParts"_kjc);
-    auto userSpan = context.makeUserTraceSpan("r2_listParts"_kjc);
-    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto traceContext = context.makeUserTraceSpan("r2_listParts"_kjc);
     auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
 
-    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
     KJ_IF_SOME(b, this->bucket->bindingName()) {
-      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, b);
+      traceContext.setTag("cloudflare.binding.name"_kjc, b);
     }
-    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, "ListParts"_kjc);
+    traceContext.setTag("cloudflare.r2.operation"_kjc, "ListParts"_kjc);
     KJ_IF_SOME(b, this->bucket->bucketName()) {
-      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, b);
+      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
     }
-    traceContext.userSpan.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
-    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+    traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
+    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -296,14 +294,14 @@ jsg::Promise<R2MultipartUpload::ListPartsResult> R2MultipartUpload::listParts(js
         JSG_REQUIRE(m >= 1 && m <= 1000, RangeError,
             "maxParts must be between 1 and 1000 (inclusive). Actual value was: ", m);
         listPartsBuilder.setMaxParts(m);
-        traceContext.userSpan.setTag(
+        traceContext.setTag(
             "cloudflare.r2.request.max_parts"_kjc, static_cast<int64_t>(m));
       }
       KJ_IF_SOME(p, o.partNumberMarker) {
         JSG_REQUIRE(
             p > 0, RangeError, "partNumberMarker must be greater than 0. Actual value was: ", p);
         listPartsBuilder.setPartNumberMarker(p);
-        traceContext.userSpan.setTag(
+        traceContext.setTag(
             "cloudflare.r2.request.part_number_marker"_kjc, static_cast<int64_t>(p));
       }
     }
@@ -343,9 +341,9 @@ jsg::Promise<R2MultipartUpload::ListPartsResult> R2MultipartUpload::listParts(js
         result.partNumberMarker = static_cast<int>(responseBuilder.getPartNumberMarker());
       }
 
-      traceContext.userSpan.setTag(
+      traceContext.setTag(
           "cloudflare.r2.response.returned_parts"_kjc, static_cast<int64_t>(result.parts.size()));
-      traceContext.userSpan.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
+      traceContext.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
       return kj::mv(result);
     });
   });
