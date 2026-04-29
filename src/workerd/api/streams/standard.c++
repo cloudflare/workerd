@@ -1284,10 +1284,13 @@ kj::Own<typename ReadableImpl<Self>::Consumer> ReadableImpl<Self>::getConsumer(
 // ======================================================================================
 
 template <typename Self>
-WritableImpl<Self>::WritableImpl(
-    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
+WritableImpl<Self>::WritableImpl(jsg::Lock& js,
+    WritableStream& owner,
+    kj::Own<UnderlyingSinkImpl> sink,
+    jsg::Ref<AbortSignal> abortSignal)
     : owner(owner.addWeakRef()),
-      signal(kj::mv(abortSignal)) {
+      signal(kj::mv(abortSignal)),
+      underlyingSink(kj::mv(sink)) {
   flags.pedanticWpt = FeatureFlags::get(js).getPedanticWpt();
 }
 
@@ -1628,15 +1631,9 @@ void WritableImpl<Self>::rejectCloseAndClosedPromiseIfNeeded(jsg::Lock& js) {
 }
 
 template <typename Self>
-void WritableImpl<Self>::setup(jsg::Lock& js,
-    jsg::Ref<Self> self,
-    UnderlyingSink underlyingSink,
-    StreamQueuingStrategy queuingStrategy) {
+void WritableImpl<Self>::setup(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(!flags.started && !flags.starting);
   flags.starting = true;
-
-  this->underlyingSink =
-      kj::heap<UnderlyingSinkImpl>(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
@@ -3841,10 +3838,12 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 
 // ======================================================================================
 
-WritableStreamDefaultController::WritableStreamDefaultController(
-    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
+WritableStreamDefaultController::WritableStreamDefaultController(jsg::Lock& js,
+    WritableStream& owner,
+    kj::Own<UnderlyingSinkImpl> underlyingSink,
+    jsg::Ref<AbortSignal> abortSignal)
     : ioContext(tryGetIoContext()),
-      impl(js, owner, kj::mv(abortSignal)) {}
+      impl(js, owner, kj::mv(underlyingSink), kj::mv(abortSignal)) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(jsg::Lock& js, jsg::JsValue reason) {
   return impl.abort(js, JSG_THIS, reason);
@@ -3881,9 +3880,8 @@ kj::Maybe<jsg::JsValue> WritableStreamDefaultController::isErroring(jsg::Lock& j
   return kj::none;
 }
 
-void WritableStreamDefaultController::setup(
-    jsg::Lock& js, UnderlyingSink underlyingSink, StreamQueuingStrategy queuingStrategy) {
-  impl.setup(js, JSG_THIS, kj::mv(underlyingSink), kj::mv(queuingStrategy));
+void WritableStreamDefaultController::setup(jsg::Lock& js) {
+  impl.setup(js, JSG_THIS);
 }
 
 jsg::Promise<void> WritableStreamDefaultController::write(jsg::Lock& js, jsg::JsValue value) {
@@ -4176,10 +4174,11 @@ void WritableStreamJsController::setup(jsg::Lock& js,
   // because their lifetimes are identical and memory accounting itself has a memory overhead.
   auto controller = js.allocAccounted<WritableStreamDefaultController>(
       sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, KJ_ASSERT_NONNULL(owner),
+      kj::heap<UnderlyingSinkImpl>(js, kj::mv(underlyingSink), kj::mv(queuingStrategy)),
       js.alloc<AbortSignal>());
   auto& controllerRef = *controller;
   state.transitionTo<Controller>(kj::mv(controller));
-  controllerRef.setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
+  controllerRef.setup(js);
 }
 
 kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(

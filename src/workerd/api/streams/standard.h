@@ -290,7 +290,10 @@ class WritableImpl {
     }
   };
 
-  WritableImpl(jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+  WritableImpl(jsg::Lock& js,
+      WritableStream& owner,
+      kj::Own<UnderlyingSinkImpl> sink,
+      jsg::Ref<AbortSignal> abortSignal);
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
@@ -324,10 +327,7 @@ class WritableImpl {
 
   kj::Maybe<WritableStreamJsController&> tryGetOwner();
 
-  void setup(jsg::Lock& js,
-      jsg::Ref<Self> self,
-      UnderlyingSink underlyingSink,
-      StreamQueuingStrategy queuingStrategy);
+  void setup(jsg::Lock& js, jsg::Ref<Self> self);
 
   // Puts the writable into an erroring state. This allows any in flight write or
   // close to complete before actually transitioning the writable.
@@ -621,8 +621,10 @@ class WritableStreamDefaultController: public jsg::Object {
  public:
   using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
-  explicit WritableStreamDefaultController(
-      jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+  explicit WritableStreamDefaultController(jsg::Lock& js,
+      WritableStream& owner,
+      kj::Own<UnderlyingSinkImpl> sink,
+      jsg::Ref<AbortSignal> abortSignal);
 
   ~WritableStreamDefaultController() noexcept(false);
 
@@ -651,7 +653,7 @@ class WritableStreamDefaultController: public jsg::Object {
     return impl.flags.backpressure;
   }
 
-  void setup(jsg::Lock& js, UnderlyingSink underlyingSink, StreamQueuingStrategy queuingStrategy);
+  void setup(jsg::Lock& js);
 
   jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
 
