@@ -588,7 +588,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
                 "detached while the read was pending. The read completed with a zero-length buffer "
                 "and the data that was read is lost. Avoid detaching buffers that are being used "
                 "for active read operations on streams, or use the "
-                "streams_byob_reader_detaches_buffer compatibility flag, to prevent this from"
+                "streams_byob_reader_detaches_buffer compatibility flag, to prevent this from "
                 "happening."_kj);
 
             return js.resolvedPromise(ReadResult{
