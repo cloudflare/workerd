@@ -870,7 +870,7 @@ jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algori
       interpretAlgorithmParam(kj::mv(algorithm)), kj::mv(paf.resolver), kj::mv(paf.promise));
 
   // clang-format off
-  stream->getController().setup(js, UnderlyingSink{
+  auto sink = kj::heap<UnderlyingSinkImpl>(js, UnderlyingSink{
     .write = [&stream = *stream](jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
       return js.tryCatch([&] {
         // Make sure what we got can be interpreted as bytes...
@@ -916,8 +916,10 @@ jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algori
         return js.resolvedPromise();
       }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
     }
-  }, kj::none);
+  }, StreamQueuingStrategy {});
   // clang-format on
+
+  stream->getController().setup(js, kj::mv(sink));
 
   return kj::mv(stream);
 }

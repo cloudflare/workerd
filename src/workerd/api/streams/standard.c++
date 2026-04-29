@@ -948,9 +948,7 @@ class WritableStreamJsController final: public WritableStreamController {
 
   void setOwnerRef(WritableStream& stream) override;
 
-  void setup(jsg::Lock& js,
-      jsg::Optional<UnderlyingSink> maybeUnderlyingSink,
-      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) override;
+  void setup(jsg::Lock& js, kj::Own<UnderlyingSinkImpl> sink) override;
 
   kj::Maybe<jsg::Promise<void>> tryPipeFrom(
       jsg::Lock& js, jsg::Ref<ReadableStream> source, PipeToOptions options) override;
@@ -4157,25 +4155,12 @@ void WritableStreamJsController::setOwnerRef(WritableStream& stream) {
   owner = stream;
 }
 
-void WritableStreamJsController::setup(jsg::Lock& js,
-    jsg::Optional<UnderlyingSink> maybeUnderlyingSink,
-    jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
-  auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
-  auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-
-  if (FeatureFlags::get(js).getPedanticWpt()) {
-    // Per the spec, the type property for WritableStream's underlying sink must be undefined.
-    // If it's anything else, throw a RangeError.
-    JSG_REQUIRE(underlyingSink.type == kj::none, RangeError,
-        "Invalid underlying sink type. Only undefined is valid.");
-  }
-
+void WritableStreamJsController::setup(jsg::Lock& js, kj::Own<UnderlyingSinkImpl> sink) {
   // We account for the memory usage of the WritableStreamDefaultController and AbortSignal together
   // because their lifetimes are identical and memory accounting itself has a memory overhead.
   auto controller = js.allocAccounted<WritableStreamDefaultController>(
       sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, KJ_ASSERT_NONNULL(owner),
-      kj::heap<UnderlyingSinkImpl>(js, kj::mv(underlyingSink), kj::mv(queuingStrategy)),
-      js.alloc<AbortSignal>());
+      kj::mv(sink), js.alloc<AbortSignal>());
   auto& controllerRef = *controller;
   state.transitionTo<Controller>(kj::mv(controller));
   controllerRef.setup(js);

@@ -831,9 +831,7 @@ class WritableStreamController {
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};
 
-  virtual void setup(jsg::Lock& js,
-      jsg::Optional<UnderlyingSink> underlyingSink,
-      jsg::Optional<StreamQueuingStrategy> queuingStrategy) {}
+  virtual void setup(jsg::Lock& js, kj::Own<UnderlyingSinkImpl> underlyingSink) {}
 
   virtual bool isClosedOrClosing() = 0;
   virtual bool isErrored() = 0;

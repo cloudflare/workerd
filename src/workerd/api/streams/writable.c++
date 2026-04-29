@@ -256,7 +256,11 @@ jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
   // lifetimes are identical and memory accounting itself has a memory overhead.
   auto stream = js.allocAccounted<WritableStream>(
       sizeof(WritableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
-  stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
+
+  auto sink = kj::heap<UnderlyingSinkImpl>(
+      js, kj::mv(underlyingSink).orDefault({}), kj::mv(queuingStrategy).orDefault({}));
+
+  stream->getController().setup(js, kj::mv(sink));
   return kj::mv(stream);
 }
 

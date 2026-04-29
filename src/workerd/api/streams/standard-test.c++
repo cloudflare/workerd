@@ -1981,22 +1981,22 @@ KJ_TEST("WritableStream close during abort algorithm returns rejected promise") 
     // We capture a raw pointer to the writer so the abort callback can call close().
     WritableStreamDefaultWriter* writerPtr = nullptr;
 
+    auto sink = kj::heap<UnderlyingSinkImpl>(js,
+        UnderlyingSink{
+          .abort = [&](jsg::Lock& js, v8::Local<v8::Value> reason) -> jsg::Promise<void> {
+      abortCalled = true;
+      // Re-entrantly call close() on the writer during the abort algorithm.
+      // At this point, WritableImpl has already transitioned to Errored state
+      // but WritableStreamJsController hasn't been updated yet.
+      // This should return a rejected promise instead of crashing.
+      writerPtr->close(js).then(js, [](jsg::Lock& js) {},
+          [&](jsg::Lock& js, jsg::Value reason) { closeRejected = true; });
+      return js.resolvedPromise();
+    }},
+        StreamQueuingStrategy{});
+
     // clang-format off
-    ws->getController().setup(js, UnderlyingSink{
-      .abort = [&](jsg::Lock& js, v8::Local<v8::Value> reason) -> jsg::Promise<void> {
-        abortCalled = true;
-        // Re-entrantly call close() on the writer during the abort algorithm.
-        // At this point, WritableImpl has already transitioned to Errored state
-        // but WritableStreamJsController hasn't been updated yet.
-        // This should return a rejected promise instead of crashing.
-        writerPtr->close(js).then(js,
-            [](jsg::Lock& js) {},
-            [&](jsg::Lock& js, jsg::Value reason) {
-              closeRejected = true;
-            });
-        return js.resolvedPromise();
-      }
-    }, StreamQueuingStrategy{});
+    ws->getController().setup(js, kj::mv(sink));
     // clang-format on
 
     auto writer = js.alloc<WritableStreamDefaultWriter>();

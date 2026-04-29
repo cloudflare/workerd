@@ -2713,7 +2713,9 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
       return js.resolvedPromise();
     }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
   };
-  stream->getController().setup(js, kj::mv(sink), kj::none);
+
+  stream->getController().setup(
+      js, kj::heap<UnderlyingSinkImpl>(js, kj::mv(sink), StreamQueuingStrategy{}));
 
   return js.resolvedPromise(kj::mv(stream));
 }

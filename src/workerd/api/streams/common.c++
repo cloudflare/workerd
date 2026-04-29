@@ -4,6 +4,8 @@
 
 #include "common.h"
 
+#include <workerd/io/features.h>
+
 namespace workerd::api {
 
 WritableStreamController::PendingAbort::PendingAbort(
@@ -49,6 +51,12 @@ UnderlyingSinkImpl::UnderlyingSinkImpl(
   // not as a method on the strategy object.
   KJ_IF_SOME(size, size_) {
     size.setReceiver(js.v8Ref(js.v8Undefined()));
+  }
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // Per the spec, the type property for WritableStream's underlying sink must be undefined.
+    // If it's anything else, throw a RangeError.
+    JSG_REQUIRE(sink.type == kj::none, RangeError,
+        "Invalid underlying sink type. Only undefined is valid.");
   }
 }
 
