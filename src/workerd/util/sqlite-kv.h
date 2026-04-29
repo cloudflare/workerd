@@ -93,7 +93,7 @@ class SqliteKv: private SqliteDatabase::ResetListener {
     // easier to manage.
     SqliteDatabase& db;
 
-    SqliteKvRegulator regulator;
+    static constexpr SqliteKvRegulator regulator;
 
     SqliteDatabase::Statement stmtGet = db.prepare(regulator, R"(
       SELECT value FROM _cf_KV WHERE key = ?
