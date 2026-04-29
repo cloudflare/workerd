@@ -186,6 +186,7 @@ class UnderlyingSinkImpl {
   using SizeAlgorithm = StreamQueuingStrategy::SizeAlgorithm;
 
   UnderlyingSinkImpl(jsg::Lock& js, UnderlyingSink sink, StreamQueuingStrategy strategy);
+  virtual ~UnderlyingSinkImpl() noexcept(false) = default;
   KJ_DISALLOW_COPY_AND_MOVE(UnderlyingSinkImpl);
 
   inline uint64_t getHighWaterMark() const {
@@ -232,7 +233,8 @@ class UnderlyingSinkImpl {
     visitor.visit(start_, write_, abort_, close_, size_);
   }
 
- private:
+ protected:
+  UnderlyingSinkImpl() = default;
   kj::Maybe<jsg::Function<StartAlgorithm>> start_;
   kj::Maybe<jsg::Function<WriteAlgorithm>> write_;
   kj::Maybe<jsg::Function<AbortAlgorithm>> abort_;

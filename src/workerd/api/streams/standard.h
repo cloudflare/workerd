@@ -781,4 +781,9 @@ class TransformStreamDefaultController: public jsg::Object {
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
+// =======================================================================================
+
+jsg::Ref<WritableStream> newInternalWritableStream(
+    jsg::Lock& js, IoContext& ioContext, kj::Own<WritableStreamSink> sink);
+
 }  // namespace workerd::api

@@ -1387,7 +1387,7 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
 
   KJ_ASSERT(inFlightWrite == kj::none);
   auto req = dequeueWriteRequest();
-  auto value = req.value.addRef(js);
+  auto value = req.value.getHandle(js);
   auto size = req.size;
   inFlightWrite = kj::mv(req);
 
@@ -1427,11 +1427,11 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   // from the write don't resolve the ready promise synchronously, preserving correct
   // microtask ordering (e.g., ready rejects before closed on releaseLock).
   if (FeatureFlags::get(js).getPedanticWpt()) {
-    maybeRunAlgorithmAsync(js, underlyingSink->write(), kj::mv(onSuccess), kj::mv(onFailure),
-        value.getHandle(js), self.addRef());
+    maybeRunAlgorithmAsync(
+        js, underlyingSink->write(), kj::mv(onSuccess), kj::mv(onFailure), value, self.addRef());
   } else {
-    maybeRunAlgorithm(js, underlyingSink->write(), kj::mv(onSuccess), kj::mv(onFailure),
-        value.getHandle(js), self.addRef());
+    maybeRunAlgorithm(
+        js, underlyingSink->write(), kj::mv(onSuccess), kj::mv(onFailure), value, self.addRef());
   }
 }
 
@@ -4978,6 +4978,144 @@ jsg::Ref<ReadableStream> ReadableStream::from(
     },
   }, StreamQueuingStrategy{ .highWaterMark = 0 });
   // clang-format on
+}
+
+// =======================================================================================
+
+namespace {
+
+class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
+ public:
+  InternalUnderlyingSinkImpl(IoContext& context, kj::Own<WritableStreamSink> out)
+      : inner(context.addObject(kj::heap<Active>(kj::mv(out)))) {
+
+    // Not really necessary to explicitly set this to none but doing so to be
+    // extra clear that there is no start algorithm for this underlying sink.
+    start_ = kj::none;
+
+    highWaterMark_ = 1;  // TODO(soon): Make configurable
+    size_ = [](jsg::Lock& js, jsg::JsValue chunk) { return 1; };
+
+    write_ = [selfRef = addWeakRef()](jsg::Lock& js, jsg::JsValue chunk,
+                 jsg::Ref<WritableStreamDefaultController> controller) {
+      KJ_IF_SOME(self, selfRef->tryGet()) {
+        KJ_SWITCH_ONEOF(self.inner) {
+          KJ_CASE_ONEOF(closed, Closed) {
+            return js.rejectedPromise<void>(js.typeError("The WritableStream is closed"));
+          }
+          KJ_CASE_ONEOF(errored, Errored) {
+            return js.rejectedPromise<void>(js.exceptionToJs(errored.clone()));
+          }
+          KJ_CASE_ONEOF(active, IoOwn<Active>) {
+            auto& i = *active;
+
+            KJ_IF_SOME(ab, chunk.tryCast<jsg::JsArrayBuffer>()) {
+              return self.write(js, i, ab.copy());
+            }
+            KJ_IF_SOME(sab, chunk.tryCast<jsg::JsSharedArrayBuffer>()) {
+              return self.write(js, i, sab.copy());
+            }
+            KJ_IF_SOME(view, chunk.tryCast<jsg::JsArrayBufferView>()) {
+              auto buf = kj::heapArray<kj::byte>(view.asArrayPtr());
+              return self.write(js, i, kj::mv(buf));
+            }
+            KJ_IF_SOME(str, chunk.tryCast<jsg::JsString>()) {
+              auto kjstr = str.toDOMString(js);
+              return self.write(
+                  js, i, kjstr.asBytes().slice(0, kjstr.size()).attach(kj::mv(kjstr)));
+            }
+
+            return js.rejectedPromise<void>(js.typeError(
+                "Chunk must be an ArrayBuffer, ArrayBufferView, SharedArrayBuffer, or string."_kj));
+          }
+        }
+      }
+
+      return js.rejectedPromise<void>(js.typeError("The WritableStream is closed"));
+    };
+
+    close_ = [selfRef = addWeakRef()](jsg::Lock& js) {
+      KJ_IF_SOME(self, selfRef->tryGet()) {
+        KJ_SWITCH_ONEOF(self.inner) {
+          KJ_CASE_ONEOF(closed, Closed) {
+            return js.rejectedPromise<void>(js.typeError("The WritableStream is closed"));
+          }
+          KJ_CASE_ONEOF(errored, Errored) {
+            return js.rejectedPromise<void>(js.exceptionToJs(errored.clone()));
+          }
+          KJ_CASE_ONEOF(active, IoOwn<Active>) {
+            return self.close(js, *active);
+          }
+        }
+      }
+
+      return js.rejectedPromise<void>(js.typeError("The WritableStream is closed"));
+    };
+
+    abort_ = [selfRef = addWeakRef()](jsg::Lock& js, jsg::JsValue reason) {
+      KJ_IF_SOME(self, selfRef->tryGet()) {
+        KJ_IF_SOME(active, self.inner.tryGet<IoOwn<Active>>()) {
+          auto exception = js.exceptionToKj(reason);
+          active->canceler.cancel(exception.clone());
+          self.inner = kj::mv(exception);
+        }
+      }
+
+      return js.resolvedPromise();
+    };
+  }
+
+  ~InternalUnderlyingSinkImpl() noexcept(false) {
+    weakRef->invalidate();
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(InternalUnderlyingSinkImpl);
+
+ private:
+  struct Active {
+    kj::Own<WritableStreamSink> out;
+    kj::Canceler canceler;
+    Active(kj::Own<WritableStreamSink> out): out(kj::mv(out)) {}
+  };
+  struct Closed {};
+  using Errored = kj::Exception;
+  kj::OneOf<IoOwn<Active>, Closed, Errored> inner;
+  kj::Rc<WeakRef<InternalUnderlyingSinkImpl>> weakRef =
+      kj::rc<WeakRef<InternalUnderlyingSinkImpl>>(kj::Badge<InternalUnderlyingSinkImpl>(), *this);
+
+  jsg::Promise<void> write(jsg::Lock& js, Active& active, kj::Array<kj::byte> chunk) {
+    auto& ioContext = IoContext::current();
+    auto promise = active.canceler.wrap(active.out->write(chunk).attach(kj::mv(chunk)))
+                       .catch_([selfRef = addWeakRef()](auto exception) -> kj::Promise<void> {
+      selfRef->runIfAlive([&](auto& self) { self.inner = exception.clone(); });
+      return kj::mv(exception);
+    });
+    return ioContext.awaitIo(js, kj::mv(promise));
+  }
+
+  jsg::Promise<void> close(jsg::Lock& js, Active& active) {
+    auto& ioContext = IoContext::current();
+    auto promise = active.canceler.wrap(active.out->end()).then([selfRef = addWeakRef()]() {
+      selfRef->runIfAlive([&](auto& self) { self.inner.template init<Closed>(); });
+    });
+    return ioContext.awaitIo(js, kj::mv(promise));
+  }
+
+  kj::Rc<WeakRef<InternalUnderlyingSinkImpl>> addWeakRef() {
+    return weakRef.addRef();
+  }
+};
+
+}  // namespace
+
+jsg::Ref<WritableStream> newInternalWritableStream(
+    jsg::Lock& js, IoContext& ioContext, kj::Own<WritableStreamSink> sink) {
+  auto controller = newWritableStreamJsController();
+  auto stream = js.allocAccounted<WritableStream>(
+      sizeof(WritableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
+  auto sinkImpl = kj::heap<InternalUnderlyingSinkImpl>(ioContext, kj::mv(sink));
+  stream->getController().setup(js, kj::mv(sinkImpl));
+  return kj::mv(stream);
 }
 
 }  // namespace workerd::api
