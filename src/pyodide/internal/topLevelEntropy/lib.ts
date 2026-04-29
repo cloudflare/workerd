@@ -12,6 +12,7 @@
  */
 import { default as entropyPatches } from 'pyodide-internal:topLevelEntropy/entropy_patches.py';
 import { default as entropyImportContext } from 'pyodide-internal:topLevelEntropy/entropy_import_context.py';
+import { default as entropyImportContextPackages } from 'pyodide-internal:topLevelEntropy/entropy_import_context_packages.py';
 import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
 import { default as allowEntropy } from 'pyodide-internal:topLevelEntropy/allow_entropy.py';
 import { simpleRunPython, PythonUserError } from 'pyodide-internal:util';
@@ -89,29 +90,20 @@ export function getRandomValues(
 export function entropyMountFiles(Module: Module): void {
   const cloudflareDir = Module.FS.sitePackages + '/_cloudflare';
   Module.FS.mkdir(cloudflareDir);
-  Module.FS.writeFile(cloudflareDir + '/__init__.py', new Uint8Array(0), {
-    canOwn: true,
-  });
-  Module.FS.writeFile(
-    cloudflareDir + '/entropy_patches.py',
-    new Uint8Array(entropyPatches),
-    { canOwn: true }
-  );
-  Module.FS.writeFile(
-    cloudflareDir + '/entropy_import_context.py',
-    new Uint8Array(entropyImportContext),
-    { canOwn: true }
-  );
-  Module.FS.writeFile(
-    cloudflareDir + '/import_patch_manager.py',
-    new Uint8Array(importPatchManager),
-    { canOwn: true }
-  );
-  Module.FS.writeFile(
-    cloudflareDir + '/allow_entropy.py',
-    new Uint8Array(allowEntropy),
-    { canOwn: true }
-  );
+  const files: [string, ArrayBuffer][] = [
+    ['__init__.py', new ArrayBuffer(0)],
+    ['entropy_patches.py', entropyPatches],
+    ['entropy_import_context.py', entropyImportContext],
+    ['entropy_import_context_packages.py', entropyImportContextPackages],
+    ['import_patch_manager.py', importPatchManager],
+    ['allow_entropy.py', allowEntropy],
+  ];
+
+  for (const [name, contents] of files) {
+    Module.FS.writeFile(cloudflareDir + '/' + name, new Uint8Array(contents), {
+      canOwn: true,
+    });
+  }
 }
 
 /**
