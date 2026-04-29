@@ -434,6 +434,10 @@ struct EllipticCurveInfo {
   uint rsSize;         // size of "r" and "s" in the signature
 };
 
+bool isSecp256k1(kj::StringPtr name) {
+  return strcasecmp(name.cStr(), "secp256k1") == 0;
+}
+
 EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
   static const std::map<kj::StringPtr, EllipticCurveInfo, CiLess> registeredCurves{
     {"P-256", {"P-256", NID_X9_62_prime256v1, 32}},
@@ -449,8 +453,7 @@ EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
 
 // Overload that adds secp256k1 to the table when the compat flag is set.
 EllipticCurveInfo lookupEllipticCurve(jsg::Lock& js, kj::StringPtr curveName) {
-  if (FeatureFlags::get(js).getSecp256k1EcdsaCurve() &&
-      strcasecmp(curveName.cStr(), "secp256k1") == 0) {
+  if (FeatureFlags::get(js).getSecp256k1EcdsaCurve() && isSecp256k1(curveName)) {
     return {"secp256k1", 0, 32};
   }
   return lookupEllipticCurve(curveName);
@@ -468,7 +471,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(jsg:
   auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
 
   // The compat flag scopes secp256k1 support to ECDSA; ECDH is rejected.
-  if (strcasecmp(normalizedNamedCurve.cStr(), "secp256k1") == 0) {
+  if (isSecp256k1(normalizedNamedCurve)) {
     JSG_REQUIRE(normalizedName == "ECDSA", DOMNotSupportedError, "\"", normalizedName,
         "\" is not supported for curve \"secp256k1\".");
     return Secp256k1Key::generatePair(js,
@@ -721,7 +724,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(jsg::Lock& js,
 
   auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
 
-  if (strcasecmp(normalizedNamedCurve.cStr(), "secp256k1") == 0) {
+  if (isSecp256k1(normalizedNamedCurve)) {
     return Secp256k1Key::import(js, normalizedName, format, kj::mv(keyData),
         CryptoKey::EllipticKeyAlgorithm{normalizedName, normalizedNamedCurve}, extractable,
         keyUsages);
@@ -785,7 +788,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(jsg::Lock& js,
 
   auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(js, namedCurve);
 
-  JSG_REQUIRE(strcasecmp(normalizedNamedCurve.cStr(), "secp256k1") != 0, DOMNotSupportedError,
+  JSG_REQUIRE(!isSecp256k1(normalizedNamedCurve), DOMNotSupportedError,
       "ECDH is not supported for curve \"secp256k1\".");
 
   auto importedKey = [&, curveId = curveId] {

@@ -9,6 +9,7 @@
 #include <workerd/api/util.h>
 #include <workerd/rust/aws-lc/lib.rs.h>
 
+#include <kj-rs/convert.h>
 #include <openssl/crypto.h>
 #include <openssl/mem.h>
 
@@ -38,7 +39,7 @@ kj::Array<kj::byte> decodeJwkCoordinate(
   JSG_REQUIRE(bytes.size() <= expectedLen, DOMDataError, "JSON Web Key \"", fieldName,
       "\" must be at most ", expectedLen, " bytes.");
   auto out = kj::heapArray<kj::byte>(expectedLen);
-  memset(out.begin(), 0, expectedLen);
+  out.asPtr().fill(0);
   out.slice(expectedLen - bytes.size(), expectedLen).copyFrom(bytes);
   return out;
 }
@@ -62,12 +63,11 @@ kj::Own<CryptoKey::Impl> importRaw(kj::ArrayPtr<const kj::byte> keyData,
       "Invalid secp256k1 public key length (expected ", PUBKEY_UNCOMPRESSED_LEN,
       " bytes uncompressed, got ", keyData.size(), ").");
 
-  JSG_REQUIRE(::workerd::rust::aws_lc::validate_public(
-                  ::rust::Slice<const uint8_t>(keyData.begin(), keyData.size())),
-      DOMDataError, "Invalid secp256k1 public key (failed to parse).");
+  JSG_REQUIRE(::workerd::rust::aws_lc::validate_public(keyData.as<kj_rs::Rust>()), DOMDataError,
+      "Invalid secp256k1 public key (failed to parse).");
 
   auto pub = kj::heapArray<kj::byte>(PUBKEY_UNCOMPRESSED_LEN);
-  memcpy(pub.begin(), keyData.begin(), PUBKEY_UNCOMPRESSED_LEN);
+  pub.asPtr().copyFrom(keyData);
   return kj::heap<Secp256k1Key>(
       KeyType::PUBLIC, kj::mv(pub), kj::none, kj::mv(keyAlgorithm), extractable, usages);
 }
@@ -121,7 +121,7 @@ kj::Own<CryptoKey::Impl> importJwk(SubtleCrypto::JsonWebKey&& jwk,
     }
 
     for (const auto& requested: keyUsages) {
-      JSG_REQUIRE(std::find(ops.begin(), ops.end(), requested) != ops.end(), DOMDataError,
+      JSG_REQUIRE(ops.asPtr().findFirst(requested) != kj::none, DOMDataError,
           "All specified key usages must be present in the JSON Web Key's Key Operations "
           "parameter (\"key_ops\").");
     }
@@ -136,13 +136,12 @@ kj::Own<CryptoKey::Impl> importJwk(SubtleCrypto::JsonWebKey&& jwk,
 
   auto pub = kj::heapArray<kj::byte>(PUBKEY_UNCOMPRESSED_LEN);
   pub[0] = 0x04;
-  memcpy(pub.begin() + 1, xBytes.begin(), COORDINATE_LEN);
-  memcpy(pub.begin() + 1 + COORDINATE_LEN, yBytes.begin(), COORDINATE_LEN);
+  pub.slice(1, 1 + COORDINATE_LEN).copyFrom(xBytes);
+  pub.slice(1 + COORDINATE_LEN, PUBKEY_UNCOMPRESSED_LEN).copyFrom(yBytes);
 
   // Validate the public point is on the curve before storing.
-  JSG_REQUIRE(::workerd::rust::aws_lc::validate_public(
-                  ::rust::Slice<const uint8_t>(pub.begin(), pub.size())),
-      DOMDataError, "Invalid secp256k1 public key in JSON Web Key (coordinates are not on curve).");
+  JSG_REQUIRE(::workerd::rust::aws_lc::validate_public(pub.as<kj_rs::Rust>()), DOMDataError,
+      "Invalid secp256k1 public key in JSON Web Key (coordinates are not on curve).");
 
   if (jwk.d == kj::none) {
     return kj::heap<Secp256k1Key>(
@@ -152,7 +151,7 @@ kj::Own<CryptoKey::Impl> importJwk(SubtleCrypto::JsonWebKey&& jwk,
   // d is decoded into already-wrapped storage. The base64url intermediate is the only
   // plaintext copy and gets scrubbed on the way out, including on error paths.
   auto scrubbed = wrapSecret(kj::heapArray<kj::byte>(SECKEY_LEN));
-  memset(scrubbed->asPtr().begin(), 0, SECKEY_LEN);
+  scrubbed->asPtr().fill(0);
 
   auto dRaw = JSG_REQUIRE_NONNULL(decodeBase64Url(kj::mv(KJ_ASSERT_NONNULL(jwk.d))), DOMDataError,
       "Invalid EC key in JSON Web Key; missing or invalid private key component (\"d\").");
@@ -164,8 +163,7 @@ kj::Own<CryptoKey::Impl> importJwk(SubtleCrypto::JsonWebKey&& jwk,
   // aws-lc-rs's from_private_key_and_public_key validates that d derives the claimed (x, y)
   // and that d is in range. Either failure surfaces here.
   JSG_REQUIRE(::workerd::rust::aws_lc::validate_keypair(
-                  ::rust::Slice<const uint8_t>(scrubbed->begin(), scrubbed->size()),
-                  ::rust::Slice<const uint8_t>(pub.begin(), pub.size())),
+                  scrubbed->asPtr().as<kj_rs::Rust>(), pub.as<kj_rs::Rust>()),
       DOMDataError,
       "Invalid EC key; private key component \"d\" is out of range or does not match the "
       "claimed public point.");
@@ -250,15 +248,15 @@ CryptoKeyPair Secp256k1Key::generatePair(jsg::Lock& js,
       "Failed to generate secp256k1 keypair.");
 
   auto secret = kj::heapArray<kj::byte>(SECKEY_LEN);
-  memcpy(secret.begin(), generated.data(), SECKEY_LEN);
+  secret.asPtr().copyFrom(kj::arrayPtr(generated.data(), SECKEY_LEN));
   auto wrappedSecret = wrapSecret(kj::mv(secret));
   OPENSSL_cleanse(generated.data(), SECKEY_LEN);
 
-  const auto* pubSrc = generated.data() + SECKEY_LEN;
+  auto pubSrc = kj::arrayPtr(generated.data() + SECKEY_LEN, PUBKEY_UNCOMPRESSED_LEN);
   auto privatePub = kj::heapArray<kj::byte>(PUBKEY_UNCOMPRESSED_LEN);
-  memcpy(privatePub.begin(), pubSrc, PUBKEY_UNCOMPRESSED_LEN);
+  privatePub.asPtr().copyFrom(pubSrc);
   auto publicPub = kj::heapArray<kj::byte>(PUBKEY_UNCOMPRESSED_LEN);
-  memcpy(publicPub.begin(), pubSrc, PUBKEY_UNCOMPRESSED_LEN);
+  publicPub.asPtr().copyFrom(pubSrc);
 
   auto privateKeyRef = js.alloc<CryptoKey>(kj::heap<Secp256k1Key>(KeyType::PRIVATE,
       kj::mv(privatePub), kj::mv(wrappedSecret), keyAlgorithm, extractable, privateKeyUsages));
@@ -280,10 +278,8 @@ jsg::JsArrayBuffer Secp256k1Key::sign(jsg::Lock& js,
 
   validateHash(algorithm.hash);
 
-  auto signature =
-      ::workerd::rust::aws_lc::sign(::rust::Slice<const uint8_t>(seckey->begin(), seckey->size()),
-          ::rust::Slice<const uint8_t>(publicKey.begin(), publicKey.size()),
-          ::rust::Slice<const uint8_t>(data.begin(), data.size()));
+  auto signature = ::workerd::rust::aws_lc::sign(
+      seckey->asPtr().as<kj_rs::Rust>(), publicKey.as<kj_rs::Rust>(), data.as<kj_rs::Rust>());
   JSG_REQUIRE(
       signature.size() == SIGNATURE_LEN, DOMOperationError, "secp256k1 ECDSA signing failed.");
 
@@ -303,9 +299,7 @@ bool Secp256k1Key::verify(jsg::Lock& js,
   validateHash(algorithm.hash);
 
   return ::workerd::rust::aws_lc::verify(
-      ::rust::Slice<const uint8_t>(publicKey.begin(), publicKey.size()),
-      ::rust::Slice<const uint8_t>(data.begin(), data.size()),
-      ::rust::Slice<const uint8_t>(signature.begin(), signature.size()));
+      publicKey.as<kj_rs::Rust>(), data.as<kj_rs::Rust>(), signature.as<kj_rs::Rust>());
 }
 
 SubtleCrypto::ExportKeyData Secp256k1Key::exportKey(jsg::Lock& js, kj::StringPtr format) const {
