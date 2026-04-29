@@ -301,7 +301,7 @@ jsg::Promise<R2MultipartUpload::ListPartsResult> R2MultipartUpload::listParts(js
       }
       KJ_IF_SOME(p, o.partNumberMarker) {
         JSG_REQUIRE(
-            p > 0, RangeError, "partNumberMarker must be non-negative. Actual value was: ", p);
+            p > 0, RangeError, "partNumberMarker must be greater than 0. Actual value was: ", p);
         listPartsBuilder.setPartNumberMarker(p);
         traceContext.userSpan.setTag(
             "cloudflare.r2.request.part_number_marker"_kjc, static_cast<int64_t>(p));
