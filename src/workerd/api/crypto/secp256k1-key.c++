@@ -103,21 +103,20 @@ kj::Own<CryptoKey::Impl> importJwk(SubtleCrypto::JsonWebKey&& jwk,
   }
 
   KJ_IF_SOME(ops, jwk.key_ops) {
-    std::sort(ops.begin(), ops.end());
-    JSG_REQUIRE(std::adjacent_find(ops.begin(), ops.end()) == ops.end(), DOMDataError,
-        "A JSON Web Key's Key Operations parameter (\"key_ops\") must not contain duplicates.");
-
     KJ_IF_SOME(use, jwk.use) {
       JSG_REQUIRE(use == "sig", DOMDataError,
           "Asymmetric \"jwk\" import requires a JSON Web Key with Public Key Use \"use\" (\"", use,
           "\") equal to \"sig\".");
     }
 
-    for (const auto& op: ops) {
-      JSG_REQUIRE(op == "sign" || op == "verify", DOMDataError,
+    std::sort(ops.begin(), ops.end());
+    for (size_t i = 0; i < ops.size(); ++i) {
+      JSG_REQUIRE(ops[i] == "sign" || ops[i] == "verify", DOMDataError,
           "JSON Web Key Operations parameter (\"key_ops\") for ECDSA may only contain \"sign\" "
           "and/or \"verify\" (got \"",
-          op, "\").");
+          ops[i], "\").");
+      JSG_REQUIRE(i == 0 || ops[i] != ops[i - 1], DOMDataError,
+          "A JSON Web Key's Key Operations parameter (\"key_ops\") must not contain duplicates.");
     }
 
     for (const auto& requested: keyUsages) {

@@ -338,6 +338,17 @@ export const importJwkRejectsKeyOpsMissingRequestedUsage = {
   },
 };
 
+export const importJwkRejectsInvalidKeyOp = {
+  // ECDSA key_ops may only contain "sign" and/or "verify".
+  async test() {
+    const jwk = await makeGeneratorJwk();
+    jwk.key_ops = ['encrypt'];
+    await rejects(crypto.subtle.importKey('jwk', jwk, ECDSA, true, []), {
+      name: 'DataError',
+    });
+  },
+};
+
 export const jwkPrivateRoundTrip = {
   async test() {
     const { privateKey, publicKey } = await generatePair();
