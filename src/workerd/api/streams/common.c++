@@ -35,4 +35,21 @@ kj::Maybe<kj::Own<WritableStreamController::PendingAbort>> WritableStreamControl
   return kj::mv(maybePendingAbort);
 }
 
+// ====================================================================================
+
+UnderlyingSinkImpl::UnderlyingSinkImpl(
+    jsg::Lock& js, UnderlyingSink sink, StreamQueuingStrategy strategy)
+    : start_(kj::mv(sink.start)),
+      write_(kj::mv(sink.write)),
+      abort_(kj::mv(sink.abort)),
+      close_(kj::mv(sink.close)),
+      size_(kj::mv(strategy.size)),
+      highWaterMark_(strategy.highWaterMark.orDefault(DEFAULT_HIGH_WATER_MARK)) {
+  // Per the streams spec, the size function should be called with `undefined` as `this`,
+  // not as a method on the strategy object.
+  KJ_IF_SOME(size, size_) {
+    size.setReceiver(js.v8Ref(js.v8Undefined()));
+  }
+}
+
 }  // namespace workerd::api

@@ -353,32 +353,6 @@ class WritableImpl {
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  struct Algorithms {
-    kj::Maybe<jsg::Function<UnderlyingSink::AbortAlgorithm>> abort;
-    kj::Maybe<jsg::Function<UnderlyingSink::CloseAlgorithm>> close;
-    kj::Maybe<jsg::Function<UnderlyingSink::WriteAlgorithm>> write;
-    kj::Maybe<jsg::Function<StreamQueuingStrategy::SizeAlgorithm>> size;
-
-    Algorithms() {};
-    ~Algorithms() {
-      // Clear all algorithm references to break circular references
-      clear();
-    }
-    Algorithms(Algorithms&& other) = default;
-    Algorithms& operator=(Algorithms&& other) = default;
-
-    void clear() {
-      abort = kj::none;
-      close = kj::none;
-      size = kj::none;
-      write = kj::none;
-    }
-
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(write, close, abort, size);
-    }
-  };
-
   struct Writable {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "writable"_kj;
   };
@@ -408,9 +382,9 @@ class WritableImpl {
   kj::Maybe<kj::Own<WeakRef<WritableStream>>> owner;
   jsg::Ref<AbortSignal> signal;
   State state = State::template create<Writable>();
-  Algorithms algorithms;
 
-  size_t highWaterMark = 1;
+  kj::Own<UnderlyingSinkImpl> underlyingSink;
+
   size_t amountBuffered = 0;
 
   RingBuffer<WriteRequest, 8> writeRequests;

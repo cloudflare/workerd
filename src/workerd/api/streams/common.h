@@ -176,6 +176,71 @@ struct UnderlyingSink {
   });
 };
 
+class UnderlyingSinkImpl {
+ public:
+  constexpr static uint64_t DEFAULT_HIGH_WATER_MARK = 1;
+  using StartAlgorithm = UnderlyingSink::StartAlgorithm;
+  using WriteAlgorithm = UnderlyingSink::WriteAlgorithm;
+  using AbortAlgorithm = UnderlyingSink::AbortAlgorithm;
+  using CloseAlgorithm = UnderlyingSink::CloseAlgorithm;
+  using SizeAlgorithm = StreamQueuingStrategy::SizeAlgorithm;
+
+  UnderlyingSinkImpl(jsg::Lock& js, UnderlyingSink sink, StreamQueuingStrategy strategy);
+  KJ_DISALLOW_COPY_AND_MOVE(UnderlyingSinkImpl);
+
+  inline uint64_t getHighWaterMark() const {
+    return highWaterMark_;
+  }
+
+  inline kj::Maybe<jsg::Function<StartAlgorithm>>& start() {
+    return start_;
+  }
+  inline kj::Maybe<jsg::Function<WriteAlgorithm>>& write() {
+    return write_;
+  }
+  inline kj::Maybe<jsg::Function<AbortAlgorithm>>& abort() {
+    return abort_;
+  }
+  inline kj::Maybe<jsg::Function<CloseAlgorithm>>& close() {
+    return close_;
+  }
+  inline kj::Maybe<jsg::Function<SizeAlgorithm>>& size() {
+    return size_;
+  }
+
+  void clearStart() {
+    start_ = kj::none;
+  }
+
+  void clear() {
+    start_ = kj::none;
+    write_ = kj::none;
+    abort_ = kj::none;
+    close_ = kj::none;
+    size_ = kj::none;
+  }
+
+  JSG_MEMORY_INFO(UnderlyingSinkImpl) {
+    tracker.trackField("start", start_);
+    tracker.trackField("write", write_);
+    tracker.trackField("abort", abort_);
+    tracker.trackField("close", close_);
+    tracker.trackField("size", size_);
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(start_, write_, abort_, close_, size_);
+  }
+
+ private:
+  kj::Maybe<jsg::Function<StartAlgorithm>> start_;
+  kj::Maybe<jsg::Function<WriteAlgorithm>> write_;
+  kj::Maybe<jsg::Function<AbortAlgorithm>> abort_;
+  kj::Maybe<jsg::Function<CloseAlgorithm>> close_;
+  kj::Maybe<jsg::Function<SizeAlgorithm>> size_;
+  uint64_t highWaterMark_ = DEFAULT_HIGH_WATER_MARK;
+};
+
 struct Transformer {
   using Controller = jsg::Ref<TransformStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);

@@ -1341,7 +1341,7 @@ kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
 
 template <typename Self>
 ssize_t WritableImpl<Self>::getDesiredSize() {
-  return highWaterMark - amountBuffered;
+  return underlyingSink->getHighWaterMark() - amountBuffered;
 }
 
 template <typename Self>
@@ -1376,9 +1376,9 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
       // synchronously if algorithms.close is not specified. maybeRunAlgorithmAsync
       // always defers to a microtask.
       if (FeatureFlags::get(js).getPedanticWpt()) {
-        maybeRunAlgorithmAsync(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+        maybeRunAlgorithmAsync(js, underlyingSink->close(), kj::mv(onSuccess), kj::mv(onFailure));
       } else {
-        maybeRunAlgorithm(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
+        maybeRunAlgorithm(js, underlyingSink->close(), kj::mv(onSuccess), kj::mv(onFailure));
       }
     }
     return;
@@ -1426,10 +1426,10 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   // from the write don't resolve the ready promise synchronously, preserving correct
   // microtask ordering (e.g., ready rejects before closed on releaseLock).
   if (FeatureFlags::get(js).getPedanticWpt()) {
-    maybeRunAlgorithmAsync(js, algorithms.write, kj::mv(onSuccess), kj::mv(onFailure),
+    maybeRunAlgorithmAsync(js, underlyingSink->write(), kj::mv(onSuccess), kj::mv(onFailure),
         value.getHandle(js), self.addRef());
   } else {
-    maybeRunAlgorithm(js, algorithms.write, kj::mv(onSuccess), kj::mv(onFailure),
+    maybeRunAlgorithm(js, underlyingSink->write(), kj::mv(onSuccess), kj::mv(onFailure),
         value.getHandle(js), self.addRef());
   }
 }
@@ -1485,7 +1485,9 @@ void WritableImpl<Self>::doClose(jsg::Lock& js) {
   KJ_ASSERT(writeRequests.empty());
   // State should have already been transitioned to Closed
   KJ_ASSERT(state.template is<StreamStates::Closed>());
-  algorithms.clear();
+  if (underlyingSink.get() != nullptr) {
+    underlyingSink->clear();
+  }
 
   KJ_IF_SOME(owner, tryGetOwner()) {
     owner.doClose(js);
@@ -1501,7 +1503,9 @@ void WritableImpl<Self>::doError(jsg::Lock& js, jsg::JsValue reason) {
   KJ_ASSERT(writeRequests.empty());
   // State should have already been transitioned to Errored
   KJ_ASSERT(state.template is<StreamStates::Errored>());
-  algorithms.clear();
+  if (underlyingSink.get() != nullptr) {
+    underlyingSink->clear();
+  }
 
   KJ_IF_SOME(owner, tryGetOwner()) {
     owner.doError(js, reason);
@@ -1511,7 +1515,9 @@ void WritableImpl<Self>::doError(jsg::Lock& js, jsg::JsValue reason) {
 template <typename Self>
 void WritableImpl<Self>::error(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason) {
   if (isWritable()) {
-    algorithms.clear();
+    if (underlyingSink.get() != nullptr) {
+      underlyingSink->clear();
+    }
     startErroring(js, kj::mv(self), reason);
   }
 }
@@ -1549,7 +1555,7 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
           rejectCloseAndClosedPromiseIfNeeded(js);
         });
 
-    maybeRunAlgorithm(js, algorithms.abort, kj::mv(onSuccess), kj::mv(onFailure), reason);
+    maybeRunAlgorithm(js, underlyingSink->abort(), kj::mv(onSuccess), kj::mv(onFailure), reason);
     return;
   }
   rejectCloseAndClosedPromiseIfNeeded(js);
@@ -1558,7 +1564,9 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
 template <typename Self>
 void WritableImpl<Self>::finishInFlightClose(
     jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<jsg::JsValue> maybeReason) {
-  algorithms.clear();
+  if (underlyingSink.get() != nullptr) {
+    underlyingSink->clear();
+  }
   KJ_ASSERT_NONNULL(inFlightClose);
   KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
 
@@ -1609,7 +1617,9 @@ bool WritableImpl<Self>::isCloseQueuedOrInFlight() {
 
 template <typename Self>
 void WritableImpl<Self>::rejectCloseAndClosedPromiseIfNeeded(jsg::Lock& js) {
-  algorithms.clear();
+  if (underlyingSink.get() != nullptr) {
+    underlyingSink->clear();
+  }
   auto reason =
       KJ_ASSERT_NONNULL(state.template tryGetUnsafe<StreamStates::Errored>()).getHandle(js);
   maybeRejectPromise<void>(js, closeRequest, reason);
@@ -1625,20 +1635,13 @@ void WritableImpl<Self>::setup(jsg::Lock& js,
   KJ_ASSERT(!flags.started && !flags.starting);
   flags.starting = true;
 
-  highWaterMark = queuingStrategy.highWaterMark.orDefault(1);
-  auto startAlgorithm = kj::mv(underlyingSink.start);
-  algorithms.write = kj::mv(underlyingSink.write);
-  algorithms.close = kj::mv(underlyingSink.close);
-  algorithms.abort = kj::mv(underlyingSink.abort);
-  algorithms.size = kj::mv(queuingStrategy.size);
-  // Per the streams spec, the size function should be called with `undefined` as `this`,
-  // not as a method on the strategy object.
-  KJ_IF_SOME(sizeFunc, algorithms.size) {
-    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.v8Undefined()));
-  }
+  this->underlyingSink =
+      kj::heap<UnderlyingSinkImpl>(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
+
+    this->underlyingSink->clearStart();
 
     if (isWritable()) {
     // Only resolve the ready promise if an abort is not pending.
@@ -1671,7 +1674,8 @@ void WritableImpl<Self>::setup(jsg::Lock& js,
 
   flags.backpressure = getDesiredSize() <= 0;
 
-  maybeRunAlgorithm(js, startAlgorithm, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
+  maybeRunAlgorithm(
+      js, this->underlyingSink->start(), kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
 
 template <typename Self>
@@ -1705,7 +1709,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
     jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue value) {
 
   size_t size = 1;
-  KJ_IF_SOME(sizeFunc, algorithms.size) {
+  KJ_IF_SOME(sizeFunc, underlyingSink->size()) {
     kj::Maybe<jsg::JsValue> failure;
     JSG_TRY(js) {
       size = sizeFunc(js, value);
@@ -1764,7 +1768,12 @@ jsg::Promise<void> WritableImpl<Self>::write(
 template <typename Self>
 void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
   state.visitForGc(visitor);
-  visitor.visit(inFlightWrite, inFlightClose, closeRequest, algorithms, signal);
+  visitor.visit(inFlightWrite, inFlightClose, closeRequest, signal);
+
+  // The underlyingSink might not yet be set the first time visitForGc is called.
+  if (underlyingSink.get() != nullptr) {
+    underlyingSink->visitForGc(visitor);
+  }
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     visitor.visit(*pendingAbort);
   }
@@ -3886,7 +3895,8 @@ void WritableStreamDefaultController::cancelPendingWrites(jsg::Lock& js, jsg::Js
 }
 
 void WritableStreamDefaultController::clearAlgorithms() {
-  impl.algorithms.clear();
+  // Free the underlying sink to break circular references.
+  auto _ = kj::mv(impl.underlyingSink);
 }
 
 WritableStreamDefaultController::~WritableStreamDefaultController() noexcept(false) {
@@ -4812,10 +4822,7 @@ void WritableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
     KJ_CASE_ONEOF(writable, Writable) {}
   }
 
-  tracker.trackField("abortAlgorithm", algorithms.abort);
-  tracker.trackField("closeAlgorithm", algorithms.close);
-  tracker.trackField("writeAlgorithm", algorithms.write);
-  tracker.trackField("sizeAlgorithm", algorithms.size);
+  tracker.trackField("sink", underlyingSink);
 
   for (auto& request: writeRequests) {
     tracker.trackField("pendingWrite", request);
