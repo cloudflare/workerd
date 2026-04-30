@@ -1863,12 +1863,36 @@ jsg::Promise<void> WritableImpl<Self>::write(
   KJ_ASSERT(isWritable());
 
   auto prp = js.newPromiseAndResolver<void>();
+  amountBuffered += size;
+
+  // Fast path: if no write is in flight and the queue is empty, dispatch immediately
+  // without round-tripping the value through a JsRef (avoids a V8 global handle).
+  if (flags.started && inFlightWrite == kj::none && writeRequests.empty()) {
+    inFlightWrite = WriteRequest{
+      .resolver = kj::mv(prp.resolver),
+      .value = {},  // Not stored — value is passed directly to the algorithm below.
+      .size = size,
+    };
+    inFlightSelf = kj::mv(self);
+    updateBackpressure(js);
+
+    auto& wc = getWriteContinuation(js);
+    if (FeatureFlags::get(js).getPedanticWpt()) {
+      maybeRunAlgorithmAsyncWithPersistentContinuation(
+          js, underlyingSink->write(), wc, value, KJ_ASSERT_NONNULL(inFlightSelf).addRef());
+    } else {
+      maybeRunAlgorithmWithPersistentContinuation(
+          js, underlyingSink->write(), wc, value, KJ_ASSERT_NONNULL(inFlightSelf).addRef());
+    }
+    return kj::mv(prp.promise);
+  }
+
+  // Slow path: queue the write for later dispatch via advanceQueueIfNeeded.
   writeRequests.push_back(WriteRequest{
     .resolver = kj::mv(prp.resolver),
     .value = value.addRef(js),
     .size = size,
   });
-  amountBuffered += size;
 
   updateBackpressure(js);
   advanceQueueIfNeeded(js, kj::mv(self));
