@@ -824,6 +824,7 @@ class TransformStreamDefaultController: public jsg::Object {
   }
 
   jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue chunk);
+  jsg::Promise<void> writev(jsg::Lock& js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks);
   jsg::Promise<void> abort(jsg::Lock& js, jsg::JsValue reason);
   jsg::Promise<void> close(jsg::Lock& js);
   jsg::Promise<void> pull(jsg::Lock& js);
@@ -834,6 +835,7 @@ class TransformStreamDefaultController: public jsg::Object {
  private:
   void errorWritableAndUnblockWrite(jsg::Lock& js, jsg::JsValue reason);
   jsg::Promise<void> performTransform(jsg::Lock& js, jsg::JsValue chunk);
+  jsg::Promise<void> performTransformv(jsg::Lock& js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
 
   kj::Maybe<IoContext&> ioContext;

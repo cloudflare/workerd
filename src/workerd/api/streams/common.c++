@@ -43,6 +43,7 @@ UnderlyingSinkImpl::UnderlyingSinkImpl(
     jsg::Lock& js, UnderlyingSink sink, StreamQueuingStrategy strategy)
     : start_(kj::mv(sink.start)),
       write_(kj::mv(sink.write)),
+      writev_(kj::mv(sink.writev)),
       abort_(kj::mv(sink.abort)),
       close_(kj::mv(sink.close)),
       size_(kj::mv(strategy.size)),
@@ -81,7 +82,7 @@ UnderlyingSourceImpl::UnderlyingSourceImpl(
       size_(kj::mv(strategy.size)),
       isBytes_(source.type.map([](kj::StringPtr s) { return s == "bytes"; }).orDefault(false)),
       highWaterMark_(strategy.highWaterMark.orDefault(
-          isBytes_ ? DEFAILT_HIGH_WATER_MARK_BYTES : DEFAULT_HIGH_WATER_MARK_VALUE)),
+          isBytes_ ? DEFAULT_HIGH_WATER_MARK_BYTES : DEFAULT_HIGH_WATER_MARK_VALUE)),
       expectedLength_(source.expectedLength),
       autoAllocateChunkSize_(source.autoAllocateChunkSize) {
   // Per the streams spec, the size function should be called with `undefined` as `this`,
@@ -112,7 +113,8 @@ TransformerImpl::TransformerImpl(jsg::Lock& js, Transformer transformer)
     : start_(kj::mv(transformer.start)),
       transform_(kj::mv(transformer.transform)),
       flush_(kj::mv(transformer.flush)),
-      cancel_(kj::mv(transformer.cancel)) {
+      cancel_(kj::mv(transformer.cancel)),
+      transformv_(kj::mv(transformer.transformv)) {
   // Per the spec, both readableType and writableType must be undefined.
   JSG_REQUIRE(transformer.readableType == kj::none, RangeError,
       "Invalid transformer readableType. Only undefined is valid.");
@@ -129,6 +131,7 @@ void TransformerImpl::clear() {
   transform_ = kj::none;
   flush_ = kj::none;
   cancel_ = kj::none;
+  transformv_ = kj::none;
 }
 
 }  // namespace workerd::api

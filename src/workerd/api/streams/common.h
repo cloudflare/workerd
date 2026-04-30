@@ -153,7 +153,7 @@ class UnderlyingSourceImpl {
  public:
   // When the underlying source has types="bytes", the default high water mark is 0,
   static constexpr uint64_t DEFAULT_HIGH_WATER_MARK_VALUE = 1;
-  static constexpr uint64_t DEFAILT_HIGH_WATER_MARK_BYTES = 0;
+  static constexpr uint64_t DEFAULT_HIGH_WATER_MARK_BYTES = 0;
 
   using StartAlgorithm = UnderlyingSource::StartAlgorithm;
   using PullAlgorithm = UnderlyingSource::PullAlgorithm;
@@ -231,6 +231,7 @@ struct UnderlyingSink {
   using Controller = jsg::Ref<WritableStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
   using WriteAlgorithm = jsg::Promise<void>(jsg::JsValue, Controller);
+  using WritevAlgorithm = jsg::Promise<void>(kj::Array<jsg::JsRef<jsg::JsValue>>, Controller);
   using AbortAlgorithm = jsg::Promise<void>(jsg::JsValue);
   using CloseAlgorithm = jsg::Promise<void>();
 
@@ -252,6 +253,11 @@ struct UnderlyingSink {
     abort?: (reason: any) => void | Promise<void>;
     close?: () => void | Promise<void>;
   });
+
+  // Non-standard extension: vectorized write algorithm. When set, allows the stream
+  // to batch multiple queued writes into a single call. Only set by internal C++ sinks
+  // that support vectorized I/O, never by user-provided JS sinks.
+  jsg::Optional<jsg::Function<WritevAlgorithm>> writev;
 };
 
 class UnderlyingSinkImpl {
@@ -266,10 +272,7 @@ class UnderlyingSinkImpl {
   // Non-standard extension: vectorized write algorithm. When set, allows the stream
   // to batch multiple queued writes into a single call. Only set by internal C++ sinks
   // that support vectorized I/O, never by user-provided JS sinks.
-  // Uses JsRef (V8 global handles) rather than JsValue (stack locals) because the
-  // array is heap-allocated.
-  using WritevAlgorithm = jsg::Promise<void>(
-      kj::Array<jsg::JsRef<jsg::JsValue>>, jsg::Ref<WritableStreamDefaultController>);
+  using WritevAlgorithm = UnderlyingSink::WritevAlgorithm;
 
   UnderlyingSinkImpl(jsg::Lock& js, UnderlyingSink sink, StreamQueuingStrategy strategy);
   virtual ~UnderlyingSinkImpl() noexcept(false) = default;
@@ -296,6 +299,10 @@ class UnderlyingSinkImpl {
   }
   inline kj::Maybe<jsg::Function<WritevAlgorithm>>& writev() {
     return writev_;
+  }
+
+  inline void setWritev(jsg::Function<WritevAlgorithm> writev) {
+    writev_ = kj::mv(writev);
   }
 
   void clearStart();
@@ -334,6 +341,7 @@ struct Transformer {
   using Controller = jsg::Ref<TransformStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
   using TransformAlgorithm = jsg::Promise<void>(jsg::JsValue, Controller);
+  using TransformvAlgorithm = jsg::Promise<void>(kj::Array<jsg::JsRef<jsg::JsValue>>, Controller);
   using FlushAlgorithm = jsg::Promise<void>(Controller);
   using CancelAlgorithm = jsg::Promise<void>(jsg::JsValue);
 
@@ -358,12 +366,17 @@ struct Transformer {
     cancel?: (reason: any) => void | Promise<void>;
     expectedLength?: number;
   });
+
+  // Non-standard extension: vectorized transform algorithm. When set, allows the stream
+  // to transform multiple queued chunks into a single call.
+  jsg::Optional<jsg::Function<TransformvAlgorithm>> transformv;
 };
 
 class TransformerImpl {
  public:
   using StartAlgorithm = Transformer::StartAlgorithm;
   using TransformAlgorithm = Transformer::TransformAlgorithm;
+  using TransformvAlgorithm = Transformer::TransformvAlgorithm;
   using FlushAlgorithm = Transformer::FlushAlgorithm;
   using CancelAlgorithm = Transformer::CancelAlgorithm;
 
@@ -384,6 +397,10 @@ class TransformerImpl {
     return cancel_;
   }
 
+  inline kj::Maybe<jsg::Function<TransformvAlgorithm>>& transformv() {
+    return transformv_;
+  }
+
   void clearStart();
 
   void clear();
@@ -393,10 +410,11 @@ class TransformerImpl {
     tracker.trackField("transform", transform_);
     tracker.trackField("flush", flush_);
     tracker.trackField("cancel", cancel_);
+    tracker.trackField("transformv", transformv_);
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(start_, transform_, flush_, cancel_);
+    visitor.visit(start_, transform_, flush_, cancel_, transformv_);
   }
 
  protected:
@@ -405,6 +423,7 @@ class TransformerImpl {
   kj::Maybe<jsg::Function<TransformAlgorithm>> transform_;
   kj::Maybe<jsg::Function<FlushAlgorithm>> flush_;
   kj::Maybe<jsg::Function<CancelAlgorithm>> cancel_;
+  kj::Maybe<jsg::Function<TransformvAlgorithm>> transformv_;
 };
 
 // ReadableStreamSource and WritableStreamSink

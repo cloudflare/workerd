@@ -4785,6 +4785,38 @@ jsg::Promise<void> TransformStreamDefaultController::write(jsg::Lock& js, jsg::J
   }
 }
 
+jsg::Promise<void> TransformStreamDefaultController::writev(
+    jsg::Lock& js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks) {
+  KJ_IF_SOME(writableController, tryGetWritableController()) {
+    KJ_IF_SOME(error, writableController.isErroredOrErroring(js)) {
+      return js.rejectedPromise<void>(error);
+    }
+
+    KJ_ASSERT(writableController.isWritable());
+
+    if (flags.backpressure) {
+      return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js).then(js,
+          JSG_VISITABLE_LAMBDA((chunks = kj::mv(chunks), ref=JSG_THIS),
+                              (chunks, ref), (jsg::Lock& js) mutable -> jsg::Promise<void> {
+        KJ_IF_SOME(writableController, ref->tryGetWritableController()) {
+          KJ_IF_SOME(error, writableController.isErroring(js)) {
+            return js.rejectedPromise<void>(error);
+          } else {
+            // Else block to avert dangling else compiler warning.
+          }
+        } else {
+          // Else block to avert dangling else compiler warning.
+        }
+        return ref->performTransformv(js, kj::mv(chunks));
+      }));
+    }
+    return performTransformv(js, kj::mv(chunks));
+  } else {
+    return js.rejectedPromise<void>(
+        KJ_EXCEPTION(FAILED, "jsg.TypeError: Writing to the TransformStream failed."));
+  }
+}
+
 jsg::Promise<void> TransformStreamDefaultController::abort(jsg::Lock& js, jsg::JsValue reason) {
   if (FeatureFlags::get(js).getPedanticWpt()) {
     // If a finish operation is already in progress, return the existing promise
@@ -4990,6 +5022,14 @@ jsg::Promise<void> TransformStreamDefaultController::performTransform(
     enqueue(js, chunk);
     return js.resolvedPromise();
   }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+}
+
+jsg::Promise<void> TransformStreamDefaultController::performTransformv(
+    jsg::Lock& js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks) {
+  KJ_ASSERT(transformer->transformv() != kj::none);
+  auto& tc = getTransformContinuation(js);
+  return maybeRunAlgorithmWithPersistentContinuation(
+      js, transformer->transformv(), tc, kj::mv(chunks), JSG_THIS);
 }
 
 void TransformStreamDefaultController::setBackpressure(jsg::Lock& js, bool newBackpressure) {
@@ -5292,7 +5332,9 @@ class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
       : inner(context.addObject(kj::heap<Active>(kj::mv(in)))) {
 
     isBytes_ = true;
-    expectedLength_ = in->tryGetLength(StreamEncoding::IDENTITY);
+    // Note: `in` was moved above, so we access the source through `inner`.
+    auto& active = *inner.get<IoOwn<Active>>();
+    expectedLength_ = active.source->tryGetLength(StreamEncoding::IDENTITY);
     autoAllocateChunkSize_ = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2;
     start_ = kj::none;
     size_ = kj::none;
@@ -5369,6 +5411,12 @@ class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
       return js.resolvedPromise();
     };
   }
+
+  ~InternalUnderlyingSourceImpl() noexcept(false) {
+    weakRef->invalidate();
+  }
+
+  KJ_DISALLOW_COPY_AND_MOVE(InternalUnderlyingSourceImpl);
 
  private:
   struct Active {

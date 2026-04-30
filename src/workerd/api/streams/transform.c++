@@ -46,6 +46,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
     auto expectedLength = transformer.expectedLength;
 
     auto transformerImpl = kj::heap<TransformerImpl>(js, kj::mv(transformer));
+    bool hasTransformv = transformerImpl->transformv() != kj::none;
     auto controller = js.alloc<TransformStreamDefaultController>(js, kj::mv(transformerImpl));
 
     // By default, let's signal backpressure on the readable side by setting the highWaterMark
@@ -56,25 +57,34 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
                                 .orDefault(StreamQueuingStrategy{
                                   .highWaterMark = 0,
                                 });
+    auto writableStrategy = kj::mv(maybeWritableStrategy).orDefault(StreamQueuingStrategy{});
 
-    auto readable = ReadableStream::constructor(js,
-        UnderlyingSource{
-          .type = kj::none,
-          .autoAllocateChunkSize = kj::none,
-          .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+    auto readableController = newReadableStreamJsController();
+    auto readable = js.alloc<ReadableStream>(kj::mv(readableController));
+    readable->getController().setup(js,
+        kj::heap<UnderlyingSourceImpl>(js,
+            UnderlyingSource{
+              .type = kj::none,
+              .autoAllocateChunkSize = kj::none,
+              .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>( JSG_VISITABLE_LAMBDA(
+                  (controller = controller.addRef()), (controller),
                   (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
-          .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->pull(js); })),
-          .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>( JSG_VISITABLE_LAMBDA(
-              (controller = controller.addRef()), (controller),
-              (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); })),
-          .expectedLength = expectedLength,
-        },
-        kj::mv(readableStrategy));
+              .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(
+                  JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+                      (jsg::Lock & js, auto c) mutable { return controller->pull(js); })),
+              .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>(
+                  JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+                      (jsg::Lock & js, auto reason) mutable {
+                        return controller->cancel(js, reason);
+                      })),
+              .expectedLength = expectedLength,
+            },
+            kj::mv(readableStrategy)));
 
-    auto writable = WritableStream::constructor(js,
+    auto writableController = newWritableStreamJsController();
+    auto writable = js.alloc<WritableStream>(kj::mv(writableController));
+
+    auto sink = kj::heap<UnderlyingSinkImpl>(js,
         UnderlyingSink{
           .type = kj::none,
           .start = maybeAddFunctor<UnderlyingSink::StartAlgorithm>(
@@ -92,7 +102,19 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
               JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
                   (jsg::Lock & js) mutable { return controller->close(js); })),
         },
-        kj::mv(maybeWritableStrategy));
+        kj::mv(writableStrategy));
+
+    // If the transform supports the optional vectorized transform algorithm, then we also
+    // set up a vectorized writev function on the sink.
+    if (hasTransformv) {
+      sink->setWritev(maybeAddFunctor<UnderlyingSink::WritevAlgorithm>(
+          JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+              (jsg::Lock & js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks, auto c) mutable {
+                return controller->writev(js, kj::mv(chunks));
+              })));
+    }
+
+    writable->getController().setup(js, kj::mv(sink));
 
     // The controller will store c++ references to both the readable and writable
     // streams underlying controllers.
