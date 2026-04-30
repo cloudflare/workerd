@@ -233,6 +233,10 @@ class UnderlyingSinkImpl {
     size_ = kj::none;
   }
 
+  kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() {
+    return kj::none;
+  }
+
   JSG_MEMORY_INFO(UnderlyingSinkImpl) {
     tracker.trackField("start", start_);
     tracker.trackField("write", write_);

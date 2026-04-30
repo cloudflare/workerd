@@ -506,6 +506,7 @@ class WritableImpl {
     uint8_t starting : 1 = 0;
     uint8_t backpressure : 1 = 0;
     uint8_t pedanticWpt : 1 = 0;
+    uint8_t specCompliantWriter : 1 = 0;
   };
   Flags flags{};
 

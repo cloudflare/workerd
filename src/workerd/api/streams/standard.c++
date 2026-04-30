@@ -1351,7 +1351,9 @@ WritableImpl<Self>::WritableImpl(jsg::Lock& js,
     : owner(owner.addWeakRef()),
       signal(kj::mv(abortSignal)),
       underlyingSink(kj::mv(sink)) {
-  flags.pedanticWpt = FeatureFlags::get(js).getPedanticWpt();
+  auto featureFlags = FeatureFlags::get(js);
+  flags.pedanticWpt = featureFlags.getPedanticWpt();
+  flags.specCompliantWriter = featureFlags.getWritableStreamSpecCompliantWriter();
 }
 
 template <typename Self>
@@ -1360,7 +1362,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   // Per the spec, the signal.reason should be a DOMException with name 'AbortError'
   // when no reason is provided, but the stored error should remain as the original reason.
   auto signalReason = [&]() -> jsg::JsValue {
-    if (reason.isUndefined() && FeatureFlags::get(js).getPedanticWpt()) {
+    if (reason.isUndefined() && flags.pedanticWpt) {
       auto ex = js.domException(
           kj::str("AbortError"), kj::str("This writable stream has been aborted."), kj::none);
       return jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
@@ -1516,7 +1518,8 @@ jsg::Promise<void> WritableImpl<Self>::onWritevFailure(jsg::Lock& js, jsg::Value
   }
   inFlightBatchWrite = kj::none;
   KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
-  return dealWithRejection(js, kj::mv(self), jsReason), js.resolvedPromise();
+  dealWithRejection(js, kj::mv(self), jsReason);
+  return js.resolvedPromise();
 }
 
 template <typename Self>
@@ -1554,6 +1557,15 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
     return finishErroring(js, kj::mv(self));
   }
 
+  KJ_ASSERT(inFlightWrite == kj::none);
+  KJ_ASSERT(inFlightBatchWrite == kj::none);
+
+  // Drain any leading flush entries — these are sync points that resolve immediately
+  // once all preceding writes have completed (which they have, since inFlightWrite is none).
+  while (!writeRequests.empty() && writeRequests.front().flush) {
+    dequeueWriteRequest().resolver.resolve(js);
+  }
+
   if (writeRequests.empty()) {
     if (closeRequest != kj::none) {
       KJ_ASSERT(inFlightClose == kj::none);
@@ -1568,34 +1580,7 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
       // The original maybeRunAlgorithm would call the onSuccess continuation
       // synchronously if algorithms.close is not specified. maybeRunAlgorithmAsync
       // always defers to a microtask.
-      if (FeatureFlags::get(js).getPedanticWpt()) {
-        maybeRunAlgorithmAsyncWithPersistentContinuation(js, underlyingSink->close(), cc);
-      } else {
-        maybeRunAlgorithmWithPersistentContinuation(js, underlyingSink->close(), cc);
-      }
-    }
-    return;
-  }
-
-  KJ_ASSERT(inFlightWrite == kj::none);
-  KJ_ASSERT(inFlightBatchWrite == kj::none);
-
-  // Drain any leading flush entries — these are sync points that resolve immediately
-  // once all preceding writes have completed (which they have, since inFlightWrite is none).
-  while (!writeRequests.empty() && writeRequests.front().flush) {
-    dequeueWriteRequest().resolver.resolve(js);
-  }
-
-  if (writeRequests.empty()) {
-    // All remaining entries were flushes. Check for close.
-    if (closeRequest != kj::none) {
-      KJ_ASSERT(inFlightClose == kj::none);
-      KJ_ASSERT_NONNULL(closeRequest);
-      inFlightClose = kj::mv(closeRequest);
-      inFlightSelf = kj::mv(self);
-
-      auto& cc = getCloseContinuation(js);
-      if (FeatureFlags::get(js).getPedanticWpt()) {
+      if (flags.pedanticWpt) {
         maybeRunAlgorithmAsyncWithPersistentContinuation(js, underlyingSink->close(), cc);
       } else {
         maybeRunAlgorithmWithPersistentContinuation(js, underlyingSink->close(), cc);
@@ -1651,7 +1636,7 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   // there's no user-provided write handler. This ensures that backpressure changes
   // from the write don't resolve the ready promise synchronously, preserving correct
   // microtask ordering (e.g., ready rejects before closed on releaseLock).
-  if (FeatureFlags::get(js).getPedanticWpt()) {
+  if (flags.pedanticWpt) {
     maybeRunAlgorithmAsyncWithPersistentContinuation(
         js, underlyingSink->write(), wc, value, KJ_ASSERT_NONNULL(inFlightSelf).addRef());
   } else {
@@ -1907,7 +1892,8 @@ void WritableImpl<Self>::startErroring(jsg::Lock& js, jsg::Ref<Self> self, jsg::
     owner.maybeRejectReadyPromise(js, reason);
   }
   state.template transitionTo<StreamStates::Erroring>(js, reason);
-  if (inFlightWrite == kj::none && inFlightClose == kj::none && flags.started) {
+  if (inFlightWrite == kj::none && inFlightBatchWrite == kj::none && inFlightClose == kj::none &&
+      flags.started) {
     finishErroring(js, kj::mv(self));
   }
 }
@@ -1951,7 +1937,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
   // releaseLock() was called from within strategy.size(), the write must be
   // rejected. This check must occur before any state checks, as the stream
   // state may still appear writable even after the writer was released.
-  if (FeatureFlags::get(js).getWritableStreamSpecCompliantWriter()) {
+  if (flags.specCompliantWriter) {
     KJ_IF_SOME(owner, tryGetOwner()) {
       if (!owner.isLockedToWriter()) {
         return js.rejectedPromise<void>(
@@ -1990,7 +1976,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
     updateBackpressure(js);
 
     auto& wc = getWriteContinuation(js);
-    if (FeatureFlags::get(js).getPedanticWpt()) {
+    if (flags.pedanticWpt) {
       maybeRunAlgorithmAsyncWithPersistentContinuation(
           js, underlyingSink->write(), wc, value, KJ_ASSERT_NONNULL(inFlightSelf).addRef());
     } else {
@@ -5330,7 +5316,7 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
     start_ = kj::none;
 
     highWaterMark_ = 1;  // TODO(soon): Make configurable
-    size_ = [](jsg::Lock& js, jsg::JsValue chunk) { return 1; };
+    // size_ intentionally left as kj::none — defaults to 1 per chunk.
 
     write_ = [selfRef = addWeakRef()](jsg::Lock& js, jsg::JsValue chunk,
                  jsg::Ref<WritableStreamDefaultController> controller) {
@@ -5436,6 +5422,17 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
   }
 
   KJ_DISALLOW_COPY_AND_MOVE(InternalUnderlyingSinkImpl);
+
+  kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() {
+    KJ_IF_SOME(active, inner.tryGet<IoOwn<Active>>()) {
+      auto& a = *active;
+      KJ_REQUIRE(a.canceler.isEmpty(), "Cannot release sink while there are pending operations");
+      auto sink = kj::mv(active->out);
+      inner.template init<Closed>();
+      return kj::mv(sink);
+    }
+    return kj::none;
+  }
 
  private:
   struct Active {
