@@ -60,4 +60,52 @@ UnderlyingSinkImpl::UnderlyingSinkImpl(
   }
 }
 
+void UnderlyingSinkImpl::clearStart() {
+  start_ = kj::none;
+}
+
+void UnderlyingSinkImpl::clear() {
+  start_ = kj::none;
+  write_ = kj::none;
+  writev_ = kj::none;
+  abort_ = kj::none;
+  close_ = kj::none;
+  size_ = kj::none;
+}
+
+UnderlyingSourceImpl::UnderlyingSourceImpl(
+    jsg::Lock& js, UnderlyingSource source, StreamQueuingStrategy strategy)
+    : start_(kj::mv(source.start)),
+      pull_(kj::mv(source.pull)),
+      cancel_(kj::mv(source.cancel)),
+      size_(kj::mv(strategy.size)),
+      isBytes_(source.type.map([](kj::StringPtr s) { return s == "bytes"; }).orDefault(false)),
+      highWaterMark_(strategy.highWaterMark.orDefault(
+          isBytes_ ? DEFAILT_HIGH_WATER_MARK_BYTES : DEFAULT_HIGH_WATER_MARK_VALUE)),
+      expectedLength_(source.expectedLength),
+      autoAllocateChunkSize_(source.autoAllocateChunkSize) {
+  // Per the streams spec, the size function should be called with `undefined` as `this`,
+  // not as a method on the strategy object.
+  KJ_IF_SOME(size, size_) {
+    size.setReceiver(js.v8Ref(js.v8Undefined()));
+  }
+  // Per the spec, the type property for ReadableStream's underlying source must be
+  // undefined, the empty string, or "bytes".
+  KJ_IF_SOME(type, source.type) {
+    JSG_REQUIRE(type == "" || type == "bytes", RangeError,
+        "Invalid underlying source type. Only undefined, '' and 'bytes' are valid.");
+  }
+}
+
+void UnderlyingSourceImpl::clearStart() {
+  start_ = kj::none;
+}
+
+void UnderlyingSourceImpl::clear() {
+  start_ = kj::none;
+  pull_ = kj::none;
+  cancel_ = kj::none;
+  size_ = kj::none;
+}
+
 }  // namespace workerd::api

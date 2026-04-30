@@ -590,7 +590,11 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(jsg::Lock& js,
   auto controller = newReadableStreamJsController();
   auto stream = js.allocAccounted<ReadableStream>(
       sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
-  stream->getController().setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
+
+  auto source = kj::heap<UnderlyingSourceImpl>(
+      js, kj::mv(underlyingSource).orDefault({}), kj::mv(queuingStrategy).orDefault({}));
+
+  stream->getController().setup(js, kj::mv(source));
   return kj::mv(stream);
 }
 

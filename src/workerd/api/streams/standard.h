@@ -137,7 +137,7 @@ class ReadableImpl {
   using Entry = Self::QueueType::Entry;
   using StateListener = Self::QueueType::ConsumerImpl::StateListener;
 
-  ReadableImpl(UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
+  ReadableImpl(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source);
 
   // Invokes the start algorithm to initialize the underlying source.
   void start(jsg::Lock& js, jsg::Ref<Self> self);
@@ -241,9 +241,8 @@ class ReadableImpl {
       StreamStates::Errored,
       Queue>;
   State state;
-  Algorithms algorithms;
 
-  size_t highWaterMark = 1;
+  kj::Own<UnderlyingSourceImpl> underlyingSource;
 
   struct PendingCancel {
     kj::Maybe<jsg::Promise<void>::Resolver> fulfiller;
@@ -523,8 +522,7 @@ class ReadableStreamDefaultController: public jsg::Object {
   using QueueType = ValueQueue;
   using ReadableImpl = ReadableImpl<ReadableStreamDefaultController>;
 
-  ReadableStreamDefaultController(
-      UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
+  ReadableStreamDefaultController(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source);
 
   void start(jsg::Lock& js);
 
@@ -656,8 +654,7 @@ class ReadableByteStreamController: public jsg::Object {
   using QueueType = ByteQueue;
   using ReadableImpl = ReadableImpl<ReadableByteStreamController>;
 
-  ReadableByteStreamController(
-      UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
+  ReadableByteStreamController(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source);
   ~ReadableByteStreamController() noexcept(false);
 
   jsg::Ref<ReadableByteStreamController> getSelf() {

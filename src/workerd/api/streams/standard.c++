@@ -713,12 +713,6 @@ jsg::Promise<void> maybeRunAlgorithmAsyncWithPersistentContinuation(jsg::Lock& j
   return js.resolvedPromise().thenRef(js, continuation);
 }
 
-int getHighWaterMark(
-    const UnderlyingSource& underlyingSource, const StreamQueuingStrategy& queuingStrategy) {
-  bool isBytes = underlyingSource.type.map([](auto& s) { return s == "bytes"; }).orDefault(false);
-  return queuingStrategy.highWaterMark.orDefault(isBytes ? 0 : 1);
-}
-
 }  // namespace
 
 // It is possible for the controller state to be released synchronously while
@@ -812,9 +806,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   jsg::Ref<ReadableStream> addRef() override;
 
-  void setup(jsg::Lock& js,
-      jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
-      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) override;
+  void setup(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source) override;
 
   // Signals that this ReadableStream is no longer interested in the underlying
   // data source. Whether this cancels the underlying data source also depends
@@ -1075,21 +1067,14 @@ kj::Own<WritableStreamController> newWritableStreamJsController() {
 }
 
 template <typename Self>
-ReadableImpl<Self>::ReadableImpl(
-    UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
-    : state(State::template create<Queue>(getHighWaterMark(underlyingSource, queuingStrategy))),
-      algorithms(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
+ReadableImpl<Self>::ReadableImpl(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source)
+    : state(State::template create<Queue>(source->getHighWaterMark())),
+      underlyingSource(kj::mv(source)) {}
 
 template <typename Self>
 void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(!flags.started && !flags.starting);
   flags.starting = true;
-
-  // Per the streams spec, the size function should be called with `undefined` as `this`,
-  // not as a method on the strategy object.
-  KJ_IF_SOME(sizeFunc, algorithms.size) {
-    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.v8Undefined()));
-  }
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     flags.started = true;
@@ -1104,8 +1089,9 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
         doError(js, jsg::JsValue(reason.getHandle(js)));
       });
 
-  maybeRunAlgorithm(js, algorithms.start, kj::mv(onSuccess), kj::mv(onFailure), kj::mv(self));
-  algorithms.start = kj::none;
+  maybeRunAlgorithm(
+      js, underlyingSource->start(), kj::mv(onSuccess), kj::mv(onFailure), kj::mv(self));
+  underlyingSource->clearStart();
 }
 
 template <typename Self>
@@ -1192,7 +1178,7 @@ void ReadableImpl<Self>::doCancel(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsVal
         }
       });
 
-  maybeRunAlgorithm(js, algorithms.cancel, kj::mv(onSuccess), kj::mv(onFailure), reason);
+  maybeRunAlgorithm(js, underlyingSource->cancel(), kj::mv(onSuccess), kj::mv(onFailure), reason);
 }
 
 template <typename Self>
@@ -1225,7 +1211,7 @@ template <typename Self>
 void ReadableImpl<Self>::doClose(jsg::Lock& js) {
   // The state should have already been set to closed.
   KJ_ASSERT(state.template is<StreamStates::Closed>());
-  algorithms.clear();
+  underlyingSource->clear();
 }
 
 template <typename Self>
@@ -1238,7 +1224,7 @@ void ReadableImpl<Self>::doError(jsg::Lock& js, jsg::JsValue reason) {
   auto& queue = state.template getUnsafe<Queue>();
   queue.error(js, reason);
   state.template transitionTo<StreamStates::Errored>(reason.addRef(js));
-  algorithms.clear();
+  underlyingSource->clear();
 }
 
 template <typename Self>
@@ -1289,7 +1275,8 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
         doError(js, jsg::JsValue(reason.getHandle(js)));
       });
 
-  maybeRunAlgorithm(js, algorithms.pull, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
+  maybeRunAlgorithm(
+      js, underlyingSource->pull(), kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
 
 template <typename Self>
@@ -1322,7 +1309,8 @@ void ReadableImpl<Self>::forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
         doError(js, jsg::JsValue(reason.getHandle(js)));
       });
 
-  maybeRunAlgorithm(js, algorithms.pull, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
+  maybeRunAlgorithm(
+      js, underlyingSource->pull(), kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
 
 template <typename Self>
@@ -1331,7 +1319,9 @@ void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(pendingCancel, maybePendingCancel) {
     visitor.visit(pendingCancel.fulfiller, pendingCancel.promise);
   }
-  visitor.visit(algorithms);
+  if (underlyingSource.get() != nullptr) {
+    visitor.visit(*underlyingSource);
+  }
 }
 
 template <typename Self>
@@ -2549,9 +2539,9 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
 // =======================================================================================
 
 ReadableStreamDefaultController::ReadableStreamDefaultController(
-    UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
+    jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source)
     : ioContext(tryGetIoContext()),
-      impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
+      impl(js, kj::mv(source)) {}
 
 kj::Maybe<StreamStates::Errored> ReadableStreamDefaultController::getMaybeErrorState(
     jsg::Lock& js) {
@@ -2602,7 +2592,7 @@ void ReadableStreamDefaultController::enqueue(jsg::Lock& js, jsg::Optional<jsg::
 
   size_t size = 1;
   bool errored = false;
-  KJ_IF_SOME(sizeFunc, impl.algorithms.size) {
+  KJ_IF_SOME(sizeFunc, impl.underlyingSource->size()) {
     js.tryCatch([&] { size = sizeFunc(js, value); }, [&](jsg::Value exception) {
       impl.doError(js, jsg::JsValue(exception.getHandle(js)));
       errored = true;
@@ -2812,11 +2802,11 @@ bool ReadableStreamBYOBRequest::isPartiallyFulfilled(jsg::Lock& js) {
 // ======================================================================================
 
 ReadableByteStreamController::ReadableByteStreamController(
-    UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
+    jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source)
     : weakSelf(kj::rc<WeakRef<ReadableByteStreamController>>(
           kj::Badge<ReadableByteStreamController>{}, *this)),
       ioContext(tryGetIoContext()),
-      impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
+      impl(js, kj::mv(source)) {}
 
 ReadableByteStreamController::~ReadableByteStreamController() noexcept(false) {
   weakSelf->invalidate();
@@ -3338,16 +3328,11 @@ void ReadableStreamJsController::setOwnerRef(ReadableStream& stream) {
   owner = &stream;
 }
 
-void ReadableStreamJsController::setup(jsg::Lock& js,
-    jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
-    jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
-  auto underlyingSource = kj::mv(maybeUnderlyingSource).orDefault({});
-  auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  auto type = underlyingSource.type.map([](kj::StringPtr s) { return s; }).orDefault(""_kj);
+void ReadableStreamJsController::setup(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source) {
 
-  expectedLength = underlyingSource.expectedLength;
+  expectedLength = source->getExpectedLength();
 
-  if (type == "bytes") {
+  if (source->isBytes()) {
     // Per spec, autoAllocateChunkSize should only be set if the user explicitly provides it.
     // If not set, the underlying source's pull method won't receive a byobRequest for
     // non-BYOB reads and must use controller.enqueue() instead.
@@ -3362,19 +3347,17 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     kj::Maybe<int> autoAllocateChunkSize;
     if (useSpecCompliantBehavior) {
       // Spec-compliant: only set if user explicitly provides it
-      autoAllocateChunkSize =
-          underlyingSource.autoAllocateChunkSize.map([](int size) { return size; });
+      autoAllocateChunkSize = source->getAutoAllocateChunkSize();
     } else {
       // Legacy behavior: apply a default autoAllocateChunkSize if not provided.
       auto defaultChunkSize = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;
       if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
         defaultChunkSize = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2;
       }
-      autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize.orDefault(defaultChunkSize);
+      autoAllocateChunkSize = source->getAutoAllocateChunkSize().orDefault(defaultChunkSize);
     }
 
-    auto controller =
-        js.alloc<ReadableByteStreamController>(kj::mv(underlyingSource), kj::mv(queuingStrategy));
+    auto controller = js.alloc<ReadableByteStreamController>(js, kj::mv(source));
 
     KJ_IF_SOME(chunkSize, autoAllocateChunkSize) {
       JSG_REQUIRE(chunkSize > 0, TypeError, "The autoAllocateChunkSize option cannot be zero.");
@@ -3389,10 +3372,7 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
                 sizeof(ByteReadable) + sizeof(ReadableByteStreamController))));
     controller->start(js);
   } else {
-    JSG_REQUIRE(
-        type == "", TypeError, kj::str("\"", type, "\" is not a valid type of ReadableStream."));
-    auto controller = js.alloc<ReadableStreamDefaultController>(
-        kj::mv(underlyingSource), kj::mv(queuingStrategy));
+    auto controller = js.alloc<ReadableStreamDefaultController>(js, kj::mv(source));
     state.transitionTo<kj::Own<ValueReadable>>(
         kj::heap<ValueReadable>(controller.addRef(), *this)
             .attach(js.getExternalMemoryAdjustment(
@@ -5220,10 +5200,7 @@ void ReadableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
     }
   }
 
-  tracker.trackField("startAlgorithm", algorithms.start);
-  tracker.trackField("pullAlgorithm", algorithms.pull);
-  tracker.trackField("cancelAlgorithm", algorithms.cancel);
-  tracker.trackField("sizeAlgorithm", algorithms.size);
+  tracker.trackField("source", underlyingSource);
   tracker.trackField("pendingCancel", maybePendingCancel);
 }
 

@@ -62,8 +62,9 @@ TestFixture makeAbortClearsQueueTestFixture() {
 // Creates a BYOB-capable ReadableStream
 jsg::Ref<ReadableStream> makeByteStream(jsg::Lock& js) {
   auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
-  rs->getController().setup(
-      js, UnderlyingSource{.type = kj::str("bytes")}, StreamQueuingStrategy{});
+  rs->getController().setup(js,
+      kj::heap<UnderlyingSourceImpl>(
+          js, UnderlyingSource{.type = kj::str("bytes")}, StreamQueuingStrategy{}));
   return rs;
 }
 

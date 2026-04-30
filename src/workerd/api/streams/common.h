@@ -149,6 +149,84 @@ struct UnderlyingSource {
   });
 };
 
+class UnderlyingSourceImpl {
+ public:
+  // When the underlying source has types="bytes", the default high water mark is 0,
+  static constexpr uint64_t DEFAULT_HIGH_WATER_MARK_VALUE = 1;
+  static constexpr uint64_t DEFAILT_HIGH_WATER_MARK_BYTES = 0;
+
+  using StartAlgorithm = UnderlyingSource::StartAlgorithm;
+  using PullAlgorithm = UnderlyingSource::PullAlgorithm;
+  using CancelAlgorithm = UnderlyingSource::CancelAlgorithm;
+  using SizeAlgorithm = StreamQueuingStrategy::SizeAlgorithm;
+
+  UnderlyingSourceImpl(jsg::Lock& js, UnderlyingSource source, StreamQueuingStrategy strategy);
+  virtual ~UnderlyingSourceImpl() noexcept(false) = default;
+  KJ_DISALLOW_COPY_AND_MOVE(UnderlyingSourceImpl);
+
+  inline uint64_t getHighWaterMark() const {
+    return highWaterMark_;
+  }
+
+  inline bool isBytes() const {
+    return isBytes_;
+  }
+
+  inline kj::Maybe<uint64_t> getExpectedLength() const {
+    return expectedLength_;
+  }
+
+  inline kj::Maybe<int> getAutoAllocateChunkSize() const {
+    return autoAllocateChunkSize_;
+  }
+
+  inline kj::Maybe<jsg::Function<StartAlgorithm>>& start() {
+    return start_;
+  }
+
+  inline kj::Maybe<jsg::Function<PullAlgorithm>>& pull() {
+    return pull_;
+  }
+
+  inline kj::Maybe<jsg::Function<CancelAlgorithm>>& cancel() {
+    return cancel_;
+  }
+
+  inline kj::Maybe<jsg::Function<SizeAlgorithm>>& size() {
+    return size_;
+  }
+
+  void clearStart();
+
+  void clear();
+
+  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() {
+    return kj::none;
+  }
+
+  JSG_MEMORY_INFO(UnderlyingSourceImpl) {
+    tracker.trackField("start", start_);
+    tracker.trackField("pull", pull_);
+    tracker.trackField("cancel", cancel_);
+    tracker.trackField("size", size_);
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(start_, pull_, cancel_, size_);
+  }
+
+ private:
+  UnderlyingSourceImpl() = default;
+  kj::Maybe<jsg::Function<StartAlgorithm>> start_;
+  kj::Maybe<jsg::Function<PullAlgorithm>> pull_;
+  kj::Maybe<jsg::Function<CancelAlgorithm>> cancel_;
+  kj::Maybe<jsg::Function<SizeAlgorithm>> size_;
+  bool isBytes_ = false;
+  uint64_t highWaterMark_;
+  kj::Maybe<uint64_t> expectedLength_;
+  kj::Maybe<int> autoAllocateChunkSize_;
+};
+
 struct UnderlyingSink {
   using Controller = jsg::Ref<WritableStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
@@ -220,18 +298,9 @@ class UnderlyingSinkImpl {
     return writev_;
   }
 
-  void clearStart() {
-    start_ = kj::none;
-  }
+  void clearStart();
 
-  void clear() {
-    start_ = kj::none;
-    write_ = kj::none;
-    writev_ = kj::none;
-    abort_ = kj::none;
-    close_ = kj::none;
-    size_ = kj::none;
-  }
+  void clear();
 
   kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() {
     return kj::none;
@@ -670,9 +739,7 @@ class ReadableStreamController {
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) = 0;
 
-  virtual void setup(jsg::Lock& js,
-      jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
-      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {}
+  virtual void setup(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source) {}
 
   virtual kj::Promise<DeferredProxy<void>> pumpTo(
       jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
