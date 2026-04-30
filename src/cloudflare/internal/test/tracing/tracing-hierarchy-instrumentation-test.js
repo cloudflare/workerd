@@ -143,6 +143,23 @@ export const validateHierarchy = {
     // waitForCompletion() awaits them all. BaseTracer::WeakRef prevents the abandoned
     // SpanImpl from pinning the tracer past end-of-request.
 
+    // ---------- Case 7: jsRpcInsideEnterSpan ----------
+    // The jsRpcSession span created by an RPC binding call must be a child of the
+    // enterSpan it was called from, not the top-level onset span. This is the RPC
+    // equivalent of case 3 (fetchInsideEnterSpan).
+    {
+      const outer = findSpanByName(state, 'hierarchy-rpc-outer');
+      assert.strictEqual(outer.case, 'jsRpcInsideEnterSpan');
+      assert.ok(outer.closed);
+      const rpcSpan = findSpanByName(
+        state,
+        'jsRpcSession',
+        (s) => s.invocationId === outer.invocationId
+      );
+      assertParent(rpcSpan, outer, 'jsRpcInsideEnterSpan');
+      assertTopLevelParent(outer, 'jsRpcInsideEnterSpan');
+    }
+
     console.log('All tracing-hierarchy tests passed!');
   },
 };

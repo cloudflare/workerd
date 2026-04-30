@@ -11,12 +11,16 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "tracing-hierarchy-test.js"),
         ],
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "rpc"],
         streamingTails = ["tail"],
         bindings = [
           (
             name = "fetchTarget",
             service = "tracing-hierarchy-mock"
+          ),
+          (
+            name = "rpcTarget",
+            service = (name = "tracing-hierarchy-mock", entrypoint = "RpcTarget")
           ),
           (
             name = "tracingTest",
@@ -29,7 +33,7 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "tracing-hierarchy-mock",
       worker = (
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "rpc"],
         modules = [
           (name = "worker", esModule = embed "tracing-hierarchy-mock.js"),
         ],
