@@ -200,33 +200,6 @@ class ReadableImpl {
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  struct Algorithms {
-    kj::Maybe<jsg::Function<UnderlyingSource::StartAlgorithm>> start;
-    kj::Maybe<jsg::Function<UnderlyingSource::PullAlgorithm>> pull;
-    kj::Maybe<jsg::Function<UnderlyingSource::CancelAlgorithm>> cancel;
-    kj::Maybe<jsg::Function<StreamQueuingStrategy::SizeAlgorithm>> size;
-
-    Algorithms(UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
-        : start(kj::mv(underlyingSource.start)),
-          pull(kj::mv(underlyingSource.pull)),
-          cancel(kj::mv(underlyingSource.cancel)),
-          size(kj::mv(queuingStrategy.size)) {}
-
-    Algorithms(Algorithms&& other) = default;
-    Algorithms& operator=(Algorithms&& other) = default;
-
-    void clear() {
-      start = kj::none;
-      pull = kj::none;
-      cancel = kj::none;
-      size = kj::none;
-    }
-
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(start, pull, cancel, size);
-    }
-  };
-
   using Queue = Self::QueueType;
 
   // State machine for ReadableImpl:
@@ -253,6 +226,31 @@ class ReadableImpl {
     }
   };
   kj::Maybe<PendingCancel> maybePendingCancel;
+
+  // Persistent pull continuation — lazily initialized on first pull dispatch.
+  // Reused across all subsequent pulls to avoid per-pull OpaqueWrappable,
+  // v8::Function, and lambda heap allocations.
+  struct PullContinuationCallbacks {
+    ReadableImpl* impl;
+
+    void thenFunc(jsg::Lock& js) {
+      impl->onPullSuccess(js);
+    }
+
+    void catchFunc(jsg::Lock& js, jsg::Value reason) {
+      impl->onPullFailure(js, kj::mv(reason));
+    }
+  };
+  using PullContinuationType = jsg::PersistentContinuation<PullContinuationCallbacks, void, void>;
+
+  kj::Maybe<PullContinuationType> pullContinuation;
+
+  PullContinuationType& getPullContinuation(jsg::Lock& js);
+  void onPullSuccess(jsg::Lock& js);
+  void onPullFailure(jsg::Lock& js, jsg::Value reason);
+
+  // Keeps the controller alive via jsg::Ref during a pull operation.
+  kj::Maybe<jsg::Ref<Self>> pullSelf;
 
   struct Flags {
     uint8_t pullAgain : 1 = 0;

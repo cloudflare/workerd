@@ -1211,7 +1211,9 @@ template <typename Self>
 void ReadableImpl<Self>::doClose(jsg::Lock& js) {
   // The state should have already been set to closed.
   KJ_ASSERT(state.template is<StreamStates::Closed>());
-  underlyingSource->clear();
+  if (underlyingSource.get() != nullptr) {
+    underlyingSource->clear();
+  }
 }
 
 template <typename Self>
@@ -1224,7 +1226,9 @@ void ReadableImpl<Self>::doError(jsg::Lock& js, jsg::JsValue reason) {
   auto& queue = state.template getUnsafe<Queue>();
   queue.error(js, reason);
   state.template transitionTo<StreamStates::Errored>(reason.addRef(js));
-  underlyingSource->clear();
+  if (underlyingSource.get() != nullptr) {
+    underlyingSource->clear();
+  }
 }
 
 template <typename Self>
@@ -1247,6 +1251,34 @@ bool ReadableImpl<Self>::shouldCallPull() {
 }
 
 template <typename Self>
+typename ReadableImpl<Self>::PullContinuationType& ReadableImpl<Self>::getPullContinuation(
+    jsg::Lock& js) {
+  KJ_IF_SOME(pc, pullContinuation) {
+    return pc;
+  }
+  pullContinuation.emplace(PullContinuationType::create(js, PullContinuationCallbacks{this}));
+  return KJ_ASSERT_NONNULL(pullContinuation);
+}
+
+template <typename Self>
+void ReadableImpl<Self>::onPullSuccess(jsg::Lock& js) {
+  auto self = kj::mv(KJ_ASSERT_NONNULL(pullSelf));
+  pullSelf = kj::none;
+  flags.pulling = false;
+  if (flags.pullAgain) {
+    flags.pullAgain = false;
+    pullIfNeeded(js, kj::mv(self));
+  }
+}
+
+template <typename Self>
+void ReadableImpl<Self>::onPullFailure(jsg::Lock& js, jsg::Value reason) {
+  pullSelf = kj::none;
+  flags.pulling = false;
+  doError(js, jsg::JsValue(reason.getHandle(js)));
+}
+
+template <typename Self>
 void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
   // Determining if we need to pull is fairly complicated. All of the following
   // must hold true:
@@ -1261,22 +1293,9 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(!flags.pullAgain);
   flags.pulling = true;
 
-  auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
-    flags.pulling = false;
-    if (flags.pullAgain) {
-    flags.pullAgain = false;
-    pullIfNeeded(js, kj::mv(self));
-    }
-  });
-
-  auto onFailure = JSG_VISITABLE_LAMBDA(
-      (this, self = self.addRef()), (self), (jsg::Lock& js, jsg::Value reason) {
-        flags.pulling = false;
-        doError(js, jsg::JsValue(reason.getHandle(js)));
-      });
-
-  maybeRunAlgorithm(
-      js, underlyingSource->pull(), kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
+  pullSelf = self.addRef();
+  auto& pc = getPullContinuation(js);
+  maybeRunAlgorithmWithPersistentContinuation(js, underlyingSource->pull(), pc, kj::mv(self));
 }
 
 template <typename Self>
@@ -1294,23 +1313,9 @@ void ReadableImpl<Self>::forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(!flags.pullAgain);
   flags.pulling = true;
 
-  auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
-    flags.pulling = false;
-    if (flags.pullAgain) {
-    flags.pullAgain = false;
-    // After a force pull, we go back to normal pullIfNeeded behavior.
-    pullIfNeeded(js, kj::mv(self));
-    }
-  });
-
-  auto onFailure = JSG_VISITABLE_LAMBDA(
-      (this, self = self.addRef()), (self), (jsg::Lock& js, jsg::Value reason) {
-        flags.pulling = false;
-        doError(js, jsg::JsValue(reason.getHandle(js)));
-      });
-
-  maybeRunAlgorithm(
-      js, underlyingSource->pull(), kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
+  pullSelf = self.addRef();
+  auto& pc = getPullContinuation(js);
+  maybeRunAlgorithmWithPersistentContinuation(js, underlyingSource->pull(), pc, kj::mv(self));
 }
 
 template <typename Self>
@@ -1322,6 +1327,13 @@ void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
   if (underlyingSource.get() != nullptr) {
     visitor.visit(*underlyingSource);
   }
+  KJ_IF_SOME(pc, pullContinuation) {
+    pc.visitForGc(visitor);
+  }
+  // Note: pullSelf is intentionally NOT traced here. It is a Ref back to the
+  // controller (Self) that contains this ReadableImpl, which would create an infinite
+  // GC tracing cycle. The controller is already reachable through its owning
+  // ReadableStream's ref chain, so it won't be collected while pullSelf exists.
 }
 
 template <typename Self>
