@@ -108,4 +108,27 @@ void UnderlyingSourceImpl::clear() {
   size_ = kj::none;
 }
 
+TransformerImpl::TransformerImpl(jsg::Lock& js, Transformer transformer)
+    : start_(kj::mv(transformer.start)),
+      transform_(kj::mv(transformer.transform)),
+      flush_(kj::mv(transformer.flush)),
+      cancel_(kj::mv(transformer.cancel)) {
+  // Per the spec, both readableType and writableType must be undefined.
+  JSG_REQUIRE(transformer.readableType == kj::none, RangeError,
+      "Invalid transformer readableType. Only undefined is valid.");
+  JSG_REQUIRE(transformer.writableType == kj::none, RangeError,
+      "Invalid transformer writableType. Only undefined is valid.");
+}
+
+void TransformerImpl::clearStart() {
+  start_ = kj::none;
+}
+
+void TransformerImpl::clear() {
+  start_ = kj::none;
+  transform_ = kj::none;
+  flush_ = kj::none;
+  cancel_ = kj::none;
+}
+
 }  // namespace workerd::api

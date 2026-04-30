@@ -42,8 +42,11 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
     // the readable and writable sides. The actual TransformStream object can be dropped
     // and allowed to be garbage collected.
 
-    auto controller = js.alloc<TransformStreamDefaultController>(js);
-    auto transformer = kj::mv(maybeTransformer).orDefault({});
+    auto transformer = kj::mv(maybeTransformer).orDefault(Transformer{});
+    auto expectedLength = transformer.expectedLength;
+
+    auto transformerImpl = kj::heap<TransformerImpl>(js, kj::mv(transformer));
+    auto controller = js.alloc<TransformStreamDefaultController>(js, kj::mv(transformerImpl));
 
     // By default, let's signal backpressure on the readable side by setting the highWaterMark
     // to zero if a strategy is not given. This effectively means that writes/reads will be
@@ -67,8 +70,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
           .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>( JSG_VISITABLE_LAMBDA(
               (controller = controller.addRef()), (controller),
               (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); })),
-          .expectedLength = transformer.expectedLength.map(
-              [](uint64_t expectedLength) { return expectedLength; }),
+          .expectedLength = expectedLength,
         },
         kj::mv(readableStrategy));
 
@@ -94,7 +96,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
 
     // The controller will store c++ references to both the readable and writable
     // streams underlying controllers.
-    controller->init(js, readable, writable, kj::mv(transformer));
+    controller->init(js, readable, writable);
 
     return js.alloc<TransformStream>(kj::mv(readable), kj::mv(writable));
   }

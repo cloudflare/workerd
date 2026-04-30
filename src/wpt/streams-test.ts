@@ -606,8 +606,6 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'it should be possible to call transform() synchronously',
-      'specifying a defined readableType should throw',
-      'specifying a defined writableType should throw',
       'terminate() should abort writable immediately after readable.cancel()',
     ],
   },

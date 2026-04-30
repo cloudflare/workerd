@@ -360,6 +360,53 @@ struct Transformer {
   });
 };
 
+class TransformerImpl {
+ public:
+  using StartAlgorithm = Transformer::StartAlgorithm;
+  using TransformAlgorithm = Transformer::TransformAlgorithm;
+  using FlushAlgorithm = Transformer::FlushAlgorithm;
+  using CancelAlgorithm = Transformer::CancelAlgorithm;
+
+  TransformerImpl(jsg::Lock& js, Transformer transformer);
+  virtual ~TransformerImpl() noexcept(false) = default;
+  KJ_DISALLOW_COPY_AND_MOVE(TransformerImpl);
+
+  inline kj::Maybe<jsg::Function<StartAlgorithm>>& start() {
+    return start_;
+  }
+  inline kj::Maybe<jsg::Function<TransformAlgorithm>>& transform() {
+    return transform_;
+  }
+  inline kj::Maybe<jsg::Function<FlushAlgorithm>>& flush() {
+    return flush_;
+  }
+  inline kj::Maybe<jsg::Function<CancelAlgorithm>>& cancel() {
+    return cancel_;
+  }
+
+  void clearStart();
+
+  void clear();
+
+  JSG_MEMORY_INFO(TransformerImpl) {
+    tracker.trackField("start", start_);
+    tracker.trackField("transform", transform_);
+    tracker.trackField("flush", flush_);
+    tracker.trackField("cancel", cancel_);
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(start_, transform_, flush_, cancel_);
+  }
+
+ protected:
+  TransformerImpl() = default;
+  kj::Maybe<jsg::Function<StartAlgorithm>> start_;
+  kj::Maybe<jsg::Function<TransformAlgorithm>> transform_;
+  kj::Maybe<jsg::Function<FlushAlgorithm>> flush_;
+  kj::Maybe<jsg::Function<CancelAlgorithm>> cancel_;
+};
+
 // ReadableStreamSource and WritableStreamSink
 //
 // These are implementation interfaces for ReadableStream and WritableStream. If you just need to

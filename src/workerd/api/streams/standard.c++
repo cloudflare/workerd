@@ -4684,9 +4684,11 @@ void WritableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
 
 // =======================================================================================
 
-TransformStreamDefaultController::TransformStreamDefaultController(jsg::Lock& js)
+TransformStreamDefaultController::TransformStreamDefaultController(
+    jsg::Lock& js, kj::Own<TransformerImpl> transformer)
     : ioContext(tryGetIoContext()),
-      startPromise(js.newPromiseAndResolver<void>()) {}
+      startPromise(js.newPromiseAndResolver<void>()),
+      transformer(kj::mv(transformer)) {}
 
 kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
   KJ_IF_SOME(readableController, tryGetReadableController()) {
@@ -4786,8 +4788,8 @@ jsg::Promise<void> TransformStreamDefaultController::abort(jsg::Lock& js, jsg::J
     // If a finish operation is already in progress, return the existing promise
     // or handle the case where we're being called synchronously from within another
     // finish operation.
-    if (algorithms.finishStarted) {
-      KJ_IF_SOME(finish, algorithms.maybeFinish) {
+    if (finishStarted) {
+      KJ_IF_SOME(finish, maybeFinish) {
         return finish.whenResolved(js);
       }
       // finishStarted is true but maybeFinish is not set yet - this means we're being
@@ -4799,15 +4801,15 @@ jsg::Promise<void> TransformStreamDefaultController::abort(jsg::Lock& js, jsg::J
     }
 
     // Mark that we're starting a finish operation before running the algorithm.
-    algorithms.finishStarted = true;
+    finishStarted = true;
   } else {
-    KJ_IF_SOME(finish, algorithms.maybeFinish) {
+    KJ_IF_SOME(finish, maybeFinish) {
       return finish.whenResolved(js);
     }
   }
 
-  return algorithms.maybeFinish
-      .emplace(maybeRunAlgorithm(js, algorithms.cancel,
+  return maybeFinish
+      .emplace(maybeRunAlgorithm(js, transformer->cancel(),
           JSG_VISITABLE_LAMBDA((this, ref = JSG_THIS, reason = reason.addRef(js)), (ref, reason),
               (jsg::Lock & js)->jsg::Promise<void> {
                 // If the readable side is errored, return a rejected promise with the stored error
@@ -4838,8 +4840,8 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
     // If a finish operation is already in progress (e.g., from cancel or abort),
     // we should not run flush. Per the WHATWG streams spec, close/flush should
     // coordinate with cancel to avoid calling both.
-    if (algorithms.finishStarted) {
-      KJ_IF_SOME(finish, algorithms.maybeFinish) {
+    if (finishStarted) {
+      KJ_IF_SOME(finish, maybeFinish) {
         return finish.whenResolved(js);
       }
       // finishStarted is true but maybeFinish is not set yet - this means we're being
@@ -4858,7 +4860,7 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
 
     // Mark that we're starting a finish operation before running the algorithm,
     // since the algorithm may synchronously call other finish operations.
-    algorithms.finishStarted = true;
+    finishStarted = true;
   }
 
   auto onSuccess =
@@ -4896,13 +4898,14 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
       });
 
   if (flags.getPedanticWpt()) {
-    return algorithms.maybeFinish
-        .emplace(
-            maybeRunAlgorithm(js, algorithms.flush, kj::mv(onSuccess), kj::mv(onFailure), JSG_THIS))
+    return maybeFinish
+        .emplace(maybeRunAlgorithm(
+            js, transformer->flush(), kj::mv(onSuccess), kj::mv(onFailure), JSG_THIS))
         .whenResolved(js);
   }
 
-  return maybeRunAlgorithm(js, algorithms.flush, kj::mv(onSuccess), kj::mv(onFailure), JSG_THIS);
+  return maybeRunAlgorithm(
+      js, transformer->flush(), kj::mv(onSuccess), kj::mv(onFailure), JSG_THIS);
 }
 
 jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
@@ -4916,8 +4919,8 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
     // If a finish operation is already in progress, return the existing promise
     // or check for errors if we're being called synchronously from within another
     // finish operation.
-    if (algorithms.finishStarted) {
-      KJ_IF_SOME(finish, algorithms.maybeFinish) {
+    if (finishStarted) {
+      KJ_IF_SOME(finish, maybeFinish) {
         return finish.whenResolved(js);
       }
       // finishStarted is true but maybeFinish is not set yet - check if the stream
@@ -4929,11 +4932,11 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
     }
 
     // Mark that we're starting a finish operation before running the algorithm.
-    algorithms.finishStarted = true;
+    finishStarted = true;
   }
 
-  return algorithms.maybeFinish
-      .emplace(maybeRunAlgorithm(js, algorithms.cancel,
+  return maybeFinish
+      .emplace(maybeRunAlgorithm(js, transformer->cancel(),
           JSG_VISITABLE_LAMBDA((this, ref = JSG_THIS, reason = reason.addRef(js)), (ref, reason),
               (jsg::Lock & js)->jsg::Promise<void> {
                 // If the stream was errored during the cancel algorithm (e.g., by controller.error()
@@ -4964,8 +4967,8 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
 
 jsg::Promise<void> TransformStreamDefaultController::performTransform(
     jsg::Lock& js, jsg::JsValue chunk) {
-  if (algorithms.transform != kj::none) {
-    return maybeRunAlgorithm(js, algorithms.transform,
+  if (transformer->transform() != kj::none) {
+    return maybeRunAlgorithm(js, transformer->transform(),
         [](jsg::Lock& js) -> jsg::Promise<void> { return js.resolvedPromise(); },
         JSG_VISITABLE_LAMBDA((ref = JSG_THIS), (ref),
             (jsg::Lock & js, jsg::Value reason)->jsg::Promise<void> {
@@ -4995,7 +4998,7 @@ void TransformStreamDefaultController::setBackpressure(jsg::Lock& js, bool newBa
 
 void TransformStreamDefaultController::errorWritableAndUnblockWrite(
     jsg::Lock& js, jsg::JsValue reason) {
-  algorithms.clear();
+  transformer->clear();
   KJ_IF_SOME(writableController, tryGetWritableController()) {
     if (FeatureFlags::get(js).getPedanticWpt()) {
       // Use errorIfNeeded which goes through the proper error transition (Erroring -> Errored).
@@ -5016,13 +5019,15 @@ void TransformStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(backpressureChange, maybeBackpressureChange) {
     visitor.visit(backpressureChange.promise, backpressureChange.resolver);
   }
-  visitor.visit(writable, readable, startPromise.resolver, startPromise.promise, algorithms);
+  visitor.visit(writable, readable, startPromise.resolver, startPromise.promise);
+
+  if (transformer.get() != nullptr) {
+    visitor.visit(*transformer);
+  }
 }
 
-void TransformStreamDefaultController::init(jsg::Lock& js,
-    jsg::Ref<ReadableStream>& readable,
-    jsg::Ref<WritableStream>& writable,
-    jsg::Optional<Transformer> maybeTransformer) {
+void TransformStreamDefaultController::init(
+    jsg::Lock& js, jsg::Ref<ReadableStream>& readable, jsg::Ref<WritableStream>& writable) {
   KJ_ASSERT(this->readable == kj::none);
   KJ_ASSERT(this->writable == kj::none);
 
@@ -5036,31 +5041,9 @@ void TransformStreamDefaultController::init(jsg::Lock& js,
   auto readableRef = KJ_ASSERT_NONNULL(readableController.getController());
   this->readable = KJ_ASSERT_NONNULL(readableRef.tryGet<DefaultController>()).addRef();
 
-  auto transformer = kj::mv(maybeTransformer).orDefault({});
-
-  // TODO(someday): The stream standard includes placeholders for supporting byte-oriented
-  // TransformStreams but does not yet define them. For now, we are limiting our implementation
-  // here to only support value-based transforms.
-  JSG_REQUIRE(transformer.readableType == kj::none, TypeError,
-      "transformer.readableType must be undefined.");
-  JSG_REQUIRE(transformer.writableType == kj::none, TypeError,
-      "transformer.writableType must be undefined.");
-
-  KJ_IF_SOME(transform, transformer.transform) {
-    algorithms.transform = kj::mv(transform);
-  }
-
-  KJ_IF_SOME(flush, transformer.flush) {
-    algorithms.flush = kj::mv(flush);
-  }
-
-  KJ_IF_SOME(cancel, transformer.cancel) {
-    algorithms.cancel = kj::mv(cancel);
-  }
-
   setBackpressure(js, true);
 
-  maybeRunAlgorithm(js, transformer.start,
+  maybeRunAlgorithm(js, transformer->start(),
       JSG_VISITABLE_LAMBDA(
           (ref = JSG_THIS), (ref), (jsg::Lock& js) { ref->startPromise.resolver.resolve(js); }),
       JSG_VISITABLE_LAMBDA((ref = JSG_THIS), (ref),
@@ -5226,8 +5209,7 @@ void ReadableStreamBYOBRequest::visitForMemoryInfo(jsg::MemoryTracker& tracker) 
 void TransformStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("startPromise", startPromise);
   tracker.trackField("maybeBackpressureChange", maybeBackpressureChange);
-  tracker.trackField("transformAlgorithm", algorithms.transform);
-  tracker.trackField("flushAlgorithm", algorithms.flush);
+  tracker.trackField("transformer", transformer);
   tracker.trackField("writable", writable);
   tracker.trackField("readable", readable);
 }

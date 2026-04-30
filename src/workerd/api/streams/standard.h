@@ -793,12 +793,9 @@ class WritableStreamDefaultController: public jsg::Object {
 // long after both the readable and writable sides have been GC'ed.
 class TransformStreamDefaultController: public jsg::Object {
  public:
-  TransformStreamDefaultController(jsg::Lock& js);
+  TransformStreamDefaultController(jsg::Lock& js, kj::Own<TransformerImpl> transformer);
 
-  void init(jsg::Lock& js,
-      jsg::Ref<ReadableStream>& readable,
-      jsg::Ref<WritableStream>& writable,
-      jsg::Optional<Transformer> maybeTransformer);
+  void init(jsg::Lock& js, jsg::Ref<ReadableStream>& readable, jsg::Ref<WritableStream>& writable);
 
   // The startPromise is used by both the readable and writable sides in their respective
   // start algorithms. The promise itself is resolved within the init function when the
@@ -868,6 +865,7 @@ class TransformStreamDefaultController: public jsg::Object {
 
   kj::Maybe<IoContext&> ioContext;
   jsg::PromiseResolverPair<void> startPromise;
+  kj::Own<TransformerImpl> transformer;
 
   kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();
   kj::Maybe<WritableStreamJsController&> tryGetWritableController();
@@ -879,7 +877,9 @@ class TransformStreamDefaultController: public jsg::Object {
   // that includes a ReadableByteStreamController.
   kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> readable;
   kj::Maybe<jsg::Ref<WritableStream>> writable;
-  Algorithms algorithms;
+  kj::Maybe<jsg::Promise<void>> maybeFinish;
+
+  bool finishStarted = false;
   bool backpressure = false;
   kj::Maybe<jsg::PromiseResolverPair<void>> maybeBackpressureChange;
 
