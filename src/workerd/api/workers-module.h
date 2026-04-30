@@ -102,10 +102,7 @@ class EntrypointsModule: public jsg::Object {
 
     JSG_METHOD(waitUntil);
     JSG_METHOD(getCtxCache);
-
-    if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(abortIsolate);
-    }
+    JSG_METHOD(abortIsolate);
   }
 };
 

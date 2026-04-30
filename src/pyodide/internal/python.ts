@@ -24,9 +24,11 @@ import {
 import {
   LEGACY_VENDOR_PATH,
   PROCESS_PTH_FILES,
+  SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
 import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
+import { abortIsolate } from 'cloudflare-internal:workers';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import {
@@ -312,6 +314,9 @@ export async function loadPyodide(
         FatalReporter.reportFatal(String(error));
       } catch (_e) {
         FatalReporter.reportFatal('Internal error reporting fatal error');
+      }
+      if (SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR) {
+        abortIsolate(`Python worker fatal error: ${String(error)}`);
       }
     };
     return pyodide;
