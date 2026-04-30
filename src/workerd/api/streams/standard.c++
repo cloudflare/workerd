@@ -1031,6 +1031,60 @@ class WritableStreamJsController final: public WritableStreamController {
  private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
 
+  // Pipe loop continuation callbacks — used by pipeLoop for the read and write
+  // dispatch. These are created lazily on the first pipe operation and reused
+  // for each chunk flowing through the pipe.
+
+  // Called when a read from the source succeeds during piping.
+  jsg::Promise<void> onPipeReadSuccess(jsg::Lock& js, ReadResult result);
+  // Called when a read from the source fails during piping.
+  jsg::Promise<void> onPipeReadFailure(jsg::Lock& js, jsg::Value reason);
+  // Called when a write to this destination succeeds during piping.
+  jsg::Promise<void> onPipeWriteSuccess(jsg::Lock& js);
+  // Called when a write to this destination fails during piping.
+  jsg::Promise<void> onPipeWriteFailure(jsg::Lock& js, jsg::Value reason);
+
+  struct PipeReadContinuationCallbacks {
+    WritableStreamJsController* ctrl;
+
+    jsg::Promise<void> thenFunc(jsg::Lock& js, ReadResult result) {
+      return ctrl->onPipeReadSuccess(js, kj::mv(result));
+    }
+
+    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
+      return ctrl->onPipeReadFailure(js, kj::mv(reason));
+    }
+  };
+  using PipeReadContinuationType =
+      jsg::PersistentContinuation<PipeReadContinuationCallbacks, ReadResult, jsg::Promise<void>>;
+
+  struct PipeWriteContinuationCallbacks {
+    WritableStreamJsController* ctrl;
+
+    jsg::Promise<void> thenFunc(jsg::Lock& js) {
+      return ctrl->onPipeWriteSuccess(js);
+    }
+
+    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
+      return ctrl->onPipeWriteFailure(js, kj::mv(reason));
+    }
+  };
+  using PipeWriteContinuationType =
+      jsg::PersistentContinuation<PipeWriteContinuationCallbacks, void, jsg::Promise<void>>;
+
+  kj::Maybe<PipeReadContinuationType> pipeReadContinuation;
+  kj::Maybe<PipeWriteContinuationType> pipeWriteContinuation;
+
+  PipeReadContinuationType& getPipeReadContinuation(jsg::Lock& js);
+  PipeWriteContinuationType& getPipeWriteContinuation(jsg::Lock& js);
+
+  // Pipe flags cached for the duration of a pipe operation — stable once the pipe starts.
+  struct PipeFlags {
+    bool preventCancel = false;
+    bool pipeThrough = false;
+  };
+  PipeFlags pipeFlags;
+
   kj::Maybe<IoContext&> ioContext;
   kj::Maybe<WritableStream&> owner;
 
@@ -4289,7 +4343,76 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
   // Let's also acquire the destination pipe lock.
   lock.pipeLock(KJ_ASSERT_NONNULL(owner), kj::mv(source), options);
 
+  // Cache pipe flags for use by the persistent continuations.
+  pipeFlags.preventCancel = options.preventCancel.orDefault(false);
+  pipeFlags.pipeThrough = options.pipeThrough;
+
   return pipeLoop(js).then(js, JSG_VISITABLE_LAMBDA((ref = addRef()), (ref), (auto& js){}));
+}
+
+WritableStreamJsController::PipeReadContinuationType& WritableStreamJsController::
+    getPipeReadContinuation(jsg::Lock& js) {
+  KJ_IF_SOME(prc, pipeReadContinuation) {
+    return prc;
+  }
+  pipeReadContinuation.emplace(
+      PipeReadContinuationType::create(js, PipeReadContinuationCallbacks{this}));
+  return KJ_ASSERT_NONNULL(pipeReadContinuation);
+}
+
+WritableStreamJsController::PipeWriteContinuationType& WritableStreamJsController::
+    getPipeWriteContinuation(jsg::Lock& js) {
+  KJ_IF_SOME(pwc, pipeWriteContinuation) {
+    return pwc;
+  }
+  pipeWriteContinuation.emplace(
+      PipeWriteContinuationType::create(js, PipeWriteContinuationCallbacks{this}));
+  return KJ_ASSERT_NONNULL(pipeWriteContinuation);
+}
+
+jsg::Promise<void> WritableStreamJsController::onPipeReadSuccess(jsg::Lock& js, ReadResult result) {
+  auto maybePipeLock = lock.tryGetPipe();
+  if (maybePipeLock == kj::none) return js.resolvedPromise();
+  auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
+
+  KJ_IF_SOME(promise, pipeLock.checkSignal(js, *this)) {
+    lock.releasePipeLock();
+    return kj::mv(promise);
+  } else {
+  }  // Trailing else() to squash compiler warning
+
+  if (result.done) {
+    // We'll handle the close at the start of the next iteration.
+    return pipeLoop(js);
+  }
+
+  auto promise = write(
+      js, result.value.map([&](jsg::JsRef<jsg::JsValue>& value) { return value.getHandle(js); }));
+
+  return promise.thenRef(js, getPipeWriteContinuation(js));
+}
+
+jsg::Promise<void> WritableStreamJsController::onPipeReadFailure(jsg::Lock& js, jsg::Value reason) {
+  // The read failed. We will handle the error at the start of the next iteration.
+  return pipeLoop(js);
+}
+
+jsg::Promise<void> WritableStreamJsController::onPipeWriteSuccess(jsg::Lock& js) {
+  return pipeLoop(js);
+}
+
+jsg::Promise<void> WritableStreamJsController::onPipeWriteFailure(
+    jsg::Lock& js, jsg::Value reason) {
+  auto jsReason = jsg::JsValue(reason.getHandle(js));
+  KJ_IF_SOME(pipeLock, lock.tryGetPipe()) {
+    if (!pipeFlags.preventCancel) {
+      pipeLock.source.release(js, jsReason);
+    } else {
+      pipeLock.source.release(js);
+    }
+  } else {
+  }  // Trailing else() to squash compiler warning
+  return rejectedMaybeHandledPromise<void>(js, jsReason, pipeFlags.pipeThrough);
 }
 
 jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
@@ -4383,56 +4506,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   // source (again, depending on options). If the write operation is successful,
   // we call pipeLoop again to move on to the next iteration.
 
-  auto onSuccess = JSG_VISITABLE_LAMBDA((this, ref = addRef(), preventCancel, pipeThrough), (ref),
-      (jsg::Lock & js, ReadResult result)->jsg::Promise<void> {
-        auto maybePipeLock = lock.tryGetPipe();
-        if (maybePipeLock == kj::none) return js.resolvedPromise();
-        auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
-
-        KJ_IF_SOME(promise, pipeLock.checkSignal(js, *this)) {
-          lock.releasePipeLock();
-          return kj::mv(promise);
-        } else {
-        }  // Trailing else() is squash compiler warning
-
-        if (result.done) {
-          // We'll handle the close at the start of the next iteration.
-          return pipeLoop(js);
-        }
-
-        auto onSuccess = JSG_VISITABLE_LAMBDA(
-        (this, ref=addRef()), (ref) , (jsg::Lock& js) {
-      return pipeLoop(js);
-    } );
-
-        auto onFailure = JSG_VISITABLE_LAMBDA(
-        (this, ref=addRef(), preventCancel, pipeThrough),
-        (ref) , (jsg::Lock& js, jsg::Value value) {
-      // The write failed. We need to release the source if the pipe lock still exists.
-      auto reason = jsg::JsValue(value.getHandle(js));
-      KJ_IF_SOME(pipeLock, lock.tryGetPipe()) {
-        if (!preventCancel) {
-          pipeLock.source.release(js, reason);
-        } else {
-          pipeLock.source.release(js);
-        }
-      } else {}  // Trailing else() to squash compiler warning
-      return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
-    } );
-
-        auto promise = write(js,
-            result.value.map([&](jsg::JsRef<jsg::JsValue>& value) { return value.getHandle(js); }));
-
-        return maybeAddFunctor(js, kj::mv(promise), kj::mv(onSuccess), kj::mv(onFailure));
-      });
-
-  auto onFailure =
-      JSG_VISITABLE_LAMBDA((this, ref = addRef()), (ref), (jsg::Lock& js, jsg::Value value) {
-        // The read failed. We will handle the error at the start of the next iteration.
-        return pipeLoop(js);
-      });
-
-  return maybeAddFunctor(js, pipeLock.source.read(js), kj::mv(onSuccess), kj::mv(onFailure));
+  return pipeLock.source.read(js).thenRef(js, getPipeReadContinuation(js));
 }
 
 void WritableStreamJsController::updateBackpressure(jsg::Lock& js, bool backpressure) {
@@ -4473,6 +4547,12 @@ jsg::Promise<void> WritableStreamJsController::write(
 void WritableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
   state.visitForGc(visitor);
   visitor.visit(maybeAbortPromise, lock);
+  KJ_IF_SOME(prc, pipeReadContinuation) {
+    prc.visitForGc(visitor);
+  }
+  KJ_IF_SOME(pwc, pipeWriteContinuation) {
+    pwc.visitForGc(visitor);
+  }
 }
 
 // =======================================================================================
