@@ -62,5 +62,9 @@ export interface CacheContext {
 
 export function getCtxCache(): CacheContext | undefined;
 
-// Only defined when the `workerd_experimental` compat flag is enabled.
 export function abortIsolate(reason?: string): never;
+
+// True when the workerd_experimental compat flag is enabled. Use this for gating experimental
+// re-exports in user-facing wrappers; Cloudflare.compatibilityFlags filters out experimental
+// flags themselves so it cannot be used to detect this.
+export const isExperimental: boolean;

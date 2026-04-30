@@ -8,6 +8,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/strings.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
@@ -413,6 +414,10 @@ const kj::Array<kj::StringPtr> snapshotImports = kj::arr("_pyodide"_kj,
 
 kj::Array<kj::StringPtr> PyodideMetadataReader::getBaselineSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
+}
+
+bool PyodideMetadataReader::shouldAbortIsolateOnFatalError() {
+  return util::Autogate::isEnabled(util::AutogateKey::PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR);
 }
 
 jsg::JsObject PyodideMetadataReader::getCompatibilityFlags(jsg::Lock& js) {

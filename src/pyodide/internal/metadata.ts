@@ -7,6 +7,8 @@ import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 
 export const IS_WORKERD = MetadataReader.isWorkerd();
 export const IS_TRACING = MetadataReader.isTracing();
+export const SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR =
+  MetadataReader.shouldAbortIsolateOnFatalError();
 
 // Snapshots
 export const SHOULD_SNAPSHOT_TO_DISK = MetadataReader.shouldSnapshotToDisk();

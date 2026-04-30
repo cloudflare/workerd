@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  autogates = ["workerd-autogate-python-abort-isolate-on-fatal-error"],
+  services = [
+    ( name = "python-abort-isolate-on-fatal",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py"),
+        ],
+        compatibilityFlags = [
+          "python_workers",
+          "python_workers_development",
+        ],
+      )
+    ),
+  ],
+);

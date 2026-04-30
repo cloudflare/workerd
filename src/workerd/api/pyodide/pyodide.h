@@ -189,6 +189,10 @@ class PyodideMetadataReader: public jsg::Object {
     return state->createBaselineSnapshot;
   }
 
+  // Returns whether the python-abort-isolate-on-fatal-error autogate is enabled. When true, the
+  // Python on_fatal handler should call abortIsolate() to terminate the isolate after reporting.
+  bool shouldAbortIsolateOnFatalError();
+
   kj::StringPtr getMainModule() {
     return state->mainModule;
   }
@@ -268,6 +272,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
+    JSG_METHOD(shouldAbortIsolateOnFatalError);
     JSG_METHOD(getTransitiveRequirements);
     JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);

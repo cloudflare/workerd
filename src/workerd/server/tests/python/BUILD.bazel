@@ -1,3 +1,4 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_rust_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test", "python_test_setup")
 load("//src/workerd/server/tests/python/vendor_pkg_tests:vendor_test.bzl", "vendored_py_wd_test")
@@ -85,3 +86,33 @@ py_wd_test(
 py_wd_test("python-compat-flag")
 
 py_wd_test("pth-file")
+
+# Shell-driven test for the python-abort-isolate-on-fatal-error autogate. The Python worker
+# triggers a fatal error which (with the autogate enabled) calls abortIsolate(), terminating the
+# workerd process. The shell script verifies the expected fatal output and non-zero exit.
+sh_test(
+    name = "python-abort-isolate-on-fatal-test",
+    size = "enormous",
+    srcs = ["python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test)",
+        "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)",
+        "../+pyodide+all_pyodide_wheels_20250808",
+    ],
+    data = [
+        "python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test",
+        "python-abort-isolate-on-fatal/worker.py",
+        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule",
+        "@all_pyodide_wheels_20250808//:whls",
+    ],
+    tags = [
+        "no-coverage",
+        "python",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
