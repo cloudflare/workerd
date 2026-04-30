@@ -969,9 +969,7 @@ class WritableStreamJsController final: public WritableStreamController {
 
   jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
 
-  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override {
-    KJ_UNIMPLEMENTED("expected WritableStreamInternalController implementation to be enough");
-  }
+  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override;
 
   void doClose(jsg::Lock& js);
 
@@ -1582,8 +1580,33 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   KJ_ASSERT(inFlightWrite == kj::none);
   KJ_ASSERT(inFlightBatchWrite == kj::none);
 
-  // If the underlying sink supports writev and there are multiple writes queued,
-  // batch them into a single writev call.
+  // Drain any leading flush entries — these are sync points that resolve immediately
+  // once all preceding writes have completed (which they have, since inFlightWrite is none).
+  while (!writeRequests.empty() && writeRequests.front().flush) {
+    dequeueWriteRequest().resolver.resolve(js);
+  }
+
+  if (writeRequests.empty()) {
+    // All remaining entries were flushes. Check for close.
+    if (closeRequest != kj::none) {
+      KJ_ASSERT(inFlightClose == kj::none);
+      KJ_ASSERT_NONNULL(closeRequest);
+      inFlightClose = kj::mv(closeRequest);
+      inFlightSelf = kj::mv(self);
+
+      auto& cc = getCloseContinuation(js);
+      if (FeatureFlags::get(js).getPedanticWpt()) {
+        maybeRunAlgorithmAsyncWithPersistentContinuation(js, underlyingSink->close(), cc);
+      } else {
+        maybeRunAlgorithmWithPersistentContinuation(js, underlyingSink->close(), cc);
+      }
+    }
+    return;
+  }
+
+  // If the underlying sink supports writev and there are multiple entries queued,
+  // batch them into a single writev call. Flush entries ride along — their resolvers
+  // are included in the batch but no chunk is added for them.
   if (writeRequests.size() > 1) {
     if (underlyingSink->writev() != kj::none) {
       auto count = writeRequests.size();
@@ -1593,10 +1616,14 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
 
       while (!writeRequests.empty()) {
         auto req = dequeueWriteRequest();
-        // Move the JsRef directly — no extra V8 global handle created.
-        values.add(kj::mv(req.value));
-        resolvers.add(kj::mv(req.resolver));
-        totalSize += req.size;
+        if (req.flush) {
+          // Flush marker — include resolver but no chunk.
+          resolvers.add(kj::mv(req.resolver));
+        } else {
+          values.add(kj::mv(req.value));
+          resolvers.add(kj::mv(req.resolver));
+          totalSize += req.size;
+        }
       }
 
       inFlightBatchWrite = BatchWriteRequest{
@@ -1698,6 +1725,7 @@ void WritableImpl<Self>::doError(jsg::Lock& js, jsg::JsValue reason) {
   KJ_ASSERT(closeRequest == kj::none);
   KJ_ASSERT(inFlightClose == kj::none);
   KJ_ASSERT(inFlightWrite == kj::none);
+  KJ_ASSERT(inFlightBatchWrite == kj::none);
   KJ_ASSERT(maybePendingAbort == kj::none);
   KJ_ASSERT(writeRequests.empty());
   // State should have already been transitioned to Errored
@@ -1726,6 +1754,7 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
   auto erroring = kj::mv(KJ_ASSERT_NONNULL(state.template tryGetUnsafe<StreamStates::Erroring>()));
   auto reason = erroring.reason.getHandle(js);
   KJ_ASSERT(inFlightWrite == kj::none);
+  KJ_ASSERT(inFlightBatchWrite == kj::none);
   KJ_ASSERT(inFlightClose == kj::none);
   state.template transitionTo<StreamStates::Errored>(kj::mv(erroring.reason));
 
@@ -1980,6 +2009,40 @@ jsg::Promise<void> WritableImpl<Self>::write(
 
   updateBackpressure(js);
   advanceQueueIfNeeded(js, kj::mv(self));
+  return kj::mv(prp.promise);
+}
+
+template <typename Self>
+jsg::Promise<void> WritableImpl<Self>::flush(
+    jsg::Lock& js, jsg::Ref<Self> self, bool markAsHandled) {
+  KJ_IF_SOME(error, state.template tryGetUnsafe<StreamStates::Errored>()) {
+    return rejectedMaybeHandledPromise<void>(js, error.getHandle(js), markAsHandled);
+  }
+
+  if (state.template is<StreamStates::Closed>()) {
+    return rejectedMaybeHandledPromise<void>(
+        js, js.typeError("This WritableStream has been closed."_kj), markAsHandled);
+  }
+
+  auto prp = js.newPromiseAndResolver<void>();
+  if (markAsHandled) {
+    prp.promise.markAsHandled(js);
+  }
+
+  // If nothing is in flight and the queue is empty, resolve immediately.
+  if (inFlightWrite == kj::none && inFlightBatchWrite == kj::none && writeRequests.empty()) {
+    prp.resolver.resolve(js);
+    return kj::mv(prp.promise);
+  }
+
+  // Enqueue a flush marker. When advanceQueueIfNeeded encounters this entry,
+  // it resolves the promise immediately without dispatching a write algorithm.
+  writeRequests.push_back(WriteRequest{
+    .resolver = kj::mv(prp.resolver),
+    .value = {},
+    .size = 0,
+    .flush = true,
+  });
   return kj::mv(prp.promise);
 }
 
@@ -4135,6 +4198,10 @@ jsg::Promise<void> WritableStreamDefaultController::write(jsg::Lock& js, jsg::Js
   return impl.write(js, JSG_THIS, value);
 }
 
+jsg::Promise<void> WritableStreamDefaultController::flush(jsg::Lock& js, bool markAsHandled) {
+  return impl.flush(js, JSG_THIS, markAsHandled);
+}
+
 void WritableStreamDefaultController::cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason) {
   impl.cancelPendingWrites(js, reason);
 }
@@ -4238,6 +4305,26 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsH
     }
     KJ_CASE_ONEOF(controller, Controller) {
       return controller->close(js);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<void> WritableStreamJsController::flush(jsg::Lock& js, bool markAsHandled) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(initial, Initial) {
+      return rejectedMaybeHandledPromise<void>(
+          js, js.typeError("This WritableStream has been closed."_kj), markAsHandled);
+    }
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return rejectedMaybeHandledPromise<void>(
+          js, js.typeError("This WritableStream has been closed."_kj), markAsHandled);
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return rejectedMaybeHandledPromise<void>(js, errored.getHandle(js), markAsHandled);
+    }
+    KJ_CASE_ONEOF(controller, Controller) {
+      return controller->flush(js, markAsHandled);
     }
   }
   KJ_UNREACHABLE;

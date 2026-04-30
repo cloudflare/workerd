@@ -279,6 +279,7 @@ class WritableImpl {
     jsg::Promise<void>::Resolver resolver;
     jsg::JsRef<jsg::JsValue> value;
     size_t size;
+    bool flush = false;  // True if this is a flush sync point (no data to write).
 
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(resolver, value);
@@ -340,6 +341,12 @@ class WritableImpl {
   // Writes a chunk to the Writable, possibly queuing the chunk in the internal buffer
   // if there are already other writes pending.
   jsg::Promise<void> write(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue value);
+
+  // Inserts a flush sync point into the write queue. The returned promise resolves
+  // when all preceding writes have completed. If nothing is in flight, resolves
+  // immediately. Flush entries are represented as WriteRequests with empty value
+  // and size 0.
+  jsg::Promise<void> flush(jsg::Lock& js, jsg::Ref<Self> self, bool markAsHandled);
 
   // True if the writable is in a state where new chunks can be written
   bool isWritable() const;
@@ -756,6 +763,8 @@ class WritableStreamDefaultController: public jsg::Object {
   void setup(jsg::Lock& js);
 
   jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
+
+  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled);
 
   JSG_RESOURCE_TYPE(WritableStreamDefaultController) {
     JSG_READONLY_PROTOTYPE_PROPERTY(signal, getSignal);
