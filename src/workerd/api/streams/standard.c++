@@ -1588,12 +1588,13 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
     if (underlyingSink->writev() != kj::none) {
       auto count = writeRequests.size();
       auto resolvers = kj::heapArrayBuilder<jsg::Promise<void>::Resolver>(count);
-      auto values = kj::heapArrayBuilder<jsg::JsValue>(count);
+      auto values = kj::heapArrayBuilder<jsg::JsRef<jsg::JsValue>>(count);
       size_t totalSize = 0;
 
       while (!writeRequests.empty()) {
         auto req = dequeueWriteRequest();
-        values.add(req.value.getHandle(js));
+        // Move the JsRef directly — no extra V8 global handle created.
+        values.add(kj::mv(req.value));
         resolvers.add(kj::mv(req.resolver));
         totalSize += req.size;
       }
@@ -5282,7 +5283,7 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
       return js.rejectedPromise<void>(js.typeError("The WritableStream is closed"));
     };
 
-    writev_ = [selfRef = addWeakRef()](jsg::Lock& js, kj::Array<jsg::JsValue> chunks,
+    writev_ = [selfRef = addWeakRef()](jsg::Lock& js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks,
                   jsg::Ref<WritableStreamDefaultController> controller) {
       KJ_IF_SOME(self, selfRef->tryGet()) {
         KJ_SWITCH_ONEOF(self.inner) {
@@ -5296,7 +5297,7 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
             auto& i = *active;
             auto bytesBuilder = kj::heapArrayBuilder<kj::Array<kj::byte>>(chunks.size());
             for (auto& chunk: chunks) {
-              KJ_IF_SOME(bytes, chunkToBytes(js, chunk)) {
+              KJ_IF_SOME(bytes, chunkToBytes(js, chunk.getHandle(js))) {
                 bytesBuilder.add(kj::mv(bytes));
               } else {
                 return js.rejectedPromise<void>(

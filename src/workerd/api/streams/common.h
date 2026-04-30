@@ -188,8 +188,10 @@ class UnderlyingSinkImpl {
   // Non-standard extension: vectorized write algorithm. When set, allows the stream
   // to batch multiple queued writes into a single call. Only set by internal C++ sinks
   // that support vectorized I/O, never by user-provided JS sinks.
+  // Uses JsRef (V8 global handles) rather than JsValue (stack locals) because the
+  // array is heap-allocated.
   using WritevAlgorithm = jsg::Promise<void>(
-      kj::Array<jsg::JsValue>, jsg::Ref<WritableStreamDefaultController>);
+      kj::Array<jsg::JsRef<jsg::JsValue>>, jsg::Ref<WritableStreamDefaultController>);
 
   UnderlyingSinkImpl(jsg::Lock& js, UnderlyingSink sink, StreamQueuingStrategy strategy);
   virtual ~UnderlyingSinkImpl() noexcept(false) = default;
