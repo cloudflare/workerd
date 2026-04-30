@@ -71,7 +71,7 @@ def make_config(
 ) -> str:
     requirements = ""
     for name in reqs:
-        requirements += f'(name="{name}", pythonRequirement=""),'
+        requirements += f'(name="{name}", obsoletePythonRequirement=""),'
 
     compat_flags = ""
     for flag in flags:
