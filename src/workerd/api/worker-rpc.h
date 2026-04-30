@@ -468,12 +468,14 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
  public:
   JsRpcSessionCustomEvent(uint16_t typeId,
       kj::Maybe<kj::String> wrapperModule = kj::none,
+      SpanBuilder jsRpcSessionSpan = SpanBuilder(nullptr),
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
         typeId(typeId),
-        wrapperModule(kj::mv(wrapperModule)) {}
+        wrapperModule(kj::mv(wrapperModule)),
+        jsRpcSessionSpan(kj::mv(jsRpcSessionSpan)) {}
 
   ~JsRpcSessionCustomEvent() noexcept(false) {
     if (capFulfiller->isWaiting()) {
@@ -531,6 +533,11 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
   uint16_t typeId;
 
   kj::Maybe<kj::String> wrapperModule;
+
+  // Span representing this jsRpc session. Created before startRequest() so the callee can
+  // reference its ID for trace context propagation. Lives until this event is destroyed
+  // (i.e., until the session ends), which gives the correct span lifetime.
+  SpanBuilder jsRpcSessionSpan;
 
   class ServerTopLevelMembrane;
 };

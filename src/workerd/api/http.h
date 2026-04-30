@@ -338,6 +338,18 @@ class Fetcher: public JsRpcClientProvider {
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
+  // Worker interface plus the user span representing this jsRpc session, if any. The span is
+  // created for direct channel variants but not for OutgoingFactory variants (which create their
+  // own outer span). The span is intended to be transferred to JsRpcSessionCustomEvent.
+  struct JsRpcClient {
+    kj::Own<WorkerInterface> worker;
+    SpanBuilder sessionSpan;
+  };
+
+  // Get a worker interface for a jsRpc session call, along with the jsRpcSession span (if one
+  // should be created for this Fetcher variant).
+  JsRpcClient getJsRpcClient(IoContext& ioContext);
+
   // Result of getClient call that includes optional trace context
   struct ClientWithTracing {
     kj::Own<WorkerInterface> client;
