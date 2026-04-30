@@ -832,33 +832,6 @@ class TransformStreamDefaultController: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  struct Algorithms {
-    kj::Maybe<jsg::Function<Transformer::TransformAlgorithm>> transform;
-    kj::Maybe<jsg::Function<Transformer::FlushAlgorithm>> flush;
-    kj::Maybe<jsg::Function<Transformer::CancelAlgorithm>> cancel;
-
-    kj::Maybe<jsg::Promise<void>> maybeFinish = kj::none;
-    // This flag is set to true at the start of a finish operation (close/cancel/abort)
-    // before the algorithm runs. This is needed because emplace() evaluates its argument
-    // before setting maybeFinish, so if the algorithm calls another finish operation
-    // synchronously, maybeFinish wouldn't be set yet.
-    bool finishStarted = false;
-
-    Algorithms() {};
-    Algorithms(Algorithms&& other) = default;
-    Algorithms& operator=(Algorithms&& other) = default;
-
-    inline void clear() {
-      transform = kj::none;
-      flush = kj::none;
-      cancel = kj::none;
-    }
-
-    inline void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(transform, flush, cancel, maybeFinish);
-    }
-  };
-
   void errorWritableAndUnblockWrite(jsg::Lock& js, jsg::JsValue reason);
   jsg::Promise<void> performTransform(jsg::Lock& js, jsg::JsValue chunk);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
@@ -882,6 +855,29 @@ class TransformStreamDefaultController: public jsg::Object {
   bool finishStarted = false;
   bool backpressure = false;
   kj::Maybe<jsg::PromiseResolverPair<void>> maybeBackpressureChange;
+
+  // Persistent transform continuation — used by performTransform() for the hot
+  // write-through path. The success callback is a no-op, the failure callback
+  // errors the stream.
+  struct TransformContinuationCallbacks {
+    TransformStreamDefaultController* ctrl;
+
+    jsg::Promise<void> thenFunc(jsg::Lock& js) {
+      return js.resolvedPromise();
+    }
+
+    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
+      auto handle = jsg::JsValue(reason.getHandle(js));
+      ctrl->error(js, handle);
+      return js.rejectedPromise<void>(handle);
+    }
+  };
+  using TransformContinuationType =
+      jsg::PersistentContinuation<TransformContinuationCallbacks, void, jsg::Promise<void>>;
+
+  kj::Maybe<TransformContinuationType> transformContinuation;
+
+  TransformContinuationType& getTransformContinuation(jsg::Lock& js);
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

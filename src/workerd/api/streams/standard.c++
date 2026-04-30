@@ -4965,18 +4965,22 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
       .whenResolved(js);
 }
 
+TransformStreamDefaultController::TransformContinuationType& TransformStreamDefaultController::
+    getTransformContinuation(jsg::Lock& js) {
+  KJ_IF_SOME(tc, transformContinuation) {
+    return tc;
+  }
+  transformContinuation.emplace(
+      TransformContinuationType::create(js, TransformContinuationCallbacks{this}));
+  return KJ_ASSERT_NONNULL(transformContinuation);
+}
+
 jsg::Promise<void> TransformStreamDefaultController::performTransform(
     jsg::Lock& js, jsg::JsValue chunk) {
   if (transformer->transform() != kj::none) {
-    return maybeRunAlgorithm(js, transformer->transform(),
-        [](jsg::Lock& js) -> jsg::Promise<void> { return js.resolvedPromise(); },
-        JSG_VISITABLE_LAMBDA((ref = JSG_THIS), (ref),
-            (jsg::Lock & js, jsg::Value reason)->jsg::Promise<void> {
-              auto handle = jsg::JsValue(reason.getHandle(js));
-              ref->error(js, handle);
-              return js.rejectedPromise<void>(handle);
-            }),
-        chunk, JSG_THIS);
+    auto& tc = getTransformContinuation(js);
+    return maybeRunAlgorithmWithPersistentContinuation(
+        js, transformer->transform(), tc, chunk, JSG_THIS);
   }
   // If we got here, there is no transform algorithm. Per the spec, the default
   // behavior then is to just pass along the value untransformed.
@@ -5023,6 +5027,9 @@ void TransformStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
 
   if (transformer.get() != nullptr) {
     visitor.visit(*transformer);
+  }
+  KJ_IF_SOME(tc, transformContinuation) {
+    tc.visitForGc(visitor);
   }
 }
 
