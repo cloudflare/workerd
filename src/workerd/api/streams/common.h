@@ -215,7 +215,7 @@ class UnderlyingSourceImpl {
     visitor.visit(start_, pull_, cancel_, size_);
   }
 
- private:
+ protected:
   UnderlyingSourceImpl() = default;
   kj::Maybe<jsg::Function<StartAlgorithm>> start_;
   kj::Maybe<jsg::Function<PullAlgorithm>> pull_;

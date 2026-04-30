@@ -892,5 +892,7 @@ class TransformStreamDefaultController: public jsg::Object {
 
 jsg::Ref<WritableStream> newInternalWritableStream(
     jsg::Lock& js, IoContext& ioContext, kj::Own<WritableStreamSink> sink);
+jsg::Ref<ReadableStream> newInternalReadableStream(
+    jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 
 }  // namespace workerd::api

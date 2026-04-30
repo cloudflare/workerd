@@ -5283,6 +5283,109 @@ jsg::Ref<ReadableStream> ReadableStream::from(
 
 namespace {
 
+class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
+ public:
+  InternalUnderlyingSourceImpl(IoContext& context, kj::Own<ReadableStreamSource> in)
+      : inner(context.addObject(kj::heap<Active>(kj::mv(in)))) {
+
+    isBytes_ = true;
+    expectedLength_ = in->tryGetLength(StreamEncoding::IDENTITY);
+    autoAllocateChunkSize_ = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2;
+    start_ = kj::none;
+    size_ = kj::none;
+    highWaterMark_ = 0;
+
+    pull_ = [selfRef = addWeakRef()](jsg::Lock& js, auto controller) {
+      auto& ioContext = IoContext::current();
+      KJ_IF_SOME(self, selfRef->tryGet()) {
+        KJ_SWITCH_ONEOF(self.inner) {
+          KJ_CASE_ONEOF(active, IoOwn<Active>) {
+            auto& a = *active;
+            // Because this is a byte stream, the controller must be a ReadableByteStreamController
+            jsg::Ref<ReadableByteStreamController>& byteController = KJ_ASSERT_NONNULL(
+                controller.template tryGet<jsg::Ref<ReadableByteStreamController>>());
+
+            // Even tho this is a byte stream that will use BYOB reads, we need to allocate an
+            // intermediate buffer to read into since it is filled outside of the isolate lock.
+            // When the read completes, we will copy that data into the BYOB buffer. Even if
+            // a default reader is used, because we are using autoAllocateChunkSize, the pull
+            // will look like a BYOB read to the underlying source.
+
+            auto request = KJ_ASSERT_NONNULL(byteController->getByobRequest(js));
+            auto atLeast = request->getAtLeast().orDefault(1);
+            auto view = KJ_ASSERT_NONNULL(request->getView(js));
+            auto buf = kj::heapArray<kj::byte>(view.size());
+
+            auto promise = a.canceler.wrap(a.source->tryRead(buf.begin(), atLeast, buf.size()));
+            return ioContext.awaitIo(js, kj::mv(promise),
+          JSG_VISITABLE_LAMBDA(
+              (request = kj::mv(request), view = view.addRef(js),
+                  byteController = kj::mv(byteController), buf = kj::mv(buf), atLeast),
+              (request, view, byteController), (jsg::Lock& js, size_t amount) {
+                // Nothing read, signal EOF by closing the stream.
+                if (amount == 0) {
+                request->respond(js, 0);
+                byteController->close(js);
+                return js.resolvedPromise();
+                }
+
+                // Copy the data into the BYOB buffer and respond with the amount read.
+                view.getHandle(js).asArrayPtr().first(amount).copyFrom(buf.first(amount));
+                request->respond(js, amount);
+
+                if (amount < atLeast) {
+                byteController->close(js);
+                }
+                return js.resolvedPromise();
+              }));
+          }
+          KJ_CASE_ONEOF(closed, Closed) {
+            return js.rejectedPromise<void>(js.typeError("The ReadableStream is closed"));
+          }
+          KJ_CASE_ONEOF(errored, Errored) {
+            return js.rejectedPromise<void>(js.exceptionToJs(errored.clone()));
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+
+      return js.rejectedPromise<void>(js.typeError("The ReadableStream is closed"));
+    };
+
+    cancel_ = [selfRef = addWeakRef()](jsg::Lock& js, jsg::JsValue reason) {
+      KJ_IF_SOME(self, selfRef->tryGet()) {
+        KJ_IF_SOME(active, self.inner.tryGet<IoOwn<Active>>()) {
+          auto& a = *active;
+          auto exception = js.exceptionToKj(reason);
+          a.canceler.cancel(exception.clone());
+          a.source->cancel(exception.clone());
+          self.inner = kj::mv(exception);
+        }
+      }
+
+      return js.resolvedPromise();
+    };
+  }
+
+ private:
+  struct Active {
+    kj::Own<ReadableStreamSource> source;
+    kj::Canceler canceler;
+    Active(kj::Own<ReadableStreamSource> source): source(kj::mv(source)) {}
+  };
+  struct Closed {};
+  using Errored = kj::Exception;
+  kj::OneOf<IoOwn<Active>, Closed, Errored> inner;
+
+  kj::Rc<WeakRef<InternalUnderlyingSourceImpl>> weakRef =
+      kj::rc<WeakRef<InternalUnderlyingSourceImpl>>(
+          kj::Badge<InternalUnderlyingSourceImpl>(), *this);
+
+  kj::Rc<WeakRef<InternalUnderlyingSourceImpl>> addWeakRef() {
+    return weakRef.addRef();
+  }
+};
+
 class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
  public:
   InternalUnderlyingSinkImpl(IoContext& context, kj::Own<WritableStreamSink> out)
@@ -5291,6 +5394,7 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
     // Not really necessary to explicitly set this to none but doing so to be
     // extra clear that there is no start algorithm for this underlying sink.
     start_ = kj::none;
+    size_ = kj::none;
 
     highWaterMark_ = 1;  // TODO(soon): Make configurable
     // size_ intentionally left as kj::none — defaults to 1 per chunk.
@@ -5491,6 +5595,16 @@ jsg::Ref<WritableStream> newInternalWritableStream(
       sizeof(WritableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
   auto sinkImpl = kj::heap<InternalUnderlyingSinkImpl>(ioContext, kj::mv(sink));
   stream->getController().setup(js, kj::mv(sinkImpl));
+  return kj::mv(stream);
+}
+
+jsg::Ref<ReadableStream> newInternalReadableStream(
+    jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
+  auto controller = newReadableStreamJsController();
+  auto stream = js.allocAccounted<ReadableStream>(
+      sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
+  auto sourceImpl = kj::heap<InternalUnderlyingSourceImpl>(ioContext, kj::mv(source));
+  stream->getController().setup(js, kj::mv(sourceImpl));
   return kj::mv(stream);
 }
 
