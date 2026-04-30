@@ -649,6 +649,70 @@ jsg::Promise<void> maybeRunAlgorithmAsync(
   }
 }
 
+// Like maybeRunAlgorithm but uses a pre-built PersistentContinuation instead of per-call
+// lambdas. Skips OpaqueWrappable allocation, v8::Function::New, and addFunctor wrapping —
+// the pre-built functions from the continuation are reused directly via thenRef().
+template <typename FuncPair, typename Input, typename Output>
+jsg::Promise<void> maybeRunAlgorithmWithPersistentContinuation(jsg::Lock& js,
+    auto& maybeAlgorithm,
+    jsg::PersistentContinuation<FuncPair, Input, Output>& continuation,
+    auto&&... args) {
+  KJ_IF_SOME(algorithm, maybeAlgorithm) {
+    JSG_TRY(js) {
+      auto innerPromise = [&]() -> jsg::Promise<void> {
+        JSG_TRY(js) {
+          return algorithm(js, kj::fwd<decltype(args)>(args)...);
+        }
+        JSG_CATCH(exception) {
+          return js.rejectedPromise<void>(kj::mv(exception));
+        }
+      }();
+      return innerPromise.thenRef(js, continuation);
+    }
+    JSG_CATCH(exception) {
+      return js.rejectedPromise<void>(kj::mv(exception));
+    }
+  }
+
+  // Algorithm absent — invoke the success callback directly.
+  auto& funcPair = jsg::unwrapOpaqueRef<FuncPair>(js.v8Isolate, continuation.data.getHandle(js));
+  if constexpr (jsg::isVoid<Output>()) {
+    funcPair.thenFunc(js);
+    return js.resolvedPromise();
+  } else {
+    return funcPair.thenFunc(js);
+  }
+}
+
+// Async variant: defers to a microtask when the algorithm is absent.
+template <typename FuncPair, typename Input, typename Output>
+jsg::Promise<void> maybeRunAlgorithmAsyncWithPersistentContinuation(jsg::Lock& js,
+    auto& maybeAlgorithm,
+    jsg::PersistentContinuation<FuncPair, Input, Output>& continuation,
+    auto&&... args) {
+  KJ_IF_SOME(algorithm, maybeAlgorithm) {
+    JSG_TRY(js) {
+      auto innerPromise = [&]() -> jsg::Promise<void> {
+        JSG_TRY(js) {
+          return algorithm(js, kj::fwd<decltype(args)>(args)...);
+        }
+        JSG_CATCH(exception) {
+          return js.rejectedPromise<void>(kj::mv(exception));
+        }
+      }();
+      return innerPromise.thenRef(js, continuation);
+    }
+    JSG_CATCH(exception) {
+      return js.rejectedPromise<void>(kj::mv(exception));
+    }
+  }
+
+  // Algorithm absent — defer success to a microtask.
+  // When Output is void, thenRef returns Promise<void> from the resolved promise chain,
+  // which is what we want.
+  return js.resolvedPromise().thenRef(js, continuation);
+}
+
 int getHighWaterMark(
     const UnderlyingSource& underlyingSource, const StreamQueuingStrategy& queuingStrategy) {
   bool isBytes = underlyingSource.type.map([](auto& s) { return s == "bytes"; }).orDefault(false);
@@ -1346,6 +1410,93 @@ ssize_t WritableImpl<Self>::getDesiredSize() {
 }
 
 template <typename Self>
+typename WritableImpl<Self>::WriteContinuationType& WritableImpl<Self>::getWriteContinuation(
+    jsg::Lock& js) {
+  KJ_IF_SOME(wc, writeContinuation) {
+    return wc;
+  }
+  writeContinuation.emplace(WriteContinuationType::create(js, WriteContinuationCallbacks{this}));
+  return KJ_ASSERT_NONNULL(writeContinuation);
+}
+
+template <typename Self>
+jsg::Promise<void> WritableImpl<Self>::onWriteSuccess(jsg::Lock& js) {
+  // Read per-write state from inFlightWrite — no per-write captures needed.
+  auto& write = KJ_ASSERT_NONNULL(inFlightWrite);
+  amountBuffered -= write.size;
+  auto self = kj::mv(KJ_ASSERT_NONNULL(inFlightSelf));
+  inFlightSelf = kj::none;
+  finishInFlightWrite(js, self.addRef());
+  KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
+  if (!isCloseQueuedOrInFlight() && isWritable()) {
+    updateBackpressure(js);
+  }
+  if (state.template is<StreamStates::Erroring>() || writeRequests.empty()) {
+    // In this case, we know advanceQueueIfNeeded won't recurse further, so we can
+    // avoid the extra microtask hop.
+    advanceQueueIfNeeded(js, kj::mv(self));
+    return js.resolvedPromise();
+  }
+  // Here, however, let's avoid potentially deep recursion by hopping to a new
+  // microtask to continue processing the queue.
+  inFlightSelf = kj::mv(self);
+  return js.resolvedPromise().thenRef(js, getDrainContinuation(js));
+}
+
+template <typename Self>
+jsg::Promise<void> WritableImpl<Self>::onWriteFailure(jsg::Lock& js, jsg::Value reason) {
+  auto& write = KJ_ASSERT_NONNULL(inFlightWrite);
+  amountBuffered -= write.size;
+  auto self = kj::mv(KJ_ASSERT_NONNULL(inFlightSelf));
+  inFlightSelf = kj::none;
+  finishInFlightWrite(js, kj::mv(self), jsg::JsValue(reason.getHandle(js)));
+  return js.resolvedPromise();
+}
+
+template <typename Self>
+typename WritableImpl<Self>::DrainContinuationType& WritableImpl<Self>::getDrainContinuation(
+    jsg::Lock& js) {
+  KJ_IF_SOME(dc, drainContinuation) {
+    return dc;
+  }
+  drainContinuation.emplace(DrainContinuationType::create(js, DrainContinuationCallbacks{this}));
+  return KJ_ASSERT_NONNULL(drainContinuation);
+}
+
+template <typename Self>
+void WritableImpl<Self>::onDrainNext(jsg::Lock& js) {
+  auto self = kj::mv(KJ_ASSERT_NONNULL(inFlightSelf));
+  inFlightSelf = kj::none;
+  if (isWritable() || state.template is<StreamStates::Erroring>()) {
+    advanceQueueIfNeeded(js, kj::mv(self));
+  }
+}
+
+template <typename Self>
+typename WritableImpl<Self>::CloseContinuationType& WritableImpl<Self>::getCloseContinuation(
+    jsg::Lock& js) {
+  KJ_IF_SOME(cc, closeContinuation) {
+    return cc;
+  }
+  closeContinuation.emplace(CloseContinuationType::create(js, CloseContinuationCallbacks{this}));
+  return KJ_ASSERT_NONNULL(closeContinuation);
+}
+
+template <typename Self>
+void WritableImpl<Self>::onCloseSuccess(jsg::Lock& js) {
+  auto self = kj::mv(KJ_ASSERT_NONNULL(inFlightSelf));
+  inFlightSelf = kj::none;
+  finishInFlightClose(js, kj::mv(self));
+}
+
+template <typename Self>
+void WritableImpl<Self>::onCloseFailure(jsg::Lock& js, jsg::Value reason) {
+  auto self = kj::mv(KJ_ASSERT_NONNULL(inFlightSelf));
+  inFlightSelf = kj::none;
+  finishInFlightClose(js, kj::mv(self), jsg::JsValue(reason.getHandle(js)));
+}
+
+template <typename Self>
 void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
   if (!flags.started || inFlightWrite != kj::none) {
     return;
@@ -1361,15 +1512,9 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
       KJ_ASSERT(inFlightClose == kj::none);
       KJ_ASSERT_NONNULL(closeRequest);
       inFlightClose = kj::mv(closeRequest);
+      inFlightSelf = kj::mv(self);
 
-      auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self),
-          (jsg::Lock& js) { finishInFlightClose(js, kj::mv(self)); });
-
-      auto onFailure = JSG_VISITABLE_LAMBDA(
-          (this, self = self.addRef()), (self), (jsg::Lock& js, jsg::Value reason) {
-            finishInFlightClose(js, kj::mv(self), jsg::JsValue(reason.getHandle(js)));
-          });
-
+      auto& cc = getCloseContinuation(js);
       // Per the spec, the close algorithm should always run asynchronously, even if
       // there's no user-provided close handler. This ensures that releaseLock() can
       // reject the closed promise before the close completes.
@@ -1377,9 +1522,9 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
       // synchronously if algorithms.close is not specified. maybeRunAlgorithmAsync
       // always defers to a microtask.
       if (FeatureFlags::get(js).getPedanticWpt()) {
-        maybeRunAlgorithmAsync(js, underlyingSink->close(), kj::mv(onSuccess), kj::mv(onFailure));
+        maybeRunAlgorithmAsyncWithPersistentContinuation(js, underlyingSink->close(), cc);
       } else {
-        maybeRunAlgorithm(js, underlyingSink->close(), kj::mv(onSuccess), kj::mv(onFailure));
+        maybeRunAlgorithmWithPersistentContinuation(js, underlyingSink->close(), cc);
       }
     }
     return;
@@ -1388,50 +1533,20 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   KJ_ASSERT(inFlightWrite == kj::none);
   auto req = dequeueWriteRequest();
   auto value = req.value.getHandle(js);
-  auto size = req.size;
   inFlightWrite = kj::mv(req);
+  inFlightSelf = kj::mv(self);
 
-  auto onSuccess =
-      JSG_VISITABLE_LAMBDA((this, self = self.addRef(), size), (self), (jsg::Lock& js) {
-        amountBuffered -= size;
-        finishInFlightWrite(js, self.addRef());
-        KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
-        if (!isCloseQueuedOrInFlight() && isWritable()) {
-        updateBackpressure(js);
-        }
-        if (state.template is<StreamStates::Erroring>() || writeRequests.empty()) {
-        // In this case, we know advanceQueueIfNeeded won't recurse further, so we can
-        // avoid the extra microtask hop.
-        advanceQueueIfNeeded(js, kj::mv(self));
-        return js.resolvedPromise();
-        }
-        // Here, however, let's avoid potentially deep recursion by hopping to a new
-        // microtask to continue processing the queue.
-        return js.resolvedPromise().then(
-            js, JSG_VISITABLE_LAMBDA((this, self = kj::mv(self)), (self), (jsg::Lock & js) mutable {
-              if (isWritable() || state.template is<StreamStates::Erroring>()) {
-              advanceQueueIfNeeded(js, kj::mv(self));
-              }
-            }));
-      });
-
-  auto onFailure = JSG_VISITABLE_LAMBDA(
-      (this, self = self.addRef(), size), (self), (jsg::Lock& js, jsg::Value reason) {
-        amountBuffered -= size;
-        finishInFlightWrite(js, kj::mv(self), jsg::JsValue(reason.getHandle(js)));
-        return js.resolvedPromise();
-      });
-
+  auto& wc = getWriteContinuation(js);
   // Per the spec, the write algorithm should always run asynchronously, even if
   // there's no user-provided write handler. This ensures that backpressure changes
   // from the write don't resolve the ready promise synchronously, preserving correct
   // microtask ordering (e.g., ready rejects before closed on releaseLock).
   if (FeatureFlags::get(js).getPedanticWpt()) {
-    maybeRunAlgorithmAsync(
-        js, underlyingSink->write(), kj::mv(onSuccess), kj::mv(onFailure), value, self.addRef());
+    maybeRunAlgorithmAsyncWithPersistentContinuation(
+        js, underlyingSink->write(), wc, value, KJ_ASSERT_NONNULL(inFlightSelf).addRef());
   } else {
-    maybeRunAlgorithm(
-        js, underlyingSink->write(), kj::mv(onSuccess), kj::mv(onFailure), value, self.addRef());
+    maybeRunAlgorithmWithPersistentContinuation(
+        js, underlyingSink->write(), wc, value, KJ_ASSERT_NONNULL(inFlightSelf).addRef());
   }
 }
 
@@ -1773,6 +1888,20 @@ void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(*pendingAbort);
   }
   visitor.visitAll(writeRequests);
+  KJ_IF_SOME(wc, writeContinuation) {
+    wc.visitForGc(visitor);
+  }
+  KJ_IF_SOME(dc, drainContinuation) {
+    dc.visitForGc(visitor);
+  }
+  KJ_IF_SOME(cc, closeContinuation) {
+    cc.visitForGc(visitor);
+  }
+  // Note: inFlightSelf is intentionally NOT traced here. It is a Ref back to the
+  // controller (Self) that contains this WritableImpl, which would create an infinite
+  // GC tracing cycle (WritableImpl → Self → WritableImpl → ...). The controller is
+  // already reachable through its owning WritableStream's ref chain, so it won't be
+  // collected while inFlightSelf exists.
 }
 
 template <typename Self>

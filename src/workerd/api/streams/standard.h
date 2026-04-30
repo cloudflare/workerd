@@ -394,6 +394,70 @@ class WritableImpl {
   kj::Maybe<jsg::Promise<void>::Resolver> closeRequest;
   kj::Maybe<kj::Own<PendingAbort>> maybePendingAbort;
 
+  // Keeps the controller alive via jsg::Ref during an in-flight write operation.
+  // Set when a write is dispatched, cleared when the write continuation fires.
+  kj::Maybe<jsg::Ref<Self>> inFlightSelf;
+
+  // Persistent write continuation — lazily initialized on first write dispatch.
+  // Reused across all subsequent writes to avoid per-write OpaqueWrappable,
+  // v8::Function, and lambda heap allocations.
+  struct WriteContinuationCallbacks {
+    WritableImpl* impl;
+
+    jsg::Promise<void> thenFunc(jsg::Lock& js) {
+      return impl->onWriteSuccess(js);
+    }
+
+    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
+      return impl->onWriteFailure(js, kj::mv(reason));
+    }
+  };
+  using WriteContinuationType =
+      jsg::PersistentContinuation<WriteContinuationCallbacks, void, jsg::Promise<void>>;
+
+  kj::Maybe<WriteContinuationType> writeContinuation;
+
+  WriteContinuationType& getWriteContinuation(jsg::Lock& js);
+  jsg::Promise<void> onWriteSuccess(jsg::Lock& js);
+  jsg::Promise<void> onWriteFailure(jsg::Lock& js, jsg::Value reason);
+
+  // Persistent close continuation — same pattern as write continuation.
+  struct CloseContinuationCallbacks {
+    WritableImpl* impl;
+
+    void thenFunc(jsg::Lock& js) {
+      impl->onCloseSuccess(js);
+    }
+
+    void catchFunc(jsg::Lock& js, jsg::Value reason) {
+      impl->onCloseFailure(js, kj::mv(reason));
+    }
+  };
+  using CloseContinuationType = jsg::PersistentContinuation<CloseContinuationCallbacks, void, void>;
+
+  kj::Maybe<CloseContinuationType> closeContinuation;
+
+  // Persistent drain continuation — used for the microtask hop when the write queue
+  // has more entries after a write completes. Avoids per-drain OpaqueWrappable and
+  // v8::Function allocations.
+  struct DrainContinuationCallbacks {
+    WritableImpl* impl;
+
+    void operator()(jsg::Lock& js) {
+      impl->onDrainNext(js);
+    }
+  };
+  using DrainContinuationType =
+      jsg::PersistentThenContinuation<DrainContinuationCallbacks, void, void>;
+
+  kj::Maybe<DrainContinuationType> drainContinuation;
+
+  DrainContinuationType& getDrainContinuation(jsg::Lock& js);
+  void onDrainNext(jsg::Lock& js);
+
+  CloseContinuationType& getCloseContinuation(jsg::Lock& js);
+  void onCloseSuccess(jsg::Lock& js);
+  void onCloseFailure(jsg::Lock& js, jsg::Value reason);
   struct Flags {
     uint8_t started : 1 = 0;
     uint8_t starting : 1 = 0;
