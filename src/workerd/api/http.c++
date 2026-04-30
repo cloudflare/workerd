@@ -2118,27 +2118,7 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethodInternal(jsg::Lock& js, 
   return js.alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
-rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
-    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
-  auto& ioContext = IoContext::current();
-  auto [worker, sessionSpan] = getJsRpcClient(ioContext);
-  auto event = kj::heap<api::JsRpcSessionCustomEvent>(
-      JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE, kj::none, kj::mv(sessionSpan));
 
-  auto result = event->getCap();
-
-  // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we don't
-  // actually care about the result of the event. If it throws, the membrane will already have
-  // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
-  // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
-  // caught elsewhere.
-  ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker)).then([](auto&&) {
-  }, [](kj::Exception&&) {}));
-
-  // (Don't extend `path` because we're the root.)
-
-  return result;
-}
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto channel = getSubrequestChannel(IoContext::current());
@@ -2407,14 +2387,20 @@ kj::Own<WorkerInterface> Fetcher::getClient(
   return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
 }
 
-Fetcher::JsRpcClient Fetcher::getJsRpcClient(IoContext& ioContext) {
-  // The jsRpcSession span is owned by JsRpcSessionCustomEvent and lives for the session.
-  // OutgoingFactory variants create their own outer span, so we skip jsRpcSession for them.
+kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionClient(
+    IoContext& ioContext, kj::Vector<kj::StringPtr>& path) {
+  // Fetcher is the root of the call chain; do not extend `path`.
+  (void)path;
+
+  // The jsRpcSession span is owned by JsRpcSessionCustomEvent (constructed by callImpl) and
+  // lives for the session. OutgoingFactory variants (DurableObject stubs, cross-process actors)
+  // create their own outer span (e.g. "durable_object_subrequest"), so we skip jsRpcSession for
+  // them.
   //
-  //  builds the WorkerInterface;  lets each case populate fields
+  // `startRequest` builds the WorkerInterface; `metadataExtra` lets each case populate fields
   // that don't apply to all variants (e.g. featureFlagsForFl, which goes to FL via
   // IoChannelFactory::startSubrequest but is undefined for SubrequestChannel::startRequest).
-  auto withSessionSpan = [&](auto startRequest, auto metadataExtra) -> JsRpcClient {
+  auto withSessionSpan = [&](auto startRequest, auto metadataExtra) -> JsRpcSessionClient {
     auto sessionSpan = ioContext.getCurrentUserTraceSpan().newChild(
         "jsRpcSession"_kjc, ioContext.now());
     auto sessionSpanParent = SpanParent(sessionSpan);
@@ -2454,11 +2440,17 @@ Fetcher::JsRpcClient Fetcher::getJsRpcClient(IoContext& ioContext) {
     }
     // DurableObject stub (env.MyActor.get(id)) — factory creates durable_object_subrequest, skip.
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
-      return {outgoingFactory->newSingleUseClient(kj::none), SpanBuilder(nullptr)};
+      return JsRpcSessionClient{
+        .worker = outgoingFactory->newSingleUseClient(kj::none),
+        .sessionSpan = SpanBuilder(nullptr),
+      };
     }
     // Cross-process actor — factory creates its own outer span, skip.
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
-      return {outgoingFactory->newSingleUseClient(ioContext, kj::none), SpanBuilder(nullptr)};
+      return JsRpcSessionClient{
+        .worker = outgoingFactory->newSingleUseClient(ioContext, kj::none),
+        .sessionSpan = SpanBuilder(nullptr),
+      };
     }
   }
   KJ_UNREACHABLE;

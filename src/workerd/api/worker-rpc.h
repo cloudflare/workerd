@@ -201,8 +201,31 @@ class JsRpcClientProvider: public jsg::Object {
   //
   // If this isn't the root object (i.e. this is a JsRpcProperty), the property path starting from
   // the root object will be appended to `path`.
+  //
+  // For cap-holding providers (JsRpcStub, JsRpcPromise), this returns the live cap. Session-
+  // creating providers (Fetcher) implement tryGetJsRpcSessionClient() instead and leave this
+  // default in place; callers should always check the session path first.
   virtual rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
+    KJ_UNIMPLEMENTED(
+        "Provider does not hold a live cap; callers must use tryGetJsRpcSessionClient().");
+  }
+
+  // Returned by tryGetJsRpcSessionClient(). `worker` is the underlying WorkerInterface that the
+  // jsRpcSession event will be dispatched on. `sessionSpan` is the user span representing this
+  // session, ready to be moved into a JsRpcSessionCustomEvent.
+  struct JsRpcSessionClient {
+    kj::Own<WorkerInterface> worker;
+    SpanBuilder sessionSpan;
+  };
+
+  // For session-creating providers (Fetcher): return the building blocks for a fresh
+  // JsRpcSessionCustomEvent. Default kj::none means "I'm a cap-holder, use getClientForOneCall".
+  // `path` is populated as in getClientForOneCall().
+  virtual kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(
+      IoContext& ioContext, kj::Vector<kj::StringPtr>& path) {
+    return kj::none;
+  }
 };
 
 class JsRpcProperty;
@@ -315,6 +338,16 @@ class JsRpcProperty: public JsRpcClientProvider {
 
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  // Forward to the parent so the session is built at the root, then append our name. callImpl
+  // gives us a scratch `path` vector that is discarded if we return kj::none, so we can append
+  // unconditionally.
+  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(
+      IoContext& ioContext, kj::Vector<kj::StringPtr>& path) override {
+    auto result = parent->tryGetJsRpcSessionClient(ioContext, path);
+    path.add(name);
+    return result;
+  }
 
   // Call the property as a method.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);

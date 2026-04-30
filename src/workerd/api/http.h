@@ -338,17 +338,11 @@ class Fetcher: public JsRpcClientProvider {
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
-  // Worker interface plus the user span representing this jsRpc session, if any. The span is
-  // created for direct channel variants but not for OutgoingFactory variants (which create their
-  // own outer span). The span is intended to be transferred to JsRpcSessionCustomEvent.
-  struct JsRpcClient {
-    kj::Own<WorkerInterface> worker;
-    SpanBuilder sessionSpan;
-  };
-
   // Get a worker interface for a jsRpc session call, along with the jsRpcSession span (if one
-  // should be created for this Fetcher variant).
-  JsRpcClient getJsRpcClient(IoContext& ioContext);
+  // should be created for this Fetcher variant). Returns the building blocks for callImpl to
+  // construct a JsRpcSessionCustomEvent.
+  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(
+      IoContext& ioContext, kj::Vector<kj::StringPtr>& path) override;
 
   // Result of getClient call that includes optional trace context
   struct ClientWithTracing {
@@ -448,9 +442,6 @@ class Fetcher: public JsRpcClientProvider {
   kj::Maybe<jsg::Ref<JsRpcProperty>> getRpcMethodForTestOnly(jsg::Lock& js, kj::String name) {
     return getRpcMethod(js, kj::mv(name));
   }
-
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent

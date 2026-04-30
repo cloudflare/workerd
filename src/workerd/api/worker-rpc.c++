@@ -467,12 +467,40 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
   try {
     return js.tryCatch([&]() -> JsRpcPromiseAndPipeline {
-      // `path` will be filled in with the path of property names leading from the stub represented by
-      // `client` to the specific property / method that we're trying to invoke.
+      // `path` will be filled in with the path of property names leading from the stub represented
+      // by `client` to the specific property / method that we're trying to invoke.
+      //
+      // Two paths into the cap:
+      //   1. tryGetJsRpcSessionClient(): for session-creating providers (Fetcher). callImpl owns
+      //      the JsRpcSessionCustomEvent it constructs from the returned WorkerInterface and
+      //      span; this keeps span access in the same scope as the response handler that needs
+      //      it (no pointer-out of the function).
+      //   2. getClientForOneCall(): for cap-holding providers (JsRpcStub, JsRpcPromise) that
+      //      already have a live cap, used as a fallback when no session is needed.
       kj::Vector<kj::StringPtr> path;
-      auto client = parent.getClientForOneCall(js, path);
-
       auto& ioContext = IoContext::current();
+      rpc::JsRpcTarget::Client client(nullptr);
+      // Try the session path with a scratch `path` vector; only commit it on success. This
+      // means forwarders (JsRpcProperty) can append unconditionally without worrying about
+      // double-counting on the getClientForOneCall() fallback below.
+      kj::Vector<kj::StringPtr> sessionPath;
+      KJ_IF_SOME(sessionClient, parent.tryGetJsRpcSessionClient(ioContext, sessionPath)) {
+        path = kj::mv(sessionPath);
+        auto event =
+            kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE,
+                kj::none, kj::mv(sessionClient.sessionSpan));
+        client = event->getCap();
+        // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we
+        // don't actually care about the result of the event. If it throws, the membrane will
+        // already have propagated the exception to any RPC calls that we're waiting on, so we
+        // even ignore errors here -- otherwise they'll end up logged as "uncaught exceptions"
+        // even if they were, in fact, caught elsewhere.
+        ioContext.addTask(sessionClient.worker->customEvent(kj::mv(event))
+                              .attach(kj::mv(sessionClient.worker))
+                              .then([](auto&&) {}, [](kj::Exception&&) {}));
+      } else {
+        client = parent.getClientForOneCall(js, path);
+      }
 
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
         // Replace the client with a promise client that will delay the call until the output gate
