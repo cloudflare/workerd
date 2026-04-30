@@ -4688,7 +4688,9 @@ TransformStreamDefaultController::TransformStreamDefaultController(
     jsg::Lock& js, kj::Own<TransformerImpl> transformer)
     : ioContext(tryGetIoContext()),
       startPromise(js.newPromiseAndResolver<void>()),
-      transformer(kj::mv(transformer)) {}
+      transformer(kj::mv(transformer)) {
+  flags.fixupBackpressure = FeatureFlags::get(js).getFixupTransformStreamBackpressure();
+}
 
 kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
   KJ_IF_SOME(readableController, tryGetReadableController()) {
@@ -4724,13 +4726,13 @@ void TransformStreamDefaultController::enqueue(jsg::Lock& js, jsg::JsValue chunk
   }
 
   bool newBackpressure = readableController.hasBackpressure();
-  if (newBackpressure != backpressure) {
+  if (newBackpressure != flags.backpressure) {
     KJ_ASSERT(newBackpressure);
     // Unfortunately the original implementation forgot to actually set the backpressure
     // here so the backpressure signaling failed to work correctly. This is unfortunate
     // because applying the backpressure here could break existing code, so we need to
     // put the fix behind a compat flag. Doh!
-    if (FeatureFlags::get(js).getFixupTransformStreamBackpressure()) {
+    if (flags.fixupBackpressure) {
       setBackpressure(js, true);
     }
   }
@@ -4760,7 +4762,7 @@ jsg::Promise<void> TransformStreamDefaultController::write(jsg::Lock& js, jsg::J
 
     KJ_ASSERT(writableController.isWritable());
 
-    if (backpressure) {
+    if (flags.backpressure) {
       return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js).then(js,
           JSG_VISITABLE_LAMBDA((chunkRef = chunk.addRef(js), ref=JSG_THIS),
                               (chunkRef, ref), (jsg::Lock& js) mutable -> jsg::Promise<void> {
@@ -4788,11 +4790,11 @@ jsg::Promise<void> TransformStreamDefaultController::abort(jsg::Lock& js, jsg::J
     // If a finish operation is already in progress, return the existing promise
     // or handle the case where we're being called synchronously from within another
     // finish operation.
-    if (finishStarted) {
+    if (flags.finishStarted) {
       KJ_IF_SOME(finish, maybeFinish) {
         return finish.whenResolved(js);
       }
-      // finishStarted is true but maybeFinish is not set yet - this means we're being
+      // flags.finishStarted is true but maybeFinish is not set yet - this means we're being
       // called synchronously from within another finish operation (like cancel).
       // We need to error the stream with the abort reason so that both the current
       // operation and this abort reject with the abort reason.
@@ -4801,7 +4803,7 @@ jsg::Promise<void> TransformStreamDefaultController::abort(jsg::Lock& js, jsg::J
     }
 
     // Mark that we're starting a finish operation before running the algorithm.
-    finishStarted = true;
+    flags.finishStarted = true;
   } else {
     KJ_IF_SOME(finish, maybeFinish) {
       return finish.whenResolved(js);
@@ -4835,16 +4837,16 @@ jsg::Promise<void> TransformStreamDefaultController::abort(jsg::Lock& js, jsg::J
 }
 
 jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
-  auto flags = FeatureFlags::get(js);
-  if (flags.getPedanticWpt()) {
+  auto featureFlags = FeatureFlags::get(js);
+  if (featureFlags.getPedanticWpt()) {
     // If a finish operation is already in progress (e.g., from cancel or abort),
     // we should not run flush. Per the WHATWG streams spec, close/flush should
     // coordinate with cancel to avoid calling both.
-    if (finishStarted) {
+    if (flags.finishStarted) {
       KJ_IF_SOME(finish, maybeFinish) {
         return finish.whenResolved(js);
       }
-      // finishStarted is true but maybeFinish is not set yet - this means we're being
+      // flags.finishStarted is true but maybeFinish is not set yet - this means we're being
       // called synchronously from within another finish operation. If the stream was
       // errored during that operation, return a rejected promise with the error.
       KJ_IF_SOME(writableController, tryGetWritableController()) {
@@ -4860,7 +4862,7 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
 
     // Mark that we're starting a finish operation before running the algorithm,
     // since the algorithm may synchronously call other finish operations.
-    finishStarted = true;
+    flags.finishStarted = true;
   }
 
   auto onSuccess =
@@ -4897,7 +4899,7 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
         return js.rejectedPromise<void>(handle);
       });
 
-  if (flags.getPedanticWpt()) {
+  if (featureFlags.getPedanticWpt()) {
     return maybeFinish
         .emplace(maybeRunAlgorithm(
             js, transformer->flush(), kj::mv(onSuccess), kj::mv(onFailure), JSG_THIS))
@@ -4909,7 +4911,7 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
 }
 
 jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
-  KJ_ASSERT(backpressure);
+  KJ_ASSERT(!!flags.backpressure);
   setBackpressure(js, false);
   return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js);
 }
@@ -4919,11 +4921,11 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
     // If a finish operation is already in progress, return the existing promise
     // or check for errors if we're being called synchronously from within another
     // finish operation.
-    if (finishStarted) {
+    if (flags.finishStarted) {
       KJ_IF_SOME(finish, maybeFinish) {
         return finish.whenResolved(js);
       }
-      // finishStarted is true but maybeFinish is not set yet - check if the stream
+      // flags.finishStarted is true but maybeFinish is not set yet - check if the stream
       // was errored during that operation.
       KJ_IF_SOME(err, getReadableErrorState(js)) {
         return js.rejectedPromise<void>(kj::mv(err));
@@ -4932,7 +4934,7 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
     }
 
     // Mark that we're starting a finish operation before running the algorithm.
-    finishStarted = true;
+    flags.finishStarted = true;
   }
 
   return maybeFinish
@@ -4991,13 +4993,13 @@ jsg::Promise<void> TransformStreamDefaultController::performTransform(
 }
 
 void TransformStreamDefaultController::setBackpressure(jsg::Lock& js, bool newBackpressure) {
-  KJ_ASSERT(newBackpressure != backpressure);
+  KJ_ASSERT(newBackpressure != !!flags.backpressure);
   KJ_IF_SOME(prp, maybeBackpressureChange) {
     prp.resolver.resolve(js);
   }
   maybeBackpressureChange = js.newPromiseAndResolver<void>();
   KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.markAsHandled(js);
-  backpressure = newBackpressure;
+  flags.backpressure = newBackpressure;
 }
 
 void TransformStreamDefaultController::errorWritableAndUnblockWrite(
@@ -5014,7 +5016,7 @@ void TransformStreamDefaultController::errorWritableAndUnblockWrite(
     }
     writable = kj::none;
   }
-  if (backpressure) {
+  if (flags.backpressure) {
     setBackpressure(js, false);
   }
 }

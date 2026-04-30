@@ -852,8 +852,12 @@ class TransformStreamDefaultController: public jsg::Object {
   kj::Maybe<jsg::Ref<WritableStream>> writable;
   kj::Maybe<jsg::Promise<void>> maybeFinish;
 
-  bool finishStarted = false;
-  bool backpressure = false;
+  struct Flags {
+    uint8_t finishStarted : 1 = 0;
+    uint8_t backpressure : 1 = 0;
+    uint8_t fixupBackpressure : 1 = 0;
+  };
+  Flags flags{};
   kj::Maybe<jsg::PromiseResolverPair<void>> maybeBackpressureChange;
 
   // Persistent transform continuation — used by performTransform() for the hot
