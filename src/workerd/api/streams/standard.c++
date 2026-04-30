@@ -1473,6 +1473,55 @@ void WritableImpl<Self>::onDrainNext(jsg::Lock& js) {
 }
 
 template <typename Self>
+typename WritableImpl<Self>::WritevContinuationType& WritableImpl<Self>::getWritevContinuation(
+    jsg::Lock& js) {
+  KJ_IF_SOME(wvc, writevContinuation) {
+    return wvc;
+  }
+  writevContinuation.emplace(WritevContinuationType::create(js, WritevContinuationCallbacks{this}));
+  return KJ_ASSERT_NONNULL(writevContinuation);
+}
+
+template <typename Self>
+jsg::Promise<void> WritableImpl<Self>::onWritevSuccess(jsg::Lock& js) {
+  auto& batch = KJ_ASSERT_NONNULL(inFlightBatchWrite);
+  amountBuffered -= batch.totalSize;
+  auto self = kj::mv(KJ_ASSERT_NONNULL(inFlightSelf));
+  inFlightSelf = kj::none;
+  // Resolve all the individual write promises.
+  for (auto& resolver: batch.resolvers) {
+    resolver.resolve(js);
+  }
+  inFlightBatchWrite = kj::none;
+  KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
+  if (!isCloseQueuedOrInFlight() && isWritable()) {
+    updateBackpressure(js);
+  }
+  if (state.template is<StreamStates::Erroring>() || writeRequests.empty()) {
+    advanceQueueIfNeeded(js, kj::mv(self));
+    return js.resolvedPromise();
+  }
+  inFlightSelf = kj::mv(self);
+  return js.resolvedPromise().thenRef(js, getDrainContinuation(js));
+}
+
+template <typename Self>
+jsg::Promise<void> WritableImpl<Self>::onWritevFailure(jsg::Lock& js, jsg::Value reason) {
+  auto& batch = KJ_ASSERT_NONNULL(inFlightBatchWrite);
+  amountBuffered -= batch.totalSize;
+  auto self = kj::mv(KJ_ASSERT_NONNULL(inFlightSelf));
+  inFlightSelf = kj::none;
+  auto jsReason = jsg::JsValue(reason.getHandle(js));
+  // Reject all the individual write promises.
+  for (auto& resolver: batch.resolvers) {
+    resolver.reject(js, jsReason);
+  }
+  inFlightBatchWrite = kj::none;
+  KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
+  return dealWithRejection(js, kj::mv(self), jsReason), js.resolvedPromise();
+}
+
+template <typename Self>
 typename WritableImpl<Self>::CloseContinuationType& WritableImpl<Self>::getCloseContinuation(
     jsg::Lock& js) {
   KJ_IF_SOME(cc, closeContinuation) {
@@ -1498,7 +1547,7 @@ void WritableImpl<Self>::onCloseFailure(jsg::Lock& js, jsg::Value reason) {
 
 template <typename Self>
 void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
-  if (!flags.started || inFlightWrite != kj::none) {
+  if (!flags.started || inFlightWrite != kj::none || inFlightBatchWrite != kj::none) {
     return;
   }
   KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
@@ -1531,6 +1580,39 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   }
 
   KJ_ASSERT(inFlightWrite == kj::none);
+  KJ_ASSERT(inFlightBatchWrite == kj::none);
+
+  // If the underlying sink supports writev and there are multiple writes queued,
+  // batch them into a single writev call.
+  if (writeRequests.size() > 1) {
+    if (underlyingSink->writev() != kj::none) {
+      auto count = writeRequests.size();
+      auto resolvers = kj::heapArrayBuilder<jsg::Promise<void>::Resolver>(count);
+      auto values = kj::heapArrayBuilder<jsg::JsValue>(count);
+      size_t totalSize = 0;
+
+      while (!writeRequests.empty()) {
+        auto req = dequeueWriteRequest();
+        values.add(req.value.getHandle(js));
+        resolvers.add(kj::mv(req.resolver));
+        totalSize += req.size;
+      }
+
+      inFlightBatchWrite = BatchWriteRequest{
+        .resolvers = resolvers.finish(),
+        .totalSize = totalSize,
+      };
+      inFlightSelf = kj::mv(self);
+
+      auto& wvc = getWritevContinuation(js);
+      // writev is a non-standard extension — always dispatch synchronously (no pedanticWpt).
+      maybeRunAlgorithmWithPersistentContinuation(js, underlyingSink->writev(), wvc,
+          values.finish(), KJ_ASSERT_NONNULL(inFlightSelf).addRef());
+      return;
+    }
+  }
+
+  // Single write dispatch.
   auto req = dequeueWriteRequest();
   auto value = req.value.getHandle(js);
   inFlightWrite = kj::mv(req);
@@ -1867,7 +1949,8 @@ jsg::Promise<void> WritableImpl<Self>::write(
 
   // Fast path: if no write is in flight and the queue is empty, dispatch immediately
   // without round-tripping the value through a JsRef (avoids a V8 global handle).
-  if (flags.started && inFlightWrite == kj::none && writeRequests.empty()) {
+  if (flags.started && inFlightWrite == kj::none && inFlightBatchWrite == kj::none &&
+      writeRequests.empty()) {
     inFlightWrite = WriteRequest{
       .resolver = kj::mv(prp.resolver),
       .value = {},  // Not stored — value is passed directly to the algorithm below.
@@ -1912,8 +1995,14 @@ void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(*pendingAbort);
   }
   visitor.visitAll(writeRequests);
+  KJ_IF_SOME(batch, inFlightBatchWrite) {
+    batch.visitForGc(visitor);
+  }
   KJ_IF_SOME(wc, writeContinuation) {
     wc.visitForGc(visitor);
+  }
+  KJ_IF_SOME(wvc, writevContinuation) {
+    wvc.visitForGc(visitor);
   }
   KJ_IF_SOME(dc, drainContinuation) {
     dc.visitForGc(visitor);
@@ -1939,6 +2028,12 @@ void WritableImpl<Self>::cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason)
     write.resolver.reject(js, reason);
   }
   writeRequests.clear();
+  KJ_IF_SOME(batch, inFlightBatchWrite) {
+    for (auto& resolver: batch.resolvers) {
+      resolver.reject(js, reason);
+    }
+    inFlightBatchWrite = kj::none;
+  }
 }
 
 // ======================================================================================
@@ -5187,6 +5282,36 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
       return js.rejectedPromise<void>(js.typeError("The WritableStream is closed"));
     };
 
+    writev_ = [selfRef = addWeakRef()](jsg::Lock& js, kj::Array<jsg::JsValue> chunks,
+                  jsg::Ref<WritableStreamDefaultController> controller) {
+      KJ_IF_SOME(self, selfRef->tryGet()) {
+        KJ_SWITCH_ONEOF(self.inner) {
+          KJ_CASE_ONEOF(closed, Closed) {
+            return js.rejectedPromise<void>(js.typeError("The WritableStream is closed"));
+          }
+          KJ_CASE_ONEOF(errored, Errored) {
+            return js.rejectedPromise<void>(js.exceptionToJs(errored.clone()));
+          }
+          KJ_CASE_ONEOF(active, IoOwn<Active>) {
+            auto& i = *active;
+            auto bytesBuilder = kj::heapArrayBuilder<kj::Array<kj::byte>>(chunks.size());
+            for (auto& chunk: chunks) {
+              KJ_IF_SOME(bytes, chunkToBytes(js, chunk)) {
+                bytesBuilder.add(kj::mv(bytes));
+              } else {
+                return js.rejectedPromise<void>(
+                    js.typeError("Chunk must be an ArrayBuffer, ArrayBufferView, "
+                                 "SharedArrayBuffer, or string."_kj));
+              }
+            }
+            return self.writev(js, i, bytesBuilder.finish());
+          }
+        }
+      }
+
+      return js.rejectedPromise<void>(js.typeError("The WritableStream is closed"));
+    };
+
     close_ = [selfRef = addWeakRef()](jsg::Lock& js) {
       KJ_IF_SOME(self, selfRef->tryGet()) {
         KJ_SWITCH_ONEOF(self.inner) {
@@ -5236,10 +5361,46 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
   kj::Rc<WeakRef<InternalUnderlyingSinkImpl>> weakRef =
       kj::rc<WeakRef<InternalUnderlyingSinkImpl>>(kj::Badge<InternalUnderlyingSinkImpl>(), *this);
 
+  // Convert a JS chunk to a byte array. Returns kj::none if the chunk type is unsupported.
+  static kj::Maybe<kj::Array<kj::byte>> chunkToBytes(jsg::Lock& js, jsg::JsValue chunk) {
+    KJ_IF_SOME(ab, chunk.tryCast<jsg::JsArrayBuffer>()) {
+      return ab.copy();
+    }
+    KJ_IF_SOME(sab, chunk.tryCast<jsg::JsSharedArrayBuffer>()) {
+      return sab.copy();
+    }
+    KJ_IF_SOME(view, chunk.tryCast<jsg::JsArrayBufferView>()) {
+      return kj::heapArray<kj::byte>(view.asArrayPtr());
+    }
+    KJ_IF_SOME(str, chunk.tryCast<jsg::JsString>()) {
+      auto kjstr = str.toDOMString(js);
+      auto bytes = kj::heapArray<kj::byte>(kjstr.size());
+      memcpy(bytes.begin(), kjstr.begin(), kjstr.size());
+      return kj::mv(bytes);
+    }
+    return kj::none;
+  }
+
   jsg::Promise<void> write(jsg::Lock& js, Active& active, kj::Array<kj::byte> chunk) {
     auto& ioContext = IoContext::current();
     auto promise = active.canceler.wrap(active.out->write(chunk).attach(kj::mv(chunk)))
                        .catch_([selfRef = addWeakRef()](auto exception) -> kj::Promise<void> {
+      selfRef->runIfAlive([&](auto& self) { self.inner = exception.clone(); });
+      return kj::mv(exception);
+    });
+    return ioContext.awaitIo(js, kj::mv(promise));
+  }
+
+  jsg::Promise<void> writev(jsg::Lock& js, Active& active, kj::Array<kj::Array<kj::byte>> chunks) {
+    auto& ioContext = IoContext::current();
+    // Build the pieces array for the kj sink's vectorized write.
+    auto pieces = kj::heapArray<kj::ArrayPtr<const kj::byte>>(chunks.size());
+    for (size_t i = 0; i < chunks.size(); i++) {
+      pieces[i] = chunks[i];
+    }
+    auto promise =
+        active.canceler.wrap(active.out->write(pieces).attach(kj::mv(pieces), kj::mv(chunks)))
+            .catch_([selfRef = addWeakRef()](auto exception) -> kj::Promise<void> {
       selfRef->runIfAlive([&](auto& self) { self.inner = exception.clone(); });
       return kj::mv(exception);
     });

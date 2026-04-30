@@ -185,6 +185,12 @@ class UnderlyingSinkImpl {
   using CloseAlgorithm = UnderlyingSink::CloseAlgorithm;
   using SizeAlgorithm = StreamQueuingStrategy::SizeAlgorithm;
 
+  // Non-standard extension: vectorized write algorithm. When set, allows the stream
+  // to batch multiple queued writes into a single call. Only set by internal C++ sinks
+  // that support vectorized I/O, never by user-provided JS sinks.
+  using WritevAlgorithm = jsg::Promise<void>(
+      kj::Array<jsg::JsValue>, jsg::Ref<WritableStreamDefaultController>);
+
   UnderlyingSinkImpl(jsg::Lock& js, UnderlyingSink sink, StreamQueuingStrategy strategy);
   virtual ~UnderlyingSinkImpl() noexcept(false) = default;
   KJ_DISALLOW_COPY_AND_MOVE(UnderlyingSinkImpl);
@@ -208,6 +214,9 @@ class UnderlyingSinkImpl {
   inline kj::Maybe<jsg::Function<SizeAlgorithm>>& size() {
     return size_;
   }
+  inline kj::Maybe<jsg::Function<WritevAlgorithm>>& writev() {
+    return writev_;
+  }
 
   void clearStart() {
     start_ = kj::none;
@@ -216,6 +225,7 @@ class UnderlyingSinkImpl {
   void clear() {
     start_ = kj::none;
     write_ = kj::none;
+    writev_ = kj::none;
     abort_ = kj::none;
     close_ = kj::none;
     size_ = kj::none;
@@ -224,19 +234,21 @@ class UnderlyingSinkImpl {
   JSG_MEMORY_INFO(UnderlyingSinkImpl) {
     tracker.trackField("start", start_);
     tracker.trackField("write", write_);
+    tracker.trackField("writev", writev_);
     tracker.trackField("abort", abort_);
     tracker.trackField("close", close_);
     tracker.trackField("size", size_);
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(start_, write_, abort_, close_, size_);
+    visitor.visit(start_, write_, writev_, abort_, close_, size_);
   }
 
  protected:
   UnderlyingSinkImpl() = default;
   kj::Maybe<jsg::Function<StartAlgorithm>> start_;
   kj::Maybe<jsg::Function<WriteAlgorithm>> write_;
+  kj::Maybe<jsg::Function<WritevAlgorithm>> writev_;
   kj::Maybe<jsg::Function<AbortAlgorithm>> abort_;
   kj::Maybe<jsg::Function<CloseAlgorithm>> close_;
   kj::Maybe<jsg::Function<SizeAlgorithm>> size_;

@@ -390,6 +390,21 @@ class WritableImpl {
   RingBuffer<WriteRequest, 8> writeRequests;
 
   kj::Maybe<WriteRequest> inFlightWrite;
+
+  // Batch write: when writev is used, multiple WriteRequests are in flight simultaneously.
+  // Each has its own resolver that gets resolved/rejected when the batch completes.
+  struct BatchWriteRequest {
+    kj::Array<jsg::Promise<void>::Resolver> resolvers;
+    size_t totalSize;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      for (auto& resolver: resolvers) {
+        visitor.visit(resolver);
+      }
+    }
+  };
+  kj::Maybe<BatchWriteRequest> inFlightBatchWrite;
+
   kj::Maybe<jsg::Promise<void>::Resolver> inFlightClose;
   kj::Maybe<jsg::Promise<void>::Resolver> closeRequest;
   kj::Maybe<kj::Own<PendingAbort>> maybePendingAbort;
@@ -420,6 +435,27 @@ class WritableImpl {
   WriteContinuationType& getWriteContinuation(jsg::Lock& js);
   jsg::Promise<void> onWriteSuccess(jsg::Lock& js);
   jsg::Promise<void> onWriteFailure(jsg::Lock& js, jsg::Value reason);
+
+  // Persistent writev continuation — used when the underlying sink supports batch writes.
+  struct WritevContinuationCallbacks {
+    WritableImpl* impl;
+
+    jsg::Promise<void> thenFunc(jsg::Lock& js) {
+      return impl->onWritevSuccess(js);
+    }
+
+    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
+      return impl->onWritevFailure(js, kj::mv(reason));
+    }
+  };
+  using WritevContinuationType =
+      jsg::PersistentContinuation<WritevContinuationCallbacks, void, jsg::Promise<void>>;
+
+  kj::Maybe<WritevContinuationType> writevContinuation;
+
+  WritevContinuationType& getWritevContinuation(jsg::Lock& js);
+  jsg::Promise<void> onWritevSuccess(jsg::Lock& js);
+  jsg::Promise<void> onWritevFailure(jsg::Lock& js, jsg::Value reason);
 
   // Persistent close continuation — same pattern as write continuation.
   struct CloseContinuationCallbacks {
