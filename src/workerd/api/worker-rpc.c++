@@ -430,41 +430,33 @@ rpc::JsRpcTarget::Client JsRpcProperty::getClientForOneCall(
   return result;
 }
 
-kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionClient(
-    IoContext& ioContext, kj::Vector<kj::StringPtr>& path) {
+kj::Maybe<kj::Own<WorkerInterface>> Fetcher::tryGetJsRpcSessionClient(IoContext& ioContext,
+    kj::Vector<kj::StringPtr>& path,
+    SpanParent internalSpanParent,
+    SpanParent userSpanParent) {
   // Fetcher is the root of the call chain; do not extend `path`.
   (void)path;
 
-  // For channel variants we create a fresh jsRpcSession user span (returned to callImpl,
-  // which moves it into the JsRpcSessionCustomEvent) and an internal trace span (attached
-  // to the WorkerInterface so it lives the session). Both are plumbed into
-  // SubrequestMetadata so the callee's onset event reports them as parents.
-  //
-  // OutgoingFactory variants (DurableObject stubs, cross-process actors) already produce
-  // their own outer span (e.g. durable_object_subrequest) and would only get redundant
-  // nesting from a jsRpcSession on top, so we return an unobserved SpanBuilder instead.
-  auto withSessionSpan = [&](auto startRequest, auto metadataExtra) -> JsRpcSessionClient {
-    auto internalSpan = ioContext.makeTraceSpan("jsRpcCall"_kjc);
-    auto sessionSpan =
-        ioContext.getCurrentUserTraceSpan().newChild("jsRpcCall"_kjc, ioContext.now());
-    auto internalSpanParent = SpanParent(internalSpan);
-    auto sessionSpanParent = SpanParent(sessionSpan);
-    auto worker = ioContext.getSubrequest([&](TraceContext&, IoChannelFactory& channelFactory) {
+  // Channel variants plumb the (callImpl-owned) span parents into SubrequestMetadata so
+  // the callee's onset event reports them as parents. OutgoingFactory variants build
+  // their own metadata internally (creating their own durable_object_subrequest etc.)
+  // and ignore the parents; callImpl's jsRpcCall:client span will appear as a sibling
+  // of those factory-emitted spans rather than a parent.
+  auto buildWorker = [&](auto startRequest, auto metadataExtra) -> kj::Own<WorkerInterface> {
+    return ioContext.getSubrequest([&](TraceContext&, IoChannelFactory& channelFactory) {
       IoChannelFactory::SubrequestMetadata metadata{
         .parentSpan = internalSpanParent.addRef(),
-        .userSpanParent = sessionSpanParent.addRef(),
+        .userSpanParent = userSpanParent.addRef(),
       };
       metadataExtra(metadata);
       return startRequest(channelFactory, kj::mv(metadata));
     }, {.inHouse = isInHouse, .wrapMetrics = !isInHouse});
-    worker = worker.attach(kj::mv(internalSpan));
-    return {kj::mv(worker), kj::mv(sessionSpan)};
   };
 
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     // Service binding (e.g. env.MyService).
     KJ_CASE_ONEOF(channel, uint) {
-      return withSessionSpan(
+      return buildWorker(
           [&](IoChannelFactory& channelFactory, IoChannelFactory::SubrequestMetadata metadata) {
         return channelFactory.startSubrequest(channel, kj::mv(metadata));
       }, [&](IoChannelFactory::SubrequestMetadata& metadata) {
@@ -474,23 +466,17 @@ kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionCl
     }
     // Direct in-process channel handle.
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      return withSessionSpan([&](IoChannelFactory&, IoChannelFactory::SubrequestMetadata metadata) {
+      return buildWorker([&](IoChannelFactory&, IoChannelFactory::SubrequestMetadata metadata) {
         return channel->startRequest(kj::mv(metadata));
       }, [](IoChannelFactory::SubrequestMetadata&) {});
     }
     // DurableObject stub: factory builds durable_object_subrequest internally.
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
-      return JsRpcSessionClient{
-        .worker = outgoingFactory->newSingleUseClient(kj::none),
-        .sessionSpan = SpanBuilder(nullptr),
-      };
+      return outgoingFactory->newSingleUseClient(kj::none);
     }
     // Cross-process actor: factory builds its own outer span.
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
-      return JsRpcSessionClient{
-        .worker = outgoingFactory->newSingleUseClient(ioContext, kj::none),
-        .sessionSpan = SpanBuilder(nullptr),
-      };
+      return outgoingFactory->newSingleUseClient(ioContext, kj::none);
     }
   }
   KJ_UNREACHABLE;
@@ -535,34 +521,44 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
   try {
     return js.tryCatch([&]() -> JsRpcPromiseAndPipeline {
       // Two ways into the cap:
-      //   * tryGetJsRpcSessionClient() for session-creating providers (Fetcher) -- starts a
-      //     fresh jsRpc session over a new membrane and hands back the WorkerInterface plus
-      //     the user-facing jsRpcSession span (unobserved when the channel layer doesn't
-      //     want one, e.g. DurableObject stubs).
+      //   * tryGetJsRpcSessionClient() for session-creating providers (Fetcher) -- starts
+      //     a fresh jsRpc session over a new membrane. callImpl owns the client-side
+      //     jsRpcCall user span and the matching internal trace span (created here so the
+      //     parent IDs are available for SubrequestMetadata propagation to the callee).
       //   * getClientForOneCall() for cap-holding providers (JsRpcStub, JsRpcPromise) --
       //     pipelines on an already-open session via an existing capability. No new
-      //     session, so no jsRpcSession span here. (Future: this branch will own a
+      //     session, so no spans here today. (Future: this branch will own a
       //     jsRpcTargetCall span for observability of nested method calls.)
       // `path` is the chain of property names leading to the method being invoked.
       auto& ioContext = IoContext::current();
       rpc::JsRpcTarget::Client client(nullptr);
       kj::Vector<kj::StringPtr> path;
+      // Materialise the per-call client spans up front: the user span (jsRpcCall, what
+      // shows up in tail streams and what enrichBindingSpan writes to) and an internal
+      // trace span for downstream subrequest propagation. Both are constructed
+      // unconditionally; for DurableObject paths the channel layer ignores the parents
+      // and emits durable_object_subrequest as a sibling rather than a child.
+      auto internalSpan = ioContext.makeTraceSpan("jsRpcCall"_kjc);
+      auto jsRpcCallSpan =
+          ioContext.getCurrentUserTraceSpan().newChild("jsRpcCall"_kjc, ioContext.now());
       // Try the session path with a scratch `path` vector; only commit it on success. This
       // means forwarders (JsRpcProperty) can append unconditionally without worrying about
       // double-counting on the getClientForOneCall() fallback below.
       kj::Vector<kj::StringPtr> sessionPath;
-      KJ_IF_SOME(sessionClient, parent.tryGetJsRpcSessionClient(ioContext, sessionPath)) {
+      KJ_IF_SOME(worker,
+          parent.tryGetJsRpcSessionClient(
+              ioContext, sessionPath, SpanParent(internalSpan), SpanParent(jsRpcCallSpan))) {
         path = kj::mv(sessionPath);
-        // Move the user span into the event so callImpl's response lambda can apply
-        // enrichment to it. (Unobserved when the channel layer didn't want one.)
-        auto event =
-            kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE,
-                kj::none, kj::mv(sessionClient.sessionSpan));
+        // Internal span lives with the worker (= the session); user span moves into the
+        // event so callImpl's response lambda can apply enrichment to it.
+        auto attachedWorker = kj::mv(worker).attach(kj::mv(internalSpan));
+        auto event = kj::heap<api::JsRpcSessionCustomEvent>(
+            JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE, kj::none, kj::mv(jsRpcCallSpan));
         client = event->getCap();
         // Cancel the CustomEvent if our I/O context is destroyed; ignore errors because the
         // membrane already propagates exceptions to in-flight RPC calls.
-        ioContext.addTask(sessionClient.worker->customEvent(kj::mv(event))
-                              .attach(kj::mv(sessionClient.worker))
+        ioContext.addTask(attachedWorker->customEvent(kj::mv(event))
+                              .attach(kj::mv(attachedWorker))
                               .then([](auto&&) {}, [](kj::Exception&&) {}));
       } else {
         client = parent.getClientForOneCall(js, path);
