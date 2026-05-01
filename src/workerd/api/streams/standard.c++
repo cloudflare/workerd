@@ -7,6 +7,7 @@
 #include "readable.h"
 #include "writable.h"
 
+#include <workerd/api/util.h>
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/autogate.h>
@@ -807,6 +808,10 @@ class ReadableStreamJsController final: public ReadableStreamController {
   explicit ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer);
   ~ReadableStreamJsController() noexcept(false);
 
+  bool isInternal() const override;
+
+  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() override;
+
   jsg::Ref<ReadableStream> addRef() override;
 
   void setup(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source) override;
@@ -1127,6 +1132,9 @@ class WritableStreamJsController final: public WritableStreamController {
   };
   PipeFlags pipeFlags;
 
+  kj::Rc<WeakRef<WritableStreamJsController>> weakSelf =
+      kj::rc<WeakRef<WritableStreamJsController>>(kj::Badge<WritableStreamJsController>{}, *this);
+
   kj::Maybe<IoContext&> ioContext;
   kj::Maybe<WritableStream&> owner;
 
@@ -1168,6 +1176,26 @@ ReadableImpl<Self>::ReadableImpl(
     : state(State::template create<Queue>(source->getHighWaterMark())),
       underlyingSource(kj::mv(source)),
       weakController(kj::mv(weakController)) {}
+
+template <typename Self>
+kj::Maybe<UnderlyingSourceImpl::Tee> ReadableImpl<Self>::tryTeeSource(uint64_t limit) {
+  if (underlyingSource.get() == nullptr) return kj::none;
+  if (flags.pulling) return kj::none;
+  return underlyingSource->tryTee(limit);
+}
+
+template <typename Self>
+kj::Maybe<kj::Own<ReadableStreamSource>> ReadableImpl<Self>::tryReleaseSource() {
+  if (underlyingSource.get() == nullptr) return kj::none;
+  if (flags.pulling) return kj::none;
+  return underlyingSource->tryReleaseSource();
+}
+
+template <typename Self>
+bool ReadableImpl<Self>::isInternal() const {
+  if (underlyingSource.get() == nullptr) return false;
+  return underlyingSource->isInternal();
+}
 
 template <typename Self>
 void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
@@ -1468,6 +1496,28 @@ WritableImpl<Self>::WritableImpl(jsg::Lock& js,
   auto featureFlags = FeatureFlags::get(js);
   flags.pedanticWpt = featureFlags.getPedanticWpt();
   flags.specCompliantWriter = featureFlags.getWritableStreamSpecCompliantWriter();
+}
+
+template <typename Self>
+bool WritableImpl<Self>::isInternal() const {
+  if (underlyingSink.get() == nullptr) return false;
+  return underlyingSink->isInternal();
+}
+
+template <typename Self>
+kj::Maybe<kj::Own<WritableStreamSink>> WritableImpl<Self>::tryReleaseSink() {
+  if (underlyingSink.get() == nullptr) return kj::none;
+  if (inFlightWrite != kj::none || inFlightBatchWrite != kj::none || inFlightClose != kj::none ||
+      !writeRequests.empty()) {
+    return kj::none;
+  }
+  return underlyingSink->tryReleaseSink();
+}
+
+template <typename Self>
+kj::Maybe<WritableStreamSink&> WritableImpl<Self>::tryGetSink() {
+  if (underlyingSink.get() == nullptr) return kj::none;
+  return underlyingSink->tryGetSink();
 }
 
 template <typename Self>
@@ -2696,6 +2746,18 @@ ReadableStreamDefaultController::~ReadableStreamDefaultController() noexcept(fal
   clearAlgorithms();
 }
 
+kj::Maybe<UnderlyingSourceImpl::Tee> ReadableStreamDefaultController::tryTeeSource(uint64_t limit) {
+  return impl.tryTeeSource(limit);
+}
+
+kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamDefaultController::tryReleaseSource() {
+  return impl.tryReleaseSource();
+}
+
+bool ReadableStreamDefaultController::isInternal() const {
+  return impl.isInternal();
+}
+
 void ReadableStreamDefaultController::clearAlgorithms() {
   auto _ KJ_UNUSED = kj::mv(impl.underlyingSource);
   impl.pullContinuation = kj::none;
@@ -2972,6 +3034,18 @@ ReadableByteStreamController::~ReadableByteStreamController() noexcept(false) {
   clearAlgorithms();
 }
 
+kj::Maybe<UnderlyingSourceImpl::Tee> ReadableByteStreamController::tryTeeSource(uint64_t limit) {
+  return impl.tryTeeSource(limit);
+}
+
+kj::Maybe<kj::Own<ReadableStreamSource>> ReadableByteStreamController::tryReleaseSource() {
+  return impl.tryReleaseSource();
+}
+
+bool ReadableByteStreamController::isInternal() const {
+  return impl.isInternal();
+}
+
 void ReadableByteStreamController::clearAlgorithms() {
   auto _ KJ_UNUSED = kj::mv(impl.underlyingSource);
   impl.pullContinuation = kj::none;
@@ -3111,6 +3185,66 @@ ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ValueReada
 ReadableStreamJsController::ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer)
     : ioContext(tryGetIoContext()) {
   state.transitionTo<kj::Own<ByteReadable>>(consumer.clone(js, *this));
+}
+
+bool ReadableStreamJsController::isInternal() const {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(initial, Initial) {
+      return false;
+    }
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return false;
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return false;
+    }
+    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+      KJ_IF_SOME(s, consumer->state) {
+        return s.controller->isInternal();
+      }
+      return false;
+    }
+    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+      KJ_IF_SOME(s, consumer->state) {
+        return s.controller->isInternal();
+      }
+      return false;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamJsController::tryReleaseSource() {
+  if (isLockedToReader()) return kj::none;
+  if (disturbed) return kj::none;
+  auto tryRelease = [&](auto& consumer) -> kj::Maybe<kj::Own<ReadableStreamSource>> {
+    KJ_IF_SOME(s, consumer->state) {
+      KJ_IF_SOME(source, s.controller->tryReleaseSource()) {
+        disturbed = true;
+        state.transitionTo<StreamStates::Closed>();
+        return kj::mv(source);
+      }
+    }
+    return kj::none;
+  };
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(initial, Initial) {
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+      return tryRelease(consumer);
+    }
+    KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+      return tryRelease(consumer);
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
@@ -3430,6 +3564,23 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
     };
   }
 
+  auto trySourceTee = [&](auto& consumer) -> kj::Maybe<Tee> {
+    auto& s = KJ_ASSERT_NONNULL(consumer->state);
+    auto limit = IoContext::current().getLimitEnforcer().getBufferingLimit();
+    KJ_IF_SOME(tee, s.controller->tryTeeSource(limit)) {
+      state.transitionTo<StreamStates::Closed>();
+      auto stream1 = js.alloc<ReadableStream>(newReadableStreamJsController());
+      auto stream2 = js.alloc<ReadableStream>(newReadableStreamJsController());
+      stream1->getController().setup(js, kj::mv(tee.branch1));
+      stream2->getController().setup(js, kj::mv(tee.branch2));
+      return Tee{
+        .branch1 = kj::mv(stream1),
+        .branch2 = kj::mv(stream2),
+      };
+    }
+    return kj::none;
+  };
+
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {
       // Stream not yet set up, treat as closed.
@@ -3457,6 +3608,9 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       };
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+      KJ_IF_SOME(tee, trySourceTee(consumer)) {
+        return kj::mv(tee);
+      }
       KJ_DEFER(state.transitionTo<StreamStates::Closed>());
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
@@ -3466,6 +3620,9 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       };
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+      KJ_IF_SOME(tee, trySourceTee(consumer)) {
+        return kj::mv(tee);
+      }
       KJ_DEFER(state.transitionTo<StreamStates::Closed>());
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
@@ -3941,6 +4098,30 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
   // This operation leaves the stream locked and disturbed. The loop will read until
   // the stream is closed or errored. If the limit is reached, the loop will error.
 
+  // Try to extract the underlying kj source for direct readAll.
+  auto trySourceReadAll = [&](auto& consumer) -> kj::Maybe<jsg::Promise<T>> {
+    auto& s = KJ_ASSERT_NONNULL(consumer->state);
+    KJ_IF_SOME(source, s.controller->tryReleaseSource()) {
+      state.transitionTo<StreamStates::Closed>();
+      auto& context = IoContext::current();
+      if constexpr (kj::isSameType<T, jsg::JsRef<jsg::JsArrayBuffer>>()) {
+        return context.awaitIoLegacy(js, source->readAllBytes(limit).attach(kj::mv(source)))
+            .then(
+                js, [](jsg::Lock& js, kj::Array<kj::byte> bytes) -> jsg::JsRef<jsg::JsArrayBuffer> {
+          auto ab = jsg::JsArrayBuffer::create(js, bytes);
+          return ab.addRef(js);
+        });
+      } else {
+        auto option = ReadAllTextOption::NULL_TERMINATE;
+        if (stripBom) {
+          option |= ReadAllTextOption::STRIP_BOM;
+        }
+        return context.awaitIoLegacy(js, source->readAllText(limit, option).attach(kj::mv(source)));
+      }
+    }
+    return kj::none;
+  };
+
   const auto readAll = [this, limit, stripBom](auto& js) -> jsg::Promise<T> {
     KJ_ASSERT(lock.lock());
     // The AllReader will hold a traceable reference to the ReadableStream.
@@ -3995,9 +4176,15 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
       return js.rejectedPromise<T>(errored.addRef(js));
     }
     KJ_CASE_ONEOF(valueReadable, kj::Own<ValueReadable>) {
+      KJ_IF_SOME(result, trySourceReadAll(valueReadable)) {
+        return kj::mv(result);
+      }
       return readAll(js);
     }
     KJ_CASE_ONEOF(byteReadable, kj::Own<ByteReadable>) {
+      KJ_IF_SOME(result, trySourceReadAll(byteReadable)) {
+        return kj::mv(result);
+      }
       return readAll(js);
     }
   }
@@ -4066,7 +4253,44 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 
   // This operation will leave the ReadableStream locked and disturbed. It will consume
   // the stream until it either closed or errors.
-  //
+
+  // Try to extract the underlying kj source for deferred-proxy-capable pumping.
+  auto trySourcePump = [&](auto& consumer) -> kj::Maybe<kj::Promise<DeferredProxy<void>>> {
+    auto& s = KJ_ASSERT_NONNULL(consumer->state);
+    KJ_IF_SOME(source, s.controller->tryReleaseSource()) {
+      // Source extracted — close this stream and pump at the kj level.
+      state.transitionTo<StreamStates::Closed>();
+      // Use the same Holder pattern as ReadableStreamInternalController::pumpTo
+      // to ensure cancellation propagates if the pump is dropped.
+      struct Holder: public kj::Refcounted {
+        kj::Own<WritableStreamSink> sink;
+        kj::Own<ReadableStreamSource> source;
+        bool done = false;
+        Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
+            : sink(kj::mv(sink)),
+              source(kj::mv(source)) {}
+        ~Holder() noexcept(false) {
+          if (!done) {
+            source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
+          }
+        }
+      };
+      auto holder = kj::rc<Holder>(kj::mv(sink), kj::mv(source));
+      return holder->source->pumpTo(*holder->sink, end)
+          .then(
+              [holder = holder.addRef()](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
+        proxy.proxyTask = proxy.proxyTask.attach(holder.addRef());
+        holder->done = true;
+        return kj::mv(proxy);
+      }, [holder = holder.addRef()](kj::Exception&& ex) mutable {
+        holder->sink->abort(ex.clone());
+        holder->source->cancel(ex.clone());
+        holder->done = true;
+        return kj::mv(ex);
+      });
+    }
+    return kj::none;
+  };
 
   const auto handlePump = [&] {
     auto reader = KJ_ASSERT_NONNULL(DrainingReader::create(js, *this->addRef()),
@@ -4087,9 +4311,15 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
       return js.exceptionToKj(errored.addRef(js));
     }
     KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
+      KJ_IF_SOME(result, trySourcePump(readable)) {
+        return kj::mv(result);
+      }
       return handlePump();
     }
     KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
+      KJ_IF_SOME(result, trySourcePump(readable)) {
+        return kj::mv(result);
+      }
       return handlePump();
     }
   }
@@ -4107,6 +4337,18 @@ WritableStreamDefaultController::WritableStreamDefaultController(jsg::Lock& js,
           kj::Badge<WritableStreamDefaultController>{}, *this)),
       ioContext(tryGetIoContext()),
       impl(js, owner, kj::mv(underlyingSink), kj::mv(abortSignal), weakSelf.addRef()) {}
+
+bool WritableStreamDefaultController::isInternal() const {
+  return impl.isInternal();
+}
+
+kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamDefaultController::tryReleaseSink() {
+  return impl.tryReleaseSink();
+}
+
+kj::Maybe<WritableStreamSink&> WritableStreamDefaultController::tryGetSink() {
+  return impl.tryGetSink();
+}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(jsg::Lock& js, jsg::JsValue reason) {
   return impl.abort(js, JSG_THIS, reason);
@@ -4183,6 +4425,7 @@ WritableStreamDefaultController::~WritableStreamDefaultController() noexcept(fal
 WritableStreamJsController::WritableStreamJsController(): ioContext(tryGetIoContext()) {}
 
 WritableStreamJsController::~WritableStreamJsController() noexcept(false) {
+  weakSelf->invalidate();
   // Clear algorithms to break circular references during destruction
   KJ_IF_SOME(controller, state.tryGetUnsafe<Controller>()) {
     controller->clearAlgorithms();
@@ -4478,12 +4721,91 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
   // This method will return a JavaScript promise that is resolved when the pipe operation
   // completes, or is rejected if the pipe operation is aborted or errored.
 
+  auto preventAbort = options.preventAbort.orDefault(false);
+  auto preventClose = options.preventClose.orDefault(false);
+  auto preventCancel = options.preventCancel.orDefault(false);
+  auto pipeThrough = options.pipeThrough;
+
+  // If both source and destination are backed by internal kj streams, use the
+  // kj-level pump directly, bypassing the JS pipe loop. The source is extracted
+  // (consumed) but the sink is accessed by reference — the controller retains
+  // ownership so the writable remains usable if preventClose is true.
+  KJ_IF_SOME(controller, state.tryGetUnsafe<Controller>()) {
+    if (controller->isInternal() && source->getController().isInternal()) {
+      auto& sinkRef = KJ_ASSERT_NONNULL(controller->tryGetSink());
+      auto kjSource = KJ_ASSERT_NONNULL(source->getController().tryReleaseSource());
+      lock.pipeLock(KJ_ASSERT_NONNULL(owner), source.addRef(), options);
+      auto end = preventClose ? End::NO : End::YES;
+      auto& ioCtx = IoContext::current();
+      struct Holder: public kj::Refcounted {
+        kj::Own<ReadableStreamSource> source;
+        bool done = false;
+        explicit Holder(kj::Own<ReadableStreamSource> source): source(kj::mv(source)) {}
+        ~Holder() noexcept(false) {
+          if (!done) {
+            source->cancel(KJ_EXCEPTION(DISCONNECTED, "pipe canceled"));
+          }
+        }
+      };
+      auto holder = kj::rc<Holder>(kj::mv(kjSource));
+      auto promise = holder->source->pumpTo(sinkRef, end)
+                         .then([holder = holder.addRef()](DeferredProxy<void> proxy) mutable {
+        holder->done = true;
+        return kj::mv(proxy.proxyTask);
+      }, [holder = holder.addRef()](kj::Exception&& ex) mutable -> kj::Promise<void> {
+        holder->source->cancel(ex.clone());
+        holder->done = true;
+        kj::throwFatalException(kj::mv(ex));
+      });
+      KJ_IF_SOME(signal, options.signal) {
+        promise = signal->wrap(js, kj::mv(promise));
+      }
+      auto result = ioCtx.awaitIo(js, kj::mv(promise))
+                        .then(js,
+                            [weak = weakSelf.addRef(), preventClose](jsg::Lock& js) {
+        weak->runIfAlive([&](auto& self) {
+          KJ_IF_SOME(l, self.lock.tryGetPipe()) {
+            l.source.release(js);
+          }
+          self.lock.releasePipeLock();
+          if (!preventClose) {
+            self.doClose(js);
+          }
+        });
+        return js.resolvedPromise();
+      },
+                            [weak = weakSelf.addRef(), preventAbort, preventCancel, pipeThrough](
+                                jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
+        auto handle = jsg::JsValue(reason.getHandle(js));
+        weak->runIfAlive([&](auto& self) {
+          KJ_IF_SOME(l, self.lock.tryGetPipe()) {
+            if (!preventCancel) {
+              l.source.release(js, handle);
+            } else {
+              l.source.release(js);
+            }
+            if (!preventAbort) {
+              self.doError(js, handle);
+            }
+          }
+          self.lock.releasePipeLock();
+        });
+        return rejectedMaybeHandledPromise<void>(
+            js, handle, pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
+      });
+      if (pipeThrough) {
+        result.markAsHandled(js);
+      }
+      return kj::mv(result);
+    }
+  }
+
   // Let's also acquire the destination pipe lock.
   lock.pipeLock(KJ_ASSERT_NONNULL(owner), kj::mv(source), options);
 
   // Cache pipe flags for use by the persistent continuations.
-  pipeFlags.preventCancel = options.preventCancel.orDefault(false);
-  pipeFlags.pipeThrough = options.pipeThrough;
+  pipeFlags.preventCancel = preventCancel;
+  pipeFlags.pipeThrough = pipeThrough;
 
   return pipeLoop(js).then(js, JSG_VISITABLE_LAMBDA((ref = addRef()), (ref), (auto& js){}));
 }
@@ -5352,6 +5674,9 @@ jsg::Ref<ReadableStream> ReadableStream::from(
 namespace {
 
 class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
+ private:
+  struct Closed {};
+
  public:
   InternalUnderlyingSourceImpl(IoContext& context, kj::Own<ReadableStreamSource> in)
       : inner(context.addObject(kj::heap<Active>(kj::mv(in)))) {
@@ -5437,11 +5762,98 @@ class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
     };
   }
 
+  InternalUnderlyingSourceImpl(Closed closed, bool isBytes): inner(closed) {
+    isBytes_ = isBytes;
+    start_ = [](jsg::Lock& js, auto controller) {
+      // Use the controller variant to call error() on it
+      KJ_SWITCH_ONEOF(controller) {
+        KJ_CASE_ONEOF(byteCtrl, jsg::Ref<ReadableByteStreamController>) {
+          byteCtrl->close(js);
+        }
+        KJ_CASE_ONEOF(defaultCtrl, jsg::Ref<ReadableStreamDefaultController>) {
+          defaultCtrl->close(js);
+        }
+      }
+      return js.resolvedPromise();
+    };
+  }
+  InternalUnderlyingSourceImpl(kj::Exception error, bool isBytes): inner(error.clone()) {
+    isBytes_ = isBytes;
+    start_ = [error = kj::mv(error)](jsg::Lock& js, auto controller) mutable {
+      // Use the controller variant to call error() on it
+      KJ_SWITCH_ONEOF(controller) {
+        KJ_CASE_ONEOF(byteCtrl, jsg::Ref<ReadableByteStreamController>) {
+          byteCtrl->error(js, js.exceptionToJsValue(kj::mv(error)).getHandle(js));
+        }
+        KJ_CASE_ONEOF(defaultCtrl, jsg::Ref<ReadableStreamDefaultController>) {
+          defaultCtrl->error(js, js.exceptionToJsValue(kj::mv(error)).getHandle(js));
+        }
+      }
+      return js.resolvedPromise();
+    };
+  }
+
   ~InternalUnderlyingSourceImpl() noexcept(false) {
     weakRef->invalidate();
   }
 
   KJ_DISALLOW_COPY_AND_MOVE(InternalUnderlyingSourceImpl);
+
+  bool isInternal() const override {
+    return true;
+  }
+
+  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() override {
+    KJ_IF_SOME(active, inner.tryGet<IoOwn<Active>>()) {
+      auto& a = *active;
+      KJ_REQUIRE(a.canceler.isEmpty(), "Cannot release source while there are pending operations");
+      auto sink = kj::mv(active->source);
+      inner.template init<Closed>();
+      return kj::mv(sink);
+    }
+    return kj::none;
+  }
+
+  kj::Maybe<Tee> tryTee(uint64_t limit) override {
+    auto& ioContext = IoContext::current();
+    KJ_SWITCH_ONEOF(inner) {
+      KJ_CASE_ONEOF(active, IoOwn<Active>) {
+        auto& a = *active;
+        KJ_REQUIRE(a.canceler.isEmpty(), "Cannot tee while there are pending operations");
+        auto source = kj::mv(a.source);
+        // Try the source's own optimized tee first.
+        KJ_IF_SOME(tee, source->tryTee(limit)) {
+          inner.init<Closed>();
+          return Tee{
+            .branch1 = kj::heap<InternalUnderlyingSourceImpl>(ioContext, kj::mv(tee.branches[0])),
+            .branch2 = kj::heap<InternalUnderlyingSourceImpl>(ioContext, kj::mv(tee.branches[1])),
+          };
+        }
+        // Fall back to kj::newTee.
+        auto tee = kj::newTee(kj::heap<TeeAdapter>(kj::mv(source)), limit);
+        inner.init<Closed>();
+        return Tee{
+          .branch1 = kj::heap<InternalUnderlyingSourceImpl>(
+              ioContext, kj::heap<TeeBranch>(newTeeErrorAdapter(kj::mv(tee.branches[0])))),
+          .branch2 = kj::heap<InternalUnderlyingSourceImpl>(
+              ioContext, kj::heap<TeeBranch>(newTeeErrorAdapter(kj::mv(tee.branches[1])))),
+        };
+      }
+      KJ_CASE_ONEOF(closed, Closed) {
+        return Tee{
+          .branch1 = kj::heap<InternalUnderlyingSourceImpl>(Closed{}, isBytes_),
+          .branch2 = kj::heap<InternalUnderlyingSourceImpl>(Closed{}, isBytes_),
+        };
+      }
+      KJ_CASE_ONEOF(errored, Errored) {
+        return Tee{
+          .branch1 = kj::heap<InternalUnderlyingSourceImpl>(errored.clone(), isBytes_),
+          .branch2 = kj::heap<InternalUnderlyingSourceImpl>(errored.clone(), isBytes_),
+        };
+      }
+    }
+    KJ_UNREACHABLE;
+  }
 
  private:
   struct Active {
@@ -5449,7 +5861,6 @@ class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
     kj::Canceler canceler;
     Active(kj::Own<ReadableStreamSource> source): source(kj::mv(source)) {}
   };
-  struct Closed {};
   using Errored = kj::Exception;
   kj::OneOf<IoOwn<Active>, Closed, Errored> inner;
 
@@ -5580,13 +5991,24 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
 
   KJ_DISALLOW_COPY_AND_MOVE(InternalUnderlyingSinkImpl);
 
-  kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() {
+  bool isInternal() const override {
+    return true;
+  }
+
+  kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() override {
     KJ_IF_SOME(active, inner.tryGet<IoOwn<Active>>()) {
       auto& a = *active;
       KJ_REQUIRE(a.canceler.isEmpty(), "Cannot release sink while there are pending operations");
       auto sink = kj::mv(active->out);
       inner.template init<Closed>();
       return kj::mv(sink);
+    }
+    return kj::none;
+  }
+
+  kj::Maybe<WritableStreamSink&> tryGetSink() override {
+    KJ_IF_SOME(active, inner.tryGet<IoOwn<Active>>()) {
+      return *active->out;
     }
     return kj::none;
   }

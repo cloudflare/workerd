@@ -206,8 +206,20 @@ class UnderlyingSourceImpl {
 
   void clear();
 
-  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() {
+  virtual kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() {
     return kj::none;
+  }
+
+  struct Tee {
+    kj::Own<UnderlyingSourceImpl> branch1;
+    kj::Own<UnderlyingSourceImpl> branch2;
+  };
+  virtual kj::Maybe<Tee> tryTee(uint64_t limit) {
+    return kj::none;
+  }
+
+  virtual bool isInternal() const {
+    return false;
   }
 
   JSG_MEMORY_INFO(UnderlyingSourceImpl) {
@@ -315,8 +327,19 @@ class UnderlyingSinkImpl {
 
   void clear();
 
-  kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() {
+  virtual kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() {
     return kj::none;
+  }
+
+  // Returns a non-owning reference to the underlying WritableStreamSink, if this
+  // is an internal source. The sink remains owned by this impl. Returns kj::none
+  // for JS-backed sinks or if the sink is not in an active state.
+  virtual kj::Maybe<WritableStreamSink&> tryGetSink() {
+    return kj::none;
+  }
+
+  virtual bool isInternal() const {
+    return false;
   }
 
   JSG_MEMORY_INFO(UnderlyingSinkImpl) {
@@ -719,6 +742,10 @@ class ReadableStreamController {
   // therefore supports the pull into API. When false, the stream can be used to pass
   // any arbitrary JavaScript value through.
   virtual bool isByteOriented() const = 0;
+  virtual bool isInternal() const = 0;
+  virtual kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() {
+    return kj::none;
+  }
 
   // Reads data from the stream. If the stream is byte-oriented, then the ByobOptions can be
   // specified to provide a v8::ArrayBuffer to be filled by the read operation. If the ByobOptions
@@ -1174,5 +1201,49 @@ inline bool isByteSource(const jsg::JsValue& value) {
   return value.isArrayBuffer() || value.isSharedArrayBuffer() || value.isArrayBufferView() ||
       value.isString();
 }
+
+// ======================================================================================
+
+// Adapt ReadableStreamSource to kj::AsyncInputStream's interface for use with `kj::newTee()`.
+class TeeAdapter final: public kj::AsyncInputStream {
+ public:
+  explicit TeeAdapter(kj::Own<ReadableStreamSource> inner);
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
+  kj::Maybe<uint64_t> tryGetLength() override;
+
+ private:
+  kj::Own<ReadableStreamSource> inner;
+};
+
+class TeeBranch final: public ReadableStreamSource {
+ public:
+  explicit TeeBranch(kj::Own<kj::AsyncInputStream> inner);
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
+
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, End end) override;
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
+
+  kj::Maybe<Tee> tryTee(uint64_t limit) override;
+
+  void cancel(kj::Exception reason) override;
+
+ private:
+  // Adapt WritableStreamSink to kj::AsyncOutputStream's interface for use in
+  // `TeeBranch::pumpTo()`. If you squint, the write logic looks very similar to TeeAdapter's
+  // read logic.
+  class PumpAdapter final: public kj::AsyncOutputStream {
+   public:
+    explicit PumpAdapter(WritableStreamSink& inner);
+    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override;
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override;
+    kj::Promise<void> whenWriteDisconnected() override;
+
+    WritableStreamSink& inner;
+  };
+
+  kj::Own<kj::AsyncInputStream> inner;
+};
 
 }  // namespace workerd::api

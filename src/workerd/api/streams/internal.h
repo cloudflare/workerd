@@ -52,6 +52,22 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   ~ReadableStreamInternalController() noexcept(false) override;
 
+  bool isInternal() const override {
+    return true;
+  }
+  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() override {
+    if (isLockedToReader()) return kj::none;
+    if (disturbed) return kj::none;
+    KJ_IF_SOME(readable, state.tryGetUnsafe<Readable>()) {
+      readState.transitionTo<Locked>();
+      disturbed = true;
+      auto result = kj::mv(readable);
+      state.transitionTo<StreamStates::Closed>();
+      return kj::mv(result);
+    }
+    return kj::none;
+  }
+
   void setOwnerRef(ReadableStream& stream) override {
     owner = stream;
   }

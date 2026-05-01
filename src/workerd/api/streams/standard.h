@@ -200,6 +200,10 @@ class ReadableImpl {
   size_t jsgGetMemorySelfSize() const;
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
+  kj::Maybe<UnderlyingSourceImpl::Tee> tryTeeSource(uint64_t limit);
+  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource();
+  bool isInternal() const;
+
  private:
   using Queue = Self::QueueType;
 
@@ -357,6 +361,9 @@ class WritableImpl {
 
   // True if the writable is in a state where new chunks can be written
   bool isWritable() const;
+  bool isInternal() const;
+  kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink();
+  kj::Maybe<WritableStreamSink&> tryGetSink();
 
   void cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason);
 
@@ -605,6 +612,10 @@ class ReadableStreamDefaultController: public jsg::Object {
     impl.pullSelf = kj::none;
   }
 
+  kj::Maybe<UnderlyingSourceImpl::Tee> tryTeeSource(uint64_t limit);
+  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource();
+  bool isInternal() const;
+
  private:
   kj::Rc<WeakRef<ReadableStreamDefaultController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;
@@ -749,6 +760,10 @@ class ReadableByteStreamController: public jsg::Object {
     impl.pullSelf = kj::none;
   }
 
+  kj::Maybe<UnderlyingSourceImpl::Tee> tryTeeSource(uint64_t limit);
+  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource();
+  bool isInternal() const;
+
  private:
   kj::Rc<WeakRef<ReadableByteStreamController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;
@@ -820,6 +835,10 @@ class WritableStreamDefaultController: public jsg::Object {
 
   // Clear algorithms to break circular references during destruction
   void clearAlgorithms();
+
+  bool isInternal() const;
+  kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink();
+  kj::Maybe<WritableStreamSink&> tryGetSink();
 
  private:
   kj::Rc<WeakRef<WritableStreamDefaultController>> weakSelf;
