@@ -175,7 +175,7 @@ class IoContext_IncomingRequest final {
   friend class IoContext;
 
  public:
-  // Span enrichment buffered by the callee via ctx.tracing.setBindingSpan() for the caller to
+  // Span enrichment buffered by the callee via ctx.tracing.enrichBindingSpan() for the caller to
   // forward on RPC return. Last call before return wins. `name` is carried as a separate field
   // on the wire so the caller can forward it as a synthetic 'span.name' attribute event to the
   // streaming tail worker; the callee API still spells it as the attribute key 'span.name'.
@@ -397,7 +397,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return !incomingRequests.empty();
   }
 
-  // Called by ctx.tracing.setBindingSpan() to buffer enrichment for the current invocation.
+  // Called by ctx.tracing.enrichBindingSpan() to buffer enrichment for the current invocation.
   // Last-caller-wins; any previous pending enrichment is replaced.
   void setPendingBindingSpanEnrichment(IncomingRequest::PendingSpanEnrichment enrichment) {
     KJ_REQUIRE(!incomingRequests.empty());

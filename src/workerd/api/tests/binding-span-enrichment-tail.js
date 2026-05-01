@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Streaming tail worker for binding-span-enrichment tests. Validates that the callee's
-// setBindingSpan() attributes (including "span.name" rename) appear on the caller's
+// enrichBindingSpan() attributes (including "span.name" rename) appear on the caller's
 // jsRpcSession span in the STW stream.
 
 import assert from 'node:assert';
@@ -43,7 +43,7 @@ export const validate = {
     await collector.waitForCompletion();
     const { state } = collector;
 
-    // The callee called setBindingSpan({ "span.name": "ai_gateway.run", ... }).
+    // The callee called enrichBindingSpan({ "span.name": "ai_gateway.run", ... }).
     // The jsRpcSession span must have been renamed and carry the attributes.
     const enrichedSpan = findSpanByName(state, 'ai_gateway.run');
     assert.ok(

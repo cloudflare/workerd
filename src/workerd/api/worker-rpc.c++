@@ -1244,7 +1244,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           results.setParamsStreamSink(kj::mv(ss));
         }
 
-        // If the callee called ctx.tracing.setBindingSpan(), populate the enrichment field
+        // If the callee called ctx.tracing.enrichBindingSpan(), populate the enrichment field
         // on CallResults so the caller's runtime can apply it to the user span.
         if (IoContext::hasCurrent()) {
           KJ_IF_SOME(enrichment, IoContext::current().takePendingBindingSpanEnrichment()) {

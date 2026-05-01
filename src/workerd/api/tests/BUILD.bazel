@@ -87,7 +87,7 @@ wd_test(
     tags = ["no-coverage"],
 )
 
-# TDD tests for binding span enrichment (ctx.tracing.setBindingSpan).
+# TDD tests for binding span enrichment (ctx.tracing.enrichBindingSpan).
 # Test 1: no spanEnrichmentPolicy → ctx.tracing is undefined in the callee.
 # Test 2: spanEnrichmentPolicy present → callee renames the jsRpcSession span;
 #         the renamed span with its attributes appears in the caller's STW stream.
