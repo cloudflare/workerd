@@ -533,6 +533,11 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       auto& ioContext = IoContext::current();
       rpc::JsRpcTarget::Client client(nullptr);
       kj::Vector<kj::StringPtr> path;
+      // Pointer to the jsRpcCall user span owned by the JsRpcSessionCustomEvent we
+      // construct below. Used by the response lambda to apply BindingSpanEnrichment from
+      // CallResults. Null when the call goes through a cap-holding provider (no span
+      // to enrich).
+      SpanBuilder* sessionSpan = nullptr;
       // Materialise the per-call client spans up front: the user span (jsRpcCall, what
       // shows up in tail streams and what enrichBindingSpan writes to) and an internal
       // trace span for downstream subrequest propagation. Both are constructed
@@ -554,6 +559,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         auto attachedWorker = kj::mv(worker).attach(kj::mv(internalSpan));
         auto event = kj::heap<api::JsRpcSessionCustomEvent>(
             JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE, kj::none, kj::mv(jsRpcCallSpan));
+        sessionSpan = &event->jsRpcCallSpan;
         client = event->getCap();
         // Cancel the CustomEvent if our I/O context is destroyed; ignore errors because the
         // membrane already propagates exceptions to in-flight RPC calls.
@@ -669,9 +675,25 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       // RemotePromise lets us consume its pipeline and promise portions independently; we consume
       // the promise here and we consume the pipeline below, both via kj::mv().
       auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
-          [weakRef = kj::atomicAddRef(*weakRef), resultStreamSink = kj::mv(resultStreamSink)](
-              jsg::Lock& js,
+          [weakRef = kj::atomicAddRef(*weakRef), resultStreamSink = kj::mv(resultStreamSink),
+              sessionSpan](jsg::Lock& js,
               capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable -> jsg::Value {
+        // Apply any BindingSpanEnrichment from the callee to the jsRpcSession span. The separate
+        // `name` field and the user attributes are all set as tags on the span; the STW observes
+        // them as attribute events and is responsible for treating "span.name" as a rename.
+        if (sessionSpan != nullptr && response.hasBindingSpanEnrichment()) {
+          auto enrichment = response.getBindingSpanEnrichment();
+          auto name = enrichment.getName();
+          if (name.size() > 0) {
+            sessionSpan->setTag("span.name"_kjc, kj::str(name));
+          }
+          for (auto attrReader: enrichment.getAttributes()) {
+            tracing::Attribute attr(attrReader);
+            if (attr.value.size() == 0) continue;
+            sessionSpan->setTag(kj::mv(attr.name), kj::mv(attr.value[0]));
+          }
+        }
+
         auto jsResult = deserializeRpcReturnValue(js, response, resultStreamSink);
 
         if (weakRef->disposed) {
@@ -1299,6 +1321,21 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
         KJ_IF_SOME(ss, paramsStreamSink) {
           results.setParamsStreamSink(kj::mv(ss));
+        }
+
+        // If the callee called ctx.tracing.enrichBindingSpan(), populate the enrichment field
+        // on CallResults so the caller's runtime can apply it to the user span.
+        if (IoContext::hasCurrent()) {
+          KJ_IF_SOME(enrichment, IoContext::current().takePendingBindingSpanEnrichment()) {
+            auto enrichBuilder = results.initBindingSpanEnrichment();
+            KJ_IF_SOME(name, enrichment.name) {
+              enrichBuilder.setName(name);
+            }
+            auto attrsList = enrichBuilder.initAttributes(enrichment.attributes.size());
+            for (auto i: kj::indices(enrichment.attributes)) {
+              enrichment.attributes[i].copyTo(attrsList[i]);
+            }
+          }
         }
 
         // paramDisposalGroup will be destroyed when we return (or when this lambda is destroyed

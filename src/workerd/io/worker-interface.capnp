@@ -737,6 +737,21 @@ interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
     paramsStreamSink @3 :JsValue.StreamSink;
     # StreamSink used for ReadableStreams found in the params. The caller begins sending bytes for
     # these streams immediately using promise pipelining.
+
+    bindingSpanEnrichment @4 :BindingSpanEnrichment;
+    # Optional enrichment data written by the callee via ctx.tracing.enrichBindingSpan().
+    # The caller's runtime applies it to the jsRpcSession user span. Absent when the callee did
+    # not call enrichBindingSpan().
+  }
+
+  struct BindingSpanEnrichment {
+    # Span enrichment data produced by the callee via ctx.tracing.enrichBindingSpan().
+    # Carried on the return path so the caller's runtime can forward it to the streaming tail
+    # worker, which observes it as attribute events on the jsRpcSession span.
+    name @0 :Text;
+    # New name for the jsRpcSession span. Forwarded to the STW as a synthetic 'span.name'
+    # attribute; the STW is responsible for treating it as a rename.
+    attributes @1 :List(Trace.Attribute);
   }
 
   call @0 CallParams -> CallResults;

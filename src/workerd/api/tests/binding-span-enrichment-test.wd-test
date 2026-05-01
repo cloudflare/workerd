@@ -1,0 +1,43 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Tests for binding span enrichment (ctx.tracing.enrichBindingSpan).
+# The callee writes attributes (including a "span.name" rename) onto the caller's
+# jsRpcSession user span. The validate test in the tail worker asserts on the
+# collected spans after all invocation outcomes have been emitted.
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "caller", worker = .callerWorker),
+    (name = "callee", worker = .calleeWorker),
+    (name = "stw",    worker = .tailWorker),
+  ]
+);
+
+const callerWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "binding-span-enrichment-caller.js"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental", "rpc"],
+  streamingTails = ["stw"],
+  bindings = [
+    (
+      name = "callee",
+      service = (name = "callee", entrypoint = "CalleeEntrypoint")
+    ),
+  ]
+);
+
+const calleeWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "binding-span-enrichment-callee.js"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental", "rpc"],
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "binding-span-enrichment-tail.js"),
+    (name = "instrumentation-test-helper", esModule = embed "../../../cloudflare/internal/test/instrumentation-test-helper.js"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental", "rpc"],
+);

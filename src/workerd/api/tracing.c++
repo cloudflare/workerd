@@ -8,6 +8,8 @@
 #include <workerd/io/tracer.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <cmath>
+
 namespace workerd::api::user_tracing {
 
 namespace {
@@ -268,6 +270,96 @@ v8::Local<v8::Value> Tracing::enterSpan(jsg::Lock& js,
   } else {
     return executeCallback();
   }
+}
+
+namespace {
+// Caps for ctx.tracing.enrichBindingSpan() input. AIG and similar callees may attach AI
+// context payloads, so values are generous; entries that exceed any cap are silently
+// dropped so a misbehaving callee can't brick its caller.
+constexpr size_t kMaxBindingSpanAttributes = 256;
+constexpr size_t kMaxBindingSpanKeyLength = 256;
+constexpr size_t kMaxBindingSpanValueLength = 128 * 1024;
+}  // namespace
+
+void Tracing::enrichBindingSpan(jsg::Lock& js, EnrichmentOptions options) {
+  // Merges into any pending enrichment buffered by an earlier enrichBindingSpan() call in the
+  // same RPC method. `name` is overwritten by each call (latest wins). Attributes upsert by
+  // key: same-key entries replace the prior value; new keys are appended subject to the count
+  // cap. The merged bag is shipped on the next RPC return as a single CallResults field.
+  if (!IoContext::hasCurrent()) return;
+  auto& ioCtx = IoContext::current();
+  if (!ioCtx.hasCurrentIncomingRequest()) return;
+
+  IoContext::IncomingRequest::PendingSpanEnrichment merged;
+  KJ_IF_SOME(existing, ioCtx.takePendingBindingSpanEnrichment()) {
+    merged = kj::mv(existing);
+  }
+
+  // `name` is optional per call. When provided, it overwrites any previous name (latest
+  // wins); only drop the new value if it busts the size cap.
+  KJ_IF_SOME(n, options.name) {
+    if (n.size() <= kMaxBindingSpanValueLength) {
+      merged.name = kj::mv(n);
+    }
+  }
+
+  // Move existing attributes into a mutable vector so we can upsert into them.
+  kj::Vector<tracing::Attribute> attrVec(merged.attributes.size());
+  for (auto& a: merged.attributes) {
+    attrVec.add(kj::mv(a));
+  }
+
+  KJ_IF_SOME(attributes, options.attributes) {
+    for (auto& field: attributes.fields) {
+      if (field.name.size() > kMaxBindingSpanKeyLength) continue;
+
+      v8::Local<v8::Value> handle = field.value.getHandle(js);
+      tracing::Attribute::Value value;
+      if (handle->IsString()) {
+        auto str = kj::str(jsg::JsValue(handle).toString(js));
+        if (str.size() > kMaxBindingSpanValueLength) continue;
+        value = kj::ConstString(kj::mv(str));
+      } else if (handle->IsBoolean()) {
+        value = handle->BooleanValue(js.v8Isolate);
+      } else if (handle->IsNumber()) {
+        double d = handle->NumberValue(js.v8Context()).FromMaybe(0.0);
+        // Coerce to int64 only when finite and exactly representable. NaN, +/-Infinity, and
+        // out-of-range doubles fall through to the double branch -- casting them to int64
+        // would be undefined behaviour.
+        constexpr double kInt64Min = -9223372036854775808.0;  // -2^63 (exactly representable).
+        constexpr double kInt64MaxExclusive =
+            9223372036854775808.0;  // 2^63 (exclusive upper bound).
+        if (std::isfinite(d) && d >= kInt64Min && d < kInt64MaxExclusive &&
+            d == static_cast<double>(static_cast<int64_t>(d))) {
+          value = static_cast<int64_t>(d);
+        } else {
+          value = d;
+        }
+      } else {
+        continue;  // Skip unsupported types (objects, arrays, null, undefined).
+      }
+
+      // Upsert by key: same-key entries replace the prior value; new keys are appended
+      // subject to the count cap.
+      bool replaced = false;
+      for (auto& existing: attrVec) {
+        if (existing.name == field.name) {
+          existing = tracing::Attribute(kj::ConstString(kj::str(field.name)), kj::mv(value));
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced) {
+        if (attrVec.size() >= kMaxBindingSpanAttributes) continue;
+        attrVec.add(tracing::Attribute(kj::ConstString(kj::str(field.name)), kj::mv(value)));
+      }
+    }
+  }
+
+  ioCtx.setPendingBindingSpanEnrichment(IoContext::IncomingRequest::PendingSpanEnrichment{
+    .name = kj::mv(merged.name),
+    .attributes = attrVec.releaseAsArray(),
+  });
 }
 
 }  // namespace workerd::api

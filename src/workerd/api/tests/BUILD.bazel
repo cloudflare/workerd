@@ -87,6 +87,20 @@ wd_test(
     tags = ["no-coverage"],
 )
 
+# Tests for binding span enrichment (ctx.tracing.enrichBindingSpan): the callee renames
+# the caller's binding-call span and tags it with attributes; the renamed span appears in
+# the caller's STW stream.
+wd_test(
+    src = "binding-span-enrichment-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "binding-span-enrichment-callee.js",
+        "binding-span-enrichment-caller.js",
+        "binding-span-enrichment-tail.js",
+        "//src/cloudflare/internal/test:instrumentation-test-helper.js",
+    ],
+)
+
 # Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
 # serializable when forwarded over service-binding RPC, just like fetch onset.info.
 wd_test(
