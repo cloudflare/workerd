@@ -211,19 +211,33 @@ class JsRpcClientProvider: public jsg::Object {
         "Provider does not hold a live cap; callers must use tryGetJsRpcSessionClient().");
   }
 
-  // Returned by tryGetJsRpcSessionClient(). `worker` is the underlying WorkerInterface that the
-  // jsRpcSession event will be dispatched on. `sessionSpan` is the user span representing this
-  // session, ready to be moved into a JsRpcSessionCustomEvent.
+  // Returned by tryGetJsRpcSessionClient(): just the WorkerInterface that will dispatch the
+  // jsRpcSession event. The user-facing jsRpcSession span (if any) is owned by callImpl --
+  // it constructs the span before invoking tryGet so the parent ID can be plumbed into
+  // SubrequestMetadata for the callee's onset event.
   struct JsRpcSessionClient {
     kj::Own<WorkerInterface> worker;
-    SpanBuilder sessionSpan;
   };
 
-  // For session-creating providers (Fetcher): return the building blocks for a fresh
-  // JsRpcSessionCustomEvent. Default kj::none means "I'm a cap-holder, use getClientForOneCall".
-  // `path` is populated as in getClientForOneCall().
-  virtual kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(
-      IoContext& ioContext, kj::Vector<kj::StringPtr>& path) {
+  // True when tryGetJsRpcSessionClient() would dispatch on a channel that wants a fresh
+  // jsRpcSession user span. callImpl peeks at this to decide whether to construct the
+  // session/internal spans before calling tryGet. False for variants that already create
+  // their own outer user span (e.g. DurableObject stubs emit durable_object_subrequest),
+  // so we don't double-instrument.
+  virtual bool wouldCreateJsRpcSessionSpan() {
+    return false;
+  }
+
+  // For session-creating providers (Fetcher): return the WorkerInterface for a fresh
+  // JsRpcSessionCustomEvent. `internalSpanParent` / `userSpanParent` come from spans
+  // callImpl already created (gated by wouldCreateJsRpcSessionSpan()); tryGet just plumbs
+  // them into SubrequestMetadata. Both may be unobserved when no spans were created.
+  // `path` is populated as in getClientForOneCall(). Default kj::none means "I'm a
+  // cap-holder, use getClientForOneCall".
+  virtual kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(IoContext& ioContext,
+      kj::Vector<kj::StringPtr>& path,
+      SpanParent internalSpanParent,
+      SpanParent userSpanParent) {
     return kj::none;
   }
 };
@@ -339,12 +353,18 @@ class JsRpcProperty: public JsRpcClientProvider {
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
-  // Forward to the parent so the session is built at the root, then append our name. callImpl
-  // gives us a scratch `path` vector that is discarded if we return kj::none, so we can append
-  // unconditionally.
-  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(
-      IoContext& ioContext, kj::Vector<kj::StringPtr>& path) override {
-    auto result = parent->tryGetJsRpcSessionClient(ioContext, path);
+  // Forward to the parent so policy/dispatch happens at the root, then append our name.
+  // callImpl gives us a scratch `path` vector that is discarded if we return kj::none, so
+  // we can append unconditionally.
+  bool wouldCreateJsRpcSessionSpan() override {
+    return parent->wouldCreateJsRpcSessionSpan();
+  }
+  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(IoContext& ioContext,
+      kj::Vector<kj::StringPtr>& path,
+      SpanParent internalSpanParent,
+      SpanParent userSpanParent) override {
+    auto result = parent->tryGetJsRpcSessionClient(
+        ioContext, path, kj::mv(internalSpanParent), kj::mv(userSpanParent));
     path.add(name);
     return result;
   }
