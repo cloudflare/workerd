@@ -222,6 +222,19 @@ class UnderlyingSourceImpl {
     return false;
   }
 
+  // Called after the ReadableStream is fully constructed. Allows internal source
+  // implementations to store a back-reference to the owning stream (e.g., for
+  // signalEof support). Default is a no-op.
+  virtual void setOwner(ReadableStream& stream) {}
+
+  virtual StreamEncoding getPreferredEncoding() {
+    return StreamEncoding::IDENTITY;
+  }
+
+  virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
+    return kj::none;
+  }
+
   JSG_MEMORY_INFO(UnderlyingSourceImpl) {
     tracker.trackField("start", start_);
     tracker.trackField("pull", pull_);
@@ -1021,6 +1034,9 @@ class WritableStreamController {
   // Used by sockets to signal that the WritableStream shouldn't allow writes due to pending
   // closure.
   virtual void setPendingClosure() = 0;
+
+  // Used by sockets to ensure the connection is established before close.
+  virtual void setClosureWaitable(jsg::Promise<void> waitable) {}
 
   // For memory tracking
   virtual kj::StringPtr jsgGetMemoryName() const = 0;

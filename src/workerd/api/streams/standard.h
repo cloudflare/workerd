@@ -12,6 +12,10 @@
 #include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
+namespace workerd {
+class ByteStreamObserver;
+}  // namespace workerd
+
 namespace workerd::api {
 
 // =======================================================================================
@@ -203,6 +207,8 @@ class ReadableImpl {
   kj::Maybe<UnderlyingSourceImpl::Tee> tryTeeSource(uint64_t limit);
   kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource();
   bool isInternal() const;
+  StreamEncoding getPreferredEncoding();
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
  private:
   using Queue = Self::QueueType;
@@ -615,6 +621,8 @@ class ReadableStreamDefaultController: public jsg::Object {
   kj::Maybe<UnderlyingSourceImpl::Tee> tryTeeSource(uint64_t limit);
   kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource();
   bool isInternal() const;
+  StreamEncoding getPreferredEncoding();
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
  private:
   kj::Rc<WeakRef<ReadableStreamDefaultController>> weakSelf;
@@ -763,6 +771,8 @@ class ReadableByteStreamController: public jsg::Object {
   kj::Maybe<UnderlyingSourceImpl::Tee> tryTeeSource(uint64_t limit);
   kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource();
   bool isInternal() const;
+  StreamEncoding getPreferredEncoding();
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
  private:
   kj::Rc<WeakRef<ReadableByteStreamController>> weakSelf;
@@ -963,8 +973,11 @@ class TransformStreamDefaultController: public jsg::Object {
 
 // =======================================================================================
 
-jsg::Ref<WritableStream> newInternalWritableStream(
-    jsg::Lock& js, IoContext& ioContext, kj::Own<WritableStreamSink> sink);
+jsg::Ref<WritableStream> newInternalWritableStream(jsg::Lock& js,
+    IoContext& ioContext,
+    kj::Own<WritableStreamSink> sink,
+    kj::Maybe<kj::Own<ByteStreamObserver>> observer = kj::none,
+    kj::Maybe<uint64_t> maybeHighWaterMark = kj::none);
 jsg::Ref<ReadableStream> newInternalReadableStream(
     jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
 
