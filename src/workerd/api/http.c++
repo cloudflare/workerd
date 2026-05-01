@@ -2401,18 +2401,31 @@ kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionCl
   // that don't apply to all variants (e.g. featureFlagsForFl, which goes to FL via
   // IoChannelFactory::startSubrequest but is undefined for SubrequestChannel::startRequest).
   auto withSessionSpan = [&](auto startRequest, auto metadataExtra) -> JsRpcSessionClient {
+    // Create both an internal trace span and a user-facing session span. The internal span
+    // propagates trace context to downstream subrequests (e.g. QuickSilver Read.get the
+    // callee issues during dynamic-worker ban checks). The user span is what AIG /
+    // binding-span-enrichment attach attributes to and what shows up in user tail-stream
+    // span trees as "jsRpcSession".
+    //
+    // Mirrors the old Fetcher::getClient("jsRpcSession") path which used
+    // IoContext::makeUserTraceSpan to produce a TraceContext{internal, user}.
+    auto internalSpan = ioContext.makeTraceSpan("jsRpcSession"_kjc);
     auto sessionSpan = ioContext.getCurrentUserTraceSpan().newChild(
         "jsRpcSession"_kjc, ioContext.now());
+    auto internalSpanParent = SpanParent(internalSpan);
     auto sessionSpanParent = SpanParent(sessionSpan);
     auto worker = ioContext.getSubrequest(
-        [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
+        [&](TraceContext&, IoChannelFactory& channelFactory) {
       IoChannelFactory::SubrequestMetadata metadata{
-        .parentSpan = tracing.getInternalSpanParent(),
+        .parentSpan = internalSpanParent.addRef(),
         .userSpanParent = sessionSpanParent.addRef(),
       };
       metadataExtra(metadata);
       return startRequest(channelFactory, kj::mv(metadata));
     }, {.inHouse = isInHouse, .wrapMetrics = !isInHouse});
+    // Internal span lives with the worker (= the session). The user span is returned
+    // to the caller, which moves it into JsRpcSessionCustomEvent (also session-scoped).
+    worker = worker.attach(kj::mv(internalSpan));
     return {kj::mv(worker), kj::mv(sessionSpan)};
   };
 
