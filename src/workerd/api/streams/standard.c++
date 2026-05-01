@@ -123,7 +123,7 @@ class ReadableLockImpl {
       inner.lock.state.template transitionTo<Unlocked>();
     }
 
-    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
+    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, End end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
@@ -352,7 +352,7 @@ void ReadableLockImpl<Controller>::onError(jsg::Lock& js, jsg::JsValue reason) {
 
 template <typename Controller>
 kj::Maybe<kj::Promise<void>> ReadableLockImpl<Controller>::PipeLocked::tryPumpTo(
-    WritableStreamSink& sink, bool end) {
+    WritableStreamSink& sink, End end) {
   // We return nullptr here because this controller does not support kj's pumpTo.
   return kj::none;
 }
@@ -521,10 +521,12 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
       }
       if (!flags.preventAbort) {
         return self.abort(js, reason).then(js, JSG_VISITABLE_LAMBDA((this, reason = reason.addRef(js), ref = self.addRef()), (reason, ref), (jsg::Lock& js) {
-          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), flags.pipeThrough);
+          return rejectedMaybeHandledPromise<void>(
+              js, reason.getHandle(js), flags.pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
         }));
       }
-      return rejectedMaybeHandledPromise<void>(js, reason, flags.pipeThrough);
+      return rejectedMaybeHandledPromise<void>(
+          js, reason, flags.pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
     }
   }
   return kj::none;
@@ -845,7 +847,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
       jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) override;
 
   kj::Promise<DeferredProxy<void>> pumpTo(
-      jsg::Lock& js, kj::Own<WritableStreamSink>, bool end) override;
+      jsg::Lock& js, kj::Own<WritableStreamSink>, End end) override;
 
   kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) override;
@@ -871,7 +873,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
-  kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) override;
+  kj::Own<ReadableStreamController> detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) override;
 
   void setPendingClosure() override {
     KJ_UNIMPLEMENTED("only implemented for WritableStreamInternalController");
@@ -999,9 +1001,9 @@ class WritableStreamJsController final: public WritableStreamController {
 
   jsg::Ref<WritableStream> addRef() override;
 
-  jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
+  jsg::Promise<void> close(jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) override;
 
-  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override;
+  jsg::Promise<void> flush(jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) override;
 
   void doClose(jsg::Lock& js);
 
@@ -1047,7 +1049,7 @@ class WritableStreamJsController final: public WritableStreamController {
   kj::Maybe<jsg::Promise<void>> tryPipeFrom(
       jsg::Lock& js, jsg::Ref<ReadableStream> source, PipeToOptions options) override;
 
-  void updateBackpressure(jsg::Lock& js, bool backpressure);
+  void updateBackpressure(jsg::Lock& js, UpdateBackpressure backpressure);
 
   jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> value) override;
 
@@ -1502,7 +1504,8 @@ jsg::Promise<void> WritableImpl<Self>::abort(
 
   KJ_DEFER(if (!wasAlreadyErroring) { startErroring(js, kj::mv(self), reason); });
 
-  maybePendingAbort = kj::heap<PendingAbort>(js, reason, wasAlreadyErroring);
+  maybePendingAbort =
+      kj::heap<PendingAbort>(js, reason, wasAlreadyErroring ? Reject::YES : Reject::NO);
   return KJ_ASSERT_NONNULL(maybePendingAbort)->whenResolved(js);
 }
 
@@ -2024,7 +2027,8 @@ void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
   if (bp != flags.backpressure) {
     flags.backpressure = bp;
     KJ_IF_SOME(owner, tryGetOwner()) {
-      owner.updateBackpressure(js, flags.backpressure);
+      owner.updateBackpressure(
+          js, flags.backpressure ? UpdateBackpressure::YES : UpdateBackpressure::NO);
     }
   }
 }
@@ -2117,7 +2121,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
 
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::flush(
-    jsg::Lock& js, jsg::Ref<Self> self, bool markAsHandled) {
+    jsg::Lock& js, jsg::Ref<Self> self, MarkAsHandled markAsHandled) {
   KJ_IF_SOME(error, state.template tryGetUnsafe<StreamStates::Errored>()) {
     return rejectedMaybeHandledPromise<void>(js, error.getHandle(js), markAsHandled);
   }
@@ -3872,7 +3876,7 @@ class AllReader {
 kj::Promise<void> pumpToImpl(IoContext& ioContext,
     kj::Own<DrainingReader> reader,
     kj::Own<WritableStreamSink> sink,
-    bool end) {
+    End end) {
 
   bool writeFailed = false;
 
@@ -4010,7 +4014,7 @@ jsg::Promise<kj::String> ReadableStreamJsController::readAllText(jsg::Lock& js, 
 }
 
 kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
-    jsg::Lock& js, bool ignored /* unused */) {
+    jsg::Lock& js, IgnoreDisturbed ignored /* unused */) {
   KJ_ASSERT(!isLockedToReader());
   KJ_ASSERT(!isDisturbed());
   KJ_ASSERT(!state.hasOperationInProgress(), "Unable to detach with read pending");
@@ -4055,7 +4059,7 @@ kj::Maybe<uint64_t> ReadableStreamJsController::tryGetLength(StreamEncoding enco
 }
 
 kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
-    jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
+    jsg::Lock& js, kj::Own<WritableStreamSink> sink, End end) {
   KJ_ASSERT(IoContext::hasCurrent(), "Unable to consume this ReadableStream outside of a request");
   KJ_REQUIRE(!isLockedToReader(), "This ReadableStream is currently locked to a reader.");
   disturbed = true;
@@ -4147,7 +4151,8 @@ jsg::Promise<void> WritableStreamDefaultController::write(jsg::Lock& js, jsg::Js
   return impl.write(js, JSG_THIS, value);
 }
 
-jsg::Promise<void> WritableStreamDefaultController::flush(jsg::Lock& js, bool markAsHandled) {
+jsg::Promise<void> WritableStreamDefaultController::flush(
+    jsg::Lock& js, MarkAsHandled markAsHandled) {
   return impl.flush(js, JSG_THIS, markAsHandled);
 }
 
@@ -4244,7 +4249,7 @@ bool WritableStreamJsController::isErrored() {
   return state.isErrored();
 }
 
-jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsHandled) {
+jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, MarkAsHandled markAsHandled) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {
       return rejectedMaybeHandledPromise<void>(
@@ -4268,7 +4273,7 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsH
   KJ_UNREACHABLE;
 }
 
-jsg::Promise<void> WritableStreamJsController::flush(jsg::Lock& js, bool markAsHandled) {
+jsg::Promise<void> WritableStreamJsController::flush(jsg::Lock& js, MarkAsHandled markAsHandled) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {
       return rejectedMaybeHandledPromise<void>(
@@ -4545,7 +4550,8 @@ jsg::Promise<void> WritableStreamJsController::onPipeWriteFailure(
     }
   } else {
   }  // Trailing else() to squash compiler warning
-  return rejectedMaybeHandledPromise<void>(js, jsReason, pipeFlags.pipeThrough);
+  return rejectedMaybeHandledPromise<void>(
+      js, jsReason, pipeFlags.pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
 }
 
 jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
@@ -4571,7 +4577,8 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     if (!preventAbort) {
       auto onSuccess = JSG_VISITABLE_LAMBDA(
           (pipeThrough, reason = errored.addRef(js)), (reason), (jsg::Lock& js) {
-            return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
+            return rejectedMaybeHandledPromise<void>(
+                js, reason.getHandle(js), pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
           });
       auto promise = abort(js, errored);
       KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
@@ -4580,7 +4587,8 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
         return promise.then(js, kj::mv(onSuccess));
       }
     }
-    return rejectedMaybeHandledPromise<void>(js, errored, pipeThrough);
+    return rejectedMaybeHandledPromise<void>(
+        js, errored, pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
   }
 
   KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
@@ -4591,7 +4599,8 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     } else {
       source.release(js);
     }
-    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+    return rejectedMaybeHandledPromise<void>(
+        js, reason, pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
   }
 
   KJ_IF_SOME(erroring, isErroring(js)) {
@@ -4601,7 +4610,8 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     } else {
       source.release(js);
     }
-    return rejectedMaybeHandledPromise<void>(js, erroring, pipeThrough);
+    return rejectedMaybeHandledPromise<void>(
+        js, erroring, pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
   }
 
   if (source.isClosed()) {
@@ -4626,7 +4636,8 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
       source.release(js);
     }
 
-    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+    return rejectedMaybeHandledPromise<void>(
+        js, reason, pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
   }
 
   // Assuming we get by that, we perform a read on the source. If the read errors,
@@ -4642,7 +4653,8 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   return pipeLock.source.read(js).thenRef(js, getPipeReadContinuation(js));
 }
 
-void WritableStreamJsController::updateBackpressure(jsg::Lock& js, bool backpressure) {
+void WritableStreamJsController::updateBackpressure(
+    jsg::Lock& js, UpdateBackpressure backpressure) {
   KJ_IF_SOME(writerLock, lock.state.tryGetUnsafe<WriterLocked>()) {
     if (backpressure) {
       // Per the spec, when backpressure is updated and is true, we replace the existing
@@ -4745,7 +4757,7 @@ void TransformStreamDefaultController::enqueue(jsg::Lock& js, jsg::JsValue chunk
     // because applying the backpressure here could break existing code, so we need to
     // put the fix behind a compat flag. Doh!
     if (flags.fixupBackpressure) {
-      setBackpressure(js, true);
+      setBackpressure(js, UpdateBackpressure::YES);
     }
   }
 }
@@ -4956,7 +4968,7 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
 
 jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
   KJ_ASSERT(!!flags.backpressure);
-  setBackpressure(js, false);
+  setBackpressure(js, UpdateBackpressure::NO);
   return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js);
 }
 
@@ -5044,14 +5056,15 @@ jsg::Promise<void> TransformStreamDefaultController::performTransformv(
       js, transformer->transformv(), tc, kj::mv(chunks), JSG_THIS);
 }
 
-void TransformStreamDefaultController::setBackpressure(jsg::Lock& js, bool newBackpressure) {
-  KJ_ASSERT(newBackpressure != !!flags.backpressure);
+void TransformStreamDefaultController::setBackpressure(
+    jsg::Lock& js, UpdateBackpressure newBackpressure) {
+  KJ_ASSERT(!!newBackpressure != !!flags.backpressure);
   KJ_IF_SOME(prp, maybeBackpressureChange) {
     prp.resolver.resolve(js);
   }
   maybeBackpressureChange = js.newPromiseAndResolver<void>();
   KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.markAsHandled(js);
-  flags.backpressure = newBackpressure;
+  flags.backpressure = !!newBackpressure;
 }
 
 void TransformStreamDefaultController::errorWritableAndUnblockWrite(
@@ -5069,7 +5082,7 @@ void TransformStreamDefaultController::errorWritableAndUnblockWrite(
     // while we are still inside a member function. Let GC handle cleanup.
   }
   if (flags.backpressure) {
-    setBackpressure(js, false);
+    setBackpressure(js, UpdateBackpressure::NO);
   }
 }
 
@@ -5102,7 +5115,7 @@ void TransformStreamDefaultController::init(
   auto readableRef = KJ_ASSERT_NONNULL(readableController.getController());
   this->readable = KJ_ASSERT_NONNULL(readableRef.tryGet<DefaultController>()).addRef();
 
-  setBackpressure(js, true);
+  setBackpressure(js, UpdateBackpressure::YES);
 
   maybeRunAlgorithm(js, transformer->start(),
       JSG_VISITABLE_LAMBDA(

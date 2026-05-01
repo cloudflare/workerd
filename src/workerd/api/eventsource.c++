@@ -474,8 +474,8 @@ void EventSource::run(jsg::Lock& js,
   // pumping the body into an EventSourceSink until the body is closed, canceled,
   // or errored.
   context
-      .awaitIo(
-          js, processBody(context, readable->pumpTo(js, kj::heap<EventSourceSink>(*this), true)))
+      .awaitIo(js,
+          processBody(context, readable->pumpTo(js, kj::heap<EventSourceSink>(*this), End::YES)))
       .then(js, kj::mv(onSuccess), kj::mv(onFailed));
 }
 

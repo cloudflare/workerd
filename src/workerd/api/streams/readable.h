@@ -446,7 +446,7 @@ public:
   // ReadableStream that will take over ownership of the internal state of this one,
   // leaving this ReadableStream locked and disturbed so that it is no longer usable.
   // The name "detach" here is used in the sense of "detaching the internal state".
-  jsg::Ref<ReadableStream> detach(jsg::Lock& js, bool ignoreDisturbed=false);
+  jsg::Ref<ReadableStream> detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed = IgnoreDisturbed::NO);
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
@@ -456,7 +456,7 @@ public:
   // state of the readable.
   kj::Promise<DeferredProxy<void>> pumpTo(jsg::Lock& js,
                                           kj::Own<WritableStreamSink> sink,
-                                          bool end);
+                                          End end);
 
   // Initializes signalling mechanism for EOF detection. Returns a promise that will resolve when
   // EOF is reached.

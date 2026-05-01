@@ -1355,7 +1355,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
-    return jsBody->pumpTo(js, kj::mv(stream), true);
+    return jsBody->pumpTo(js, kj::mv(stream), End::YES);
   } else {
     outer.send(statusCode, getStatusText(), outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
@@ -1702,7 +1702,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       // TODO(someday): Allow deferred proxying for bidirectional streaming.
       ioContext.addWaitUntil(handleCancelablePump(
           AbortSignal::maybeCancelWrap(
-              js, signal, ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), true))),
+              js, signal, ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), End::YES))),
           jsBody.addRef()));
     } else {
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, static_cast<uint64_t>(0));

@@ -33,7 +33,7 @@ namespace {
       kj::str(JSG_EXCEPTION(TypeError) ": ", message)));
 }
 
-kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output, bool end) {
+kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output, End end) {
   kj::byte buffer[65536]{};
 
   while (true) {
@@ -291,7 +291,7 @@ class TeeBranch final: public ReadableStreamSource {
     return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, End end) override {
 #ifdef KJ_NO_RTTI
     // Yes, I'm paranoid.
     static_assert(!KJ_NO_RTTI, "Need RTTI for correctness");
@@ -372,8 +372,7 @@ class TeeBranch final: public ReadableStreamSource {
 
 // =======================================================================================
 
-kj::Promise<DeferredProxy<void>> ReadableStreamSource::pumpTo(
-    WritableStreamSink& output, bool end) {
+kj::Promise<DeferredProxy<void>> ReadableStreamSource::pumpTo(WritableStreamSink& output, End end) {
   KJ_IF_SOME(p, output.tryPumpFrom(*this, end)) {
     return kj::mv(p);
   }
@@ -423,7 +422,7 @@ kj::Maybe<ReadableStreamSource::Tee> ReadableStreamSource::tryTee(uint64_t limit
 }
 
 kj::Maybe<kj::Promise<DeferredProxy<void>>> WritableStreamSink::tryPumpFrom(
-    ReadableStreamSource& input, bool end) {
+    ReadableStreamSource& input, End end) {
   return kj::none;
 }
 
@@ -866,7 +865,7 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
 }
 
 kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::removeSource(
-    jsg::Lock& js, bool ignoreDisturbed) {
+    jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) {
   JSG_REQUIRE(
       !isLockedToReader(), TypeError, "This ReadableStream is currently locked to a reader.");
   JSG_REQUIRE(!disturbed || ignoreDisturbed, TypeError, "This ReadableStream is disturbed.");
@@ -1054,11 +1053,12 @@ void WritableStreamInternalController::adjustWriteBufferSize(jsg::Lock& js, int6
   currentWriteBufferSize += amount;
   KJ_IF_SOME(highWaterMark, maybeHighWaterMark) {
     int64_t desiredSize = highWaterMark - currentWriteBufferSize;
-    updateBackpressure(js, desiredSize <= 0);
+    updateBackpressure(js, desiredSize <= 0 ? UpdateBackpressure::YES : UpdateBackpressure::NO);
   }
 }
 
-void WritableStreamInternalController::updateBackpressure(jsg::Lock& js, bool backpressure) {
+void WritableStreamInternalController::updateBackpressure(
+    jsg::Lock& js, UpdateBackpressure backpressure) {
   KJ_IF_SOME(writerLock, writeState.tryGetUnsafe<WriterLocked>()) {
     if (backpressure) {
       // Per the spec, when backpressure is updated and is true, we replace the existing
@@ -1079,7 +1079,8 @@ void WritableStreamInternalController::setHighWaterMark(uint64_t highWaterMark) 
   maybeHighWaterMark = highWaterMark;
 }
 
-jsg::Promise<void> WritableStreamInternalController::closeImpl(jsg::Lock& js, bool markAsHandled) {
+jsg::Promise<void> WritableStreamInternalController::closeImpl(
+    jsg::Lock& js, MarkAsHandled markAsHandled) {
   if (isClosedOrClosing()) {
     return js.resolvedPromise();
   }
@@ -1113,7 +1114,8 @@ jsg::Promise<void> WritableStreamInternalController::closeImpl(jsg::Lock& js, bo
   KJ_UNREACHABLE;
 }
 
-jsg::Promise<void> WritableStreamInternalController::close(jsg::Lock& js, bool markAsHandled) {
+jsg::Promise<void> WritableStreamInternalController::close(
+    jsg::Lock& js, MarkAsHandled markAsHandled) {
   KJ_IF_SOME(closureWaitable, maybeClosureWaitable) {
     // If we're already waiting on the closure waitable, then we do not want to try scheduling
     // it again, let's just wait for the existing one to be resolved.
@@ -1135,7 +1137,8 @@ jsg::Promise<void> WritableStreamInternalController::close(jsg::Lock& js, bool m
   }
 }
 
-jsg::Promise<void> WritableStreamInternalController::flush(jsg::Lock& js, bool markAsHandled) {
+jsg::Promise<void> WritableStreamInternalController::flush(
+    jsg::Lock& js, MarkAsHandled markAsHandled) {
   if (isClosedOrClosing()) {
     auto reason = js.typeError("This WritableStream has been closed."_kj);
     return rejectedMaybeHandledPromise<void>(js, reason, markAsHandled);
@@ -1206,18 +1209,21 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
       // immediately and an immediately resolved or rejected promise will be returned.
       writable->abort(exception.clone());
       drain(js, reason);
-      return options.reject ? rejectedMaybeHandledPromise<void>(js, reason, options.handled)
+      return options.reject ? rejectedMaybeHandledPromise<void>(js, reason,
+                                  options.handled ? MarkAsHandled::YES : MarkAsHandled::NO)
                             : js.resolvedPromise();
     }
 
     if (queue.empty()) {
       writable->abort(exception.clone());
       doError(js, reason);
-      return options.reject ? rejectedMaybeHandledPromise<void>(js, reason, options.handled)
+      return options.reject ? rejectedMaybeHandledPromise<void>(js, reason,
+                                  options.handled ? MarkAsHandled::YES : MarkAsHandled::NO)
                             : js.resolvedPromise();
     }
 
-    maybePendingAbort = kj::heap<PendingAbort>(js, reason, options.reject);
+    maybePendingAbort =
+        kj::heap<PendingAbort>(js, reason, options.reject ? Reject::YES : Reject::NO);
     auto promise = KJ_ASSERT_NONNULL(maybePendingAbort)->whenResolved(js);
     if (options.handled) {
       promise.markAsHandled(js);
@@ -1225,7 +1231,8 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
     return kj::mv(promise);
   }
 
-  return options.reject ? rejectedMaybeHandledPromise<void>(js, reason, options.handled)
+  return options.reject ? rejectedMaybeHandledPromise<void>(
+                              js, reason, options.handled ? MarkAsHandled::YES : MarkAsHandled::NO)
                         : js.resolvedPromise();
 }
 
@@ -1246,14 +1253,16 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
 
   if (isPiping()) {
     auto reason = js.typeError("This WritableStream is currently being piped to."_kj);
-    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+    return rejectedMaybeHandledPromise<void>(
+        js, reason, pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
   }
 
   // If a signal is provided, we need to check that it is not already triggered. If it
   // is, we return a rejected promise using the signal's reason.
   KJ_IF_SOME(signal, options.signal) {
     if (signal->getAborted(js)) {
-      return rejectedMaybeHandledPromise<void>(js, signal->getReason(js), pipeThrough);
+      return rejectedMaybeHandledPromise<void>(
+          js, signal->getReason(js), pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
     }
   }
 
@@ -1277,7 +1286,8 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
 
     // If preventAbort was true, we're going to unlock the destination now.
     writeState.transitionTo<Unlocked>();
-    return rejectedMaybeHandledPromise<void>(js, errored, pipeThrough);
+    return rejectedMaybeHandledPromise<void>(
+        js, errored, pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
   }
 
   // If the destination has errored, the spec requires us to reject the pipe promise and, if
@@ -1290,7 +1300,8 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
     } else {
       sourceLock.release(js);
     }
-    return rejectedMaybeHandledPromise<void>(js, errored.getHandle(js), pipeThrough);
+    return rejectedMaybeHandledPromise<void>(
+        js, errored.getHandle(js), pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
   }
 
   // If the source has closed, the spec requires us to close the destination if preventClose
@@ -1325,7 +1336,8 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
       sourceLock.release(js);
     }
 
-    return rejectedMaybeHandledPromise<void>(js, destClosed, pipeThrough);
+    return rejectedMaybeHandledPromise<void>(
+        js, destClosed, pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
   }
 
   // The pipe will continue until either the source closes or errors, or until the destination
@@ -1774,7 +1786,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
           if (!preventClose) {
             // Note: unlike a real Close request, it's not possible for us to have been aborted.
-            return close(js, true);
+            return close(js, MarkAsHandled::YES);
           } else {
             writeState.transitionTo<Unlocked>();
           }
@@ -1802,7 +1814,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         }));
       };
 
-      KJ_IF_SOME(promise, request->source().tryPumpTo(*writable->sink, !request->preventClose())) {
+      KJ_IF_SOME(promise,
+          request->source().tryPumpTo(
+              *writable->sink, request->preventClose() ? End::NO : End::YES)) {
         return handlePromise(js,
             ioContext.awaitIo(js,
                 writable->canceler.wrap(
@@ -2170,7 +2184,7 @@ void ReadableStreamInternalController::PipeLocked::release(
 }
 
 kj::Maybe<kj::Promise<void>> ReadableStreamInternalController::PipeLocked::tryPumpTo(
-    WritableStreamSink& sink, bool end) {
+    WritableStreamSink& sink, End end) {
   // This is safe because the caller should have already checked isClosed and tryGetErrored
   // and handled those before calling tryPumpTo.
   auto& readable = KJ_ASSERT_NONNULL(inner.state.tryGetUnsafe<Readable>());
@@ -2263,13 +2277,13 @@ kj::Maybe<uint64_t> ReadableStreamInternalController::tryGetLength(StreamEncodin
 }
 
 kj::Own<ReadableStreamController> ReadableStreamInternalController::detach(
-    jsg::Lock& js, bool ignoreDetached) {
+    jsg::Lock& js, IgnoreDisturbed ignoreDetached) {
   return newReadableStreamInternalController(
       IoContext::current(), KJ_ASSERT_NONNULL(removeSource(js, ignoreDetached)));
 }
 
 kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
-    jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
+    jsg::Lock& js, kj::Own<WritableStreamSink> sink, End end) {
   auto source = KJ_ASSERT_NONNULL(removeSource(js));
 
   struct Holder: public kj::Refcounted {

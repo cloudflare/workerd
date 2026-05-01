@@ -166,7 +166,7 @@ class EncodedAsyncOutputStream final: public WritableStreamSink {
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
 
   kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
-      ReadableStreamSource& input, bool end) override;
+      ReadableStreamSource& input, End end) override;
 
   kj::Promise<void> end() override;
 
@@ -224,7 +224,7 @@ kj::Promise<void> EncodedAsyncOutputStream::write(
 }
 
 kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFrom(
-    ReadableStreamSource& input, bool end) {
+    ReadableStreamSource& input, End end) {
 
   // If this output stream has already been ended, then there's nothing more to
   // pump into it, just return an immediately resolved promise. Alternatively

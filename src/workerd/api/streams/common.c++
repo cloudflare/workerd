@@ -9,14 +9,14 @@
 namespace workerd::api {
 
 WritableStreamController::PendingAbort::PendingAbort(
-    jsg::Lock& js, jsg::PromiseResolverPair<void> prp, jsg::JsValue reason, bool reject)
+    jsg::Lock& js, jsg::PromiseResolverPair<void> prp, jsg::JsValue reason, Reject reject)
     : resolver(kj::mv(prp.resolver)),
       promise(kj::mv(prp.promise)),
       reason(reason.addRef(js)),
       reject(reject) {}
 
 WritableStreamController::PendingAbort::PendingAbort(
-    jsg::Lock& js, jsg::JsValue reason, bool reject)
+    jsg::Lock& js, jsg::JsValue reason, Reject reject)
     : WritableStreamController::PendingAbort(js, js.newPromiseAndResolver<void>(), reason, reject) {
 }
 

@@ -525,7 +525,7 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
         KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
           auto sink = newSystemStream(kj::mv(stdinWriter), StreamEncoding::IDENTITY, ioContext);
           auto pipePromise =
-              (ioContext.waitForDeferredProxy(readable->pumpTo(js, kj::mv(sink), true)));
+              (ioContext.waitForDeferredProxy(readable->pumpTo(js, kj::mv(sink), End::YES)));
           ioContext.addTask(pipePromise.attach(readable.addRef()));
         }
         // user sets "pipe"... they want to consume the API with the stdin WritableStream

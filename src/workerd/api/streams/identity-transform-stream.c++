@@ -123,7 +123,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
     return promise;
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, End end) override {
 #ifdef KJ_NO_RTTI
     // Yes, I'm paranoid.
     static_assert(!KJ_NO_RTTI, "Need RTTI for correctness");

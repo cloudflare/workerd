@@ -727,7 +727,7 @@ kj::Promise<void> Rewriter::replacerThunkPromise(
 
     auto streamSink = kj::heap<ReplacerStreamSink>(sink, registration.isHtml);
     return ioContext.waitForDeferredProxy(
-        registration.stream->pumpTo(lock, kj::mv(streamSink), true));
+        registration.stream->pumpTo(lock, kj::mv(streamSink), End::YES));
   });
 }
 
@@ -1294,10 +1294,10 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
   //   after we know that nothing else (like invalid encoding) could cause an exception.
 
   // Drive and flush the parser asynchronously.
-  ioContext.addTask(
-      ioContext
-          .waitForDeferredProxy(KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), true))
-          .catch_([](kj::Exception&& e) {
+  ioContext.addTask(ioContext
+                        .waitForDeferredProxy(
+                            KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), End::YES))
+                        .catch_([](kj::Exception&& e) {
     // Errors in pumpTo() are already propagated to the destination stream. We don't want to
     // throw them from here since it'll cause an uncaught exception to be reported via taskFailed(),
     // which would poison the IoContext even though the application may have handled the error.

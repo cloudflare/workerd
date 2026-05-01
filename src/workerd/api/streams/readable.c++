@@ -558,7 +558,7 @@ jsg::Promise<void> ReadableStream::returnFunction(
   return js.resolvedPromise();
 }
 
-jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js, bool ignoreDisturbed) {
+jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) {
   JSG_REQUIRE(
       !isDisturbed() || ignoreDisturbed, TypeError, "The ReadableStream has already been read.");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
@@ -570,7 +570,7 @@ kj::Maybe<uint64_t> ReadableStream::tryGetLength(StreamEncoding encoding) {
 }
 
 kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
-    jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
+    jsg::Lock& js, kj::Own<WritableStreamSink> sink, End end) {
   JSG_REQUIRE(
       IoContext::hasCurrent(), Error, "Unable to consume this ReadableStream outside of a request");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
@@ -733,7 +733,7 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
     return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, End end) override {
     // Move the deferred proxy part of the task over to the non-deferred part. To do this,
     // we use `ioctx.waitForDeferredProxy()`, which returns a single promise covering both parts
     // (and, importantly, registering pending events where needed). Then, we add a noop deferred
@@ -826,7 +826,7 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto sink = newSystemStream(kj::mv(kjStream), encoding, ioctx);
 
   ioctx.addTask(
-      ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), true)).catch_([](kj::Exception&& e) {
+      ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), End::YES)).catch_([](kj::Exception&& e) {
     // Errors in pumpTo() are automatically propagated to the source and destination. We don't
     // want to throw them from here since it'll cause an uncaught exception to be reported, even
     // if the application actually does handle it!

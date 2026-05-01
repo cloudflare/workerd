@@ -31,6 +31,12 @@ class TransformStreamDefaultController;
 
 using rpc::StreamEncoding;
 
+WD_STRONG_BOOL(MarkAsHandled);
+WD_STRONG_BOOL(End);
+WD_STRONG_BOOL(IgnoreDisturbed);
+WD_STRONG_BOOL(Reject);
+WD_STRONG_BOOL(UpdateBackpressure);
+
 enum class ReadAllTextOption : uint8_t {
   NONE = 0,
   NULL_TERMINATE = 1 << 0,
@@ -456,7 +462,7 @@ class WritableStreamSink {
   // Must call to flush and finish the stream.
 
   virtual kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
-      ReadableStreamSource& input, bool end);
+      ReadableStreamSource& input, End end);
 
   virtual void abort(kj::Exception reason) = 0;
   // TODO(conform): abort() should return a promise after which closed fulfillers should be
@@ -482,7 +488,7 @@ class ReadableStreamSource {
   // If `end` is true, then `output.end()` will be called after pumping. Note that it's especially
   // important to take advantage of this when using deferred proxying since calling `end()`
   // directly might attempt to use the `IoContext` to call `registerPendingEvent()`.
-  virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end);
+  virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, End end);
 
   // If pumpTo() pumps to a system stream, what is the best encoding for that system stream to
   // use? This is just a hint.
@@ -709,7 +715,7 @@ class ReadableStreamController {
     virtual void close(jsg::Lock& js) = 0;
     virtual void error(jsg::Lock& js, jsg::JsValue reason) = 0;
     virtual void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) = 0;
-    virtual kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) = 0;
+    virtual kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, End end) = 0;
     virtual jsg::Promise<ReadResult> read(jsg::Lock& js) = 0;
   };
 
@@ -808,7 +814,7 @@ class ReadableStreamController {
   virtual void setup(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source) {}
 
   virtual kj::Promise<DeferredProxy<void>> pumpTo(
-      jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
+      jsg::Lock& js, kj::Own<WritableStreamSink> sink, End end) = 0;
 
   // If pumpTo() pumps to a system stream, what is the best encoding for that system stream to
   // use? This is just a hint.
@@ -816,7 +822,8 @@ class ReadableStreamController {
     return StreamEncoding::IDENTITY;
   }
 
-  virtual kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) = 0;
+  virtual kj::Own<ReadableStreamController> detach(
+      jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) = 0;
 
   // Used by sockets to signal that the ReadableStream shouldn't allow reads due to pending
   // closure.
@@ -894,9 +901,9 @@ class WritableStreamController {
     bool reject = false;
 
     PendingAbort(
-        jsg::Lock& js, jsg::PromiseResolverPair<void> prp, jsg::JsValue reason, bool reject);
+        jsg::Lock& js, jsg::PromiseResolverPair<void> prp, jsg::JsValue reason, Reject reject);
 
-    PendingAbort(jsg::Lock& js, jsg::JsValue reason, bool reject);
+    PendingAbort(jsg::Lock& js, jsg::JsValue reason, Reject reject);
 
     void complete(jsg::Lock& js);
 
@@ -941,11 +948,13 @@ class WritableStreamController {
 
   // Indicates that no additional data will be written to the controller. All
   // existing pending writes should be allowed to complete.
-  virtual jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) = 0;
+  virtual jsg::Promise<void> close(
+      jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) = 0;
 
   // Waits for pending data to be written. The returned promise is resolved when all pending writes
   // have completed.
-  virtual jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) = 0;
+  virtual jsg::Promise<void> flush(
+      jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) = 0;
 
   // Immediately interrupts existing pending writes and errors the stream.
   virtual jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) = 0;
@@ -1156,7 +1165,8 @@ void maybeRejectPromise(jsg::Lock& js,
 }
 
 template <typename T>
-jsg::Promise<T> rejectedMaybeHandledPromise(jsg::Lock& js, jsg::JsValue reason, bool handled) {
+jsg::Promise<T> rejectedMaybeHandledPromise(
+    jsg::Lock& js, jsg::JsValue reason, MarkAsHandled handled) {
   auto prp = js.newPromiseAndResolver<T>();
   if (handled) {
     prp.promise.markAsHandled(js);

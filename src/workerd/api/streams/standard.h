@@ -353,7 +353,7 @@ class WritableImpl {
   // when all preceding writes have completed. If nothing is in flight, resolves
   // immediately. Flush entries are represented as WriteRequests with empty value
   // and size 0.
-  jsg::Promise<void> flush(jsg::Lock& js, jsg::Ref<Self> self, bool markAsHandled);
+  jsg::Promise<void> flush(jsg::Lock& js, jsg::Ref<Self> self, MarkAsHandled markAsHandled);
 
   // True if the writable is in a state where new chunks can be written
   bool isWritable() const;
@@ -807,7 +807,7 @@ class WritableStreamDefaultController: public jsg::Object {
 
   jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
 
-  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled);
+  jsg::Promise<void> flush(jsg::Lock& js, MarkAsHandled markAsHandled);
 
   JSG_RESOURCE_TYPE(WritableStreamDefaultController) {
     JSG_READONLY_PROTOTYPE_PROPERTY(signal, getSignal);
@@ -885,7 +885,7 @@ class TransformStreamDefaultController: public jsg::Object {
   void errorWritableAndUnblockWrite(jsg::Lock& js, jsg::JsValue reason);
   jsg::Promise<void> performTransform(jsg::Lock& js, jsg::JsValue chunk);
   jsg::Promise<void> performTransformv(jsg::Lock& js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks);
-  void setBackpressure(jsg::Lock& js, bool newBackpressure);
+  void setBackpressure(jsg::Lock& js, UpdateBackpressure newBackpressure);
 
   kj::Rc<WeakRef<TransformStreamDefaultController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;

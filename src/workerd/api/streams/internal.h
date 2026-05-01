@@ -76,7 +76,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
   Tee tee(jsg::Lock& js) override;
 
   kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(
-      jsg::Lock& js, bool ignoreDisturbed = false);
+      jsg::Lock& js, IgnoreDisturbed ignoreDisturbed = IgnoreDisturbed::NO);
 
   bool isClosedOrErrored() const override {
     return state.is<StreamStates::Closed>() || state.is<StreamStates::Errored>();
@@ -109,11 +109,11 @@ class ReadableStreamInternalController: public ReadableStreamController {
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
   kj::Promise<DeferredProxy<void>> pumpTo(
-      jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) override;
+      jsg::Lock& js, kj::Own<WritableStreamSink> sink, End end) override;
 
   StreamEncoding getPreferredEncoding() override;
 
-  kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) override;
+  kj::Own<ReadableStreamController> detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) override;
 
   void setPendingClosure() override {
     isPendingClosure = true;
@@ -145,7 +145,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
     void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) override;
 
-    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
+    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, End end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
@@ -224,9 +224,9 @@ class WritableStreamInternalController: public WritableStreamController {
 
   jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> value) override;
 
-  jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
+  jsg::Promise<void> close(jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) override;
 
-  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override;
+  jsg::Promise<void> flush(jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) override;
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) override;
 
@@ -291,7 +291,7 @@ class WritableStreamInternalController: public WritableStreamController {
   void drain(jsg::Lock& js, jsg::JsValue reason);
   void finishClose(jsg::Lock& js);
   void finishError(jsg::Lock& js, jsg::JsValue reason);
-  jsg::Promise<void> closeImpl(jsg::Lock& js, bool markAsHandled);
+  jsg::Promise<void> closeImpl(jsg::Lock& js, MarkAsHandled markAsHandled);
 
   struct PipeLocked {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
@@ -344,7 +344,7 @@ class WritableStreamInternalController: public WritableStreamController {
   bool isPendingClosure = false;
 
   void adjustWriteBufferSize(jsg::Lock& js, int64_t amount);
-  void updateBackpressure(jsg::Lock& js, bool backpressure);
+  void updateBackpressure(jsg::Lock& js, UpdateBackpressure backpressure);
 
   struct Write {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;

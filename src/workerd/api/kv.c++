@@ -633,7 +633,7 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
               [dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
                   stream = kj::mv(stream)](jsg::Lock& js) mutable {
             return IoContext::current().waitForDeferredProxy(
-                stream->pumpTo(js, kj::mv(dest), true));
+                stream->pumpTo(js, kj::mv(dest), End::YES));
           });
         }
       }

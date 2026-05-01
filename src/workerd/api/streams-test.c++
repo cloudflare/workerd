@@ -186,7 +186,7 @@ KJ_TEST("PumpToReader regression") {
 
     auto sink = kj::heap<TestSink>(events);
     auto writePromise = kj::mv(sink->paf.promise);
-    auto promise = stream->pumpTo(js, kj::mv(sink), true);
+    auto promise = stream->pumpTo(js, kj::mv(sink), End::YES);
 
     return writePromise.attach(kj::mv(promise));
   });
