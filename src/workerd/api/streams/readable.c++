@@ -854,8 +854,7 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
 
   kj::Own<kj::AsyncInputStream> in;
   if (rs.hasStream()) {
-    in =
-        ioctx.getExternalPusher()->unwrapStream(rs.getStream(), externalHandler->getDebugContext());
+    in = ioctx.getExternalPusher()->unwrapStream(rs.getStream());
   } else {
     kj::Maybe<uint64_t> expectedLength;
     auto el = rs.getExpectedLength();

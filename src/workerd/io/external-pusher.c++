@@ -131,14 +131,14 @@ kj::Promise<void> ExternalPusherImpl::pushByteStream(PushByteStreamContext conte
 }
 
 kj::Own<kj::AsyncInputStream> ExternalPusherImpl::unwrapStream(
-    ExternalPusher::InputStream::Client cap, kj::LiteralStringConst debugContext) {
-  return kj::newPromisedStream(unwrapStreamImpl(kj::mv(cap), debugContext));
+    ExternalPusher::InputStream::Client cap) {
+  return kj::newPromisedStream(unwrapStreamImpl(kj::mv(cap)));
 }
 
 kj::Promise<kj::Own<kj::AsyncInputStream>> ExternalPusherImpl::unwrapStreamImpl(
-    ExternalPusher::InputStream::Client cap, kj::LiteralStringConst debugContext) {
+    ExternalPusher::InputStream::Client cap) {
   auto& unwrapped = KJ_REQUIRE_NONNULL(co_await inputStreamSet.getLocalServer(cap),
-      "pushed external is not a byte stream", debugContext, cap.debugInfo());
+      "pushed external is not a byte stream", cap.debugInfo());
 
   co_return KJ_REQUIRE_NONNULL(kj::mv(kj::downcast<InputStreamImpl>(unwrapped).stream),
       "pushed byte stream has already been consumed");
