@@ -1167,13 +1167,6 @@ class WritableStreamJsController final: public WritableStreamController {
   PipeWriteContinuationType& getPipeWriteContinuation(
       jsg::Lock& js) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
-  // Pipe flags cached for the duration of a pipe operation — stable once the pipe starts.
-  struct PipeFlags {
-    bool preventCancel = false;
-    bool pipeThrough = false;
-  };
-  PipeFlags pipeFlags;
-
   kj::Rc<WeakRef<WritableStreamJsController>> weakSelf =
       kj::rc<WeakRef<WritableStreamJsController>>(kj::Badge<WritableStreamJsController>{}, *this);
 
@@ -5017,10 +5010,6 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
   // Let's also acquire the destination pipe lock.
   lock.pipeLock(KJ_ASSERT_NONNULL(owner), kj::mv(source), options);
 
-  // Cache pipe flags for use by the persistent continuations.
-  pipeFlags.preventCancel = preventCancel;
-  pipeFlags.pipeThrough = pipeThrough;
-
   return pipeLoop(js).then(js, JSG_VISITABLE_LAMBDA((ref = addRef()), (ref), (auto& js){}));
 }
 
@@ -5078,8 +5067,10 @@ jsg::Promise<void> WritableStreamJsController::onPipeWriteSuccess(jsg::Lock& js)
 jsg::Promise<void> WritableStreamJsController::onPipeWriteFailure(
     jsg::Lock& js, jsg::Value reason) {
   auto jsReason = jsg::JsValue(reason.getHandle(js));
+  bool pipeThrough = false;
   KJ_IF_SOME(pipeLock, lock.tryGetPipe()) {
-    if (!pipeFlags.preventCancel) {
+    pipeThrough = pipeLock.flags.pipeThrough;
+    if (!pipeLock.flags.preventCancel) {
       pipeLock.source.release(js, jsReason);
     } else {
       pipeLock.source.release(js);
@@ -5087,7 +5078,7 @@ jsg::Promise<void> WritableStreamJsController::onPipeWriteFailure(
   } else {
   }  // Trailing else() to squash compiler warning
   return rejectedMaybeHandledPromise<void>(
-      js, jsReason, pipeFlags.pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
+      js, jsReason, pipeThrough ? MarkAsHandled::YES : MarkAsHandled::NO);
 }
 
 jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
