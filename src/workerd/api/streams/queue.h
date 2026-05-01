@@ -823,6 +823,19 @@ class ValueQueue final {
    private:
     ConsumerImpl impl;
 
+    // Persistent continuation for the drainingRead promise transform
+    // (ReadResult → DrainingReadResult). Lazily initialized on first async
+    // drainingRead and reused for subsequent calls.
+    struct DrainingReadCallbacks {
+      kj::Rc<WeakRef<ConsumerImpl>> weakImpl;
+
+      DrainingReadResult thenFunc(jsg::Lock& js, ReadResult result);
+      DrainingReadResult catchFunc(jsg::Lock& js, jsg::Value exception);
+    };
+    using DrainingReadContinuationType =
+        jsg::PersistentContinuation<DrainingReadCallbacks, ReadResult, DrainingReadResult>;
+    kj::Maybe<DrainingReadContinuationType> drainingReadContinuation;
+
     friend class ValueQueue;
   };
 
@@ -1063,6 +1076,16 @@ class ByteQueue final {
 
    private:
     ConsumerImpl impl;
+
+    struct DrainingReadCallbacks {
+      kj::Rc<WeakRef<ConsumerImpl>> weakImpl;
+
+      DrainingReadResult thenFunc(jsg::Lock& js, ReadResult result);
+      DrainingReadResult catchFunc(jsg::Lock& js, jsg::Value exception);
+    };
+    using DrainingReadContinuationType =
+        jsg::PersistentContinuation<DrainingReadCallbacks, ReadResult, DrainingReadResult>;
+    kj::Maybe<DrainingReadContinuationType> drainingReadContinuation;
   };
 
   explicit ByteQueue(size_t highWaterMark);

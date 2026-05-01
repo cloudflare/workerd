@@ -318,9 +318,19 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     listener.onConsumerWantsData(js);
   }
 
-  // Transform the ReadResult promise to DrainingReadResult.
-  return prp.promise.then(
-      js, [this](jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
+  // Transform the ReadResult promise to DrainingReadResult using a persistent
+  // continuation to avoid per-call OpaqueWrappable and v8::Function allocations.
+  KJ_IF_SOME(dc, drainingReadContinuation) {
+    return prp.promise.thenRef(js, dc);
+  }
+  drainingReadContinuation.emplace(
+      DrainingReadContinuationType::create(js, DrainingReadCallbacks{impl.selfRef.addRef()}));
+  return prp.promise.thenRef(js, KJ_ASSERT_NONNULL(drainingReadContinuation));
+}
+
+DrainingReadResult ValueQueue::Consumer::DrainingReadCallbacks::thenFunc(
+    jsg::Lock& js, ReadResult result) {
+  KJ_IF_SOME(impl, weakImpl->tryGet()) {
     KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
       ready.hasPendingDrainingRead = false;
     }
@@ -329,26 +339,30 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       return DrainingReadResult{.chunks = nullptr, .done = true};
     }
 
-    // Convert the value to bytes.
     kj::Vector<kj::Array<kj::byte>> chunks;
     KJ_IF_SOME(val, result.value) {
       KJ_IF_SOME(bytes, valueToBytes(js, val.getHandle(js))) {
         chunks.add(kj::mv(bytes));
       }
-      // If valueToBytes returned kj::none, we just return empty chunks.
-      // The error case should have been caught earlier.
     }
 
     return DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
       .done = false,
     };
-  }, [this](jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
+  } else {
+    return DrainingReadResult{.chunks = nullptr, .done = true};
+  }
+}
+
+DrainingReadResult ValueQueue::Consumer::DrainingReadCallbacks::catchFunc(
+    jsg::Lock& js, jsg::Value exception) {
+  KJ_IF_SOME(impl, weakImpl->tryGet()) {
     KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
       ready.hasPendingDrainingRead = false;
     }
-    js.throwException(kj::mv(exception));
-  });
+  }
+  js.throwException(kj::mv(exception));
 }
 
 void ValueQueue::Consumer::cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
@@ -357,6 +371,9 @@ void ValueQueue::Consumer::cancelPendingReads(jsg::Lock& js, jsg::JsValue reason
 
 void ValueQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(impl);
+  KJ_IF_SOME(dc, drainingReadContinuation) {
+    dc.visitForGc(visitor);
+  }
 }
 
 #pragma endregion ValueQueue::Consumer
@@ -800,41 +817,58 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
       listener.onConsumerWantsData(js);
     }
 
-    // Transform the ReadResult promise to DrainingReadResult.
-    return prp.promise.then(
-        js, [this](jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
-      KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
-        ready.hasPendingDrainingRead = false;
-      }
-
-      if (result.done) {
-        return DrainingReadResult{.chunks = nullptr, .done = true};
-      }
-
-      kj::Vector<kj::Array<kj::byte>> chunks;
-      KJ_IF_SOME(val, result.value) {
-        auto jsval = val.getHandle(js);
-        KJ_IF_SOME(ab, jsval.tryCast<jsg::JsArrayBuffer>()) {
-          chunks.add(kj::heapArray(ab.asArrayPtr()));
-        } else KJ_IF_SOME(abView, jsval.tryCast<jsg::JsArrayBufferView>()) {
-          chunks.add(kj::heapArray(abView.asArrayPtr()));
-        }
-      }
-
-      return DrainingReadResult{
-        .chunks = chunks.releaseAsArray(),
-        .done = false,
-      };
-    }, [this](jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
-      KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
-        ready.hasPendingDrainingRead = false;
-      }
-      js.throwException(kj::mv(exception));
-    });
+    // Transform the ReadResult promise to DrainingReadResult using a persistent
+    // continuation to avoid per-call OpaqueWrappable and v8::Function allocations.
+    KJ_IF_SOME(dc, drainingReadContinuation) {
+      return prp.promise.thenRef(js, dc);
+    }
+    drainingReadContinuation.emplace(
+        DrainingReadContinuationType::create(js, DrainingReadCallbacks{impl.selfRef.addRef()}));
+    return prp.promise.thenRef(js, KJ_ASSERT_NONNULL(drainingReadContinuation));
   } else {
     return js.rejectedPromise<DrainingReadResult>(
         js.error("Failed to allocate buffer for draining read"_kj));
   }
+}
+
+DrainingReadResult ByteQueue::Consumer::DrainingReadCallbacks::thenFunc(
+    jsg::Lock& js, ReadResult result) {
+  KJ_IF_SOME(impl, weakImpl->tryGet()) {
+    KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
+      ready.hasPendingDrainingRead = false;
+    }
+
+    if (result.done) {
+      return DrainingReadResult{.chunks = nullptr, .done = true};
+    }
+
+    kj::Vector<kj::Array<kj::byte>> chunks;
+    KJ_IF_SOME(val, result.value) {
+      auto jsval = val.getHandle(js);
+      KJ_IF_SOME(ab, jsval.tryCast<jsg::JsArrayBuffer>()) {
+        chunks.add(kj::heapArray(ab.asArrayPtr()));
+      } else KJ_IF_SOME(abView, jsval.tryCast<jsg::JsArrayBufferView>()) {
+        chunks.add(kj::heapArray(abView.asArrayPtr()));
+      }
+    }
+
+    return DrainingReadResult{
+      .chunks = chunks.releaseAsArray(),
+      .done = false,
+    };
+  } else {
+    return DrainingReadResult{.chunks = nullptr, .done = true};
+  }
+}
+
+DrainingReadResult ByteQueue::Consumer::DrainingReadCallbacks::catchFunc(
+    jsg::Lock& js, jsg::Value exception) {
+  KJ_IF_SOME(impl, weakImpl->tryGet()) {
+    KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
+      ready.hasPendingDrainingRead = false;
+    }
+  }
+  js.throwException(kj::mv(exception));
 }
 
 void ByteQueue::Consumer::cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
@@ -843,6 +877,9 @@ void ByteQueue::Consumer::cancelPendingReads(jsg::Lock& js, jsg::JsValue reason)
 
 void ByteQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(impl);
+  KJ_IF_SOME(dc, drainingReadContinuation) {
+    dc.visitForGc(visitor);
+  }
 }
 
 #pragma endregion ByteQueue::Consumer
