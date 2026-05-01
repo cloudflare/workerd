@@ -295,9 +295,12 @@ void Tracing::enrichBindingSpan(jsg::Lock& js, EnrichmentOptions options) {
     merged = kj::mv(existing);
   }
 
-  // `name` is required by the API; only drop the new value if it busts the size cap.
-  if (options.name.size() <= kMaxBindingSpanValueLength) {
-    merged.name = kj::mv(options.name);
+  // `name` is optional per call. When provided, it overwrites any previous name (latest
+  // wins); only drop the new value if it busts the size cap.
+  KJ_IF_SOME(n, options.name) {
+    if (n.size() <= kMaxBindingSpanValueLength) {
+      merged.name = kj::mv(n);
+    }
   }
 
   // Move existing attributes into a mutable vector so we can upsert into them.

@@ -140,11 +140,13 @@ class Tracing: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
       const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler);
 
-  // Options bag for enrichBindingSpan. `name` is required (every enrichment renames the
-  // span -- a span called "jsRpcSession" is meaningless to a user reading their tail
-  // stream); `attributes` is optional.
+  // Options bag for enrichBindingSpan. Both fields are optional, but at least one call
+  // should set `name` -- a span called "jsRpcSession" is meaningless to a user reading
+  // their tail stream. The typical pattern is to set `name` and initial `attributes` up
+  // front, then call again with only `attributes` to append more as the method progresses
+  // (multiple calls merge; see method docs).
   struct EnrichmentOptions {
-    kj::String name;
+    jsg::Optional<kj::String> name;
     jsg::Optional<jsg::Dict<jsg::Value>> attributes;
     JSG_STRUCT(name, attributes);
   };

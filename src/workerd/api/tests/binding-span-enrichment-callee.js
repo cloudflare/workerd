@@ -24,8 +24,9 @@ export class CalleeEntrypoint extends WorkerEntrypoint {
   }
 
   // Multiple enrichBindingSpan() calls within the same RPC method must merge: name is
-  // overwritten by the latest call, attributes upsert by key (same key replaces, new key
-  // appends).
+  // overwritten by the latest call when provided (otherwise preserved), attributes upsert
+  // by key (same key replaces, new key appends). Tests the natural AIG pattern: set name
+  // up front, then append more attributes later without repeating it.
   async runMerge() {
     this.ctx.tracing.enrichBindingSpan({
       name: 'first.name',
@@ -34,12 +35,17 @@ export class CalleeEntrypoint extends WorkerEntrypoint {
         'merge.overwritten': 'first_value',
       },
     });
+    // Second call sets a new name + overlapping/new attributes.
     this.ctx.tracing.enrichBindingSpan({
       name: 'final.name',
       attributes: {
         'merge.overwritten': 'second_value',
         'merge.added': 'from_second_call',
       },
+    });
+    // Third call: attributes only -- name from previous call must be preserved.
+    this.ctx.tracing.enrichBindingSpan({
+      attributes: { 'merge.late': 'from_third_call' },
     });
     return 'ok';
   }

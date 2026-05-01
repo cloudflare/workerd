@@ -96,6 +96,11 @@ export const validate = {
       'from_second_call',
       'new key from the second call must be added'
     );
+    assert.strictEqual(
+      mergedSpan.attributes?.['merge.late'],
+      'from_third_call',
+      'attributes-only call must append; name from prior call must be preserved'
+    );
 
     // Edge-case invocation (callee.runEdgeCases): the marker attribute identifies the span;
     // the other assertions verify the B1 (finite-guard) C++ behaviour.
