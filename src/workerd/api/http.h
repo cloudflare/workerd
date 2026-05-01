@@ -341,8 +341,7 @@ class Fetcher: public JsRpcClientProvider {
   // Get a worker interface for a jsRpc session call, along with the jsRpcSession span (if one
   // should be created for this Fetcher variant). Returns the building blocks for callImpl to
   // construct a JsRpcSessionCustomEvent.
-  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(
-      IoContext& ioContext, kj::Vector<kj::StringPtr>& path) override;
+  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(IoContext& ioContext) override;
 
   // Result of getClient call that includes optional trace context
   struct ClientWithTracing {
