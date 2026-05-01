@@ -197,36 +197,33 @@ class JsRpcTarget: public jsg::Object {
 // it's only a C++ class used to abstract how to get a capnp client out of the object.
 class JsRpcClientProvider: public jsg::Object {
  public:
-  // Returned by getClientForOneCall(). `client` is a live capnp cap to dispatch one call on;
-  // `path` is the property chain from the root provider down to the call site (empty if the call
-  // is being made directly on the root object).
-  struct OneCall {
-    rpc::JsRpcTarget::Client client;
-    kj::Vector<kj::StringPtr> path;
-  };
-
-  // Get a capnp client that can be used to dispatch one call, plus the property path leading to
-  // it. For cap-holding providers (JsRpcStub, JsRpcPromise) this returns the live cap. Session-
+  // Get a capnp client that can be used to dispatch one call.
+  //
+  // If this isn't the root object (i.e. this is a JsRpcProperty), the property path starting from
+  // the root object will be appended to `path`.
+  //
+  // For cap-holding providers (JsRpcStub, JsRpcPromise), this returns the live cap. Session-
   // creating providers (Fetcher) implement tryGetJsRpcSessionClient() instead and leave this
   // default in place; callers should always check the session path first.
-  virtual OneCall getClientForOneCall(jsg::Lock& js) {
+  virtual rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
     KJ_UNIMPLEMENTED(
         "Provider does not hold a live cap; callers must use tryGetJsRpcSessionClient().");
   }
 
   // Returned by tryGetJsRpcSessionClient(). `worker` is the underlying WorkerInterface that the
-  // jsRpcSession event will be dispatched on; `sessionSpan` is the user span representing this
-  // session, ready to be moved into a JsRpcSessionCustomEvent; `path` is the property chain from
-  // the root provider down to the call site (empty if invoked directly on the root).
+  // jsRpcSession event will be dispatched on. `sessionSpan` is the user span representing this
+  // session, ready to be moved into a JsRpcSessionCustomEvent.
   struct JsRpcSessionClient {
     kj::Own<WorkerInterface> worker;
     SpanBuilder sessionSpan;
-    kj::Vector<kj::StringPtr> path;
   };
 
   // For session-creating providers (Fetcher): return the building blocks for a fresh
   // JsRpcSessionCustomEvent. Default kj::none means "I'm a cap-holder, use getClientForOneCall".
-  virtual kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(IoContext& ioContext) {
+  // `path` is populated as in getClientForOneCall().
+  virtual kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(
+      IoContext& ioContext, kj::Vector<kj::StringPtr>& path) {
     return kj::none;
   }
 };
@@ -260,7 +257,8 @@ class JsRpcPromise: public JsRpcClientProvider {
   void resolve(jsg::Lock& js, jsg::JsValue result);
   void dispose(jsg::Lock& js);
 
-  OneCall getClientForOneCall(jsg::Lock& js) override;
+  rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
   // Expect that the call is itself going to return a function... and call that.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -338,16 +336,16 @@ class JsRpcProperty: public JsRpcClientProvider {
       : parent(kj::mv(parent)),
         name(kj::mv(name)) {}
 
-  OneCall getClientForOneCall(jsg::Lock& js) override;
+  rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
-  // Forward to the parent so the session is built at the root, then append our name to the
-  // returned path. The result is a kj::Maybe<JsRpcSessionClient> so the compiler forces us to
-  // handle the kj::none case before touching `path` -- there is no shared state to corrupt.
-  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(IoContext& ioContext) override {
-    auto result = parent->tryGetJsRpcSessionClient(ioContext);
-    KJ_IF_SOME(r, result) {
-      r.path.add(name);
-    }
+  // Forward to the parent so the session is built at the root, then append our name. callImpl
+  // gives us a scratch `path` vector that is discarded if we return kj::none, so we can append
+  // unconditionally.
+  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(
+      IoContext& ioContext, kj::Vector<kj::StringPtr>& path) override {
+    auto result = parent->tryGetJsRpcSessionClient(ioContext, path);
+    path.add(name);
     return result;
   }
 
@@ -426,7 +424,8 @@ class JsRpcStub: public JsRpcClientProvider {
 
   rpc::JsRpcTarget::Client getClient();
 
-  OneCall getClientForOneCall(jsg::Lock& js) override;
+  rpc::JsRpcTarget::Client getClientForOneCall(
+      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
   jsg::Ref<JsRpcStub> dup(jsg::Lock& js);
   void dispose();

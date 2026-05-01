@@ -338,7 +338,8 @@ class Fetcher: public JsRpcClientProvider {
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
-  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(IoContext& ioContext) override;
+  kj::Maybe<JsRpcSessionClient> tryGetJsRpcSessionClient(
+      IoContext& ioContext, kj::Vector<kj::StringPtr>& path) override;
 
   // Result of getClient call that includes optional trace context
   struct ClientWithTracing {
