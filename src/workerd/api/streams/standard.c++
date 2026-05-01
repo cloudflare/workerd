@@ -66,7 +66,7 @@ class ReadableLockImpl {
   void onClose(jsg::Lock& js);
   void onError(jsg::Lock& js, jsg::JsValue reason);
 
-  kj::Maybe<PipeController&> tryPipeLock(Controller& self);
+  kj::Maybe<PipeController&> tryPipeLock(Controller& self) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -97,7 +97,7 @@ class ReadableLockImpl {
       return inner.state.template is<StreamStates::Closed>();
     }
 
-    kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) override {
+    kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) override KJ_WARN_UNUSED_RESULT {
       KJ_IF_SOME(errored, inner.state.template tryGetUnsafe<StreamStates::Errored>()) {
         return errored.getHandle(js);
       }
@@ -125,9 +125,10 @@ class ReadableLockImpl {
       inner.lock.state.template transitionTo<Unlocked>();
     }
 
-    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, End end) override;
+    kj::Maybe<kj::Promise<void>> tryPumpTo(
+        WritableStreamSink& sink, End end) override KJ_WARN_UNUSED_RESULT;
 
-    jsg::Promise<ReadResult> read(jsg::Lock& js) override;
+    jsg::Promise<ReadResult> read(jsg::Lock& js) override KJ_WARN_UNUSED_RESULT;
 
    private:
     Controller& inner;
@@ -189,7 +190,8 @@ class WritableLockImpl {
 
     kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
 
-    kj::Maybe<jsg::Promise<void>> checkSignal(jsg::Lock& js, Controller& self);
+    kj::Maybe<jsg::Promise<void>> checkSignal(
+        jsg::Lock& js, Controller& self) KJ_WARN_UNUSED_RESULT;
 
     struct Flags {
       uint8_t preventAbort : 1 = 0;
@@ -215,7 +217,7 @@ class WritableLockImpl {
   using LockState = StateMachine<Unlocked, Locked, WriterLocked, PipeLocked>;
   LockState state = LockState::template create<Unlocked>();
 
-  inline kj::Maybe<PipeLocked&> tryGetPipe() {
+  inline kj::Maybe<PipeLocked&> tryGetPipe() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
     KJ_IF_SOME(locked, state.template tryGetUnsafe<PipeLocked>()) {
       return locked;
     }
@@ -811,9 +813,9 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   bool isInternal() const override;
 
-  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() override;
+  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() override KJ_WARN_UNUSED_RESULT;
 
-  jsg::Ref<ReadableStream> addRef() override;
+  jsg::Ref<ReadableStream> addRef() override KJ_WARN_UNUSED_RESULT;
 
   void setup(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source) override;
 
@@ -824,7 +826,8 @@ class ReadableStreamJsController final: public ReadableStreamController {
   // is still pending, the ReadableStream will be no longer usable and any
   // data still in the queue will be dropped. Pending read requests will be
   // rejected if a reason is given, or resolved with no data otherwise.
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) override;
+  jsg::Promise<void> cancel(
+      jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) override KJ_WARN_UNUSED_RESULT;
 
   void doClose(jsg::Lock& js);
 
@@ -845,43 +848,47 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   bool lockReader(jsg::Lock& js, Reader& reader) override;
 
-  kj::Maybe<jsg::JsValue> isErrored(jsg::Lock& js);
+  kj::Maybe<jsg::JsValue> isErrored(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   kj::Maybe<int> getDesiredSize();
 
-  jsg::Promise<void> pipeTo(
-      jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) override;
+  jsg::Promise<void> pipeTo(jsg::Lock& js,
+      WritableStreamController& destination,
+      PipeToOptions options) override KJ_WARN_UNUSED_RESULT;
 
   kj::Promise<DeferredProxy<void>> pumpTo(
-      jsg::Lock& js, kj::Own<WritableStreamSink>, End end) override;
+      jsg::Lock& js, kj::Own<WritableStreamSink>, End end) override KJ_WARN_UNUSED_RESULT;
 
   kj::Maybe<jsg::Promise<ReadResult>> read(
-      jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) override;
+      jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) override KJ_WARN_UNUSED_RESULT;
 
   kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(
-      jsg::Lock& js, size_t maxRead = kj::maxValue) override;
+      jsg::Lock& js, size_t maxRead = kj::maxValue) override KJ_WARN_UNUSED_RESULT;
 
   // See the comment for releaseReader in common.h for details on the use of maybeJs
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
 
   void setOwnerRef(ReadableStream& stream) override;
 
-  Tee tee(jsg::Lock& js) override;
+  Tee tee(jsg::Lock& js) override KJ_WARN_UNUSED_RESULT;
 
-  kj::Maybe<PipeController&> tryPipeLock() override;
+  kj::Maybe<PipeController&> tryPipeLock() override KJ_WARN_UNUSED_RESULT;
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
-  kj::Maybe<kj::OneOf<DefaultController, ByobController>> getController();
+  kj::Maybe<kj::OneOf<DefaultController, ByobController>> getController() KJ_WARN_UNUSED_RESULT;
 
-  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> readAllBytes(jsg::Lock& js, uint64_t limit) override;
-  jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> readAllBytes(
+      jsg::Lock& js, uint64_t limit) override KJ_WARN_UNUSED_RESULT;
+  jsg::Promise<kj::String> readAllText(
+      jsg::Lock& js, uint64_t limit) override KJ_WARN_UNUSED_RESULT;
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
   StreamEncoding getPreferredEncoding() override;
 
-  kj::Own<ReadableStreamController> detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) override;
+  kj::Own<ReadableStreamController> detach(
+      jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) override KJ_WARN_UNUSED_RESULT;
 
   void setPendingClosure() override {
     flags.pendingClosure = true;
@@ -948,7 +955,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   struct WrapDrainingReadCallbacks {
     kj::Rc<WeakRef<ReadableStreamJsController>> weakSelf;
 
-    DrainingReadResult thenFunc(jsg::Lock& js, DrainingReadResult result) {
+    DrainingReadResult thenFunc(jsg::Lock& js, DrainingReadResult result) KJ_WARN_UNUSED_RESULT {
       KJ_IF_SOME(self, weakSelf->tryGet()) {
         if (self.state.endOperation()) {
           if (self.state.template is<StreamStates::Closed>()) {
@@ -966,12 +973,13 @@ class ReadableStreamJsController final: public ReadableStreamController {
       return kj::mv(result);
     }
 
-    DrainingReadResult catchFunc(jsg::Lock& js, jsg::Value exception) {
+    DrainingReadResult catchFunc(jsg::Lock& js, jsg::Value exception) KJ_WARN_UNUSED_RESULT {
       KJ_IF_SOME(self, weakSelf->tryGet()) {
         self.state.clearPendingState();
         (void)self.state.endOperation();
       }
       js.throwException(kj::mv(exception));
+      KJ_UNREACHABLE;
     }
   };
   using WrapDrainingReadContinuationType = jsg::
@@ -979,7 +987,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   kj::Maybe<WrapDrainingReadContinuationType> wrapDrainingReadContinuation;
 
   template <typename T>
-  jsg::Promise<T> readAll(jsg::Lock& js, uint64_t limit);
+  jsg::Promise<T> readAll(jsg::Lock& js, uint64_t limit) KJ_WARN_UNUSED_RESULT;
 
   friend ReadableLockImpl;
   friend ReadableLockImpl::PipeLocked;
@@ -1011,13 +1019,16 @@ class WritableStreamJsController final: public WritableStreamController {
 
   KJ_DISALLOW_COPY_AND_MOVE(WritableStreamJsController);
 
-  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) override;
+  jsg::Promise<void> abort(
+      jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) override KJ_WARN_UNUSED_RESULT;
 
-  jsg::Ref<WritableStream> addRef() override;
+  jsg::Ref<WritableStream> addRef() override KJ_WARN_UNUSED_RESULT;
 
-  jsg::Promise<void> close(jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) override;
+  jsg::Promise<void> close(jsg::Lock& js,
+      MarkAsHandled markAsHandled = MarkAsHandled::NO) override KJ_WARN_UNUSED_RESULT;
 
-  jsg::Promise<void> flush(jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) override;
+  jsg::Promise<void> flush(jsg::Lock& js,
+      MarkAsHandled markAsHandled = MarkAsHandled::NO) override KJ_WARN_UNUSED_RESULT;
 
   void doClose(jsg::Lock& js);
 
@@ -1029,8 +1040,8 @@ class WritableStreamJsController final: public WritableStreamController {
 
   kj::Maybe<int> getDesiredSize() override;
 
-  kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) override;
-  kj::Maybe<jsg::JsValue> isErroredOrErroring(jsg::Lock& js);
+  kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) override KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<jsg::JsValue> isErroredOrErroring(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   bool isLocked() const;
 
@@ -1100,37 +1111,49 @@ class WritableStreamJsController final: public WritableStreamController {
   // for each chunk flowing through the pipe.
 
   // Called when a read from the source succeeds during piping.
-  jsg::Promise<void> onPipeReadSuccess(jsg::Lock& js, ReadResult result);
+  jsg::Promise<void> onPipeReadSuccess(jsg::Lock& js, ReadResult result) KJ_WARN_UNUSED_RESULT;
   // Called when a read from the source fails during piping.
-  jsg::Promise<void> onPipeReadFailure(jsg::Lock& js, jsg::Value reason);
+  jsg::Promise<void> onPipeReadFailure(jsg::Lock& js, jsg::Value reason) KJ_WARN_UNUSED_RESULT;
   // Called when a write to this destination succeeds during piping.
-  jsg::Promise<void> onPipeWriteSuccess(jsg::Lock& js);
+  jsg::Promise<void> onPipeWriteSuccess(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
   // Called when a write to this destination fails during piping.
-  jsg::Promise<void> onPipeWriteFailure(jsg::Lock& js, jsg::Value reason);
+  jsg::Promise<void> onPipeWriteFailure(jsg::Lock& js, jsg::Value reason) KJ_WARN_UNUSED_RESULT;
 
   struct PipeReadContinuationCallbacks {
-    WritableStreamJsController* ctrl;
+    kj::Rc<WeakRef<WritableStreamJsController>> weakCtrl;
 
-    jsg::Promise<void> thenFunc(jsg::Lock& js, ReadResult result) {
-      return ctrl->onPipeReadSuccess(js, kj::mv(result));
+    jsg::Promise<void> thenFunc(jsg::Lock& js, ReadResult result) KJ_WARN_UNUSED_RESULT {
+      KJ_IF_SOME(ctrl, weakCtrl->tryGet()) {
+        return ctrl.onPipeReadSuccess(js, kj::mv(result));
+      }
+      return js.resolvedPromise();
     }
 
-    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
-      return ctrl->onPipeReadFailure(js, kj::mv(reason));
+    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) KJ_WARN_UNUSED_RESULT {
+      KJ_IF_SOME(ctrl, weakCtrl->tryGet()) {
+        return ctrl.onPipeReadFailure(js, kj::mv(reason));
+      }
+      return js.rejectedPromise<void>(kj::mv(reason));
     }
   };
   using PipeReadContinuationType =
       jsg::PersistentContinuation<PipeReadContinuationCallbacks, ReadResult, jsg::Promise<void>>;
 
   struct PipeWriteContinuationCallbacks {
-    WritableStreamJsController* ctrl;
+    kj::Rc<WeakRef<WritableStreamJsController>> weakCtrl;
 
-    jsg::Promise<void> thenFunc(jsg::Lock& js) {
-      return ctrl->onPipeWriteSuccess(js);
+    jsg::Promise<void> thenFunc(jsg::Lock& js) KJ_WARN_UNUSED_RESULT {
+      KJ_IF_SOME(ctrl, weakCtrl->tryGet()) {
+        return ctrl.onPipeWriteSuccess(js);
+      }
+      return js.resolvedPromise();
     }
 
-    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
-      return ctrl->onPipeWriteFailure(js, kj::mv(reason));
+    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) KJ_WARN_UNUSED_RESULT {
+      KJ_IF_SOME(ctrl, weakCtrl->tryGet()) {
+        return ctrl.onPipeWriteFailure(js, kj::mv(reason));
+      }
+      return js.rejectedPromise<void>(kj::mv(reason));
     }
   };
   using PipeWriteContinuationType =
@@ -1139,8 +1162,10 @@ class WritableStreamJsController final: public WritableStreamController {
   kj::Maybe<PipeReadContinuationType> pipeReadContinuation;
   kj::Maybe<PipeWriteContinuationType> pipeWriteContinuation;
 
-  PipeReadContinuationType& getPipeReadContinuation(jsg::Lock& js);
-  PipeWriteContinuationType& getPipeWriteContinuation(jsg::Lock& js);
+  PipeReadContinuationType& getPipeReadContinuation(
+      jsg::Lock& js) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+  PipeWriteContinuationType& getPipeWriteContinuation(
+      jsg::Lock& js) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   // Pipe flags cached for the duration of a pipe operation — stable once the pipe starts.
   struct PipeFlags {
@@ -1611,8 +1636,8 @@ kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
 }
 
 template <typename Self>
-ssize_t WritableImpl<Self>::getDesiredSize() {
-  return underlyingSink->getHighWaterMark() - amountBuffered;
+kj::Maybe<int> WritableImpl<Self>::getDesiredSize() {
+  return static_cast<int>(underlyingSink->getHighWaterMark() - amountBuffered);
 }
 
 template <typename Self>
@@ -2047,7 +2072,7 @@ void WritableImpl<Self>::rejectCloseAndClosedPromiseIfNeeded(jsg::Lock& js) {
   auto reason =
       KJ_ASSERT_NONNULL(state.template tryGetUnsafe<StreamStates::Errored>()).getHandle(js);
   maybeRejectPromise<void>(js, closeRequest, reason);
-  PendingAbort::dequeue(maybePendingAbort);
+  auto _ KJ_UNUSED = PendingAbort::dequeue(maybePendingAbort);
   doError(js, reason);
 }
 
@@ -2090,7 +2115,7 @@ void WritableImpl<Self>::setup(jsg::Lock& js, jsg::Ref<Self> self) {
         dealWithRejection(js, kj::mv(self), handle);
       });
 
-  flags.backpressure = getDesiredSize() <= 0;
+  flags.backpressure = getDesiredSize().orDefault(0) <= 0;
 
   maybeRunAlgorithm(
       js, this->underlyingSink->start(), kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
@@ -2113,7 +2138,7 @@ template <typename Self>
 void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
   KJ_ASSERT(isWritable());
   KJ_ASSERT(!isCloseQueuedOrInFlight());
-  bool bp = getDesiredSize() <= 0;
+  bool bp = getDesiredSize().orDefault(0) <= 0;
 
   if (bp != flags.backpressure) {
     flags.backpressure = bp;
@@ -3157,7 +3182,7 @@ void ReadableByteStreamController::close(jsg::Lock& js) {
     // Only do this if the queue doesn't have a partially fulfilled read.
     KJ_IF_SOME(queue, impl.state.tryGetUnsafe<ByteQueue>()) {
       if (!queue.hasPartiallyFulfilledRead(js)) {
-        getByobRequest(js);
+        auto _ KJ_UNUSED = getByobRequest(js);
       }
     }
   }
@@ -3460,7 +3485,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     auto view = byobOptions.bufferView.getHandle(js);
     if (!view.isDetachable()) {
       return js.rejectedPromise<ReadResult>(
-          js.typeError("Unabled to use non-detachable ArrayBuffer."_kj));
+          js.typeError("Unable to use non-detachable ArrayBuffer."_kj));
     }
 
     if (view.size() == 0 && !isInternal()) {
@@ -3922,7 +3947,7 @@ class AllReader {
   }
   KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
-  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) KJ_WARN_UNUSED_RESULT {
     return loop(js).then(
         js, [this](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
       auto out = jsg::JsArrayBuffer::create(js, runningTotal);
@@ -3931,8 +3956,8 @@ class AllReader {
     });
   }
 
-  jsg::Promise<kj::String> allText(
-      jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
+  jsg::Promise<kj::String> allText(jsg::Lock& js,
+      ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) KJ_WARN_UNUSED_RESULT {
     return loop(js).then(js, [this, option](auto& js, PartList&& partPtrs) {
       // Strip UTF-8 BOM if requested
       if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
@@ -3980,15 +4005,14 @@ class AllReader {
   struct LoopCallbacks {
     kj::Rc<WeakRef<AllReader>> weakSelf;
 
-    jsg::Promise<PartList> thenFunc(jsg::Lock& js, ReadResult result) {
+    jsg::Promise<PartList> thenFunc(jsg::Lock& js, ReadResult result) KJ_WARN_UNUSED_RESULT {
       KJ_IF_SOME(self, weakSelf->tryGet()) {
         return self.onLoopSuccess(js, kj::mv(result));
       }
-      return js.rejectedPromise<PartList>(
-          KJ_EXCEPTION(FAILED, "jsg.Error: AllReader was destroyed"));
+      return js.rejectedPromise<PartList>(js.error("AllReader was destroyed"));
     }
 
-    jsg::Promise<PartList> catchFunc(jsg::Lock& js, jsg::Value exception) {
+    jsg::Promise<PartList> catchFunc(jsg::Lock& js, jsg::Value exception) KJ_WARN_UNUSED_RESULT {
       KJ_IF_SOME(self, weakSelf->tryGet()) {
         return self.onLoopFailure(js, kj::mv(exception));
       }
@@ -3999,7 +4023,7 @@ class AllReader {
       jsg::PersistentContinuation<LoopCallbacks, ReadResult, jsg::Promise<PartList>>;
   kj::Maybe<LoopContinuationType> loopContinuation;
 
-  jsg::Promise<PartList> loop(jsg::Lock& js) {
+  jsg::Promise<PartList> loop(jsg::Lock& js) KJ_WARN_UNUSED_RESULT {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         return js.resolvedPromise(KJ_MAP(p, parts) {
@@ -4032,13 +4056,18 @@ class AllReader {
 
   // Helper to cancel the readable and loop back to return the error.
   jsg::Promise<PartList> cancelAndLoop(
-      jsg::Lock& js, jsg::Ref<ReadableStream> readable, jsg::JsValue error) {
+      jsg::Lock& js, jsg::Ref<ReadableStream> readable, jsg::JsValue error) KJ_WARN_UNUSED_RESULT {
     state.template transitionTo<StreamStates::Errored>(error.addRef(js));
     return readable->getController().cancel(js, error).then(
-        js, [this](jsg::Lock& js) { return loop(js); });
+        js, [weak = weakSelf.addRef()](jsg::Lock& js) -> jsg::Promise<PartList> {
+      KJ_IF_SOME(self, weak->tryGet()) {
+        return self.loop(js);
+      }
+      return js.rejectedPromise<PartList>(js.error("AllReader was destroyed"));
+    });
   }
 
-  jsg::Promise<PartList> onLoopSuccess(jsg::Lock& js, ReadResult result) {
+  jsg::Promise<PartList> onLoopSuccess(jsg::Lock& js, ReadResult result) KJ_WARN_UNUSED_RESULT {
     KJ_IF_SOME(readable, state.tryGetActiveUnsafe()) {
       if (result.done) {
         state.template transitionTo<StreamStates::Closed>();
@@ -4085,7 +4114,7 @@ class AllReader {
     }
   }
 
-  jsg::Promise<PartList> onLoopFailure(jsg::Lock& js, jsg::Value exception) {
+  jsg::Promise<PartList> onLoopFailure(jsg::Lock& js, jsg::Value exception) KJ_WARN_UNUSED_RESULT {
     auto handle = jsg::JsValue(exception.getHandle(js));
     state.template transitionTo<StreamStates::Errored>(handle.addRef(js));
     return loop(js);
@@ -4172,8 +4201,8 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
         js.typeError("This ReadableStream belongs to an object that is closing."_kj));
   }
   if (isLockedToReader()) {
-    return js.rejectedPromise<T>(KJ_EXCEPTION(
-        FAILED, "jsg.TypeError: This ReadableStream is currently locked to a reader."));
+    return js.rejectedPromise<T>(
+        js.typeError("This ReadableStream is currently locked to a reader."));
   }
   flags.disturbed = true;
 
@@ -4508,7 +4537,7 @@ void WritableStreamDefaultController::error(jsg::Lock& js, jsg::Optional<jsg::Js
   impl.error(js, JSG_THIS, reason.orDefault(js.undefined()));
 }
 
-kj::Maybe<ssize_t> WritableStreamDefaultController::getDesiredSize() {
+kj::Maybe<int> WritableStreamDefaultController::getDesiredSize() {
   // Per the spec, desiredSize should be null when the stream is erroring.
   if (impl.flags.pedanticWpt && isErroring()) {
     return kj::none;
@@ -4641,8 +4670,12 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, MarkAsHandle
       return closureWaitable.whenResolved(js);
     }
     flags.waitingOnClosureWritableAlready = true;
-    auto promise = closureWaitable.then(js, [markAsHandled, this](jsg::Lock& js) {
-      return close(js, markAsHandled);
+    auto promise = closureWaitable.then(
+        js, [markAsHandled, weak = weakSelf.addRef()](jsg::Lock& js) -> jsg::Promise<void> {
+      KJ_IF_SOME(self, weak->tryGet()) {
+        return self.close(js, markAsHandled);
+      }
+      return js.resolvedPromise();
     }, [](jsg::Lock& js, jsg::Value) {
       // Ignore rejection — reported in Socket's closed/opened promises instead.
       return js.resolvedPromise();
@@ -4762,7 +4795,7 @@ kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
       return kj::none;
     }
     KJ_CASE_ONEOF(controller, Controller) {
-      return controller->getDesiredSize().map([](ssize_t size) -> int { return size; });
+      return controller->getDesiredSize();
     }
   }
   KJ_UNREACHABLE;
@@ -4862,8 +4895,11 @@ void WritableStreamJsController::detach(jsg::Lock& js) {
   JSG_REQUIRE(
       !lock.isLockedToWriter(), TypeError, "This WritableStream is currently locked to a writer.");
   KJ_IF_SOME(controller, state.tryGetUnsafe<Controller>()) {
-    // Try to release the underlying sink. If successful, the sink is dropped
-    // and the stream transitions to closed/locked.
+    // Try to release the underlying sink. If it can't be released (e.g., in-flight
+    // writes), the sink stays with the controller but the stream is still detached.
+    // This differs from the readable side which asserts no pending operations —
+    // the writable side is more lenient because detach is used in serialization
+    // contexts where the stream may still be draining.
     auto maybeSink KJ_UNUSED = controller->tryReleaseSink();
   }
   lock.state.transitionTo<Locked>();
@@ -4994,7 +5030,7 @@ WritableStreamJsController::PipeReadContinuationType& WritableStreamJsController
     return prc;
   }
   pipeReadContinuation.emplace(
-      PipeReadContinuationType::create(js, PipeReadContinuationCallbacks{this}));
+      PipeReadContinuationType::create(js, PipeReadContinuationCallbacks{weakSelf.addRef()}));
   return KJ_ASSERT_NONNULL(pipeReadContinuation);
 }
 
@@ -5004,7 +5040,7 @@ WritableStreamJsController::PipeWriteContinuationType& WritableStreamJsControlle
     return pwc;
   }
   pipeWriteContinuation.emplace(
-      PipeWriteContinuationType::create(js, PipeWriteContinuationCallbacks{this}));
+      PipeWriteContinuationType::create(js, PipeWriteContinuationCallbacks{weakSelf.addRef()}));
   return KJ_ASSERT_NONNULL(pipeWriteContinuation);
 }
 
@@ -5218,6 +5254,9 @@ TransformStreamDefaultController::TransformStreamDefaultController(
 
 TransformStreamDefaultController::~TransformStreamDefaultController() noexcept(false) {
   weakSelf->invalidate();
+  // Clear the persistent continuation to break the reference cycle:
+  // controller → transformContinuation → OpaqueWrappable → Ref<controller>
+  transformContinuation = kj::none;
 }
 
 kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
@@ -5308,8 +5347,7 @@ jsg::Promise<void> TransformStreamDefaultController::write(jsg::Lock& js, jsg::J
     }
     return performTransform(js, chunk);
   } else {
-    return js.rejectedPromise<void>(
-        KJ_EXCEPTION(FAILED, "jsg.TypeError: Writing to the TransformStream failed."));
+    return js.rejectedPromise<void>(js.typeError("Writing to the TransformStream failed."));
   }
 }
 
@@ -5340,8 +5378,7 @@ jsg::Promise<void> TransformStreamDefaultController::writev(
     }
     return performTransformv(js, kj::mv(chunks));
   } else {
-    return js.rejectedPromise<void>(
-        KJ_EXCEPTION(FAILED, "jsg.TypeError: Writing to the TransformStream failed."));
+    return js.rejectedPromise<void>(js.typeError("Writing to the TransformStream failed."));
   }
 }
 
@@ -5594,7 +5631,7 @@ void TransformStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(backpressureChange, maybeBackpressureChange) {
     visitor.visit(backpressureChange.promise, backpressureChange.resolver);
   }
-  visitor.visit(writable, readable, startPromise.resolver, startPromise.promise);
+  visitor.visit(writable, readable, startPromise.resolver, startPromise.promise, maybeFinish);
 
   if (transformer.get() != nullptr) {
     visitor.visit(*transformer);
@@ -5895,16 +5932,17 @@ class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
 
             auto promise = a.canceler.wrap(a.source->tryRead(buf.begin(), atLeast, buf.size()));
             return ioContext.awaitIo(js, kj::mv(promise),
-          JSG_VISITABLE_LAMBDA((request = kj::mv(request), view = view.addRef(js),
-                                   byteController = kj::mv(byteController), buf = kj::mv(buf),
-                                   atLeast, maybeOwner = self.owner),
-              (request, view, byteController), (jsg::Lock& js, size_t amount) {
+          JSG_VISITABLE_LAMBDA(
+              (request = kj::mv(request), view = view.addRef(js),
+                  byteController = kj::mv(byteController), buf = kj::mv(buf), atLeast,
+                  maybeOwnerRef = self.owner.map([](ReadableStream& s) { return s.addRef(); })),
+              (request, view, byteController, maybeOwnerRef), (jsg::Lock& js, size_t amount) {
                 // Nothing read, signal EOF by closing the stream.
                 if (amount == 0) {
                 request->respond(js, 0);
                 byteController->close(js);
-                KJ_IF_SOME(o, maybeOwner) {
-                o.signalEof(js);
+                KJ_IF_SOME(ownerRef, maybeOwnerRef) {
+                ownerRef->signalEof(js);
                 } else {
                 }
                 return js.resolvedPromise();
@@ -6007,7 +6045,7 @@ class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
     return kj::none;
   }
 
-  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() override {
+  kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() override KJ_WARN_UNUSED_RESULT {
     KJ_IF_SOME(active, inner.tryGet<IoOwn<Active>>()) {
       auto& a = *active;
       KJ_REQUIRE(a.canceler.isEmpty(), "Cannot release source while there are pending operations");
@@ -6018,7 +6056,7 @@ class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
     return kj::none;
   }
 
-  kj::Maybe<Tee> tryTee(uint64_t limit) override {
+  kj::Maybe<Tee> tryTee(uint64_t limit) override KJ_WARN_UNUSED_RESULT {
     auto& ioContext = IoContext::current();
     KJ_SWITCH_ONEOF(inner) {
       KJ_CASE_ONEOF(active, IoOwn<Active>) {
@@ -6073,7 +6111,7 @@ class InternalUnderlyingSourceImpl final: public UnderlyingSourceImpl {
       kj::rc<WeakRef<InternalUnderlyingSourceImpl>>(
           kj::Badge<InternalUnderlyingSourceImpl>(), *this);
 
-  kj::Rc<WeakRef<InternalUnderlyingSourceImpl>> addWeakRef() {
+  kj::Rc<WeakRef<InternalUnderlyingSourceImpl>> addWeakRef() KJ_WARN_UNUSED_RESULT {
     return weakRef.addRef();
   }
 };
@@ -6231,7 +6269,7 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
     return true;
   }
 
-  kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() override {
+  kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() override KJ_WARN_UNUSED_RESULT {
     KJ_IF_SOME(active, inner.tryGet<IoOwn<Active>>()) {
       auto& a = *active;
       KJ_REQUIRE(a.canceler.isEmpty(), "Cannot release sink while there are pending operations");
@@ -6242,7 +6280,7 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
     return kj::none;
   }
 
-  kj::Maybe<WritableStreamSink&> tryGetSink() override {
+  kj::Maybe<WritableStreamSink&> tryGetSink() override KJ_WARN_UNUSED_RESULT {
     KJ_IF_SOME(active, inner.tryGet<IoOwn<Active>>()) {
       return *active->out;
     }
@@ -6282,7 +6320,8 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
     return kj::none;
   }
 
-  jsg::Promise<void> write(jsg::Lock& js, Active& active, kj::Array<kj::byte> chunk) {
+  jsg::Promise<void> write(
+      jsg::Lock& js, Active& active, kj::Array<kj::byte> chunk) KJ_WARN_UNUSED_RESULT {
     auto& ioContext = IoContext::current();
     auto size = chunk.size();
     KJ_IF_SOME(o, observer) {
@@ -6311,7 +6350,8 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
     return ioContext.awaitIo(js, kj::mv(promise));
   }
 
-  jsg::Promise<void> writev(jsg::Lock& js, Active& active, kj::Array<kj::Array<kj::byte>> chunks) {
+  jsg::Promise<void> writev(
+      jsg::Lock& js, Active& active, kj::Array<kj::Array<kj::byte>> chunks) KJ_WARN_UNUSED_RESULT {
     auto& ioContext = IoContext::current();
     size_t totalSize = 0;
     // Build the pieces array for the kj sink's vectorized write.
@@ -6346,7 +6386,7 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
     return ioContext.awaitIo(js, kj::mv(promise));
   }
 
-  jsg::Promise<void> close(jsg::Lock& js, Active& active) {
+  jsg::Promise<void> close(jsg::Lock& js, Active& active) KJ_WARN_UNUSED_RESULT {
     auto& ioContext = IoContext::current();
     auto promise = active.canceler.wrap(active.out->end()).then([selfRef = addWeakRef()]() {
       selfRef->runIfAlive([&](auto& self) { self.inner.template init<Closed>(); });
@@ -6354,7 +6394,7 @@ class InternalUnderlyingSinkImpl final: public UnderlyingSinkImpl {
     return ioContext.awaitIo(js, kj::mv(promise));
   }
 
-  kj::Rc<WeakRef<InternalUnderlyingSinkImpl>> addWeakRef() {
+  kj::Rc<WeakRef<InternalUnderlyingSinkImpl>> addWeakRef() KJ_WARN_UNUSED_RESULT {
     return weakRef.addRef();
   }
 };

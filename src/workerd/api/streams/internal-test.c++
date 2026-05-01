@@ -294,7 +294,7 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
           ex.getDescription() == "jsg.TypeError: This WritableStream is currently being piped to.");
     });
 
-    source->getController().cancel(env.js, kj::none);
+    auto _ KJ_UNUSED = source->getController().cancel(env.js, kj::none);
 
     env.js.runMicrotasks();
 
@@ -344,7 +344,7 @@ KJ_TEST("WritableStreamInternalController operations reject when piped to") {
       KJ_FAIL_ASSERT("Expected tryPipeFrom to return a promise");
     }
 
-    source->getController().cancel(env.js, kj::none);
+    auto _ KJ_UNUSED = source->getController().cancel(env.js, kj::none);
     env.js.runMicrotasks();
 
     KJ_ASSERT(closeFailed);
@@ -646,7 +646,7 @@ KJ_TEST("DrainingReader on closed stream (internal stream)") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<EofSource>());
-    rs->getController().cancel(env.js, kj::none);
+    auto _ KJ_UNUSED = rs->getController().cancel(env.js, kj::none);
 
     KJ_IF_SOME(reader, DrainingReader::create(env.js, *rs)) {
       bool done = false;

@@ -1401,7 +1401,7 @@ void WritableStreamInternalController::doClose(jsg::Lock& js) {
   } else {
     (void)writeState.transitionFromTo<PipeLocked, Unlocked>();
   }
-  PendingAbort::dequeue(maybePendingAbort);
+  auto _ KJ_UNUSED = PendingAbort::dequeue(maybePendingAbort);
 }
 
 void WritableStreamInternalController::doError(jsg::Lock& js, jsg::JsValue reason) {
@@ -1416,7 +1416,7 @@ void WritableStreamInternalController::doError(jsg::Lock& js, jsg::JsValue reaso
   } else {
     (void)writeState.transitionFromTo<PipeLocked, Unlocked>();
   }
-  PendingAbort::dequeue(maybePendingAbort);
+  auto _ KJ_UNUSED = PendingAbort::dequeue(maybePendingAbort);
 }
 
 void WritableStreamInternalController::ensureWriting(jsg::Lock& js) {

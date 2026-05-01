@@ -786,7 +786,7 @@ class ValueQueue final {
 
     void close(jsg::Lock& js);
 
-    bool empty();
+    bool empty() const;
 
     void error(jsg::Lock& js, jsg::JsValue reason);
 
@@ -805,7 +805,7 @@ class ValueQueue final {
 
     void reset();
 
-    size_t size();
+    size_t size() const;
 
     kj::Own<Consumer> clone(
         jsg::Lock& js, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
@@ -965,7 +965,7 @@ class ByteQueue final {
 
     size_t getAtLeast() const;
 
-    kj::Maybe<jsg::JsUint8Array> getView(jsg::Lock& js);
+    kj::Maybe<jsg::JsUint8Array> getView(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
     // Returns the byte length of the original underlying ArrayBuffer.
     size_t getOriginalBufferByteLength(jsg::Lock& js) const;
@@ -976,6 +976,12 @@ class ByteQueue final {
     JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
 
    private:
+    // These raw references are safe because ByobRequest instances are only ever
+    // accessed through ReadableStreamBYOBRequest (in standard.h), which guards all
+    // operations behind its own validity check (maybeImpl). The ReadableStreamBYOBRequest
+    // is invalidated when the controller is closed/errored or when the BYOB request is
+    // consumed, ensuring these references are never accessed after the consumer or queue
+    // is destroyed.
     kj::Maybe<ReadRequest&> request;
     ConsumerImpl& consumer;
     QueueImpl& queue;

@@ -90,7 +90,7 @@ void ValueQueue::Consumer::close(jsg::Lock& js) {
   impl.close(js);
 };
 
-bool ValueQueue::Consumer::empty() {
+bool ValueQueue::Consumer::empty() const {
   return impl.empty();
 }
 
@@ -110,7 +110,7 @@ void ValueQueue::Consumer::reset() {
   impl.reset();
 };
 
-size_t ValueQueue::Consumer::size() {
+size_t ValueQueue::Consumer::size() const {
   return impl.size();
 }
 
@@ -343,6 +343,11 @@ DrainingReadResult ValueQueue::Consumer::DrainingReadCallbacks::thenFunc(
     KJ_IF_SOME(val, result.value) {
       KJ_IF_SOME(bytes, valueToBytes(js, val.getHandle(js))) {
         chunks.add(kj::mv(bytes));
+      } else {
+        // Value couldn't be converted to bytes (not an ArrayBuffer, ArrayBufferView, or string).
+        // Consistent with the synchronous drainBuffer path, treat as an error.
+        js.throwException(js.typeError("This ReadableStream did not return bytes."_kj));
+        KJ_UNREACHABLE;
       }
     }
 
@@ -849,6 +854,9 @@ DrainingReadResult ByteQueue::Consumer::DrainingReadCallbacks::thenFunc(
         chunks.add(kj::heapArray(ab.asArrayPtr()));
       } else KJ_IF_SOME(abView, jsval.tryCast<jsg::JsArrayBufferView>()) {
         chunks.add(kj::heapArray(abView.asArrayPtr()));
+      } else {
+        js.throwException(js.typeError("This ReadableStream did not return bytes."_kj));
+        KJ_UNREACHABLE;
       }
     }
 
@@ -937,6 +945,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
       queue.push(js, kj::mv(entry), consumer);
     } else {
       js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
+      KJ_UNREACHABLE;
     }
   }
 
