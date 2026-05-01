@@ -2388,10 +2388,7 @@ kj::Own<WorkerInterface> Fetcher::getClient(
 }
 
 kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionClient(
-    IoContext& ioContext, kj::Vector<kj::StringPtr>& path) {
-  // Fetcher is the root of the call chain; do not extend `path`.
-  (void)path;
-
+    IoContext& ioContext) {
   // The jsRpcSession span is owned by JsRpcSessionCustomEvent (constructed by callImpl) and
   // lives for the session. OutgoingFactory variants (DurableObject stubs, cross-process actors)
   // create their own outer span (e.g. "durable_object_subrequest"), so we skip jsRpcSession for
@@ -2426,7 +2423,7 @@ kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionCl
     // Internal span lives with the worker (= the session). The user span is returned
     // to the caller, which moves it into JsRpcSessionCustomEvent (also session-scoped).
     worker = worker.attach(kj::mv(internalSpan));
-    return {kj::mv(worker), kj::mv(sessionSpan)};
+    return {kj::mv(worker), kj::mv(sessionSpan), {}};
   };
 
   KJ_SWITCH_ONEOF(channelOrClientFactory) {

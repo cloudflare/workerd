@@ -368,13 +368,10 @@ void JsRpcPromise::dispose(jsg::Lock& js) {
 static rpc::JsRpcTarget::Client makeJsRpcTargetForSingleLoopbackCall(
     jsg::Lock& js, jsg::JsObject obj);
 
-rpc::JsRpcTarget::Client JsRpcPromise::getClientForOneCall(
-    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
-  // (Don't extend `path` because we're the root.)
-
+JsRpcClientProvider::OneCall JsRpcPromise::getClientForOneCall(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(pending, Pending) {
-      return pending.pipeline->getCallPipeline();
+      return {pending.pipeline->getCallPipeline(), {}};
     }
     KJ_CASE_ONEOF(resolved, Resolved) {
       // Dereference `ctxCheck` just to verify we're running in the correct context. (If not,
@@ -399,7 +396,7 @@ rpc::JsRpcTarget::Client JsRpcPromise::getClientForOneCall(
       // The easiest way to make this all just work is... to actually wrap the value in a one-off
       // RPC stub, and make a real RPC on it.
 
-      return js.withinHandleScope([&]() -> rpc::JsRpcTarget::Client {
+      return {js.withinHandleScope([&]() -> rpc::JsRpcTarget::Client {
         auto value = jsg::JsValue(resolved.result.getHandle(js));
 
         KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
@@ -413,19 +410,19 @@ rpc::JsRpcTarget::Client JsRpcPromise::getClientForOneCall(
         } else {
           JSG_FAIL_REQUIRE(TypeError, "Can't pipeline on RPC that did not return an object.");
         }
-      });
+      }),
+        {}};
     }
     KJ_CASE_ONEOF(disposed, Disposed) {
-      return JSG_KJ_EXCEPTION(FAILED, Error, "RPC promise used after being disposed.");
+      return {JSG_KJ_EXCEPTION(FAILED, Error, "RPC promise used after being disposed."), {}};
     }
   }
   KJ_UNREACHABLE;
 }
 
-rpc::JsRpcTarget::Client JsRpcProperty::getClientForOneCall(
-    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
-  auto result = parent->getClientForOneCall(js, path);
-  path.add(name);
+JsRpcClientProvider::OneCall JsRpcProperty::getClientForOneCall(jsg::Lock& js) {
+  auto result = parent->getClientForOneCall(js);
+  result.path.add(name);
   return result;
 }
 
@@ -467,30 +464,25 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
   try {
     return js.tryCatch([&]() -> JsRpcPromiseAndPipeline {
-      // `path` will be filled in with the path of property names leading from the stub represented
-      // by `client` to the specific property / method that we're trying to invoke.
-      //
-      // Two paths into the cap:
+      // `path` is the chain of property names leading from the root provider to the specific
+      // method we're invoking. Both code paths below return it as part of their result, so
+      // there is no shared mutable state to corrupt:
       //   1. tryGetJsRpcSessionClient(): for session-creating providers (Fetcher). callImpl owns
       //      the JsRpcSessionCustomEvent it constructs from the returned WorkerInterface and
       //      span; this keeps span access in the same scope as the response handler that needs
       //      it (no pointer-out of the function).
       //   2. getClientForOneCall(): for cap-holding providers (JsRpcStub, JsRpcPromise) that
       //      already have a live cap, used as a fallback when no session is needed.
-      kj::Vector<kj::StringPtr> path;
       auto& ioContext = IoContext::current();
       rpc::JsRpcTarget::Client client(nullptr);
-      // Try the session path with a scratch `path` vector; only commit it on success. This
-      // means forwarders (JsRpcProperty) can append unconditionally without worrying about
-      // double-counting on the getClientForOneCall() fallback below.
-      kj::Vector<kj::StringPtr> sessionPath;
+      kj::Vector<kj::StringPtr> path;
       // Pointer to the jsRpcSession user span owned by the JsRpcSessionCustomEvent we
       // construct below. Used by the response lambda to apply BindingSpanEnrichment from
       // CallResults. Null when the call goes through a cap-holding provider (no session
       // means no span to enrich).
       SpanBuilder* sessionSpan = nullptr;
-      KJ_IF_SOME(sessionClient, parent.tryGetJsRpcSessionClient(ioContext, sessionPath)) {
-        path = kj::mv(sessionPath);
+      KJ_IF_SOME(sessionClient, parent.tryGetJsRpcSessionClient(ioContext)) {
+        path = kj::mv(sessionClient.path);
         auto event =
             kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE,
                 kj::none, kj::mv(sessionClient.sessionSpan));
@@ -505,7 +497,9 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
                               .attach(kj::mv(sessionClient.worker))
                               .then([](auto&&) {}, [](kj::Exception&&) {}));
       } else {
-        client = parent.getClientForOneCall(js, path);
+        auto oneCall = parent.getClientForOneCall(js);
+        client = kj::mv(oneCall.client);
+        path = kj::mv(oneCall.path);
       }
 
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
@@ -867,10 +861,8 @@ rpc::JsRpcTarget::Client JsRpcStub::getClient() {
   }
 }
 
-rpc::JsRpcTarget::Client JsRpcStub::getClientForOneCall(
-    jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
-  // (Don't extend `path` because we're the root.)
-  return getClient();
+JsRpcClientProvider::OneCall JsRpcStub::getClientForOneCall(jsg::Lock& js) {
+  return {getClient(), {}};
 }
 
 jsg::Ref<JsRpcStub> JsRpcStub::dup(jsg::Lock& js) {
