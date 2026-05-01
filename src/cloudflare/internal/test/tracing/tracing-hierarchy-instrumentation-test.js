@@ -144,7 +144,7 @@ export const validateHierarchy = {
     // SpanImpl from pinning the tracer past end-of-request.
 
     // ---------- Case 7: jsRpcInsideEnterSpan ----------
-    // The jsRpcSession span created by an RPC binding call must be a child of the
+    // The jsRpcCall span created by an RPC binding call must be a child of the
     // enterSpan it was called from, not the top-level onset span. This is the RPC
     // equivalent of case 3 (fetchInsideEnterSpan).
     {
@@ -153,7 +153,7 @@ export const validateHierarchy = {
       assert.ok(outer.closed);
       const rpcSpan = findSpanByName(
         state,
-        'jsRpcSession',
+        'jsRpcCall',
         (s) => s.invocationId === outer.invocationId
       );
       assertParent(rpcSpan, outer, 'jsRpcInsideEnterSpan');

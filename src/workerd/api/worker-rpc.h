@@ -505,13 +505,13 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
  public:
   JsRpcSessionCustomEvent(uint16_t typeId,
       kj::Maybe<kj::String> wrapperModule = kj::none,
-      SpanBuilder jsRpcSessionSpan = SpanBuilder(nullptr),
+      SpanBuilder jsRpcCallSpan = SpanBuilder(nullptr),
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
         typeId(typeId),
-        jsRpcSessionSpan(kj::mv(jsRpcSessionSpan)),
+        jsRpcCallSpan(kj::mv(jsRpcCallSpan)),
         wrapperModule(kj::mv(wrapperModule)) {}
 
   ~JsRpcSessionCustomEvent() noexcept(false) {
@@ -570,11 +570,11 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
   uint16_t typeId;
 
  public:
-  // Span representing this jsRpc session. Created before startRequest() so the callee can
-  // reference its ID for trace context propagation, and lives until this event is destroyed
-  // (i.e. until the session ends). Public so callImpl() can apply BindingSpanEnrichment from
-  // CallResults to it.
-  SpanBuilder jsRpcSessionSpan;
+  // Span representing this jsRpc top-level call. Created before startRequest() so the
+  // callee can reference its ID for trace context propagation, and lives until this event
+  // is destroyed (i.e. until the session ends). Public so callImpl() can apply
+  // BindingSpanEnrichment from CallResults to it.
+  SpanBuilder jsRpcCallSpan;
 
  private:
   kj::Maybe<kj::String> wrapperModule;
