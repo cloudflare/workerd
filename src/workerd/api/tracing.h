@@ -140,17 +140,26 @@ class Tracing: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler,
       const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler);
 
-  // Enriches the caller's binding-call span with attributes carried back on the next RPC
-  // return. The special attribute key "span.name" renames the span; other keys become tags.
-  // Last call before the RPC method returns wins. Per-key length, per-value length, and
-  // total attribute count are capped; entries that exceed any cap are silently dropped.
+  // Options bag for enrichBindingSpan. `name` is required (every enrichment renames the
+  // span -- a span called "jsRpcSession" is meaningless to a user reading their tail
+  // stream); `attributes` is optional.
+  struct EnrichmentOptions {
+    kj::String name;
+    jsg::Optional<jsg::Dict<jsg::Value>> attributes;
+    JSG_STRUCT(name, attributes);
+  };
+
+  // Enriches the caller's binding-call span with a new name and optional attributes,
+  // carried back on the next RPC return. Last call before the RPC method returns wins.
+  // Per-key length, per-value length, and total attribute count are capped; entries that
+  // exceed any cap are silently dropped.
   //
   // Only takes effect for direct service-binding calls (e.g. `env.svc.method()`). Calls
   // made via a held JsRpcStub (e.g. `const s = await env.svc.session(); await s.method()`)
   // buffer the enrichment correctly on the callee side, but the caller has no span to
   // enrich on those paths so the data is dropped on receive. No-ops outside an RPC
   // method (e.g. inside a fetch handler).
-  void enrichBindingSpan(jsg::Lock& js, jsg::Dict<jsg::Value> attributes);
+  void enrichBindingSpan(jsg::Lock& js, EnrichmentOptions options);
 
   JSG_RESOURCE_TYPE(Tracing) {
     JSG_METHOD(enterSpan);
@@ -194,4 +203,5 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
 
 }  // namespace workerd::api
 
-#define EW_TRACING_ISOLATE_TYPES api::Tracing, api::user_tracing::Span
+#define EW_TRACING_ISOLATE_TYPES                                                                   \
+  api::Tracing, api::Tracing::EnrichmentOptions, api::user_tracing::Span

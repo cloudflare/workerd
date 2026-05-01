@@ -66,7 +66,7 @@ export const validate = {
     assert.strictEqual(enrichedSpan.closed, true);
 
     // Edge-case invocation (callee.runEdgeCases): the marker attribute identifies the span;
-    // the other assertions verify the C++ guards.
+    // the other assertions verify the B1 (finite-guard) C++ behaviour.
     const edgeSpans = [...state.spans.values()].filter(
       (s) => s.attributes?.['gen_ai.tag'] === 'edge_case_marker'
     );
@@ -76,18 +76,6 @@ export const validate = {
       'Expected exactly one span tagged with the edge_case_marker'
     );
     const edgeSpan = edgeSpans[0];
-
-    // B2: non-string "span.name" must NOT rename the span. The span keeps its default name.
-    assert.notStrictEqual(
-      edgeSpan.name,
-      '42',
-      'Non-string span.name must not rename the span'
-    );
-    assert.notStrictEqual(
-      edgeSpan.name,
-      42,
-      'Non-string span.name must not rename the span'
-    );
 
     // B1: Infinity / NaN must round-trip as finite-or-non-finite numbers without crashing
     // the runtime. They go through the double branch (no int64 cast).

@@ -281,58 +281,54 @@ constexpr size_t kMaxBindingSpanKeyLength = 256;
 constexpr size_t kMaxBindingSpanValueLength = 128 * 1024;
 }  // namespace
 
-void Tracing::enrichBindingSpan(jsg::Lock& js, jsg::Dict<jsg::Value> attributes) {
+void Tracing::enrichBindingSpan(jsg::Lock& js, EnrichmentOptions options) {
   // Buffers span enrichment from a callee-side binding to be shipped back to the caller on the
-  // next RPC return. The caller forwards it to the streaming tail worker. The special attribute
-  // key "span.name" is extracted as a separate `name` field on the wire; other keys are
-  // forwarded verbatim as attribute events. Last call before return wins.
+  // next RPC return. The caller forwards it to the streaming tail worker as attribute events
+  // on the binding-call span; `name` is shipped as a separate field and applied as a rename.
+  // Last call before return wins.
   if (!IoContext::hasCurrent()) return;
   auto& ioCtx = IoContext::current();
   if (!ioCtx.hasCurrentIncomingRequest()) return;
 
+  // `name` is required by the API; only drop it if it busts the size cap.
   kj::Maybe<kj::String> name;
-  kj::Vector<tracing::Attribute> attrVec;
-  for (auto& field: attributes.fields) {
-    if (attrVec.size() >= kMaxBindingSpanAttributes) break;
-    if (field.name.size() > kMaxBindingSpanKeyLength) continue;
+  if (options.name.size() <= kMaxBindingSpanValueLength) {
+    name = kj::mv(options.name);
+  }
 
-    v8::Local<v8::Value> handle = field.value.getHandle(js);
-    // The "span.name" key is reserved for renaming the span. Always consumed (never falls
-    // through as a regular attribute) so users can't accidentally tag the span with a key
-    // named "span.name" by passing a non-string value.
-    if (field.name == "span.name"_kj) {
+  kj::Vector<tracing::Attribute> attrVec;
+  KJ_IF_SOME(attributes, options.attributes) {
+    for (auto& field: attributes.fields) {
+      if (attrVec.size() >= kMaxBindingSpanAttributes) break;
+      if (field.name.size() > kMaxBindingSpanKeyLength) continue;
+
+      v8::Local<v8::Value> handle = field.value.getHandle(js);
+      tracing::Attribute::Value value;
       if (handle->IsString()) {
         auto str = kj::str(jsg::JsValue(handle).toString(js));
-        if (str.size() <= kMaxBindingSpanValueLength) {
-          name = kj::mv(str);
+        if (str.size() > kMaxBindingSpanValueLength) continue;
+        value = kj::ConstString(kj::mv(str));
+      } else if (handle->IsBoolean()) {
+        value = handle->BooleanValue(js.v8Isolate);
+      } else if (handle->IsNumber()) {
+        double d = handle->NumberValue(js.v8Context()).FromMaybe(0.0);
+        // Coerce to int64 only when finite and exactly representable. NaN, +/-Infinity, and
+        // out-of-range doubles fall through to the double branch -- casting them to int64
+        // would be undefined behaviour.
+        constexpr double kInt64Min = -9223372036854775808.0;  // -2^63 (exactly representable).
+        constexpr double kInt64MaxExclusive =
+            9223372036854775808.0;  // 2^63 (exclusive upper bound).
+        if (std::isfinite(d) && d >= kInt64Min && d < kInt64MaxExclusive &&
+            d == static_cast<double>(static_cast<int64_t>(d))) {
+          value = static_cast<int64_t>(d);
+        } else {
+          value = d;
         }
-      }
-      continue;
-    }
-    tracing::Attribute::Value value;
-    if (handle->IsString()) {
-      auto str = kj::str(jsg::JsValue(handle).toString(js));
-      if (str.size() > kMaxBindingSpanValueLength) continue;
-      value = kj::ConstString(kj::mv(str));
-    } else if (handle->IsBoolean()) {
-      value = handle->BooleanValue(js.v8Isolate);
-    } else if (handle->IsNumber()) {
-      double d = handle->NumberValue(js.v8Context()).FromMaybe(0.0);
-      // Coerce to int64 only when finite and exactly representable. NaN, +/-Infinity, and
-      // out-of-range doubles fall through to the double branch -- casting them to int64
-      // would be undefined behaviour.
-      constexpr double kInt64Min = -9223372036854775808.0;  // -2^63 (exactly representable).
-      constexpr double kInt64MaxExclusive = 9223372036854775808.0;  // 2^63 (exclusive upper bound).
-      if (std::isfinite(d) && d >= kInt64Min && d < kInt64MaxExclusive &&
-          d == static_cast<double>(static_cast<int64_t>(d))) {
-        value = static_cast<int64_t>(d);
       } else {
-        value = d;
+        continue;  // Skip unsupported types (objects, arrays, null, undefined).
       }
-    } else {
-      continue;  // Skip unsupported types.
+      attrVec.add(tracing::Attribute(kj::ConstString(kj::str(field.name)), kj::mv(value)));
     }
-    attrVec.add(tracing::Attribute(kj::ConstString(kj::str(field.name)), kj::mv(value)));
   }
 
   ioCtx.setPendingBindingSpanEnrichment(IoContext::IncomingRequest::PendingSpanEnrichment{
