@@ -10,6 +10,7 @@
 
 #include <workerd/api/util.h>
 #include <workerd/io/features.h>
+#include <workerd/util/autogate.h>
 
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
@@ -451,9 +452,9 @@ EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
   return iter->second;
 }
 
-// Overload that adds secp256k1 to the table when the compat flag is set.
+// Overload that adds secp256k1 to the table when the autogate is enabled.
 EllipticCurveInfo lookupEllipticCurve(jsg::Lock& js, kj::StringPtr curveName) {
-  if (FeatureFlags::get(js).getSecp256k1EcdsaCurve() && isSecp256k1(curveName)) {
+  if (util::Autogate::isEnabled(util::AutogateKey::SECP256K1_ECDSA) && isSecp256k1(curveName)) {
     return {"secp256k1", 0, 32};
   }
   return lookupEllipticCurve(curveName);

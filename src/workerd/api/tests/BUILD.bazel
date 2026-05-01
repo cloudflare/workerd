@@ -309,13 +309,21 @@ wd_test(
     data = ["crypto-impl-asymmetric-test.js"],
 )
 
+# secp256k1 ECDSA when the SECP256K1_ECDSA autogate is off (default variant only).
 wd_test(
-    src = "crypto-secp256k1-test.wd-test",
+    src = "crypto-secp256k1-disabled-test.wd-test",
     args = ["--experimental"],
-    data = [
-        "crypto-secp256k1-no-flag-test.js",
-        "crypto-secp256k1-with-flag-test.js",
-    ],
+    data = ["crypto-secp256k1-disabled-test.js"],
+    generate_all_autogates_variant = False,
+)
+
+# secp256k1 ECDSA when the SECP256K1_ECDSA autogate is on (@all-autogates only).
+wd_test(
+    src = "crypto-secp256k1-enabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto-secp256k1-enabled-test.js"],
+    generate_all_compat_flags_variant = False,
+    generate_default_variant = False,
 )
 
 wd_test(

@@ -1539,10 +1539,4 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # startup. This allows packages to extend `sys.path` declaratively (e.g. to
   # add subdirectories or register import hooks). Without this flag, `.pth`
   # files in `python_modules/` are ignored.
-
-  secp256k1EcdsaCurve @177 :Bool
-      $compatEnableFlag("secp256k1_ecdsa_curve")
-      $experimental;
-  # When enabled, the WebCrypto ECDSA algorithm accepts "secp256k1" as a
-  # namedCurve, with SHA-256 as the only supported hash.
 }

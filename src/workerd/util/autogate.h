@@ -52,6 +52,8 @@ enum class AutogateKey {
   UPDATED_AUTO_ALLOCATE_CHUNK_SIZE,
   // Call abortIsolate() when a Python worker encounters a fatal error.
   PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR,
+  // Enable WebCrypto ECDSA support for the secp256k1 curve via aws-lc-rs.
+  SECP256K1_ECDSA,
   NumOfKeys  // Reserved for iteration.
 };
 

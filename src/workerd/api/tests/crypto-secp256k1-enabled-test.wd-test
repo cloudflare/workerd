@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Tests that secp256k1 ECDSA works when the SECP256K1_ECDSA autogate is on.
+# Only runs in the @all-autogates variant.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-secp256k1-enabled",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-secp256k1-enabled-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

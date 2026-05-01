@@ -28,7 +28,7 @@ syn = { version = "2", features = ["full"] }
 ada-url = "3"
 anyhow = "1"
 async-trait = { version = "0", default-features = false }
-aws-lc-rs = "1"
+aws-lc-rs = { version = "1", features = ["prebuilt-nasm"] }
 capnp = "0"
 capnpc = "0"
 capnp-rpc = "0"
