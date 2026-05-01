@@ -282,24 +282,32 @@ constexpr size_t kMaxBindingSpanValueLength = 128 * 1024;
 }  // namespace
 
 void Tracing::enrichBindingSpan(jsg::Lock& js, EnrichmentOptions options) {
-  // Buffers span enrichment from a callee-side binding to be shipped back to the caller on the
-  // next RPC return. The caller forwards it to the streaming tail worker as attribute events
-  // on the binding-call span; `name` is shipped as a separate field and applied as a rename.
-  // Last call before return wins.
+  // Merges into any pending enrichment buffered by an earlier enrichBindingSpan() call in the
+  // same RPC method. `name` is overwritten by each call (latest wins). Attributes upsert by
+  // key: same-key entries replace the prior value; new keys are appended subject to the count
+  // cap. The merged bag is shipped on the next RPC return as a single CallResults field.
   if (!IoContext::hasCurrent()) return;
   auto& ioCtx = IoContext::current();
   if (!ioCtx.hasCurrentIncomingRequest()) return;
 
-  // `name` is required by the API; only drop it if it busts the size cap.
-  kj::Maybe<kj::String> name;
-  if (options.name.size() <= kMaxBindingSpanValueLength) {
-    name = kj::mv(options.name);
+  IoContext::IncomingRequest::PendingSpanEnrichment merged;
+  KJ_IF_SOME(existing, ioCtx.takePendingBindingSpanEnrichment()) {
+    merged = kj::mv(existing);
   }
 
-  kj::Vector<tracing::Attribute> attrVec;
+  // `name` is required by the API; only drop the new value if it busts the size cap.
+  if (options.name.size() <= kMaxBindingSpanValueLength) {
+    merged.name = kj::mv(options.name);
+  }
+
+  // Move existing attributes into a mutable vector so we can upsert into them.
+  kj::Vector<tracing::Attribute> attrVec(merged.attributes.size());
+  for (auto& a: merged.attributes) {
+    attrVec.add(kj::mv(a));
+  }
+
   KJ_IF_SOME(attributes, options.attributes) {
     for (auto& field: attributes.fields) {
-      if (attrVec.size() >= kMaxBindingSpanAttributes) break;
       if (field.name.size() > kMaxBindingSpanKeyLength) continue;
 
       v8::Local<v8::Value> handle = field.value.getHandle(js);
@@ -327,12 +335,26 @@ void Tracing::enrichBindingSpan(jsg::Lock& js, EnrichmentOptions options) {
       } else {
         continue;  // Skip unsupported types (objects, arrays, null, undefined).
       }
-      attrVec.add(tracing::Attribute(kj::ConstString(kj::str(field.name)), kj::mv(value)));
+
+      // Upsert by key: same-key entries replace the prior value; new keys are appended
+      // subject to the count cap.
+      bool replaced = false;
+      for (auto& existing: attrVec) {
+        if (existing.name == field.name) {
+          existing = tracing::Attribute(kj::ConstString(kj::str(field.name)), kj::mv(value));
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced) {
+        if (attrVec.size() >= kMaxBindingSpanAttributes) continue;
+        attrVec.add(tracing::Attribute(kj::ConstString(kj::str(field.name)), kj::mv(value)));
+      }
     }
   }
 
   ioCtx.setPendingBindingSpanEnrichment(IoContext::IncomingRequest::PendingSpanEnrichment{
-    .name = kj::mv(name),
+    .name = kj::mv(merged.name),
     .attributes = attrVec.releaseAsArray(),
   });
 }

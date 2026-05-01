@@ -65,6 +65,38 @@ export const validate = {
     );
     assert.strictEqual(enrichedSpan.closed, true);
 
+    // Merge invocation (callee.runMerge): two enrichBindingSpan calls in one method.
+    // Latest name wins; same-key attribute is replaced; new key is appended; first-only
+    // key is preserved.
+    const mergedSpan = findSpanByName(state, 'final.name');
+    assert.ok(
+      mergedSpan,
+      'Expected the second enrichBindingSpan call to win the rename'
+    );
+    const firstNameSurvived = [...state.spans.values()].some(
+      (s) => s.name === 'first.name'
+    );
+    assert.strictEqual(
+      firstNameSurvived,
+      false,
+      'first.name must not survive: it is overwritten by the second call'
+    );
+    assert.strictEqual(
+      mergedSpan.attributes?.['merge.kept'],
+      'from_first_call',
+      'first-only key must survive the merge'
+    );
+    assert.strictEqual(
+      mergedSpan.attributes?.['merge.overwritten'],
+      'second_value',
+      'same-key attribute must be replaced by the second call'
+    );
+    assert.strictEqual(
+      mergedSpan.attributes?.['merge.added'],
+      'from_second_call',
+      'new key from the second call must be added'
+    );
+
     // Edge-case invocation (callee.runEdgeCases): the marker attribute identifies the span;
     // the other assertions verify the B1 (finite-guard) C++ behaviour.
     const edgeSpans = [...state.spans.values()].filter(

@@ -23,6 +23,27 @@ export class CalleeEntrypoint extends WorkerEntrypoint {
     return { answer: 42 };
   }
 
+  // Multiple enrichBindingSpan() calls within the same RPC method must merge: name is
+  // overwritten by the latest call, attributes upsert by key (same key replaces, new key
+  // appends).
+  async runMerge() {
+    this.ctx.tracing.enrichBindingSpan({
+      name: 'first.name',
+      attributes: {
+        'merge.kept': 'from_first_call',
+        'merge.overwritten': 'first_value',
+      },
+    });
+    this.ctx.tracing.enrichBindingSpan({
+      name: 'final.name',
+      attributes: {
+        'merge.overwritten': 'second_value',
+        'merge.added': 'from_second_call',
+      },
+    });
+    return 'ok';
+  }
+
   // Edge cases: Infinity / NaN must not crash and must round-trip as numbers (they fall
   // through to the double branch in the C++ guard).
   async runEdgeCases() {

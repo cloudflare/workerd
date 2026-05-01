@@ -14,6 +14,14 @@ export const callEnrichesSpan = {
   },
 };
 
+// Drives runMerge on the callee. Asserts on the merged span live in the tail worker.
+export const callMerge = {
+  async test(ctrl, env) {
+    const result = await env.callee.runMerge();
+    assert.strictEqual(result, 'ok');
+  },
+};
+
 // Drives runEdgeCases on the callee. The actual assertions on what the STW saw live in
 // the validateEdgeCases test in binding-span-enrichment-tail.js.
 export const callEdgeCases = {
