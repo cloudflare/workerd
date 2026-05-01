@@ -2261,6 +2261,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
 
   incomingRequest->delivered();
 
+  // Server-side span representing the membrane lifetime: from the moment the callee starts
+  // serving this session until donePromise resolves (= no caps remain across the membrane).
+  // Distinct from the per-call jsRpcCall span on the client side, which only wraps a single
+  // top-level method call; one jsRpcSession on the server can serve many client-side calls
+  // when the user holds onto a returned RpcTarget stub. Parented to the current user trace
+  // span, which (post USER_SPAN_CONTEXT_PROPAGATION) is the caller's jsRpcCall span.
+  auto jsRpcSessionSpan = ioctx.getCurrentUserTraceSpan().newChild("jsRpcSession"_kjc, ioctx.now());
+
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
     // disconnects.
