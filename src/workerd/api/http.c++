@@ -2389,23 +2389,11 @@ kj::Own<WorkerInterface> Fetcher::getClient(
 
 kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionClient(
     IoContext& ioContext) {
-  // The jsRpcSession span is owned by JsRpcSessionCustomEvent (constructed by callImpl) and
-  // lives for the session. OutgoingFactory variants (DurableObject stubs, cross-process actors)
-  // create their own outer span (e.g. "durable_object_subrequest"), so we skip jsRpcSession for
-  // them.
-  //
-  // `startRequest` builds the WorkerInterface; `metadataExtra` lets each case populate fields
-  // that don't apply to all variants (e.g. featureFlagsForFl, which goes to FL via
-  // IoChannelFactory::startSubrequest but is undefined for SubrequestChannel::startRequest).
+  // OutgoingFactory variants (DurableObject stubs, cross-process actors) create their own
+  // outer span, so we skip jsRpcSession for them.
   auto withSessionSpan = [&](auto startRequest, auto metadataExtra) -> JsRpcSessionClient {
-    // Create both an internal trace span and a user-facing session span. The internal span
-    // propagates trace context to downstream subrequests (e.g. QuickSilver Read.get the
-    // callee issues during dynamic-worker ban checks). The user span is what AIG /
-    // binding-span-enrichment attach attributes to and what shows up in user tail-stream
-    // span trees as "jsRpcSession".
-    //
-    // Mirrors the old Fetcher::getClient("jsRpcSession") path which used
-    // IoContext::makeUserTraceSpan to produce a TraceContext{internal, user}.
+    // Adds internal span (for trace context propagation) and user span (for jsRpcSession in
+    // tail streams / AIG enrichment).
     auto internalSpan = ioContext.makeTraceSpan("jsRpcSession"_kjc);
     auto sessionSpan = ioContext.getCurrentUserTraceSpan().newChild(
         "jsRpcSession"_kjc, ioContext.now());
@@ -2420,8 +2408,6 @@ kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionCl
       metadataExtra(metadata);
       return startRequest(channelFactory, kj::mv(metadata));
     }, {.inHouse = isInHouse, .wrapMetrics = !isInHouse});
-    // Internal span lives with the worker (= the session). The user span is returned
-    // to the caller, which moves it into JsRpcSessionCustomEvent (also session-scoped).
     worker = worker.attach(kj::mv(internalSpan));
     return {kj::mv(worker), kj::mv(sessionSpan), {}};
   };
@@ -2434,8 +2420,6 @@ kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionCl
         return channelFactory.startSubrequest(channel, kj::mv(metadata));
       },
           [&](IoChannelFactory::SubrequestMetadata& metadata) {
-        // featureFlagsForFl is forwarded to FL by IoChannelFactory::startSubrequest. The
-        // SubrequestChannel::startRequest path below explicitly does not honour this field.
         metadata.featureFlagsForFl =
             mapCopyString(ioContext.getWorker().getIsolate().getFeatureFlagsForFl());
       });

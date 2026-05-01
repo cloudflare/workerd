@@ -464,15 +464,9 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
   try {
     return js.tryCatch([&]() -> JsRpcPromiseAndPipeline {
-      // `path` is the chain of property names leading from the root provider to the specific
-      // method we're invoking. Both code paths below return it as part of their result, so
-      // there is no shared mutable state to corrupt:
-      //   1. tryGetJsRpcSessionClient(): for session-creating providers (Fetcher). callImpl owns
-      //      the JsRpcSessionCustomEvent it constructs from the returned WorkerInterface and
-      //      span; this keeps span access in the same scope as the response handler that needs
-      //      it (no pointer-out of the function).
-      //   2. getClientForOneCall(): for cap-holding providers (JsRpcStub, JsRpcPromise) that
-      //      already have a live cap, used as a fallback when no session is needed.
+      // Two ways into the cap: tryGetJsRpcSessionClient() for session-creating providers
+      // (Fetcher), getClientForOneCall() for cap-holders (JsRpcStub, JsRpcPromise). `path` is
+      // the chain of property names leading to the method being invoked.
       auto& ioContext = IoContext::current();
       rpc::JsRpcTarget::Client client(nullptr);
       kj::Vector<kj::StringPtr> path;
@@ -482,11 +476,8 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
             kj::heap<api::JsRpcSessionCustomEvent>(JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE,
                 kj::none, kj::mv(sessionClient.sessionSpan));
         client = event->getCap();
-        // Arrange to cancel the CustomEvent if our I/O context is destroyed. But otherwise, we
-        // don't actually care about the result of the event. If it throws, the membrane will
-        // already have propagated the exception to any RPC calls that we're waiting on, so we
-        // even ignore errors here -- otherwise they'll end up logged as "uncaught exceptions"
-        // even if they were, in fact, caught elsewhere.
+        // Cancel the CustomEvent if our I/O context is destroyed; ignore errors because the
+        // membrane already propagates exceptions to in-flight RPC calls.
         ioContext.addTask(sessionClient.worker->customEvent(kj::mv(event))
                               .attach(kj::mv(sessionClient.worker))
                               .then([](auto&&) {}, [](kj::Exception&&) {}));
