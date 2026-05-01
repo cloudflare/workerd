@@ -144,6 +144,12 @@ class Tracing: public jsg::Object {
   // return. The special attribute key "span.name" renames the span; other keys become tags.
   // Last call before the RPC method returns wins. Per-key length, per-value length, and
   // total attribute count are capped; entries that exceed any cap are silently dropped.
+  //
+  // Only takes effect for direct service-binding calls (e.g. `env.svc.method()`). Calls
+  // made via a held JsRpcStub (e.g. `const s = await env.svc.session(); await s.method()`)
+  // buffer the enrichment correctly on the callee side, but the caller has no span to
+  // enrich on those paths so the data is dropped on receive. No-ops outside an RPC
+  // method (e.g. inside a fetch handler).
   void enrichBindingSpan(jsg::Lock& js, jsg::Dict<jsg::Value> attributes);
 
   JSG_RESOURCE_TYPE(Tracing) {

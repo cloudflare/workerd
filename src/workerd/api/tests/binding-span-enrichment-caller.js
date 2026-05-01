@@ -13,3 +13,12 @@ export const callEnrichesSpan = {
     assert.deepStrictEqual(result, { answer: 42 });
   },
 };
+
+// Drives runEdgeCases on the callee. The actual assertions on what the STW saw live in
+// the validateEdgeCases test in binding-span-enrichment-tail.js.
+export const callEdgeCases = {
+  async test(ctrl, env) {
+    const result = await env.callee.runEdgeCases();
+    assert.strictEqual(result, 'ok');
+  },
+};

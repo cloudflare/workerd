@@ -64,5 +64,44 @@ export const validate = {
       'my-gateway'
     );
     assert.strictEqual(enrichedSpan.closed, true);
+
+    // Edge-case invocation (callee.runEdgeCases): the marker attribute identifies the span;
+    // the other assertions verify the C++ guards.
+    const edgeSpans = [...state.spans.values()].filter(
+      (s) => s.attributes?.['gen_ai.tag'] === 'edge_case_marker'
+    );
+    assert.strictEqual(
+      edgeSpans.length,
+      1,
+      'Expected exactly one span tagged with the edge_case_marker'
+    );
+    const edgeSpan = edgeSpans[0];
+
+    // B2: non-string "span.name" must NOT rename the span. The span keeps its default name.
+    assert.notStrictEqual(
+      edgeSpan.name,
+      '42',
+      'Non-string span.name must not rename the span'
+    );
+    assert.notStrictEqual(
+      edgeSpan.name,
+      42,
+      'Non-string span.name must not rename the span'
+    );
+
+    // B1: Infinity / NaN must round-trip as finite-or-non-finite numbers without crashing
+    // the runtime. They go through the double branch (no int64 cast).
+    const temp = edgeSpan.attributes?.['gen_ai.temperature'];
+    const cost = edgeSpan.attributes?.['gen_ai.usage.cost'];
+    assert.strictEqual(
+      typeof temp === 'number' || typeof temp === 'bigint',
+      true,
+      `gen_ai.temperature should be numeric, got ${typeof temp}`
+    );
+    assert.strictEqual(
+      typeof cost === 'number' || typeof cost === 'bigint',
+      true,
+      `gen_ai.usage.cost should be numeric, got ${typeof cost}`
+    );
   },
 };

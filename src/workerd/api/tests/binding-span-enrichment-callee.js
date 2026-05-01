@@ -20,4 +20,17 @@ export class CalleeEntrypoint extends WorkerEntrypoint {
     });
     return { answer: 42 };
   }
+
+  // Edge cases: non-string span.name must not rename the span (it's reserved and silently
+  // ignored when the value isn't a string). Infinity / NaN must not crash and must round-trip
+  // as numbers (they fall through to the double branch in the C++ guard).
+  async runEdgeCases() {
+    this.ctx.tracing.enrichBindingSpan({
+      'span.name': 42, // non-string -> ignored, span keeps default name
+      'gen_ai.temperature': Infinity,
+      'gen_ai.usage.cost': NaN,
+      'gen_ai.tag': 'edge_case_marker',
+    });
+    return 'ok';
+  }
 }

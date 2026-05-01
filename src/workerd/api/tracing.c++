@@ -297,10 +297,15 @@ void Tracing::enrichBindingSpan(jsg::Lock& js, jsg::Dict<jsg::Value> attributes)
     if (field.name.size() > kMaxBindingSpanKeyLength) continue;
 
     v8::Local<v8::Value> handle = field.value.getHandle(js);
-    if (field.name == "span.name"_kj && handle->IsString()) {
-      auto str = kj::str(jsg::JsValue(handle).toString(js));
-      if (str.size() <= kMaxBindingSpanValueLength) {
-        name = kj::mv(str);
+    // The "span.name" key is reserved for renaming the span. Always consumed (never falls
+    // through as a regular attribute) so users can't accidentally tag the span with a key
+    // named "span.name" by passing a non-string value.
+    if (field.name == "span.name"_kj) {
+      if (handle->IsString()) {
+        auto str = kj::str(jsg::JsValue(handle).toString(js));
+        if (str.size() <= kMaxBindingSpanValueLength) {
+          name = kj::mv(str);
+        }
       }
       continue;
     }
