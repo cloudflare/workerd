@@ -1121,9 +1121,11 @@ kj::Own<WritableStreamController> newWritableStreamJsController() {
 }
 
 template <typename Self>
-ReadableImpl<Self>::ReadableImpl(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source)
+ReadableImpl<Self>::ReadableImpl(
+    jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source, kj::Rc<WeakRef<Self>> weakController)
     : state(State::template create<Queue>(source->getHighWaterMark())),
-      underlyingSource(kj::mv(source)) {}
+      underlyingSource(kj::mv(source)),
+      weakController(kj::mv(weakController)) {}
 
 template <typename Self>
 void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
@@ -1310,23 +1312,32 @@ typename ReadableImpl<Self>::PullContinuationType& ReadableImpl<Self>::getPullCo
   KJ_IF_SOME(pc, pullContinuation) {
     return pc;
   }
-  pullContinuation.emplace(PullContinuationType::create(js, PullContinuationCallbacks{this}));
+  pullContinuation.emplace(
+      PullContinuationType::create(js, PullContinuationCallbacks{this, weakController.addRef()}));
   return KJ_ASSERT_NONNULL(pullContinuation);
 }
 
 template <typename Self>
 void ReadableImpl<Self>::onPullSuccess(jsg::Lock& js) {
-  auto self = kj::mv(KJ_ASSERT_NONNULL(pullSelf));
+  // pullSelf may have been cleared by clearAlgorithms() during teardown.
+  // If so, the stream is being destroyed and we should bail out.
+  auto maybeSelf = kj::mv(pullSelf);
   pullSelf = kj::none;
   flags.pulling = false;
-  if (flags.pullAgain) {
-    flags.pullAgain = false;
-    pullIfNeeded(js, kj::mv(self));
+  KJ_IF_SOME(self, maybeSelf) {
+    if (flags.pullAgain) {
+      flags.pullAgain = false;
+      pullIfNeeded(js, kj::mv(self));
+    }
   }
 }
 
 template <typename Self>
 void ReadableImpl<Self>::onPullFailure(jsg::Lock& js, jsg::Value reason) {
+  // pullSelf may have been cleared by clearAlgorithms() during teardown.
+  // Keep it alive on the stack through doError — doError can trigger a cascade
+  // (via queue.error → consumer callbacks) that may drop the last Ref.
+  auto self = kj::mv(pullSelf);
   pullSelf = kj::none;
   flags.pulling = false;
   doError(js, jsg::JsValue(reason.getHandle(js)));
@@ -1334,6 +1345,8 @@ void ReadableImpl<Self>::onPullFailure(jsg::Lock& js, jsg::Value reason) {
 
 template <typename Self>
 void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
+  // If algorithms have been cleared (e.g. during teardown), don't pull.
+  if (underlyingSource.get() == nullptr) return;
   // Determining if we need to pull is fairly complicated. All of the following
   // must hold true:
   if (!shouldCallPull()) {
@@ -1354,6 +1367,8 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
 
 template <typename Self>
 void ReadableImpl<Self>::forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
+  // If algorithms have been cleared (e.g. during teardown), don't pull.
+  if (underlyingSource.get() == nullptr) return;
   // Like pullIfNeeded but bypasses the shouldCallPull() check. Used for draining reads
   // which need to pull all available data regardless of backpressure settings.
   if (!canCloseOrEnqueue()) {
@@ -1403,10 +1418,12 @@ template <typename Self>
 WritableImpl<Self>::WritableImpl(jsg::Lock& js,
     WritableStream& owner,
     kj::Own<UnderlyingSinkImpl> sink,
-    jsg::Ref<AbortSignal> abortSignal)
+    jsg::Ref<AbortSignal> abortSignal,
+    kj::Rc<WeakRef<Self>> weakController)
     : owner(owner.addWeakRef()),
       signal(kj::mv(abortSignal)),
-      underlyingSink(kj::mv(sink)) {
+      underlyingSink(kj::mv(sink)),
+      weakController(kj::mv(weakController)) {
   auto featureFlags = FeatureFlags::get(js);
   flags.pedanticWpt = featureFlags.getPedanticWpt();
   flags.specCompliantWriter = featureFlags.getWritableStreamSpecCompliantWriter();
@@ -1471,7 +1488,8 @@ typename WritableImpl<Self>::WriteContinuationType& WritableImpl<Self>::getWrite
   KJ_IF_SOME(wc, writeContinuation) {
     return wc;
   }
-  writeContinuation.emplace(WriteContinuationType::create(js, WriteContinuationCallbacks{this}));
+  writeContinuation.emplace(
+      WriteContinuationType::create(js, WriteContinuationCallbacks{this, weakController.addRef()}));
   return KJ_ASSERT_NONNULL(writeContinuation);
 }
 
@@ -1515,7 +1533,8 @@ typename WritableImpl<Self>::DrainContinuationType& WritableImpl<Self>::getDrain
   KJ_IF_SOME(dc, drainContinuation) {
     return dc;
   }
-  drainContinuation.emplace(DrainContinuationType::create(js, DrainContinuationCallbacks{this}));
+  drainContinuation.emplace(
+      DrainContinuationType::create(js, DrainContinuationCallbacks{this, weakController.addRef()}));
   return KJ_ASSERT_NONNULL(drainContinuation);
 }
 
@@ -1534,7 +1553,8 @@ typename WritableImpl<Self>::WritevContinuationType& WritableImpl<Self>::getWrit
   KJ_IF_SOME(wvc, writevContinuation) {
     return wvc;
   }
-  writevContinuation.emplace(WritevContinuationType::create(js, WritevContinuationCallbacks{this}));
+  writevContinuation.emplace(WritevContinuationType::create(
+      js, WritevContinuationCallbacks{this, weakController.addRef()}));
   return KJ_ASSERT_NONNULL(writevContinuation);
 }
 
@@ -1584,7 +1604,8 @@ typename WritableImpl<Self>::CloseContinuationType& WritableImpl<Self>::getClose
   KJ_IF_SOME(cc, closeContinuation) {
     return cc;
   }
-  closeContinuation.emplace(CloseContinuationType::create(js, CloseContinuationCallbacks{this}));
+  closeContinuation.emplace(
+      CloseContinuationType::create(js, CloseContinuationCallbacks{this, weakController.addRef()}));
   return KJ_ASSERT_NONNULL(closeContinuation);
 }
 
@@ -1871,6 +1892,10 @@ void WritableImpl<Self>::finishInFlightWrite(
   KJ_IF_SOME(reason, maybeReason) {
     write.resolver.reject(js, reason);
     inFlightWrite = kj::none;
+    // If the state already transitioned to Errored (e.g., via a side-channel
+    // error from TransformStreamDefaultController::error() during the write),
+    // skip dealWithRejection since error handling already completed.
+    if (state.template is<StreamStates::Errored>()) return;
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
     return dealWithRejection(js, kj::mv(self), reason);
   }
@@ -2157,6 +2182,21 @@ struct ReadableState {
       : controller(kj::mv(controller)),
         consumer(kj::mv(consumer)),
         owner(owner) {}
+
+  ReadableState(ReadableState&&) = default;
+  ReadableState& operator=(ReadableState&&) = default;
+  KJ_DISALLOW_COPY(ReadableState);
+
+  ~ReadableState() noexcept(false) {
+    // Break the pullSelf ref cycle (controller → ReadableImpl → pullSelf → controller)
+    // so the controller can be freed when this Ref is dropped. We only clear pullSelf
+    // here — the full clearAlgorithms (which moves underlyingSource) is deferred to
+    // the controller's destructor, because the controller may still need the source
+    // for in-progress operations.
+    if (controller.get() != nullptr) {
+      controller->breakPullCycle();
+    }
+  }
 
   ReadableState(Controller controller,
       Queue::ConsumerImpl::StateListener& listener,
@@ -2606,8 +2646,21 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
 
 ReadableStreamDefaultController::ReadableStreamDefaultController(
     jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source)
-    : ioContext(tryGetIoContext()),
-      impl(js, kj::mv(source)) {}
+    : weakSelf(kj::rc<WeakRef<ReadableStreamDefaultController>>(
+          kj::Badge<ReadableStreamDefaultController>{}, *this)),
+      ioContext(tryGetIoContext()),
+      impl(js, kj::mv(source), weakSelf.addRef()) {}
+
+ReadableStreamDefaultController::~ReadableStreamDefaultController() noexcept(false) {
+  weakSelf->invalidate();
+  clearAlgorithms();
+}
+
+void ReadableStreamDefaultController::clearAlgorithms() {
+  auto _ KJ_UNUSED = kj::mv(impl.underlyingSource);
+  impl.pullContinuation = kj::none;
+  impl.pullSelf = kj::none;
+}
 
 kj::Maybe<StreamStates::Errored> ReadableStreamDefaultController::getMaybeErrorState(
     jsg::Lock& js) {
@@ -2872,10 +2925,17 @@ ReadableByteStreamController::ReadableByteStreamController(
     : weakSelf(kj::rc<WeakRef<ReadableByteStreamController>>(
           kj::Badge<ReadableByteStreamController>{}, *this)),
       ioContext(tryGetIoContext()),
-      impl(js, kj::mv(source)) {}
+      impl(js, kj::mv(source), weakSelf.addRef()) {}
 
 ReadableByteStreamController::~ReadableByteStreamController() noexcept(false) {
   weakSelf->invalidate();
+  clearAlgorithms();
+}
+
+void ReadableByteStreamController::clearAlgorithms() {
+  auto _ KJ_UNUSED = kj::mv(impl.underlyingSource);
+  impl.pullContinuation = kj::none;
+  impl.pullSelf = kj::none;
 }
 
 void ReadableByteStreamController::start(jsg::Lock& js) {
@@ -3977,8 +4037,10 @@ WritableStreamDefaultController::WritableStreamDefaultController(jsg::Lock& js,
     WritableStream& owner,
     kj::Own<UnderlyingSinkImpl> underlyingSink,
     jsg::Ref<AbortSignal> abortSignal)
-    : ioContext(tryGetIoContext()),
-      impl(js, owner, kj::mv(underlyingSink), kj::mv(abortSignal)) {}
+    : weakSelf(kj::rc<WeakRef<WritableStreamDefaultController>>(
+          kj::Badge<WritableStreamDefaultController>{}, *this)),
+      ioContext(tryGetIoContext()),
+      impl(js, owner, kj::mv(underlyingSink), kj::mv(abortSignal), weakSelf.addRef()) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(jsg::Lock& js, jsg::JsValue reason) {
   return impl.abort(js, JSG_THIS, reason);
@@ -4034,10 +4096,19 @@ void WritableStreamDefaultController::cancelPendingWrites(jsg::Lock& js, jsg::Js
 void WritableStreamDefaultController::clearAlgorithms() {
   // Free the underlying sink to break circular references.
   auto _ = kj::mv(impl.underlyingSink);
+  // Release V8 handles from persistent continuations.
+  impl.writeContinuation = kj::none;
+  impl.writevContinuation = kj::none;
+  impl.drainContinuation = kj::none;
+  impl.closeContinuation = kj::none;
+  impl.inFlightSelf = kj::none;
 }
 
 WritableStreamDefaultController::~WritableStreamDefaultController() noexcept(false) {
-  // Clear algorithms in destructor to break circular references
+  // Invalidate the weak ref BEFORE clearing algorithms. This prevents
+  // persistent continuation callbacks from dereferencing this (now being
+  // destroyed) WritableImpl.
+  weakSelf->invalidate();
   clearAlgorithms();
 }
 
@@ -4559,10 +4630,16 @@ void WritableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
 
 TransformStreamDefaultController::TransformStreamDefaultController(
     jsg::Lock& js, kj::Own<TransformerImpl> transformer)
-    : ioContext(tryGetIoContext()),
+    : weakSelf(kj::rc<WeakRef<TransformStreamDefaultController>>(
+          kj::Badge<TransformStreamDefaultController>{}, *this)),
+      ioContext(tryGetIoContext()),
       startPromise(js.newPromiseAndResolver<void>()),
       transformer(kj::mv(transformer)) {
   flags.fixupBackpressure = FeatureFlags::get(js).getFixupTransformStreamBackpressure();
+}
+
+TransformStreamDefaultController::~TransformStreamDefaultController() noexcept(false) {
+  weakSelf->invalidate();
 }
 
 kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
@@ -4614,7 +4691,7 @@ void TransformStreamDefaultController::enqueue(jsg::Lock& js, jsg::JsValue chunk
 void TransformStreamDefaultController::error(jsg::Lock& js, jsg::JsValue reason) {
   KJ_IF_SOME(readableController, tryGetReadableController()) {
     readableController.error(js, reason);
-    readable = kj::none;
+    // Do NOT clear `readable` here — dropping the Ref can destroy `this`.
   }
   errorWritableAndUnblockWrite(js, reason);
 }
@@ -4622,7 +4699,7 @@ void TransformStreamDefaultController::error(jsg::Lock& js, jsg::JsValue reason)
 void TransformStreamDefaultController::terminate(jsg::Lock& js) {
   KJ_IF_SOME(readableController, tryGetReadableController()) {
     readableController.close(js);
-    readable = kj::none;
+    // Do NOT clear `readable` here — dropping the Ref can destroy `this`.
   }
   errorWritableAndUnblockWrite(js, js.typeError("The transform stream has been terminated"_kj));
 }
@@ -4873,19 +4950,19 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
 }
 
 TransformStreamDefaultController::TransformContinuationType& TransformStreamDefaultController::
-    getTransformContinuation(jsg::Lock& js) {
+    getTransformContinuation(jsg::Lock& js, jsg::Ref<TransformStreamDefaultController> self) {
   KJ_IF_SOME(tc, transformContinuation) {
     return tc;
   }
   transformContinuation.emplace(
-      TransformContinuationType::create(js, TransformContinuationCallbacks{this}));
+      TransformContinuationType::create(js, TransformContinuationCallbacks{kj::mv(self)}));
   return KJ_ASSERT_NONNULL(transformContinuation);
 }
 
 jsg::Promise<void> TransformStreamDefaultController::performTransform(
     jsg::Lock& js, jsg::JsValue chunk) {
   if (transformer->transform() != kj::none) {
-    auto& tc = getTransformContinuation(js);
+    auto& tc = getTransformContinuation(js, JSG_THIS);
     return maybeRunAlgorithmWithPersistentContinuation(
         js, transformer->transform(), tc, chunk, JSG_THIS);
   }
@@ -4900,7 +4977,7 @@ jsg::Promise<void> TransformStreamDefaultController::performTransform(
 jsg::Promise<void> TransformStreamDefaultController::performTransformv(
     jsg::Lock& js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks) {
   KJ_ASSERT(transformer->transformv() != kj::none);
-  auto& tc = getTransformContinuation(js);
+  auto& tc = getTransformContinuation(js, JSG_THIS);
   return maybeRunAlgorithmWithPersistentContinuation(
       js, transformer->transformv(), tc, kj::mv(chunks), JSG_THIS);
 }
@@ -4919,15 +4996,15 @@ void TransformStreamDefaultController::errorWritableAndUnblockWrite(
     jsg::Lock& js, jsg::JsValue reason) {
   transformer->clear();
   KJ_IF_SOME(writableController, tryGetWritableController()) {
-    if (FeatureFlags::get(js).getPedanticWpt()) {
-      // Use errorIfNeeded which goes through the proper error transition (Erroring -> Errored).
-      // This allows close() to be called while the stream is "erroring" and reject with the
-      // stored error, which is the expected behavior per the WHATWG streams spec.
-      writableController.errorIfNeeded(js, reason);
-    } else if (writableController.isWritable()) {
-      writableController.doError(js, reason);
-    }
-    writable = kj::none;
+    // Always use errorIfNeeded which goes through the proper error transition
+    // (Writable -> Erroring -> Errored). This respects in-flight write/close
+    // operations by deferring finishErroring until the operation completes,
+    // preventing destruction of the controller while promise reactions are
+    // still pending.
+    writableController.errorIfNeeded(js, reason);
+    // NOTE: Do NOT clear `writable` here. Dropping the Ref can trigger a
+    // destruction chain that destroys `this` (the TransformStreamDefaultController)
+    // while we are still inside a member function. Let GC handle cleanup.
   }
   if (flags.backpressure) {
     setBackpressure(js, false);

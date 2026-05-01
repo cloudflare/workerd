@@ -137,7 +137,8 @@ class ReadableImpl {
   using Entry = Self::QueueType::Entry;
   using StateListener = Self::QueueType::ConsumerImpl::StateListener;
 
-  ReadableImpl(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source);
+  ReadableImpl(
+      jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source, kj::Rc<WeakRef<Self>> weakController);
 
   // Invokes the start algorithm to initialize the underlying source.
   void start(jsg::Lock& js, jsg::Ref<Self> self);
@@ -227,17 +228,25 @@ class ReadableImpl {
   };
   kj::Maybe<PendingCancel> maybePendingCancel;
 
+  // Weak reference to the owning controller. Shared with persistent continuation
+  // callbacks so they can detect when the controller has been destroyed and bail
+  // out instead of dereferencing a dangling pointer.
+  kj::Rc<WeakRef<Self>> weakController;
+
   // Persistent pull continuation — lazily initialized on first pull dispatch.
   // Reused across all subsequent pulls to avoid per-pull OpaqueWrappable,
   // v8::Function, and lambda heap allocations.
   struct PullContinuationCallbacks {
     ReadableImpl* impl;
+    kj::Rc<WeakRef<Self>> weakController;
 
     void thenFunc(jsg::Lock& js) {
+      if (weakController->tryGet() == kj::none) return;
       impl->onPullSuccess(js);
     }
 
     void catchFunc(jsg::Lock& js, jsg::Value reason) {
+      if (weakController->tryGet() == kj::none) return;
       impl->onPullFailure(js, kj::mv(reason));
     }
   };
@@ -291,7 +300,8 @@ class WritableImpl {
   WritableImpl(jsg::Lock& js,
       WritableStream& owner,
       kj::Own<UnderlyingSinkImpl> sink,
-      jsg::Ref<AbortSignal> abortSignal);
+      jsg::Ref<AbortSignal> abortSignal,
+      kj::Rc<WeakRef<Self>> weakController);
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
@@ -417,17 +427,24 @@ class WritableImpl {
   // Set when a write is dispatched, cleared when the write continuation fires.
   kj::Maybe<jsg::Ref<Self>> inFlightSelf;
 
+  // Weak reference to the owning controller. Shared with persistent continuation
+  // callbacks so they can detect when the controller has been destroyed.
+  kj::Rc<WeakRef<Self>> weakController;
+
   // Persistent write continuation — lazily initialized on first write dispatch.
   // Reused across all subsequent writes to avoid per-write OpaqueWrappable,
   // v8::Function, and lambda heap allocations.
   struct WriteContinuationCallbacks {
     WritableImpl* impl;
+    kj::Rc<WeakRef<Self>> weakController;
 
     jsg::Promise<void> thenFunc(jsg::Lock& js) {
+      if (weakController->tryGet() == kj::none) return js.resolvedPromise();
       return impl->onWriteSuccess(js);
     }
 
     jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
+      if (weakController->tryGet() == kj::none) return js.rejectedPromise<void>(kj::mv(reason));
       return impl->onWriteFailure(js, kj::mv(reason));
     }
   };
@@ -443,12 +460,15 @@ class WritableImpl {
   // Persistent writev continuation — used when the underlying sink supports batch writes.
   struct WritevContinuationCallbacks {
     WritableImpl* impl;
+    kj::Rc<WeakRef<Self>> weakController;
 
     jsg::Promise<void> thenFunc(jsg::Lock& js) {
+      if (weakController->tryGet() == kj::none) return js.resolvedPromise();
       return impl->onWritevSuccess(js);
     }
 
     jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
+      if (weakController->tryGet() == kj::none) return js.rejectedPromise<void>(kj::mv(reason));
       return impl->onWritevFailure(js, kj::mv(reason));
     }
   };
@@ -464,12 +484,17 @@ class WritableImpl {
   // Persistent close continuation — same pattern as write continuation.
   struct CloseContinuationCallbacks {
     WritableImpl* impl;
+    kj::Rc<WeakRef<Self>> weakController;
 
     void thenFunc(jsg::Lock& js) {
+      if (weakController->tryGet() == kj::none) return;
       impl->onCloseSuccess(js);
     }
 
     void catchFunc(jsg::Lock& js, jsg::Value reason) {
+      if (weakController->tryGet() == kj::none) {
+        js.throwException(kj::mv(reason));
+      }
       impl->onCloseFailure(js, kj::mv(reason));
     }
   };
@@ -482,8 +507,10 @@ class WritableImpl {
   // v8::Function allocations.
   struct DrainContinuationCallbacks {
     WritableImpl* impl;
+    kj::Rc<WeakRef<Self>> weakController;
 
     void operator()(jsg::Lock& js) {
+      if (weakController->tryGet() == kj::none) return;
       impl->onDrainNext(js);
     }
   };
@@ -521,6 +548,7 @@ class ReadableStreamDefaultController: public jsg::Object {
   using ReadableImpl = ReadableImpl<ReadableStreamDefaultController>;
 
   ReadableStreamDefaultController(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source);
+  ~ReadableStreamDefaultController() noexcept(false);
 
   void start(jsg::Lock& js);
 
@@ -567,7 +595,18 @@ class ReadableStreamDefaultController: public jsg::Object {
 
   kj::Maybe<StreamStates::Errored> getMaybeErrorState(jsg::Lock& js);
 
+  // Clear algorithms and persistent continuations to break circular references.
+  void clearAlgorithms();
+
+  // Break the pullSelf ref cycle without clearing the underlying source.
+  // Called from ReadableState destructor to allow the controller to be freed
+  // while keeping the source available for any in-progress operations.
+  void breakPullCycle() {
+    impl.pullSelf = kj::none;
+  }
+
  private:
+  kj::Rc<WeakRef<ReadableStreamDefaultController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
 
@@ -702,6 +741,14 @@ class ReadableByteStreamController: public jsg::Object {
     tracker.trackField("maybeByobRequest", maybeByobRequest);
   }
 
+  // Clear algorithms and persistent continuations to break circular references.
+  void clearAlgorithms();
+
+  // Break the pullSelf ref cycle without clearing the underlying source.
+  void breakPullCycle() {
+    impl.pullSelf = kj::none;
+  }
+
  private:
   kj::Rc<WeakRef<ReadableByteStreamController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;
@@ -775,6 +822,7 @@ class WritableStreamDefaultController: public jsg::Object {
   void clearAlgorithms();
 
  private:
+  kj::Rc<WeakRef<WritableStreamDefaultController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;
   WritableImpl impl;
 
@@ -794,6 +842,7 @@ class WritableStreamDefaultController: public jsg::Object {
 class TransformStreamDefaultController: public jsg::Object {
  public:
   TransformStreamDefaultController(jsg::Lock& js, kj::Own<TransformerImpl> transformer);
+  ~TransformStreamDefaultController() noexcept(false);
 
   void init(jsg::Lock& js, jsg::Ref<ReadableStream>& readable, jsg::Ref<WritableStream>& writable);
 
@@ -838,6 +887,7 @@ class TransformStreamDefaultController: public jsg::Object {
   jsg::Promise<void> performTransformv(jsg::Lock& js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
 
+  kj::Rc<WeakRef<TransformStreamDefaultController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;
   jsg::PromiseResolverPair<void> startPromise;
   kj::Own<TransformerImpl> transformer;
@@ -866,7 +916,10 @@ class TransformStreamDefaultController: public jsg::Object {
   // write-through path. The success callback is a no-op, the failure callback
   // errors the stream.
   struct TransformContinuationCallbacks {
-    TransformStreamDefaultController* ctrl;
+    // Strong reference keeps the controller alive through the callback.
+    // This creates a cycle (controller → continuation → wrappable → callbacks → Ref),
+    // which is broken when the PersistentContinuation is cleared (destructor).
+    jsg::Ref<TransformStreamDefaultController> ref;
 
     jsg::Promise<void> thenFunc(jsg::Lock& js) {
       return js.resolvedPromise();
@@ -874,7 +927,7 @@ class TransformStreamDefaultController: public jsg::Object {
 
     jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
       auto handle = jsg::JsValue(reason.getHandle(js));
-      ctrl->error(js, handle);
+      ref->error(js, handle);
       return js.rejectedPromise<void>(handle);
     }
   };
@@ -883,7 +936,8 @@ class TransformStreamDefaultController: public jsg::Object {
 
   kj::Maybe<TransformContinuationType> transformContinuation;
 
-  TransformContinuationType& getTransformContinuation(jsg::Lock& js);
+  TransformContinuationType& getTransformContinuation(
+      jsg::Lock& js, jsg::Ref<TransformStreamDefaultController> self);
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

@@ -577,7 +577,6 @@ export default {
     comment: 'To be investigated',
     expectedFailures: [
       'readable.cancel() and a parallel writable.close() should reject if a transformer.cancel() calls controller.error()',
-      'writable.abort() and readable.cancel() should reject if a transformer.cancel() calls controller.error()',
       'writable.abort() should not call cancel() again when already called from readable.cancel()',
     ],
   },
@@ -593,15 +592,9 @@ export default {
       'when strategy.size calls controller.error() then throws, the constructor should throw the first error',
       'controller.error() should do nothing after a transformer method has thrown an exception',
       'controller.error() should close writable immediately after readable.cancel()',
-      'erroring during write with backpressure should result in the write failing',
     ],
   },
-  'transform-streams/flush.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      'error() during flush should cause writer.close() to reject',
-    ],
-  },
+  'transform-streams/flush.any.js': {},
   'transform-streams/general.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
