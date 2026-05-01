@@ -117,7 +117,7 @@ export const abandonedPromiseSpan = {
 export const jsRpcInsideEnterSpan = {
   async test(ctrl, env, ctx) {
     const { withSpan } = env.tracingTest;
-    // An RPC call inside enterSpan should produce a jsRpcSession user span whose
+    // An RPC call inside enterSpan should produce a jsRpcCall user span whose
     // parent is the enterSpan, not the top-level onset span. This is the RPC
     // equivalent of fetchInsideEnterSpan.
     await withSpan('hierarchy-rpc-outer', async (outer) => {

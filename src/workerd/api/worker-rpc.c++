@@ -444,9 +444,9 @@ kj::Maybe<JsRpcClientProvider::JsRpcSessionClient> Fetcher::tryGetJsRpcSessionCl
   // their own outer span (e.g. durable_object_subrequest) and would only get redundant
   // nesting from a jsRpcSession on top, so we return an unobserved SpanBuilder instead.
   auto withSessionSpan = [&](auto startRequest, auto metadataExtra) -> JsRpcSessionClient {
-    auto internalSpan = ioContext.makeTraceSpan("jsRpcSession"_kjc);
+    auto internalSpan = ioContext.makeTraceSpan("jsRpcCall"_kjc);
     auto sessionSpan =
-        ioContext.getCurrentUserTraceSpan().newChild("jsRpcSession"_kjc, ioContext.now());
+        ioContext.getCurrentUserTraceSpan().newChild("jsRpcCall"_kjc, ioContext.now());
     auto internalSpanParent = SpanParent(internalSpan);
     auto sessionSpanParent = SpanParent(sessionSpan);
     auto worker = ioContext.getSubrequest([&](TraceContext&, IoChannelFactory& channelFactory) {
