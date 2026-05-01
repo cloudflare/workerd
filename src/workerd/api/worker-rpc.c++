@@ -2339,6 +2339,17 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
+  // Client-side jsRpcSession span: only fires for cross-process dispatch (workerd
+  // in-process service bindings reach the callee via WorkerEntrypoint::customEvent ->
+  // event->run() and never enter sendRpc). Wraps the wire round-trip from sending the
+  // jsRpcSessionRequest until the session completes (the membrane is fully drained).
+  // Parented to the current user trace span (the caller's jsRpcCall), if any.
+  SpanBuilder jsRpcSessionSpan(nullptr);
+  if (IoContext::hasCurrent()) {
+    auto& ioctx = IoContext::current();
+    jsRpcSessionSpan = ioctx.getCurrentUserTraceSpan().newChild("jsRpcSession"_kjc, ioctx.now());
+  }
+
   // We arrange to revoke all capabilities in this session as soon as `sendRpc()` completes or is
   // canceled. Normally, the server side doesn't return if any capabilities still exist, so this
   // only makes a difference in the case that some sort of an error occurred. We don't strictly
