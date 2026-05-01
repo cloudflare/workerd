@@ -3638,8 +3638,12 @@ class AllReader {
   using PartList = kj::Array<kj::ArrayPtr<byte>>;
 
   AllReader(jsg::Ref<ReadableStream> stream, uint64_t limit)
-      : state(State::create<jsg::Ref<ReadableStream>>(kj::mv(stream))),
+      : weakSelf(kj::rc<WeakRef<AllReader>>(kj::Badge<AllReader>{}, *this)),
+        state(State::create<jsg::Ref<ReadableStream>>(kj::mv(stream))),
         limit(limit) {}
+  ~AllReader() noexcept(false) {
+    weakSelf->invalidate();
+  }
   KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
@@ -3673,9 +3677,14 @@ class AllReader {
 
   void visitForGc(jsg::GcVisitor& visitor) {
     state.visitForGc(visitor);
+    KJ_IF_SOME(lc, loopContinuation) {
+      lc.visitForGc(visitor);
+    }
   }
 
  private:
+  kj::Rc<WeakRef<AllReader>> weakSelf;
+
   // State machine for AllReader:
   // Closed is terminal, Errored is implicitly terminal via ErrorState.
   // jsg::Ref<ReadableStream> is the active state (still reading).
@@ -3689,6 +3698,30 @@ class AllReader {
   uint64_t limit;
   kj::Vector<kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, jsg::DOMString>> parts;
   uint64_t runningTotal = 0;
+
+  // Persistent continuation for the read loop. Reused across iterations to
+  // avoid per-read OpaqueWrappable and v8::Function allocations.
+  struct LoopCallbacks {
+    kj::Rc<WeakRef<AllReader>> weakSelf;
+
+    jsg::Promise<PartList> thenFunc(jsg::Lock& js, ReadResult result) {
+      KJ_IF_SOME(self, weakSelf->tryGet()) {
+        return self.onLoopSuccess(js, kj::mv(result));
+      }
+      return js.rejectedPromise<PartList>(
+          KJ_EXCEPTION(FAILED, "jsg.Error: AllReader was destroyed"));
+    }
+
+    jsg::Promise<PartList> catchFunc(jsg::Lock& js, jsg::Value exception) {
+      KJ_IF_SOME(self, weakSelf->tryGet()) {
+        return self.onLoopFailure(js, kj::mv(exception));
+      }
+      return js.rejectedPromise<PartList>(kj::mv(exception));
+    }
+  };
+  using LoopContinuationType =
+      jsg::PersistentContinuation<LoopCallbacks, ReadResult, jsg::Promise<PartList>>;
+  kj::Maybe<LoopContinuationType> loopContinuation;
 
   jsg::Promise<PartList> loop(jsg::Lock& js) {
     KJ_SWITCH_ONEOF(state) {
@@ -3709,76 +3742,77 @@ class AllReader {
         return js.template rejectedPromise<PartList>(errored.getHandle(js));
       }
       KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
-        // Note that these nested lambda retain references to `this` and `readable`
-        // and are passed into to promise returned by this method. It is the responsibility
-        // of the caller to ensure that the AllReader instance is kept alive until the
-        // promise is settled.
-        auto onSuccess = JSG_VISITABLE_LAMBDA((this, readable = readable.addRef()), (readable),
-            (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<PartList> {
-              if (result.done) {
-              state.template transitionTo<StreamStates::Closed>();
-              return loop(js);
-              }
-
-              // If we're not done, the result value must be interpretable as
-              // bytes for the read to make any sense.
-              auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
-
-              KJ_IF_SOME(str, handle.tryCast<jsg::JsString>()) {
-              auto kjstr = str.toDOMString(js);
-              if (kjstr.size() == 0) return loop(js);
-              if ((runningTotal + kjstr.size()) > limit) {
-              auto error = js.typeError("Memory limit exceeded before EOF.");
-              state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-              return readable->getController().cancel(js, error).then(
-                  js, [&](jsg::Lock& js) { return loop(js); });
-              }
-
-              runningTotal += kjstr.size();
-              parts.add(kj::mv(kjstr));
-              return loop(js);
-              } else {
-              }
-
-              if (!handle.isArrayBufferView() && !handle.isSharedArrayBuffer() &&
-                  !handle.isArrayBuffer()) {
-              auto error = js.typeError("This ReadableStream did not return bytes.");
-              state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-              return readable->getController().cancel(js, error).then(
-                  js, [&](jsg::Lock& js) { return loop(js); });
-              }
-
-              jsg::JsBufferSource bufferSource(handle);
-
-              if (bufferSource.size() == 0) {
-              // Weird but allowed, we'll skip it.
-              return loop(js);
-              }
-
-              if ((runningTotal + bufferSource.size()) > limit) {
-              auto error = js.typeError("Memory limit exceeded before EOF.");
-              state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-              return readable->getController().cancel(js, error).then(
-                  js, [&](jsg::Lock& js) { return loop(js); });
-              }
-
-              runningTotal += bufferSource.size();
-              parts.add(bufferSource.addRef(js));
-              return loop(js);
-            });
-
-        auto onFailure = [this](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
-          // In this case the stream should already be errored.
-          auto handle = jsg::JsValue(exception.getHandle(js));
-          state.template transitionTo<StreamStates::Errored>(handle.addRef(js));
-          return loop(js);
-        };
-
-        return maybeAddFunctor(js, KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none)),
-            kj::mv(onSuccess), kj::mv(onFailure));
+        KJ_IF_SOME(lc, loopContinuation) {
+          return KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none)).thenRef(js, lc);
+        }
+        loopContinuation.emplace(
+            LoopContinuationType::create(js, LoopCallbacks{weakSelf.addRef()}));
+        return KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none))
+            .thenRef(js, KJ_ASSERT_NONNULL(loopContinuation));
       }
     }
     KJ_UNREACHABLE;
+  }
+
+  // Helper to cancel the readable and loop back to return the error.
+  jsg::Promise<PartList> cancelAndLoop(
+      jsg::Lock& js, jsg::Ref<ReadableStream> readable, jsg::JsValue error) {
+    state.template transitionTo<StreamStates::Errored>(error.addRef(js));
+    return readable->getController().cancel(js, error).then(
+        js, [this](jsg::Lock& js) { return loop(js); });
+  }
+
+  jsg::Promise<PartList> onLoopSuccess(jsg::Lock& js, ReadResult result) {
+    KJ_IF_SOME(readable, state.tryGetActiveUnsafe()) {
+      if (result.done) {
+        state.template transitionTo<StreamStates::Closed>();
+        return loop(js);
+      }
+
+      auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
+
+      KJ_IF_SOME(str, handle.tryCast<jsg::JsString>()) {
+        auto kjstr = str.toDOMString(js);
+        if (kjstr.size() == 0) return loop(js);
+        if ((runningTotal + kjstr.size()) > limit) {
+          return cancelAndLoop(
+              js, readable.addRef(), js.typeError("Memory limit exceeded before EOF."));
+        }
+        runningTotal += kjstr.size();
+        parts.add(kj::mv(kjstr));
+        return loop(js);
+      } else {
+      }
+
+      if (!handle.isArrayBufferView() && !handle.isSharedArrayBuffer() && !handle.isArrayBuffer()) {
+        return cancelAndLoop(
+            js, readable.addRef(), js.typeError("This ReadableStream did not return bytes."));
+      }
+
+      jsg::JsBufferSource bufferSource(handle);
+
+      if (bufferSource.size() == 0) {
+        return loop(js);
+      }
+
+      if ((runningTotal + bufferSource.size()) > limit) {
+        return cancelAndLoop(
+            js, readable.addRef(), js.typeError("Memory limit exceeded before EOF."));
+      }
+
+      runningTotal += bufferSource.size();
+      parts.add(bufferSource.addRef(js));
+      return loop(js);
+    } else {
+      // State already terminal — return terminal result.
+      return loop(js);
+    }
+  }
+
+  jsg::Promise<PartList> onLoopFailure(jsg::Lock& js, jsg::Value exception) {
+    auto handle = jsg::JsValue(exception.getHandle(js));
+    state.template transitionTo<StreamStates::Errored>(handle.addRef(js));
+    return loop(js);
   }
 
   void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
