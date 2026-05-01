@@ -157,7 +157,7 @@ struct UnderlyingSource {
 
 class UnderlyingSourceImpl {
  public:
-  // When the underlying source has types="bytes", the default high water mark is 0,
+  // Default high water mark: 1 for value streams, 0 for byte streams (type="bytes").
   static constexpr uint64_t DEFAULT_HIGH_WATER_MARK_VALUE = 1;
   static constexpr uint64_t DEFAULT_HIGH_WATER_MARK_BYTES = 0;
 
@@ -465,8 +465,9 @@ class WritableStreamSink {
       ReadableStreamSource& input, End end);
 
   virtual void abort(kj::Exception reason) = 0;
-  // TODO(conform): abort() should return a promise after which closed fulfillers should be
-  //   rejected. This may necessitate an "erroring" state.
+  // Note: The JS-facing WritableStream abort API returns a promise and uses an "erroring"
+  // state — both are handled by the controller layer (WritableStreamJsController). This
+  // internal WritableStreamSink interface intentionally uses void + kj::Exception.
 
   // Tells the sink that it is no longer to be responsible for encoding in the correct format.
   // Instead, the caller takes responsibility. The expected encoding is returned; the caller
@@ -502,19 +503,12 @@ class ReadableStreamSource {
   kj::Promise<kj::String> readAllText(
       uint64_t limit, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE);
 
-  // Hook to inform this ReadableStreamSource that the ReadableStream has been canceled. This only
-  // really means anything to TransformStreams, which are supposed to propagate the error to the
-  // writable side, and custom ReadableStreams, which we don't implement yet.
-  //
-  // NOTE: By "propagate the error back to the writable stream", I mean: if the WritableStream is in
-  //   the Writable state, set it to the Errored state and reject its closed fulfiller with
-  //   `reason`. I'm not sure how I'm going to do this yet.
+  // Hook to inform this ReadableStreamSource that the ReadableStream has been canceled.
+  // This is primarily meaningful for TransformStreams, which propagate cancellation to
+  // the writable side. The JS-facing ReadableStream.cancel() API (which accepts any JS
+  // value and returns a promise) is handled by the controller layer; this internal
+  // interface intentionally uses kj::Exception and returns void.
   virtual void cancel(kj::Exception reason);
-  // TODO(conform): Should return promise.
-  //
-  // TODO(conform): `reason` should be allowed to be any JS value, and not just an exception.
-  //   That is, something silly like `stream.cancel(42)` should be allowed and trigger a
-  //   rejection with the integer `42`.
 
   struct Tee {
     kj::Own<ReadableStreamSource> branches[2];
@@ -559,19 +553,15 @@ struct Erroring {
 }  // namespace StreamStates
 
 // A ReadableStreamController provides the underlying implementation for a ReadableStream.
-// We will generally have three implementations:
-//  * ReadableStreamDefaultController
-//  * ReadableByteStreamController
-//  * ReadableStreamInternalController
+// There are two implementations:
+//  * ReadableStreamJsController — JS-backed streams (standard). Internally delegates to
+//    a ReadableStreamDefaultController (value streams) or ReadableByteStreamController
+//    (byte streams), which are the JS-visible controller objects defined by the spec.
+//  * ReadableStreamInternalController — Workers runtime specific, bridges to the
+//    kj-backed ReadableStreamSource API.
 //
-// The ReadableStreamDefaultController and ReadableByteStreamController are defined by the
-// streams standard and source all of the stream data from JavaScript functions provided by
-// user code.
-//
-// The ReadableStreamInternalController is Workers runtime specific and provides a bridge
-// to the existing ReadableStreamSource API. At the API contract layer, the
-// ReadableByteStreamController and ReadableStreamInternalController will appear to be
-// identical. Internally, however, they will be very different from one another.
+// At the API contract layer, byte-oriented JS streams and internal streams appear
+// identical. Internally, however, they are very different from one another.
 //
 // The ReadableStreamController instance is meant to be a private member of the ReadableStream,
 // e.g.

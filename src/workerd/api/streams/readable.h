@@ -166,13 +166,12 @@ public:
   jsg::Promise<ReadResult> read(jsg::Lock& js, jsg::JsArrayBufferView byobBuffer,
       jsg::Optional<ReadableStreamBYOBReaderReadOptions> options = kj::none);
 
-  // Non-standard extension so that reads can specify a minimum number of elements to read. It's a
-  // struct so that we could eventually add things like timeouts if we need to. Since there's no
-  // existing spec that's a leading contender, this is behind a different method name to avoid
-  // conflicts with any changes to `read`. Fewer than `minElements` may be returned if EOF is hit
-  // or the underlying stream is closed/errors out. In all cases the read result is either
-  // {value: theChunk, done: false} or {value: undefined, done: true} as with read.
-  // TODO(soon): Like fetch() and Cache.match(), readAtLeast() returns a promise for a V8 object.
+  // Non-standard extension so that reads can specify a minimum number of elements to read.
+  // Note: The standard read() method now supports a `min` option via
+  // ReadableStreamBYOBReaderReadOptions (see above), which largely supersedes this method.
+  // readAtLeast() is retained for backward compatibility. Fewer than `minElements` may be
+  // returned if EOF is hit or the underlying stream is closed/errors out. In all cases the
+  // read result is either {value: theChunk, done: false} or {value: undefined, done: true}.
   jsg::Promise<ReadResult> readAtLeast(jsg::Lock& js,
                                         int minElements,
                                         jsg::JsArrayBufferView byobBuffer);

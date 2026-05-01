@@ -391,7 +391,6 @@ kj::Promise<kj::Array<byte>> ReadableStreamSource::readAllBytes(uint64_t limit) 
     AllReader allReader(*this, limit);
     co_return co_await allReader.readAllBytes();
   } catch (...) {
-    // TODO(soon): Temporary logging.
     auto ex = kj::getCaughtExceptionAsKj();
     if (ex.getDescription().endsWith("exceeded before EOF.")) {
       LOG_WARNING_PERIODICALLY("NOSENTRY Internal Stream readAllBytes - Exceeded limit");
@@ -406,7 +405,6 @@ kj::Promise<kj::String> ReadableStreamSource::readAllText(
     AllReader allReader(*this, limit);
     co_return co_await allReader.readAllText(option);
   } catch (...) {
-    // TODO(soon): Temporary logging.
     auto ex = kj::getCaughtExceptionAsKj();
     if (ex.getDescription().endsWith("exceeded before EOF.")) {
       LOG_WARNING_PERIODICALLY("NOSENTRY Internal Stream readAllText - Exceeded limit");
@@ -1803,7 +1801,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           // deeper integration with the implementation of pumpTo(). Oh well. One consequence
           // of this is that if there is an error on the writable side, we error the readable
           // side, rather than close (cancel) it, which is what the spec would have us do.
-          // TODO(now): Warn on the console about this.
+          // TODO(conform): Consider warning on the console about this.
           request.source().error(js, handle);
           queue.pop_front();
           if (!preventAbort) {
@@ -1855,8 +1853,8 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       }));
     }
     KJ_CASE_ONEOF(request, kj::Own<Flush>) {
-      // This is not a standards-defined state for a WritableStream and is only used internally
-      // for Socket's startTls call.
+      // Flush is a non-standard extension. Originally added for Socket's startTls, it is
+      // now available as a general-purpose flush mechanism via WritableStream::flush().
       //
       // Flushing is similar to closing the stream, the main difference is that `finishClose`
       // and `writable->end()` are never called.

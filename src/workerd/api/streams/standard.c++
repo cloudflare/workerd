@@ -2072,7 +2072,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
   }
 
   if (isCloseQueuedOrInFlight() || state.template is<StreamStates::Closed>()) {
-    return js.rejectedPromise<void>(js.typeError("This ReadableStream is closed."_kj));
+    return js.rejectedPromise<void>(js.typeError("This WritableStream is closed."_kj));
   }
 
   KJ_IF_SOME(erroring, state.template tryGetUnsafe<StreamStates::Erroring>()) {

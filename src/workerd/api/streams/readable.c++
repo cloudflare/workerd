@@ -111,8 +111,6 @@ jsg::Promise<ReadResult> ReaderImpl::read(
 }
 
 void ReaderImpl::releaseLock(jsg::Lock& js) {
-  // TODO(soon): Releasing the lock should cancel any pending reads. This is a recent
-  // modification to the spec that we have not yet implemented.
   assertAttachedOrTerminal();
   // Closed and Released states are no-ops.
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {

@@ -114,7 +114,6 @@ void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& st
 }
 
 void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
-  // TODO(soon): Releasing the lock should cancel any pending writes.
   assertAttachedOrTerminal();
   // Closed and Released states are no-ops.
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
@@ -518,9 +517,6 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       "WritableStream can only be serialized for RPC.");
 
   IoContext& ioctx = IoContext::current();
-
-  // TODO(soon): Support JS-backed WritableStreams. Currently this only supports native streams
-  //   and IdentityTransformStream, since only they are backed by WritableStreamSink.
 
   KJ_IF_SOME(sink, getController().removeSink(js)) {
     // NOTE: We're counting on `removeSink()`, to check that the stream is not locked and other
