@@ -101,6 +101,15 @@ const helloWorldServer = http.createServer((req, res) => {
       break;
     }
 
+    case 'set-cookie-duplicates': {
+      res.writeHead(200, {
+        'Content-Type': 'text/plain',
+        'Set-Cookie': ['a=1', 'b=2'],
+      });
+      res.end('ok');
+      break;
+    }
+
     case 'echo': {
       // Echo the request body back as the response
       let body = '';
