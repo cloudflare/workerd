@@ -2427,7 +2427,10 @@ class Lock {
   }
   template <typename T>
   kj::String serializeJson(V8Ref<T>&& value) {
-    return serializeJson(value.getHandle(*this));
+    // Callers expect the rvalue-reference to be consumed, and to ensure
+    // that, explicitly move it into a local variable
+    auto moved = kj::mv(value);
+    return serializeJson(moved.getHandle(*this));
   }
 
   void recursivelyFreeze(Value& value);
