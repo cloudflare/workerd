@@ -1307,8 +1307,7 @@ bool ReadableImpl<Self>::shouldCallPull() {
 }
 
 template <typename Self>
-typename ReadableImpl<Self>::PullContinuationType& ReadableImpl<Self>::getPullContinuation(
-    jsg::Lock& js) {
+ReadableImpl<Self>::PullContinuationType& ReadableImpl<Self>::getPullContinuation(jsg::Lock& js) {
   KJ_IF_SOME(pc, pullContinuation) {
     return pc;
   }
@@ -1483,8 +1482,7 @@ ssize_t WritableImpl<Self>::getDesiredSize() {
 }
 
 template <typename Self>
-typename WritableImpl<Self>::WriteContinuationType& WritableImpl<Self>::getWriteContinuation(
-    jsg::Lock& js) {
+WritableImpl<Self>::WriteContinuationType& WritableImpl<Self>::getWriteContinuation(jsg::Lock& js) {
   KJ_IF_SOME(wc, writeContinuation) {
     return wc;
   }
@@ -1528,8 +1526,7 @@ jsg::Promise<void> WritableImpl<Self>::onWriteFailure(jsg::Lock& js, jsg::Value 
 }
 
 template <typename Self>
-typename WritableImpl<Self>::DrainContinuationType& WritableImpl<Self>::getDrainContinuation(
-    jsg::Lock& js) {
+WritableImpl<Self>::DrainContinuationType& WritableImpl<Self>::getDrainContinuation(jsg::Lock& js) {
   KJ_IF_SOME(dc, drainContinuation) {
     return dc;
   }
@@ -1548,7 +1545,7 @@ void WritableImpl<Self>::onDrainNext(jsg::Lock& js) {
 }
 
 template <typename Self>
-typename WritableImpl<Self>::WritevContinuationType& WritableImpl<Self>::getWritevContinuation(
+WritableImpl<Self>::WritevContinuationType& WritableImpl<Self>::getWritevContinuation(
     jsg::Lock& js) {
   KJ_IF_SOME(wvc, writevContinuation) {
     return wvc;
@@ -1599,8 +1596,7 @@ jsg::Promise<void> WritableImpl<Self>::onWritevFailure(jsg::Lock& js, jsg::Value
 }
 
 template <typename Self>
-typename WritableImpl<Self>::CloseContinuationType& WritableImpl<Self>::getCloseContinuation(
-    jsg::Lock& js) {
+WritableImpl<Self>::CloseContinuationType& WritableImpl<Self>::getCloseContinuation(jsg::Lock& js) {
   KJ_IF_SOME(cc, closeContinuation) {
     return cc;
   }
