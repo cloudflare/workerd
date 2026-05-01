@@ -803,6 +803,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
   explicit ReadableStreamJsController(StreamStates::Errored errored);
   explicit ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer);
   explicit ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer);
+  ~ReadableStreamJsController() noexcept(false);
 
   jsg::Ref<ReadableStream> addRef() override;
 
@@ -921,6 +922,45 @@ class ReadableStreamJsController final: public ReadableStreamController {
   ReadableLockImpl lock;
 
   bool disturbed = false;
+
+  // WeakRef for persistent continuation safety.
+  kj::Rc<WeakRef<ReadableStreamJsController>> weakSelf =
+      kj::rc<WeakRef<ReadableStreamJsController>>(kj::Badge<ReadableStreamJsController>{}, *this);
+
+  // Persistent continuation for wrapDrainingRead's .then() — reused across
+  // draining read cycles to avoid per-read OpaqueWrappable/v8::Function allocations.
+  struct WrapDrainingReadCallbacks {
+    kj::Rc<WeakRef<ReadableStreamJsController>> weakSelf;
+
+    DrainingReadResult thenFunc(jsg::Lock& js, DrainingReadResult result) {
+      KJ_IF_SOME(self, weakSelf->tryGet()) {
+        if (self.state.endOperation()) {
+          if (self.state.template is<StreamStates::Closed>()) {
+            self.lock.onClose(js);
+          } else if (self.state.template is<StreamStates::Errored>()) {
+            KJ_IF_SOME(err, self.state.template tryGetUnsafe<StreamStates::Errored>()) {
+              self.lock.onError(js, err.getHandle(js));
+              js.throwException(err.addRef(js));
+            }
+          }
+        }
+        return kj::mv(result);
+      }
+      // Controller is gone — just return what we have.
+      return kj::mv(result);
+    }
+
+    DrainingReadResult catchFunc(jsg::Lock& js, jsg::Value exception) {
+      KJ_IF_SOME(self, weakSelf->tryGet()) {
+        self.state.clearPendingState();
+        (void)self.state.endOperation();
+      }
+      js.throwException(kj::mv(exception));
+    }
+  };
+  using WrapDrainingReadContinuationType = jsg::
+      PersistentContinuation<WrapDrainingReadCallbacks, DrainingReadResult, DrainingReadResult>;
+  kj::Maybe<WrapDrainingReadContinuationType> wrapDrainingReadContinuation;
 
   template <typename T>
   jsg::Promise<T> readAll(jsg::Lock& js, uint64_t limit);
@@ -3045,6 +3085,10 @@ kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
 
 ReadableStreamJsController::ReadableStreamJsController(): ioContext(tryGetIoContext()) {}
 
+ReadableStreamJsController::~ReadableStreamJsController() noexcept(false) {
+  weakSelf->invalidate();
+}
+
 ReadableStreamJsController::ReadableStreamJsController(StreamStates::Closed closed)
     : ioContext(tryGetIoContext()) {
   state.transitionTo<StreamStates::Closed>();
@@ -3296,27 +3340,12 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
   auto wrapDrainingRead =
       [this](jsg::Lock& js,
           jsg::Promise<DrainingReadResult> promise) -> jsg::Promise<DrainingReadResult> {
-    return promise.then(js, [this](jsg::Lock& js, DrainingReadResult result) {
-      if (state.endOperation()) {
-        // A pending state was applied. Call the appropriate callback.
-        if (state.template is<StreamStates::Closed>()) {
-          lock.onClose(js);
-        } else if (state.template is<StreamStates::Errored>()) {
-          KJ_IF_SOME(err, state.template tryGetUnsafe<StreamStates::Errored>()) {
-            lock.onError(js, err.getHandle(js));
-            // The error was applied during this operation — the data we collected
-            // may be invalid. Discard it and propagate the error rather than
-            // silently returning possibly-corrupt data.
-            js.throwException(err.addRef(js));
-          }
-        }
-      }
-      return kj::mv(result);
-    }, [this](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
-      state.clearPendingState();
-      (void)state.endOperation();
-      js.throwException(kj::mv(exception));
-    });
+    KJ_IF_SOME(wdr, wrapDrainingReadContinuation) {
+      return promise.thenRef(js, wdr);
+    }
+    wrapDrainingReadContinuation.emplace(
+        WrapDrainingReadContinuationType::create(js, WrapDrainingReadCallbacks{weakSelf.addRef()}));
+    return promise.thenRef(js, KJ_ASSERT_NONNULL(wrapDrainingReadContinuation));
   };
 
   KJ_SWITCH_ONEOF(state) {
@@ -3530,6 +3559,9 @@ void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
     }
   }
   visitor.visit(lock);
+  KJ_IF_SOME(wdr, wrapDrainingReadContinuation) {
+    wdr.visitForGc(visitor);
+  }
 }
 
 kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
