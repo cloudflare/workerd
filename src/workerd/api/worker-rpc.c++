@@ -712,7 +712,7 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       getClient(), kj::refcounted<AttachmentMembrane>(IoContext::current().registerPendingEvent()));
 
   externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
-    builder.setRpcTarget(kj::mv(cap));
+    builder.initRpcTarget().setCap(kj::mv(cap));
   });
 
   if (externalHandler->getStubOwnership() == RpcSerializerExternalHandler::TRANSFER) {
@@ -740,7 +740,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
   static constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_STUB = 1600;
   auto externalMemory = js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_STUB);
 
-  return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(reader.getRpcTarget())),
+  return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(reader.getRpcTarget().getCap())),
       externalHandler->getDisposalGroup(), kj::mv(externalMemory));
 }
 
@@ -1000,7 +1000,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
             KJ_ASSERT(externals.size() == 1);
             auto external = externals[0];
             KJ_ASSERT(external.isRpcTarget());
-            results.setCallPipeline(external.getRpcTarget());
+            results.setCallPipeline(external.getRpcTarget().getCap());
           }
           KJ_CASE_ONEOF(nonPipelinable, MakeCallPipeline::NonPipelinable) {
             results.setCallPipeline(kj::mv(nonPipelinable.errorPipeline));
@@ -1668,7 +1668,7 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle);
 
   externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
-    builder.setRpcTarget(kj::mv(cap));
+    builder.initRpcTarget().setCap(kj::mv(cap));
   });
 }
 
@@ -1704,7 +1704,7 @@ void RpcSerializerExternalHandler::serializeFunction(
   rpc::JsRpcTarget::Client cap =
       kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, true);
   write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
-    builder.setRpcTarget(kj::mv(cap));
+    builder.initRpcTarget().setCap(kj::mv(cap));
   });
 }
 
@@ -1758,7 +1758,7 @@ void RpcSerializerExternalHandler::serializeProxy(
   rpc::JsRpcTarget::Client cap =
       kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, allowInstanceProperties);
   write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
-    builder.setRpcTarget(kj::mv(cap));
+    builder.initRpcTarget().setCap(kj::mv(cap));
   });
 }
 

@@ -57,6 +57,7 @@ struct ChannelToken {
   enum Type {
     subrequest @0;  # token for IoChannelFactory::SubrequestChannel
     actorClass @1;  # token for IoChannelFactory::ActorClassChannel
+    rpc @2;         # token for IoChannelFactory::RpcChannel (`restoreChain` must not be empty)
   }
 
   union {
@@ -92,6 +93,33 @@ struct ChannelToken {
     }
   }
 
+  restoreChain @7 :List(Frankenvalue);
+  # If present, then one or more chained "restore" calls must be made on the object.
+  #
+  # In this case, the union above points to a WorkerEntrypoint or actor instance (NOT an actor
+  # class). That instance will have a `[restore]()` method (where `restore` is a `Symbol` imported
+  # from "cloudflare:workers"). That method must be called with the first `Frankenvalue` (which
+  # must represent a JS object) as the single argument.
+  #
+  # If `restoreChain` has more than one value, then the result of the first `[restore]()` call must
+  # be another service or actor stub, which points at another instance with a `[restore]()` method.
+  # That method is called with the second value in the chain, and so on, until all the values in
+  # the chain have been applied.
+  #
+  # The final result of the last `[restore]()` call is the stub which this channel token actually
+  # represents.
+  #
+  # Note that when `restoreChain` is non-empty, `type` refers to the type of the final result of
+  # the chain.
+  #
+  # (At present, though, the final `type` cannot be `actorClass`. Actor classes are tricky because
+  # to be used to instantiate a facet, the class must be local on the parent DO's machine. But an
+  # actor class created via a restore chain may end up being created somewhere entirely different,
+  # particularly if the restore chain is rooted in another actor. To solve this we probably need
+  # a way for dynamic workers to actually send their code back to the requesting machine, to be
+  # instantiated there -- or maybe some mechanism for running "remote facets". For now, though,
+  # we punt and simply don't support it.)
+
   struct FrankenvalueCapTable {
     # CapTable representation for `ChannelToken.props`.
 
@@ -104,6 +132,7 @@ struct ChannelToken {
 
         subrequestChannel @1 :Data;
         actorClassChannel @2 :Data;
+        rpcChannel @3 :Data;
         # Nested capabilities are represented using fully encoded channel tokens themselves (rather
         # than ChannelToken capnp structs) for a couple reasons:
         # 1. This simplifies the abstractions needed when encoding a channel token -- just call
