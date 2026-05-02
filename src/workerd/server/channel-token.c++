@@ -307,6 +307,8 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
               case ChannelToken::FrankenvalueCapTable::Cap::ACTOR_CLASS_CHANNEL:
                 capTable.add(decodeActorClassChannelToken(usage, cap.getActorClassChannel()));
                 continue;
+              case ChannelToken::FrankenvalueCapTable::Cap::RPC_CHANNEL:
+                KJ_FAIL_REQUIRE("RPC channel cap table entries are not supported yet");
             }
             KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
           }
@@ -325,6 +327,8 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
           return resolver.resolveEntrypoint(service.getName(), entrypoint, kj::mv(props));
         case ChannelToken::Type::ACTOR_CLASS:
           return resolver.resolveActorClass(service.getName(), entrypoint, kj::mv(props));
+        case ChannelToken::Type::RPC:
+          KJ_FAIL_REQUIRE("RPC channel tokens are not supported yet");
       }
 
       KJ_UNREACHABLE;
@@ -341,6 +345,10 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
       }
 
       return resolver.resolveActor(actor.getNamespaceKey(), actor.getId(), name);
+    }
+
+    case ChannelToken::RESTORED: {
+      KJ_UNIMPLEMENTED("TODO(now)");
     }
   }
 
