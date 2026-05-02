@@ -63,3 +63,5 @@ export interface CacheContext {
 export function getCtxCache(): CacheContext | undefined;
 
 export function abortIsolate(reason?: string): never;
+
+export const restore: symbol;
