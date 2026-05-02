@@ -88,6 +88,16 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
               }));
             }
           }
+        } else KJ_IF_SOME(rpcChannel, kj::tryDowncast<IoChannelFactory::RpcChannel>(*capTable[i])) {
+          KJ_SWITCH_ONEOF(rpcChannel.getTokenMaybeSync(usage)) {
+            KJ_CASE_ONEOF(token, kj::Array<byte>) {
+              caps[i].setRpcChannel(token);
+            }
+            KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+              promises.add(promise.then(
+                  [slot = caps[i]](kj::Array<byte> token) mutable { slot.setRpcChannel(token); }));
+            }
+          }
         } else {
           KJ_FAIL_REQUIRE("unknown type in props");
         }
@@ -308,7 +318,9 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
                 capTable.add(decodeActorClassChannelToken(usage, cap.getActorClassChannel()));
                 continue;
               case ChannelToken::FrankenvalueCapTable::Cap::RPC_CHANNEL:
-                KJ_FAIL_REQUIRE("RPC channel cap table entries are not supported yet");
+                capTable.add(
+                    decodeChannelTokenImpl(ChannelToken::Type::RPC, usage, cap.getRpcChannel()));
+                continue;
             }
             KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
           }

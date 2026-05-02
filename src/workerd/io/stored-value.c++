@@ -331,6 +331,20 @@ kj::Own<IoChannelFactory::ActorClassChannel> StoredExternalHandler::Deserializer
   KJ_UNREACHABLE;
 }
 
+kj::Own<IoChannelFactory::RpcChannel> StoredExternalHandler::Deserializer::readRpcChannel(
+    IoChannelFactory& factory) {
+  KJ_SWITCH_ONEOF(readChannelImpl()) {
+    KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
+      return kj::addRef(KJ_REQUIRE_NONNULL(kj::tryDowncast<IoChannelFactory::RpcChannel>(*channel),
+          "serialized value doesn't match external type"));
+    }
+    KJ_CASE_ONEOF(token, kj::ArrayPtr<const byte>) {
+      return factory.rpcChannelFromToken(IoChannelFactory::ChannelTokenUsage::STORAGE, token);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 StoredExternalHandler::Deserializer::State& StoredExternalHandler::Deserializer::getState() {
   KJ_IF_SOME(s, this->state) {
     return s;

@@ -6,6 +6,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
+#include <workerd/io/stored-value.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/util/autogate.h>
@@ -561,6 +562,17 @@ JsRpcStub::JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
   disposalGroup.list.add(*this);
 }
 
+JsRpcStub::JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+    IoOwn<IoChannelFactory::RpcChannel> rpcChannel,
+    RpcStubDisposalGroup& disposalGroup,
+    jsg::ExternalMemoryAdjustment externalMemoryAdjustment)
+    : capnpClient(kj::mv(capnpClient)),
+      rpcChannel(kj::mv(rpcChannel)),
+      disposalGroup(disposalGroup),
+      externalMemoryAdjustment(kj::mv(externalMemoryAdjustment)) {
+  disposalGroup.list.add(*this);
+}
+
 JsRpcStub::~JsRpcStub() noexcept(false) {
   KJ_IF_SOME(d, disposalGroup) {
     d.list.remove(*this);
@@ -588,6 +600,8 @@ JsRpcStub::~JsRpcStub() noexcept(false) {
           "an RPC call disposes all stubs within it."_kj);
     }
   }
+
+  // (No need to defer `rpcChannel` GC because its disposal isn't normally observable.)
 }
 
 RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
@@ -639,6 +653,11 @@ RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
 rpc::JsRpcTarget::Client JsRpcStub::getClient() {
   KJ_IF_SOME(c, capnpClient) {
     return *c;
+  } else KJ_IF_SOME(c, rpcChannel) {
+    auto session = c->restore();
+    IoContext::current().addTask(kj::mv(session.task));
+    capnpClient = IoContext::current().addObject(kj::heap(kj::cp(session.cap)));
+    return kj::mv(session.cap);
   } else {
     // TODO(soon): Improve the error message to describe why it was disposed.
     return JSG_KJ_EXCEPTION(FAILED, Error, "RPC stub used after being disposed.");
@@ -652,11 +671,28 @@ rpc::JsRpcTarget::Client JsRpcStub::getClientForOneCall(
 }
 
 jsg::Ref<JsRpcStub> JsRpcStub::dup(jsg::Lock& js) {
-  return js.alloc<JsRpcStub>(IoContext::current().addObject(kj::heap(getClient())));
+  KJ_IF_SOME(cap, capnpClient) {
+    auto& ioctx = IoContext::current();
+    KJ_IF_SOME(chan, rpcChannel) {
+      // Both cap and channel.
+      return js.alloc<JsRpcStub>(
+          ioctx.addObject(kj::heap(*cap)), ioctx.addObject(kj::addRef(*chan)));
+    } else {
+      // Cap only.
+      return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(*cap)));
+    }
+  } else KJ_IF_SOME(chan, rpcChannel) {
+    // Channel only.
+    auto& ioctx = IoContext::current();
+    return js.alloc<JsRpcStub>(ioctx.addObject(kj::addRef(*chan)));
+  } else {
+    KJ_FAIL_ASSERT("JsRpcStub has none of capnpClient nor rpcChannel?");
+  }
 }
 
 void JsRpcStub::dispose() {
   capnpClient = kj::none;
+  rpcChannel = kj::none;
   externalMemoryAdjustment = kj::none;
   KJ_IF_SOME(d, disposalGroup) {
     d.list.remove(*this);
@@ -691,62 +727,134 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcStub::getRpcMethod(jsg::Lock& js, kj::St
 }
 
 void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
-      "Remote RPC references can only be serialized for RPC.");
-  auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
-  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
-      "Remote RPC references can only be serialized for RPC.");
+  KJ_IF_SOME(handler, serializer.getExternalHandler()) {
+    KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableBuilder>(handler)) {
+      auto& channel = JSG_REQUIRE_NONNULL(rpcChannel, DOMDataCloneError,
+          "RpcStub cannot be serialized in this context because it is not a persistent stub.");
+      channel->requireAllowsTransfer();
+      serializer.writeRawUint32(frankenvalueHandler.add(kj::addRef(*channel)));
+      return;
+    } else KJ_IF_SOME(externalHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
+      // We may be forwarding a stub that points to some other isolate. Consider the case where we
+      // are returning the stub to our client. The RPC session remains live as long as the client is
+      // holding any remaining stubs obtained from this session, due to CompletionMembrane. However,
+      // if the only remaining stubs point on to different isolates, and we don't have anything left
+      // to do in this IoContext, then the pending event mechanism would abort the IoContext early
+      // with "The script will never generate a response." To avoid that, we need to attach a
+      // pending event to this stub, using a membrane.
+      //
+      // TODO(someday): Ideally, we would not need to keep the IoContext live just because stubs
+      // pass through it. It would be nice to implement a sort of "deferred proxying" for RPC,
+      // where we shut down the IoContext when it has nothing left to do. Note, though, that if the
+      // IoContext is explicitly *aborted*, we probably should revoke all capabilities obtained
+      // through it. That actually doesn't quite happen today: aborting the IoContext is likely to
+      // cancel all subrequests which probably has the effect of breaking any stubs obtained from
+      // them, but not necessarily (the subrequests could use waitUntil() to extend themselves).
+      // Anyway, this will be trickier to get right, so I'm punting with this work-around for now.
+      //
+      // TODO(someday): If `capnpClient` is null (because we only have an `RpcChannel`), this call
+      // to getClient() will force it to be created, invoking the restore chain, just so the stub
+      // can be sent over RPC. Maybe we should actually leave it null and leave it up to the
+      // receiving end to invoke the restore chain if desired?
+      auto cap = capnp::membrane(getClient(),
+          kj::refcounted<AttachmentMembrane>(IoContext::current().registerPendingEvent()));
 
-  // We may be forwarding a stub that points to some other isolate. Consider the case where we
-  // are returning the stub to our client. The RPC session remains live as long as the client is
-  // holding any remaining stubs obtained from this session, due to CompletionMembrane. However, if
-  // the only remaining stubs point on to different isolates, and we don't have anything left to
-  // do in this IoContext, then the pending event mechanism would abort the IoContext early with
-  // "The script will never generate a response." To avoid that, we need to attach a pending event
-  // to this stub, using a membrane.
-  //
-  // TODO(someday): Ideally, we would not need to keep the IoContext live just because stubs pass
-  //   through it. It would be nice to implement a sort of "deferred proxying" for RPC, where we
-  //   shut down the IoContext when it has nothing left to do. Note, though, that if the IoContext
-  //   is explicitly *aborted*, we probably should revoke all capabilities obtained through it.
-  //   That actually doesn't quite happen today: aborting the IoContext is likely to cancel all
-  //   subrequests which probably has the effect of breaking any stubs obtained from them, but
-  //   not necessarily (the subrequests could use waitUntil() to extend themselves). Anyway, this
-  //   will be trickier to get right, so I'm punting with this work-around for now.
-  auto cap = capnp::membrane(
-      getClient(), kj::refcounted<AttachmentMembrane>(IoContext::current().registerPendingEvent()));
+      // If a channel is present, send a channel token for it.
+      kj::Maybe<kj::Array<byte>> channelToken;
+      KJ_IF_SOME(channel, rpcChannel) {
+        // Note: RpcChannels are always transferrable (there wouldn't be any reason to create one
+        //   that isn't), but we still call requireAllowsTransfer() for good measure.
+        channel->requireAllowsTransfer();
+        KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            channelToken = kj::mv(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            // TODO(now): Support this.
+            KJ_UNIMPLEMENTED("tried to send RpcChannel whose token is not synchronously available");
+          }
+        }
+      }
 
-  externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
-    builder.initRpcTarget().setCap(kj::mv(cap));
-  });
+      externalHandler.write([cap = kj::mv(cap), channelToken = kj::mv(channelToken)](
+                                rpc::JsValue::External::Builder builder) mutable {
+        auto target = builder.initRpcTarget();
+        target.setCap(kj::mv(cap));
+        KJ_IF_SOME(token, channelToken) {
+          target.setChannelToken(token);
+        }
+      });
 
-  if (externalHandler->getStubOwnership() == RpcSerializerExternalHandler::TRANSFER) {
-    // Instead of disposing the stub immediately, we add a disposer to the serializer
-    // that will be executed when the pipeline is finished. This ensures the stub
-    // remains valid for the duration of any pipelined operations.
-    externalHandler->addStubDisposer(
-        kj::heap(kj::defer([self = JSG_THIS]() mutable { self->dispose(); })));
+      if (externalHandler.getStubOwnership() == RpcSerializerExternalHandler::TRANSFER) {
+        // Instead of disposing the stub immediately, we add a disposer to the serializer
+        // that will be executed when the pipeline is finished. This ensures the stub
+        // remains valid for the duration of any pipelined operations.
+        externalHandler.addStubDisposer(
+            kj::heap(kj::defer([self = JSG_THIS]() mutable { self->dispose(); })));
+      }
+
+      return;
+    } else KJ_IF_SOME(storedHandler, kj::tryDowncast<StoredExternalHandler::Serializer>(handler)) {
+      JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+          "RpcStub cannot be serialized in this context.");
+      auto& channel = JSG_REQUIRE_NONNULL(rpcChannel, DOMDataCloneError,
+          "RpcStub cannot be serialized in this context because it is not a persistent stub.");
+      channel->requireAllowsTransfer();
+      storedHandler.writeChannel(
+          kj::addRef(*channel), channel->getToken(IoChannelFactory::ChannelTokenUsage::STORAGE));
+      return;
+    }
   }
+
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "RpcStub cannot be serialized in this context.");
 }
 
 jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-  auto& handler = KJ_REQUIRE_NONNULL(
-      deserializer.getExternalHandler(), "got JsRpcStub on non-RPC serialized object?");
-  auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
-  KJ_REQUIRE(externalHandler != nullptr, "got JsRpcStub on non-RPC serialized object?");
-
-  auto reader = externalHandler->read();
-  KJ_REQUIRE(reader.isRpcTarget(), "external table slot type doesn't match serialization tag");
-
   auto& ioctx = IoContext::current();
 
-  // Account for membrane/promise memory in the KJ heap (~1600 bytes per stub from profiling).
-  static constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_STUB = 1600;
-  auto externalMemory = js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_STUB);
+  KJ_IF_SOME(handler, deserializer.getExternalHandler()) {
+    KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableReader>(handler)) {
+      auto& cap = KJ_REQUIRE_NONNULL(frankenvalueHandler.get(deserializer.readRawUint32()),
+          "serialized RpcStub had invalid cap table index");
 
-  return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(reader.getRpcTarget().getCap())),
-      externalHandler->getDisposalGroup(), kj::mv(externalMemory));
+      KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::RpcChannel>(cap)) {
+        return js.alloc<JsRpcStub>(ioctx.addObject(kj::addRef(channel)));
+      } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
+        channel.getChannelNumber(IoChannelCapTableEntry::Type::RPC);
+        KJ_FAIL_REQUIRE("RpcStub capability in dynamic isolate env is not supported yet");
+      } else {
+        KJ_FAIL_REQUIRE("RpcStub capability in Frankenvalue is not an RpcChannel?");
+      }
+    } else KJ_IF_SOME(externalHandler, kj::tryDowncast<RpcDeserializerExternalHandler>(handler)) {
+      auto reader = externalHandler.read();
+      KJ_REQUIRE(reader.isRpcTarget(), "external table slot type doesn't match serialization tag");
+      auto rpcTarget = reader.getRpcTarget();
+
+      // Account for membrane/promise memory in the KJ heap (~1600 bytes per stub from profiling).
+      static constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_STUB = 1600;
+      auto externalMemory = js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_STUB);
+
+      if (rpcTarget.hasChannelToken()) {
+        auto channel = ioctx.getIoChannelFactory().rpcChannelFromToken(
+            IoChannelFactory::ChannelTokenUsage::RPC, rpcTarget.getChannelToken());
+        return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(rpcTarget.getCap())),
+            ioctx.addObject(kj::mv(channel)), externalHandler.getDisposalGroup(),
+            kj::mv(externalMemory));
+      } else {
+        return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(rpcTarget.getCap())),
+            externalHandler.getDisposalGroup(), kj::mv(externalMemory));
+      }
+    } else KJ_IF_SOME(storedHandler,
+        kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
+      JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+          "RpcStub cannot be deserialized in this context.");
+      auto channel = storedHandler.readRpcChannel(ioctx.getIoChannelFactory());
+      return js.alloc<JsRpcStub>(ioctx.addObject(kj::mv(channel)));
+    }
+  }
+
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "RpcStub cannot be deserialized in this context.");
 }
 
 static bool isFunctionForRpc(jsg::Lock& js, v8::Local<v8::Function> func) {

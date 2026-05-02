@@ -157,6 +157,7 @@ class StoredExternalHandler::Deserializer final: public jsg::Deserializer::Exter
   // Read an external. Externals are expected to be read in the same order they were written.
   kj::Own<IoChannelFactory::SubrequestChannel> readSubrequestChannel(IoChannelFactory& factory);
   kj::Own<IoChannelFactory::ActorClassChannel> readActorClassChannel(IoChannelFactory& factory);
+  kj::Own<IoChannelFactory::RpcChannel> readRpcChannel(IoChannelFactory& factory);
 
   // Throw if we haven't read all channels.
   void assertDone();
