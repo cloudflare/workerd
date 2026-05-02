@@ -333,6 +333,10 @@ class IoChannelFactory {
     // Restoring the channel opens a fresh JS RPC session to the persistent target.
   };
 
+  virtual kj::Own<RpcChannel> getRpcChannel(uint channel) {
+    KJ_UNIMPLEMENTED("This runtime doesn't support RPC channels.");
+  }
+
   // Aborts all actors except those in namespaces marked with `preventEviction`.
   virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");

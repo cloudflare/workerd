@@ -803,8 +803,8 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::RpcChannel>(cap)) {
         return js.alloc<JsRpcStub>(ioctx.addObject(kj::addRef(channel)));
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
-        channel.getChannelNumber(IoChannelCapTableEntry::Type::RPC);
-        KJ_FAIL_REQUIRE("RpcStub capability in dynamic isolate env is not supported yet");
+        return js.alloc<JsRpcStub>(ioctx.addObject(ioctx.getIoChannelFactory().getRpcChannel(
+            channel.getChannelNumber(IoChannelCapTableEntry::Type::RPC))));
       } else {
         KJ_FAIL_REQUIRE("RpcStub capability in Frankenvalue is not an RpcChannel?");
       }

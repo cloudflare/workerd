@@ -2956,6 +2956,7 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> subrequest;
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
     kj::Array<kj::Own<IoChannelFactory::ActorClassChannel>> actorClass;
+    kj::Array<kj::Own<IoChannelFactory::RpcChannel>> rpc;
     kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> cache;
     kj::Maybe<const kj::Directory&> actorStorage;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
@@ -3708,6 +3709,14 @@ class Server::WorkerService final: public Service,
     return kj::addRef(cls);
   }
 
+  kj::Own<RpcChannel> getRpcChannel(uint channel) override {
+    auto& channels =
+        KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+
+    KJ_REQUIRE(channel < channels.rpc.size(), "invalid RPC channel number");
+    return kj::addRef(*channels.rpc[channel]);
+  }
+
   void abortAllActors(kj::Maybe<kj::Exception&> reason) override {
     abortActorsCallback(reason);
   }
@@ -4319,6 +4328,7 @@ struct Server::WorkerDef {
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
+  kj::Vector<kj::Own<IoChannelFactory::RpcChannel>> rpcChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
   bool hasWorkerdDebugPortBinding = false;
   kj::Array<FutureSubrequestChannel> tails;
@@ -4478,6 +4488,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
       // Rewrite the capabilities in `env` in order to build the I/O channel table.
       kj::Vector<FutureSubrequestChannel> subrequestChannels;
       kj::Vector<FutureActorClassChannel> actorClassChannels;
+      kj::Vector<kj::Own<IoChannelFactory::RpcChannel>> rpcChannels;
       source.env.rewriteCaps([&](kj::Own<Frankenvalue::CapTableEntry> entry) {
         KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*entry)) {
           uint channelNumber =
@@ -4496,6 +4507,10 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           });
           return kj::heap<IoChannelCapTableEntry>(
               IoChannelCapTableEntry::ACTOR_CLASS, channelNumber);
+        } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::RpcChannel>(*entry)) {
+          uint channelNumber = rpcChannels.size();
+          rpcChannels.add(kj::addRef(channel));
+          return kj::heap<IoChannelCapTableEntry>(IoChannelCapTableEntry::RPC, channelNumber);
         } else {
           // Generally, it shouldn't be possible to get here, but just in case, let's at least
           // provide some sort of error, although it's a vague one.
@@ -4521,6 +4536,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
 
         .subrequestChannels = kj::mv(subrequestChannels),
         .actorClassChannels = kj::mv(actorClassChannels),
+        .rpcChannels = kj::mv(rpcChannels),
 
         .tails = KJ_MAP(tail, source.tails) -> FutureSubrequestChannel {
           return {
@@ -5134,6 +5150,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
     result.actor = linkedActorChannels.finish();
     result.actorClass = actorClasses.finish();
+    result.rpc = kj::mv(def.rpcChannels).releaseAsArray();
 
     KJ_IF_SOME(out, def.cacheApiOutbound) {
       result.cache = kj::mv(out).lookup(*this);
