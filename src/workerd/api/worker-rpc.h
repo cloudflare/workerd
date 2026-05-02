@@ -383,6 +383,15 @@ class JsRpcStub: public JsRpcClientProvider {
   // for testing to be able to construct a loopback stub.
   static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::JsObject object);
 
+  // Returns true if the RPC system would implicitly convert the given object into an RpcStub when
+  // passed as an RPC parameter or return value. In other words, checks if the object is a
+  // Function or an RpcTarget.
+  //
+  // Note that `constructor()` also accepts plain objects, even though shouldImplicitlyStubify()
+  // returns false for them. Plain objects can be *explicitly* stubified by explicitly calling
+  // `new RpcStub(obj)` in application code, but they are not *implicitly* stubified.
+  static bool shouldImplicitlyStubify(jsg::Lock& js, jsg::JsObject object);
+
   // Call the stub itself as a function.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
 

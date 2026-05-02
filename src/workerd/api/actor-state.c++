@@ -6,6 +6,7 @@
 
 #include "actor.h"
 #include "export-loopback.h"
+#include "restore.h"
 #include "sql.h"
 #include "sync-kv.h"
 #include "util.h"
@@ -24,6 +25,13 @@
 #include <v8.h>
 
 namespace workerd::api {
+
+jsg::Promise<jsg::Value> DurableObjectState::restore(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
+  return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
+}
 
 namespace {
 

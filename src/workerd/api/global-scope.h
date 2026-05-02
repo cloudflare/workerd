@@ -323,6 +323,19 @@ class ExecutionContext: public jsg::Object {
     return props.getHandle(js);
   }
 
+  // Call the `[restore]()` method of the current entrypoint with the given params object and
+  // return its result, except that the returned value is able to be persisted in storage.
+  // Persistence works by replaying the restore call whenever the value is loaded from storage
+  // again. Hence, the contents of `params` must themselves be storable. The returned type must
+  // be a Fetcher or RpcStub; ActorClass is intentionally not supported. The value itself
+  // doesn't need to be inherently storable since the replay mechanism can restore it instead.
+  // For example, RpcStubs are never storable by default, nor are ServiceStubs coming from
+  // Dynamic Workers or Facets.
+  jsg::Promise<jsg::Value> restore(jsg::Lock& js,
+      jsg::JsObject params,
+      const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+      const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler);
+
   // Returns a CacheContext for cache-enabled workers, or empty jsg::Optional otherwise.
   // However, by default this always returns undefined unless the embedding application overrides
   // the IoContext.
@@ -352,6 +365,9 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
+    if (flags.getAllowIrrevocableStubStorage()) {
+      JSG_METHOD(restore);
+    }
     JSG_LAZY_INSTANCE_PROPERTY(cache, getCache);
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);

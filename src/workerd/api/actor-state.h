@@ -605,6 +605,12 @@ class DurableObjectState: public jsg::Object {
     return props.getHandle(js);
   }
 
+  // Same as ExecutionContext::restore() but calls `[restore]()` on the actor instance.
+  jsg::Promise<jsg::Value> restore(jsg::Lock& js,
+      jsg::JsObject params,
+      const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+      const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler);
+
   kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
 
   jsg::Optional<jsg::Ref<DurableObjectStorage>> getStorage() {
@@ -711,6 +717,9 @@ class DurableObjectState: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
+    if (flags.getAllowIrrevocableStubStorage()) {
+      JSG_METHOD(restore);
+    }
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);
