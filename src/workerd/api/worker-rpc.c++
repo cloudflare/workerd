@@ -651,16 +651,35 @@ RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
 }
 
 rpc::JsRpcTarget::Client JsRpcStub::getClient() {
+  auto& ioctx = IoContext::current();
+
   KJ_IF_SOME(c, capnpClient) {
     return *c;
-  } else KJ_IF_SOME(c, rpcChannel) {
+  } else KJ_IF_SOME(c, getRpcChannel(ioctx)) {
     auto session = c->restore();
-    IoContext::current().addTask(kj::mv(session.task));
-    capnpClient = IoContext::current().addObject(kj::heap(kj::cp(session.cap)));
+    ioctx.addTask(session.task.attach(kj::mv(c)));
+
+    // Keep the live capability permanently ONLY if we created it from `rpcChannel` and not
+    // `channelNumber`. In the latter case, this stub needs to remain IoContext-independent as
+    // it likely came from `env`.
+    if (rpcChannel != kj::none) {
+      capnpClient = ioctx.addObject(kj::heap(kj::cp(session.cap)));
+    }
+
     return kj::mv(session.cap);
   } else {
     // TODO(soon): Improve the error message to describe why it was disposed.
     return JSG_KJ_EXCEPTION(FAILED, Error, "RPC stub used after being disposed.");
+  }
+}
+
+kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> JsRpcStub::getRpcChannel(IoContext& ioctx) {
+  KJ_IF_SOME(c, rpcChannel) {
+    return kj::addRef(*c);
+  } else KJ_IF_SOME(c, channelNumber) {
+    return ioctx.getIoChannelFactory().getRpcChannel(c);
+  } else {
+    return kj::none;
   }
 }
 
@@ -685,8 +704,12 @@ jsg::Ref<JsRpcStub> JsRpcStub::dup(jsg::Lock& js) {
     // Channel only.
     auto& ioctx = IoContext::current();
     return js.alloc<JsRpcStub>(ioctx.addObject(kj::addRef(*chan)));
+  } else KJ_IF_SOME(num, channelNumber) {
+    // Neither cap nor channel, only channel number. Note: We may have no IoContext in this
+    // case.
+    return js.alloc<JsRpcStub>(num);
   } else {
-    KJ_FAIL_ASSERT("JsRpcStub has none of capnpClient nor rpcChannel?");
+    KJ_FAIL_ASSERT("JsRpcStub has none of capnpClient, rpcChannel, nor channelNumber?");
   }
 }
 
@@ -728,11 +751,12 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcStub::getRpcMethod(jsg::Lock& js, kj::St
 
 void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   KJ_IF_SOME(handler, serializer.getExternalHandler()) {
+    auto& ioctx = IoContext::current();
     KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableBuilder>(handler)) {
-      auto& channel = JSG_REQUIRE_NONNULL(rpcChannel, DOMDataCloneError,
+      auto channel = JSG_REQUIRE_NONNULL(getRpcChannel(ioctx), DOMDataCloneError,
           "RpcStub cannot be serialized in this context because it is not a persistent stub.");
       channel->requireAllowsTransfer();
-      serializer.writeRawUint32(frankenvalueHandler.add(kj::addRef(*channel)));
+      serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
       return;
     } else KJ_IF_SOME(externalHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
       // We may be forwarding a stub that points to some other isolate. Consider the case where we
@@ -756,12 +780,12 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       // to getClient() will force it to be created, invoking the restore chain, just so the stub
       // can be sent over RPC. Maybe we should actually leave it null and leave it up to the
       // receiving end to invoke the restore chain if desired?
-      auto cap = capnp::membrane(getClient(),
-          kj::refcounted<AttachmentMembrane>(IoContext::current().registerPendingEvent()));
+      auto cap = capnp::membrane(
+          getClient(), kj::refcounted<AttachmentMembrane>(ioctx.registerPendingEvent()));
 
       // If a channel is present, send a channel token for it.
       kj::Maybe<kj::Array<byte>> channelToken;
-      KJ_IF_SOME(channel, rpcChannel) {
+      KJ_IF_SOME(channel, getRpcChannel(ioctx)) {
         // Note: RpcChannels are always transferrable (there wouldn't be any reason to create one
         //   that isn't), but we still call requireAllowsTransfer() for good measure.
         channel->requireAllowsTransfer();
@@ -797,11 +821,11 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     } else KJ_IF_SOME(storedHandler, kj::tryDowncast<StoredExternalHandler::Serializer>(handler)) {
       JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
           "RpcStub cannot be serialized in this context.");
-      auto& channel = JSG_REQUIRE_NONNULL(rpcChannel, DOMDataCloneError,
+      auto channel = JSG_REQUIRE_NONNULL(getRpcChannel(ioctx), DOMDataCloneError,
           "RpcStub cannot be serialized in this context because it is not a persistent stub.");
       channel->requireAllowsTransfer();
-      storedHandler.writeChannel(
-          kj::addRef(*channel), channel->getToken(IoChannelFactory::ChannelTokenUsage::STORAGE));
+      auto tokenPromise = channel->getToken(IoChannelFactory::ChannelTokenUsage::STORAGE);
+      storedHandler.writeChannel(kj::mv(channel), kj::mv(tokenPromise));
       return;
     }
   }
@@ -811,18 +835,18 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
 jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-  auto& ioctx = IoContext::current();
-
   KJ_IF_SOME(handler, deserializer.getExternalHandler()) {
     KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableReader>(handler)) {
       auto& cap = KJ_REQUIRE_NONNULL(frankenvalueHandler.get(deserializer.readRawUint32()),
           "serialized RpcStub had invalid cap table index");
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::RpcChannel>(cap)) {
-        return js.alloc<JsRpcStub>(ioctx.addObject(kj::addRef(channel)));
+        return js.alloc<JsRpcStub>(IoContext::current().addObject(kj::addRef(channel)));
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
-        channel.getChannelNumber(IoChannelCapTableEntry::Type::RPC);
-        KJ_FAIL_REQUIRE("RpcStub capability in dynamic isolate env is not supported yet");
+        // NOTE: In this case we are quite possibly not in any I/O context! This case happens
+        //   when a JsRpcStub is in the `env` object (e.g. of a Dynamic Worker) and refers to a
+        //   channel number.
+        return js.alloc<JsRpcStub>(channel.getChannelNumber(IoChannelCapTableEntry::Type::RPC));
       } else {
         KJ_FAIL_REQUIRE("RpcStub capability in Frankenvalue is not an RpcChannel?");
       }
@@ -835,6 +859,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
       static constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_STUB = 1600;
       auto externalMemory = js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_STUB);
 
+      auto& ioctx = IoContext::current();
       if (rpcTarget.hasChannelToken()) {
         auto channel = ioctx.getIoChannelFactory().rpcChannelFromToken(
             IoChannelFactory::ChannelTokenUsage::RPC, rpcTarget.getChannelToken());
@@ -849,6 +874,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
         kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
       JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
           "RpcStub cannot be deserialized in this context.");
+      auto& ioctx = IoContext::current();
       auto channel = storedHandler.readRpcChannel(ioctx.getIoChannelFactory());
       return js.alloc<JsRpcStub>(ioctx.addObject(kj::mv(channel)));
     }

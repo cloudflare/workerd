@@ -365,9 +365,13 @@ class JsRpcStub: public JsRpcClientProvider {
       IoOwn<IoChannelFactory::RpcChannel> rpcChannel,
       RpcStubDisposalGroup& disposalGroup,
       jsg::ExternalMemoryAdjustment externalMemoryAdjustment);
+  explicit JsRpcStub(uint channelNumber): channelNumber(channelNumber) {}
   ~JsRpcStub() noexcept(false);
 
   rpc::JsRpcTarget::Client getClient();
+
+  // If the stub is backed by a persistable RpcChannel, return it.
+  kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> getRpcChannel(IoContext& ioctx);
 
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
@@ -414,6 +418,11 @@ class JsRpcStub: public JsRpcClientProvider {
   // Nulled out upon dispose().
   kj::Maybe<IoOwn<rpc::JsRpcTarget::Client>> capnpClient;
   kj::Maybe<IoOwn<IoChannelFactory::RpcChannel>> rpcChannel;
+
+  // If set, this stub was part of `env` (e.g. to a Dynamic Worker) so cannot contain `IoOwn`s.
+  // The channel number will have to be exchanged for an RpcChannel via the IoChannelFactory on
+  // every invocation.
+  kj::Maybe<uint> channelNumber;
 
   kj::Maybe<RpcStubDisposalGroup&> disposalGroup;
   kj::ListLink<JsRpcStub> disposalGroupLink;
