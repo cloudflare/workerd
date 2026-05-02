@@ -105,6 +105,17 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 };
 
 class RpcStubDisposalGroup;
+class Fetcher;
+class JsRpcStub;
+
+using RestoreResult = kj::OneOf<jsg::Ref<Fetcher>, jsg::Ref<JsRpcStub>>;
+
+jsg::Promise<RestoreResult> invokeRestoreAndCoerce(
+    jsg::Lock& js, jsg::JsObject target, jsg::JsObject params);
+jsg::Promise<jsg::Value> restoreCurrentEntrypoint(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler);
 
 // ExternalHandler used when deserializing RPC messages. Deserialization functions with which to
 // handle RPC specially should use this.

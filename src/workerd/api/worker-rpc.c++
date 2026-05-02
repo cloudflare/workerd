@@ -1685,6 +1685,66 @@ jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::JsObject object) 
   return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(kj::mv(cap))));
 }
 
+jsg::Promise<RestoreResult> invokeRestoreAndCoerce(
+    jsg::Lock& js, jsg::JsObject target, jsg::JsObject params) {
+  auto restoreValue = target.get(js, js.symbolInternal("cloudflare:workers:restore"));
+  auto restoreFunction = JSG_REQUIRE_NONNULL(restoreValue.tryCast<jsg::JsFunction>(), TypeError,
+      "The receiver does not implement the restore method.");
+
+  auto result = restoreFunction.call(js, target, params);
+  return js.toPromise(result).then(js, [](jsg::Lock& js, jsg::Value value) -> RestoreResult {
+    auto jsValue = jsg::JsValue(value.getHandle(js));
+    auto object = JSG_REQUIRE_NONNULL(jsValue.tryCast<jsg::JsObject>(), TypeError,
+        "The restore method must return a ServiceStub or RpcStub.");
+
+    KJ_IF_SOME(fetcher, object.tryUnwrapAs<Fetcher>(js)) {
+      return fetcher.addRef();
+    }
+
+    KJ_IF_SOME(stub, object.tryUnwrapAs<JsRpcStub>(js)) {
+      return stub.addRef();
+    }
+
+    if (object.isInstanceOf<JsRpcTarget>(js) || isFunctionForRpc(js, object)) {
+      return JsRpcStub::constructor(js, object);
+    }
+
+    JSG_FAIL_REQUIRE(TypeError, "The restore method must return a ServiceStub or RpcStub.");
+  });
+}
+
+jsg::Promise<jsg::Value> restoreCurrentEntrypoint(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
+  JSG_REQUIRE(!v8::Local<v8::Object>(params)->IsArray(), TypeError,
+      "restore params must be an object.");
+
+  auto restoreParams = Frankenvalue::fromJs(js, jsg::JsValue(params));
+  auto target = IoContext::current().getEntrypointHandler(js);
+
+  return invokeRestoreAndCoerce(js, target, params)
+      .then(js, [&fetcherHandler, &rpcStubHandler, restoreParams = kj::mv(restoreParams)](
+                    jsg::Lock& js, RestoreResult result) mutable -> jsg::Value {
+    auto& ioctx = IoContext::current();
+    KJ_SWITCH_ONEOF(result) {
+      KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
+        auto channel = ioctx.makeRestoredSubrequestChannel(kj::mv(restoreParams));
+        auto restored = js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+        return jsg::Value(js.v8Isolate, fetcherHandler.wrap(js, kj::mv(restored)));
+      }
+      KJ_CASE_ONEOF(stub, jsg::Ref<JsRpcStub>) {
+        auto channel = ioctx.makeRestoredRpcChannel(kj::mv(restoreParams));
+        auto client = stub->getClient();
+        auto restored = js.alloc<JsRpcStub>(
+            ioctx.addObject(kj::heap(kj::mv(client))), ioctx.addObject(kj::mv(channel)));
+        return jsg::Value(js.v8Isolate, rpcStubHandler.wrap(js, kj::mv(restored)));
+      }
+    }
+    KJ_UNREACHABLE;
+  });
+}
+
 void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize by effectively creating a `JsRpcStub` around this object and serializing that.
   // Except we don't actually want to do _exactly_ that, because we do not want to actually create

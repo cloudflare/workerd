@@ -67,6 +67,13 @@ void ExecutionContext::passThroughOnException() {
   IoContext::current().setFailOpen();
 }
 
+jsg::Promise<jsg::Value> ExecutionContext::restore(jsg::Lock& js,
+    jsg::JsObject params,
+    const jsg::TypeHandler<jsg::Ref<Fetcher>>& fetcherHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcStub>>& rpcStubHandler) {
+  return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
+}
+
 jsg::Optional<jsg::Ref<CacheContext>> ExecutionContext::getCache(jsg::Lock& js) {
   // Hook for the embedding application to provide a CacheContext.
   // The default Worker::Api implementation returns kj::none.
