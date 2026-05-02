@@ -64,3 +64,5 @@ export function getCtxCache(): CacheContext | undefined;
 
 // Only defined when the `workerd_experimental` compat flag is enabled.
 export function abortIsolate(reason?: string): never;
+
+export const restore: symbol;

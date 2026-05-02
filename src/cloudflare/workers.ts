@@ -251,6 +251,8 @@ export const WorkflowEntrypoint = Cloudflare.compatibilityFlags
   ? WorkflowEntrypointWrapper
   : entrypoints.WorkflowEntrypoint;
 
+export const restore = entrypoints.restore;
+
 export function withEnv(newEnv: unknown, fn: () => unknown): unknown {
   return innerEnv.withEnv(newEnv, fn);
 }

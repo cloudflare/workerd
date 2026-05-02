@@ -90,6 +90,8 @@ class EntrypointsModule: public jsg::Object {
   // process.
   void abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> reason);
 
+  jsg::JsSymbol getRestoreSymbol(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(EntrypointsModule, CompatibilityFlags::Reader flags) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE(WorkflowEntrypoint);
@@ -102,6 +104,7 @@ class EntrypointsModule: public jsg::Object {
 
     JSG_METHOD(waitUntil);
     JSG_METHOD(getCtxCache);
+    JSG_LAZY_INSTANCE_PROPERTY(restore, getRestoreSymbol);
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(abortIsolate);
