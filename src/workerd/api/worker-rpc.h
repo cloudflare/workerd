@@ -447,12 +447,14 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
  public:
   JsRpcSessionCustomEvent(uint16_t typeId,
       kj::Maybe<kj::String> wrapperModule = kj::none,
+      kj::Maybe<Frankenvalue> restoreParams = kj::none,
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
         typeId(typeId),
-        wrapperModule(kj::mv(wrapperModule)) {}
+        wrapperModule(kj::mv(wrapperModule)),
+        restoreParams(kj::mv(restoreParams)) {}
 
   ~JsRpcSessionCustomEvent() noexcept(false) {
     if (capFulfiller->isWaiting()) {
@@ -510,8 +512,72 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
   uint16_t typeId;
 
   kj::Maybe<kj::String> wrapperModule;
+  kj::Maybe<Frankenvalue> restoreParams;
 
   class ServerTopLevelMembrane;
+};
+
+// Used by restore-chain replay when the next hop is expected to produce a Fetcher. This is a
+// custom event rather than a WorkerInterface virtual method so that existing WorkerInterface
+// wrappers automatically forward it through customEvent().
+//
+// The side channel returns a SubrequestChannel (not a WorkerInterface) so that the restore-chain
+// code in ChannelTokenHandler can control WorkerInterface creation and inject the subordinate's
+// self-token via the internal server.c++ call chain (see persistent-stubs-spec.md Step 6).
+class RestoreServiceCustomEvent final: public WorkerInterface::CustomEvent {
+ public:
+  RestoreServiceCustomEvent(uint16_t typeId,
+      Frankenvalue restoreParams,
+      kj::PromiseFulfillerPair<kj::Own<IoChannelFactory::SubrequestChannel>> paf =
+          kj::newPromiseAndFulfiller<kj::Own<IoChannelFactory::SubrequestChannel>>())
+      : channelFulfiller(kj::mv(paf.fulfiller)),
+        channel(kj::mv(paf.promise)),
+        typeId(typeId),
+        restoreParams(kj::mv(restoreParams)) {}
+
+  ~RestoreServiceCustomEvent() noexcept(false) {
+    if (channelFulfiller->isWaiting()) {
+      channelFulfiller->reject(
+          KJ_EXCEPTION(DISCONNECTED, "RestoreServiceCustomEvent was destroyed before completion"));
+    }
+  }
+
+  kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
+      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
+      Frankenvalue props,
+      kj::TaskSet& waitUntilTasks,
+      bool isDynamicDispatch) override;
+
+  kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      capnp::ByteStreamFactory& byteStreamFactory,
+      rpc::EventDispatcher::Client dispatcher) override;
+
+  uint16_t getType() override {
+    return typeId;
+  }
+
+  tracing::EventInfo getEventInfo() const override;
+
+  kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>> getChannel() {
+    auto result = kj::mv(KJ_ASSERT_NONNULL(channel, "can only call getChannel() once"));
+    channel = kj::none;
+    return result;
+  }
+
+  kj::Promise<Result> notSupported() override {
+    JSG_FAIL_REQUIRE(TypeError, "The receiver does not support restore");
+  }
+
+  void failed(const kj::Exception& e) override {
+    channelFulfiller->reject(e.clone());
+  }
+
+ private:
+  kj::Own<kj::PromiseFulfiller<kj::Own<IoChannelFactory::SubrequestChannel>>> channelFulfiller;
+  kj::Maybe<kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>>> channel;
+  uint16_t typeId;
+  Frankenvalue restoreParams;
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES                                                                \

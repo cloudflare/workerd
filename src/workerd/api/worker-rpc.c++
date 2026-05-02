@@ -4,9 +4,11 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/http.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/completion-membrane.h>
@@ -2103,6 +2105,119 @@ class JsRpcSessionCustomEvent::ServerTopLevelMembrane final: public capnp::Membr
   kj::Maybe<kj::Own<CompletionMembrane>> completionMembrane;
 };
 
+namespace {
+
+jsg::JsObject requireRestoreParamsObject(jsg::Lock& js, Frankenvalue& restoreParams) {
+  auto params = restoreParams.toJs(js);
+  return JSG_REQUIRE_NONNULL(params.tryCast<jsg::JsObject>(), TypeError,
+      "restore params must be an object.");
+}
+
+jsg::JsObject getExportedHandlerSelf(Worker::Lock& js,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
+    Frankenvalue props,
+    bool isDynamicDispatch) {
+  auto& ioctx = IoContext::current();
+  auto handler = JSG_REQUIRE_NONNULL(js.getExportedHandler(entrypointName,
+      kj::mv(versionInfo), kj::mv(props), ioctx.getActor(), isDynamicDispatch), TypeError,
+      "The receiver does not implement the restore method.");
+  return jsg::JsObject(handler->self.getHandle(js));
+}
+
+class RestoredServiceSubrequestChannel final: public IoChannelFactory::SubrequestChannel {
+ public:
+  RestoredServiceSubrequestChannel(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      capnp::ByteStreamFactory& byteStreamFactory,
+      rpc::EventDispatcher::Client dispatcher)
+      : httpOverCapnpFactory(httpOverCapnpFactory),
+        byteStreamFactory(byteStreamFactory),
+        dispatcher(kj::mv(dispatcher)) {}
+
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    return kj::heap<RpcWorkerInterface>(httpOverCapnpFactory, byteStreamFactory, kj::mv(dispatcher));
+  }
+
+  void requireAllowsTransfer() override {
+    JSG_FAIL_REQUIRE(Error, "Restored service channels cannot be transferred directly");
+  }
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    JSG_FAIL_REQUIRE(Error, "Restored service channels cannot be transferred directly");
+  }
+
+ private:
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  capnp::ByteStreamFactory& byteStreamFactory;
+  rpc::EventDispatcher::Client dispatcher;
+};
+
+}  // namespace
+
+tracing::EventInfo RestoreServiceCustomEvent::getEventInfo() const {
+  return tracing::CustomEventInfo();
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run(
+    kj::Own<IoContext::IncomingRequest> incomingRequest,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
+    Frankenvalue props,
+    kj::TaskSet& waitUntilTasks,
+    bool isDynamicDispatch) {
+  IoContext& ioctx = incomingRequest->getContext();
+
+  incomingRequest->delivered();
+
+  KJ_DEFER({ waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest))); });
+
+  auto channel = co_await ioctx.run(
+      [this, entrypointName = entrypointName, &ioctx, versionInfo = kj::mv(versionInfo),
+          props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
+    jsg::AsyncContextFrame::StorageScope traceScope = ioctx.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = ioctx.makeUserAsyncTraceScope(lock);
+
+    auto params = requireRestoreParamsObject(lock, restoreParams);
+    auto target = getExportedHandlerSelf(
+        lock, entrypointName, kj::mv(versionInfo), kj::mv(props), isDynamicDispatch);
+
+    return ioctx.awaitJs(lock,
+        invokeRestoreAndCoerce(lock, target, params)
+            .then(lock, [&ioctx](jsg::Lock& js, RestoreResult result) {
+      KJ_SWITCH_ONEOF(result) {
+        KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
+          return fetcher->getSubrequestChannel(ioctx);
+        }
+        KJ_CASE_ONEOF(stub, jsg::Ref<JsRpcStub>) {
+          JSG_FAIL_REQUIRE(TypeError, "The restore method must return a ServiceStub.");
+        }
+      }
+      KJ_UNREACHABLE;
+    }));
+  });
+
+  channelFulfiller->fulfill(kj::mv(channel));
+
+  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::sendRpc(
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+    capnp::ByteStreamFactory& byteStreamFactory,
+    rpc::EventDispatcher::Client dispatcher) {
+  auto req = dispatcher.restoreServiceRequest();
+  restoreParams.toCapnp(req.initParams());
+  auto sent = req.send();
+
+  channelFulfiller->fulfill(kj::heap<RestoredServiceSubrequestChannel>(
+      httpOverCapnpFactory, byteStreamFactory, sent.getService()));
+
+  co_await sent.ignoreResult();
+
+  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+}
+
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
@@ -2119,6 +2234,41 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // disconnects.
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
+
+  KJ_IF_SOME(params, restoreParams) {
+    auto localRestoreParams = kj::mv(params);
+    auto cap = co_await ioctx.run(
+        [entrypointName = entrypointName, &ioctx, versionInfo = kj::mv(versionInfo),
+            props = kj::mv(props), isDynamicDispatch,
+            restoreParams = kj::mv(localRestoreParams)](Worker::Lock& lock) mutable {
+      jsg::AsyncContextFrame::StorageScope traceScope = ioctx.makeAsyncTraceScope(lock);
+      jsg::AsyncContextFrame::StorageScope userTraceScope = ioctx.makeUserAsyncTraceScope(lock);
+
+      auto params = requireRestoreParamsObject(lock, restoreParams);
+      auto target = getExportedHandlerSelf(
+          lock, entrypointName, kj::mv(versionInfo), kj::mv(props), isDynamicDispatch);
+
+      return ioctx.awaitJs(lock,
+          invokeRestoreAndCoerce(lock, target, params).then(lock,
+              [](jsg::Lock& js, RestoreResult result) -> rpc::JsRpcTarget::Client {
+        KJ_SWITCH_ONEOF(result) {
+          KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
+            JSG_FAIL_REQUIRE(TypeError, "The restore method must return an RpcStub.");
+          }
+          KJ_CASE_ONEOF(stub, jsg::Ref<JsRpcStub>) {
+            auto client = stub->getClient();
+            stub->dispose();
+            return client;
+          }
+        }
+        KJ_UNREACHABLE;
+      }));
+    });
+
+    capFulfiller->fulfill(kj::mv(cap));
+
+    co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+  }
 
   EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
       kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
@@ -2147,6 +2297,18 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
+  KJ_IF_SOME(params, restoreParams) {
+    auto req = dispatcher.restoreRpcStubRequest();
+    params.toCapnp(req.initParams());
+    auto sent = req.send();
+
+    capFulfiller->fulfill(sent.getTarget());
+
+    co_await sent.ignoreResult();
+
+    co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+  }
+
   // We arrange to revoke all capabilities in this session as soon as `sendRpc()` completes or is
   // canceled. Normally, the server side doesn't return if any capabilities still exist, so this
   // only makes a difference in the case that some sort of an error occurred. We don't strictly
