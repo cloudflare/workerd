@@ -9,6 +9,7 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-util.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-source.h>
 
 #include <capnp/capability.h>  // for Capability
@@ -300,6 +301,38 @@ class IoChannelFactory {
     KJ_UNIMPLEMENTED("This runtime doesn't support actor class channels.");
   }
 
+  // RpcChannel points at a persistent RpcTarget implemented by some other worker. "Persistent"
+  // means it can be saved as a channel token and restored later, recreating the same object,
+  // possibly in an entirely new isolate.
+  class RpcChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
+   public:
+    kj::Own<CapTableEntry> clone() override final {
+      return kj::addRef(*this);
+    }
+
+    struct Session {
+      rpc::JsRpcTarget::Client cap;
+
+      // Cancelling this terminates the session. Typically you should pass this to
+      // ioContext.addTask(), so that it is canceled naturally if the parent context is canceled.
+      kj::Promise<void> task;
+    };
+
+    virtual Session restore() = 0;
+
+    // Same as the corresponding methods on SubrequestChannel.
+    virtual void requireAllowsTransfer() = 0;
+    kj::Promise<kj::Array<byte>> getToken(ChannelTokenUsage usage);
+    virtual kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+        ChannelTokenUsage usage) = 0;
+    virtual kj::OneOf<kj::Own<RpcChannel>, kj::Promise<kj::Own<RpcChannel>>>
+    getResolved() {
+      return kj::addRef(*this);
+    }
+
+    // Restoring the channel opens a fresh JS RPC session to the persistent target.
+  };
+
   // Aborts all actors except those in namespaces marked with `preventEviction`.
   virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
@@ -335,6 +368,8 @@ class IoChannelFactory {
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
   virtual kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+  virtual kj::Own<RpcChannel> rpcChannelFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 
   // Overloads which accept a promise. Any attempts to use the channel will have to wait for the
   // token to arrive first, but this should be transparent.
@@ -342,6 +377,28 @@ class IoChannelFactory {
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
   kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
+  kj::Own<RpcChannel> rpcChannelFromToken(
+      ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
+
+  // Create a SubrequestChannel or RpcChannel by taking `baseToken` and appending `restoreParams`
+  // to its `restoreChain`. `baseToken` must be the channel token representing the
+  // currently-running service or actor (the "self token"); it is supplied by the caller because
+  // IoChannelFactory in workerd is shared across all execution contexts and so cannot know on its
+  // own which context is asking. The resulting channel, when used, will walk the restore chain
+  // (calling `[restore]()` on the entrypoint that the current execution context started from,
+  // passing the given params). The channel's `getTokenMaybeSync(usage)` produces the correctly
+  // encoded token for the requested usage (RPC or STORAGE).
+  //
+  // `restoreParams` must represent a JS object. Any embedded externals must be persistable.
+  //
+  // Typically called by `IoContext::makeRestoredSubrequestChannel()` /
+  // `IoContext::makeRestoredRpcChannel()`, which forward the IoContext's stored self-token here.
+  virtual kj::Own<SubrequestChannel> makeRestoredSubrequestChannel(
+      kj::ArrayPtr<const byte> baseToken,
+      Frankenvalue restoreParams);
+  virtual kj::Own<RpcChannel> makeRestoredRpcChannel(
+      kj::ArrayPtr<const byte> baseToken,
+      Frankenvalue restoreParams);
 };
 
 // ResourceLimits provides a means to control the resource allocation for a worker stage via a
@@ -429,7 +486,7 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
   enum Type {
     SUBREQUEST,
     ACTOR_CLASS,
-    // TODO(someday): Other channel types, maybe.
+    RPC,
   };
 
   IoChannelCapTableEntry(Type type, uint channel): type(type), channel(channel) {}

@@ -30,6 +30,18 @@ kj::Promise<kj::Array<byte>> IoChannelFactory::ActorClassChannel::getToken(
   KJ_UNREACHABLE;
 }
 
+kj::Promise<kj::Array<byte>> IoChannelFactory::RpcChannel::getToken(ChannelTokenUsage usage) {
+  KJ_SWITCH_ONEOF(getTokenMaybeSync(usage)) {
+    KJ_CASE_ONEOF(token, kj::Array<byte>) {
+      return kj::mv(token);
+    }
+    KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+      return kj::mv(promise);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannelFromToken(
     ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
   JSG_FAIL_REQUIRE(DOMDataCloneError, "This Worker is not able to deserialize ServiceStubs.");
@@ -39,6 +51,23 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromTok
     ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
   JSG_FAIL_REQUIRE(
       DOMDataCloneError, "This Worker is not able to deserialize Durable Object class stubs.");
+}
+
+kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
+    ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "This Worker is not able to deserialize RpcStubs.");
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::makeRestoredSubrequestChannel(
+    kj::ArrayPtr<const byte> baseToken,
+    Frankenvalue restoreParams) {
+  KJ_UNIMPLEMENTED("This runtime doesn't support persistent ServiceStubs.");
+}
+
+kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannel(
+    kj::ArrayPtr<const byte> baseToken,
+    Frankenvalue restoreParams) {
+  KJ_UNIMPLEMENTED("This runtime doesn't support persistent RpcStubs.");
 }
 
 namespace {
@@ -175,6 +204,77 @@ class PromisedActorClassChannel final: public IoChannelFactory::ActorClassChanne
   }
 };
 
+class PromisedRpcChannel final: public IoChannelFactory::RpcChannel {
+ public:
+  PromisedRpcChannel(kj::Promise<kj::Own<RpcChannel>> promise)
+      : readyPromise(waitForResolution(kj::mv(promise)).fork()) {}
+
+  Session restore() override {
+    KJ_IF_SOME(channel, inner) {
+      return channel->restore();
+    } else {
+      return {
+        .cap = rpc::JsRpcTarget::Client(readyPromise.addBranch().then([this]() mutable {
+          return KJ_ASSERT_NONNULL(inner)->restore().cap;
+        })),
+        .task = readyPromise.addBranch(),
+      };
+    }
+  }
+
+  void requireAllowsTransfer() override {
+    // PromisedRpcChannel is used for channels initialized from a promised channel token. A
+    // RpcChannel created from a channel token should always support transfer, via channel tokens.
+  }
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    KJ_IF_SOME(channel, inner) {
+      return channel->getTokenMaybeSync(usage);
+    } else {
+      return readyPromise.addBranch().then([this, usage]() -> kj::Promise<kj::Array<byte>> {
+        KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(inner)->getTokenMaybeSync(usage)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            return kj::mv(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            return kj::mv(promise);
+          }
+        }
+        KJ_UNREACHABLE;
+      });
+    }
+  }
+
+  kj::OneOf<kj::Own<RpcChannel>, kj::Promise<kj::Own<RpcChannel>>> getResolved() override {
+    KJ_IF_SOME(channel, inner) {
+      return kj::addRef(*channel);
+    } else {
+      return readyPromise.addBranch().then(
+          [this]() mutable { return kj::addRef(*KJ_ASSERT_NONNULL(inner)); });
+    }
+  }
+
+ private:
+  kj::ForkedPromise<void> readyPromise;
+  kj::Maybe<kj::Own<RpcChannel>> inner;
+
+  kj::Promise<void> waitForResolution(kj::Promise<kj::Own<RpcChannel>> promise) {
+    for (;;) {
+      auto resolution = co_await promise;
+      KJ_SWITCH_ONEOF(resolution->getResolved()) {
+        KJ_CASE_ONEOF(channel, kj::Own<RpcChannel>) {
+          inner = kj::mv(channel);
+          co_return;
+        }
+        KJ_CASE_ONEOF(deeperPromise, kj::Promise<kj::Own<RpcChannel>>) {
+          promise = kj::mv(deeperPromise);
+        }
+      }
+    }
+  }
+};
+
 }  // namespace
 
 kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannelFromToken(
@@ -188,6 +288,13 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromTok
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
   // We shouldn't get here unless someone (Kenton) screwed up the build order.
   KJ_FAIL_ASSERT("Async channel token deserialization unimplemented.");
+}
+
+kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
+    ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
+  return kj::refcounted<PromisedRpcChannel>(token.then([this, usage](kj::Array<byte> token) {
+    return rpcChannelFromToken(usage, token.asPtr());
+  }));
 }
 
 void IoChannelFactory::ActorChannel::requireAllowsTransfer() {
