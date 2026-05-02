@@ -5865,61 +5865,146 @@ void TransformStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tr
 
 // ======================================================================================
 
-jsg::Ref<ReadableStream> ReadableStream::from(
-    jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator) {
+namespace {
 
-  // AsyncGenerator is not a refcounted type, so we need to wrap it in a refcounted
-  // struct so that we can keep it alive through the various promise branches below.
-  auto rcGenerator =
-      kj::rc<kj::RefcountedWrapper<jsg::AsyncGenerator<jsg::Value>>>(kj::mv(generator));
-
-  // clang-format off
-  return constructor(js, UnderlyingSource{
-    .pull = [generator = rcGenerator.addRef()](jsg::Lock& js, auto controller) mutable {
+class FromUnderlyingSourceImpl final: public UnderlyingSourceImpl {
+ public:
+  FromUnderlyingSourceImpl(jsg::AsyncGenerator<jsg::JsRef<jsg::JsValue>> generator)
+      : generator(kj::mv(generator)) {
+    pull_ = [ref = addWeakRef()](jsg::Lock& js, auto controller) mutable {
+      auto& self = JSG_REQUIRE_NONNULL(ref->tryGet(), Error, "The ReadableStream has been closed");
+      auto& generator = self.getGenerator();
       auto& c = controller.template get<DefaultController>();
-      return generator->getWrapped().next(js).then(js,
-          JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = generator.addRef()),
-              (controller),
-              (jsg::Lock& js, kj::Maybe<jsg::Value> value) {
-                KJ_IF_SOME(v, value) {
-                  auto handle = v.getHandle(js);
-                  // Per the ReadableStream.from spec, if the value is a promise,
-                  // the stream should wait for it to resolve and enqueue the
-                  // resolved value...
-                  // ... yes, this means that ReadableStream.from where the inputs
-                  // are promises will be slow, but that's the spec.
-                  if (handle->IsPromise()) {
-                    return js.toPromise(handle.As<v8::Promise>()).then(js,
-                        JSG_VISITABLE_LAMBDA(
-                            (controller=controller.addRef()),
-                            (controller),
-                            (jsg::Lock& js, jsg::Value val) mutable {
-                      controller->enqueue(js, jsg::JsValue(val.getHandle(js)));
-                      return js.resolvedPromise();
-                    }));
-                  }
-                  controller->enqueue(js, jsg::JsValue(v.getHandle(js)));
-                } else {
-                  controller->close(js);
-                }
-                return js.resolvedPromise();
-              }),
-          JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = generator.addRef()),
-              (controller), (jsg::Lock& js, jsg::Value reason) {
-                auto handle = jsg::JsValue(reason.getHandle(js));
-                controller->error(js, handle);
-                return js.rejectedPromise<void>(handle);
-              }));
-    },
-    .cancel = [generator = rcGenerator.addRef()](jsg::Lock& js, auto reason) mutable {
-      return generator->getWrapped().return_(js, js.v8Ref(v8::Local<v8::Value>(reason)))
+      return generator.next(js).thenRef(js, self.getNextContinuation(js, c.addRef()));
+    };
+
+    cancel_ = [ref = addWeakRef()](jsg::Lock& js, auto reason) mutable {
+      auto& self = JSG_REQUIRE_NONNULL(ref->tryGet(), Error, "The ReadableStream has been closed");
+      auto& generator = self.getGenerator();
+      return generator.return_(js, reason.addRef(js))
           .then(js, [generator = kj::mv(generator)](auto& lock, auto) {
         // The generator might produce a value on return and might even want to continue,
         // but the stream has been canceled at this point, so we stop here.
       });
-    },
-  }, StreamQueuingStrategy{ .highWaterMark = 0 });
-  // clang-format on
+    };
+  }
+
+  ~FromUnderlyingSourceImpl() noexcept(false) {
+    weakSelf->invalidate();
+  }
+
+  jsg::AsyncGenerator<jsg::JsRef<jsg::JsValue>>& getGenerator() {
+    return generator;
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    generator.visitForGc(visitor);
+  }
+
+ private:
+  jsg::AsyncGenerator<jsg::JsRef<jsg::JsValue>> generator;
+  kj::Rc<WeakRef<FromUnderlyingSourceImpl>> weakSelf =
+      kj::rc<WeakRef<FromUnderlyingSourceImpl>>(kj::Badge<FromUnderlyingSourceImpl>{}, *this);
+
+  jsg::Promise<void> nextSuccess(
+      jsg::Lock& js, DefaultController controller, kj::Maybe<jsg::JsRef<jsg::JsValue>> value) {
+    KJ_IF_SOME(v, value) {
+      auto handle = v.getHandle(js);
+      // Per the ReadableStream.from spec, if the value is a promise,
+      // the stream should wait for it to resolve and enqueue the
+      // resolved value...
+      // ... yes, this means that ReadableStream.from where the inputs
+      // are promises will be slow, but that's the spec.
+      KJ_IF_SOME(promise, handle.tryCast<jsg::JsPromise>()) {
+        return js.toPromise(promise).thenRef(
+            js, getNextFinishContinuation(js, controller.addRef()));
+      } else {
+      }
+      controller->enqueue(js, v.getHandle(js));
+    } else {
+      controller->close(js);
+    }
+    return js.resolvedPromise();
+  }
+
+  jsg::Promise<void> nextFailure(jsg::Lock& js, DefaultController controller, jsg::Value reason) {
+    auto handle = jsg::JsValue(reason.getHandle(js));
+    controller->error(js, handle);
+    return js.rejectedPromise<void>(handle);
+  }
+
+  void nextFinish(jsg::Lock& js, DefaultController controller, jsg::Value val) {
+    controller->enqueue(js, jsg::JsValue(val.getHandle(js)));
+  }
+
+  struct NextCallbacks {
+    kj::Rc<WeakRef<FromUnderlyingSourceImpl>> weakSelf;
+    DefaultController controller;
+    jsg::Promise<void> thenFunc(jsg::Lock& js, kj::Maybe<jsg::JsRef<jsg::JsValue>> value) {
+      auto& self =
+          JSG_REQUIRE_NONNULL(weakSelf->tryGet(), Error, "The ReadableStream has been closed");
+      return self.nextSuccess(js, controller.addRef(), kj::mv(value));
+    }
+
+    jsg::Promise<void> catchFunc(jsg::Lock& js, jsg::Value reason) {
+      auto& self =
+          JSG_REQUIRE_NONNULL(weakSelf->tryGet(), Error, "The ReadableStream has been closed");
+      return self.nextFailure(js, controller.addRef(), kj::mv(reason));
+    }
+  };
+  using NextContinuationType = jsg::PersistentContinuation<NextCallbacks,
+      kj::Maybe<jsg::JsRef<jsg::JsValue>>,
+      jsg::Promise<void>>;
+  kj::Maybe<NextContinuationType> nextContinuation;
+
+  NextContinuationType& getNextContinuation(jsg::Lock& js, DefaultController controller) {
+    KJ_IF_SOME(nc, nextContinuation) {
+      return nc;
+    }
+    return nextContinuation.emplace(
+        NextContinuationType::create(js, NextCallbacks{addWeakRef(), kj::mv(controller)}));
+  }
+
+  struct NextFinishCallbacks {
+    kj::Rc<WeakRef<FromUnderlyingSourceImpl>> weakSelf;
+    DefaultController controller;
+    void operator()(jsg::Lock& js, jsg::Value val) {
+      auto& self =
+          JSG_REQUIRE_NONNULL(weakSelf->tryGet(), Error, "The ReadableStream has been closed");
+      self.nextFinish(js, controller.addRef(), kj::mv(val));
+    }
+  };
+
+  using NextFinishContinuationType =
+      jsg::PersistentThenContinuation<NextFinishCallbacks, jsg::Value, void>;
+  kj::Maybe<NextFinishContinuationType> nextFinishContinuation;
+
+  NextFinishContinuationType& getNextFinishContinuation(
+      jsg::Lock& js, DefaultController controller) {
+    KJ_IF_SOME(nc, nextFinishContinuation) {
+      return nc;
+    }
+    return nextFinishContinuation.emplace(NextFinishContinuationType::create(
+        js, NextFinishCallbacks{addWeakRef(), kj::mv(controller)}));
+  }
+
+  kj::Rc<WeakRef<FromUnderlyingSourceImpl>> addWeakRef() {
+    return weakSelf.addRef();
+  }
+};
+
+}  // namespace
+
+jsg::Ref<ReadableStream> ReadableStream::from(
+    jsg::Lock& js, jsg::AsyncGenerator<jsg::JsRef<jsg::JsValue>> generator) {
+
+  auto controller = newReadableStreamJsController();
+  auto stream = js.allocAccounted<ReadableStream>(
+      sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
+  auto sourceImpl = kj::heap<FromUnderlyingSourceImpl>(kj::mv(generator));
+  sourceImpl->setOwner(*stream);
+  stream->getController().setup(js, kj::mv(sourceImpl));
+  return kj::mv(stream);
 }
 
 // =======================================================================================

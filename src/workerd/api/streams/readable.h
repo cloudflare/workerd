@@ -271,14 +271,14 @@ private:
     bool preventCancel;
   };
 
-  static jsg::Promise<kj::Maybe<jsg::Value>> nextFunction(
+  static jsg::Promise<kj::Maybe<jsg::JsRef<jsg::JsValue>>> nextFunction(
       jsg::Lock& js,
       AsyncIteratorState& state);
 
   static jsg::Promise<void> returnFunction(
       jsg::Lock& js,
       AsyncIteratorState& state,
-      jsg::Optional<jsg::Value>& value);
+      jsg::Optional<jsg::JsRef<jsg::JsValue>>& value);
 
 public:
   explicit ReadableStream(IoContext& ioContext,
@@ -303,7 +303,8 @@ public:
       jsg::Optional<UnderlyingSource> underlyingSource,
       jsg::Optional<StreamQueuingStrategy> queuingStrategy);
 
-  static jsg::Ref<ReadableStream> from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator);
+  static jsg::Ref<ReadableStream> from(jsg::Lock& js,
+      jsg::AsyncGenerator<jsg::JsRef<jsg::JsValue>> generator);
 
   bool isLocked();
 
@@ -336,7 +337,7 @@ public:
 
   JSG_ASYNC_ITERATOR_WITH_OPTIONS(ReadableStreamAsyncIterator,
                                    values,
-                                   jsg::Value,
+                                   jsg::JsRef<jsg::JsValue>,
                                    AsyncIteratorState,
                                    nextFunction,
                                    returnFunction,

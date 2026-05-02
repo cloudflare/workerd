@@ -520,24 +520,25 @@ jsg::Optional<uint64_t> ReadableStream::inspectLength() {
   return tryGetLength(StreamEncoding::IDENTITY);
 }
 
-jsg::Promise<kj::Maybe<jsg::Value>> ReadableStream::nextFunction(
+jsg::Promise<kj::Maybe<jsg::JsRef<jsg::JsValue>>> ReadableStream::nextFunction(
     jsg::Lock& js, AsyncIteratorState& state) {
   return state.reader->read(js).then(
       js, [reader = state.reader.addRef()](jsg::Lock& js, ReadResult result) mutable {
     if (result.done) {
       reader->releaseLock(js);
-      return js.resolvedPromise(kj::Maybe<jsg::Value>(kj::none));
+      return js.resolvedPromise(kj::Maybe<jsg::JsRef<jsg::JsValue>>(kj::none));
     }
-    return js.resolvedPromise<kj::Maybe<jsg::Value>>(kj::mv(result.value));
+    return js.resolvedPromise<kj::Maybe<jsg::JsRef<jsg::JsValue>>>(kj::mv(result.value));
   });
 }
 
 jsg::Promise<void> ReadableStream::returnFunction(
-    jsg::Lock& js, AsyncIteratorState& state, jsg::Optional<jsg::Value>& value) {
+    jsg::Lock& js, AsyncIteratorState& state, jsg::Optional<jsg::JsRef<jsg::JsValue>>& value) {
   if (state.reader.get() != nullptr) {
     auto reader = kj::mv(state.reader);
     if (!state.preventCancel) {
-      auto promise = reader->cancel(js, value.map([&](jsg::Value& v) { return v.getHandle(js); }));
+      auto promise = reader->cancel(
+          js, value.map([&](jsg::JsRef<jsg::JsValue>& v) { return v.getHandle(js); }));
       reader->releaseLock(js);
       auto result = promise.then(js,
           JSG_VISITABLE_LAMBDA((reader = kj::mv(reader)), (reader), (jsg::Lock& js) {

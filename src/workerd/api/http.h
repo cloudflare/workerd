@@ -50,7 +50,7 @@ class Body: public jsg::Object {
       jsg::Ref<FormData>,
       jsg::Ref<URLSearchParams>,
       jsg::Ref<url::URLSearchParams>,
-      jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
+      jsg::AsyncGeneratorIgnoringStrings<jsg::JsRef<jsg::JsValue>>>;
 
   struct RefcountedBytes final: public kj::Refcounted {
     kj::Array<kj::byte> bytes;
