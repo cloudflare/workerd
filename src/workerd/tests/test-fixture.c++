@@ -421,7 +421,7 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 
 kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
   auto context = kj::refcounted<IoContext>(
-      threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
+      threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>(), kj::none);
   kj::Own<IoChannelFactory> channelFactory;
   KJ_IF_SOME(factory, ioChannelFactory) {
     channelFactory = factory(*timerChannel);

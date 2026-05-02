@@ -204,7 +204,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   IoContext(ThreadContext& thread,
       kj::Own<const Worker> worker,
       kj::Maybe<Worker::Actor&> actor,
-      kj::Own<LimitEnforcer> limitEnforcer);
+      kj::Own<LimitEnforcer> limitEnforcer,
+      kj::Maybe<kj::Array<byte>> selfToken);
 
   // On destruction, all outstanding tasks associated with this request are canceled.
   ~IoContext() noexcept(false);
@@ -381,6 +382,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
   jsg::JsObject getEntrypointHandler(jsg::Lock& js);
+
+  kj::Own<IoChannelFactory::SubrequestChannel> makeRestoredSubrequestChannel(
+      Frankenvalue restoreParams);
+  kj::Own<IoChannelFactory::RpcChannel> makeRestoredRpcChannel(Frankenvalue restoreParams);
 
   // Check if a current request is available. Used to provide better diagnostics when this is
   // unexpectedly absent when reporting a user span.
@@ -976,6 +981,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<const Worker> worker;
   kj::Maybe<Worker::Actor&> actor;
   kj::Own<LimitEnforcer> limitEnforcer;
+  kj::Maybe<kj::Array<byte>> selfToken;
 
   // List of active IncomingRequests, ordered from most-recently-started to least-recently-started.
   kj::List<IncomingRequest, &IncomingRequest::link> incomingRequests;

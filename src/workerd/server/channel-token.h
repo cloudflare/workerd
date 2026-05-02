@@ -35,6 +35,17 @@ class ChannelTokenHandler {
 
     virtual kj::Own<IoChannelFactory::ActorChannel> resolveActor(
         kj::StringPtr namespaceKey, kj::ArrayPtr<const byte> id, kj::Maybe<kj::StringPtr> name) = 0;
+
+    // Start a request on `channel`, arranging for the target IoContext's self-token to be set
+    // to `selfToken`. Used by the restore-chain replay code: after RestoreServiceCustomEvent
+    // returns a SubrequestChannel, the chain walker calls this to create the WorkerInterface with
+    // the correct self-token injected. The Server implementation handles the concrete type dispatch
+    // (Service vs ActorChannelImpl) and threads the token through the internal startRequest()
+    // overloads to newWorkerEntrypoint() → IoContext.
+    virtual kj::Own<WorkerInterface> startSubrequestWithSelfToken(
+        IoChannelFactory::SubrequestChannel& channel,
+        IoChannelFactory::SubrequestMetadata metadata,
+        kj::Array<byte> selfToken) = 0;
   };
 
   explicit ChannelTokenHandler(Resolver& resolver);

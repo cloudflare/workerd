@@ -279,6 +279,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Own<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
       kj::ArrayPtr<const byte> id,
       kj::Maybe<kj::StringPtr> name) override;
+  kj::Own<WorkerInterface> startSubrequestWithSelfToken(IoChannelFactory::SubrequestChannel& channel,
+      IoChannelFactory::SubrequestMetadata metadata,
+      kj::Array<byte> selfToken) override;
 
   kj::Array<byte> encodeChannelToken(IoChannelFactory::ChannelTokenUsage usage,
       kj::StringPtr serviceName,

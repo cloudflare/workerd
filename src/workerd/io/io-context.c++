@@ -150,11 +150,13 @@ class IoContext::TimeoutManagerImpl::TimeoutState {
 IoContext::IoContext(ThreadContext& thread,
     kj::Own<const Worker> workerParam,
     kj::Maybe<Worker::Actor&> actorParam,
-    kj::Own<LimitEnforcer> limitEnforcerParam)
+    kj::Own<LimitEnforcer> limitEnforcerParam,
+    kj::Maybe<kj::Array<byte>> selfToken)
     : thread(thread),
       worker(kj::mv(workerParam)),
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
+      selfToken(kj::mv(selfToken)),
       threadId(getThreadId()),
       deleteQueue(kj::arc<DeleteQueue>()),
       cachePutSerializer(kj::READY_NOW),
@@ -1441,6 +1443,20 @@ void IoContext::setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler) {
 
 jsg::JsObject IoContext::getEntrypointHandler(jsg::Lock& js) {
   return KJ_REQUIRE_NONNULL(entrypointHandler, "entrypoint handler has not been set").getHandle(js);
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> IoContext::makeRestoredSubrequestChannel(
+    Frankenvalue restoreParams) {
+  auto& token = JSG_REQUIRE_NONNULL(selfToken, Error,
+      "Cannot create persistent stub because the current entrypoint has no channel token.");
+  return getIoChannelFactory().makeRestoredSubrequestChannel(token, kj::mv(restoreParams));
+}
+
+kj::Own<IoChannelFactory::RpcChannel> IoContext::makeRestoredRpcChannel(
+    Frankenvalue restoreParams) {
+  auto& token = JSG_REQUIRE_NONNULL(selfToken, Error,
+      "Cannot create persistent stub because the current entrypoint has no channel token.");
+  return getIoChannelFactory().makeRestoredRpcChannel(token, kj::mv(restoreParams));
 }
 
 auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {

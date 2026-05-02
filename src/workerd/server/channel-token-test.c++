@@ -191,6 +191,13 @@ class MockResolver: public ChannelTokenHandler::Resolver {
       kj::Maybe<kj::StringPtr> name) override {
     return kj::refcounted<MockActorChannel>(namespaceKey, id, name);
   }
+
+  kj::Own<WorkerInterface> startSubrequestWithSelfToken(
+      IoChannelFactory::SubrequestChannel& channel,
+      IoChannelFactory::SubrequestMetadata metadata,
+      kj::Array<byte> selfToken) override {
+    KJ_UNREACHABLE;
+  }
 };
 
 using Usage = IoChannelFactory::ChannelTokenUsage;

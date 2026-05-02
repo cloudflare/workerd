@@ -47,6 +47,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     // subtask of another request. If it is kj::none, then this invocation is a top-level
     // invocation.
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan = kj::none,
+    kj::Maybe<kj::Array<byte>> selfToken = kj::none,
     bool isDynamicDispatch = false);
 
 }  // namespace workerd

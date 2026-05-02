@@ -61,6 +61,7 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<Worker::VersionInfo> versionInfo,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+      kj::Maybe<kj::Array<byte>> selfToken,
       bool isDynamicDispatch);
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -110,7 +111,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
+      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+      kj::Maybe<kj::Array<byte>> selfToken);
 
   template <typename T>
   kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
@@ -184,6 +186,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+    kj::Maybe<kj::Array<byte>> selfToken,
     bool isDynamicDispatch) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
 
@@ -192,7 +195,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
       kj::mv(cfBlobJson), kj::mv(versionInfo));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
-      kj::mv(maybeTriggerInvocationSpan));
+      kj::mv(maybeTriggerInvocationSpan), kj::mv(selfToken));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -222,7 +225,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> metrics,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan) {
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+    kj::Maybe<kj::Array<byte>> selfToken) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -235,7 +239,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     // of the associated WorkerInterface, other references may be created below for actors requests
     // in separate init() calls but this ioContextDependency does not need to live as long as those
     // instances.
-    return kj::refcounted<IoContext>(threadContext, kj::mv(worker), actorRef, kj::mv(limitEnforcer))
+    return kj::refcounted<IoContext>(threadContext, kj::mv(worker), actorRef,
+        kj::mv(limitEnforcer), kj::mv(selfToken))
         .attachToThisReference(kj::mv(ioContextDependency));
   };
 
@@ -1008,12 +1013,13 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+    kj::Maybe<kj::Array<byte>> selfToken,
     bool isDynamicDispatch) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(props), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::mv(metrics), waitUntilTasks, tunnelExceptions,
       kj::mv(workerTracer), kj::mv(cfBlobJson), kj::mv(versionInfo),
-      kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch);
+      kj::mv(maybeTriggerInvocationSpan), kj::mv(selfToken), isDynamicDispatch);
 }
 
 }  // namespace workerd

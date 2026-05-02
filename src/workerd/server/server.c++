@@ -230,6 +230,11 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
   virtual kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata) override = 0;
 
+  virtual kj::Own<WorkerInterface> startRequestWithSelfToken(
+      IoChannelFactory::SubrequestMetadata metadata, kj::Array<byte> selfToken) {
+    KJ_FAIL_REQUIRE("cannot inject self-token into this service");
+  }
+
   // Returns true if the service exports the given handler, e.g. `fetch`, `scheduled`, etc.
   virtual bool hasHandler(kj::StringPtr handlerName) = 0;
 
@@ -275,7 +280,9 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
 
   // Start a request on the actor. (The actor must have been created using newActor().)
   virtual kj::Own<WorkerInterface> startRequest(
-      IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
+      IoChannelFactory::SubrequestMetadata metadata,
+      kj::Own<Worker::Actor> actor,
+      kj::Maybe<kj::Array<byte>> selfToken = kj::none) = 0;
 
   virtual kj::Own<ActorClass> forProps(Frankenvalue props) {
     KJ_FAIL_REQUIRE("can't override props for this actor class");
@@ -309,6 +316,8 @@ Server::~Server() noexcept {
 
 class Server::ActorNamespace final {
  public:
+  friend class Server;
+
   ActorNamespace(kj::Own<ActorClass> actorClass,
       const ActorConfig& config,
       const kj::Clock& clock,
@@ -555,8 +564,8 @@ class Server::ActorNamespace final {
       co_return KJ_ASSERT_NONNULL(actor)->addRef();
     }
 
-    kj::Promise<kj::Own<WorkerInterface>> startRequest(
-        IoChannelFactory::SubrequestMetadata metadata) {
+    kj::Promise<kj::Own<WorkerInterface>> startRequest(IoChannelFactory::SubrequestMetadata metadata,
+        kj::Maybe<kj::Array<byte>> selfToken = kj::none) {
       auto actor = co_await getActor();
 
       if (ns.cleanupTask == kj::none) {
@@ -567,7 +576,12 @@ class Server::ActorNamespace final {
       // Since `getActor()` completed, `classAndId` must be resolved.
       auto& actorClass = KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).actorClass;
 
-      co_return actorClass->startRequest(kj::mv(metadata), kj::mv(actor))
+      if (selfToken == kj::none && parent == kj::none && ns.getConfig().is<Durable>()) {
+        selfToken = getChannelTokenImpl(IoChannelFactory::ChannelTokenUsage::RPC,
+            KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).id);
+      }
+
+      co_return actorClass->startRequest(kj::mv(metadata), kj::mv(actor), kj::mv(selfToken))
           .attach(kj::defer([self = kj::addRef(*this)]() mutable { self->updateAccessTime(); }));
     }
 
@@ -1251,6 +1265,12 @@ class Server::ActorNamespace final {
       return newPromisedWorkerInterface(actorContainer->startRequest(kj::mv(metadata)));
     }
 
+    kj::Own<WorkerInterface> startRequestWithSelfToken(
+        IoChannelFactory::SubrequestMetadata metadata, kj::Array<byte> selfToken) {
+      return newPromisedWorkerInterface(
+          actorContainer->startRequest(kj::mv(metadata), kj::mv(selfToken)));
+    }
+
     void requireAllowsTransfer() override {
       actorContainer->requireTransferrableStub();
     }
@@ -1584,8 +1604,9 @@ class Server::InvalidConfigActorClass final: public ActorClass {
         Error, "Cannot instantiate Durable Object class because its config is invalid.");
   }
 
-  kj::Own<WorkerInterface> startRequest(
-      IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata,
+      kj::Own<Worker::Actor> actor,
+      kj::Maybe<kj::Array<byte>> selfToken = kj::none) override {
     // Can't get here because creating the actor would have required calling the other method.
     KJ_UNREACHABLE;
   }
@@ -3152,7 +3173,13 @@ class Server::WorkerService final: public Service,
   }
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    return startRequest(kj::mv(metadata), kj::none, {});
+    return startRequest(kj::mv(metadata), kj::none, {}, kj::none, false, kj::none);
+  }
+
+  kj::Own<WorkerInterface> startRequestWithSelfToken(
+      IoChannelFactory::SubrequestMetadata metadata, kj::Array<byte> selfToken) override {
+    return startRequest(
+        kj::mv(metadata), kj::none, {}, kj::none, false, kj::mv(selfToken));
   }
 
   bool hasHandler(kj::StringPtr handlerName) override {
@@ -3167,7 +3194,8 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none,
-      bool isTracer = false) {
+      bool isTracer = false,
+      kj::Maybe<kj::Array<byte>> selfToken = kj::none) {
     TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
 
     auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
@@ -3274,6 +3302,21 @@ class Server::WorkerService final: public Service,
       }
     }
 
+    if (selfToken == kj::none && actor == kj::none) {
+      KJ_IF_SOME(name, serviceName) {
+        KJ_SWITCH_ONEOF(channelTokenHandler.encodeSubrequestChannelToken(
+            IoChannelFactory::ChannelTokenUsage::RPC, name, entrypointName, props)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            selfToken = kj::mv(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            KJ_UNIMPLEMENTED(
+                "static entrypoint self-token was not synchronously available");
+          }
+        }
+      }
+    }
+
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
         {},  // ioContextDependency
@@ -3283,7 +3326,7 @@ class Server::WorkerService final: public Service,
         kj::mv(workerTracer),  // workerTracer
         kj::mv(metadata.cfBlobJson),
         kj::none,  // versionInfo
-        kj::mv(triggerContext));
+        kj::mv(triggerContext), kj::mv(selfToken));
   }
 
  private:
@@ -3299,18 +3342,26 @@ class Server::WorkerService final: public Service,
           props(kj::mv(props)) {}
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-      return startRequest(kj::mv(metadata), false);
+      return startRequest(kj::mv(metadata), false, kj::none);
+    }
+
+    kj::Own<WorkerInterface> startRequestWithSelfToken(
+        IoChannelFactory::SubrequestMetadata metadata, kj::Array<byte> selfToken) override {
+      return startRequest(kj::mv(metadata), false, kj::mv(selfToken));
     }
 
     kj::Own<WorkerInterface> startRequest(
-        IoChannelFactory::SubrequestMetadata metadata, bool isTracer) {
+        IoChannelFactory::SubrequestMetadata metadata,
+        bool isTracer,
+        kj::Maybe<kj::Array<byte>> selfToken = kj::none) {
       Frankenvalue props;
       KJ_IF_SOME(p, this->props) {
         props = p.clone();
       } else {
         // Calling ctx.exports loopback without specifying props. Use empty props.
       }
-      return worker->startRequest(kj::mv(metadata), entrypoint, kj::mv(props), kj::none, isTracer);
+      return worker->startRequest(
+          kj::mv(metadata), entrypoint, kj::mv(props), kj::none, isTracer, kj::mv(selfToken));
     }
 
     bool hasHandler(kj::StringPtr handlerName) override {
@@ -3392,11 +3443,13 @@ class Server::WorkerService final: public Service,
           kj::mv(container), facetManager);
     }
 
-    kj::Own<WorkerInterface> startRequest(
-        IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
+    kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata,
+        kj::Own<Worker::Actor> actor,
+        kj::Maybe<kj::Array<byte>> selfToken = kj::none) override {
       // The `props` parameter is empty here because props are not passed per-request, they are
       // passed at Actor construction time.
-      return service->startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
+      return service->startRequest(
+          kj::mv(metadata), className, {}, kj::mv(actor), false, kj::mv(selfToken));
     }
 
     kj::Own<ActorClass> forProps(Frankenvalue props) override {
@@ -4610,9 +4663,10 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
             facetManager);
       }
 
-      kj::Own<WorkerInterface> startRequest(
-          IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
-        return getInner().startRequest(kj::mv(metadata), kj::mv(actor));
+      kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata,
+          kj::Own<Worker::Actor> actor,
+          kj::Maybe<kj::Array<byte>> selfToken = kj::none) override {
+        return getInner().startRequest(kj::mv(metadata), kj::mv(actor), kj::mv(selfToken));
       }
 
      private:
@@ -5334,6 +5388,19 @@ kj::Own<IoChannelFactory::ActorChannel> Server::resolveActor(
   auto idObj = idFactory->idFromRaw(id, name.clone());
 
   return ns.getActorChannel(kj::mv(idObj));
+}
+
+kj::Own<WorkerInterface> Server::startSubrequestWithSelfToken(
+    IoChannelFactory::SubrequestChannel& channel,
+    IoChannelFactory::SubrequestMetadata metadata,
+    kj::Array<byte> selfToken) {
+  KJ_IF_SOME(service, kj::tryDowncast<Service>(channel)) {
+    return service.startRequestWithSelfToken(kj::mv(metadata), kj::mv(selfToken));
+  } else KJ_IF_SOME(actor, kj::tryDowncast<ActorNamespace::ActorChannelImpl>(channel)) {
+    return actor.startRequestWithSelfToken(kj::mv(metadata), kj::mv(selfToken));
+  }
+
+  KJ_FAIL_REQUIRE("cannot inject self-token into this subrequest channel");
 }
 
 // =======================================================================================
