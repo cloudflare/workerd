@@ -343,8 +343,17 @@ class JsRpcStub: public JsRpcClientProvider {
   // constructor()) just refcount existing capabilities or create local loopbacks.
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient): capnpClient(kj::mv(capnpClient)) {}
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+      IoOwn<IoChannelFactory::RpcChannel> rpcChannel)
+      : capnpClient(kj::mv(capnpClient)),
+        rpcChannel(kj::mv(rpcChannel)) {}
+  JsRpcStub(IoOwn<IoChannelFactory::RpcChannel> rpcChannel): rpcChannel(kj::mv(rpcChannel)) {}
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
       RpcStubDisposalGroup& disposalGroup,
       jsg::ExternalMemoryAdjustment externalMemoryAdjustment);
+  JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
+      RpcStubDisposalGroup& disposalGroup,
+      jsg::ExternalMemoryAdjustment externalMemoryAdjustment,
+      IoOwn<IoChannelFactory::RpcChannel> rpcChannel);
   ~JsRpcStub() noexcept(false);
 
   rpc::JsRpcTarget::Client getClient();
@@ -384,6 +393,7 @@ class JsRpcStub: public JsRpcClientProvider {
  private:
   // Nulled out upon dispose().
   kj::Maybe<IoOwn<rpc::JsRpcTarget::Client>> capnpClient;
+  kj::Maybe<IoOwn<IoChannelFactory::RpcChannel>> rpcChannel;
 
   kj::Maybe<RpcStubDisposalGroup&> disposalGroup;
   kj::ListLink<JsRpcStub> disposalGroupLink;

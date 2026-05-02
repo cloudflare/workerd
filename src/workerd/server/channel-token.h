@@ -16,7 +16,7 @@ namespace workerd::server {
 // directly.
 //
 // Note that all `Frankenvalue`s here are expected to contain cap tables holding live instances
-// of `SubrequestChannel` and `ActorClassChannel`.
+// of `SubrequestChannel`, `ActorClassChannel`, and `RpcChannel`.
 class ChannelTokenHandler {
  public:
   // Callbacks implemented by `Server` (in `server.h`) to resolve entrypoint designators to live
