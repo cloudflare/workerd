@@ -789,6 +789,8 @@ class ReadableByteStreamController: public jsg::Object {
     impl.pullSelf = kj::none;
   }
 
+  kj::Maybe<StreamStates::Errored> getMaybeErrorState(jsg::Lock& js);
+
   kj::Maybe<UnderlyingSourceImpl::Tee> tryTeeSource(uint64_t limit);
   kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() KJ_WARN_UNUSED_RESULT;
   bool isInternal() const;
@@ -944,17 +946,20 @@ class TransformStreamDefaultController: public jsg::Object {
   jsg::PromiseResolverPair<void> startPromise;
   kj::Own<TransformerImpl> transformer;
 
-  kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController()
-      KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+  // Dispatch a callable over whichever readable controller variant is stored.
+  // Returns kj::none when the readable has been released (e.g. after cancel).
+  template <typename F>
+  auto withReadableController(
+      F&& f) -> kj::Maybe<decltype(f(kj::instance<ReadableStreamDefaultController&>()))>;
+
   kj::Maybe<WritableStreamJsController&> tryGetWritableController()
       KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   kj::Maybe<jsg::JsValue> getReadableErrorState(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
-  // Currently, JS-backed transform streams only support value-oriented streams.
-  // In the future, that may change and this will need to become a kj::OneOf
-  // that includes a ReadableByteStreamController.
-  kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> readable;
+  using ReadableController =
+      kj::OneOf<jsg::Ref<ReadableStreamDefaultController>, jsg::Ref<ReadableByteStreamController>>;
+  kj::Maybe<ReadableController> readable;
   kj::Maybe<jsg::Ref<WritableStream>> writable;
   kj::Maybe<jsg::Promise<void>> maybeFinish;
 
@@ -995,6 +1000,23 @@ class TransformStreamDefaultController: public jsg::Object {
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
+
+template <typename F>
+auto TransformStreamDefaultController::withReadableController(
+    F&& f) -> kj::Maybe<decltype(f(kj::instance<ReadableStreamDefaultController&>()))> {
+  KJ_IF_SOME(rc, readable) {
+    KJ_SWITCH_ONEOF(rc) {
+      KJ_CASE_ONEOF(defaultCtrl, jsg::Ref<ReadableStreamDefaultController>) {
+        return f(*defaultCtrl);
+      }
+      KJ_CASE_ONEOF(byteCtrl, jsg::Ref<ReadableByteStreamController>) {
+        return f(*byteCtrl);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+  return kj::none;
+}
 
 // =======================================================================================
 

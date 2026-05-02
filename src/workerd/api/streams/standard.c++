@@ -2626,8 +2626,10 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
                   .type = ByteQueue::ReadRequest::Type::BYOB,
                 }));
       } else KJ_IF_SOME(chunkSize, autoAllocateChunkSize) {
-        // autoAllocateChunkSize is set, so we allocate a buffer and do a BYOB read.
+        // autoAllocateChunkSize is set, so we allocate a buffer and do a BYOB-style read.
         // This makes the buffer available to the underlying source via controller.byobRequest.
+        // The type stays BYOB for queue processing, but autoAllocated is set so that close
+        // semantics follow the default reader spec ({done: true, value: undefined}).
         KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, chunkSize)) {
           // Ensure that the handle is created here so that the size of the buffer
           // is accounted for in the isolate memory tracking.
@@ -2636,6 +2638,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
                   {
                     .store = jsg::JsArrayBufferView(store).addRef(js),
                     .type = ByteQueue::ReadRequest::Type::BYOB,
+                    .autoAllocated = true,
                   }));
         } else {
           prp.resolver.reject(js, js.error("Failed to allocate buffer for read."));
@@ -3147,6 +3150,13 @@ bool ReadableByteStreamController::hasBackpressure() {
 
 kj::Maybe<int> ReadableByteStreamController::getDesiredSize() {
   return impl.getDesiredSize();
+}
+
+kj::Maybe<StreamStates::Errored> ReadableByteStreamController::getMaybeErrorState(jsg::Lock& js) {
+  KJ_IF_SOME(errored, impl.state.tryGetUnsafe<StreamStates::Errored>()) {
+    return errored.addRef(js);
+  }
+  return kj::none;
 }
 
 void ReadableByteStreamController::visitForGc(jsg::GcVisitor& visitor) {
@@ -5251,64 +5261,79 @@ TransformStreamDefaultController::~TransformStreamDefaultController() noexcept(f
 }
 
 kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
-  KJ_IF_SOME(readableController, tryGetReadableController()) {
-    return readableController.getDesiredSize();
+  KJ_IF_SOME(result, withReadableController([](auto& ctrl) { return ctrl.getDesiredSize(); })) {
+    return result;
   }
   return kj::none;
 }
 
 void TransformStreamDefaultController::enqueue(jsg::Lock& js, jsg::JsValue chunk) {
-  auto& readableController = JSG_REQUIRE_NONNULL(tryGetReadableController(), TypeError,
+  JSG_REQUIRE(readable != kj::none, TypeError,
       "The readable side of this TransformStream is no longer readable.");
-  // Hold a strong reference to the readable controller for the duration of this
-  // method. The readableController.enqueue() call below invokes the user-provided
-  // size algorithm, which can re-enter JS and call error() on this transform
-  // controller, dropping the jsg::Ref held by this->readable and the one held by
-  // the ReadableStreamJsController's ValueReadable. Without this ref the
-  // ReadableStreamDefaultController would be freed while its enqueue() method is
-  // still on the stack.
-  auto readableControllerRef = kj::addRef(readableController);
 
-  JSG_REQUIRE(readableController.canCloseOrEnqueue(), TypeError,
-      "The readable side of this TransformStream is no longer readable.");
-  js.tryCatch([&] { readableController.enqueue(js, chunk); }, [&](jsg::Value exception) {
-    auto handle = jsg::JsValue(exception.getHandle(js));
-    errorWritableAndUnblockWrite(js, handle);
-    js.throwException(handle);
-  });
-
-  // If the controller was errored during the enqueue (e.g. by the size callback
-  // calling error()), skip the backpressure update — the stream is already torn down.
-  if (!readableController.canCloseOrEnqueue()) {
-    return;
-  }
-
-  bool newBackpressure = readableController.hasBackpressure();
-  if (newBackpressure != flags.backpressure) {
-    KJ_ASSERT(newBackpressure);
-    // Unfortunately the original implementation forgot to actually set the backpressure
-    // here so the backpressure signaling failed to work correctly. This is unfortunate
-    // because applying the backpressure here could break existing code, so we need to
-    // put the fix behind a compat flag. Doh!
-    if (flags.fixupBackpressure) {
-      setBackpressure(js, UpdateBackpressure::YES);
+  // Dispatch enqueue + backpressure update through the controller variant.
+  // Both ReadableStreamDefaultController and ReadableByteStreamController share
+  // canCloseOrEnqueue/hasBackpressure/error, but enqueue signatures differ:
+  //   DefaultController::enqueue(js, Optional<JsValue>)
+  //   ByteController::enqueue(js, JsBufferSource)
+  auto& rc = KJ_ASSERT_NONNULL(readable);
+  KJ_SWITCH_ONEOF(rc) {
+    KJ_CASE_ONEOF(defaultCtrl, jsg::Ref<ReadableStreamDefaultController>) {
+      auto ref = defaultCtrl.addRef();
+      JSG_REQUIRE(ref->canCloseOrEnqueue(), TypeError,
+          "The readable side of this TransformStream is no longer readable.");
+      js.tryCatch([&] { ref->enqueue(js, chunk); }, [&](jsg::Value exception) {
+        auto handle = jsg::JsValue(exception.getHandle(js));
+        errorWritableAndUnblockWrite(js, handle);
+        js.throwException(handle);
+      });
+      if (!ref->canCloseOrEnqueue()) return;
+      bool newBackpressure = ref->hasBackpressure();
+      if (newBackpressure != flags.backpressure) {
+        KJ_ASSERT(newBackpressure);
+        if (flags.fixupBackpressure) {
+          setBackpressure(js, UpdateBackpressure::YES);
+        }
+      }
+    }
+    KJ_CASE_ONEOF(byteCtrl, jsg::Ref<ReadableByteStreamController>) {
+      auto ref = byteCtrl.addRef();
+      JSG_REQUIRE(ref->canCloseOrEnqueue(), TypeError,
+          "The readable side of this TransformStream is no longer readable.");
+      JSG_REQUIRE(chunk.isArrayBuffer() || chunk.isSharedArrayBuffer() || chunk.isArrayBufferView(),
+          TypeError, "This chunk type is not supported by a byte stream controller."_kj);
+      js.tryCatch([&] { ref->enqueue(js, jsg::JsBufferSource(chunk)); }, [&](jsg::Value exception) {
+        auto handle = jsg::JsValue(exception.getHandle(js));
+        errorWritableAndUnblockWrite(js, handle);
+        js.throwException(handle);
+      });
+      if (!ref->canCloseOrEnqueue()) return;
+      bool newBackpressure = ref->hasBackpressure();
+      if (newBackpressure != flags.backpressure) {
+        KJ_ASSERT(newBackpressure);
+        if (flags.fixupBackpressure) {
+          setBackpressure(js, UpdateBackpressure::YES);
+        }
+      }
     }
   }
 }
 
 void TransformStreamDefaultController::error(jsg::Lock& js, jsg::JsValue reason) {
-  KJ_IF_SOME(readableController, tryGetReadableController()) {
-    readableController.error(js, reason);
-    // Do NOT clear `readable` here — dropping the Ref can destroy `this`.
-  }
+  withReadableController([&](auto& ctrl) -> bool {
+    ctrl.error(js, reason);
+    return true;
+  });
+  // Do NOT clear `readable` here — dropping the Ref can destroy `this`.
   errorWritableAndUnblockWrite(js, reason);
 }
 
 void TransformStreamDefaultController::terminate(jsg::Lock& js) {
-  KJ_IF_SOME(readableController, tryGetReadableController()) {
-    readableController.close(js);
-    // Do NOT clear `readable` here — dropping the Ref can destroy `this`.
-  }
+  withReadableController([&](auto& ctrl) -> bool {
+    ctrl.close(js);
+    return true;
+  });
+  // Do NOT clear `readable` here — dropping the Ref can destroy `this`.
   errorWritableAndUnblockWrite(js, js.typeError("The transform stream has been terminated"_kj));
 }
 
@@ -5468,15 +5493,12 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
         // complete once all of the queued data is read or the stream
         // errors. Only close if the stream can still be closed (e.g.,
         // it wasn't closed by a cancel operation from within flush).
-        {
-        KJ_IF_SOME(readableController, ref->tryGetReadableController()) {
-        if (readableController.canCloseOrEnqueue()) {
-        readableController.close(js);
-        }
-        } else {
-        // Else block to avert dangling else compiler warning.
-        }
-        }
+        ref->withReadableController([&](auto& ctrl) -> bool {
+          if (ctrl.canCloseOrEnqueue()) {
+          ctrl.close(js);
+          }
+          return true;
+        });
         return js.resolvedPromise();
       });
 
@@ -5622,7 +5644,17 @@ void TransformStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(backpressureChange, maybeBackpressureChange) {
     visitor.visit(backpressureChange.promise, backpressureChange.resolver);
   }
-  visitor.visit(writable, readable, startPromise.resolver, startPromise.promise, maybeFinish);
+  visitor.visit(writable, startPromise.resolver, startPromise.promise, maybeFinish);
+  KJ_IF_SOME(rc, readable) {
+    KJ_SWITCH_ONEOF(rc) {
+      KJ_CASE_ONEOF(defaultCtrl, jsg::Ref<ReadableStreamDefaultController>) {
+        visitor.visit(defaultCtrl);
+      }
+      KJ_CASE_ONEOF(byteCtrl, jsg::Ref<ReadableByteStreamController>) {
+        visitor.visit(byteCtrl);
+      }
+    }
+  }
 
   if (transformer.get() != nullptr) {
     visitor.visit(*transformer);
@@ -5645,7 +5677,14 @@ void TransformStreamDefaultController::init(
   // to push data into it.
   auto& readableController = static_cast<ReadableStreamJsController&>(readable->getController());
   auto readableRef = KJ_ASSERT_NONNULL(readableController.getController());
-  this->readable = KJ_ASSERT_NONNULL(readableRef.tryGet<DefaultController>()).addRef();
+  KJ_SWITCH_ONEOF(readableRef) {
+    KJ_CASE_ONEOF(defaultCtrl, DefaultController) {
+      this->readable = defaultCtrl.addRef();
+    }
+    KJ_CASE_ONEOF(byteCtrl, ByobController) {
+      this->readable = byteCtrl.addRef();
+    }
+  }
 
   setBackpressure(js, UpdateBackpressure::YES);
 
@@ -5659,14 +5698,6 @@ void TransformStreamDefaultController::init(
       JSG_THIS);
 }
 
-kj::Maybe<ReadableStreamDefaultController&> TransformStreamDefaultController::
-    tryGetReadableController() {
-  KJ_IF_SOME(controller, readable) {
-    return *controller;
-  }
-  return kj::none;
-}
-
 kj::Maybe<WritableStreamJsController&> TransformStreamDefaultController::
     tryGetWritableController() {
   KJ_IF_SOME(w, writable) {
@@ -5676,10 +5707,13 @@ kj::Maybe<WritableStreamJsController&> TransformStreamDefaultController::
 }
 
 kj::Maybe<jsg::JsValue> TransformStreamDefaultController::getReadableErrorState(jsg::Lock& js) {
-  KJ_IF_SOME(controller, tryGetReadableController()) {
-    KJ_IF_SOME(err, controller.getMaybeErrorState(js)) {
+  KJ_IF_SOME(result, withReadableController([&](auto& ctrl) -> kj::Maybe<jsg::JsValue> {
+    KJ_IF_SOME(err, ctrl.getMaybeErrorState(js)) {
       return err.getHandle(js);
     }
+    return kj::none;
+  })) {
+    return result;
   }
   return kj::none;
 }
@@ -5817,7 +5851,16 @@ void TransformStreamDefaultController::visitForMemoryInfo(jsg::MemoryTracker& tr
   tracker.trackField("maybeBackpressureChange", maybeBackpressureChange);
   tracker.trackField("transformer", transformer);
   tracker.trackField("writable", writable);
-  tracker.trackField("readable", readable);
+  KJ_IF_SOME(rc, readable) {
+    KJ_SWITCH_ONEOF(rc) {
+      KJ_CASE_ONEOF(defaultCtrl, jsg::Ref<ReadableStreamDefaultController>) {
+        tracker.trackField("readable", defaultCtrl);
+      }
+      KJ_CASE_ONEOF(byteCtrl, jsg::Ref<ReadableByteStreamController>) {
+        tracker.trackField("readable", byteCtrl);
+      }
+    }
+  }
 }
 
 // ======================================================================================

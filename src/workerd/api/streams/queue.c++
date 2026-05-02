@@ -538,9 +538,15 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
     // There's been at least some data written, we need to respond but not
     // set done to true since that's what the streams spec requires.
     return resolve(js);
+  }
+  if (pullInto.autoAllocated) {
+    // Auto-allocated reads originate from a default reader. Per the spec,
+    // the default reader's close steps resolve with {value: undefined, done: true}.
+    resolver.resolve(js, ReadResult{.done = true});
   } else {
+    // Explicit BYOB reads. Per the spec, the BYOB reader's close steps resolve
+    // with {value: <zero-length view>, done: true}.
     auto handle = pullInto.store.getHandle(js).clone(js);
-    // Otherwise, we set the length to zero
     handle = handle.slice(js, 0, 0);
     resolver.resolve(js,
         ReadResult{

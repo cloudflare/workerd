@@ -906,6 +906,11 @@ class ByteQueue final {
       size_t filled = 0;
       size_t atLeast = 1;
       Type type = Type::DEFAULT;
+      // True when this read was auto-allocated on behalf of a default reader.
+      // Processed as BYOB by the queue (type remains BYOB), but close semantics
+      // follow the default reader spec: {done: true, value: undefined} instead
+      // of {done: true, value: <zero-length view>}.
+      bool autoAllocated = false;
 
       JSG_MEMORY_INFO(ByteQueue::ReadRequest::PullInto) {
         tracker.trackField("store", store);

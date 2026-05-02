@@ -184,7 +184,7 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
     readableStrategy = StreamQueuingStrategy{};
   }
 
-  auto transformer = TransformStream::constructor(js,
+  auto transformer = TransformStream::constructorNoCheck(js,
       Transformer{
         .transform = jsg::Function<Transformer::TransformAlgorithm>(kj::mv(transform)),
         .flush = jsg::Function<Transformer::FlushAlgorithm>(kj::mv(flush)),
@@ -304,7 +304,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
   if (!FeatureFlags::get(js).getEncoderStreamSpecCompliantBackpressure()) {
     readableStrategy = StreamQueuingStrategy{};
   }
-  auto transformer = TransformStream::constructor(js,
+  auto transformer = TransformStream::constructorNoCheck(js,
       Transformer{
         .transform = jsg::Function<Transformer::TransformAlgorithm>(kj::mv(transform)),
         .flush = jsg::Function<Transformer::FlushAlgorithm>(kj::mv(flush)),
