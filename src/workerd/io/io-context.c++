@@ -1432,6 +1432,17 @@ bool IoContext::isCurrent() {
   return this == threadLocalRequest;
 }
 
+void IoContext::setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler) {
+  KJ_IF_SOME(_, entrypointHandler) {
+    KJ_FAIL_REQUIRE("entrypoint handler has already been set");
+  }
+  entrypointHandler = jsg::JsRef<jsg::JsObject>(js, handler);
+}
+
+jsg::JsObject IoContext::getEntrypointHandler(jsg::Lock& js) {
+  return KJ_REQUIRE_NONNULL(entrypointHandler, "entrypoint handler has not been set").getHandle(js);
+}
+
 auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
   KJ_IF_SOME(ioContext, tryCurrent()) {
     return ioContext.getWeakRef();
