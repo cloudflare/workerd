@@ -3756,6 +3756,21 @@ class Server::WorkerService final: public Service,
     return channelTokenHandler.decodeActorClassChannelToken(usage, token);
   }
 
+  kj::Own<RpcChannel> rpcChannelFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) override {
+    return channelTokenHandler.decodeRpcChannelToken(usage, token);
+  }
+
+  kj::Own<SubrequestChannel> makeRestoredSubrequestChannel(
+      kj::ArrayPtr<const byte> baseToken, Frankenvalue restoreParams) override {
+    return channelTokenHandler.makeRestoredSubrequestChannel(baseToken, kj::mv(restoreParams));
+  }
+
+  kj::Own<RpcChannel> makeRestoredRpcChannel(
+      kj::ArrayPtr<const byte> baseToken, Frankenvalue restoreParams) override {
+    return channelTokenHandler.makeRestoredRpcChannel(baseToken, kj::mv(restoreParams));
+  }
+
   // ---------------------------------------------------------------------------
   // implements TimerChannel
 

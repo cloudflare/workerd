@@ -7,6 +7,8 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/server/channel-token.capnp.h>
 
+#include <capnp/message.h>
+
 namespace workerd::server {
 
 // Helper class to encode channel tokens for workerd.
@@ -71,6 +73,13 @@ class ChannelTokenHandler {
       IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
   kj::Own<IoChannelFactory::ActorClassChannel> decodeActorClassChannelToken(
       IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+  kj::Own<IoChannelFactory::RpcChannel> decodeRpcChannelToken(
+      IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+
+  kj::Own<IoChannelFactory::SubrequestChannel> makeRestoredSubrequestChannel(
+      kj::ArrayPtr<const byte> baseToken, Frankenvalue restoreParams);
+  kj::Own<IoChannelFactory::RpcChannel> makeRestoredRpcChannel(
+      kj::ArrayPtr<const byte> baseToken, Frankenvalue restoreParams);
 
  private:
   // Annoyingly the OpenSSL/BoringSSL headers don't seem to define these as static constants.
@@ -107,6 +116,13 @@ class ChannelTokenHandler {
   kj::Own<Frankenvalue::CapTableEntry> decodeChannelTokenImpl(ChannelToken::Type type,
       IoChannelFactory::ChannelTokenUsage usage,
       kj::ArrayPtr<const byte> token);
+  kj::Own<capnp::MallocMessageBuilder> parseChannelToken(
+      IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+  Frankenvalue decodeFrankenvalue(
+      IoChannelFactory::ChannelTokenUsage usage, rpc::Frankenvalue::Reader reader);
+
+  class RestoreChainSubrequestChannel;
+  class RestoreChainRpcChannel;
 };
 
 }  // namespace workerd::server

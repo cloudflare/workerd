@@ -4,6 +4,7 @@
 
 #include "channel-token.h"
 
+#include <workerd/api/worker-rpc.h>
 #include <workerd/server/channel-token.capnp.h>
 #include <workerd/util/entropy.h>
 
@@ -216,10 +217,8 @@ kj::Array<byte> ChannelTokenHandler::encodeActorChannelToken(
   return serializeTokenImpl(usage, message);
 }
 
-kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl(
-    ChannelToken::Type type,
-    IoChannelFactory::ChannelTokenUsage usage,
-    kj::ArrayPtr<const byte> token) {
+kj::Own<capnp::MallocMessageBuilder> ChannelTokenHandler::parseChannelToken(
+    IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
   kj::ArrayPtr<const byte> plaintext;
   kj::Array<byte> ownPlaintext;
 
@@ -284,10 +283,216 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
 
   kj::ArrayInputStream input(plaintext);
   capnp::word scratch[128]{};
-  capnp::PackedMessageReader message(input, {}, scratch);
-  auto reader = message.getRoot<ChannelToken>();
+  capnp::PackedMessageReader inputMessage(input, {}, scratch);
+  auto reader = inputMessage.getRoot<ChannelToken>();
+  auto result = kj::heap<capnp::MallocMessageBuilder>();
+  result->setRoot(reader);
+  return result;
+}
+
+Frankenvalue ChannelTokenHandler::decodeFrankenvalue(
+    IoChannelFactory::ChannelTokenUsage usage, rpc::Frankenvalue::Reader reader) {
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+  if (reader.hasCapTable()) {
+    auto tableReader = reader.getCapTable().getAs<ChannelToken::FrankenvalueCapTable>();
+    if (!tableReader.hasCaps()) {
+      return Frankenvalue::fromCapnp(reader, kj::mv(capTable));
+    }
+
+    auto caps = tableReader.getCaps();
+    capTable.reserve(caps.size());
+
+    for (auto cap: caps) {
+      switch (cap.which()) {
+        case ChannelToken::FrankenvalueCapTable::Cap::UNKNOWN:
+          break;
+        case ChannelToken::FrankenvalueCapTable::Cap::SUBREQUEST_CHANNEL:
+          capTable.add(decodeSubrequestChannelToken(usage, cap.getSubrequestChannel()));
+          continue;
+        case ChannelToken::FrankenvalueCapTable::Cap::ACTOR_CLASS_CHANNEL:
+          capTable.add(decodeActorClassChannelToken(usage, cap.getActorClassChannel()));
+          continue;
+        case ChannelToken::FrankenvalueCapTable::Cap::RPC_CHANNEL:
+          capTable.add(decodeRpcChannelToken(usage, cap.getRpcChannel()));
+          continue;
+      }
+      KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
+    }
+  }
+
+  return Frankenvalue::fromCapnp(reader, kj::mv(capTable));
+}
+
+namespace {
+
+static constexpr uint16_t RESTORE_CUSTOM_EVENT_TYPE =
+    api::JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE;
+
+IoChannelFactory::SubrequestMetadata cloneMetadata(
+    IoChannelFactory::SubrequestMetadata& metadata) {
+  return {
+    .cfBlobJson = metadata.cfBlobJson.map([](const kj::String& s) { return kj::str(s); }),
+    .parentSpan = metadata.parentSpan.addRef(),
+    .userSpanParent = metadata.userSpanParent.addRef(),
+    .featureFlagsForFl = metadata.featureFlagsForFl.map([](const kj::String& s) {
+      return kj::str(s);
+    }),
+    .startTime = metadata.startTime,
+  };
+}
+
+}  // namespace
+
+class ChannelTokenHandler::RestoreChainSubrequestChannel final
+    : public IoChannelFactory::SubrequestChannel {
+ public:
+  RestoreChainSubrequestChannel(ChannelTokenHandler& handler,
+      kj::Own<IoChannelFactory::SubrequestChannel> base,
+      kj::Array<Frankenvalue> restoreChain,
+      kj::Own<capnp::MallocMessageBuilder> tokenMessage)
+      : handler(handler),
+        base(kj::mv(base)),
+        restoreChain(kj::mv(restoreChain)),
+        tokenMessage(kj::mv(tokenMessage)) {}
+
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    return newPromisedWorkerInterface(walkChain(kj::mv(metadata)));
+  }
+
+  void requireAllowsTransfer() override {}
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    return handler.serializeTokenImpl(usage, *tokenMessage);
+  }
+
+ private:
+  ChannelTokenHandler& handler;
+  kj::Own<IoChannelFactory::SubrequestChannel> base;
+  kj::Array<Frankenvalue> restoreChain;
+  kj::Own<capnp::MallocMessageBuilder> tokenMessage;
+
+  kj::Array<byte> makeToken(uint chainSize, ChannelToken::Type type) {
+    capnp::MallocMessageBuilder message;
+    message.setRoot(tokenMessage->getRoot<ChannelToken>().asReader());
+    auto builder = message.getRoot<ChannelToken>();
+    builder.setType(type);
+    auto chain = builder.initRestoreChain(chainSize);
+    for (uint i = 0; i < chainSize; ++i) {
+      restoreChain[i].threadSafeClone().toCapnp(chain[i]);
+    }
+    return handler.serializeTokenImpl(IoChannelFactory::ChannelTokenUsage::RPC, message);
+  }
+
+  kj::Promise<kj::Own<WorkerInterface>> walkChain(IoChannelFactory::SubrequestMetadata metadata) {
+    auto worker = base->startRequest(cloneMetadata(metadata));
+
+    for (auto i: kj::indices(restoreChain)) {
+      auto event = kj::heap<api::RestoreServiceCustomEvent>(
+          RESTORE_CUSTOM_EVENT_TYPE, restoreChain[i].threadSafeClone());
+      auto channelPromise = event->getChannel();
+      auto eventPromise = worker->customEvent(kj::mv(event));
+      auto channel = co_await kj::mv(channelPromise);
+      co_await kj::mv(eventPromise);
+      worker = handler.resolver.startSubrequestWithSelfToken(
+          *channel, cloneMetadata(metadata), makeToken(i + 1, ChannelToken::Type::SUBREQUEST))
+                   .attach(kj::mv(channel));
+    }
+
+    co_return kj::mv(worker);
+  }
+};
+
+class ChannelTokenHandler::RestoreChainRpcChannel final: public IoChannelFactory::RpcChannel {
+ public:
+  RestoreChainRpcChannel(ChannelTokenHandler& handler,
+      kj::Own<IoChannelFactory::SubrequestChannel> base,
+      kj::Array<Frankenvalue> restoreChain,
+      kj::Own<capnp::MallocMessageBuilder> tokenMessage)
+      : handler(handler),
+        base(kj::mv(base)),
+        restoreChain(kj::mv(restoreChain)),
+        tokenMessage(kj::mv(tokenMessage)) {}
+
+  Session restore() override {
+    auto paf = kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>();
+    return {
+      .cap = kj::mv(paf.promise),
+      .task = walkChain(kj::mv(paf.fulfiller)),
+    };
+  }
+
+  void requireAllowsTransfer() override {}
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    return handler.serializeTokenImpl(usage, *tokenMessage);
+  }
+
+ private:
+  ChannelTokenHandler& handler;
+  kj::Own<IoChannelFactory::SubrequestChannel> base;
+  kj::Array<Frankenvalue> restoreChain;
+  kj::Own<capnp::MallocMessageBuilder> tokenMessage;
+
+  kj::Array<byte> makeToken(uint chainSize) {
+    capnp::MallocMessageBuilder message;
+    message.setRoot(tokenMessage->getRoot<ChannelToken>().asReader());
+    auto builder = message.getRoot<ChannelToken>();
+    builder.setType(ChannelToken::Type::SUBREQUEST);
+    auto chain = builder.initRestoreChain(chainSize);
+    for (uint i = 0; i < chainSize; ++i) {
+      restoreChain[i].threadSafeClone().toCapnp(chain[i]);
+    }
+    return handler.serializeTokenImpl(IoChannelFactory::ChannelTokenUsage::RPC, message);
+  }
+
+  kj::Promise<void> walkChain(kj::Own<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>> fulfiller) {
+    auto metadata = IoChannelFactory::SubrequestMetadata{};
+    auto worker = base->startRequest(cloneMetadata(metadata));
+
+    for (uint i = 0; i + 1 < restoreChain.size(); ++i) {
+      auto event = kj::heap<api::RestoreServiceCustomEvent>(
+          RESTORE_CUSTOM_EVENT_TYPE, restoreChain[i].threadSafeClone());
+      auto channelPromise = event->getChannel();
+      auto eventPromise = worker->customEvent(kj::mv(event));
+      auto channel = co_await kj::mv(channelPromise);
+      co_await kj::mv(eventPromise);
+      worker = handler.resolver.startSubrequestWithSelfToken(
+          *channel, cloneMetadata(metadata), makeToken(i + 1))
+                   .attach(kj::mv(channel));
+    }
+
+    auto event = kj::heap<api::JsRpcSessionCustomEvent>(
+        RESTORE_CUSTOM_EVENT_TYPE, kj::none, restoreChain[restoreChain.size() - 1].threadSafeClone());
+    auto cap = event->getCap();
+    auto eventPromise = worker->customEvent(kj::mv(event));
+    fulfiller->fulfill(kj::mv(cap));
+    co_await kj::mv(eventPromise);
+  }
+};
+
+kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl(
+    ChannelToken::Type type,
+    IoChannelFactory::ChannelTokenUsage usage,
+    kj::ArrayPtr<const byte> token) {
+  auto message = parseChannelToken(usage, token);
+  auto reader = message->getRoot<ChannelToken>();
 
   KJ_REQUIRE(reader.getType() == type, "channel token type mismatch");
+
+  kj::Array<Frankenvalue> restoreChain;
+  if (reader.hasRestoreChain()) {
+    auto chainReader = reader.getRestoreChain();
+    KJ_REQUIRE(chainReader.size() <= 4, "restore chain is too long");
+    KJ_REQUIRE(type != ChannelToken::Type::ACTOR_CLASS,
+        "actor class channel tokens cannot have a restore chain");
+    if (chainReader.size() > 0) {
+      KJ_REQUIRE(reader.which() == ChannelToken::SERVICE || reader.which() == ChannelToken::ACTOR,
+          "restore chain base token must be a service or actor");
+      restoreChain = KJ_MAP(value, chainReader) { return decodeFrankenvalue(usage, value); };
+    }
+  }
 
   switch (reader.which()) {
     case ChannelToken::SERVICE: {
@@ -300,34 +505,22 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
 
       Frankenvalue props;
       if (service.hasProps()) {
-        auto propsReader = service.getProps();
-        auto tableReader = propsReader.getCapTable().getAs<ChannelToken::FrankenvalueCapTable>();
+        props = decodeFrankenvalue(usage, service.getProps());
+      }
 
-        kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
-        if (tableReader.hasCaps()) {
-          auto caps = tableReader.getCaps();
-          capTable.reserve(caps.size());
-
-          for (auto cap: caps) {
-            switch (cap.which()) {
-              case ChannelToken::FrankenvalueCapTable::Cap::UNKNOWN:
-                break;
-              case ChannelToken::FrankenvalueCapTable::Cap::SUBREQUEST_CHANNEL:
-                capTable.add(decodeSubrequestChannelToken(usage, cap.getSubrequestChannel()));
-                continue;
-              case ChannelToken::FrankenvalueCapTable::Cap::ACTOR_CLASS_CHANNEL:
-                capTable.add(decodeActorClassChannelToken(usage, cap.getActorClassChannel()));
-                continue;
-              case ChannelToken::FrankenvalueCapTable::Cap::RPC_CHANNEL:
-                capTable.add(decodeChannelTokenImpl(
-                    ChannelToken::Type::RPC, usage, cap.getRpcChannel()));
-                continue;
-            }
-            KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
-          }
+      if (restoreChain.size() > 0) {
+        auto base = resolver.resolveEntrypoint(service.getName(), entrypoint, kj::mv(props));
+        switch (type) {
+          case ChannelToken::Type::SUBREQUEST:
+            return kj::refcounted<RestoreChainSubrequestChannel>(
+                *this, kj::mv(base), kj::mv(restoreChain), kj::mv(message));
+          case ChannelToken::Type::ACTOR_CLASS:
+            KJ_FAIL_REQUIRE("actor class channel tokens cannot have a restore chain");
+          case ChannelToken::Type::RPC:
+            return kj::refcounted<RestoreChainRpcChannel>(
+                *this, kj::mv(base), kj::mv(restoreChain), kj::mv(message));
         }
-
-        props = Frankenvalue::fromCapnp(propsReader, kj::mv(capTable));
+        KJ_UNREACHABLE;
       }
 
       // HACK: It would be more type-safe for us to return the (name, entrypoint, props) triplet and
@@ -341,7 +534,7 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
         case ChannelToken::Type::ACTOR_CLASS:
           return resolver.resolveActorClass(service.getName(), entrypoint, kj::mv(props));
         case ChannelToken::Type::RPC:
-          KJ_FAIL_REQUIRE("RPC channel tokens are not supported yet");
+          KJ_FAIL_REQUIRE("RPC channel tokens must have a restore chain");
       }
 
       KJ_UNREACHABLE;
@@ -350,12 +543,30 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
     case ChannelToken::ACTOR: {
       auto actor = reader.getActor();
 
-      KJ_REQUIRE(type == ChannelToken::Type::SUBREQUEST, "channel token type mismatch");
+      KJ_REQUIRE(type == ChannelToken::Type::SUBREQUEST || type == ChannelToken::Type::RPC,
+          "channel token type mismatch");
 
       kj::Maybe<kj::StringPtr> name;
       if (actor.hasName()) {
         name = actor.getName();
       }
+
+      if (restoreChain.size() > 0) {
+        auto base = resolver.resolveActor(actor.getNamespaceKey(), actor.getId(), name);
+        switch (type) {
+          case ChannelToken::Type::SUBREQUEST:
+            return kj::refcounted<RestoreChainSubrequestChannel>(
+                *this, kj::mv(base), kj::mv(restoreChain), kj::mv(message));
+          case ChannelToken::Type::ACTOR_CLASS:
+            KJ_FAIL_REQUIRE("actor class channel tokens cannot have a restore chain");
+          case ChannelToken::Type::RPC:
+            return kj::refcounted<RestoreChainRpcChannel>(
+                *this, kj::mv(base), kj::mv(restoreChain), kj::mv(message));
+        }
+        KJ_UNREACHABLE;
+      }
+
+      KJ_REQUIRE(type == ChannelToken::Type::SUBREQUEST, "channel token type mismatch");
 
       return resolver.resolveActor(actor.getNamespaceKey(), actor.getId(), name);
     }
@@ -374,6 +585,82 @@ kj::Own<IoChannelFactory::ActorClassChannel> ChannelTokenHandler::decodeActorCla
     IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
   return decodeChannelTokenImpl(ChannelToken::Type::ACTOR_CLASS, usage, token)
       .downcast<IoChannelFactory::ActorClassChannel>();
+}
+
+kj::Own<IoChannelFactory::RpcChannel> ChannelTokenHandler::decodeRpcChannelToken(
+    IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
+  return decodeChannelTokenImpl(ChannelToken::Type::RPC, usage, token)
+      .downcast<IoChannelFactory::RpcChannel>();
+}
+
+namespace {
+
+kj::Array<Frankenvalue> appendRestoreParam(
+    kj::Array<Frankenvalue> existing, Frankenvalue restoreParams) {
+  kj::Vector<Frankenvalue> result(existing.size() + 1);
+  for (auto& value: existing) {
+    result.add(kj::mv(value));
+  }
+  result.add(kj::mv(restoreParams));
+  return result.releaseAsArray();
+}
+
+}  // namespace
+
+kj::Own<IoChannelFactory::SubrequestChannel> ChannelTokenHandler::makeRestoredSubrequestChannel(
+    kj::ArrayPtr<const byte> baseToken, Frankenvalue restoreParams) {
+  auto message = parseChannelToken(IoChannelFactory::ChannelTokenUsage::RPC, baseToken);
+  auto reader = message->getRoot<ChannelToken>();
+  KJ_REQUIRE(reader.which() == ChannelToken::SERVICE || reader.which() == ChannelToken::ACTOR,
+      "restore chain base token must be a service or actor");
+
+  kj::Array<Frankenvalue> existing;
+  if (reader.hasRestoreChain()) {
+    auto chainReader = reader.getRestoreChain();
+    KJ_REQUIRE(chainReader.size() < 4, "restore chain is too long");
+    existing = KJ_MAP(value, chainReader) {
+      return decodeFrankenvalue(IoChannelFactory::ChannelTokenUsage::RPC, value);
+    };
+  }
+
+  auto chainValues = appendRestoreParam(kj::mv(existing), kj::mv(restoreParams));
+  auto builder = message->getRoot<ChannelToken>();
+  builder.setType(ChannelToken::Type::SUBREQUEST);
+  auto chain = builder.initRestoreChain(chainValues.size());
+  for (auto i: kj::indices(chainValues)) {
+    chainValues[i].threadSafeClone().toCapnp(chain[i]);
+  }
+
+  auto token = serializeTokenImpl(IoChannelFactory::ChannelTokenUsage::RPC, *message);
+  return decodeSubrequestChannelToken(IoChannelFactory::ChannelTokenUsage::RPC, token.asPtr());
+}
+
+kj::Own<IoChannelFactory::RpcChannel> ChannelTokenHandler::makeRestoredRpcChannel(
+    kj::ArrayPtr<const byte> baseToken, Frankenvalue restoreParams) {
+  auto message = parseChannelToken(IoChannelFactory::ChannelTokenUsage::RPC, baseToken);
+  auto reader = message->getRoot<ChannelToken>();
+  KJ_REQUIRE(reader.which() == ChannelToken::SERVICE || reader.which() == ChannelToken::ACTOR,
+      "restore chain base token must be a service or actor");
+
+  kj::Array<Frankenvalue> existing;
+  if (reader.hasRestoreChain()) {
+    auto chainReader = reader.getRestoreChain();
+    KJ_REQUIRE(chainReader.size() < 4, "restore chain is too long");
+    existing = KJ_MAP(value, chainReader) {
+      return decodeFrankenvalue(IoChannelFactory::ChannelTokenUsage::RPC, value);
+    };
+  }
+
+  auto chainValues = appendRestoreParam(kj::mv(existing), kj::mv(restoreParams));
+  auto builder = message->getRoot<ChannelToken>();
+  builder.setType(ChannelToken::Type::RPC);
+  auto chain = builder.initRestoreChain(chainValues.size());
+  for (auto i: kj::indices(chainValues)) {
+    chainValues[i].threadSafeClone().toCapnp(chain[i]);
+  }
+
+  auto token = serializeTokenImpl(IoChannelFactory::ChannelTokenUsage::RPC, *message);
+  return decodeRpcChannelToken(IoChannelFactory::ChannelTokenUsage::RPC, token.asPtr());
 }
 
 }  // namespace workerd::server
