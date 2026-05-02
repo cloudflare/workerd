@@ -735,7 +735,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
   // methods, as well as the methods can trigger JavaScript errors to be thrown
   // synchronously in some cases. We want to make sure non-fatal errors cause the
   // stream to error and only fatal cases bubble up.
-  return js.tryCatch([&] {
+  JSG_TRY(js) {
     controller.state.beginOperation();
     auto result = readCallback();
     endOperation = false;
@@ -758,7 +758,8 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     }
 
     return kj::mv(result);
-  }, [&](jsg::Value exception) -> jsg::Promise<ReadResult> {
+  }
+  JSG_CATCH(exception) {
     if (endOperation) {
       // Clear any pending state since we're erroring
       controller.state.clearPendingState();
@@ -767,7 +768,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     auto handle = jsg::JsValue(exception.getHandle(js));
     controller.doError(js, handle);
     return js.rejectedPromise<ReadResult>(handle);
-  });
+  };
 }
 
 // The ReadableStreamJsController provides the implementation of custom
@@ -2890,10 +2891,13 @@ void ReadableStreamDefaultController::enqueue(jsg::Lock& js, jsg::Optional<jsg::
   size_t size = 1;
   bool errored = false;
   KJ_IF_SOME(sizeFunc, impl.underlyingSource->size()) {
-    js.tryCatch([&] { size = sizeFunc(js, value); }, [&](jsg::Value exception) {
+    JSG_TRY(js) {
+      size = sizeFunc(js, value);
+    }
+    JSG_CATCH(exception) {
       impl.doError(js, jsg::JsValue(exception.getHandle(js)));
       errored = true;
-    });
+    };
   }
 
   // Re-check canCloseOrEnqueue: the size callback may have errored us without
@@ -5282,11 +5286,14 @@ void TransformStreamDefaultController::enqueue(jsg::Lock& js, jsg::JsValue chunk
       auto ref = defaultCtrl.addRef();
       JSG_REQUIRE(ref->canCloseOrEnqueue(), TypeError,
           "The readable side of this TransformStream is no longer readable.");
-      js.tryCatch([&] { ref->enqueue(js, chunk); }, [&](jsg::Value exception) {
+      JSG_TRY(js) {
+        ref->enqueue(js, chunk);
+      }
+      JSG_CATCH(exception) {
         auto handle = jsg::JsValue(exception.getHandle(js));
         errorWritableAndUnblockWrite(js, handle);
         js.throwException(handle);
-      });
+      };
       if (!ref->canCloseOrEnqueue()) return;
       bool newBackpressure = ref->hasBackpressure();
       if (newBackpressure != flags.backpressure) {
@@ -5302,11 +5309,14 @@ void TransformStreamDefaultController::enqueue(jsg::Lock& js, jsg::JsValue chunk
           "The readable side of this TransformStream is no longer readable.");
       JSG_REQUIRE(chunk.isArrayBuffer() || chunk.isSharedArrayBuffer() || chunk.isArrayBufferView(),
           TypeError, "This chunk type is not supported by a byte stream controller."_kj);
-      js.tryCatch([&] { ref->enqueue(js, jsg::JsBufferSource(chunk)); }, [&](jsg::Value exception) {
+      JSG_TRY(js) {
+        ref->enqueue(js, jsg::JsBufferSource(chunk));
+      }
+      JSG_CATCH(exception) {
         auto handle = jsg::JsValue(exception.getHandle(js));
         errorWritableAndUnblockWrite(js, handle);
         js.throwException(handle);
-      });
+      };
       if (!ref->canCloseOrEnqueue()) return;
       bool newBackpressure = ref->hasBackpressure();
       if (newBackpressure != flags.backpressure) {
@@ -5596,10 +5606,13 @@ jsg::Promise<void> TransformStreamDefaultController::performTransform(
   }
   // If we got here, there is no transform algorithm. Per the spec, the default
   // behavior then is to just pass along the value untransformed.
-  return js.tryCatch([&] {
+  JSG_TRY(js) {
     enqueue(js, chunk);
     return js.resolvedPromise();
-  }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+  }
+  JSG_CATCH(exception) {
+    return js.rejectedPromise<void>(kj::mv(exception));
+  };
 }
 
 jsg::Promise<void> TransformStreamDefaultController::performTransformv(
