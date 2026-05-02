@@ -63,7 +63,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<Worker::VersionInfo> versionInfo,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       bool isDynamicDispatch,
-      kj::Maybe<kj::Own<AccessInfo>> accessInfo);
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -114,7 +115,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-      kj::Maybe<kj::Own<AccessInfo>> accessInfo);
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 
   kj::Promise<void> requestImpl(kj::HttpMethod method,
       kj::StringPtr url,
@@ -202,7 +204,8 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     bool isDynamicDispatch,
-    kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
 
   // Arrange to forcefully cancel work when the Actor is aborted.
@@ -216,7 +219,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
       kj::mv(cfBlobJson), kj::mv(versionInfo));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
-      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo));
+      kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo), kj::mv(selfTokenFactory));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -249,7 +252,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<RequestObserver> metrics,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-    kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -279,7 +283,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
   }
 
   incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::mv(context), kj::mv(ioChannelFactory),
-      kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo))
+      kj::mv(metrics), kj::mv(workerTracer), kj::mv(maybeTriggerInvocationSpan), kj::mv(accessInfo),
+      kj::mv(selfTokenFactory))
                         .attach(kj::mv(actor));
 }
 
@@ -1000,12 +1005,14 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     bool isDynamicDispatch,
-    kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo,
+    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(props), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::mv(metrics), waitUntilTasks, tunnelExceptions,
       kj::mv(workerTracer), kj::mv(cfBlobJson), kj::mv(versionInfo),
-      kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch, kj::mv(accessInfo));
+      kj::mv(maybeTriggerInvocationSpan), isDynamicDispatch, kj::mv(accessInfo),
+      kj::mv(selfTokenFactory));
 }
 
 }  // namespace workerd

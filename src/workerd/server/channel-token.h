@@ -37,6 +37,17 @@ class ChannelTokenHandler {
         kj::StringPtr namespaceKey, kj::ArrayPtr<const byte> id, kj::Maybe<kj::StringPtr> name) = 0;
   };
 
+  // workerd's implementation of `IoChannelFactory::SelfTokenFactory`. Produces the encoded
+  // "vendor" token to embed in a restored channel token (i.e. the token referring to the
+  // entrypoint whose `[restore]()` method must be called). Concrete implementations live in
+  // `server.c++` (one for static workers, one for actors).
+  class ServerSelfTokenFactory: public IoChannelFactory::SelfTokenFactory {
+   public:
+    // Get the token referring to "self", to be embedded as the vendor of a restored token.
+    virtual kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getSelfToken(
+        IoChannelFactory::ChannelTokenUsage usage) = 0;
+  };
+
   explicit ChannelTokenHandler(Resolver& resolver);
 
   // Helpers to implement `IoChannelFactory::{SubrequestChannel,ActorClassChannel}::getToken()`.

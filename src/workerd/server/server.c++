@@ -308,6 +308,8 @@ Server::~Server() noexcept {
 
 class Server::ActorNamespace final {
  public:
+  friend class Server;
+
   ActorNamespace(kj::Own<ActorClass> actorClass,
       const ActorConfig& config,
       const kj::Clock& clock,
@@ -574,6 +576,27 @@ class Server::ActorNamespace final {
 
       // Since `getActor()` completed, `classAndId` must be resolved.
       auto& actorClass = KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).actorClass;
+
+      if (parent == kj::none) {
+        // We're the root actor, not a facet. So, this ActorContainer is perfectly capable of
+        // constructing a token pointing to itself, and can set itself as the
+        // `restoredSelfTokenFactory`. In fact, we MUST NOT accept a `restoredSelfTokenFactory`
+        // passed in from the caller as this would potentially allow a malicious caller to read
+        // and manipulate the parameters to our own `[restore]()` method.
+        //
+        // We use a dedicated `ActorSelfTokenFactory` rather than an `ActorChannelImpl` so that we
+        // don't hold a reference back to the `ActorContainer`, which would create a cycle
+        // preventing actor eviction.
+        metadata.restoredSelfTokenFactory = kj::refcounted<ActorSelfTokenFactory>(
+            ns, Worker::Actor::cloneId(KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).id));
+      } else {
+        // We're a facet. The only way we could have been called by anyone other than our direct
+        // parent is if the `ctx.restore()` mechanism was used (because otherwise, the facet stub
+        // is not serializable and therefore could not have been shared). In this case, we would
+        // have been called through a `RestoredSubrequestChannel` which sets
+        // `restoredSelfTokenFactory` to point at itself. Since this `RestoredSubrequestChannel`
+        // must have been set up by our parent actor, we can trust it as our `selfTokenFactory`.
+      }
 
       co_return actorClass->startRequest(kj::mv(metadata), kj::mv(actor))
           .attach(kj::defer([self = kj::addRef(*this)]() mutable { self->updateAccessTime(); }));
@@ -1352,6 +1375,37 @@ class Server::ActorNamespace final {
 
    private:
     kj::Own<ActorNamespace::ActorContainer> actorContainer;
+  };
+
+  // `SelfTokenFactory` for a root (non-facet) Durable Object instance. Note that unlike
+  // `StaticServiceSelfTokenFactory`, this does not simply hold a reference to the entrypoint,
+  // because that would mean holding a reference to the `ActorChannelImpl` or `ActorContainer`,
+  // which would block eviction of the actor while the request is still running. All we actually
+  // need to construct the self-token is the actor ID (and namespace info).
+  class ActorSelfTokenFactory final: public ChannelTokenHandler::ServerSelfTokenFactory {
+   public:
+    ActorSelfTokenFactory(ActorNamespace& ns, Worker::Actor::Id id): ns(ns), id(kj::mv(id)) {}
+
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getSelfToken(
+        IoChannelFactory::ChannelTokenUsage usage) override {
+      // This factory is only ever created for root (non-facet) actors, so the only
+      // transferrability check we need is that the namespace is durable (ephemeral objects are
+      // not serializable). This throws lazily, i.e. only if `ctx.restore()` is actually used.
+      JSG_REQUIRE(ns.getConfig().is<Durable>(), DOMDataCloneError,
+          "Stubs pointing to ephemeral objects are not serializable.");
+
+      kj::StringPtr uniqueKey = ns.getConfig().get<Durable>().uniqueKey;
+      const ActorIdFactory::ActorId& abstractId =
+          *KJ_ASSERT_NONNULL(id.tryGet<kj::Own<ActorIdFactory::ActorId>>());
+      auto& idImpl =
+          KJ_ASSERT_NONNULL(kj::tryDowncast<const ActorIdFactoryImpl::ActorIdImpl>(abstractId));
+      return ns.channelTokenHandler.encodeActorChannelToken(
+          usage, uniqueKey, idImpl.getRaw(), idImpl.getName());
+    }
+
+   private:
+    ActorNamespace& ns;
+    Worker::Actor::Id id;
   };
 
   // Implements actor loopback, which is used by websocket hibernation to deliver events to the
@@ -3248,7 +3302,13 @@ class Server::WorkerService final: public Service,
   }
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    return startRequest(kj::mv(metadata), kj::none, {});
+    // Same logic as in EntrypointService::startRequest().
+    if (!isDynamic) {
+      metadata.restoredSelfTokenFactory =
+          kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*this));
+    }
+
+    return startRequest(kj::mv(metadata), kj::none, {}, kj::none, false);
   }
 
   bool hasHandler(kj::StringPtr handlerName) override {
@@ -3383,10 +3443,29 @@ class Server::WorkerService final: public Service,
         kj::mv(workerTracer),  // workerTracer
         kj::mv(metadata.cfBlobJson),
         kj::none,  // versionInfo
-        kj::mv(triggerContext));
+        kj::mv(triggerContext),
+        false,     // isDynamicDispatch
+        kj::none,  // accessInfo
+        kj::mv(metadata.restoredSelfTokenFactory));
   }
 
  private:
+  // `SelfTokenFactory` for a static (non-dynamic) worker entrypoint. It simply wraps the
+  // entrypoint's own `SubrequestChannel` and constructs the token via its `getTokenMaybeSync()`.
+  class StaticServiceSelfTokenFactory final: public ChannelTokenHandler::ServerSelfTokenFactory {
+   public:
+    StaticServiceSelfTokenFactory(kj::Own<IoChannelFactory::SubrequestChannel> service)
+        : service(kj::mv(service)) {}
+
+    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getSelfToken(
+        IoChannelFactory::ChannelTokenUsage usage) override {
+      return service->getTokenMaybeSync(usage);
+    }
+
+   private:
+    kj::Own<IoChannelFactory::SubrequestChannel> service;
+  };
+
   class EntrypointService final: public Service {
    public:
     EntrypointService(WorkerService& worker,
@@ -3410,6 +3489,25 @@ class Server::WorkerService final: public Service,
       } else {
         // Calling ctx.exports loopback without specifying props. Use empty props.
       }
+
+      // Figure out the self-token factory, used for restore tokens.
+      if (worker->isDynamic) {
+        // We're a dynamic worker. The only way we could have been called by anyone other than our
+        // own creator is if the `ctx.restore()` mechanism was used (because otherwise, the stub
+        // is not serializable and therefore could not have been shared). In this case, we would
+        // have been called through a `RestoredSubrequestChannel` which sets
+        // `restoredSelfTokenFactory` to point at itself. Since this `RestoredSubrequestChannel`
+        // must have been set up by our creating worker, we can trust it as our `selfTokenFactory`.
+      } else {
+        // We're the static worker. So, this EntrypointService is perfectly capable of constructing
+        // a token pointing to itself, and can set itself as the `restoredSelfTokenFactory`. In
+        // fact, we MUST NOT accept a `restoredSelfTokenFactory` passed in from the caller as this
+        // would potentially allow a malicious caller to read and manipulate the parameters to our
+        // own `[restore]()` method.
+        metadata.restoredSelfTokenFactory =
+            kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*this));
+      }
+
       return worker->startRequest(kj::mv(metadata), entrypoint, kj::mv(props), kj::none, isTracer);
     }
 
@@ -3441,10 +3539,9 @@ class Server::WorkerService final: public Service,
       worker->requireAllowsTransfer();
 
       // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
-      // Unspecialized loopback entrypoints are not serializable, so if we get here we must have
-      // props.
+      Frankenvalue emptyProps;
       return worker->channelTokenHandler.encodeSubrequestChannelToken(
-          usage, KJ_ASSERT_NONNULL(worker->serviceName), entrypoint, KJ_ASSERT_NONNULL(props));
+          usage, KJ_ASSERT_NONNULL(worker->serviceName), entrypoint, props.orDefault(emptyProps));
     }
 
    private:

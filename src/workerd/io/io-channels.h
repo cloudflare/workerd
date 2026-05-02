@@ -132,6 +132,14 @@ class IoChannelFactory {
 
     // Timestamp for when a subrequest is started. (ms since the Unix Epoch)
     double startTime = dateNow();
+
+    // If the subrequest was originally made on a channel that was itself created by calling a
+    // `[restore]()` method on some other service, `restoredSelfTokenFactory` is able to construct a
+    // token referring to that channel. In the case that the target is a dynamic worker or facet
+    // (contexts which aren't inherently tokenizeable), then `restoredSelfTokenFactory` is
+    // appropriate to pass down to the IoContext as the `selfTokenFactory`, for use by the
+    // implementation of `ctx.restore()`, so that it can determine its own base token.
+    kj::Maybe<kj::Own<SelfTokenFactory>> restoredSelfTokenFactory;
   };
 
   // Parameters that can influence the version of a worker that is used to serve a subrequest.
