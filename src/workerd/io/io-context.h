@@ -448,6 +448,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
   bool isCurrent();
 
+  void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
+  jsg::JsObject getEntrypointHandler(jsg::Lock& js);
+
   // Check if a current request is available. Used to provide better diagnostics when this is
   // unexpectedly absent when reporting a user span.
   // TODO(cleanup): This is a hack, remove after addressing the underlying issue.
@@ -1134,6 +1137,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type);
 
   kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> entrypointHandler;
 
   class Runnable {
    public:
