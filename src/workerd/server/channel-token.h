@@ -7,6 +7,8 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/server/channel-token.capnp.h>
 
+#include <capnp/message.h>
+
 namespace workerd::server {
 
 // Helper class to encode channel tokens for workerd.
@@ -65,11 +67,36 @@ class ChannelTokenHandler {
       kj::StringPtr namespaceKey,
       kj::ArrayPtr<const byte> id,
       kj::Maybe<kj::StringPtr> name);
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelToken(
+      IoChannelFactory::ChannelTokenUsage usage,
+      ChannelToken::Type type,
+      kj::ArrayPtr<const byte> vendorToken,
+      Frankenvalue restoreArg);
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelToken(
+      IoChannelFactory::ChannelTokenUsage usage,
+      ChannelToken::Type type,
+      kj::Own<IoChannelFactory::SubrequestChannel> vendor,
+      Frankenvalue restoreArg);
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelToken(
+      IoChannelFactory::ChannelTokenUsage usage,
+      ChannelToken::Type type,
+      kj::Own<ServerSelfTokenFactory> vendor,
+      Frankenvalue restoreArg);
+
+  // Implements the respective methods of IoChannelFactory.
+  kj::Own<IoChannelFactory::SubrequestChannel> makeRestoredSubrequestChannel(
+      kj::Own<IoChannelFactory::SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      kj::Own<IoChannelFactory::SubrequestChannel> inner);
+  kj::Own<IoChannelFactory::RpcChannel> makeRestoredRpcChannel(
+      kj::Own<IoChannelFactory::SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams);
 
   // Helpers to implement `IoChannelFactory::{subrequestChannel,actorClass}FromToken()`.
   kj::Own<IoChannelFactory::SubrequestChannel> decodeSubrequestChannelToken(
       IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
   kj::Own<IoChannelFactory::ActorClassChannel> decodeActorClassChannelToken(
+      IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
+  kj::Own<IoChannelFactory::RpcChannel> decodeRpcChannelToken(
       IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 
  private:
@@ -111,9 +138,25 @@ class ChannelTokenHandler {
   kj::Own<Frankenvalue::CapTableEntry> decodeChannelTokenImpl(ChannelToken::Type type,
       IoChannelFactory::ChannelTokenUsage usage,
       kj::ArrayPtr<const byte> token);
+  kj::Own<Frankenvalue::CapTableEntry> decodeChannelTokenImpl(ChannelToken::Type type,
+      IoChannelFactory::ChannelTokenUsage usage,
+      ChannelToken::Reader reader);
 
   Frankenvalue decodeFrankenvalue(
       IoChannelFactory::ChannelTokenUsage usage, rpc::Frankenvalue::Reader reader);
+
+  // Shared implementation of the `kj::Own<SubrequestChannel>` and `kj::Own<ServerSelfTokenFactory>`
+  // overloads of `encodeRestoredChannelToken()`. `vendorTokenMaybeSync` is the (possibly async)
+  // vendor token; `keepVendorAlive` keeps the object that produced it alive while we await.
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelTokenImpl(
+      IoChannelFactory::ChannelTokenUsage usage,
+      ChannelToken::Type type,
+      kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> vendorTokenMaybeSync,
+      kj::Own<void> keepVendorAlive,
+      Frankenvalue restoreArg);
+
+  class RestoredSubrequestChannel;
+  class RestoredRpcChannel;
 };
 
 }  // namespace workerd::server

@@ -3901,6 +3901,25 @@ class Server::WorkerService final: public Service,
     return channelTokenHandler.decodeActorClassChannelToken(usage, token);
   }
 
+  kj::Own<RpcChannel> rpcChannelFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) override {
+    return channelTokenHandler.decodeRpcChannelToken(usage, token);
+  }
+
+  kj::Own<SubrequestChannel> makeRestoredSubrequestChannelResolved(
+      kj::Own<SelfTokenFactory> selfTokenFactory,
+      Frankenvalue restoreParams,
+      kj::Own<SubrequestChannel> inner) override {
+    return channelTokenHandler.makeRestoredSubrequestChannel(
+        kj::mv(selfTokenFactory), kj::mv(restoreParams), kj::mv(inner));
+  }
+
+  kj::Own<RpcChannel> makeRestoredRpcChannelResolved(
+      kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams) override {
+    return channelTokenHandler.makeRestoredRpcChannel(
+        kj::mv(selfTokenFactory), kj::mv(restoreParams));
+  }
+
   kj::Own<void> addRef() override {
     return kj::addRef(*this);
   }
