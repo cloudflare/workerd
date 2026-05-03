@@ -2955,6 +2955,7 @@ class Server::WorkerService final: public Service,
       static kj::Promise<ClassAndId> callFacetStartCallback(
           kj::Function<kj::Promise<StartInfo>()> getStartInfo) {
         auto info = co_await getStartInfo();
+        co_await info.ensureAllResolved();
 
         // Wait for the provided ActorClassChannel to be fully resolved, so that we will be able to
         // downcast it to our `ActorClass` type.
@@ -3526,7 +3527,7 @@ class Server::WorkerService final: public Service,
     co_return;
   }
 
-  kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
+  kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
       kj::Maybe<Frankenvalue> props,
       kj::Maybe<VersionRequest> versionRequest) override {
     auto& channels =
@@ -3590,7 +3591,8 @@ class Server::WorkerService final: public Service,
     return ns.getActorChannel(kj::str(id));
   }
 
-  kj::Own<ActorClassChannel> getActorClass(uint channel, kj::Maybe<Frankenvalue> props) override {
+  kj::Own<ActorClassChannel> getActorClassResolved(
+      uint channel, kj::Maybe<Frankenvalue> props) override {
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
@@ -3651,6 +3653,10 @@ class Server::WorkerService final: public Service,
   kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) override {
     return channelTokenHandler.decodeActorClassChannelToken(usage, token);
+  }
+
+  kj::Own<void> addRef() override {
+    return kj::addRef(*this);
   }
 
   // ---------------------------------------------------------------------------
@@ -4305,7 +4311,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
     }
   };
 
-  class WorkerStubImpl final: public WorkerStubChannel, public kj::Refcounted {
+  class WorkerStubImpl final: public WorkerStubChannel {
    public:
     WorkerStubImpl(Server& server,
         kj::String isolateName,
@@ -4324,12 +4330,12 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
       }
     }
 
-    kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
+    kj::Own<IoChannelFactory::SubrequestChannel> getEntrypointResolved(
         kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
       return kj::refcounted<SubrequestChannelImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
     }
 
-    kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
+    kj::Own<IoChannelFactory::ActorClassChannel> getActorClassResolved(
         kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
       return kj::refcounted<ActorClassImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
     }
@@ -4354,6 +4360,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         kj::String isolateName,
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
       auto source = co_await fetchSource();
+      co_await source.ensureAllResolved();
       static const kj::HashMap<kj::String, ActorConfig> EMPTY_ACTOR_CONFIGS;
 
       // Rewrite the capabilities in `env` in order to build the I/O channel table.

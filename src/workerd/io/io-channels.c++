@@ -1,6 +1,7 @@
 #include "io-channels.h"
 
 #include <workerd/io/worker-interface.h>
+#include <workerd/io/worker.h>
 
 namespace workerd {
 
@@ -175,7 +176,92 @@ class PromisedActorClassChannel final: public IoChannelFactory::ActorClassChanne
   }
 };
 
+kj::OneOf<kj::Own<Frankenvalue::CapTableEntry>, kj::Promise<kj::Own<Frankenvalue::CapTableEntry>>>
+resolveCap(kj::Own<Frankenvalue::CapTableEntry> cap) {
+  KJ_IF_SOME(typed, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*cap)) {
+    KJ_SWITCH_ONEOF(typed.getResolved()) {
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
+        return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
+      }
+      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>>) {
+        return promise.then([](kj::Own<IoChannelFactory::SubrequestChannel> channel) {
+          return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
+        });
+      }
+    }
+    KJ_UNREACHABLE;
+  } else KJ_IF_SOME(typed, kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*cap)) {
+    KJ_SWITCH_ONEOF(typed.getResolved()) {
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::ActorClassChannel>) {
+        return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
+      }
+      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>>) {
+        return promise.then([](kj::Own<IoChannelFactory::ActorClassChannel> channel) {
+          return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
+        });
+      }
+    }
+    KJ_UNREACHABLE;
+  } else {
+    auto& ref = *cap;
+    KJ_FAIL_ASSERT("unknown type in Frankenvalue", typeid(ref).name());
+  }
+}
+
 }  // namespace
+
+kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::getSubrequestChannel(
+    uint channel, kj::Maybe<Frankenvalue> props, kj::Maybe<VersionRequest> versionRequest) {
+  KJ_IF_SOME(p, props) {
+    KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
+      return kj::refcounted<PromisedSubrequestChannel>(
+          promise.then([this, self = addRef(), channel, props = kj::mv(p),
+                           versionRequest = kj::mv(versionRequest)]() mutable {
+        return getSubrequestChannelResolved(channel, kj::mv(props), kj::mv(versionRequest));
+      }));
+    }
+  }
+  return getSubrequestChannelResolved(channel, kj::mv(props), kj::mv(versionRequest));
+}
+
+kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::getActorClass(
+    uint channel, kj::Maybe<Frankenvalue> props) {
+  KJ_IF_SOME(p, props) {
+    KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
+      return kj::refcounted<PromisedActorClassChannel>(
+          promise.then([this, self = addRef(), channel, props = kj::mv(p)]() mutable {
+        return getActorClassResolved(channel, kj::mv(props));
+      }));
+    }
+  }
+  return getActorClassResolved(channel, kj::mv(props));
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> WorkerStubChannel::getEntrypoint(
+    kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) {
+  KJ_IF_SOME(promise, props.resolveCaps(resolveCap)) {
+    return kj::refcounted<PromisedSubrequestChannel>(
+        promise.then([self = addRefToThis(), name = kj::mv(name), props = kj::mv(props),
+                         limits = kj::mv(limits)]() mutable {
+      return self->getEntrypointResolved(kj::mv(name), kj::mv(props), kj::mv(limits));
+    }));
+  } else {
+    return getEntrypointResolved(kj::mv(name), kj::mv(props), kj::mv(limits));
+  }
+}
+
+kj::Own<IoChannelFactory::ActorClassChannel> WorkerStubChannel::getActorClass(
+    kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) {
+  KJ_IF_SOME(promise, props.resolveCaps(resolveCap)) {
+    return kj::refcounted<PromisedActorClassChannel>(
+        promise.then([self = addRefToThis(), name = kj::mv(name), props = kj::mv(props),
+                         limits = kj::mv(limits)]() mutable {
+      return self->getActorClassResolved(kj::mv(name), kj::mv(props), kj::mv(limits));
+    }));
+  } else {
+    return getActorClassResolved(kj::mv(name), kj::mv(props), kj::mv(limits));
+  }
+}
 
 kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannelFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
@@ -201,6 +287,53 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> IoChannelFactory::Actor
   JSG_FAIL_REQUIRE(DOMDataCloneError,
       "Durable Object stubs cannot (yet) be transferred between Workers. This will change in "
       "a future version.");
+}
+
+kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
+  kj::Vector<kj::Promise<void>> promises;
+
+  KJ_IF_SOME(promise, env.resolveCaps(resolveCap)) {
+    promises.add(kj::mv(promise));
+  }
+
+  auto resolveChannelSlot = [&](kj::Own<IoChannelFactory::SubrequestChannel>& slot) {
+    KJ_SWITCH_ONEOF(slot->getResolved()) {
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
+        slot = kj::mv(channel);
+      }
+      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>>) {
+        promises.add(promise.then([&slot](kj::Own<IoChannelFactory::SubrequestChannel> channel) {
+          slot = kj::mv(channel);
+        }));
+      }
+    }
+  };
+
+  KJ_IF_SOME(slot, globalOutbound) {
+    resolveChannelSlot(slot);
+  }
+
+  for (auto& slot: tails) {
+    resolveChannelSlot(slot);
+  }
+  for (auto& slot: streamingTails) {
+    resolveChannelSlot(slot);
+  }
+
+  if (!promises.empty()) {
+    co_await kj::joinPromisesFailFast(promises.releaseAsArray());
+  }
+}
+
+kj::Promise<void> Worker::Actor::FacetManager::StartInfo::ensureAllResolved() {
+  KJ_SWITCH_ONEOF(actorClass->getResolved()) {
+    KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::ActorClassChannel>) {
+      actorClass = kj::mv(channel);
+    }
+    KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>>) {
+      actorClass = co_await promise;
+    }
+  }
 }
 
 uint IoChannelCapTableEntry::getChannelNumber(Type expectedType) {
