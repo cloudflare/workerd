@@ -213,6 +213,12 @@ class IoChannelFactory {
     // SubrequestChannel, return the inner channel -- synchronously if the promise has resolved
     // already, otherwise asynchronously.
     //
+    // Note that the various `IoChannelFactory` methods that take `props` or `env` objects all
+    // automatically resolve all channel objects *before* passing off to the underlying
+    // implementation. In the internal codebase, implementations end up needing to downcast these
+    // objects to implementation-specific types, and handling the need to call getResolved()
+    // in every use case would be painful, so it is taken care of in this layer.
+    //
     // Default implementation returns self.
     virtual kj::OneOf<kj::Own<SubrequestChannel>, kj::Promise<kj::Own<SubrequestChannel>>>
     getResolved() {
@@ -229,10 +235,19 @@ class IoChannelFactory {
   // `props` and `versionRequest` can only be specified if this is a loopback channel (i.e. from
   // ctx.exports). For any other channel, they will throw.
   //
+  // The non-virtual method dispatches to getSubrequestChannelResolved(), but only after resolving
+  // all channels embedded in `props` (that is, calling `getResolved()` on all of them, waiting
+  // for the resolutions if necessary, and replacing the caps with the resolutions).
+  //
   // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
-  virtual kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
+  kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
       kj::Maybe<Frankenvalue> props = kj::none,
-      kj::Maybe<VersionRequest> versionRequest = kj::none) = 0;
+      kj::Maybe<VersionRequest> versionRequest = kj::none);
+
+  // Underlying implementation of getSubrequestChannel(). The implementation can assume that `props`
+  // contains strictly resolved channels.
+  virtual kj::Own<SubrequestChannel> getSubrequestChannelResolved(
+      uint channel, kj::Maybe<Frankenvalue> props, kj::Maybe<VersionRequest> versionRequest) = 0;
 
   // Stub for a remote actor. Allows sending requests to the actor.
   class ActorChannel: public SubrequestChannel {
@@ -293,11 +308,16 @@ class IoChannelFactory {
   //
   // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
   // other channel, it will throw.
-  virtual kj::Own<ActorClassChannel> getActorClass(
-      uint channel, kj::Maybe<Frankenvalue> props = kj::none) {
-    // TODO(cleanup): Remove this once the production runtime has implemented this.
-    KJ_UNIMPLEMENTED("This runtime doesn't support actor class channels.");
-  }
+  //
+  // The non-virtual method dispatches to getActorClassResolved(), but only after resolving
+  // all channels embedded in `props` (that is, calling `getResolved()` on all of them, waiting
+  // for the resolutions if necessary, and replacing the caps with the resolutions).
+  kj::Own<ActorClassChannel> getActorClass(uint channel, kj::Maybe<Frankenvalue> props = kj::none);
+
+  // Underlying implementation of getActorClass(). The implementation can assume that `props`
+  // contains strictly resolved channels.
+  virtual kj::Own<ActorClassChannel> getActorClassResolved(
+      uint channel, kj::Maybe<Frankenvalue> props) = 0;
 
   // Aborts all actors except those in namespaces marked with `preventEviction`.
   virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
@@ -341,6 +361,15 @@ class IoChannelFactory {
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
   kj::Own<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
+
+  // Return a strong reference to this same factory. Used in the implementations of
+  // getSubrequestChannel() and getActorClass() when delayed resolution is needed.
+  //
+  // TODO(cleanup): This is hacky. IoChannelFactory isn't declared to simply extend kj::Refcounted
+  //   because the workerd implementation is privately implemented by Server::WorkerService, which
+  //   inherits kj::Refcounted a different way. But maybe it's time for Server::WorkerService to
+  //   stop working that way?
+  virtual kj::Own<void> addRef() = 0;
 };
 
 // ResourceLimits provides a means to control the resource allocation for a worker stage via a
@@ -360,12 +389,20 @@ struct ResourceLimits {
 //
 // This object is returned before the Worker actually loads, so if any errors occur while loading,
 // any requests sent to the Worker will fail, propagating the exception.
-class WorkerStubChannel {
+class WorkerStubChannel: public kj::Refcounted {
  public:
-  virtual kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
+  // As with IoChannelFactory::getSubrequestChannel(), the non-virtual method waits for `props` to
+  // resolve first, then calls the virtual method.
+  kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
+      kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits);
+  virtual kj::Own<IoChannelFactory::SubrequestChannel> getEntrypointResolved(
       kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) = 0;
 
-  virtual kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
+  // As with IoChannelFactory::getActorClass(), the non-virtual method waits for `props` to
+  // resolve first, then calls the virtual method.
+  kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
+      kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits);
+  virtual kj::Own<IoChannelFactory::ActorClassChannel> getActorClassResolved(
       kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) = 0;
 
   // TODO(someday): Allow caller to enumerate entrypoints?
@@ -417,6 +454,10 @@ struct DynamicWorkerSource {
       .ownContentIsRpcResponse = ownContentIsRpcResponse,
     };
   }
+
+  // Walks through all channels in `env` and other properties and ensures that they point at
+  // resolved objects by calling their `getResolved()` methods.
+  kj::Promise<void> ensureAllResolved();
 };
 
 // A Frankenvalue::CapTableEntry which directly references a numbered I/O channel. This is ONLY
