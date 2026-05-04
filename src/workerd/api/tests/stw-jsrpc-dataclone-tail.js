@@ -3,45 +3,101 @@
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
 
-let result;
+let jsrpcResult;
+let fetchReturnResult;
+let queueOnsetResult;
+
+async function captureInfo(info, env) {
+  const result = {
+    type: info.type,
+    protoIsObjectPrototype: Object.getPrototypeOf(info) === Object.prototype,
+  };
+
+  if ('statusCode' in info) {
+    result.statusCode = info.statusCode;
+  }
+  if ('batchSize' in info) {
+    result.batchSize = info.batchSize;
+  }
+
+  try {
+    await env.RECEIVER.capture(info);
+    result.rpcOk = true;
+  } catch (err) {
+    result.rpcOk = false;
+    result.errorName = err?.name;
+    result.errorMessage = err?.message;
+  }
+
+  return result;
+}
 
 export default {
   async tailStream(onsetEvent, env) {
-    const info = onsetEvent.event.info;
-    if (info?.type !== 'jsrpc' || result !== undefined) return;
+    const onsetInfo = onsetEvent.event.info;
 
-    const proto = Object.getPrototypeOf(info);
-    result = {
-      type: info.type,
-      protoIsObjectPrototype: proto === Object.prototype,
-    };
-
-    try {
-      await env.RECEIVER.capture(info);
-      result.rpcOk = true;
-    } catch (err) {
-      result.rpcOk = false;
-      result.errorName = err?.name;
-      result.errorMessage = err?.message;
+    if (onsetInfo?.type === 'jsrpc' && jsrpcResult === undefined) {
+      jsrpcResult = await captureInfo(onsetInfo, env);
+      return;
     }
+
+    if (onsetInfo?.type === 'queue' && queueOnsetResult === undefined) {
+      queueOnsetResult = await captureInfo(onsetInfo, env);
+      return;
+    }
+
+    return async (event) => {
+      const info = event.event.info;
+      if (
+        event.event.type === 'return' &&
+        info?.type === 'fetch' &&
+        fetchReturnResult === undefined
+      ) {
+        fetchReturnResult = await captureInfo(info, env);
+      }
+    };
   },
 };
 
 export const test = {
   async test(ctrl, env) {
     await env.RECEIVER.reset();
-    result = undefined;
+    jsrpcResult = undefined;
+    fetchReturnResult = undefined;
+    queueOnsetResult = undefined;
+
+    const response = await env.CALLEE.fetch('http://callee/');
+    assert.strictEqual(response.status, 201);
+    assert.strictEqual(await response.text(), 'ok');
+
+    const timestamp = new Date();
+    const queueResult = await env.CALLEE.queue('stw-jsrpc-dataclone-test', [
+      { id: '#0', timestamp, body: 'hello', attempts: 1 },
+    ]);
+    assert.strictEqual(queueResult.outcome, 'ok');
 
     assert.strictEqual(await env.CALLEE_RPC.ping(), 'ok');
     await scheduler.wait(100);
 
-    assert.ok(result, 'missing jsrpc onset.info result');
-    assert.strictEqual(result.type, 'jsrpc');
+    assert.ok(fetchReturnResult, 'missing fetch return info result');
+    assert.strictEqual(fetchReturnResult.type, 'fetch');
+    assert.strictEqual(fetchReturnResult.statusCode, 201);
+    assert.strictEqual(fetchReturnResult.protoIsObjectPrototype, true);
+    assert.strictEqual(fetchReturnResult.rpcOk, true);
+
+    assert.ok(queueOnsetResult, 'missing queue onset.info result');
+    assert.strictEqual(queueOnsetResult.type, 'queue');
+    assert.strictEqual(queueOnsetResult.batchSize, 1);
+    assert.strictEqual(queueOnsetResult.protoIsObjectPrototype, true);
+    assert.strictEqual(queueOnsetResult.rpcOk, true);
+
+    assert.ok(jsrpcResult, 'missing jsrpc onset.info result');
+    assert.strictEqual(jsrpcResult.type, 'jsrpc');
     assert.strictEqual(
-      result.protoIsObjectPrototype,
+      jsrpcResult.protoIsObjectPrototype,
       true,
       'jsrpc onset.info should be a plain object'
     );
-    assert.strictEqual(result.rpcOk, true);
+    assert.strictEqual(jsrpcResult.rpcOk, true);
   },
 };

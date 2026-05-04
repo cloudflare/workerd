@@ -23,30 +23,32 @@ import {
 } from 'pyodide-internal:topLevelEntropy/lib';
 import {
   LEGACY_VENDOR_PATH,
+  PROCESS_PTH_FILES,
+  SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
 import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
-
-/**
- * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
- * emscripten seperately from this code in another context.
- * The underlying code for it can be found in pool/emscriptenSetup.ts.
- */
-import { default as SetupEmscripten } from 'internal:setup-emscripten';
+import { default as cloudflareWorkers } from 'cloudflare-internal:workers';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import {
   PythonUserError,
   PythonWorkersInternalError,
+  loadPythonMod,
   reportError,
   setInternalErrorReporter,
   unreachable,
 } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
-import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
+import { default as setupPythonSearchPathSource } from 'pyodide-internal:setup_python_search_path.py';
+import { TRANSITIVE_REQUIREMENTS, IS_WORKERD } from 'pyodide-internal:metadata';
 import { getTrustedReadFunc } from 'pyodide-internal:readOnlyFS';
 import { PyodideVersion } from 'pyodide-internal:const';
+import { default as pythonStdlibZip } from 'pyodideRuntime-internal:python_stdlib.zip';
+import { default as pyodideAsmWasm } from 'pyodideRuntime-internal:pyodide.asm.wasm';
+import { instantiateEmscriptenModule } from 'pyodideRuntime-internal:emscriptenSetup';
+import { createImportProxy } from 'pyodide-internal:serializeJsModule';
 
 // Wire the PythonWorkersInternalError constructor's reporter to the C++ FatalReporter module.
 // See util.ts for why this indirection is needed (pool bundling constraints).
@@ -81,44 +83,23 @@ function prepareWasmLinearMemory(
   }
 }
 
+type SetupPythonSearchPathMod = {
+  __dict__: PyDict;
+  setup_python_search_path: PyCallable;
+  destroy(): void;
+};
+
 function setupPythonSearchPath(pyodide: Pyodide): void {
-  pyodide.runPython(`
-    def _tmp():
-      import sys
-      from pathlib import Path
-
-      LEGACY_VENDOR_PATH = "${LEGACY_VENDOR_PATH}" == "true"
-      VENDOR_PATH = "/session/metadata/vendor"
-      PYTHON_MODULES_PATH = "/session/metadata/python_modules"
-
-      # adjustSysPath adds the session path, but it is immortalised by the memory snapshot. This
-      # code runs irrespective of the memory snapshot.
-      if VENDOR_PATH in sys.path and LEGACY_VENDOR_PATH:
-        sys.path.remove(VENDOR_PATH)
-
-      if PYTHON_MODULES_PATH in sys.path:
-        sys.path.remove(PYTHON_MODULES_PATH)
-
-      # Insert vendor path after system paths but before site-packages
-      # System paths are typically: ['/session', '/lib/python312.zip', '/lib/python3.12', '/lib/python3.12/lib-dynload']
-      # We want to insert before '/lib/python3.12/site-packages' and other site-packages
-      #
-      # We also need the session path to be before the vendor path, if we don't do so then a local
-      # import will pick a module from the vendor path rather than the local path. We've got a test
-      # that reproduces this (vendor_dir).
-      for i, path in enumerate(sys.path):
-        if 'site-packages' in path:
-          if LEGACY_VENDOR_PATH:
-            sys.path.insert(i, VENDOR_PATH)
-          sys.path.insert(i, PYTHON_MODULES_PATH)
-          break
-      else:
-        # If no site-packages found, fail
-        raise ValueError("No site-packages found in sys.path")
-
-    _tmp()
-    del _tmp
-  `);
+  const mod = loadPythonMod(
+    pyodide,
+    'setup_python_search_path',
+    setupPythonSearchPathSource
+  ) as SetupPythonSearchPathMod;
+  mod.setup_python_search_path.callKwargs({
+    LEGACY_VENDOR_PATH,
+    PROCESS_PTH_FILES,
+  });
+  mod.destroy();
 }
 
 /**
@@ -243,21 +224,27 @@ function compileModuleFromReadOnlyFS(
   return UnsafeEval.newWasmModule(buffer);
 }
 
-export function loadPyodide(
+export async function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
   customSerializedObjects: CustomSerializedObjects
-): Pyodide {
+): Promise<Pyodide> {
   try {
-    const Module = enterJaegerSpan('instantiate_emscripten', () =>
-      SetupEmscripten.getModule()
+    const Module = await enterJaegerSpan('instantiate_emscripten', () =>
+      instantiateEmscriptenModule(IS_WORKERD, pythonStdlibZip, pyodideAsmWasm)
     );
     Module.compileModuleFromReadOnlyFS = compileModuleFromReadOnlyFS;
-    Module.API.config.jsglobals = globalThis;
+    if (Module.API.version === PyodideVersion.V0_28_2) {
+      Module.API.config.jsglobals = createImportProxy(
+        'global this',
+        globalThis
+      );
+    } else {
+      Module.API.config.jsglobals = globalThis;
+    }
     if (isWorkerd) {
       Module.API.config.resolveLockFilePromise!(lockfile);
     }
-    Module.setUnsafeEval(UnsafeEval);
     Module.setGetRandomValues(getRandomValues);
     Module.setSetTimeout(
       makeSetTimeout(Module),
@@ -290,18 +277,6 @@ export function loadPyodide(
     const pyodide = Module.API.public_api;
 
     validatePyodideVersion(pyodide);
-
-    // Need to set these here so that the logs go to the right context. If we don't they will go
-    // to SetupEmscripten's context and end up being KJ_LOG'd, which we do not want.
-    Module.API.initializeStreams(
-      null,
-      (msg) => {
-        console.log(msg);
-      },
-      (msg) => {
-        console.error(msg);
-      }
-    );
     setupPythonSearchPath(pyodide);
     setupRuntimeSignalHandling(Module);
     Module.API.on_fatal = (error: unknown): void => {
@@ -309,6 +284,11 @@ export function loadPyodide(
         FatalReporter.reportFatal(String(error));
       } catch (_e) {
         FatalReporter.reportFatal('Internal error reporting fatal error');
+      }
+      if (SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR) {
+        cloudflareWorkers.abortIsolate(
+          `Python worker fatal error: ${String(error)}`
+        );
       }
     };
     return pyodide;

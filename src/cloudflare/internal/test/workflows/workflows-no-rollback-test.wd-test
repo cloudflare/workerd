@@ -1,0 +1,33 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Regression test: exercises workflows WITHOUT the workflows_step_rollback flag.
+# Reuses BasicWorkflow from workflows-step-promise-workflows.js but does not
+# enable the flag, verifying the unwrapped step RPC stub works normally.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "workflows-no-rollback-test",
+      worker = .testWorker,
+    ),
+    ( name = "workflows",
+      worker = .workflowsWorker,
+    ),
+  ]
+);
+
+const testWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "workflows-no-rollback-test.js"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental"],
+  bindings = [
+    (name = "BasicWorkflow", service = (name = "workflows", entrypoint = "BasicWorkflow")),
+  ],
+);
+
+const workflowsWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "workflows-step-promise-workflows.js"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental"],
+);

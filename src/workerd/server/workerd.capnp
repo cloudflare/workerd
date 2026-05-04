@@ -400,9 +400,10 @@ struct Worker {
       # given service name.
 
       r2Bucket @12 :ServiceDesignator;
-      r2Admin @13 :ServiceDesignator;
-      # R2 bucket and admin API bindings. Similar to KV namespaces, these turn operations into
-      # HTTP requests aimed at the named service.
+      # R2 bucket binding. Similar to KV namespaces, this turns operations into HTTP requests aimed
+      # at the named service.
+
+      obsolete0 @13 :ServiceDesignator;
 
       wrapped @14 :WrappedBinding;
       # Wraps a collection of inner bindings in a common api functionality.
@@ -492,7 +493,7 @@ struct Worker {
         durableObjectNamespace @7 :Void;
         kvNamespace @8 :Void;
         r2Bucket @9 :Void;
-        r2Admin @10 :Void;
+        obsolete0 @10 :Void;
         queue @11 :Void;
         analyticsEngine @12 : Void;
         hyperdrive @13: Void;

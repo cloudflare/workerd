@@ -2405,12 +2405,6 @@ class Lock {
     return from(v8::Isolate::GetCurrent());
   }
 
-  // Signals that execution should be terminated immediately, including during C++ iterator
-  // callbacks where V8's own TerminateExecution() interrupt would not be checked.
-  // Also calls V8's TerminateExecution(). See IsolateBase::requestTermination().
-  void requestTermination();
-  bool isTerminationRequested() const;
-
   // RAII construct that reports amount of external memory to be manually attributed to
   // the isolate. When the returned ExtrernalMemoryAdjuster is dropped, the amount will
   // be subtracted from the isolate's external memory accounting. If the adjuster is

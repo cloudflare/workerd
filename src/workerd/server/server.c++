@@ -1605,17 +1605,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   void reportFailure(
       const kj::Exception& exception, FailureSource source = FailureSource::OTHER) override {
-    // Handle all exception based outcomes that can appear in workerd.
-    if (exception.getDetail(CPU_LIMIT_DETAIL_ID) != kj::none) {
-      outcome = EventOutcome::EXCEEDED_CPU;
-    } else if (exception.getDetail(MEMORY_LIMIT_DETAIL_ID) != kj::none) {
-      outcome = EventOutcome::EXCEEDED_MEMORY;
-    } else if (source == RequestObserver::FailureSource::DEFERRED_PROXY &&
-        exception.getType() == kj::Exception::Type::DISCONNECTED) {
-      outcome = EventOutcome::RESPONSE_STREAM_DISCONNECTED;
-    } else {
-      outcome = EventOutcome::EXCEPTION;
-    }
+    outcome = RequestObserver::outcomeFromException(exception, source);
   }
 
   void setOutcome(EventOutcome newOutcome) override {
@@ -1941,7 +1931,8 @@ class Server::WorkerService final: public Service,
       DeleteActorsCallback deleteActorsCallback,
       kj::Maybe<kj::String> dockerPathParam,
       kj::Maybe<kj::String> containerEgressInterceptorImageParam,
-      bool isDynamic)
+      bool isDynamic,
+      kj::Maybe<kj::Function<void()>> abortIsolateCallback = kj::none)
       : channelTokenHandler(channelTokenHandler),
         serviceName(serviceName),
         threadContext(threadContext),
@@ -1956,7 +1947,8 @@ class Server::WorkerService final: public Service,
         deleteActorsCallback(kj::mv(deleteActorsCallback)),
         dockerPath(kj::mv(dockerPathParam)),
         containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImageParam)),
-        isDynamic(isDynamic) {}
+        isDynamic(isDynamic),
+        abortIsolateCallback(kj::mv(abortIsolateCallback)) {}
 
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
@@ -3335,6 +3327,7 @@ class Server::WorkerService final: public Service,
   kj::Maybe<kj::String> dockerPath;
   kj::Maybe<kj::String> containerEgressInterceptorImage;
   bool isDynamic;
+  kj::Maybe<kj::Function<void()>> abortIsolateCallback;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
@@ -3559,6 +3552,25 @@ class Server::WorkerService final: public Service,
 
   void deleteAllActors(kj::Maybe<kj::Exception&> reason) override {
     deleteActorsCallback(reason);
+  }
+
+  // For now, in workerd just abort the process for non-dynamic workers.
+  void abortIsolate(kj::StringPtr reason) noexcept override {
+    KJ_IF_SOME(cb, abortIsolateCallback) {
+      // Removes the isolate from the isolates map.
+      //
+      // TODO: Should abort all outstanding calls to the isolate causing them to
+      // throw the reason as the error.
+      cb();
+    } else {
+      // Otherwise, abort the process. Throwing from a noexcept function will call
+      // std::terminate, which produces a nicer error message than ::abort().
+      if (reason == nullptr) {
+        KJ_FAIL_REQUIRE("abortIsolate() called, terminating process");
+      } else {
+        KJ_FAIL_REQUIRE("abortIsolate() called, terminating process", reason);
+      }
+    }
   }
 
   kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
@@ -3907,12 +3919,9 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
         .bindingName = kj::str(binding.getName())});
     }
 
-    case config::Worker::Binding::R2_ADMIN: {
-      uint channel = static_cast<uint>(subrequestChannels.size()) +
-          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
-      subrequestChannels.add(FutureSubrequestChannel{binding.getR2Admin(), kj::mv(errorContext)});
-      return makeGlobal(Global::R2Admin{.subrequestChannel = channel});
-    }
+    case config::Worker::Binding::OBSOLETE0:
+      errorReporter.addError(kj::str(errorContext, " uses an obsolete binding type."));
+      return kj::none;
 
     case config::Worker::Binding::QUEUE: {
       uint channel = static_cast<uint>(subrequestChannels.size()) +
@@ -4152,6 +4161,10 @@ struct Server::WorkerDef {
   // If the WorkerDef was created from a DymamicWorkerSource and that
   // source contains a clone of the source bundle, this will take ownership.
   kj::Maybe<kj::Own<void>> maybeOwnedSourceCode;
+
+  // Callback invoked when abortIsolate() is called. Used by dynamic workers to remove
+  // themselves from the loader's isolate map.
+  kj::Maybe<kj::Function<void()>> abortIsolateCallback;
 };
 
 class Server::WorkerLoaderNamespace: public kj::Refcounted {
@@ -4176,15 +4189,27 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         // may be used in error logs.
         auto isolateName = kj::str(namespaceName, ':', n);
 
+        // On abort, remove the entry from this namespace's isolates map so
+        // subsequent loadIsolate() calls with the same name will create a fresh
+        // isolate.
+        kj::Function<void()> onAborted = [this, mapKey = kj::str(n)]() { removeIsolate(mapKey); };
+
         return {.key = kj::mv(n),
-          .value = kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::mv(fetchSource))};
+          .value = kj::rc<WorkerStubImpl>(
+              server, kj::mv(isolateName), kj::mv(onAborted), kj::mv(fetchSource))};
       })
           .addRef()
           .toOwn();
     } else {
       auto isolateName = kj::str(namespaceName, ":dynamic:", randomUUID(server.entropySource));
-      return kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::mv(fetchSource)).toOwn();
+      return kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::none, kj::mv(fetchSource))
+          .toOwn();
     }
+  }
+
+  void removeIsolate(kj::StringPtr name) {
+    // This is called by abortIsolate()
+    isolates.erase(name);
   }
 
  private:
@@ -4220,8 +4245,10 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
    public:
     WorkerStubImpl(Server& server,
         kj::String isolateName,
+        kj::Maybe<kj::Function<void()>> onAborted,
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource)
-        : startupTask(start(server, kj::mv(isolateName), kj::mv(fetchSource)).fork()) {}
+        : onAborted(kj::mv(onAborted)),
+          startupTask(start(server, kj::mv(isolateName), kj::mv(fetchSource)).fork()) {}
 
     ~WorkerStubImpl() {
       unlink();
@@ -4244,8 +4271,20 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
     }
 
    private:
+    // Callback to remove the worker stub from the isolates map. None for
+    // unnamed dynamic isolates.
+    kj::Maybe<kj::Function<void()>> onAborted;
+
     kj::Maybe<kj::Own<WorkerService>> service;  // null if still starting up
     kj::ForkedPromise<void> startupTask;        // resolves when `service` is non-null
+
+    void onAbortIsolate() {
+      KJ_IF_SOME(cb, onAborted) {
+        auto callback = kj::mv(cb);
+        onAborted = kj::none;
+        callback();
+      }
+    }
 
     kj::Promise<void> start(Server& server,
         kj::String isolateName,
@@ -4324,6 +4363,9 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         // ownership issues. For the downstream use, however, we need to be careful
         // to not copy the ownContent if it is an RPC response.
         .maybeOwnedSourceCode = kj::mv(source.ownContent),
+        // The callback is owned by the WorkerService, which is owned by `this`, so a raw
+        // pointer is safe.
+        .abortIsolateCallback = kj::Function<void()>([this]() { onAbortIsolate(); }),
         // clang-format on
       };
 
@@ -4815,6 +4857,9 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     { auto drop = kj::mv(ctxExportsHandle); }
   });
 
+  // Extract abortIsolateCallback before moving def into linkCallback lambda
+  auto abortIsolateCallback = kj::mv(def.abortIsolateCallback);
+
   auto linkCallback = [this, def = kj::mv(def), totalActorChannels](WorkerService& workerService,
                           Worker::ValidationErrorReporter& errorReporter) mutable {
     WorkerService::LinkedIoChannels result;
@@ -4968,12 +5013,13 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   kj::Maybe<kj::StringPtr> serviceName;
   if (!def.isDynamic) serviceName = name;
 
-  auto result = kj::refcounted<WorkerService>(channelTokenHandler, serviceName,
-      globalContext->threadContext, monotonicClock, kj::mv(worker),
-      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), KJ_BIND_METHOD(*this, deleteAllActors),
-      kj::mv(dockerPath), kj::mv(containerEgressInterceptorImage), def.isDynamic);
+  auto result =
+      kj::refcounted<WorkerService>(channelTokenHandler, serviceName, globalContext->threadContext,
+          monotonicClock, kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
+          kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
+          kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors),
+          KJ_BIND_METHOD(*this, deleteAllActors), kj::mv(dockerPath),
+          kj::mv(containerEgressInterceptorImage), def.isDynamic, kj::mv(abortIsolateCallback));
   result->initActorNamespaces(def.localActorConfigs, network);
   co_return result;
 }

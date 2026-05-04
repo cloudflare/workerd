@@ -44,9 +44,9 @@ jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
   // TODO(someday): Support TLS? It's not at all necessary since we're connecting locally, but
   // some users may want it anyway.
   auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
-  auto sock = setupSocket(js, kj::mv(conn), kj::str(getHost(), ":", getPort()), kj::none,
-      kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::str(this->randomHost), false,
-      kj::none /* maybeOpenedPrPair */);
+  auto sock = setupSocket(js, kj::mv(conn), kj::str(getHost(), ":", getPort()),
+      kj::none /* localAddress */, kj::none, kj::mv(nullTlsStarter), SecureTransportKind::OFF,
+      kj::str(this->randomHost), false, kj::none /* maybeOpenedPrPair */);
   sock->handleProxyStatus(js, kj::mv(paf.promise));
   return sock;
 }

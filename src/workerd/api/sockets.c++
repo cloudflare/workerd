@@ -87,6 +87,7 @@ class StreamWorkerInterface;
 jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Own<kj::AsyncIoStream> connection,
     kj::Maybe<kj::String> remoteAddress,
+    kj::Maybe<kj::String> localAddress,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
     SecureTransportKind secureTransport,
@@ -173,9 +174,9 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
       getWritableHighWaterMark(options), openedPrPair.promise.whenResolved(js));
 
   auto result = js.alloc<Socket>(js, ioContext, kj::mv(refcountedConnection), kj::mv(remoteAddress),
-      kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair), kj::mv(watchForDisconnectTask),
-      kj::mv(options), kj::mv(tlsStarter), secureTransport, kj::mv(domain), isDefaultFetchPort,
-      kj::mv(openedPrPair));
+      kj::mv(localAddress), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
+      kj::mv(watchForDisconnectTask), kj::mv(options), kj::mv(tlsStarter), secureTransport,
+      kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 
   KJ_IF_SOME(p, eofPromise) {
     result->handleReadableEof(js, kj::mv(p));
@@ -272,9 +273,9 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   auto request = httpClient->connect(addressStr, *headers, httpConnectSettings);
   request.connection = request.connection.attach(kj::mv(httpClient));
 
-  auto result = setupSocket(js, kj::mv(request.connection), kj::mv(addressStr), kj::mv(options),
-      kj::mv(tlsStarter), secureTransport, kj::mv(domain), isDefaultFetchPort,
-      kj::none /* maybeOpenedPrPair */);
+  auto result = setupSocket(js, kj::mv(request.connection), kj::mv(addressStr),
+      kj::none /* localAddress */, kj::mv(options), kj::mv(tlsStarter), secureTransport,
+      kj::mv(domain), isDefaultFetchPort, kj::none /* maybeOpenedPrPair */);
   // `handleProxyStatus` needs an initialized refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor. Also it's only necessary when creating a Socket as a result of
   // a `connect`.
@@ -363,7 +364,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
           JSG_VISITABLE_LAMBDA((self = JSG_THIS, domain = kj::heapString(KJ_ASSERT_NONNULL(domain)),
                                    tlsOptions = kj::mv(tlsOptions),
                                    openedResolver = openedPrPair.resolver.addRef(js),
-                                   remoteAddress = mapCopyString(remoteAddress)),
+                                   remoteAddress = mapCopyString(remoteAddress),
+                                   localAddress = mapCopyString(localAddress)),
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
@@ -402,11 +404,12 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
                 openedResolver.resolve(js,
                     context.awaitIo(js, forkedPromise.addBranch(),
-                        [remoteAddress = kj::mv(remoteAddress)](
+                        [remoteAddress = kj::mv(remoteAddress),
+                            localAddress = kj::mv(localAddress)](
                             jsg::Lock& js) mutable -> SocketInfo {
                   return SocketInfo{
                     .remoteAddress = kj::mv(remoteAddress),
-                    .localAddress = kj::none,
+                    .localAddress = kj::mv(localAddress),
                   };
                 }));
 
@@ -425,8 +428,9 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // to `setupSocket`.
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
   return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)),
-      mapCopyString(remoteAddress), kj::mv(options), kj::mv(newTlsStarter), SecureTransportKind::ON,
-      kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
+      mapCopyString(remoteAddress), mapCopyString(localAddress), kj::mv(options),
+      kj::mv(newTlsStarter), SecureTransportKind::ON, kj::mv(domain), isDefaultFetchPort,
+      kj::mv(openedPrPair));
 }
 
 void Socket::handleProxyStatus(
@@ -460,12 +464,13 @@ void Socket::handleProxyStatus(
       }
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {
-      // In our implementation we do not expose the local address at all simply
-      // because there's no useful value we can provide.
+      // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
+      // by the `connect()` handler dispatch path) populate `localAddress` with the CONNECT
+      // authority that the peer targeted.
       openedResolver.resolve(js,
           SocketInfo{
             .remoteAddress = mapCopyString(remoteAddress),
-            .localAddress = kj::none,
+            .localAddress = mapCopyString(localAddress),
           });
     }
   };
@@ -488,12 +493,13 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
     if (result != kj::none) {
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
     } else {
-      // In our implementation we do not expose the local address at all simply
-      // because there's no useful value we can provide.
+      // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
+      // by the `connect()` handler dispatch path) populate `localAddress` with the CONNECT
+      // authority that the peer targeted.
       openedResolver.resolve(js,
           SocketInfo{
             .remoteAddress = mapCopyString(remoteAddress),
-            .localAddress = kj::none,
+            .localAddress = mapCopyString(localAddress),
           });
     }
   };

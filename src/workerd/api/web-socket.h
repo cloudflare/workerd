@@ -592,7 +592,13 @@ class WebSocket: public EventTarget {
   // Keep track of current hibernatable websockets auto-response status to avoid racing
   // between regular websocket messages, and auto-responses.
   struct AutoResponse {
-    kj::Promise<void> ongoingAutoResponse = kj::READY_NOW;
+    // The ongoing auto-response promise, used for pump() synchronization.
+    // Wrapped in IoOwn when an IoContext is available (for GC-safe destruction that avoids
+    // violating DISALLOW_KJ_IO_DESTRUCTORS_SCOPE), or plain kj::Own when no IoContext is
+    // available (e.g. when called from the hibernation manager's readLoop).
+    using OwnedAutoResponsePromise =
+        kj::OneOf<IoOwn<kj::Promise<void>>, kj::Own<kj::Promise<void>>>;
+    kj::Maybe<OwnedAutoResponsePromise> ongoingAutoResponse;
     workerd::util::Queue<kj::String> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;

@@ -726,9 +726,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
       // It'd be nicer if we could fall through to the code below for the non-compat-flag logic in
       // this case, but we don't even know if the worker uses service worker syntax until after
       // runProm resolves, so we just copy the bare essentials here.
-      auto result = co_await incomingRequest->finishScheduled();
-      bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
-      outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
+      auto scheduledResult = co_await incomingRequest->finishScheduled();
+      bool completed = scheduledResult == EventOutcome::OK;
+      outcome = completed ? context.waitUntilStatus() : scheduledResult;
     } else {
       // We're responsible for calling drain() on the incomingRequest to ensure that waitUntil tasks
       // can continue to run in the backgound for a while even after we return a result to the
@@ -750,55 +750,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 
     // We reuse the finishScheduled() method for convenience, since queues use the same wall clock
     // timeout as scheduled workers.
-    auto result = co_await incomingRequest->finishScheduled();
-    bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
-
-    // Log some debug info if the request timed out or was aborted, to aid in debugging situations
-    // where consumer workers appear to get stuck and repeatedly take 15 minutes.
-    // In particular, detect whether or not the users queue() handler function completed
-    // and include info about other waitUntil tasks that may have caused the request to timeout.
-    if (!completed) {
-      kj::String status;
-      if (queueEventHolder->event.get() == nullptr) {
-        status = kj::str("Empty");
-      } else {
-        KJ_SWITCH_ONEOF(queueEventHolder->event->getCompletionStatus()) {
-          KJ_CASE_ONEOF(i, QueueEvent::Incomplete) {
-            status = kj::str("Incomplete");
-            break;
-          }
-          KJ_CASE_ONEOF(s, QueueEvent::CompletedSuccessfully) {
-            status = kj::str("Completed Succesfully");
-            break;
-          }
-          KJ_CASE_ONEOF(e, QueueEvent::CompletedWithError) {
-            status = kj::str("Completed with error:", e.error);
-            break;
-          }
-        }
-      }
-      auto& ioContext = incomingRequest->getContext();
-      auto scriptId = ioContext.getWorker().getScript().getId();
-      auto tasks = ioContext.getWaitUntilTasks().trace();
-      if (result == IoContext_IncomingRequest::FinishScheduledResult::TIMEOUT) {
-        KJ_LOG(WARNING, "NOSENTRY queue event hit timeout", scriptId, status, tasks);
-      } else if (result == IoContext_IncomingRequest::FinishScheduledResult::ABORTED) {
-        // Attempt to grab the error message to understand the reason for the abort.
-        // Include a timeout just in case for some unexpected reason the onAbort promise hasn't
-        // already rejected.
-        kj::String abortError;
-        co_await ioContext.onAbort()
-            .catch_([&abortError](kj::Exception&& e) {
-          abortError = kj::str(e);
-        }).exclusiveJoin(ioContext.afterLimitTimeout(1 * kj::MICROSECONDS).then([&abortError]() {
-          abortError = kj::str("onAbort() promise has unexpectedly not yet been rejected");
-        }));
-        KJ_LOG(WARNING, "NOSENTRY queue event aborted", abortError, scriptId, status, tasks);
-      }
-    }
+    auto scheduledResult = co_await incomingRequest->finishScheduled();
+    bool completed = scheduledResult == EventOutcome::OK;
 
     co_return WorkerInterface::CustomEvent::Result{
-      .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU,
+      .outcome = completed ? context.waitUntilStatus() : scheduledResult,
     };
   }
 }

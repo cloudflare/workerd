@@ -251,6 +251,7 @@ wd_cc_library(
     hdrs = ["observer.h"],
     implementation_deps = [
         ":worker-interface",
+        "//src/workerd/util:exception",
     ],
     visibility = ["//visibility:public"],
     deps = [

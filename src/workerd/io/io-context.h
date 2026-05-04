@@ -99,8 +99,8 @@ class IoContext_IncomingRequest final {
   kj::Promise<void> drain();
 
   // Waits for all "waitUntil" tasks to finish, up to the time limit for scheduled events, as
-  // defined by `scheduledTimeoutMs` in `WorkerLimits`. Returns an enum indicating if the
-  // event completed successfully, hit a timeout, or was aborted.
+  // defined by `scheduledTimeoutMs` in `WorkerLimits`. Returns an enum indicating the event outcome
+  // based on whether the given tasks completed successfully, hit a timeout, or were aborted.
   //
   // Note that, while this is similar in some ways to `drain()`, `finishScheduled()` is intended
   // to be called synchronously during request handling, i.e. where a client is waiting for the
@@ -110,8 +110,7 @@ class IoContext_IncomingRequest final {
   // This method is also used by some custom event handlers (see WorkerInterface::CustomEvent) that
   // need similar behavior, as well as the test handler. TODO(cleanup): Rename to something more
   // generic?
-  enum class FinishScheduledResult { COMPLETED, ABORTED, TIMEOUT };
-  kj::Promise<FinishScheduledResult> finishScheduled();
+  kj::Promise<EventOutcome> finishScheduled();
 
   // Access the event loop's current time point. This will remain constant between ticks. This is
   // used to implement IoContext::now(), which should be preferred so that time can be adjusted
@@ -886,6 +885,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void deleteAllActors(kj::Maybe<kj::Exception&> reason) {
     getIoChannelFactory().deleteAllActors(reason);
   }
+
+  // Condemn and terminate JS isolate
+  void abortIsolate(kj::StringPtr reason = nullptr);
 
   // Get an HttpClient to use for Cache API subrequests.
   kj::Own<CacheClient> getCacheClient();

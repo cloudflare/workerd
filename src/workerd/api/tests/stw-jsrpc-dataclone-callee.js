@@ -8,3 +8,19 @@ export class RpcEntrypoint extends WorkerEntrypoint {
     return 'ok';
   }
 }
+
+export default {
+  async fetch() {
+    return new Response('ok', { status: 201 });
+  },
+
+  async queue() {
+    return {
+      outcome: 'ok',
+      retryBatch: { retry: false },
+      ackAll: true,
+      retryMessages: [],
+      explicitAcks: [],
+    };
+  },
+};

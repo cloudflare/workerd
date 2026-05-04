@@ -27,15 +27,18 @@ import {
 } from 'pyodide-internal:python';
 import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
+  fillSnapshotJsModules,
   LOADED_SNAPSHOT_TYPE,
   maybeCollectDedicatedSnapshot,
 } from 'pyodide-internal:snapshot';
 import {
   PythonUserError,
   PythonWorkersInternalError,
+  loadPythonMod,
   reportError,
 } from 'pyodide-internal:util';
 import { PyodideVersion } from 'pyodide-internal:const';
+import { default as introspectionSource } from 'pyodide-internal:introspection.py';
 export { createImportProxy } from 'pyodide-internal:serializeJsModule';
 
 type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
@@ -115,6 +118,7 @@ export async function setDoAnImport(
       throw new PythonWorkersInternalError(message);
     },
   };
+  await fillSnapshotJsModules(doAnImport);
 }
 
 function handleSrcImport(pyodide: Pyodide, e: any): never {
@@ -161,7 +165,7 @@ async function getPyodide(): Promise<Pyodide> {
       return pyodidePromise;
     }
     pyodidePromise = (async function (): Promise<Pyodide> {
-      const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, {
+      const pyodide = await loadPyodide(IS_WORKERD, LOCKFILE, {
         pyodide_entrypoint_helper: get_pyodide_entrypoint_helper(),
         cloudflare_compat_flags: COMPATIBILITY_FLAGS,
       });
@@ -525,25 +529,16 @@ type IntrospectionMod = {
 };
 
 let introspectionModPromise: Promise<IntrospectionMod> | null = null;
-async function loadIntrospectionMod(
-  pyodide: Pyodide
-): Promise<IntrospectionMod> {
-  const introspectionSource = await import('pyodide-internal:introspection.py');
-  const introspectionMod = pyodide.runPython(
-    "from types import ModuleType; ModuleType('introspection')"
-  ) as IntrospectionMod;
-  const decoder = new TextDecoder();
-  pyodide.runPython(decoder.decode(introspectionSource.default), {
-    globals: introspectionMod.__dict__,
-    filename: 'introspection.py',
-  });
-
-  return introspectionMod;
-}
-
 async function getIntrospectionMod(): Promise<IntrospectionMod> {
   if (introspectionModPromise === null) {
-    introspectionModPromise = getPyodide().then(loadIntrospectionMod);
+    introspectionModPromise = (async (): Promise<IntrospectionMod> => {
+      const pyodide = await getPyodide();
+      return loadPythonMod(
+        pyodide,
+        'introspection',
+        introspectionSource
+      ) as IntrospectionMod;
+    })();
   }
 
   return introspectionModPromise;

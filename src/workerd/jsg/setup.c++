@@ -169,7 +169,7 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   v8::V8::SetFlagsFromString("--single-threaded-gc");
 #endif  // __APPLE__
 
-  if (isPredictableModeForTest()) {
+  if (isPredictableModeForTest() || isGcStressModeForTest()) {
     v8::V8::SetFlagsFromString("--expose-gc");
   }
 
@@ -312,6 +312,7 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
       handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
           Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
           static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
+
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
   // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
   // visit the reference again, but it will DCHECK-fail on that second attempt because the

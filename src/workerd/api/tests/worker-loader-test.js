@@ -944,3 +944,108 @@ export let justLoad = {
     }
   },
 };
+
+// Test that abortIsolate() works correctly for dynamic workers.
+// When abortIsolate() is called on a dynamic worker, it should:
+// 1. Terminate the isolate (not the entire process).
+// 2. Cause subsequent lookups by name to reload the isolate from scratch.
+export let abortIsolateDynamic = {
+  async test(ctrl, env, ctx) {
+    // Create a dynamic worker that calls abortIsolate. ping() increments and returns a
+    // module-scoped counter so we can distinguish fresh isolates from reused ones.
+    let loadCount = 0;
+    const getWorkerEntrypoint = () =>
+      env.loader
+        .get('abort-test', () => {
+          loadCount++;
+          return {
+            compatibilityDate: '2025-01-01',
+            compatibilityFlags: ['experimental'],
+            allowExperimental: true,
+            mainModule: 'worker.js',
+            modules: {
+              'worker.js': `
+            import {WorkerEntrypoint, abortIsolate} from "cloudflare:workers";
+            let counter = 0;
+            export class TestEntrypoint extends WorkerEntrypoint {
+              async crash() {
+                abortIsolate('Dynamic worker abort test');
+              }
+              async ping() {
+                return ++counter;
+              }
+            }
+          `,
+            },
+          };
+        })
+        .getEntrypoint('TestEntrypoint');
+
+    let entrypoint = getWorkerEntrypoint();
+    // First, verify the worker works normally. Each ping increments the counter.
+    assert.strictEqual(await entrypoint.ping(), 1);
+    assert.strictEqual(await entrypoint.ping(), 2);
+    assert.strictEqual(loadCount, 1);
+
+    entrypoint = getWorkerEntrypoint();
+    assert.strictEqual(await entrypoint.ping(), 3);
+    assert.strictEqual(loadCount, 1);
+
+    // Now trigger abortIsolate - this should terminate the isolate but not crash the process.
+    await assert.rejects(
+      () => entrypoint.crash(),
+      (err) => {
+        return err.message.startsWith('internal error; reference =');
+      }
+    );
+
+    entrypoint = getWorkerEntrypoint();
+    assert.strictEqual(await entrypoint.ping(), 1);
+    assert.strictEqual(await entrypoint.ping(), 2);
+    assert.strictEqual(loadCount, 2);
+  },
+};
+
+// Test that abortIsolate() works correctly for anonymous dynamic workers.
+// Anonymous workers don't have a name and therefore aren't stored in the loader's map.
+export let abortIsolateDynamicAnonymous = {
+  async test(ctrl, env, ctx) {
+    // Create an anonymous dynamic worker (no name provided to get())
+    let worker = env.loader.get(null, () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        compatibilityFlags: ['experimental'],
+        allowExperimental: true,
+        mainModule: 'worker.js',
+        modules: {
+          'worker.js': `
+            import {WorkerEntrypoint, abortIsolate} from "cloudflare:workers";
+            let counter = 0;
+            export class TestEntrypoint extends WorkerEntrypoint {
+              async crash() {
+                abortIsolate('Anonymous dynamic worker abort test');
+              }
+              async ping() {
+                return ++counter;
+              }
+            }
+          `,
+        },
+      };
+    });
+
+    // First, verify the worker works normally.
+    let entrypoint = worker.getEntrypoint('TestEntrypoint');
+    assert.strictEqual(await entrypoint.ping(), 1);
+    assert.strictEqual(await entrypoint.ping(), 2);
+
+    // Now trigger abortIsolate - this should terminate the isolate
+    // but NOT crash the entire process.
+    await assert.rejects(
+      () => entrypoint.crash(),
+      (err) => {
+        return err.message.startsWith('internal error; reference =');
+      }
+    );
+  },
+};

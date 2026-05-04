@@ -31,7 +31,7 @@ tests/               # JS integration tests (238 entries); each test = .js + .wd
 | Encoding (TextEncoder/Dec)     | `encoding.h`; stream variants in `streams/encoding.h` |
 | Scheduled / Queue / Alarm      | `scheduled.h`, `queue.h`, `actor-state.h`             |
 | HTMLRewriter                   | `html-rewriter.h`                                     |
-| R2 storage                     | `r2-bucket.h`, `r2-admin.h`, `r2-multipart.h`         |
+| R2 storage                     | `r2-bucket.h`, `r2-multipart.h`                       |
 | KV / SyncKV                    | `kv.h`, `sync-kv.h`                                   |
 | SQL (DO)                       | `sql.h`                                               |
 | Body mixin (shared Req/Res)    | `http.h` — `Body` class, `Body::Initializer` OneOf    |

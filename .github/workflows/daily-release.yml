@@ -39,12 +39,17 @@ jobs:
           else
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
-          echo "last_email=$(git show --format="%ae" -s)" >> $GITHUB_OUTPUT
+          if [[ $(git show --format="%ae" -s) == "workers-devprod@cloudflare.com" ]] && \
+             [[ $(git diff-tree --no-commit-id --name-only -r HEAD -- src/workerd/io/release-version.txt) ]]; then
+            echo "last_commit_is_daily_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "last_commit_is_daily_release=false" >> $GITHUB_OUTPUT
+          fi
 
-      # Publish new version if compatibility-date changed and last commit wasn't a daily release
-      # already.
+      # Publish new version if compatibility-date changed and the last commit wasn't already
+      # an automated daily release.
       - name: Commit and push change
-        if: steps.git-check.outputs.changed == 'true' && steps.git-check.outputs.last_email != 'workers-devprod@cloudflare.com'
+        if: steps.git-check.outputs.changed == 'true' && steps.git-check.outputs.last_commit_is_daily_release != 'true'
         run: |
           git config user.email "workers-devprod@cloudflare.com"
           git config user.name "Workers DevProd"

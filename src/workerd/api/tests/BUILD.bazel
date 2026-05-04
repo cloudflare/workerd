@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -916,4 +917,24 @@ wd_test(
 wd_test(
     src = "htmlrewriter-transform-cancel-test.wd-test",
     data = ["htmlrewriter-transform-cancel-test.js"],
+)
+
+sh_test(
+    name = "abortIsolate",
+    size = "small",
+    srcs = ["abortIsolate.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location abortIsolate.wd-test)",
+        "$(location abortIsolate.js)",
+    ],
+    data = [
+        "abortIsolate.js",
+        "abortIsolate.wd-test",
+        "//src/workerd/server:workerd_cross",
+    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )

@@ -12,6 +12,7 @@ def wd_test(
         generate_default_variant = True,
         generate_all_autogates_variant = True,
         generate_all_compat_flags_variant = True,
+        generate_gc_stress_variant = True,
         compat_date = "",
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
@@ -26,6 +27,7 @@ def wd_test(
      generate_default_variant: If True (default), generate the default variant with oldest compat date.
      generate_all_autogates_variant: If True (default), generate @all-autogates variants.
      generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
+     generate_gc_stress_variant: If True (default), generate @gc-stress variant.
      compat_date: If specified, use this compat date for the default variant instead of 2000-01-01.
         Does not affect the @all-compat-flags variant which always uses 2999-12-31.
 
@@ -33,6 +35,7 @@ def wd_test(
      - name@ (if generate_default_variant): oldest compat date (2000-01-01)
      - name@all-compat-flags (if generate_all_compat_flags_variant): newest compat date (2999-12-31)
      - name@all-autogates (if generate_all_autogates_variant): all autogates + oldest compat date
+     - name@gc-stress (if generate_gc_stress_variant): forced GC at every continuation
     """
 
     # Add workerd binary to "data" dependencies.
@@ -127,6 +130,24 @@ def wd_test(
             args = base_args + default_compat_args + ["--all-autogates"],
             python_snapshot_test = python_snapshot_test,
             **kwargs
+        )
+
+    # GC stress variant: forced full GC at every awaitIo continuation.
+    # Uses newest compat date unless the test opted out of @all-compat-flags (meaning
+    # it is compat-date-sensitive), in which case it uses the default compat date.
+    # Tagged off-by-default so it only runs when explicitly requested.
+    if generate_gc_stress_variant:
+        gc_stress_compat = newest_compat_args if generate_all_compat_flags_variant else default_compat_args
+        gc_stress_kwargs = dict(kwargs)
+        gc_stress_tags = gc_stress_kwargs.pop("tags", []) + ["gc-stress", "no-coverage", "off-by-default"]
+        _wd_test(
+            src = src,
+            name = name + "@gc-stress",
+            data = data,
+            args = base_args + gc_stress_compat + ["--gc-stress"],
+            python_snapshot_test = python_snapshot_test,
+            tags = gc_stress_tags,
+            **gc_stress_kwargs
         )
 
 WINDOWS_TEMPLATE = """

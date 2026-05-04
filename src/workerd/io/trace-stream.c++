@@ -185,9 +185,10 @@ jsg::JsValue ToJs(jsg::Lock& js, kj::ArrayPtr<const Attribute> attributes, Strin
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cache) {
-  static const kj::StringPtr keys[] = {TYPE_STR, STATUSCODE_STR};
-  jsg::JsValue values[] = {cache.get(js, FETCH_STR), js.num(info.statusCode)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
+  obj.set(js, STATUSCODE_STR, js.num(info.statusCode));
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache) {
@@ -243,17 +244,20 @@ jsg::JsValue ToJs(jsg::Lock& js, const AlarmEventInfo& info, StringCache& cache)
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const QueueEventInfo& info, StringCache& cache) {
-  static const kj::StringPtr keys[] = {TYPE_STR, QUEUENAME_STR, BATCHSIZE_STR};
-  jsg::JsValue values[] = {
-    cache.get(js, QUEUE_STR), js.str(info.queueName), js.num(info.batchSize)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, QUEUE_STR));
+  obj.set(js, QUEUENAME_STR, js.str(info.queueName));
+  obj.set(js, BATCHSIZE_STR, js.num(info.batchSize));
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const EmailEventInfo& info, StringCache& cache) {
-  static const kj::StringPtr keys[] = {TYPE_STR, MAILFROM_STR, RCPTTO_STR, RAWSIZE_STR};
-  jsg::JsValue values[] = {
-    cache.get(js, EMAIL_STR), js.str(info.mailFrom), js.str(info.rcptTo), js.num(info.rawSize)};
-  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, EMAIL_STR));
+  obj.set(js, MAILFROM_STR, js.str(info.mailFrom));
+  obj.set(js, RCPTTO_STR, js.str(info.rcptTo));
+  obj.set(js, RAWSIZE_STR, js.num(info.rawSize));
+  return obj;
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const TraceEventInfo& info, StringCache& cache) {

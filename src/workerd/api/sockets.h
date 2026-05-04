@@ -32,8 +32,11 @@ struct SocketAddress {
 struct SocketInfo {
   jsg::Optional<kj::String> remoteAddress;
 
-  // The local address is specified by the spec but we don't implement it.
-  // It will always remain empty.
+  // The local address — i.e. the address on this side of the socket. For outbound sockets created
+  // via `connect()`, we don't have a useful value to provide and leave it empty. For inbound
+  // sockets delivered to a worker's `connect(socket)` handler, this is populated with the CONNECT
+  // authority (the "host:port" string the caller passed to `fetcher.connect(...)`), since from the
+  // handler's perspective that is the address the peer asked to connect to on this end.
   jsg::Optional<kj::String> localAddress;
   JSG_STRUCT(remoteAddress, localAddress);
 };
@@ -61,6 +64,7 @@ class Socket: public jsg::Object {
       IoContext& context,
       kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
       kj::Maybe<kj::String> remoteAddress,
+      kj::Maybe<kj::String> localAddress,
       jsg::Ref<ReadableStream> readableParam,
       jsg::Ref<WritableStream> writable,
       jsg::PromiseResolverPair<void> closedPrPair,
@@ -80,6 +84,7 @@ class Socket: public jsg::Object {
         closedPromise(kj::mv(closedPrPair.promise)),
         options(kj::mv(options)),
         remoteAddress(kj::mv(remoteAddress)),
+        localAddress(kj::mv(localAddress)),
         secureTransport(secureTransport),
         domain(kj::mv(domain)),
         isDefaultFetchPort(isDefaultFetchPort),
@@ -201,6 +206,7 @@ class Socket: public jsg::Object {
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
   jsg::Optional<SocketOptions> options;
   kj::Maybe<kj::String> remoteAddress;
+  kj::Maybe<kj::String> localAddress;
   // Set to true when the socket is upgraded to a secure one.
   bool upgraded = false;
   SecureTransportKind secureTransport;
@@ -246,6 +252,7 @@ class Socket: public jsg::Object {
 jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Own<kj::AsyncIoStream> connection,
     kj::Maybe<kj::String> remoteAddress,
+    kj::Maybe<kj::String> localAddress,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
     SecureTransportKind secureTransport,

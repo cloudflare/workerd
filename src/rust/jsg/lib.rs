@@ -598,28 +598,18 @@ impl Lock {
 
     /// Signals that JavaScript execution on this isolate should be terminated immediately.
     ///
-    /// Calls `IsolateBase::requestTermination()`, which sets the `terminationRequested` flag
-    /// (checked by C++ iterator callbacks) and calls `v8::Isolate::TerminateExecution()` so
-    /// V8 raises an uncatchable termination exception that unwinds all JS call frames back to
-    /// the top-level C++ entry point.
+    /// Calls `IsolateBase::TerminateExecution()`, so V8 raises an
+    /// uncatchable termination exception that unwinds all JS call frames back
+    /// to the top-level C++ entry point.
     ///
     /// This mirrors what C++ `KJ_ASSERT` / `KJ_FAIL_ASSERT` effectively do when they fire
     /// inside an isolate context: they abort further JS execution rather than letting the
     /// isolate continue in a potentially inconsistent state.
-    pub fn request_termination(&mut self) {
+    pub fn terminate_execution(&mut self) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
-            v8::ffi::isolate_request_termination(self.isolate().as_ffi());
+            v8::ffi::isolate_terminate_execution(self.isolate().as_ffi());
         }
-    }
-
-    /// Returns `true` if `request_termination()` has been called on this isolate.
-    ///
-    /// Mirrors `IsolateBase::isTerminationRequested()`. Useful in tests and
-    /// post-panic cleanup to confirm that the isolate will not execute further JS.
-    pub fn is_termination_requested(&self) -> bool {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        unsafe { v8::ffi::isolate_is_termination_requested(self.isolate().as_ffi()) }
     }
 }
 
@@ -795,7 +785,7 @@ unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]
 /// `"Error: internal error; reference = <id>"` exception with a unique
 /// reference ID, keeping the internal message out of JS-visible output.
 ///
-/// After logging the error, `request_termination()` is called so that V8 raises
+/// After logging the error, `terminate_execution()` is called so that V8 raises
 /// an uncatchable termination exception and unwinds all JS call frames. This
 /// mirrors what C++ `KJ_ASSERT` effectively does inside an isolate context and
 /// closes the window where a panicked resource with partially-mutated `jsg::Rc`
@@ -816,6 +806,6 @@ pub fn catch_panic<F: FnOnce()>(lock: &mut Lock, f: F) {
             "<non-string panic payload>"
         };
         lock.throw_internal_error(msg);
-        lock.request_termination();
+        lock.terminate_execution();
     }
 }

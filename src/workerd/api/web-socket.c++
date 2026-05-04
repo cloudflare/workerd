@@ -782,7 +782,14 @@ void WebSocket::serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) {
 void WebSocket::setAutoResponseStatus(
     kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) {
   autoResponseTimestamp = time;
-  autoResponseStatus.ongoingAutoResponse = kj::mv(autoResponsePromise);
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
+    autoResponseStatus.ongoingAutoResponse.emplace(
+        context.addObject(kj::heap(kj::mv(autoResponsePromise))));
+  } else {
+    // Called outside an IoContext (e.g. from the hibernation manager's readLoop).
+    // Use plain kj::Own; the caller manages the promise lifecycle.
+    autoResponseStatus.ongoingAutoResponse.emplace(kj::heap(kj::mv(autoResponsePromise)));
+  }
 }
 
 kj::Maybe<kj::Date> WebSocket::getAutoResponseTimestamp() {
@@ -860,9 +867,14 @@ kj::Promise<void> WebSocket::sendAutoResponse(kj::String message, kj::WebSocket&
     autoResponseStatus.pendingAutoResponseDeque.push(kj::mv(message));
   } else if (!autoResponseStatus.isClosed) {
     auto p = ws.send(message).fork();
-    autoResponseStatus.ongoingAutoResponse = p.addBranch();
+    KJ_IF_SOME(context, IoContext::tryCurrent()) {
+      autoResponseStatus.ongoingAutoResponse.emplace(context.addObject(kj::heap(p.addBranch())));
+    } else {
+      // Called outside an IoContext (e.g. from the hibernation manager's readLoop).
+      autoResponseStatus.ongoingAutoResponse.emplace(kj::heap(p.addBranch()));
+    }
     co_await p;
-    autoResponseStatus.ongoingAutoResponse = kj::READY_NOW;
+    autoResponseStatus.ongoingAutoResponse = kj::none;
   }
 }
 
@@ -928,8 +940,17 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
   // If we have a ongoingAutoResponse, we must co_await it here because there's a ws.send()
   // in progress. Otherwise there can occur ws.send() race problems.
-  co_await autoResponse.ongoingAutoResponse;
-  autoResponse.ongoingAutoResponse = kj::READY_NOW;
+  KJ_IF_SOME(promiseHolder, autoResponse.ongoingAutoResponse) {
+    KJ_SWITCH_ONEOF(promiseHolder) {
+      KJ_CASE_ONEOF(ioOwned, IoOwn<kj::Promise<void>>) {
+        co_await *ioOwned;
+      }
+      KJ_CASE_ONEOF(owned, kj::Own<kj::Promise<void>>) {
+        co_await *owned;
+      }
+    }
+    autoResponse.ongoingAutoResponse = kj::none;
+  }
 
   do {
     while (outgoingMessages.size() > 0) {

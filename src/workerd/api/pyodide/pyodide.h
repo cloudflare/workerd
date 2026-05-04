@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -190,6 +189,10 @@ class PyodideMetadataReader: public jsg::Object {
     return state->createBaselineSnapshot;
   }
 
+  // Returns whether the python-abort-isolate-on-fatal-error autogate is enabled. When true, the
+  // Python on_fatal handler should call abortIsolate() to terminate the isolate after reporting.
+  bool shouldAbortIsolateOnFatalError();
+
   kj::StringPtr getMainModule() {
     return state->mainModule;
   }
@@ -269,6 +272,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
+    JSG_METHOD(shouldAbortIsolateOnFatalError);
     JSG_METHOD(getTransitiveRequirements);
     JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
@@ -522,22 +526,6 @@ class SimplePythonLimiter: public jsg::Object {
   }
 };
 
-class SetupEmscripten: public jsg::Object {
- public:
-  SetupEmscripten(EmscriptenRuntime emscriptenRuntime)
-      : emscriptenRuntime(kj::mv(emscriptenRuntime)) {};
-
-  jsg::JsValue getModule(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(SetupEmscripten) {
-    JSG_METHOD(getModule);
-  }
-
- private:
-  EmscriptenRuntime emscriptenRuntime;
-  void visitForGc(jsg::GcVisitor& visitor);
-};
-
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
 // Returns a list of filenames we need to fetch according to the pyodide-lock.json file
@@ -554,8 +542,7 @@ kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr fi
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
       api::pyodide::DisabledInternalJaeger, api::pyodide::SimplePythonLimiter,                     \
-      api::pyodide::WorkerFatalReporter, api::pyodide::MemorySnapshotResult,                       \
-      api::pyodide::SetupEmscripten
+      api::pyodide::WorkerFatalReporter, api::pyodide::MemorySnapshotResult
 
 }  // namespace workerd::api::pyodide
 

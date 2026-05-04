@@ -729,17 +729,6 @@ class IteratorBase: public Object {
 
   Next nextImpl(Lock& js, NextSignature nextFunc) {
     KJ_IF_SOME(value, nextFunc(js, state)) {
-      // When V8 builtins like Array.from() or spread syntax iterate a C++ iterator,
-      // the loop runs in C++ without JS back-edge interrupt checks. If
-      // TerminateExecution() was called (e.g. by the near-heap-limit callback), the
-      // interrupt won't be processed until V8 next checks the stack guard, which may
-      // never happen in the builtin loop. Check for a termination request here and
-      // throw a JS exception so V8 sees it on the callback return path.
-      // See https://crbug.com/v8/14681 for the same class of bug in Intl.Segmenter.
-      if (js.isTerminationRequested()) {
-        js.v8Isolate->ThrowError(v8Str(js.v8Isolate, "Isolate terminated (OOM?)"_kj));
-        throw JsExceptionThrown();
-      }
       return Next{.done = false, .value = kj::mv(value)};
     }
     return Next{

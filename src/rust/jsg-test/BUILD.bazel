@@ -37,6 +37,9 @@ wd_rust_crate(
         "lib.rs",
     ],
     test_proc_macro_deps = ["//src/rust/jsg-macros"],
+    # The crate has hundreds of subtests and uses RUST_TEST_THREADS=1 (serial),
+    # so the default "medium" (15s) timeout is too tight under CI load.
+    test_size = "large",
     visibility = ["//visibility:public"],
     deps = [
         ":ffi-impl",

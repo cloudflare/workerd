@@ -721,10 +721,10 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
                                               kj::Own<IoContext::IncomingRequest> request)
       -> kj::Promise<WorkerInterface::ScheduledResult> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() waitForFinished()");
-    auto result = co_await request->finishScheduled();
-    bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
+    auto scheduledResult = co_await request->finishScheduled();
+    bool completed = scheduledResult == EventOutcome::OK;
     co_return WorkerInterface::ScheduledResult{.retry = context.shouldRetryScheduled(),
-      .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU};
+      .outcome = completed ? context.waitUntilStatus() : scheduledResult};
   };
 
   auto promise = waitForFinished(context, kj::mv(incomingRequest));
@@ -899,9 +899,9 @@ kj::Promise<bool> WorkerEntrypoint::test() {
   static auto constexpr waitForFinished =
       [](IoContext& context, kj::Own<IoContext::IncomingRequest> request) -> kj::Promise<bool> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() waitForFinished()");
-    auto result = co_await request->finishScheduled();
+    auto scheduledResult = co_await request->finishScheduled();
 
-    if (result == IoContext_IncomingRequest::FinishScheduledResult::ABORTED) {
+    if (scheduledResult == EventOutcome::EXCEPTION) {
       // If the test handler throws an exception (without aborting - just a regular exception),
       // then `outcome` ends up being EventOutcome::EXCEPTION, which causes us to return false.
       // But in that case we are separately relying on the exception being logged as an uncaught
@@ -919,8 +919,8 @@ kj::Promise<bool> WorkerEntrypoint::test() {
     // (enough so that we can get logs/spans from them in wd-tests), so this is not needed in
     // practice.
 
-    bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
-    auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
+    bool completed = scheduledResult == EventOutcome::OK;
+    auto outcome = completed ? context.waitUntilStatus() : scheduledResult;
     co_return outcome == EventOutcome::OK;
   };
 

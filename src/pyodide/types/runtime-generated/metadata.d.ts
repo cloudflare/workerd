@@ -12,12 +12,14 @@ declare namespace MetadataReader {
     enable_python_external_sdk?: boolean;
     python_check_rng_state?: boolean;
     python_workflows_implicit_dependencies?: boolean;
+    python_process_pth_files?: boolean;
   }
 
   const isWorkerd: () => boolean;
   const isTracing: () => boolean;
   const shouldSnapshotToDisk: () => boolean;
   const isCreatingBaselineSnapshot: () => boolean;
+  const shouldAbortIsolateOnFatalError: () => boolean;
   const getRequirements: () => string[];
   const getMainModule: () => string;
   const hasMemorySnapshot: () => boolean;

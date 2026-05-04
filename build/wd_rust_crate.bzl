@@ -58,6 +58,7 @@ def wd_rust_crate(
         test_tags = [],
         test_deps = [],
         test_proc_macro_deps = [],
+        test_size = "medium",
         cxx_bridge_deps = [],
         cxx_bridge_tags = [],
         cxx_bridge_local_defines = [],
@@ -78,6 +79,8 @@ def wd_rust_crate(
         test_tags: additional test tags.
         test_deps: test-only dependencies.
         test_proc_macro_deps: test-only proc_macro dependencies.
+        test_size: Bazel test size (default "medium"); affects test timeout. Use "large" for
+            crates with many subtests, since RUST_TEST_THREADS=1 forces serial execution.
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
     """
@@ -155,6 +158,7 @@ def wd_rust_crate(
             # our tests are usually very heavy and do not support concurrent invocation
             "RUST_TEST_THREADS": "1",
         } | test_env,
+        size = test_size,
         tags = test_tags + ["no-coverage"],
         crate_features = crate_features,
         deps = test_deps,

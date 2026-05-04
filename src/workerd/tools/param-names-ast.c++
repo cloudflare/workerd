@@ -24,7 +24,6 @@
 #include <workerd/api/messagechannel.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/queue.h>
-#include <workerd/api/r2-admin.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>

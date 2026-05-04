@@ -12,7 +12,7 @@ const calleeWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "stw-jsrpc-dataclone-callee.js")
   ],
-  compatibilityFlags = ["nodejs_compat", "experimental", "rpc"],
+  compatibilityFlags = ["nodejs_compat", "experimental", "rpc", "service_binding_extra_handlers"],
   streamingTails = ["stw"],
 );
 
@@ -20,7 +20,7 @@ const tailWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "stw-jsrpc-dataclone-tail.js")
   ],
-  compatibilityFlags = ["nodejs_compat", "experimental", "rpc"],
+  compatibilityFlags = ["nodejs_compat", "experimental", "rpc", "service_binding_extra_handlers"],
   bindings = [
     (name = "CALLEE", service = "callee"),
     (name = "CALLEE_RPC", service = (name = "callee", entrypoint = "RpcEntrypoint")),

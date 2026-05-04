@@ -230,6 +230,12 @@
               },
               "freeze_version": {
                 "type": "string"
+              },
+              "patches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [

@@ -130,6 +130,10 @@ struct TestFixture {
     virtual ~DummyIoChannelFactory() = default;
     DummyIoChannelFactory(TimerChannel& timer): timer(timer) {}
 
+    void abortIsolate(kj::StringPtr reason) override {
+      KJ_FAIL_ASSERT("no abortIsolate");
+    }
+
     kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
       KJ_FAIL_ASSERT("no subrequests");
     }

@@ -19,7 +19,6 @@
 #include <kj/mutex.h>
 #include <kj/vector.h>
 
-#include <atomic>
 #include <typeindex>
 
 namespace workerd::jsg {
@@ -104,20 +103,9 @@ class IsolateBase {
   virtual kj::Maybe<v8::Local<v8::Object>> deserialize(
       Lock& js, uint tag, Deserializer& deserializer) = 0;
 
-  // Calls V8's TerminateExecution(), cancelling JavaScript execution. Safe to call across
-  // threads, without holding the lock.
+  // Immediately cancels JavaScript execution in this isolate, causing an uncatchable exception to
+  // be thrown. Safe to call across threads, without holding the lock.
   void terminateExecution() const;
-
-  // Like terminateExecution(), but also sets a flag that C++ iterator callbacks can check.
-  // V8 builtins like Array.from() loop over C++ callbacks without JS back-edge interrupt
-  // checks, so V8's TerminateExecution() alone would be ignored until the iteration completes.
-  void requestTermination() {
-    terminationRequested = true;
-    terminateExecution();
-  }
-  bool isTerminationRequested() const {
-    return terminationRequested;
-  }
 
   using Logger = Lock::Logger;
   inline void setLoggerCallback(kj::Badge<Lock>, kj::Function<Logger>&& logger) {
@@ -404,7 +392,6 @@ class IsolateBase {
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
   bool extraMicrotaskCheckpointRequested = false;
-  std::atomic<bool> terminationRequested = false;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;

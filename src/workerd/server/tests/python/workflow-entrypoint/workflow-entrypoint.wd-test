@@ -9,7 +9,7 @@ const config :Workerd.Config = (
 );
 
 const pyWorker :Workerd.Worker = (
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "python_workflows_implicit_dependencies"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "python_workflows_implicit_dependencies", "workflows_step_rollback"],
 
   modules = [
     (name = "workflow.py", pythonModule = embed "workflow.py"),
@@ -21,7 +21,7 @@ const pyWorker :Workerd.Worker = (
 );
 
 const pyWorkerOld :Workerd.Worker = (
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "no_python_workflows_implicit_dependencies"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows", "no_python_workflows_implicit_dependencies", "workflows_step_rollback"],
 
   modules = [
     (name = "workflow-old.py", pythonModule = embed "workflow-old.py"),

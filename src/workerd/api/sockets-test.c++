@@ -73,6 +73,10 @@ struct ConnectTestIoChannelFactory final: public TestFixture::DummyIoChannelFact
     return kj::heap<MockConnectWorkerInterface>(connectCalled, headerTable, pipeEnd);
   }
 
+  void abortIsolate(kj::StringPtr reason) override {
+    JSG_FAIL_REQUIRE(Error, "abortIsolate() is not implemented for this runtime.");
+  }
+
   bool& connectCalled;
   kj::HttpHeaderTable& headerTable;
   kj::Maybe<kj::AsyncIoStream&>& pipeEnd;

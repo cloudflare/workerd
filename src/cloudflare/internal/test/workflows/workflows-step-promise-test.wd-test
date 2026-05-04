@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "workflows-step-promise-test",
+      worker = .testWorker,
+    ),
+    ( name = "workflows",
+      worker = .workflowsWorker,
+    ),
+  ]
+);
+
+const testWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "workflows-step-promise-test.js"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental", "workflows_step_rollback"],
+  bindings = [
+    (name = "ForwardingWorkflow", service = (name = "workflows", entrypoint = "ForwardingWorkflow")),
+    (name = "ErrorGuardsWorkflow", service = (name = "workflows", entrypoint = "ErrorGuardsWorkflow")),
+    (name = "ErrorPropagationWorkflow", service = (name = "workflows", entrypoint = "ErrorPropagationWorkflow")),
+    (name = "RollbackCallableWorkflow", service = (name = "workflows", entrypoint = "RollbackCallableWorkflow")),
+  ],
+);
+
+const workflowsWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "workflows-step-promise-workflows.js"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental", "workflows_step_rollback"],
+);

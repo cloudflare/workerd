@@ -995,7 +995,7 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
   // though, we don't want to awaitIo() since it blocks hibernation in actors.
 
   KJ_IF_SOME(promise, rpcAbortPromise) {
-    IoContext::current().awaitIo(js, kj::mv(*promise), [this](jsg::Lock& js) {
+    IoContext::current().awaitIo(js, kj::mv(*promise), [this, self = JSG_THIS](jsg::Lock& js) {
       KJ_IF_SOME(r, deserializePendingReason(js)) {
         triggerAbort(js, r);
       }
