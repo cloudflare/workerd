@@ -507,8 +507,6 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
   uint16_t typeId;
 
   kj::Maybe<kj::String> wrapperModule;
-
-  class ServerTopLevelMembrane;
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES                                                                \

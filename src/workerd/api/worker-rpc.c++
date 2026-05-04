@@ -1897,61 +1897,6 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   }
 };
 
-// A membrane which wraps the top-level JsRpcTarget of an RPC session on the server side. The
-// purpose of this membrane is to allow only a single top-level call, which then gets a
-// `CompletionMembrane` wrapped around it. Note that we can't just wrap `CompletionMembrane` around
-// the top-level object directly because that capability will not be dropped until the RPC session
-// completes, since it is actually returned as the result of the top-level RPC call, but that
-// call doesn't return until the `CompletionMembrane` says all capabilities were dropped, so this
-// would create a cycle.
-class JsRpcSessionCustomEvent::ServerTopLevelMembrane final: public capnp::MembranePolicy,
-                                                             public kj::Refcounted {
- public:
-  explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
-      : completionMembrane(kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))) {}
-
-  ~ServerTopLevelMembrane() noexcept(false) {
-    KJ_IF_SOME(cm, completionMembrane) {
-      cm->reject(
-          KJ_EXCEPTION(DISCONNECTED, "JS RPC session canceled without calling an RPC method."));
-    }
-  }
-
-  kj::Maybe<capnp::Capability::Client> inboundCall(
-      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
-    if (interfaceId == capnp::typeId<rpc::JsRpcTarget>()) {
-      // JsRpcTarget::call()
-      auto cm = kj::mv(JSG_REQUIRE_NONNULL(
-          completionMembrane, Error, "Only one RPC method call is allowed on this object."));
-      completionMembrane = kj::none;
-      return capnp::membrane(kj::mv(target), kj::mv(cm));
-    } else if (interfaceId == capnp::typeId<rpc::JsValue::ExternalPusher>()) {
-      // ExternalPusher methods
-      //
-      // It's important that we use the same membrane that we'll use for call(), so that
-      // capabilities returned by the ExternalPusher will be wrapped in the membrane, hence they
-      // will be unwrapped when passed back through the membrane again to call().
-      auto& cm = *JSG_REQUIRE_NONNULL(
-          completionMembrane, Error, "getExternalPusher() must be called before call()");
-      return capnp::membrane(kj::mv(target), kj::addRef(cm));
-    } else {
-      KJ_FAIL_ASSERT("unkown interface ID for JsRpcTarget");
-    }
-  }
-
-  kj::Maybe<capnp::Capability::Client> outboundCall(
-      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
-    KJ_FAIL_ASSERT("ServerTopLevelMembrane shouldn't have outgoing capabilities");
-  }
-
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
-  }
-
- private:
-  kj::Maybe<kj::Own<CompletionMembrane>> completionMembrane;
-};
-
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
@@ -1976,17 +1921,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
   try {
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
-    kj::Own<capnp::MembranePolicy> topMembrane;
-    if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_SESSION_HANDLE)) {
-      // When using the session handle approach, we don't need the convoluted
-      // `ServerTopLevelMembrane` because the the top-level `JsRpcTarget` is not unnaturally held
-      // open, so it can be treated the same as any other capability in the session.
-      topMembrane = kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller));
-    } else {
-      topMembrane = kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller));
-    }
-
-    capFulfiller->fulfill(capnp::membrane(revcableTarget.getClient(), kj::mv(topMembrane)));
+    capFulfiller->fulfill(capnp::membrane(
+        revcableTarget.getClient(), kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))));
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
@@ -2083,26 +2019,19 @@ kj::Promise<void> JsRpcSessionCustomEvent::receiveRpc(JsRpcSessionContext contex
 
   auto cap = customEvent->getCap();
 
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_SESSION_HANDLE)) {
-    auto promise = worker.customEvent(kj::mv(customEvent));
+  auto promise = worker.customEvent(kj::mv(customEvent));
 
-    auto results = context.getResults(capnp::MessageSize{4, 2});
-    results.setTopLevel(kj::mv(cap));
+  auto results = context.getResults(capnp::MessageSize{4, 2});
+  results.setTopLevel(kj::mv(cap));
 
-    // Set the returned session capability to resolve to a null capability when the event is
-    // complete. This also neatly arranges that if the session is dropped early, the
-    // `customEvent()` promise is canceled, thus canceling the session.
-    results.setSession(promise.then([ownWorker = kj::mv(ownWorker)](auto outcome) {
-      return rpc::JsRpcSession::Client(nullptr);
-    }));
-  } else {
-    capnp::PipelineBuilder<rpc::EventDispatcher::JsRpcSessionResults> pipelineBuilder;
-    pipelineBuilder.setTopLevel(cap);
-    context.setPipeline(pipelineBuilder.build());
-    context.getResults().setTopLevel(kj::mv(cap));
+  // Set the returned session capability to resolve to a null capability when the event is
+  // complete. This also neatly arranges that if the session is dropped early, the
+  // `customEvent()` promise is canceled, thus canceling the session.
+  results.setSession(promise.then([ownWorker = kj::mv(ownWorker)](auto outcome) {
+    return rpc::JsRpcSession::Client(nullptr);
+  }));
 
-    co_await worker.customEvent(kj::mv(customEvent));
-  }
+  return kj::READY_NOW;
 }
 
 };  // namespace workerd::api
