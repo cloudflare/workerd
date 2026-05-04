@@ -136,10 +136,10 @@ bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
 # workerd-cxx
 http.archive(
     name = "workerd-cxx",
-    sha256 = "979f8ffc98f8a8577264167f4c7d07ec08ec790dd085110dadbebc476a1d1d7f",
-    strip_prefix = "cloudflare-workerd-cxx-5b4e067",
+    sha256 = "fbba1b102b2c4fe879b2f610d7e94ceda6beceac3d57a27196482ce3e9536b50",
+    strip_prefix = "cloudflare-workerd-cxx-c677ef5",
     type = "tgz",
-    url = "https://github.com/cloudflare/workerd-cxx/tarball/5b4e067b5180b6a791443ef16b0068b57bbc88bd",
+    url = "https://github.com/cloudflare/workerd-cxx/tarball/c677ef53092a8425ce9f059074441fdb1b7c1ed3",
 )
 use_repo(http, "workerd-cxx")
 

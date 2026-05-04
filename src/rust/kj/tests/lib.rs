@@ -62,7 +62,7 @@ impl HttpService for ProxyHttpService {
         url: &'a [u8],
         headers: HttpHeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
-        response: Pin<&'a mut HttpServiceResponse>,
+        response: HttpServiceResponse<'a>,
     ) -> Result<()> {
         self.target
             .request(method, url, headers, request_body, response)
@@ -75,7 +75,7 @@ impl HttpService for ProxyHttpService {
         host: &'a [u8],
         headers: HttpHeadersRef<'a>,
         connection: Pin<&'a mut AsyncIoStream>,
-        response: Pin<&'a mut ConnectResponse>,
+        response: ConnectResponse<'a>,
         settings: HttpConnectSettings<'a>,
     ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<()>> + 'b>>
     where

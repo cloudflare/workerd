@@ -139,6 +139,7 @@ impl Wrapper {
         request_body: Pin<&'a mut bridge::AsyncInputStream>,
         response: Pin<&'a mut bridge::HttpServiceResponse>,
     ) -> Result<()> {
+        let response = crate::HttpServiceResponse::from(response);
         self.worker
             .request(method, url, headers.into(), request_body, response)
             .await?;
@@ -153,6 +154,7 @@ impl Wrapper {
         response: Pin<&'a mut bridge::ConnectResponse>,
         settings: HttpConnectSettings<'a>,
     ) -> Result<()> {
+        let response = crate::ConnectResponse::from(response);
         self.worker
             .connect(host, headers.into(), connection, response, settings)
             .await?;

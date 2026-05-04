@@ -19,11 +19,26 @@ using AsyncInputStream = kj::AsyncInputStream;
 using AsyncOutputStream = kj::AsyncOutputStream;
 using AsyncIoStream = kj::AsyncIoStream;
 
+inline kj::Promise<void> async_output_stream_write(
+    AsyncOutputStream& stream, ::rust::Slice<const kj::byte> buffer) {
+  return stream.write(kj::from<kj_rs::Rust>(buffer));
+}
+
+inline kj::Promise<void> async_output_stream_when_write_disconnected(AsyncOutputStream& stream) {
+  return stream.whenWriteDisconnected();
+}
+
 // --- kj::HttpHeaders ffi
 
 using BuiltinIndicesEnum = kj::HttpHeaders::BuiltinIndicesEnum;
+using HttpHeaderTable = kj::HttpHeaderTable;
 using HttpHeaders = kj::HttpHeaders;
 using HttpHeaderId = kj::HttpHeaderId;
+
+inline kj::Own<kj::HttpHeaders> new_http_headers(const HttpHeaderTable& table) {
+  // There is no C++ stack frame to hold the new instance, so we heap allocate it for Rust.
+  return kj::heap<kj::HttpHeaders>(table);
+}
 
 inline kj::Own<kj::HttpHeaders> clone_shallow(const HttpHeaders& headers) {
   // there is no c++ stack frame to hold the new instance,
@@ -95,6 +110,29 @@ using HttpMethod = kj::HttpMethod;
 using HttpService = kj::HttpService;
 using HttpServiceResponse = kj::HttpService::Response;
 using TlsStarterCallback = kj::TlsStarterCallback;
+
+inline kj::Own<AsyncOutputStream> response_send(HttpServiceResponse& response,
+    uint32_t statusCode,
+    ::rust::Str statusText,
+    const HttpHeaders& headers,
+    kj::Maybe<uint64_t> expectedBodySize) {
+  return response.send(statusCode, kj::str(statusText), headers, expectedBodySize);
+}
+
+inline void connect_response_accept(ConnectResponse& response,
+    uint32_t statusCode,
+    ::rust::Str statusText,
+    const HttpHeaders& headers) {
+  response.accept(statusCode, kj::str(statusText), headers);
+}
+
+inline kj::Own<AsyncOutputStream> connect_response_reject(ConnectResponse& response,
+    uint32_t statusCode,
+    ::rust::Str statusText,
+    const HttpHeaders& headers,
+    kj::Maybe<uint64_t> expectedBodySize) {
+  return response.reject(statusCode, kj::str(statusText), headers, expectedBodySize);
+}
 
 inline kj::Promise<void> request(HttpService& service,
     HttpMethod method,

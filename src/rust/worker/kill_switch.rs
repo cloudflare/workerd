@@ -59,7 +59,7 @@ impl kj::http::HttpService for Worker {
         _url: &'a [u8],
         _headers: HttpHeadersRef<'a>,
         _request_body: Pin<&'a mut AsyncInputStream>,
-        _response: Pin<&'a mut HttpServiceResponse>,
+        _response: HttpServiceResponse<'a>,
     ) -> Result<()> {
         Self::error(file!(), line!())
     }
@@ -69,7 +69,7 @@ impl kj::http::HttpService for Worker {
         _host: &'a [u8],
         _headers: HttpHeadersRef<'a>,
         _connection: Pin<&'a mut AsyncIoStream>,
-        _response: Pin<&'a mut ConnectResponse>,
+        _response: ConnectResponse<'a>,
         _settings: HttpConnectSettings<'a>,
     ) -> Result<()> {
         Self::error(file!(), line!())
