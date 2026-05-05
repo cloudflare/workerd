@@ -252,6 +252,10 @@ template <typename T>
 v8::Local<v8::String> v8Str(v8::Isolate* isolate,
     kj::ArrayPtr<T> ptr,
     v8::NewStringType newType = v8::NewStringType::kNormal) {
+  // The V8 string creation APIs take int for the length parameter. Guard against
+  // size_t values that would overflow int and be misinterpreted (negative values
+  // cause V8 to fall back to strlen, leading to heap-buffer-overflow reads).
+  KJ_REQUIRE(ptr.size() <= v8::String::kMaxLength, "String is too long for a V8 string");
   if constexpr (kj::isSameType<char16_t, T>()) {
     return check(v8::String::NewFromTwoByte(
         isolate, reinterpret_cast<uint16_t*>(ptr.begin()), newType, ptr.size()));
@@ -280,6 +284,7 @@ inline v8::Local<v8::String> v8Str(v8::Isolate* isolate,
 inline v8::Local<v8::String> v8StrFromLatin1(v8::Isolate* isolate,
     kj::ArrayPtr<const kj::byte> ptr,
     v8::NewStringType newType = v8::NewStringType::kNormal) {
+  KJ_REQUIRE(ptr.size() <= v8::String::kMaxLength, "String is too long for a V8 string");
   return check(v8::String::NewFromOneByte(isolate, ptr.begin(), newType, ptr.size()));
 }
 

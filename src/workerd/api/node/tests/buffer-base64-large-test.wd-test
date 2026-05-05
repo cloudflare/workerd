@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "buffer-base64-large-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "buffer-base64-large-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat_v2"],
+      )
+    ),
+  ],
+);
