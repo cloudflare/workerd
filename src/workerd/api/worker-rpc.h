@@ -493,6 +493,24 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
       capnp::ByteStreamFactory& byteStreamFactory,
       rpc::EventDispatcher::Client dispatcher) override;
 
+  // Same as `EventDispatcher::Server::JsRpcSessionContext` -- but that typedef is `protected`.
+  using JsRpcSessionContext = capnp::CallContext<rpc::EventDispatcher::JsRpcSessionParams,
+      rpc::EventDispatcher::JsRpcSessionResults>;
+
+  // Common implemnetation of EventDispatcher::jsRpcSession().
+  static kj::Promise<void> receiveRpc(JsRpcSessionContext context,
+      kj::Own<WorkerInterface> worker,
+      kj::Maybe<kj::String> wrapperModule = kj::none) {
+    auto& ref = *worker;
+    return receiveRpc(context, ref, kj::mv(worker), kj::mv(wrapperModule));
+  }
+
+  // Sometimes callers need to pass an `Own<void>` owning some parent object of `worker`.
+  static kj::Promise<void> receiveRpc(JsRpcSessionContext context,
+      WorkerInterface& worker,
+      kj::Own<void> ownWorker,
+      kj::Maybe<kj::String> wrapperModule = kj::none);
+
   uint16_t getType() override {
     return typeId;
   }

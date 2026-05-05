@@ -273,7 +273,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
 
       // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
       // search-and-replace across your whole site and you forgot that it'll apply to images too.
-      // When running in the fiddle, let's warn the developer if they do this.
+      // When running with a warning handler, let's warn the developer if they do this.
       auto& context = IoContext::current();
       if (context.hasWarningHandler()) {
         KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {

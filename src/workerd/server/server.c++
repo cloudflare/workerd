@@ -210,8 +210,7 @@ struct Server::GlobalContext {
             server.entropySource,
             headerTableBuilder,
             httpOverCapnpFactory,
-            byteStreamFactory,
-            false /* isFiddle -- TODO(beta): support */),
+            byteStreamFactory),
         headerTable(headerTableBuilder.getFutureTable()) {}
 };
 
@@ -4306,7 +4305,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           return kj::heap<IoChannelCapTableEntry>(
               IoChannelCapTableEntry::SUBREQUEST, channelNumber);
         } else if (auto channel = dynamic_cast<ActorClass*>(entry.get())) {
-          uint channelNumber = subrequestChannels.size();
+          uint channelNumber = actorClassChannels.size();
           actorClassChannels.add(FutureActorClassChannel{
             .designator = kj::addRef(*channel),
             .errorContext = kj::str("Worker's env"),
@@ -5277,17 +5276,7 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     }
 
     kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
-      auto customEvent = kj::heap<api::JsRpcSessionCustomEvent>(
-          api::JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
-
-      auto cap = customEvent->getCap();
-      capnp::PipelineBuilder<JsRpcSessionResults> pipelineBuilder;
-      pipelineBuilder.setTopLevel(cap);
-      context.setPipeline(pipelineBuilder.build());
-      context.getResults().setTopLevel(kj::mv(cap));
-
-      auto worker = getWorker();
-      return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
+      return api::JsRpcSessionCustomEvent::receiveRpc(context, getWorker());
     }
 
     kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {

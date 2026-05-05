@@ -743,6 +743,15 @@ interface JsRpcTarget extends(JsValue.ExternalPusher) $Cxx.allowCancellation {
   # Runs a Worker/DO's RPC method.
 }
 
+interface JsRpcSession {
+  # Represents an ongoing JSRPC session. To cancel the session (revoking all capabilities), drop
+  # this object. The `JsRpcSession` object will resolve itself to a null capability when the
+  # session is complete (all stubs have been droppped); the caller can await `whenResolved()` to
+  # find out when this happens.
+
+  # Currently there are no methods. This handle exists solely to be dropped.
+}
+
 interface TailStreamTarget $Cxx.allowCancellation {
   # Interface used to deliver streaming tail events to a tail worker.
   struct TailStreamParams {
@@ -797,15 +806,28 @@ interface EventDispatcher @0xf20697475ec1752d {
   # should be retried. The optional metadata field carries queue metrics at the time the batch was
   # dispatched; it is safe for the sender to omit this field (the consumer sees it as absent).
 
-  jsRpcSession @9 () -> (topLevel :JsRpcTarget) $Cxx.allowCancellation;
+  jsRpcSession @9 () -> (topLevel :JsRpcTarget, session :JsRpcSession) $Cxx.allowCancellation;
   # Opens a JS rpc "session". The call does not return until the session is complete.
   #
   # `topLevel` is the top-level RPC target, on which exactly one method call can be made. This
-  # call must be made using pipelining since `jsRpcSession()` won't return until after the call
-  # completes.
+  # call should be made using pipelining to avoid a round trip at startup, and to properly handle
+  # the old semantics while they still exist in production (see below).
   #
-  # If, through the one top-level call, new capabilities are exchanged between the client and
-  # server, then `jsRpcSession()` won't return until all those capabilities have been dropped.
+  # The exact return semantics of this method are currently in flux. Both an old approach and a
+  # new approach may be live in production:
+  # * Old approach: `jsRpcSession()` does not return until (1) exactly one call has been made on
+  #   `topLevel`, and (2) any stubs passed over that call (in either direction) have been dropped.
+  #   The session can be canceled by cancelling the call. When the call returns, `session` is null,
+  #   which is consistent with the session being complete.
+  # * New approach: `jsRpcSession()` returns immediately. The returned `session` capability keeps
+  #   the session alive. Dropping `session` cancels the session. `session` resolves itself to a
+  #   null capability when `topLevel` and all stubs introduced through it have been dropped; the
+  #   caller may await `whenResolved()` to find out when this happens.
+  #
+  # The transition will take place in three phases:
+  # 1. Caller is adjusted to support both approaches.
+  # 2. Automate is rolled out to switch the callee to the new approach.
+  # 3. Remove code to support old approach.
   #
   # In C++, we use `WorkerInterface::customEvent()` to dispatch this event.
 

@@ -315,14 +315,6 @@ void Lock::requestExtraMicrotaskCheckpoint() {
   IsolateBase::from(v8Isolate).requestExtraMicrotaskCheckpoint({});
 }
 
-void Lock::requestTermination() {
-  IsolateBase::from(v8Isolate).requestTermination();
-}
-
-bool Lock::isTerminationRequested() const {
-  return IsolateBase::from(v8Isolate).isTerminationRequested();
-}
-
 void Lock::terminateNextExecution() {
   v8Isolate->TerminateExecution();
 }

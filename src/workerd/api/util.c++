@@ -206,7 +206,7 @@ void maybeWarnIfNotText(jsg::Lock& js, kj::StringPtr str) {
   }
   // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
   // search-and-replace across your whole site and you forgot that it'll apply to images too.
-  // When running in the fiddle, let's warn the developer if they do this.
+  // When running with an inspector, let's warn the developer if they do this.
   js.logWarning(
       kj::str("Called .text() on an HTTP body which does not appear to be text. The body's "
               "Content-Type is \"",

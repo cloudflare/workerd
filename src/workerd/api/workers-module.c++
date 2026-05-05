@@ -6,6 +6,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/io/features.h>
 
 namespace workerd::api {
 
@@ -74,6 +75,10 @@ void EntrypointsModule::abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> re
     context.abortIsolate(r);
   }
   js.terminateExecutionNow();
+}
+
+bool EntrypointsModule::getIsExperimental(jsg::Lock& js) {
+  return FeatureFlags::get(js).getWorkerdExperimental();
 }
 
 }  // namespace workerd::api

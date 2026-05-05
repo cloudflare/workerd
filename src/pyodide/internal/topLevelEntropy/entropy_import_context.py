@@ -16,7 +16,14 @@ Package import context is defined in entropy_import_context_packages.py
 from contextlib import contextmanager
 from functools import wraps
 
-from . import entropy_import_context_packages  # noqa: F401 Imported for side effects
+try:
+    from . import (
+        entropy_import_context_packages,  # noqa: F401 Imported for side effects
+    )
+except ImportError:
+    # When the python_process_pth_files compatibility flag is enabled, package entropy import
+    # context is provided by workers-runtime-sdk via .pth files instead of being bundled here.
+    pass
 from .allow_entropy import (
     allow_bad_entropy_calls,
     get_bad_entropy_flag,

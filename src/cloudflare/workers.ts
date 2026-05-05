@@ -439,18 +439,12 @@ export const cache = new Proxy(
 
 export const tracing = innerTracing;
 
-// `abortIsolate` is only defined on `entrypoints` when the
-// `workerd_experimental` compat flag is enabled. When the flag is disabled,
-// calling it throws a clear error rather than a cryptic
-// "undefined is not a function".
-const rawAbortIsolate: ((reason?: string) => never) | undefined = (
-  entrypoints as { abortIsolate?: (reason?: string) => never }
-).abortIsolate;
-export const abortIsolate: (reason?: string) => never =
-  rawAbortIsolate !== undefined
-    ? rawAbortIsolate.bind(entrypoints)
-    : (_reason?: string): never => {
-        throw new Error(
-          'abortIsolate() requires the "experimental" compatibility flag.'
-        );
-      };
+export function abortIsolate(reason?: string): never {
+  if (entrypoints.isExperimental) {
+    entrypoints.abortIsolate(reason);
+  } else {
+    throw new Error(
+      'abortIsolate() requires the "experimental" compatibility flag.'
+    );
+  }
+}

@@ -340,8 +340,7 @@ Local exception_create(Isolate* isolate, ExceptionType exception_type, ::rust::S
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
-void isolate_request_termination(Isolate* isolate);
-bool isolate_is_termination_requested(Isolate* isolate);
+void isolate_terminate_execution(Isolate* isolate);
 bool isolate_is_locked(Isolate* isolate);
 
 }  // namespace workerd::rust::jsg

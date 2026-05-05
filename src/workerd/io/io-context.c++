@@ -401,10 +401,6 @@ bool IoContext::isInspectorEnabled() {
   return worker->getIsolate().isInspectorEnabled();
 }
 
-bool IoContext::isFiddle() {
-  return thread.isFiddle();
-}
-
 bool IoContext::hasWarningHandler() {
   return isInspectorEnabled() || getWorkerTracer() != kj::none ||
       ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO);

@@ -1086,12 +1086,8 @@ void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage)
   isolate->ThrowException(::workerd::jsg::makeInternalError(isolate, message));
 }
 
-void isolate_request_termination(Isolate* isolate) {
-  ::workerd::jsg::IsolateBase::from(isolate).requestTermination();
-}
-
-bool isolate_is_termination_requested(Isolate* isolate) {
-  return ::workerd::jsg::IsolateBase::from(isolate).isTerminationRequested();
+void isolate_terminate_execution(Isolate* isolate) {
+  ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
 }
 
 bool isolate_is_locked(Isolate* isolate) {

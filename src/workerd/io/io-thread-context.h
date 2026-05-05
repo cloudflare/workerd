@@ -43,8 +43,7 @@ class ThreadContext {
       kj::EntropySource& entropySource,
       HeaderIdBundle headerIds,
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-      capnp::ByteStreamFactory& byteStreamFactory,
-      bool isFiddle);
+      capnp::ByteStreamFactory& byteStreamFactory);
 
   // This should only be used to construct TimerChannel. Everything else should use TimerChannel.
   inline kj::Timer& getUnsafeTimer() const {
@@ -65,9 +64,6 @@ class ThreadContext {
   inline capnp::ByteStreamFactory& getByteStreamFactory() const {
     return byteStreamFactory;
   }
-  inline bool isFiddle() const {
-    return fiddle;
-  }
 
  private:
   // NOTE: This timer only updates when entering the event loop!
@@ -76,7 +72,6 @@ class ThreadContext {
   HeaderIdBundle headerIds;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
-  bool fiddle;
 };
 
 }  // namespace workerd

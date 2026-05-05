@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.1")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "f471170924b07936b348e4e34b494563fc75f8d0e7ac651fcd1051ff9f119076",
-    strip_prefix = "capnproto-capnproto-0368024/c++",
+    sha256 = "16bc50865c40448f16b10bea21098e12a175cd1046aa1518e04b9e4f4ad13670",
+    strip_prefix = "capnproto-capnproto-23bb5b9/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/0368024276bb09fd6496d3d0e29b8c083f30df42",
+    url = "https://github.com/capnproto/capnproto/tarball/23bb5b957cb1ab9f92734341b5664150e71890f2",
 )
 use_repo(http, "capnp-cpp")
 
@@ -97,10 +97,10 @@ use_repo(http, "nbytes")
 # ncrypto
 http.archive(
     name = "ncrypto",
-    sha256 = "def70950b184c16117a4c1f59bbe290427d71e03fde47e8126b47ec79158c5c3",
-    strip_prefix = "nodejs-ncrypto-c569580",
+    sha256 = "e41066de30ccb7610fd177ce59fb78a984d3298238bbf2c2cc62e17af92f8a94",
+    strip_prefix = "nodejs-ncrypto-027d1e4",
     type = "tgz",
-    url = "https://api.github.com/repos/nodejs/ncrypto/tarball/v1.1.3",
+    url = "https://api.github.com/repos/nodejs/ncrypto/tarball/v1.1.4",
 )
 use_repo(http, "ncrypto")
 
@@ -148,7 +148,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "89921383f1f51331f48a2dc843403779770ea3a9",
+    commit = "5c1dfd53066bf58d3d28197f715717dd88762443",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",

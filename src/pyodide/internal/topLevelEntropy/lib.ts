@@ -16,7 +16,7 @@ import { default as entropyImportContextPackages } from 'pyodide-internal:topLev
 import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
 import { default as allowEntropy } from 'pyodide-internal:topLevelEntropy/allow_entropy.py';
 import { simpleRunPython, PythonUserError } from 'pyodide-internal:util';
-import { CHECK_RNG_STATE } from 'pyodide-internal:metadata';
+import { CHECK_RNG_STATE, PROCESS_PTH_FILES } from 'pyodide-internal:metadata';
 
 let allowed_entropy_calls_addr: number;
 
@@ -94,10 +94,15 @@ export function entropyMountFiles(Module: Module): void {
     ['__init__.py', new ArrayBuffer(0)],
     ['entropy_patches.py', entropyPatches],
     ['entropy_import_context.py', entropyImportContext],
-    ['entropy_import_context_packages.py', entropyImportContextPackages],
     ['import_patch_manager.py', importPatchManager],
     ['allow_entropy.py', allowEntropy],
   ];
+  if (!PROCESS_PTH_FILES) {
+    files.push([
+      'entropy_import_context_packages.py',
+      entropyImportContextPackages,
+    ]);
+  }
 
   for (const [name, contents] of files) {
     Module.FS.writeFile(cloudflareDir + '/' + name, new Uint8Array(contents), {

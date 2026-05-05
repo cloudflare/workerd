@@ -7,6 +7,11 @@ declare module 'pyodide-internal:introspection.py' {
   export default value;
 }
 
+declare module 'pyodide-internal:setup_python_search_path.py' {
+  const value: Uint8Array;
+  export default value;
+}
+
 declare module 'pyodideRuntime-internal:emscriptenSetup' {
   function instantiateEmscriptenModule(
     isWorkerd: boolean,

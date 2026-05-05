@@ -289,7 +289,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Promise<T> lockOutputWhile(kj::Promise<T> promise);
 
   bool isInspectorEnabled();
-  bool isFiddle();
 
   // Returns true if there is something listening for warnings — the Chrome DevTools inspector,
   // a streaming tail worker tracer, or --verbose stderr logging. Use this to guard expensive

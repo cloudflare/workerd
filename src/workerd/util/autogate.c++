@@ -45,6 +45,10 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "user-span-context-propagation"_kj;
     case AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE:
       return "updated-auto-allocate-chunk-size"_kj;
+    case AutogateKey::PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR:
+      return "python-abort-isolate-on-fatal-error"_kj;
+    case AutogateKey::JSRPC_SESSION_HANDLE:
+      return "jsrpc-session-handle"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

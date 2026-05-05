@@ -116,3 +116,27 @@ export function unreachable(obj: never, msg?: string): never {
   }
   throw new PythonWorkersInternalError(`Unreachable: ${msg}`);
 }
+
+/**
+ * Loads a Python source file (bundled as a Uint8Array) into a fresh anonymous
+ * module and returns it. This is used for internal Python helpers that need to
+ * be invoked from JS but should not pollute the global namespace.
+ *
+ * `moduleName` is the bare name of the module (e.g. "introspection"); typically
+ * the source is the default export from `pyodide-internal:<moduleName>.py`.
+ */
+export function loadPythonMod(
+  pyodide: Pyodide,
+  moduleName: string,
+  source: Uint8Array
+): { __dict__: PyDict } {
+  const mod = pyodide.runPython(
+    `from types import ModuleType; ModuleType('${moduleName}')`
+  ) as { __dict__: PyDict };
+  const decoder = new TextDecoder();
+  pyodide.runPython(decoder.decode(source), {
+    globals: mod.__dict__,
+    filename: `${moduleName}.py`,
+  });
+  return mod;
+}

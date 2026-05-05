@@ -552,8 +552,7 @@ pub mod ffi {
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
-        pub unsafe fn isolate_request_termination(isolate: *mut Isolate);
-        pub unsafe fn isolate_is_termination_requested(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
     }
 

@@ -1104,7 +1104,7 @@ export interface CustomEventCustomEventInit {
  */
 export declare class Blob {
   constructor(
-    type?: ((ArrayBuffer | ArrayBufferView) | string | Blob)[],
+    bits?: ((ArrayBuffer | ArrayBufferView) | string | Blob)[],
     options?: BlobOptions,
   );
   /**

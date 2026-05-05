@@ -389,9 +389,13 @@ export class FacetTestActor extends DurableObject {
                 let greeter2 = this.ctx.facets.get("greeter2", () => {
                   return { class: this.ctx.props.propsGreeter };
                 });
+                let greeter3 = this.ctx.facets.get("greeter3", () => {
+                  return { class: this.env.envGreeter2 };
+                });
                 let greet1 = await greeter1.greet("Alice");
                 let greet2 = await greeter2.greet("Bob");
-                return [greet1, greet2].join("\\n");
+                let greet3 = await greeter3.greet("Carol");
+                return [greet1, greet2, greet3].join("\\n");
               }
             }
           `,
@@ -404,6 +408,12 @@ export class FacetTestActor extends DurableObject {
           envGreeter: this.ctx.exports.GreeterFacet({
             props: { greeting: 'Hello' },
           }),
+          envGreeter2: this.ctx.exports.GreeterFacet({
+            props: { greeting: 'Howdy' },
+          }),
+
+          // Catch a bug where actor class channel numbers were assigned incorrectly.
+          someSubrequestChannel: this.ctx.exports.testOutbound({}),
         },
       };
     });
@@ -427,7 +437,10 @@ export class FacetTestActor extends DurableObject {
 
     assert.deepEqual(await facet.myProps(), { foo: 123, bar: 456 });
 
-    assert.strictEqual(await facet.greets(), 'Hello, Alice?\nWelcome, Bob?');
+    assert.strictEqual(
+      await facet.greets(),
+      'Hello, Alice?\nWelcome, Bob?\nHowdy, Carol?'
+    );
   }
 }
 

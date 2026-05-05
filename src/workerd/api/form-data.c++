@@ -248,59 +248,6 @@ void FormData::parseFormDataImpl(
   }
 }
 
-kj::Array<FormData::EntryWithoutLock> FormData::parseWithoutLock(
-    kj::ArrayPtr<const char> rawText, kj::StringPtr contentType) {
-  kj::Vector<FormData::EntryWithoutLock> data;
-
-  KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
-    auto& params = parsed.params();
-    if (MimeType::FORM_DATA == parsed) {
-      auto& boundary = JSG_REQUIRE_NONNULL(params.find("boundary"_kj), TypeError,
-          "No boundary string in Content-Type header. The multipart/form-data MIME "
-          "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
-          "boundary=\"abcd\"'. See RFC 7578, section 4.");
-
-      parseFormDataImpl(rawText, boundary,
-          [&](kj::StringPtr name, kj::Maybe<kj::StringPtr> maybeFilename,
-              kj::Maybe<kj::StringPtr> maybeType, kj::ArrayPtr<const kj::byte> message) mutable {
-        KJ_IF_SOME(filename, maybeFilename) {
-          data.add(FormData::EntryWithoutLock{
-            .name = kj::str(name),
-            .filename = kj::str(filename),
-            .type = mapCopyString(maybeType),
-            .value = kj::heapArray<kj::byte>(message),
-          });
-        } else {
-          data.add(FormData::EntryWithoutLock{
-            .name = kj::str(name),
-            .value = kj::heapArray<kj::byte>(message),
-          });
-        }
-      });
-      return data.releaseAsArray();
-    } else if (MimeType::FORM_URLENCODED == parsed) {
-      // Let's read the charset so we can barf if the body isn't UTF-8.
-      //
-      // TODO(conform): Transcode to UTF-8, like the spec tells us to.
-      assertUtf8(params);
-      kj::Vector<kj::Url::QueryParam> query;
-      parseQueryString(query, kj::mv(rawText));
-      data.reserve(query.size());
-      for (auto& param: query) {
-        data.add(EntryWithoutLock{
-          .name = kj::mv(param.name),
-          .value = kj::mv(param.value),
-        });
-      }
-      return data.releaseAsArray();
-    }
-  }
-  JSG_FAIL_REQUIRE(TypeError,
-      "Unrecognized Content-Type header value. FormData can only "
-      "parse the following MIME types: ",
-      MimeType::FORM_DATA.toString(), ", ", MimeType::FORM_URLENCODED.toString());
-}
-
 void FormData::parse(jsg::Lock& js,
     kj::ArrayPtr<const char> rawText,
     kj::StringPtr contentType,

@@ -50,6 +50,11 @@ enum class AutogateKey {
   USER_SPAN_CONTEXT_PROPAGATION,
   // Apply an updated default autoAllocateChunkSize for ReadableStreams
   UPDATED_AUTO_ALLOCATE_CHUNK_SIZE,
+  // Call abortIsolate() when a Python worker encounters a fatal error.
+  PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR,
+  // `jsRpcSession()` returns a session handle instead of having the call itself hang until the
+  // session is complete.
+  JSRPC_SESSION_HANDLE,
   NumOfKeys  // Reserved for iteration.
 };
 
