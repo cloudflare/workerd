@@ -2173,6 +2173,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
+  // Server-side jsRpcSession user span: wraps the membrane lifetime (from delivered()
+  // through to all caps being dropped). Parented to the caller's enclosing user span
+  // via USER_SPAN_CONTEXT_PROPAGATION (the metadata.userSpanParent set on the client
+  // side flows here as the IoContext's current user span). Created after delivered()
+  // so the IncomingRequest is registered before the span starts; closes when the
+  // SpanBuilder leaves scope at function exit.
+  auto jsRpcSessionSpan = ioctx.getCurrentUserTraceSpan().newChild("jsRpcSession"_kjc, ioctx.now());
+
   EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
       kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
   capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
@@ -2210,6 +2218,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
+  // Client-side jsRpcSession user span: only fires for cross-process dispatch. In-process
+  // service bindings reach the callee via WorkerEntrypoint::customEvent -> event->run()
+  // and never enter sendRpc(); for those calls the only jsRpcSession span comes from the
+  // server-side run(). Here the span wraps the wire round-trip from sending the
+  // jsRpcSessionRequest until the session completes (membrane drained). Parented to the
+  // current user trace span (the caller's enclosing user span) when an IoContext is in
+  // scope; constructs as unobserved otherwise so capnp dispatch contexts that lack an
+  // IoContext don't crash.
+  SpanBuilder jsRpcSessionSpan(nullptr);
+  if (IoContext::hasCurrent()) {
+    auto& ioctx = IoContext::current();
+    jsRpcSessionSpan = ioctx.getCurrentUserTraceSpan().newChild("jsRpcSession"_kjc, ioctx.now());
+  }
+
   // We arrange to revoke all capabilities in this session as soon as `sendRpc()` completes or is
   // canceled. Normally, the server side doesn't return if any capabilities still exist, so this
   // only makes a difference in the case that some sort of an error occurred. We don't strictly

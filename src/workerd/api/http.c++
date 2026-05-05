@@ -2121,7 +2121,51 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethodInternal(jsg::Lock& js, 
 rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto& ioContext = IoContext::current();
-  auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
+  // Build the WorkerInterface for the jsRpcSession dispatch. We deliberately don't go
+  // through getClient(... "jsRpcSession"_kjc) here: that helper synthesises a *user*
+  // span at the dispatch site, but the user-visible jsRpcSession span is now emitted
+  // by JsRpcSessionCustomEvent (server-side in run(), client-side in sendRpc() for
+  // cross-process). The only span we still need at this site is the *internal* trace
+  // span, whose ID is propagated to the callee via SubrequestMetadata.parentSpan so
+  // the callee's nested internal subrequests parent correctly.
+  //
+  // The user-span parent passed in metadata is the caller's enclosing user span
+  // (getCurrentUserTraceSpan), so the server-side jsRpcSession created in
+  // JsRpcSessionCustomEvent::run() lands as a direct child of the caller's outer
+  // user span (e.g. an enterSpan).
+  auto internalSpan = ioContext.makeTraceSpan("jsRpcSession"_kjc);
+  auto worker = [&]() -> kj::Own<WorkerInterface> {
+    KJ_SWITCH_ONEOF(channelOrClientFactory) {
+      KJ_CASE_ONEOF(channel, uint) {
+        return ioContext.getSubrequest(
+            [&](TraceContext&, IoChannelFactory& channelFactory) {
+          return channelFactory.startSubrequest(channel,
+              IoChannelFactory::SubrequestMetadata{
+                .parentSpan = SpanParent(internalSpan),
+                .userSpanParent = ioContext.getCurrentUserTraceSpan(),
+                .featureFlagsForFl =
+                    mapCopyString(ioContext.getWorker().getIsolate().getFeatureFlagsForFl()),
+              });
+        }, {.inHouse = isInHouse, .wrapMetrics = !isInHouse});
+      }
+      KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+        return ioContext.getSubrequest([&](TraceContext&, IoChannelFactory&) {
+          return channel->startRequest({
+            .parentSpan = SpanParent(internalSpan),
+            .userSpanParent = ioContext.getCurrentUserTraceSpan(),
+          });
+        }, {.inHouse = isInHouse, .wrapMetrics = !isInHouse});
+      }
+      KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
+        return outgoingFactory->newSingleUseClient(kj::none);
+      }
+      KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
+        return outgoingFactory->newSingleUseClient(ioContext, kj::none);
+      }
+    }
+    KJ_UNREACHABLE;
+  }();
+  worker = worker.attach(kj::mv(internalSpan));
   auto event = kj::heap<api::JsRpcSessionCustomEvent>(
       JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
