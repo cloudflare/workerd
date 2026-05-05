@@ -13,6 +13,7 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#include <workerd/api/export-loopback.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
@@ -22,21 +23,25 @@
 #include <workerd/api/messagechannel.h>
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
+#include <workerd/api/performance.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/queue.h>
-#include <workerd/api/r2-admin.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/sql.h>
 #include <workerd/api/streams.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/api/sync-kv.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/tracing.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
+#include <workerd/api/worker-loader.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/api/workers-module.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/rtti.h>
@@ -64,7 +69,6 @@
   F("pyodide", EW_PYODIDE_ISOLATE_TYPES)                                                           \
   F("kv", EW_KV_ISOLATE_TYPES)                                                                     \
   F("queue", EW_QUEUE_ISOLATE_TYPES)                                                               \
-  F("r2-admin", EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES)                                             \
   F("r2", EW_R2_PUBLIC_BETA_ISOLATE_TYPES)                                                         \
   F("worker-rpc", EW_WORKER_RPC_ISOLATE_TYPES)                                                     \
   F("scheduled", EW_SCHEDULED_ISOLATE_TYPES)                                                       \
@@ -83,7 +87,13 @@
   F("eventsource", EW_EVENTSOURCE_ISOLATE_TYPES)                                                   \
   F("container", EW_CONTAINER_ISOLATE_TYPES)                                                       \
   F("webfs", EW_WEB_FILESYSTEM_ISOLATE_TYPE)                                                       \
-  F("messagechannel", EW_MESSAGECHANNEL_ISOLATE_TYPES)
+  F("messagechannel", EW_MESSAGECHANNEL_ISOLATE_TYPES)                                             \
+  F("workers-module", EW_WORKERS_MODULE_ISOLATE_TYPES)                                             \
+  F("export-loopback", EW_EXPORT_LOOPBACK_ISOLATE_TYPES)                                           \
+  F("sync-kv", EW_SYNC_KV_ISOLATE_TYPES)                                                           \
+  F("worker-loader", EW_WORKER_LOADER_ISOLATE_TYPES)                                               \
+  F("performance", EW_PERFORMANCE_ISOLATE_TYPES)                                                   \
+  F("tracing", EW_TRACING_ISOLATE_TYPES)
 
 namespace workerd::api {
 
@@ -133,6 +143,12 @@ struct EncoderModuleRegistryImpl {
     TypeScriptModuleContents contents(module.getTsDeclaration());
     ModuleInfo info(module.getName(), module.getType(), kj::mv(contents));
     modules.add(kj::mv(info));
+  }
+
+  void addBuiltinModule(kj::StringPtr specifier,
+      jsg::ModuleRegistry::ModuleCallback callback,
+      jsg::ModuleRegistry::Type type = jsg::ModuleRegistry::Type::BUILTIN) {
+    // TODO(soon): Implement this function
   }
 
   template <typename T>

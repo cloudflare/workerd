@@ -76,6 +76,10 @@ constexpr bool isAlphaLower(const kj::byte c) noexcept {
   return kCharLookupTable[c] & CharAttributeFlag::LOWER_CASE;
 }
 
+// TODO(later): If kj::ArrayPtr ever supports a constexpr [] operator,
+// make this function constexpr.
+bool strcaseeq(kj::ArrayPtr<const char> a, kj::ArrayPtr<const char> b);
+
 // Convert ASCII alpha characters in the given string to lowercase in place.
 kj::String toLower(kj::String&& str);
 

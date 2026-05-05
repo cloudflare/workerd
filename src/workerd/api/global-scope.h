@@ -6,10 +6,18 @@
 
 #include "basics.h"
 #include "filesystem.h"
-#include "hibernation-event-params.h"
 #include "http.h"
 #include "messagechannel.h"
+#include "performance.h"
 
+#include <workerd/api/hibernation-event-params.h>
+#ifdef WORKERD_FUZZILLI
+#include "unsafe.h"
+
+#include <workerd/api/fuzzilli.h>
+#endif
+
+#include <workerd/io/features.h>
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
 
@@ -19,9 +27,11 @@ class DOMException;
 
 namespace workerd::api {
 
+class Tracing;
 class TailEvent;
 class Cache;
 class CacheStorage;
+class JsRpcProperty;
 class Crypto;
 class CryptoKey;
 class ErrorEvent;
@@ -85,14 +95,18 @@ class Navigator: public jsg::Object {
     return 1;
   }
 
+  kj::StringPtr getPlatform() {
+    return ""_kj;
+  }
+
   kj::StringPtr getLanguage() {
     // Some packages depend on navigator.language being set to a specific value.
     return "en"_kj;
   }
 
-  kj::Array<kj::String> getLanguages() {
-    auto builder = kj::heapArrayBuilder<kj::String>(1);
-    builder.add(kj::str("en"));
+  kj::Array<kj::StringPtr> getLanguages() {
+    auto builder = kj::heapArrayBuilder<kj::StringPtr>(1);
+    builder.add("en"_kjc);
     return builder.finish();
   }
 
@@ -102,6 +116,7 @@ class Navigator: public jsg::Object {
     JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
     JSG_READONLY_INSTANCE_PROPERTY(hardwareConcurrency, getHardwareConcurrency);
+    JSG_READONLY_INSTANCE_PROPERTY(platform, getPlatform);
 
     if (reader.getEnableNavigatorLanguage()) {
       JSG_READONLY_INSTANCE_PROPERTY(language, getLanguage);
@@ -111,32 +126,10 @@ class Navigator: public jsg::Object {
     if (reader.getWebFileSystem()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(storage, getStorage);
     }
-  }
-};
 
-class Performance: public jsg::Object {
- public:
-  // We always return a time origin of 0, making performance.now() equivalent to Date.now(). There
-  // is no other appropriate time origin to use given that the Worker platform is intended to be
-  // treated like one big computer rather than many individual instances. In particular, if and
-  // when we start snapshotting applications after startup and then starting instances from that
-  // snapshot, what would the right time origin be? The time when the snapshot was created? This
-  // seems to leak implementation details in a weird way.
-  //
-  // Note that the purpose of `timeOrigin` is normally to allow `now()` to return a more-precise
-  // measurement. Measuring against a recent time allows the values returned by `now()` to be
-  // smaller in magnitude, which allows them to be more precise due to the nature of floating
-  // point numbers. In our case, though, we don't return precise measurements from this interface
-  // anyway, for Spectre reasons -- it returns the same as Date.now().
-  double getTimeOrigin() {
-    return 0.0;
-  }
-
-  double now();
-
-  JSG_RESOURCE_TYPE(Performance) {
-    JSG_READONLY_INSTANCE_PROPERTY(timeOrigin, getTimeOrigin);
-    JSG_METHOD(now);
+    JSG_TS_OVERRIDE({
+      sendBeacon(url: string, body?: BodyInit): boolean;
+    });
   }
 };
 
@@ -156,38 +149,6 @@ class Cloudflare: public jsg::Object {
   }
 };
 
-class PromiseRejectionEvent: public Event {
- public:
-  PromiseRejectionEvent(
-      v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason);
-
-  static jsg::Ref<PromiseRejectionEvent> constructor(kj::String type) = delete;
-
-  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) {
-    return promise.addRef(js);
-  }
-  jsg::Value getReason(jsg::Lock& js) {
-    return reason.addRef(js);
-  }
-
-  JSG_RESOURCE_TYPE(PromiseRejectionEvent) {
-    JSG_INHERIT(Event);
-    JSG_READONLY_INSTANCE_PROPERTY(promise, getPromise);
-    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("promise", promise);
-    tracker.trackField("reason", reason);
-  }
-
- private:
-  jsg::V8Ref<v8::Promise> promise;
-  jsg::Value reason;
-
-  void visitForGc(jsg::GcVisitor& visitor);
-};
-
 class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
  public:
   jsg::Unimplemented importScripts(kj::String s) {
@@ -196,6 +157,15 @@ class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
 
   JSG_RESOURCE_TYPE(WorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
+
+    // *** WARNING ***: *Every* new export here must be treated as a potentially
+    // breaking change. It doesn't matter if it's a new method, a new property,
+    // or a new nested type. Adding anything to the global scope risks breaking
+    // existing user code that is feature-sniffing or monkeypatching the global.
+    // *Always* add new exports behind a new compatibility flag! And when in
+    // doubt, don't add the new export on globalThis at all. The only things
+    // that should be exported on globalThis should be standardized web APIs or
+    // Node.js compat mode globals.
 
     JSG_NESTED_TYPE(EventTarget);
 
@@ -228,14 +198,69 @@ class TestController: public jsg::Object {
   JSG_RESOURCE_TYPE(TestController) {}
 };
 
+// Structured types for the cache purge API (ctx.cache.purge()).
+// These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
+// NOTE: TypeScript stubs for CachePurgeError, CachePurgeResult, CachePurgeOptions, and
+// CacheContext are manually maintained in src/cloudflare/internal/workers.d.ts. If you change
+// these types, update that file to match.
+struct CachePurgeError {
+  int code;
+  kj::String message;
+  JSG_STRUCT(code, message);
+};
+
+struct CachePurgeResult {
+  bool success;
+  kj::Array<CachePurgeError> errors;
+  JSG_STRUCT(success, errors);
+};
+
+struct CachePurgeOptions {
+  jsg::Optional<kj::Array<kj::String>> tags;
+  jsg::Optional<kj::Array<kj::String>> pathPrefixes;
+  jsg::Optional<bool> purgeEverything;
+  JSG_STRUCT(tags, pathPrefixes, purgeEverything);
+};
+
+// Base class for the ctx.cache object on cache enabled Workers.
+// Subclass when embedding to provide an implementation.
+class CacheContext: public jsg::Object {
+ public:
+  // Purge cached content.
+  //
+  // The default implementation throws without an overriding IoContext.
+  virtual jsg::Promise<CachePurgeResult> purge(jsg::Lock& js,
+      CachePurgeOptions options,
+      const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
+      const jsg::TypeHandler<CachePurgeResult>& resultHandler,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
+
+  JSG_RESOURCE_TYPE(CacheContext) {
+    JSG_METHOD(purge);
+  }
+};
+
 class ExecutionContext: public jsg::Object {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
+      : ExecutionContext(js, kj::mv(exports), /*props=*/js.obj(), /*versionInfo=*/kj::none) {}
+
+  ExecutionContext(jsg::Lock& js,
+      jsg::JsValue exports,
+      jsg::JsValue props,
+      kj::Maybe<Worker::VersionInfo> versionInfo)
       : exports(js, exports),
-        props(js, js.obj()) {}
-  ExecutionContext(jsg::Lock& js, jsg::JsValue exports, jsg::JsValue props)
-      : exports(js, exports),
-        props(js, props) {}
+        props(js, props) {
+    auto featureFlags = FeatureFlags::get(js);
+    if (featureFlags.getEnableVersionApi()) {
+      version = kj::mv(versionInfo).map([&js, &featureFlags](auto v) {
+        return jsg::JsRef{js,
+          v.toJs(js,
+              featureFlags.getEnableCtxVersionMetadata() ? PopulateVersionInfoMetadata::YES
+                                                         : PopulateVersionInfoMetadata::NO)};
+      });
+    }
+  }
 
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
@@ -252,15 +277,42 @@ class ExecutionContext: public jsg::Object {
     return props.getHandle(js);
   }
 
+  // Returns a CacheContext for cache-enabled workers, or empty jsg::Optional otherwise.
+  // However, by default this always returns undefined unless the embedding application overrides
+  // the IoContext.
+  jsg::Optional<jsg::Ref<CacheContext>> getCache(jsg::Lock& js);
+
+  jsg::JsValue getVersion(jsg::Lock& js) {
+    // TODO(soon): We should be able to assert for `version != kj::none` in the constructor when the
+    //   `enable_version_api` compat flag is enabled, but currently dynamic workers and "reusable
+    //   `ctx` object instantiation" do not pass information to populate `ctx.version` with,
+    //   `ctx.version` is currently optional so we can return undefined for now.
+    KJ_IF_SOME(someVersion, version) {
+      return someVersion.getHandle(js);
+    }
+    return js.undefined();
+  }
+
+  jsg::Optional<jsg::Ref<Tracing>> getTracing(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
-    if (flags.getWorkerdExperimental()) {
-      // TODO(soon): Remove experimental gate as soon as we've wired up the control plane so that
-      // this works in production.
+    if (flags.getEnableCtxExports()) {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
+    JSG_LAZY_INSTANCE_PROPERTY(cache, getCache);
+    if (flags.getEnableVersionApi()) {
+      JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
+    }
+
+    // ctx.tracing - user tracing API. The *type* is always visible (so the generated
+    // `Tracing` / `Span` types exist in every compat-date snapshot, not only the
+    // experimental one). The *value* is `undefined` outside the `workerdExperimental`
+    // compat flag - the gate lives in `getTracing()` in global-scope.c++.
+    // TODO: Remove this comment once the feature is stable.
+    JSG_LAZY_INSTANCE_PROPERTY(tracing, getTracing);
 
     if (flags.getWorkerdExperimental()) {
       // TODO(soon): Before making this generally available we need to:
@@ -275,25 +327,67 @@ class ExecutionContext: public jsg::Object {
       //   consistent with each other.
       JSG_METHOD(abort);
     }
+
+    // TODO(soon): This is getting unwieldy.
+    if (flags.getEnableCtxExports()) {
+      if (flags.getEnableVersionApi()) {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+          readonly exports: Cloudflare.Exports;
+          readonly version?: {
+            readonly metadata?: { readonly id: string; };
+            readonly cohort?: string;
+            readonly key?: string;
+            readonly override?: string;
+          };
+        });
+      } else {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+          readonly exports: Cloudflare.Exports;
+        });
+      }
+    } else {
+      if (flags.getEnableVersionApi()) {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+          readonly version?: {
+            readonly metadata?: { readonly id: string; };
+            readonly cohort?: string;
+            readonly key?: string;
+            readonly override?: string;
+          };
+        });
+      } else {
+        JSG_TS_OVERRIDE(<Props = unknown> {
+          readonly props: Props;
+        });
+      }
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("props", props);
+    tracker.trackField("version", version);
   }
 
  private:
   jsg::JsRef<jsg::JsValue> exports;
   jsg::JsRef<jsg::JsValue> props;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> version;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(props);
+    visitor.visit(version);
   }
 };
 
 // AlarmEventInfo is a jsg::Object used to pass alarm invocation info to an alarm handler.
 class AlarmInvocationInfo: public jsg::Object {
  public:
-  AlarmInvocationInfo(uint32_t retry): retryCount(retry) {}
+  AlarmInvocationInfo(kj::Date scheduledTime, uint32_t retry)
+      : scheduledTime(static_cast<double>((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS)),
+        retryCount(retry) {}
 
   bool getIsRetry() {
     return retryCount > 0;
@@ -301,13 +395,18 @@ class AlarmInvocationInfo: public jsg::Object {
   uint32_t getRetryCount() {
     return retryCount;
   }
+  double getScheduledTime() {
+    return scheduledTime;
+  }
 
   JSG_RESOURCE_TYPE(AlarmInvocationInfo) {
     JSG_READONLY_INSTANCE_PROPERTY(isRetry, getIsRetry);
     JSG_READONLY_INSTANCE_PROPERTY(retryCount, getRetryCount);
+    JSG_READONLY_INSTANCE_PROPERTY(scheduledTime, getScheduledTime);
   }
 
  private:
+  double scheduledTime;
   uint32_t retryCount = 0;
 };
 
@@ -321,6 +420,10 @@ struct ExportedHandler {
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
+
+  using ConnectHandler = jsg::Promise<void>(
+      jsg::Ref<Socket> socket, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
       jsg::Value env,
@@ -361,6 +464,7 @@ struct ExportedHandler {
   jsg::SelfRef self;
 
   JSG_STRUCT(fetch,
+      connect,
       tail,
       trace,
       tailStream,
@@ -377,27 +481,29 @@ struct ExportedHandler {
   // include it in type definitions.
 
   JSG_STRUCT_TS_DEFINE(
-    type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
-    type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTailStreamHandler<Env = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
-    type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
-    type ExportedHandlerTestHandler<Env = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
+    type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown, Props = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext<Props>) => Response | Promise<Response>;
+    type ExportedHandlerConnectHandler<Env = unknown, Props = unknown> = (socket: Socket, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTraceHandler<Env = unknown, Props = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext<Props>) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+    type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerQueueHandler<Env = unknown, Message = unknown, Props = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
+    type ExportedHandlerTestHandler<Env = unknown, Props = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
   );
-  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown> {
-    email?: EmailExportedHandler<Env>;
-    fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
-    tail?: ExportedHandlerTailHandler<Env>;
-    trace?: ExportedHandlerTraceHandler<Env>;
-    tailStream?: ExportedHandlerTailStreamHandler<Env>;
-    scheduled?: ExportedHandlerScheduledHandler<Env>;
+  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown, Props = unknown> {
+    email?: EmailExportedHandler<Env, Props>;
+    fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata, Props>;
+    connect?: ExportedHandlerConnectHandler<Env, Props>;
+    tail?: ExportedHandlerTailHandler<Env, Props>;
+    trace?: ExportedHandlerTraceHandler<Env, Props>;
+    tailStream?: ExportedHandlerTailStreamHandler<Env, Props>;
+    scheduled?: ExportedHandlerScheduledHandler<Env, Props>;
     alarm: never;
     webSocketMessage: never;
     webSocketClose: never;
     webSocketError: never;
-    queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage>;
-    test?: ExportedHandlerTestHandler<Env>;
+    queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage, Props>;
+    test?: ExportedHandlerTestHandler<Env, Props>;
   });
   // Make `env` parameter generic
 
@@ -453,12 +559,10 @@ class Immediate final: public jsg::Object {
   }
 
  private:
-  // On the off chance user code holds onto to the Ref<Immediate> longer than
-  // the IoContext remains alive, let's maintain just a weak reference to the
-  // IoContext here to avoid problems. This reference is used only for handling
-  // the dispose operation, so it should be perfectly fine for it to be weak
-  // and a non-op after the IoContext is gone.
-  kj::Own<IoContext::WeakRef> contextRef;
+  // Note: We cannot use IoContext::WeakRef here because it's not thread-safe (it's only intended
+  // to be held from KJ I/O objects, but this is a JSG object which can be accessed by V8's GC
+  // on different threads). Instead, we use IoPtr<IoContext> which is safe to hold from JSG objects.
+  IoPtr<IoContext> ioContext;
   TimeoutId timeoutId;
 };
 
@@ -489,6 +593,14 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
 
+  // Received TCP/socket ingress (called from C++, not JS).
+  kj::Promise<void> connect(kj::String host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      kj::HttpService::ConnectResponse& response,
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
+
   // Received sendTraces (called from C++, not JS).
   void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
       Worker::Lock& lock,
@@ -517,19 +629,22 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Promise<void> setHibernatableEventTimeout(
       kj::Promise<void> event, kj::Maybe<uint32_t> eventTimeoutMs);
 
-  void sendHibernatableWebSocketMessage(kj::OneOf<kj::String, kj::Array<byte>> message,
+  void sendHibernatableWebSocketMessage(IoContext& context,
+      kj::OneOf<kj::String, kj::Array<byte>> message,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  void sendHibernatableWebSocketClose(HibernatableSocketParams::Close close,
+  void sendHibernatableWebSocketClose(IoContext& context,
+      HibernatableSocketParams::Close close,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  void sendHibernatableWebSocketError(kj::Exception e,
+  void sendHibernatableWebSocketError(IoContext& context,
+      kj::Exception e,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
@@ -540,6 +655,15 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::V8Ref<v8::Promise> promise,
       jsg::Value value);
 
+  // Track a set of address->callback overrides for which the connect(address) behavior should be
+  // overridden via callbacks rather than using the default Socket connect() logic.
+  // This is useful for allowing generic client libraries to connect to private local services using
+  // just a provided address (rather than requiring them to support being passed a binding to call
+  // binding.connect() on).
+  using ConnectFn = kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)>;
+  void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
+  kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
+
   // ---------------------------------------------------------------------------
   // JS API
 
@@ -547,6 +671,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
   void queueMicrotask(jsg::Lock& js, jsg::Function<void()> task);
+
+#ifdef WORKERD_FUZZILLI
+  void fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args);
+#endif
 
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
@@ -591,7 +719,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   }
 
   jsg::Ref<Performance> getPerformance(jsg::Lock& js) {
-    return js.alloc<Performance>();
+    return js.alloc<Performance>(Worker::Isolate::from(js).getLimitEnforcer());
   }
 
   jsg::Ref<Cloudflare> getCloudflare(jsg::Lock& js) {
@@ -612,7 +740,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // compat Buffer and process at the global scope in all modules as lazy instance
   // properties.
   jsg::JsValue getBuffer(jsg::Lock& js);
+  void setBuffer(jsg::Lock& js, jsg::JsValue newBuffer);
   jsg::JsValue getProcess(jsg::Lock& js);
+  void setProcess(jsg::Lock& js, jsg::JsValue newProcess);
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Arguments<jsg::Value> args);
@@ -621,8 +751,23 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   JSG_RESOURCE_TYPE(ServiceWorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(WorkerGlobalScope);
 
+    // *** WARNING ***: *Every* new export here must be treated as a potentially
+    // breaking change. It doesn't matter if it's a new method, a new property,
+    // or a new nested type. Adding anything to the global scope risks breaking
+    // existing user code that is feature-sniffing or monkeypatching the global.
+    // *Always* add new exports behind a new compatibility flag! And when in
+    // doubt, don't add the new export on globalThis at all. The only things
+    // that should be exported on globalThis should be standardized web APIs or
+    // Node.js compat mode globals.
+
     JSG_NESTED_TYPE(DOMException);
     JSG_NESTED_TYPE(WorkerGlobalScope);
+    if (flags.getSpecCompliantPropertyAttributes()) {
+      // EventTarget is also declared on WorkerGlobalScope, but V8's
+      // FunctionTemplate::Inherit() does not propagate instance-template
+      // properties.  Redeclare here so it becomes an own property of globalThis.
+      JSG_NESTED_TYPE(EventTarget);
+    }
 
     JSG_METHOD(btoa);
     JSG_METHOD(atob);
@@ -663,6 +808,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_LAZY_INSTANCE_PROPERTY(performance, getPerformance);
     JSG_LAZY_INSTANCE_PROPERTY(Cloudflare, getCloudflare);
     JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
+
+#ifdef WORKERD_FUZZILLI
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(fuzzilli);
+    }
+#endif
 
     JSG_NESTED_TYPE(Event);
     JSG_NESTED_TYPE(ExtendableEvent);
@@ -708,8 +859,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
 
     if (flags.getNodeJsCompatV2()) {
-      JSG_LAZY_INSTANCE_PROPERTY(Buffer, getBuffer);
-      JSG_LAZY_INSTANCE_PROPERTY(process, getProcess);
+      JSG_INSTANCE_PROPERTY(Buffer, getBuffer, setBuffer);
+      JSG_INSTANCE_PROPERTY(process, getProcess, setProcess);
       JSG_LAZY_INSTANCE_PROPERTY(global, getSelf);
       JSG_METHOD(setImmediate);
       JSG_METHOD(clearImmediate);
@@ -769,8 +920,22 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
 
+    // Performance API
+    if (flags.getEnableGlobalPerformanceClasses() || flags.getEnableNodeJsPerfHooksModule()) {
+      JSG_NESTED_TYPE(Performance);
+      JSG_NESTED_TYPE(PerformanceEntry);
+      JSG_NESTED_TYPE(PerformanceMark);
+      JSG_NESTED_TYPE(PerformanceMeasure);
+      JSG_NESTED_TYPE(PerformanceResourceTiming);
+      JSG_NESTED_TYPE(PerformanceObserver);
+      JSG_NESTED_TYPE(PerformanceObserverEntryList);
+    }
+
     JSG_TS_ROOT();
-    JSG_TS_DEFINE(
+    // JSG_TS_DEFINE_LITERAL is used here instead of JSG_TS_DEFINE because the TypeScript definition
+    // contains the `module` keyword, which Clang rejects as a C++20 module directive when it
+    // appears inside macro arguments.
+    JSG_TS_DEFINE_LITERAL(R"(
       interface Console {
         "assert"(condition?: boolean, ...data: any[]): void;
         clear(): void;
@@ -882,7 +1047,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
         function instantiate(module: Module, imports?: Imports): Promise<Instance>;
         function validate(bytes: BufferSource): boolean;
       }
-    );
+    )");
     // workerd disables dynamic WebAssembly compilation, so `compile()`, `compileStreaming()`, the
     // `instantiate()` override taking a `BufferSource` and `instantiateStreaming()` are omitted.
     // `Module` is also declared `abstract` to disable its `BufferSource` constructor.
@@ -910,6 +1075,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
  private:
   jsg::UnhandledRejectionHandler unhandledRejections;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> processValue;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
+  kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
+  kj::HashMap<kj::String, ConnectFn> connectOverrides;
 
   // Global properties such as scheduler, crypto, caches, self, and origin should
   // be monkeypatchable / mutable at the global scope.
@@ -918,7 +1087,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
-      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::PromiseRejectionEvent,           \
-      api::Navigator, api::Performance, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

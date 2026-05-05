@@ -164,7 +164,6 @@ export const utilInspect = {
       '{ a: [Function: a] }'
     );
     assert.strictEqual(util.inspect({ a: () => {} }), '{ a: [Function: a] }');
-    // eslint-disable-next-line func-name-matching
     assert.strictEqual(
       util.inspect({ a: async function abc() {} }),
       '{ a: [AsyncFunction: abc] }'
@@ -412,7 +411,6 @@ export const utilInspect = {
       );
 
       assert.strictEqual(
-        // eslint-disable-next-line accessor-pairs
         util.inspect({ set writeonly(val) {} }),
         '{ writeonly: [Setter] }'
       );
@@ -650,7 +648,6 @@ export const utilInspect = {
       });
       const setter = Object.create(null, {
         b: {
-          // eslint-disable-line accessor-pairs
           set: function () {},
         },
       });
@@ -1147,7 +1144,7 @@ export const utilInspect = {
         assert.strictEqual(countLines(withoutColor), countLines(withColor));
       }
 
-      const bigArray = new Array(100).fill().map((value, index) => index);
+      const bigArray = Array.from({ length: 100 }, (_value, index) => index);
 
       testLines([1, 2, 3, 4, 5, 6, 7]);
       testLines(bigArray);
@@ -1465,6 +1462,7 @@ export const utilInspect = {
         writable: true,
       });
       assert.strictEqual(inspect(a, { depth: -1 }), '[Foo]');
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete a[Symbol.toStringTag];
       Object.setPrototypeOf(a, null);
       assert.strictEqual(inspect(a, { depth: -1 }), '[Foo: null prototype]');
@@ -1613,7 +1611,7 @@ export const utilInspect = {
     }
 
     {
-      const x = new (function () {})(); // eslint-disable-line new-parens
+      const x = new (function () {})();
       assert.strictEqual(util.inspect(x), '{}');
     }
 
@@ -1632,7 +1630,7 @@ export const utilInspect = {
     // Do not backport to v5/v4 unless all of
     // https://github.com/nodejs/node/pull/6334 is backported.
     {
-      const x = new Array(101).fill();
+      const x = Array.from({ length: 101 });
       assert(util.inspect(x).endsWith('1 more item\n]'));
       assert(
         !util.inspect(x, { maxArrayLength: 101 }).endsWith('1 more item\n]')
@@ -1648,7 +1646,7 @@ export const utilInspect = {
     }
 
     {
-      const x = Array(101);
+      const x = Array.from({ length: 101 });
       assert.strictEqual(
         util.inspect(x, { maxArrayLength: 0 }),
         '[ ... 101 more items ]'
@@ -1695,7 +1693,7 @@ export const utilInspect = {
 
     // util.inspect.defaultOptions tests.
     {
-      const arr = new Array(101).fill();
+      const arr = Array.from({ length: 101 });
       const obj = { a: { a: { a: { a: 1 } } } };
 
       const oldOptions = { ...util.inspect.defaultOptions };
@@ -2210,7 +2208,6 @@ export const utilInspect = {
     // Do not escape single quotes if no double quote or backtick is present.
     assert.strictEqual(util.inspect("'"), '"\'"');
     assert.strictEqual(util.inspect('"\''), '`"\'`');
-    // eslint-disable-next-line no-template-curly-in-string
     assert.strictEqual(util.inspect('"\'${a}'), "'\"\\'${a}'");
 
     // Errors should visualize as much information as possible.
@@ -2267,6 +2264,7 @@ export const utilInspect = {
         util.inspect(foo)
       );
       foo.bar = true;
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete foo[Symbol.toStringTag];
       assert(
         util
@@ -2290,7 +2288,6 @@ export const utilInspect = {
 
     // Verify that classes are properly inspected.
     [
-      /* eslint-disable spaced-comment, no-multi-spaces, brace-style */
       // The whitespace is intentional.
       [class {}, '[class (anonymous)]'],
       [
@@ -2312,8 +2309,7 @@ export const utilInspect = {
       ],
       [
         class // Random { // comments /* */ are part of the toString() result
-          /* eslint-disable-next-line space-before-blocks */
-          äß /**/
+        äß /**/
           extends /*{*/ TypeError {},
         '[class äß extends TypeError]',
       ],
@@ -2325,7 +2321,6 @@ export const utilInspect = {
         },
         '[class X extends Error]',
       ],
-      /* eslint-enable spaced-comment, no-multi-spaces, brace-style */
     ].forEach(([clazz, string]) => {
       const inspected = util.inspect(clazz);
       assert.strictEqual(inspected, string);
@@ -2367,7 +2362,6 @@ export const utilInspect = {
 
     // "class" properties should not be detected as "class".
     {
-      // eslint-disable-next-line space-before-function-paren
       let obj = { class() {} };
       assert.strictEqual(util.inspect(obj), '{ class: [Function: class] }');
       obj = { class: () => {} };
@@ -2799,14 +2793,17 @@ export const utilInspect = {
         },
         b: [1, 2, [1, 2, { a: 1, b: 2, c: 3 }]],
         c: ['foo', 4, 444444],
-        d: Array.from({ length: 101 }).map((e, i) => {
+        d: Array.from({ length: 101 }, (_e, i) => {
           return i % 2 === 0 ? i * i : i;
         }),
-        e: Array(6).fill('foobar'),
-        f: Array(9).fill('foobar'),
-        g: Array(21).fill('foobar baz'),
-        h: [100].concat(Array.from({ length: 9 }).map((e, n) => n)),
-        long: Array(9).fill('This text is too long for grouping!'),
+        e: Array.from({ length: 6 }, () => 'foobar'),
+        f: Array.from({ length: 9 }, () => 'foobar'),
+        g: Array.from({ length: 21 }, () => 'foobar baz'),
+        h: [100].concat(Array.from({ length: 9 }, (_e, n) => n)),
+        long: Array.from(
+          { length: 9 },
+          () => 'This text is too long for grouping!'
+        ),
       };
 
       let out = util.inspect(obj, { compact: 3, depth: 10, breakLength: 60 });
@@ -2971,7 +2968,7 @@ export const utilInspect = {
             },
           },
         },
-        b: Array.from({ length: 9 }).map((e, n) => {
+        b: Array.from({ length: 9 }, (e, n) => {
           return n % 2 === 0 ? 'foobar' : 'baz';
         }),
       };
@@ -2999,7 +2996,7 @@ export const utilInspect = {
 
       assert.strictEqual(out, expected);
 
-      obj = Array.from({ length: 60 }).map((e, i) => i);
+      obj = Array.from({ length: 60 }, (_e, i) => i);
       out = util.inspect(obj, {
         compact: 1,
         breakLength: Infinity,
@@ -3404,14 +3401,14 @@ export const utilInspect = {
         '[GeneratorFunction: generator] {\n' +
         '  [length]: 0,\n' +
         "  [name]: 'generator',\n" +
-        "  [prototype]: Object [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" + // eslint-disable-line max-len
+        "  [prototype]: Object [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" +
         "  [Symbol(Symbol.toStringTag)]: 'GeneratorFunction'\n" +
         '}';
       const expected2 = // TODO: Remove this once updated to new V8.
         '[GeneratorFunction: generator] {\n' +
         '  [length]: 0,\n' +
         "  [name]: 'generator',\n" +
-        "  [prototype]: Iterator [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" + // eslint-disable-line max-len
+        "  [prototype]: Iterator [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" +
         "  [Symbol(Symbol.toStringTag)]: 'GeneratorFunction'\n" +
         '}';
       const actual = util.inspect(generator, { showHidden: true });
@@ -3424,7 +3421,10 @@ export const utilInspect = {
 
     {
       // Test for when breakLength results in a single column.
-      const obj = Array(9).fill('fhqwhgadshgnsdhjsdbkhsdabkfabkveybvf');
+      const obj = Array.from(
+        { length: 9 },
+        () => 'fhqwhgadshgnsdhjsdbkhsdabkfabkveybvf'
+      );
       assert.strictEqual(
         util.inspect(obj, { breakLength: 256 }),
         '[\n' +
@@ -3707,6 +3707,17 @@ export const utilInspectProxy = {
 
     // Make sure inspecting object does not trigger any proxy traps.
     util.format('%s', proxyObj);
+    // %i%f%d use Symbol.toPrimitive to convert the value to a string.
+    // %j uses JSON.stringify, accessing the value's toJSON and toString method.
+    util.format('%s%o%O%c', proxyObj, proxyObj, proxyObj, proxyObj);
+    const nestedFormatProxy = new Proxy(new Proxy({}, handler), {});
+    util.format(
+      '%s%o%O%c',
+      nestedFormatProxy,
+      nestedFormatProxy,
+      nestedFormatProxy,
+      nestedFormatProxy
+    );
 
     const r = Proxy.revocable({}, {});
     r.revoke();
@@ -3754,7 +3765,7 @@ export const utilInspectProxy = {
     const proxy4 = new Proxy(proxy1, proxy2);
     const proxy5 = new Proxy(proxy3, proxy4);
     const proxy6 = new Proxy(proxy5, proxy5);
-    const expected0 = '{}';
+    const expected0 = 'Proxy({})';
     const expected1 = 'Proxy [ {}, {} ]';
     const expected2 = 'Proxy [ Proxy [ {}, {} ], {} ]';
     const expected3 =
@@ -3777,6 +3788,10 @@ export const utilInspectProxy = {
       '    Proxy [ Proxy [Array], Proxy [Array] ]\n' +
       '  ]\n' +
       ']';
+    const expected2NoShowProxy = 'Proxy(Proxy({}))';
+    const expected3NoShowProxy = 'Proxy(Proxy(Proxy({})))';
+    const expected4NoShowProxy = 'Proxy(Proxy(Proxy(Proxy({}))))';
+    const expected5NoShowProxy = 'Proxy(Proxy(Proxy(Proxy(Proxy({})))))';
     assert.strictEqual(
       util.inspect(proxy1, { showProxy: 1, depth: null }),
       expected1
@@ -3787,17 +3802,17 @@ export const utilInspectProxy = {
     assert.strictEqual(util.inspect(proxy5, opts), expected5);
     assert.strictEqual(util.inspect(proxy6, opts), expected6);
     assert.strictEqual(util.inspect(proxy1), expected0);
-    assert.strictEqual(util.inspect(proxy2), expected0);
-    assert.strictEqual(util.inspect(proxy3), expected0);
-    assert.strictEqual(util.inspect(proxy4), expected0);
-    assert.strictEqual(util.inspect(proxy5), expected0);
-    assert.strictEqual(util.inspect(proxy6), expected0);
+    assert.strictEqual(util.inspect(proxy2), expected2NoShowProxy);
+    assert.strictEqual(util.inspect(proxy3), expected3NoShowProxy);
+    assert.strictEqual(util.inspect(proxy4), expected2NoShowProxy);
+    assert.strictEqual(util.inspect(proxy5), expected4NoShowProxy);
+    assert.strictEqual(util.inspect(proxy6), expected5NoShowProxy);
 
     // Just for fun, let's create a Proxy using Arrays.
     const proxy7 = new Proxy([], []);
     const expected7 = 'Proxy [ [], [] ]';
     assert.strictEqual(util.inspect(proxy7, opts), expected7);
-    assert.strictEqual(util.inspect(proxy7), '[]');
+    assert.strictEqual(util.inspect(proxy7), 'Proxy([])');
 
     // Now we're just getting silly, right?
     const proxy8 = new Proxy(Date, []);
@@ -3806,8 +3821,8 @@ export const utilInspectProxy = {
     const expected9 = 'Proxy [ [Function: Date], [Function: String] ]';
     assert.strictEqual(util.inspect(proxy8, opts), expected8);
     assert.strictEqual(util.inspect(proxy9, opts), expected9);
-    assert.strictEqual(util.inspect(proxy8), '[Function: Date]');
-    assert.strictEqual(util.inspect(proxy9), '[Function: Date]');
+    assert.strictEqual(util.inspect(proxy8), 'Proxy([Function: Date])');
+    assert.strictEqual(util.inspect(proxy9), 'Proxy([Function: Date])');
 
     const proxy10 = new Proxy(() => {}, {});
     const proxy11 = new Proxy(() => {}, {
@@ -3818,10 +3833,50 @@ export const utilInspectProxy = {
         return proxy11;
       },
     });
-    const expected10 = '[Function (anonymous)]';
-    const expected11 = '[Function (anonymous)]';
+    const expected10 = 'Proxy([Function (anonymous)])';
+    const expected11 = 'Proxy([Function (anonymous)])';
     assert.strictEqual(util.inspect(proxy10), expected10);
     assert.strictEqual(util.inspect(proxy11), expected11);
+
+    const proxy12 = new Proxy([1, 2, 3], proxy5);
+    assert.strictEqual(
+      util.inspect(proxy12, { colors: true, breakLength: 1 }),
+      '\x1B[36mProxy(\x1B[39m' +
+        '[\n  \x1B[33m1\x1B[39m,\n  \x1B[33m2\x1B[39m,\n  \x1B[33m3\x1B[39m\n]\x1B[36m' +
+        ')\x1B[39m'
+    );
+    assert.strictEqual(util.format('%s', proxy12), 'Proxy([ 1, 2, 3 ])');
+
+    {
+      // Nested proxies should not trigger any proxy handlers.
+      const nestedProxy = new Proxy(new Proxy(new Proxy({}, handler), {}), {});
+
+      assert.strictEqual(
+        util.inspect(nestedProxy, { showProxy: true }),
+        'Proxy [ Proxy [ Proxy [ {}, [Object] ], {} ], {} ]'
+      );
+      assert.strictEqual(
+        util.inspect(nestedProxy, { showProxy: false }),
+        expected3NoShowProxy
+      );
+    }
+
+    {
+      // Nested revoked proxies should work as expected as well as custom
+      // inspection functions.
+      const revocable = Proxy.revocable({}, handler);
+      revocable.revoke();
+      const nestedProxy = new Proxy(revocable.proxy, {});
+
+      assert.strictEqual(
+        util.inspect(nestedProxy, { showProxy: true }),
+        'Proxy [ <Revoked Proxy>, {} ]'
+      );
+      assert.strictEqual(
+        util.inspect(nestedProxy, { showProxy: false }),
+        'Proxy(<Revoked Proxy>)'
+      );
+    }
   },
 };
 
@@ -3949,9 +4004,10 @@ export const utilFormat = {
 
       assert.strictEqual(
         util.format(
-          // eslint-disable-next-line no-loss-of-precision
           '%d %s %i',
+          // eslint-disable-next-line no-loss-of-precision
           118059162071741130342,
+          // eslint-disable-next-line no-loss-of-precision
           118059162071741130342,
           123_123_123
         ),
@@ -4441,16 +4497,19 @@ export const utilInspectError = {
 
     assert.match(
       util.inspect({ err, nested: { err } }, { compact: true }),
+      // eslint-disable-next-line no-regex-spaces
       /{ err: Error: foo\n   bar\n       at .+,\n  nested: { err: Error: foo\n      bar\n          at .+ } }/s
     );
     assert.match(
       util.inspect({ err, nested: { err } }, { compact: false }),
+      // eslint-disable-next-line no-regex-spaces
       /{\n  err: Error: foo\n  bar\n      at .+,\n  nested: {\n    err: Error: foo\n    bar\n        at .+\n  }\n}/s
     );
 
     err.foo = 'bar';
     assert.match(
       util.inspect(err, { compact: true, breakLength: 5 }),
+      // eslint-disable-next-line no-regex-spaces
       /{ Error: foo\nbar\n    at .+\n  foo: 'bar' }/
     );
   },
@@ -5686,7 +5745,7 @@ export const testStripVtControlCharacters = {
 export const testStyleText = {
   async test() {
     const styled = '\u001b[31mtest\u001b[39m';
-    const noChange = 'test';
+    const _noChange = 'test';
 
     [undefined, null, false, 5n, 5, Symbol(), () => {}, {}].forEach(
       (invalidOption) => {
@@ -5909,7 +5968,17 @@ export const testParseEnv = {
   },
 };
 
-export const supportEOLMethods = {
+export const testNotImplemented = {
+  async test() {
+    for (const method of ['_errnoException', '_exceptionWithHostPort']) {
+      assert.throws(() => util[method](), {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      });
+    }
+  },
+};
+
+export const testEndOfLife = {
   async test() {
     assert.strictEqual(typeof util.isArray, 'function');
     assert.strictEqual(typeof util.isBoolean, 'function');
@@ -5926,5 +5995,7 @@ export const supportEOLMethods = {
     assert.strictEqual(typeof util.isString, 'function');
     assert.strictEqual(typeof util.isSymbol, 'function');
     assert.strictEqual(typeof util.isUndefined, 'function');
+
+    assert.strictEqual(util.isBuffer(true), false);
   },
 };

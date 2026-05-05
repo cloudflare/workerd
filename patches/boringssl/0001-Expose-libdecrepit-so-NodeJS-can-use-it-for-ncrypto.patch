@@ -1,0 +1,28 @@
+From feda75fa93bb54bc697f1f771a0aec573ab87ab7 Mon Sep 17 00:00:00 2001
+From: Nicholas Paun <npaun@cloudflare.com>
+Date: Fri, 26 Sep 2025 14:57:57 -0700
+Subject: [PATCH] Expose libdecrepit so NodeJS can use it for ncrypto
+
+---
+ BUILD.bazel | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index b7dc35932..7d214716c 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -155,10 +155,10 @@ bssl_cc_binary(
+     ],
+ )
+ 
+-# Build, but do not export libdecrepit.
+ bssl_cc_library(
+     name = "decrepit",
+     srcs = decrepit_sources,
++    visibility = ["//visibility:public"],
+     copts = ["-DBORINGSSL_IMPLEMENTATION"],
+     internal_hdrs = decrepit_internal_headers,
+     deps = [
+-- 
+2.50.1 (Apple Git-155)
+

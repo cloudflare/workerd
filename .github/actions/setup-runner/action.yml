@@ -1,5 +1,9 @@
 name: 'Setup runner environment'
 description: 'Sets up runner environment with proper toolchain for building workerd'
+inputs:
+  GOOGLESOURCE_COOKIE:
+    description: 'Cookie for googlesource.com'
+    required: true
 runs:
   using: 'composite'
   steps:
@@ -23,17 +27,24 @@ runs:
           libclang-rt-19-dev \
           llvm-19
         sudo ln -s /usr/bin/llvm-symbolizer-19 /usr/bin/llvm-symbolizer
-        echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
-        echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
+        sudo ln -s /usr/bin/llvm-profdata-19 /usr/bin/llvm-profdata
+        sudo ln -s /usr/bin/llvm-cov-19 /usr/bin/llvm-cov
+        echo "build:linux --repo_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
         echo "build:linux --linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
         echo "build:linux --host_linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
-        echo "build:linux --action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
-        echo "build:linux --host_action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
+        echo "build:linux --repo_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
     - name: Setup Windows
       shell: pwsh
+      env:
+        GOOGLESOURCE_COOKIE: ${{ inputs.GOOGLESOURCE_COOKIE }}
       if: runner.os == 'Windows'
       # Set a custom output root directory to avoid long file name issues.
+      # TODO(cleanup): According to https://github.com/actions/runner-images/blob/win25/20251216.149/images/windows/scripts/build/Configure-DeveloperMode.ps1#L13,
+      # this should already be set on the build image, but prior testing indicated CI speedups with
+      # it, check if it is actually having any effect.
       run: |
+        # Enable Developer Mode to allow Bazel to create real symlinks
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
         git config --global core.symlinks true
         git config --show-scope --show-origin core.symlinks
         git config --system core.longpaths true
@@ -41,6 +52,8 @@ runs:
     - name: Setup macOS
       if: runner.os == 'macOS'
       shell: bash
+      env:
+        GOOGLESOURCE_COOKIE: ${{ inputs.GOOGLESOURCE_COOKIE }}
       run: |
         # Build using Xcode 16.3 (equivalent to Clang 19)
         sudo xcode-select -s "/Applications/Xcode_16.3.app"
@@ -48,3 +61,26 @@ runs:
       shell: bash
       # Configure git to quell an irrelevant warning for runners (they never commit / push).
       run: git config core.hooksPath githooks
+    # Skip when the cookie is empty (forks, Dependabot PRs, local runs). Bazel will
+    # fall back to the unauthenticated googlesource endpoint, which is slower / more
+    # rate-limited but works without credentials.
+    - name: Configure Googlesource credentials (Unix)
+      shell: bash
+      if: inputs.GOOGLESOURCE_COOKIE != '' && runner.os != 'Windows'
+      env:
+        GOOGLESOURCE_COOKIE: ${{ inputs.GOOGLESOURCE_COOKIE }}
+      run: |
+        git config --global --add url."https://chromium.googlesource.com/a/".insteadOf "https://chromium.googlesource.com/"
+        git config --global http.cookiefile ~/.gitcookies
+        tr , \\t <<__END__ >>~/.gitcookies
+        .googlesource.com,TRUE,/,TRUE,2147483647,o,$GOOGLESOURCE_COOKIE
+        __END__
+    - name: Configure Googlesource credentials (Windows)
+      shell: pwsh
+      if: inputs.GOOGLESOURCE_COOKIE != '' && runner.os == 'Windows'
+      env:
+        GOOGLESOURCE_COOKIE: ${{ inputs.GOOGLESOURCE_COOKIE }}
+      run: |
+        git config --global --add url."https://chromium.googlesource.com/a/".insteadOf "https://chromium.googlesource.com/"
+        git config --global http.cookiefile "$env:USERPROFILE\.gitcookies"
+        Write-Output ".googlesource.com`tTRUE`t/`tTRUE`t2147483647`to`t$env:GOOGLESOURCE_COOKIE" >> "$env:USERPROFILE\.gitcookies"

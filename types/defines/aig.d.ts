@@ -116,7 +116,11 @@ export declare abstract class AiGateway {
   getLog(logId: string): Promise<AiGatewayLog>;
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
-    options?: { gateway?: UniversalGatewayOptions; extraHeaders?: object }
+    options?: {
+      gateway?: UniversalGatewayOptions;
+      extraHeaders?: object;
+      signal?: AbortSignal;
+    }
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }

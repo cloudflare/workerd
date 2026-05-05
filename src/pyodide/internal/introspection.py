@@ -1,4 +1,7 @@
+import signal
+import sys
 from inspect import isawaitable, isclass
+from types import FunctionType
 
 import js
 from workers import (
@@ -13,17 +16,25 @@ from pyodide.code import relaxed_call
 from pyodide.ffi import to_js
 
 
-def collect_methods(class_val):
+def getattr_no_get(cls, name):
+    """Get attribute from class, don't run __get__"""
+    for base in cls.__mro__:
+        if name in base.__dict__:
+            return base.__dict__[name]
+    return None
+
+
+def collect_methods(cls):
     """
-    Iterates through the methods in `class_val` and returns only public non-static/non-class methods
+    Iterates through the methods in `cls` and returns only public non-static/non-class methods
     defined on that class.
     """
-    return [
+    return sorted(
         name
-        for name, value in class_val.__dict__.items()
-        if not isinstance(value, (classmethod, staticmethod))
-        and not name.startswith("_")
-    ]
+        for name in dir(cls)
+        if not name.startswith("_")
+        and isinstance(getattr_no_get(cls, name), FunctionType)
+    )
 
 
 def collect_classes(user_mod, base_cls):
@@ -77,3 +88,15 @@ async def wrapper_func(relaxed, inst, prop, *args, **kwargs):
         return python_to_rpc(await result)
     else:
         return python_to_rpc(result)
+
+
+class CpuLimitExceeded(BaseException):
+    pass
+
+
+def raise_cpu_limit_exceeded(signum, frame):
+    raise CpuLimitExceeded("Python Worker exceeded CPU time limit")
+
+
+if sys.platform == "emscripten":
+    signal.signal(signal.SIGXCPU, raise_cpu_limit_exceeded)

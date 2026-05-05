@@ -5,7 +5,9 @@
 #pragma once
 
 #include <workerd/io/outcome.capnp.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
+#include <workerd/util/http-util.h>
 
 #include <capnp/compat/http-over-capnp.h>
 #include <kj/compat/http.h>
@@ -15,6 +17,7 @@ namespace workerd {
 
 class Frankenvalue;
 class IoContext_IncomingRequest;
+struct Worker_VersionInfo;
 
 // An interface representing the services made available by a worker/pipeline to handle a
 // request.
@@ -25,11 +28,11 @@ class WorkerInterface: public kj::HttpService {
 
   // Make an HTTP request. (This method is inherited from HttpService, but re-declared here for
   // visibility.)
-  virtual kj::Promise<void> request(kj::HttpMethod method,
+  kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
-      kj::HttpService::Response& response) = 0;
+      kj::HttpService::Response& response) override = 0;
   // TODO(perf): Consider changing this to return Promise<DeferredProxy>. This would allow
   //   more resources to be dropped when merely proxying a request. However, it means we would no
   //   longer be implementing kj::HttpService. But maybe that doesn't matter too much in practice.
@@ -37,11 +40,11 @@ class WorkerInterface: public kj::HttpService {
   // This is the same as the inherited HttpService::connect(), but we override it to be
   // pure-virtual to force all subclasses of WorkerInterface to implement it explicitly rather
   // than get the default implementation which throws an unimplemented exception.
-  virtual kj::Promise<void> connect(kj::StringPtr host,
+  kj::Promise<void> connect(kj::StringPtr host,
       const kj::HttpHeaders& headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
-      kj::HttpConnectSettings settings) = 0;
+      kj::HttpConnectSettings settings) override = 0;
 
   // Hints that this worker will likely be invoked in the near future, so should be warmed up now.
   // This method should also call `prewarm()` on any subsequent pipeline stages that are expected
@@ -50,34 +53,50 @@ class WorkerInterface: public kj::HttpService {
   // If prewarm() has to do anything asynchronous, it should use "waitUntil" tasks.
   virtual kj::Promise<void> prewarm(kj::StringPtr url) = 0;
 
+  // keep in sync with `src/rust/worker/ffi.rs`
   struct ScheduledResult {
     bool retry = true;
     EventOutcome outcome = EventOutcome::UNKNOWN;
   };
 
-  struct AlarmResult {
+  // Copyable subset of AlarmResult, used by ForkedPromise for alarm deduplication in Worker::Actor.
+  // keep in sync with `src/rust/worker/ffi.rs`
+  struct AlarmOutcome {
     bool retry = true;
     bool retryCountsAgainstLimit = true;
     EventOutcome outcome = EventOutcome::UNKNOWN;
   };
 
+  // keep in sync with `src/rust/worker/ffi.rs`
+  struct AlarmResult {
+    bool retry = true;
+    bool retryCountsAgainstLimit = true;
+    EventOutcome outcome = EventOutcome::UNKNOWN;
+    kj::Maybe<kj::String> errorDescription;
+
+    AlarmOutcome asOutcome() const {
+      return {
+        .retry = retry, .retryCountsAgainstLimit = retryCountsAgainstLimit, .outcome = outcome};
+    }
+  };
+
   class AlarmFulfiller {
    public:
-    AlarmFulfiller(kj::Own<kj::PromiseFulfiller<AlarmResult>> fulfiller);
+    AlarmFulfiller(kj::Own<kj::PromiseFulfiller<AlarmOutcome>> fulfiller);
     KJ_DISALLOW_COPY(AlarmFulfiller);
     AlarmFulfiller(AlarmFulfiller&&) = default;
     AlarmFulfiller& operator=(AlarmFulfiller&&) = default;
     ~AlarmFulfiller() noexcept(false);
-    void fulfill(const AlarmResult& result);
+    void fulfill(const AlarmOutcome& result);
     void reject(const kj::Exception& e);
     void cancel();
 
    private:
-    kj::Maybe<kj::Own<kj::PromiseFulfiller<AlarmResult>>> maybeFulfiller;
-    kj::Maybe<kj::PromiseFulfiller<AlarmResult>&> getFulfiller();
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<AlarmOutcome>>> maybeFulfiller;
+    kj::Maybe<kj::PromiseFulfiller<AlarmOutcome>&> getFulfiller();
   };
 
-  using ScheduleAlarmResult = kj::OneOf<AlarmResult, AlarmFulfiller>;
+  using ScheduleAlarmResult = kj::OneOf<AlarmOutcome, AlarmFulfiller>;
 
   // Trigger a scheduled event with the given scheduled (unix timestamp) time and cron string.
   // The cron string must be valid until the returned promise completes.
@@ -86,6 +105,15 @@ class WorkerInterface: public kj::HttpService {
 
   // Trigger an alarm event with the given scheduled (unix timestamp) time.
   virtual kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) = 0;
+
+  // Called when AlarmManager has given up retrying an alarm after too many counted failures.
+  // The actor should clear its alarm state so getAlarm() reflects the deletion.
+  // Returns the actor's stored alarm time if it differs from scheduledTime (i.e. the user set a
+  // new alarm), or kj::none if the alarm was cleared or no alarm was stored.
+  // Default is a no-op so subclasses that don't host actors need not override it.
+  virtual kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) {
+    return kj::Maybe<kj::Date>(kj::none);
+  }
 
   // Run the test handler. The returned promise resolves to true or false to indicate that the test
   // passed or failed. In the case of a failure, information should have already been written to
@@ -113,8 +141,10 @@ class WorkerInterface: public kj::HttpService {
     // for this event.
     virtual kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
         kj::Maybe<kj::StringPtr> entrypointName,
+        kj::Maybe<Worker_VersionInfo> versionInfo,
         Frankenvalue props,
-        kj::TaskSet& waitUntilTasks) = 0;
+        kj::TaskSet& waitUntilTasks,
+        bool isDynamicDispatch = false) = 0;
 
     // Forward the event over RPC.
     virtual kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
@@ -128,6 +158,9 @@ class WorkerInterface: public kj::HttpService {
     // RequestObserver. The RequestObserver implementation will define what numbers correspond to
     // what types.
     virtual uint16_t getType() = 0;
+
+    // Get event info for tracing.
+    virtual tracing::EventInfo getEventInfo() const = 0;
 
     // If the CustomEvent fails before any of the other methods are called, this may be invoked
     // to report the failure reason.
@@ -232,6 +265,16 @@ class LazyWorkerInterface final: public WorkerInterface {
     }
   }
 
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    ensureResolve();
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w->abandonAlarm(scheduledTime);
+    } else {
+      co_await KJ_ASSERT_NONNULL(promise);
+      co_return co_await KJ_ASSERT_NONNULL(worker)->abandonAlarm(scheduledTime);
+    }
+  }
+
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     ensureResolve();
     KJ_IF_SOME(w, worker) {
@@ -291,6 +334,7 @@ class RpcWorkerInterface final: public WorkerInterface {
   kj::Promise<void> prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
  private:

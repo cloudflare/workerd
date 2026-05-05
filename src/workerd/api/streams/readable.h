@@ -5,7 +5,9 @@
 #pragma once
 
 #include "common.h"
+
 #include <kj/function.h>
+#include <workerd/util/state-machine.h>
 
 namespace workerd::api {
 
@@ -40,7 +42,9 @@ public:
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-  struct Initial {};
+  struct Initial {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "initial"_kj;
+  };
   // While a Reader is attached to a ReadableStream, it holds a strong reference to the
   // ReadableStream to prevent it from being GC'ed so long as the Reader is available.
   // Once the reader is closed, released, or GC'ed the reference to the ReadableStream
@@ -48,13 +52,42 @@ private:
   // it being held anywhere. If the reader is still attached to the ReadableStream when
   // it is destroyed, the ReadableStream's reference to the reader is cleared but the
   // ReadableStream remains in the "reader locked" state, per the spec.
-  using Attached = jsg::Ref<ReadableStream>;
-  struct Released {};
+  struct Attached {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "attached"_kj;
+    jsg::Ref<ReadableStream> stream;
+  };
+  // Released: The user explicitly called releaseLock() to detach the reader from the stream.
+  // The stream remains usable and can be locked by a new reader.
+  struct Released {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "released"_kj;
+  };
+  // Closed: The underlying stream ended (closed or errored) while the reader was attached.
+  // The stream is no longer usable.
+  struct Closed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+
+  // State machine for ReaderImpl:
+  //   Initial -> Attached (attach() called)
+  //   Attached -> Closed (detach() called when stream closes)
+  //   Attached -> Released (releaseLock() called)
+  // Closed and Released are terminal states.
+  // Initial is not terminal but most methods assert if called in this state.
+  using ReaderState = StateMachine<TerminalStates<Closed, Released>,
+      ActiveState<Attached>,
+      Initial,
+      Attached,
+      Closed,
+      Released>;
 
   kj::Maybe<IoContext&> ioContext;
   ReadableStreamController::Reader& reader;
 
-  kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
+  ReaderState state;
+
+  inline void assertAttachedOrTerminal() const {
+    KJ_ASSERT(!state.is<Initial>(), "this reader was never attached");
+  }
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 
   friend class ReadableStreamDefaultReader;
@@ -133,15 +166,15 @@ public:
   jsg::Promise<ReadResult> read(jsg::Lock& js, v8::Local<v8::ArrayBufferView> byobBuffer,
       jsg::Optional<ReadableStreamBYOBReaderReadOptions> options = kj::none);
 
-  // Non-standard extension so that reads can specify a minimum number of bytes to read. It's a
+  // Non-standard extension so that reads can specify a minimum number of elements to read. It's a
   // struct so that we could eventually add things like timeouts if we need to. Since there's no
   // existing spec that's a leading contender, this is behind a different method name to avoid
-  // conflicts with any changes to `read`. Fewer than `minBytes` may be returned if EOF is hit or
-  // the underlying stream is closed/errors out. In all cases the read result is either
+  // conflicts with any changes to `read`. Fewer than `minElements` may be returned if EOF is hit
+  // or the underlying stream is closed/errors out. In all cases the read result is either
   // {value: theChunk, done: false} or {value: undefined, done: true} as with read.
   // TODO(soon): Like fetch() and Cache.match(), readAtLeast() returns a promise for a V8 object.
   jsg::Promise<ReadResult> readAtLeast(jsg::Lock& js,
-                                        int minBytes,
+                                        int minElements,
                                         v8::Local<v8::ArrayBufferView> byobBuffer);
 
   void releaseLock(jsg::Lock& js);
@@ -185,6 +218,49 @@ private:
   ReaderImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor);
+};
+
+// DrainingReader is a C++ only reader (not exposed to JavaScript) that performs
+// draining reads. It locks the stream like standard readers but uses drainingRead()
+// instead of regular read() to drain all synchronously available data at once.
+// This is intended for optimized pipe operations.
+class DrainingReader: public ReadableStreamController::Reader {
+ public:
+  explicit DrainingReader();
+
+  // Factory method to create and lock to a stream. Returns nullptr if stream is locked.
+  static kj::Maybe<kj::Own<DrainingReader>> create(jsg::Lock& js, ReadableStream& stream);
+
+  virtual ~DrainingReader() noexcept(false);
+
+  // Performs a draining read, returning all synchronously available data as bytes.
+  // The maxRead parameter is a soft limit - see ReadableStreamController::drainingRead.
+  jsg::Promise<DrainingReadResult> read(jsg::Lock& js, size_t maxRead = kj::maxValue);
+
+  // Cancels the stream.
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
+
+  // Releases the lock on the stream.
+  void releaseLock(jsg::Lock& js);
+
+  // Returns whether this reader is still attached to a stream.
+  bool isAttached() const;
+
+  // ReadableStreamController::Reader interface
+  void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise) override;
+  void detach() override;
+  bool isByteOriented() const override { return false; }
+
+  void visitForGc(jsg::GcVisitor& visitor);
+
+ private:
+  struct Initial {};
+  using Attached = jsg::Ref<ReadableStream>;
+  struct Released {};
+
+  kj::Maybe<IoContext&> ioContext;
+  kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
+  kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
 };
 
 class ReadableStream: public jsg::Object {
@@ -267,10 +343,10 @@ public:
                                    returnFunction,
                                    ValuesOptions);
   struct Transform {
-    jsg::Ref<WritableStream> writable;
     jsg::Ref<ReadableStream> readable;
+    jsg::Ref<WritableStream> writable;
 
-    JSG_STRUCT(writable, readable);
+    JSG_STRUCT(readable, writable);
     JSG_STRUCT_TS_OVERRIDE(ReadableWritablePair<R = any, W = any> {
       readable: ReadableStream<R>;
       writable: WritableStream<W>;

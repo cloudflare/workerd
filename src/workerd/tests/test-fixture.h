@@ -26,9 +26,15 @@ struct TestFixture {
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
+    // If true, use real timers instead of mock timers that never advance.
+    // Requires waitScope to be kj::none (so that the fixture creates its own AsyncIoContext).
+    bool useRealTimers;
+    // If set, used instead of the default DummyIoChannelFactory when creating incoming requests.
+    // The factory receives the TimerChannel reference.
+    kj::Maybe<kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
   };
 
-  TestFixture(SetupParams&& params = {});
+  TestFixture(SetupParams&& params = {.useRealTimers = false});
 
   struct V8Environment {
     v8::Isolate* isolate;
@@ -55,8 +61,8 @@ struct TestFixture {
   // For void callbacks run waits for their completion, for promises waits for their resolution
   // and returns the result.
   template <typename CallBack>
-  auto runInIoContext(CallBack&& callback) ->
-      typename RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
+  auto runInIoContext(CallBack&& callback)
+      -> RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
     auto request = createIncomingRequest();
     kj::WaitScope* waitScope;
     KJ_IF_SOME(ws, this->waitScope) {
@@ -78,7 +84,7 @@ struct TestFixture {
 
   // Special void version of runInIoContext that ignores exceptions with given descriptions.
   void runInIoContext(kj::Function<kj::Promise<void>(const Environment&)>&& callback,
-      const kj::ArrayPtr<const kj::StringPtr> errorsToIgnore);
+      kj::ArrayPtr<const kj::StringPtr> errorsToIgnore);
 
   struct Response {
     uint statusCode;
@@ -113,8 +119,58 @@ struct TestFixture {
   kj::Own<kj::TaskSet::ErrorHandler> errorHandler;
   kj::TaskSet waitUntilTasks;
   kj::Own<kj::HttpHeaderTable> headerTable;
+  kj::Maybe<kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
 
   kj::Own<IoContext::IncomingRequest> createIncomingRequest();
+
+ public:
+  // Default IoChannelFactory used by tests. Exposed so tests can subclass it
+  // and override individual methods (e.g. startSubrequest for socket connect tests).
+  struct DummyIoChannelFactory: public IoChannelFactory {
+    virtual ~DummyIoChannelFactory() = default;
+    DummyIoChannelFactory(TimerChannel& timer): timer(timer) {}
+
+    void abortIsolate(kj::StringPtr reason) override {
+      KJ_FAIL_ASSERT("no abortIsolate");
+    }
+
+    kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
+      KJ_FAIL_ASSERT("no subrequests");
+    }
+    kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
+        kj::Maybe<Frankenvalue> props,
+        kj::Maybe<VersionRequest> versionRequest) override {
+      KJ_FAIL_ASSERT("no subrequests");
+    }
+    capnp::Capability::Client getCapability(uint channel) override {
+      KJ_FAIL_ASSERT("no capabilities");
+    }
+    // Out-of-line because it references file-local MockCacheClient in test-fixture.c++.
+    kj::Own<CacheClient> getCache() override;
+    TimerChannel& getTimer() override {
+      return timer;
+    }
+    kj::Promise<void> writeLogfwdr(
+        uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) override {
+      KJ_FAIL_ASSERT("no log channels");
+    }
+    kj::Own<ActorChannel> getGlobalActor(uint channel,
+        const ActorIdFactory::ActorId& id,
+        kj::Maybe<kj::String> locationHint,
+        ActorGetMode mode,
+        bool enableReplicaRouting,
+        ActorRoutingMode routingMode,
+        SpanParent parentSpan,
+        kj::Maybe<ActorVersion> version) override {
+      KJ_FAIL_REQUIRE("no actor channels");
+    }
+    kj::Own<ActorChannel> getColoLocalActor(
+        uint channel, kj::StringPtr id, SpanParent parentSpan) override {
+      KJ_FAIL_REQUIRE("no actor channels");
+    }
+
+    TimerChannel& timer;
+  };
 };
 
 }  // namespace workerd

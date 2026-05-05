@@ -1,8 +1,12 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 // This is based on the info about the tar file format on wikipedia
 // And some trial and error with real tar files.
 // https://en.wikipedia.org/wiki/Tar_(computing)#File_format
 
-import { PythonRuntimeError } from 'pyodide-internal:util';
+import { PythonWorkersInternalError } from 'pyodide-internal:util';
 
 const decoder = new TextDecoder();
 function decodeString(buf: Uint8Array): string {
@@ -134,7 +138,7 @@ export function parseTarInfo(reader: Reader): [TarFSInfo, string[]] {
       directory.children!.set(info.name, info);
     } else {
       // fail if we encounter other values of type (e.g., symlink, LongName, etc)
-      throw new PythonRuntimeError(
+      throw new PythonWorkersInternalError(
         `Python TarFS error: Unexpected type ${info.type}`
       );
     }

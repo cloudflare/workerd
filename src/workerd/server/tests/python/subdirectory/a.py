@@ -1,10 +1,11 @@
 from js import Response
 from subdir.a import x
+from workers import WorkerEntrypoint
 
 
-def on_fetch(request):
-    return Response.new("hello world")
+class Default(WorkerEntrypoint):
+    def fetch(self, request):
+        return Response.new("hello world")
 
-
-def test():
-    print("Hi there, this is a test", x)
+    def test(self):
+        print("Hi there, this is a test", x)

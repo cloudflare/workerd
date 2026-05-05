@@ -43,14 +43,14 @@ KJ_TEST("getPythonSnapshotRelease") {
   featureFlags.setPythonWorkers20250116(true);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "0.28.0");
+    KJ_ASSERT(res.getPyodide() == "0.28.2");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
   }
 
   featureFlags.setPythonWorkersDevPyodide(false);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "0.28.0");
+    KJ_ASSERT(res.getPyodide() == "0.28.2");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
   }
 }
@@ -293,7 +293,7 @@ kj::Array<kj::String> filterPythonScriptImports(
   auto contentsBuilder = kj::heapArrayBuilder<kj::Array<kj::byte>>(names.size());
   for (auto _: kj::zeroTo(names.size())) {
     (void)_;
-    contentsBuilder.add(kj::Array<kj::byte>(0));
+    contentsBuilder.add(kj::Array<kj::byte>(nullptr));
   }
   auto modInfo = pyodide::PythonModuleInfo(kj::mv(names), contentsBuilder.finish());
   auto modSet = modInfo.getWorkerModuleSet();

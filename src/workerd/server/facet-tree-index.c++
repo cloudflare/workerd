@@ -8,9 +8,7 @@ namespace workerd::server {
 using kj::byte;
 using kj::uint;
 
-FacetTreeIndex::FacetTreeIndex(kj::Own<const kj::File> fileParam)
-    : file(kj::mv(fileParam)),
-      offset(0) {
+FacetTreeIndex::FacetTreeIndex(kj::Own<const kj::File> fileParam): file(kj::mv(fileParam)) {
   // Read the file to populate the initial index
 
   auto fileBytes = file->readAllBytes();

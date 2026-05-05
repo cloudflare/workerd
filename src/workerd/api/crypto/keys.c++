@@ -30,18 +30,14 @@ AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key, 
   KJ_DASSERT(keyType != KeyType::SECRET);
 }
 
-jsg::BufferSource AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(
+jsg::JsArrayBuffer AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> signature) const {
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, signature.size());
-  backing.asArrayPtr().copyFrom(signature);
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsArrayBuffer::create(js, signature);
 }
 
-jsg::BufferSource AsymmetricKeyCryptoKeyImpl::signatureWebCryptoToSsl(
+jsg::JsArrayBuffer AsymmetricKeyCryptoKeyImpl::signatureWebCryptoToSsl(
     jsg::Lock& js, kj::ArrayPtr<const kj::byte> signature) const {
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, signature.size());
-  backing.asArrayPtr().copyFrom(signature);
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsArrayBuffer::create(js, signature);
 }
 
 SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(
@@ -79,19 +75,16 @@ SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(
     jwk.key_ops = getUsages().map([](auto usage) { return kj::str(usage.name()); });
     return jwk;
   } else if (format == "raw"_kj) {
-    return exportRaw(js);
+    return exportRaw(js).addRef(js);
   } else {
     JSG_FAIL_REQUIRE(DOMInvalidAccessError, "Cannot export \"", getAlgorithmName(), "\" in \"",
         format, "\" format.");
   }
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, derLen);
-  auto src = kj::arrayPtr(der, derLen);
-  backing.asArrayPtr().copyFrom(src);
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsArrayBuffer::create(js, kj::arrayPtr(der, derLen)).addRef(js);
 }
 
-jsg::BufferSource AsymmetricKeyCryptoKeyImpl::exportKeyExt(jsg::Lock& js,
+jsg::JsUint8Array AsymmetricKeyCryptoKeyImpl::exportKeyExt(jsg::Lock& js,
     kj::StringPtr format,
     kj::StringPtr type,
     jsg::Optional<kj::String> cipher,
@@ -126,10 +119,8 @@ jsg::BufferSource AsymmetricKeyCryptoKeyImpl::exportKeyExt(jsg::Lock& js,
   const auto fromBio = [&](kj::StringPtr format) {
     BUF_MEM* bptr;
     BIO_get_mem_ptr(bio.get(), &bptr);
-    auto result = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, bptr->length);
     auto src = kj::arrayPtr(bptr->data, bptr->length);
-    result.asArrayPtr().copyFrom(src.asBytes());
-    return jsg::BufferSource(js, kj::mv(result));
+    return jsg::JsUint8Array::create(js, src.asBytes());
   };
 
   if (getType() == "public"_kj) {
@@ -220,7 +211,7 @@ jsg::BufferSource AsymmetricKeyCryptoKeyImpl::exportKeyExt(jsg::Lock& js,
   JSG_FAIL_REQUIRE(TypeError, "Failed to encode private key");
 }
 
-jsg::BufferSource AsymmetricKeyCryptoKeyImpl::sign(jsg::Lock& js,
+jsg::JsArrayBuffer AsymmetricKeyCryptoKeyImpl::sign(jsg::Lock& js,
     SubtleCrypto::SignAlgorithm&& algorithm,
     kj::ArrayPtr<const kj::byte> data) const {
   JSG_REQUIRE(keyType == KeyType::PRIVATE, DOMInvalidAccessError,

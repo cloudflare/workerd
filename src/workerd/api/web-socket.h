@@ -10,6 +10,8 @@
 #include <workerd/io/io-gate.h>
 #include <workerd/io/observer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/checked-queue.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
@@ -22,6 +24,8 @@ class ActorObserver;
 }
 
 namespace workerd::api {
+
+class Blob;
 
 template <typename T>
 struct DeferredProxy;
@@ -41,7 +45,7 @@ class CloseEvent: public Event {
 
   struct Initializer {
     jsg::Optional<int> code;
-    jsg::Optional<kj::String> reason;
+    jsg::Optional<jsg::USVString> reason;
     jsg::Optional<bool> wasClean;
 
     JSG_STRUCT(code, reason, wasClean);
@@ -51,7 +55,7 @@ class CloseEvent: public Event {
       jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
     Initializer init = kj::mv(initializer).orDefault({});
     return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
-        kj::mv(init.reason).orDefault(nullptr), init.wasClean.orDefault(false));
+        kj::mv(init.reason).orDefault(jsg::USVString(kj::str())), init.wasClean.orDefault(false));
   }
 
   int getCode() {
@@ -84,6 +88,8 @@ class CloseEvent: public Event {
   kj::String reason;
   bool clean;
 };
+
+WD_STRONG_BOOL(AllowHalfOpen);
 
 // The forward declaration is necessary so we can make some
 // WebSocket methods accessible to WebSocketPair via friend declaration.
@@ -204,6 +210,9 @@ class WebSocket: public EventTarget {
 
     // True forever once the JS WebSocket calls `close()`.
     bool closedOutgoingConnection = false;
+
+    // Whether the WebSocket allows half-open close state.
+    AllowHalfOpen allowHalfOpen = AllowHalfOpen::YES;
   };
 
   ~WebSocket() noexcept(false) {
@@ -223,12 +232,12 @@ class WebSocket: public EventTarget {
   // The JS WebSocket constructor needs to initiate a connection, but we need to return the
   // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
   // to the `initConnection` method.
-  WebSocket(kj::Own<kj::WebSocket> native);
+  WebSocket(jsg::Lock& js, kj::Own<kj::WebSocket> native);
 
   // The JS WebSocket constructor needs to initiate a connection, but we need to return the
   // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
   // to the `initConnection` method.
-  WebSocket(kj::String url);
+  WebSocket(jsg::Lock& js, kj::String url);
 
   // We initiate a `new WebSocket()` connection and set up a continuation that handles the
   // response once it's available. This includes assigning the native websocket and dispatching the
@@ -284,13 +293,19 @@ class WebSocket: public EventTarget {
   // ---------------------------------------------------------------------------
   // JS API.
 
+  struct AcceptOptions {
+    jsg::Optional<bool> allowHalfOpen;
+
+    JSG_STRUCT(allowHalfOpen);
+  };
+
   // Creates a new outbound WebSocket.
   static jsg::Ref<WebSocket> constructor(jsg::Lock& js,
       kj::String url,
       jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols);
 
   // Begin delivering events locally.
-  void accept(jsg::Lock& js);
+  void accept(jsg::Lock& js, jsg::Optional<AcceptOptions> options);
 
   // Same as accept(), but websockets that are created with `new WebSocket()` in JS cannot call
   // accept(). Instead, we only permit the C++ constructor to call this "internal" version of accept()
@@ -302,7 +317,7 @@ class WebSocket: public EventTarget {
   void startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
 
   void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message);
-  void close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<kj::String> reason);
+  void close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<jsg::USVString> reason);
 
   // Used to get/set the attachment for hibernation.
   // If the object isn't serialized, it will not survive hibernation.
@@ -337,6 +352,9 @@ class WebSocket: public EventTarget {
   kj::Maybe<kj::StringPtr> getProtocol();
   kj::Maybe<kj::StringPtr> getExtensions();
 
+  kj::StringPtr getBinaryType();
+  void setBinaryType(kj::String value);
+
   JSG_RESOURCE_TYPE(WebSocket, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
     JSG_METHOD(accept);
@@ -366,11 +384,13 @@ class WebSocket: public EventTarget {
       JSG_READONLY_PROTOTYPE_PROPERTY(url, getUrl);
       JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_PROTOTYPE_PROPERTY(extensions, getExtensions);
+      JSG_PROTOTYPE_PROPERTY(binaryType, getBinaryType, setBinaryType);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(readyState, getReadyState);
       JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
       JSG_READONLY_INSTANCE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_INSTANCE_PROPERTY(extensions, getExtensions);
+      JSG_INSTANCE_PROPERTY(binaryType, getBinaryType, setBinaryType);
     }
 
     JSG_TS_DEFINE(type WebSocketEventMap = {
@@ -379,7 +399,10 @@ class WebSocket: public EventTarget {
       open: Event;
       error: ErrorEvent;
     });
-    JSG_TS_OVERRIDE(extends EventTarget<WebSocketEventMap>);
+    JSG_TS_OVERRIDE(extends EventTarget<WebSocketEventMap> {
+      get binaryType(): "blob" | "arraybuffer";
+      set binaryType(value: "blob" | "arraybuffer");
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -393,6 +416,11 @@ class WebSocket: public EventTarget {
   kj::Maybe<kj::String> url;
   kj::Maybe<kj::String> protocol = kj::String();
   kj::Maybe<kj::String> extensions = kj::String();
+  // The binaryType attribute per the WHATWG WebSocket spec. Defaults to "blob" when the
+  // websocket_standard_binary_type compat flag is enabled, "arraybuffer" otherwise.
+  enum class BinaryType { BLOB, ARRAYBUFFER };
+  BinaryType binaryType_ = BinaryType::ARRAYBUFFER;
+
   kj::Maybe<kj::Date> autoResponseTimestamp;
   // All WebSockets have this property. It starts out null but can
   // be assigned to any serializable value. The property will survive hibernation.
@@ -405,11 +433,19 @@ class WebSocket: public EventTarget {
   // `close()`, thereby preventing calls to `send()` even after we wake from hibernation.
   bool closedOutgoingForHib = false;
 
+  // When YES, a server-initiated close does NOT automatically send a reciprocal close frame,
+  // leaving readyState as CLOSING (2) when the close event fires. The application is then
+  // responsible for calling close() explicitly. When NO (spec-compliant default with the
+  // web_socket_auto_reply_to_close compat flag), a close reply is sent automatically and
+  // readyState is CLOSED (3) when the close event fires.
+  // Default is YES (legacy behavior); overridden from the compat flag at construction time.
+  AllowHalfOpen allowHalfOpen = AllowHalfOpen::YES;
+
   // Maximum allowed size for WebSocket messages
   inline static const size_t SUGGESTED_MAX_MESSAGE_SIZE = 1u << 20;
 
   // Maximum size of a WebSocket attachment.
-  inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 2;
+  inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 16;
 
   struct AwaitingConnection {
     // A canceler associated with the pending websocket connection for `new Websocket()`.
@@ -556,17 +592,22 @@ class WebSocket: public EventTarget {
   // Keep track of current hibernatable websockets auto-response status to avoid racing
   // between regular websocket messages, and auto-responses.
   struct AutoResponse {
-    kj::Promise<void> ongoingAutoResponse = kj::READY_NOW;
-    std::list<kj::String> pendingAutoResponseDeque;
+    // The ongoing auto-response promise, used for pump() synchronization.
+    // Wrapped in IoOwn when an IoContext is available (for GC-safe destruction that avoids
+    // violating DISALLOW_KJ_IO_DESTRUCTORS_SCOPE), or plain kj::Own when no IoContext is
+    // available (e.g. when called from the hibernation manager's readLoop).
+    using OwnedAutoResponsePromise =
+        kj::OneOf<IoOwn<kj::Promise<void>>, kj::Own<kj::Promise<void>>>;
+    kj::Maybe<OwnedAutoResponsePromise> ongoingAutoResponse;
+    workerd::util::Queue<kj::String> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
     bool isClosed = false;
 
     JSG_MEMORY_INFO(AutoResponse) {
       tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
-      for (const auto& message: pendingAutoResponseDeque) {
-        tracker.trackField(nullptr, message);
-      }
+      pendingAutoResponseDeque.forEach(
+          [&](const kj::String& message) { tracker.trackField(nullptr, message); });
     }
   };
 
@@ -600,6 +641,11 @@ class WebSocket: public EventTarget {
 
   void ensurePumping(jsg::Lock& js);
 
+  // Returns the number of pending auto-responses that should be sent before the next outgoing
+  // message, and advances the queuedAutoResponses counter. Called each time a GatedMessage is
+  // inserted into outgoingMessages to guarantee auto-response ordering.
+  size_t getPendingAutoResponseCount();
+
   // Write messages from `outgoingMessages` into `ws`.
   //
   // These are not necessarily called under isolate lock, but they are called on the given
@@ -624,8 +670,8 @@ class WebSocket: public EventTarget {
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \
-  api::CloseEvent, api::CloseEvent::Initializer, api::WebSocket, api::WebSocketPair,               \
-      api::WebSocketPair::PairIterator,                                                            \
+  api::CloseEvent, api::CloseEvent::Initializer, api::WebSocket, api::WebSocket::AcceptOptions,    \
+      api::WebSocketPair, api::WebSocketPair::PairIterator,                                        \
       api::WebSocketPair::PairIterator::                                                           \
           Next  // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 

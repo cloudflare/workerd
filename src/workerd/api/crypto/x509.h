@@ -23,7 +23,7 @@ class X509Certificate: public jsg::Object {
   kj::Maybe<kj::String> getValidTo();
   kj::Maybe<kj::Array<kj::String>> getKeyUsage();
   kj::Maybe<kj::Array<const char>> getSerialNumber();
-  jsg::BufferSource getRaw(jsg::Lock& js);
+  jsg::JsUint8Array getRaw(jsg::Lock& js);
   kj::Maybe<jsg::Ref<CryptoKey>> getPublicKey(jsg::Lock& js);
   kj::Maybe<kj::String> getPem();
   kj::Maybe<kj::String> getFingerprint();

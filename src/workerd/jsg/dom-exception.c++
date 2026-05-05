@@ -95,11 +95,20 @@ jsg::Ref<DOMException> DOMException::deserialize(
       // still a remote chance that someone might use it in some persisted state
       // somewhere. So let's go ahead and support it.
       kj::String name = deserializer.readLengthDelimitedString();
-      auto errorForStack = KJ_ASSERT_NONNULL(deserializer.readValue(js).tryCast<JsObject>());
-      kj::String message =
-          KJ_ASSERT_NONNULL(errorForStack.get(js, "message"_kj).tryCast<JsString>()).toString(js);
-      kj::String stack =
-          KJ_ASSERT_NONNULL(errorForStack.get(js, "stack").tryCast<JsString>()).toString(js);
+      auto errorForStack = KJ_UNWRAP_OR(deserializer.readValue(js).tryCast<JsObject>(), {
+        JSG_FAIL_REQUIRE(
+            DOMDataCloneError, "Deserialization failed: DOMException payload is not an object");
+      });
+      auto messageJs = KJ_UNWRAP_OR(errorForStack.get(js, "message"_kj).tryCast<JsString>(), {
+        JSG_FAIL_REQUIRE(
+            DOMDataCloneError, "Deserialization failed: DOMException message is not a string");
+      });
+      auto stackJs = KJ_UNWRAP_OR(errorForStack.get(js, "stack").tryCast<JsString>(), {
+        JSG_FAIL_REQUIRE(
+            DOMDataCloneError, "Deserialization failed: DOMException stack is not a string");
+      });
+      kj::String message = messageJs.toString(js);
+      kj::String stack = stackJs.toString(js);
       return js.domException(kj::mv(message), kj::mv(name), kj::mv(stack));
     }
     default:

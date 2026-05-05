@@ -1,10 +1,12 @@
 from asgi import env
+from workers import WorkerEntrypoint
 
 
-async def on_fetch(request):
-    import asgi
+class Default(WorkerEntrypoint):
+    async def fetch(self, request, env):
+        import asgi
 
-    return await asgi.fetch(app, request, env)
+        return await asgi.fetch(app, request, env)
 
 
 # Set up fastapi app

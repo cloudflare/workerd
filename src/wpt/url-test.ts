@@ -9,8 +9,11 @@ export default {
   'IdnaTestV2.window.js': {},
   'historical.any.js': {},
   'idlharness.any.js': {
-    comment: 'Implement web IDL support in harness',
-    disabledTests: true,
+    comment:
+      'IDL tests fail because Workers exposes globals differently than browsers (not as own properties of self)',
+    expectedFailures: [
+      'URLSearchParams interface: iterable<USVString, USVString>',
+    ],
   },
   'javascript-urls.window.js': {
     comment: 'Implement `globalThis.document`',
@@ -20,6 +23,7 @@ export default {
       'javascript: URL without an opaque path',
       'javascript: URL containing a JavaScript string split over path and query',
       'javascript: URL containing a JavaScript string split over path and query and has a U+000A in scheme',
+      'javascript: URL with extra slashes at the start',
     ],
   },
   'percent-encoding.window.js': {

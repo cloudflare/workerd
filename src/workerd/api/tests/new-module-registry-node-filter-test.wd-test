@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "new-module-registry-node-filter-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-node-filter-test.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          "new_module_registry",
+          "experimental",
+          "disable_nodejs_repl_module",
+        ],
+      ),
+    ),
+  ],
+);

@@ -282,7 +282,7 @@ export const retryTest = {
 };
 
 export const constructorTest = {
-  test() {
+  test(ctrl, env) {
     throws(() => new EventSource('not a valid url'), {
       name: 'SyntaxError',
       message:
@@ -304,11 +304,15 @@ export const constructorTest = {
     );
 
     // Doesn't throw
-    new EventSource('http://example.org/message').close();
     new EventSource('http://example.org/message', {
+      fetcher: env.subrequest,
+    }).close();
+    new EventSource('http://example.org/message', {
+      fetcher: env.subrequest,
       withCredentials: false,
     }).close();
     new EventSource('http://example.org/message', {
+      fetcher: env.subrequest,
       withCredentials: undefined,
     }).close();
   },
@@ -552,8 +556,9 @@ async function reconnectFail(request) {
         },
       });
     }
+    // falls through
     case 2:
-    // Fall-through
+    // falls through
     case 3: {
       return new Response(null, {
         headers: {

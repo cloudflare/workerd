@@ -32,8 +32,11 @@ struct SocketAddress {
 struct SocketInfo {
   jsg::Optional<kj::String> remoteAddress;
 
-  // The local address is specified by the spec but we don't implement it.
-  // It will always remain empty.
+  // The local address — i.e. the address on this side of the socket. For outbound sockets created
+  // via `connect()`, we don't have a useful value to provide and leave it empty. For inbound
+  // sockets delivered to a worker's `connect(socket)` handler, this is populated with the CONNECT
+  // authority (the "host:port" string the caller passed to `fetcher.connect(...)`), since from the
+  // handler's perspective that is the address the peer asked to connect to on this end.
   jsg::Optional<kj::String> localAddress;
   JSG_STRUCT(remoteAddress, localAddress);
 };
@@ -60,7 +63,8 @@ class Socket: public jsg::Object {
   Socket(jsg::Lock& js,
       IoContext& context,
       kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
-      kj::String remoteAddress,
+      kj::Maybe<kj::String> remoteAddress,
+      kj::Maybe<kj::String> localAddress,
       jsg::Ref<ReadableStream> readableParam,
       jsg::Ref<WritableStream> writable,
       jsg::PromiseResolverPair<void> closedPrPair,
@@ -68,26 +72,25 @@ class Socket: public jsg::Object {
       jsg::Optional<SocketOptions> options,
       kj::Own<kj::TlsStarterCallback> tlsStarter,
       SecureTransportKind secureTransport,
-      kj::String domain,
+      kj::Maybe<kj::String> domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
-      : connectionStream(context.addObject(kj::mv(connectionStream))),
+      : connectionData(context.addObject(kj::heap<ConnectionData>(
+            kj::mv(tlsStarter), kj::mv(connectionStream), kj::mv(watchForDisconnectTask)))),
         readable(kj::mv(readableParam)),
         writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),
         closedPromiseCopy(closedPrPair.promise.whenResolved(js)),
         closedPromise(kj::mv(closedPrPair.promise)),
-        watchForDisconnectTask(context.addObject(kj::heap(kj::mv(watchForDisconnectTask)))),
         options(kj::mv(options)),
         remoteAddress(kj::mv(remoteAddress)),
-        tlsStarter(context.addObject(kj::mv(tlsStarter))),
+        localAddress(kj::mv(localAddress)),
         secureTransport(secureTransport),
         domain(kj::mv(domain)),
         isDefaultFetchPort(isDefaultFetchPort),
         openedResolver(kj::mv(openedPrPair.resolver)),
         openedPromiseCopy(openedPrPair.promise.whenResolved(js)),
-        openedPromise(kj::mv(openedPrPair.promise)),
-        isClosing(false) {};
+        openedPromise(kj::mv(openedPrPair.promise)) {};
 
   jsg::Ref<ReadableStream> getReadable() {
     return readable.addRef();
@@ -164,10 +167,7 @@ class Socket: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackFieldWithSize(
-        "connectionStream", sizeof(IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>>));
-    tracker.trackFieldWithSize("tlsStarter", sizeof(IoOwn<kj::TlsStarterCallback>));
-    tracker.trackFieldWithSize("watchForDisconnectTask", sizeof(IoOwn<kj::Promise<void>>));
+    tracker.trackFieldWithSize("connectionData", sizeof(IoOwn<ConnectionData>));
     tracker.trackField("readable", readable);
     tracker.trackField("writable", writable);
     tracker.trackField("closedResolver", closedResolver);
@@ -181,10 +181,21 @@ class Socket: public jsg::Object {
   }
 
  private:
-  // TODO(cleanup): Combine all the IoOwns here into one, to improve efficiency and make
-  //   shutdown order clearer.
+  struct ConnectionData {
+    kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
+    kj::Maybe<kj::Promise<void>> watchForDisconnectTask;
+    // tlsStarter must be declared after connectionStream so that it is destroyed first,
+    // since it holds a reference that keeps the connection alive.
+    kj::Own<kj::TlsStarterCallback> tlsStarter;
+    ConnectionData(kj::Own<kj::TlsStarterCallback> tlsStarter,
+        kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connStream,
+        kj::Promise<void> disconnectTask)
+        : connectionStream(kj::mv(connStream)),
+          watchForDisconnectTask(kj::mv(disconnectTask)),
+          tlsStarter(kj::mv(tlsStarter)) {}
+  };
+  kj::Maybe<IoOwn<ConnectionData>> connectionData;
 
-  IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
   // This fulfiller is used to resolve the `closedPromise` below.
@@ -193,16 +204,14 @@ class Socket: public jsg::Object {
   jsg::Promise<void> closedPromiseCopy;
   // Memoized copy that is returned by the `closed` attribute.
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
-  IoOwn<kj::Promise<void>> watchForDisconnectTask;
   jsg::Optional<SocketOptions> options;
-  kj::String remoteAddress;
-  // Callback used to upgrade the existing connection to a secure one.
-  IoOwn<kj::TlsStarterCallback> tlsStarter;
+  kj::Maybe<kj::String> remoteAddress;
+  kj::Maybe<kj::String> localAddress;
   // Set to true when the socket is upgraded to a secure one.
   bool upgraded = false;
   SecureTransportKind secureTransport;
   // The domain/ip this socket is connected to. Used for startTls.
-  kj::String domain;
+  kj::Maybe<kj::String> domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;
   // This fulfiller is used to resolve the `openedPromise` below.
@@ -211,7 +220,7 @@ class Socket: public jsg::Object {
   jsg::Promise<void> openedPromiseCopy;
   jsg::MemoizedIdentity<jsg::Promise<SocketInfo>> openedPromise;
   // Used to keep track of a pending `close` operation on the socket.
-  bool isClosing;
+  bool isClosing = false;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
@@ -223,7 +232,7 @@ class Socket: public jsg::Object {
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_SOME(err, maybeErr) {
-      closedResolver.reject(js, kj::cp(err));
+      closedResolver.reject(js, err.clone());
     } else {
       closedResolver.resolve(js);
     }
@@ -242,11 +251,12 @@ class Socket: public jsg::Object {
 
 jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Own<kj::AsyncIoStream> connection,
-    kj::String remoteAddress,
+    kj::Maybe<kj::String> remoteAddress,
+    kj::Maybe<kj::String> localAddress,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
     SecureTransportKind secureTransport,
-    kj::String domain,
+    kj::Maybe<kj::String> domain,
     bool isDefaultFetchPort,
     kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair);
 

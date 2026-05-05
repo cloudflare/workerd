@@ -15,6 +15,11 @@ struct FeatureFlags {
   // Get the feature flags that are relevant for the current jsg::Lock or
   // throw if we are not currently executing JavaScript.
   static CompatibilityFlags::Reader get(jsg::Lock&);
+
+  // Alternative to get() that returns kj::none if the flags are not available.
+  // This is typically only the case in certain tests where we may only partially
+  // initialize the JS environment.
+  static kj::Maybe<CompatibilityFlags::Reader> tryGet(jsg::Lock&);
 };
 
 }  // namespace workerd

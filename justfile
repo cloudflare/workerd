@@ -15,6 +15,11 @@ prepare:
   cargo install gen-compile-commands watchexec-cli
   just create-external
   just compile-commands
+  just prepare-rust
+
+prepare-rust:
+  rustup install 1.91.0
+  rustup component add rust-analyzer --toolchain 1.91.0
 
 prepare-ubuntu:
   sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
@@ -32,6 +37,10 @@ clean:
 build *args="//...":
   bazel build {{args}}
 
+# example: just watch run -- serve $(pwd)/samples/helloworld/config.capnp
+run *args="-- --help":
+  bazel run //src/workerd/server:workerd -- {{args}} --watch --verbose --experimental
+
 build-asan *args="//...":
   just build {{args}} --config=asan
 
@@ -43,11 +52,11 @@ test-asan *args="//...":
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test *args:
-  bazel test {{args}} --test_output=streamed --nocache_test_results --config=debug --test_tag_filters= --test_size_filters=
+  bazel test {{args}} --test_output=streamed --nocache_test_results --test_tag_filters= --test_size_filters=
 
 # e.g. just node-test zlib
 node-test test_name *args:
-  just stream-test //src/workerd/api/node/tests:{{test_name}}-nodejs-test {{args}}
+  just stream-test //src/workerd/api/node/tests:{{test_name}}-nodejs-test@ {{args}}
 
 # e.g. just wpt-test urlpattern
 wpt-test test_name:
@@ -68,9 +77,14 @@ new-wpt-test test_name:
   echo 'wpt_test(name = "{{test_name}}", config = "{{test_name}}-test.ts", wpt_directory = "@wpt//:{{test_name}}@module")' >> src/wpt/BUILD.bazel
 
   ./tools/cross/format.py
-  bazel test //src/wpt:{{test_name}} --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
+  bazel test //src/wpt:{{test_name}}@ --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
 
-format: rustfmt
+# Specify the full Bazel target name for the test to be created.
+# e.g. just new-test //src/workerd/api/tests:v8-temporal-test
+new-test test_name:
+  ./tools/unix/new-test.sh {{test_name}}
+
+format:
   python3 tools/cross/format.py
 
 internal-pr:
@@ -81,11 +95,8 @@ update-deps prefix="":
   ./build/deps/update-deps.py {{prefix}}
 
 # equivalent to `cargo update`; use `workspace` or <package> to limit update scope
-update-rust package="full":
-  bazel run //deps/rust:crates_vendor -- --repin {{package}}
-
-rustfmt:
-  bazel run @rules_rust//:rustfmt
+update-rust package="":
+  bazel run @rules_rust//tools/upstream_wrapper:cargo -- update --manifest-path=deps/rust/Cargo.toml {{package}}
 
 # example: just bench mimetype
 bench path:
@@ -95,36 +106,46 @@ bench path:
 clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
 
+# example: just clang-tidy //src/rust/jsg:ffi
+clang-tidy target="//...":
+  bazel build {{target}} --config=clang-tidy
+
 generate-types:
-  bazel build //types:types
+  bazel build //types
   cp -r bazel-bin/types/definitions/ types/generated-snapshot/
 
 update-reported-node-version:
   python3 tools/update_node_version.py src/workerd/api/node/node-version.h
 
+update-opencode:
+  python3 tools/update_opencode_version.py
+
 # called by rust-analyzer discoverConfig (quiet recipe with no output)
+# rust-analyzer doesn't like stderr output, redirect it to /dev/null
 @_rust-analyzer:
   rm -rf ./rust-project.json
-  # rust-analyzer doesn't like stderr output, redirect it to /dev/null
   bazel run @rules_rust//tools/rust_analyzer:discover_bazel_rust_project 2>/dev/null
 
 create-external:
   tools/unix/create-external.sh
 
 bench-all:
-  bazel query 'deps(//src/workerd/tests:all_benchmarks, 1)' --output=label | grep -v 'all_benchmarks' | xargs -I {} bazel run --config=benchmark {}
+  bazel query 'attr(tags, "[\[ ]google_benchmark[,\]]", //... + @capnp-cpp//...)' --output=label | xargs -I {} bazel run --config=benchmark {}
+
+lint: eslint
 
 eslint:
   just stream-test \
     //src/cloudflare:cloudflare@eslint \
     //src/node:node@eslint \
     //src/pyodide:pyodide_static@eslint \
-    //src/wpt:wpt-all@eslint \
+    //src/wpt:wpt-all@tsproject@eslint \
     //types:types_lib@eslint
 
+# Generate code coverage report (Linux only)
 coverage path="//...":
-  bazel coverage {{path}}
-  genhtml --branch-coverage --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
+  bazel coverage --config=coverage {{path}}
+  genhtml --branch-coverage --ignore-errors category --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
   open coverage/index.html
 
 profile path:
@@ -136,6 +157,18 @@ profile path:
   else \
     echo "No valid perf.data file found for {{path}}"; \
   fi
+
+# Run the @gc-stress test variants to detect GC-related bugs (premature collection,
+# missing visitForGc, etc). Debug builds only. These variants are tagged off-by-default
+# so they won't run in normal `just test` invocations.
+# e.g. just test-gc-stress //src/workerd/api/tests:all
+test-gc-stress *args="//src/...":
+  bazel test $(bazel query 'attr(tags, gc-stress, kind("_wd_test rule", {{args}}))' 2>/dev/null) --test_tag_filters=gc-stress
+
+# Like test-gc-stress but with AddressSanitizer to detect use-after-free.
+# Leak detection is disabled to avoid masking more serious issues.
+test-gc-stress-asan *args="//src/...":
+  bazel test $(bazel query 'attr(tags, gc-stress, kind("_wd_test rule", {{args}}))' 2>/dev/null) --config=asan --test_tag_filters=gc-stress,-no-asan --test_timeout=300 --test_env=ASAN_OPTIONS=detect_leaks=0
 
 watch *args="build":
   watchexec -rc -w src -w build just {{args}}

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
+#include <workerd/api/performance.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/mimetype.h>
 
@@ -175,27 +176,27 @@ class UtilModule final: public jsg::Object {
 
   struct PromiseDetails {
     int state;  // TODO: can we make this a `jsg::PromiseState`
-    jsg::Optional<jsg::JsValue> result;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> result;
 
     JSG_STRUCT(state, result);
   };
-  jsg::Optional<PromiseDetails> getPromiseDetails(jsg::JsValue value);
+  jsg::Optional<PromiseDetails> getPromiseDetails(jsg::Lock& js, jsg::JsValue value);
 
   struct ProxyDetails {
-    jsg::JsValue target;
-    jsg::JsValue handler;
+    jsg::JsRef<jsg::JsValue> target;
+    jsg::JsRef<jsg::JsValue> handler;
 
     JSG_STRUCT(target, handler);
   };
-  jsg::Optional<ProxyDetails> getProxyDetails(jsg::JsValue value);
+  jsg::Optional<ProxyDetails> getProxyDetails(jsg::Lock& js, jsg::JsValue value);
 
   struct PreviewedEntries {
-    jsg::JsArray entries;
+    jsg::JsRef<jsg::JsArray> entries;
     bool isKeyValue;
 
     JSG_STRUCT(entries, isKeyValue);
   };
-  jsg::Optional<PreviewedEntries> previewEntries(jsg::JsValue value);
+  jsg::Optional<PreviewedEntries> previewEntries(jsg::Lock& js, jsg::JsValue value);
 
   jsg::JsString getConstructorName(jsg::Lock& js, jsg::JsObject value);
 
@@ -239,6 +240,14 @@ class UtilModule final: public jsg::Object {
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
     JSG_METHOD(getCallSites);
+
+    JSG_NESTED_TYPE(Performance);
+    JSG_NESTED_TYPE(PerformanceEntry);
+    JSG_NESTED_TYPE(PerformanceMeasure);
+    JSG_NESTED_TYPE(PerformanceMark);
+    JSG_NESTED_TYPE(PerformanceObserver);
+    JSG_NESTED_TYPE(PerformanceObserverEntryList);
+    JSG_NESTED_TYPE(PerformanceResourceTiming);
 
 #define V(Type) JSG_METHOD(is##Type);
     JS_UTIL_IS_TYPES(V)

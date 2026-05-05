@@ -100,14 +100,19 @@ KJ_TEST("readContentTypeParameter can fetch boundary parameter") {
       R"(multipart/form-data; foo="\"boundary=bar\""; boundary="realboundary")", "boundary"_kj,
       "realboundary"_kj);
 
-  // handle non-closing quotes
-  expectContentTypeParameter(
-      R"(multipart/form-data; charset="boundary=;\"; boundary="__boundary__")", "boundary"_kj,
-      "__boundary__"_kj);
+  // Per the "collect an HTTP quoted string" algorithm (Fetch spec §2.6), the \"
+  // in charset="boundary=;\" is an escaped quote, so the charset value consumes
+  // everything through the next real closing quote. The boundary parameter is not
+  // separately parsed.
+  KJ_ASSERT(readContentTypeParameter(
+                R"(multipart/form-data; charset="boundary=;\"; boundary="__boundary__")",
+                "boundary"_kj) == kj::none);
 
+  // The trailing \" in boundary="__boundary__\" is an escaped quote, so
+  // the value includes a literal quote character.
   expectContentTypeParameter(
       R"(multipart/form-data; charset="boundary=;"; boundary="__boundary__\")", "boundary"_kj,
-      "__boundary__"_kj);
+      R"(__boundary__")"_kj);
 
   expectContentTypeParameter(
       R"(multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\")", "boundary"_kj,

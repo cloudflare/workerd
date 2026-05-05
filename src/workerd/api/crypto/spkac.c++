@@ -21,34 +21,51 @@ bool verifySpkac(kj::ArrayPtr<const kj::byte> input) {
   // Alternatively we could choose to implement our own version of the validation that
   // bypasses BoringSSL's FIPS configuration. For now tho, this does end up matching
   // Node.js' behavior when FIPS is enabled so I guess that's something.
-  if (IoContext::hasCurrent()) {
-    IoContext::current().logWarningOnce(
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    ioContext.logWarningOnce(
         "The verifySpkac function is currently of limited value in workers because "
         "the SPKAC signature verification uses MD5, which is not supported in FIPS mode. "
         "All workers run in FIPS mode. Accordingly, this method will currently always "
         "return false even if the SPKAC signature is valid. This is a known limitation.");
   }
 
+  // Works around a bug in ncrypto...
+  auto pos = std::string_view(input.asChars().begin(), input.size()).find_last_not_of(" \n\r\t");
+  if (pos == std::string_view::npos) {
+    return false;
+  }
+
   return ncrypto::VerifySpkac(ToNcryptoBuffer(input.asChars()));
 }
 
-kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::ArrayPtr<const kj::byte> input) {
+kj::Maybe<jsg::JsUint8Array> exportPublicKey(jsg::Lock& js, kj::ArrayPtr<const kj::byte> input) {
+  // Works around a bug in ncrypto...
+  auto pos = std::string_view(input.asChars().begin(), input.size()).find_last_not_of(" \n\r\t");
+  if (pos == std::string_view::npos) {
+    return kj::none;
+  }
+
   if (auto bio = ncrypto::ExportPublicKey(ToNcryptoBuffer(input.asChars()))) {
     BUF_MEM* bptr = bio;
-    auto buf = jsg::BackingStore::alloc(js, bptr->length);
+    auto buf = jsg::JsUint8Array::create(js, bptr->length);
     auto aptr = kj::arrayPtr(bptr->data, bptr->length);
     buf.asArrayPtr<char>().copyFrom(aptr);
-    return jsg::BufferSource(js, kj::mv(buf));
+    return buf;
   }
   return kj::none;
 }
 
-kj::Maybe<jsg::BufferSource> exportChallenge(jsg::Lock& js, kj::ArrayPtr<const kj::byte> input) {
+kj::Maybe<jsg::JsUint8Array> exportChallenge(jsg::Lock& js, kj::ArrayPtr<const kj::byte> input) {
+
+  // Works around a bug in ncrypto...
+  auto pos = std::string_view(input.asChars().begin(), input.size()).find_last_not_of(" \n\r\t");
+  if (pos == std::string_view::npos) {
+    return kj::none;
+  }
+
   if (auto dp = ncrypto::ExportChallenge(ToNcryptoBuffer(input.asChars()))) {
-    auto dest = jsg::BackingStore::alloc(js, dp.size());
     auto src = kj::arrayPtr(dp.get<kj::byte>(), dp.size());
-    dest.asArrayPtr().copyFrom(src);
-    return jsg::BufferSource(js, kj::mv(dest));
+    return jsg::JsUint8Array::create(js, src);
   }
   return kj::none;
 }

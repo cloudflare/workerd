@@ -52,10 +52,17 @@ class SSEServer:
                 )
 
 
-async def on_fetch(request, env, ctx):
-    import asgi
+from workers import WorkerEntrypoint
 
-    return await asgi.fetch(app, request, env, ctx)
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        import asgi
+
+        return await asgi.fetch(app, request, self.env, self.ctx)
+
+    async def test(self, ctrl):
+        await test_sse(self.env)
 
 
 app = SSEServer()
@@ -93,7 +100,3 @@ async def test_sse(env):
     assert ": ping - message 1" in content
     assert ": ping - message 2" in content
     assert ": ping - message 3" in content
-
-
-async def test(ctrl, env):
-    await test_sse(env)

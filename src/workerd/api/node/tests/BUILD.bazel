@@ -16,6 +16,24 @@ wd_test(
 )
 
 wd_test(
+    src = "cluster-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["cluster-nodejs-test.js"],
+)
+
+wd_test(
+    src = "child_process-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["child_process-nodejs-test.js"],
+)
+
+wd_test(
+    src = "console-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["console-nodejs-test.js"],
+)
+
+wd_test(
     size = "enormous",
     src = "crypto_dh-test.wd-test",
     args = ["--experimental"],
@@ -131,6 +149,12 @@ wd_test(
 )
 
 wd_test(
+    src = "diagnostics-channel-getter-test.wd-test",
+    args = ["--experimental"],
+    data = ["diagnostics-channel-getter-test.js"],
+)
+
+wd_test(
     src = "mimetype-test.wd-test",
     args = ["--experimental"],
     data = ["mimetype-test.js"],
@@ -143,9 +167,21 @@ wd_test(
 )
 
 wd_test(
+    src = "perf-hooks-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["perf-hooks-nodejs-test.js"],
+)
+
+wd_test(
     src = "path-test.wd-test",
     args = ["--experimental"],
     data = ["path-test.js"],
+)
+
+wd_test(
+    src = "punycode-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["punycode-nodejs-test.js"],
 )
 
 wd_test(
@@ -187,9 +223,28 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
+    src = "zlib-zstd-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-zstd-nodejs-test.js"],
+)
+
+wd_test(
+    src = "module-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-nodejs-test.js"],
+)
+
+wd_test(
     src = "module-create-require-test.wd-test",
     args = ["--experimental"],
     data = ["module-create-require-test.js"],
+)
+
+wd_test(
+    src = "module-require-mutable-exports-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-require-mutable-exports-test.js"],
 )
 
 wd_test(
@@ -200,8 +255,13 @@ wd_test(
 
 wd_test(
     src = "process-nodejs-test.wd-test",
-    args = ["--experimental"],
     data = ["process-nodejs-test.js"],
+)
+
+wd_test(
+    src = "process-getbuiltin-newmodreg-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-getbuiltin-newmodreg-test.js"],
 )
 
 wd_test(
@@ -212,8 +272,12 @@ wd_test(
 
 wd_test(
     src = "process-stdio-nodejs-test.wd-test",
-    args = ["--experimental"],
     data = ["process-stdio-nodejs-test.js"],
+)
+
+wd_test(
+    src = "process-stdio-fs-nodejs-test.wd-test",
+    data = ["process-stdio-fs-nodejs-test.js"],
 )
 
 sh_test(
@@ -234,10 +298,46 @@ sh_test(
     ],
 )
 
+sh_test(
+    name = "process-stdio-fs-sh-test",
+    srcs = ["test_process_stdio.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location process-stdio-fs-nodejs-test.wd-test)",
+        "$(location process-stdio-fs-nodejs-test.expected_stdout)",
+        "$(location process-stdio-fs-nodejs-test.expected_stderr)",
+    ],
+    data = [
+        "process-stdio-fs-nodejs-test.expected_stderr",
+        "process-stdio-fs-nodejs-test.expected_stdout",
+        "process-stdio-fs-nodejs-test.js",
+        "process-stdio-fs-nodejs-test.wd-test",
+        "//src/workerd/server:workerd_cross",
+    ],
+)
+
 wd_test(
     src = "querystring-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["querystring-nodejs-test.js"],
+)
+
+wd_test(
+    src = "readline-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["readline-nodejs-test.js"],
+)
+
+wd_test(
+    src = "repl-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["repl-nodejs-test.js"],
+)
+
+wd_test(
+    src = "sqlite-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["sqlite-nodejs-test.js"],
 )
 
 config_setting(
@@ -288,6 +388,12 @@ wd_test(
     src = "timers-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["timers-nodejs-test.js"],
+)
+
+wd_test(
+    src = "timers-global-override-test.wd-test",
+    args = ["--experimental"],
+    data = ["timers-global-override-test.js"],
 )
 
 wd_test(
@@ -351,6 +457,12 @@ wd_test(
     data = ["streams-nodejs-test.js"],
 )
 
+wd_test(
+    src = "streams-v24-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-v24-nodejs-test.js"],
+)
+
 js_binary(
     name = "http-nodejs-server",
     entry_point = "http-nodejs-server.js",
@@ -410,6 +522,7 @@ wd_test(
         "DEFAULT_HEADERS_EXIST_PORT",
         "REQUEST_ARGUMENTS_PORT",
         "HELLO_WORLD_SERVER_PORT",
+        "GZIP_SERVER_PORT",
     ],
 )
 
@@ -450,9 +563,9 @@ wd_test(
 )
 
 wd_test(
-    src = "fs-test.wd-test",
+    src = "fs-nodejs-test.wd-test",
     args = ["--experimental"],
-    data = ["fs-test.js"],
+    data = ["fs-nodejs-test.js"],
 )
 
 wd_test(
@@ -516,6 +629,12 @@ wd_test(
 )
 
 wd_test(
+    src = "fs-cp-into-subdirectory-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-cp-into-subdirectory-test.js"],
+)
+
+wd_test(
     src = "fs-readstream-test.wd-test",
     args = ["--experimental"],
     data = ["fs-readstream-test.js"],
@@ -539,8 +658,86 @@ wd_test(
     data = ["http-server-nodejs-global-test.js"],
 )
 
+wd_test(
+    src = "constants-test.wd-test",
+    args = ["--experimental"],
+    data = ["constants-test.js"],
+)
+
+wd_test(
+    src = "http2-test.wd-test",
+    args = ["--experimental"],
+    data = ["http2-test.js"],
+)
+
+wd_test(
+    src = "inspector-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["inspector-nodejs-test.js"],
+)
+
+wd_test(
+    src = "vm-test.wd-test",
+    args = ["--experimental"],
+    data = ["vm-test.js"],
+)
+
+wd_test(
+    src = "domain-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["domain-nodejs-test.js"],
+)
+
+wd_test(
+    src = "v8-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["v8-nodejs-test.js"],
+)
+
+wd_test(
+    src = "tty-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tty-nodejs-test.js"],
+)
+
 js_binary(
     name = "sidecar-supervisor",
     entry_point = "sidecar-supervisor.mjs",
     visibility = ["//visibility:public"],
+)
+
+wd_test(
+    src = "worker_threads-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker_threads-nodejs-test.js"],
+)
+
+wd_test(
+    src = "wasi-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["wasi-nodejs-test.js"],
+)
+
+wd_test(
+    src = "dgram-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["dgram-nodejs-test.js"],
+)
+
+wd_test(
+    src = "trace-events-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["trace-events-nodejs-test.js"],
+)
+
+wd_test(
+    src = "buffer-effective-size-concat-test.wd-test",
+    args = ["--experimental"],
+    data = ["buffer-effective-size-concat-test.js"],
+)
+
+wd_test(
+    src = "als-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["als-gc-test.js"],
 )

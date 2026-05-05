@@ -5,18 +5,6 @@
 import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
-  'urlpattern-compare.tentative.any.js': {
-    comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
-    omittedTests: true,
-  },
-  'urlpattern-compare.tentative.https.any.js': {
-    comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
-    omittedTests: true,
-  },
-  'urlpattern-generate.tentative.any.js': {
-    comment: 'URLPattern.generate is not part of the URLPattern spec',
-    omittedTests: true,
-  },
   'urlpattern-hasregexpgroups.any.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
     expectedFailures: [
@@ -27,9 +15,17 @@ export default {
   },
   'urlpattern.any.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
+    disabledTests: [
+      // Windows uses MSVC std::regex which rejects \H as an invalid escape,
+      // causing the URLPattern constructor to throw (test passes). Linux std::regex
+      // treats \H as an identity escape so no throw occurs (test fails). Use
+      // disabledTests to avoid the cross-platform mismatch.
+      'Pattern: ["(\\\\H):"] Inputs: undefined',
+    ],
     expectedFailures: [
       // Each of these *ought* to pass. They are included here because we
       // know they currently do not. Each needs to be investigated.
+      'Pattern: ["((?R)):"] Inputs: undefined',
       'Pattern: [{"pathname":"/foo/bar","baseURL":"https://example.com?query#hash"}] Inputs: [{"pathname":"/foo/bar"}]',
       'Pattern: [{"pathname":"/foo/bar","baseURL":"https://example.com?query#hash"}] Inputs: [{"hostname":"example.com","pathname":"/foo/bar"}]',
       'Pattern: [{"pathname":"/foo/bar","baseURL":"https://example.com?query#hash"}] Inputs: [{"protocol":"https","hostname":"example.com","pathname":"/foo/bar"}]',
@@ -172,6 +168,14 @@ export default {
       'Pattern: [{"port":"80"}] Inputs: [{"port":"80?x"}]',
       'Pattern: [{"port":"80"}] Inputs: [{"port":"80\\\\x"}]',
       'Pattern: ["https://{sub.}?example{.com/}foo"] Inputs: ["https://example.com/foo"]',
+      'Pattern: [{"protocol":"http","hostname":"example.com/ignoredpath"}] Inputs: ["http://example.com/"]',
+      'Pattern: [{"protocol":"http","hostname":"example.com\\\\?ignoredsearch"}] Inputs: ["http://example.com/"]',
+      'Pattern: [{"protocol":"http","hostname":"example.com#ignoredhash"}] Inputs: ["http://example.com/"]',
+      'Pattern: ["https://www.example.com/*"] Inputs: ["https://www.example.com/x"]',
+      'Pattern: ["https://www.example.com/*"] Inputs: ["https://www.example.com/xyz"]',
+      'Pattern: ["https://www.example.com/*"] Inputs: ["https://www.example.com/example"]',
+      'Pattern: ["https://www.example.com/*"] Inputs: ["https://www.example.com/text"]',
+      'Pattern: ["https://www.example.com/*"] Inputs: ["https://www.example.com/path/with/x"]',
     ],
   },
   'urlpattern.https.any.js': {

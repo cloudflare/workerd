@@ -115,7 +115,7 @@ export function isUnsatisfiable(typeNode: ts.TypeNode): boolean {
 // For instance, a new hypothetical API called `workerd::api::magic::MakeASpell` would be
 // `magicMakeASpell`.
 const replaceEmpty =
-  /^workerd::api::public_beta::|^workerd::api::urlpattern::|^workerd::api::node::|^workerd::api::|^workerd::jsg::|::|[ >]/g;
+  /^workerd::api::public_beta::|^workerd::api::urlpattern::|^workerd::api::node::|^workerd::api::user_tracing::|^workerd::api::|^workerd::jsg::|::|[ >]/g;
 // Strings to replace in fully-qualified structure names with an underscore
 const replaceUnderscore = /[<,]/g;
 export function getTypeName(

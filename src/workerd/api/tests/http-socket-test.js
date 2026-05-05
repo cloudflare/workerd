@@ -4,7 +4,6 @@
 
 import { connect, internalNewHttpClient } from 'cloudflare:sockets';
 import { strict as assert } from 'node:assert';
-import { setTimeout as sleep } from 'node:timers/promises';
 
 // Basic connectivity and GET test
 export const oneRequest = {
@@ -96,16 +95,10 @@ export const redirect301 = {
     const httpClient = await internalNewHttpClient(socket);
 
     // TODO(cleanup) when enabling multiple fetches we can only then do redirects.
-    await assert.rejects(httpClient.fetch('https://example.com/redirect'), {
-      name: 'Error',
-      message:
-        'Fetcher created from internalNewHttpClient can only be used once',
-    });
-    /*
+    const response = await httpClient.fetch('https://example.com/redirect');
     assert.equal(response.status, 200);
     const text = await response.text();
     assert.equal(text, 'pong');
-    */
   },
 };
 
@@ -121,18 +114,10 @@ export const multipleRequests = {
     assert.equal(text1, 'pong');
 
     // Second request on same connection
-    // TODO(cleanup) we want this to fail during this initial implementation but later we should
-    // support mutiple fetches (perhaps behind a compat flag)
-    await assert.rejects(httpClient.fetch('https://example.com/json'), {
-      name: 'Error',
-      message:
-        'Fetcher created from internalNewHttpClient can only be used once',
-    });
-    /*
-     * assert.equal(response2.status, 200);
-     * const data = await response2.json();
-     * assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
-     */
+    const response2 = await httpClient.fetch('https://example.com/json');
+    assert.equal(response2.status, 200);
+    const data = await response2.json();
+    assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
   },
 };
 
@@ -144,13 +129,16 @@ export const multipleConcurrentRequests = {
     // TODO(cleanup) when multiple fetches are enabled make sure this message is changed
     await assert.rejects(
       Promise.all([
-        httpClient.fetch('https://example.com/ping'),
-        httpClient.fetch('https://example.com/json'),
+        httpClient.fetch('https://example.com/ping', {
+          signal: AbortSignal.timeout(500),
+        }),
+        httpClient.fetch('https://example.com/json', {
+          signal: AbortSignal.timeout(500),
+        }),
       ]),
       {
         name: 'Error',
-        message:
-          'Fetcher created from internalNewHttpClient can only be used once',
+        message: /internal error/,
       }
     );
   },
@@ -208,7 +196,7 @@ export const socketCloseThenFetch = {
 export const lockReaderFail = {
   async test(ctrl, env, ctx) {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
-    const reader = socket.readable.getReader();
+    const _reader = socket.readable.getReader();
     await assert.rejects(internalNewHttpClient(socket), {
       name: 'TypeError',
       message: 'The ReadableStream has been locked to a reader.',
@@ -220,7 +208,7 @@ export const lockReaderFail = {
 export const lockWriterFail = {
   async test(ctrl, env, ctx) {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
-    const writer = socket.writable.getWriter();
+    const _writer = socket.writable.getWriter();
     await assert.rejects(internalNewHttpClient(socket), {
       name: 'TypeError',
       message: 'This WritableStream is currently locked to a writer.',
@@ -270,10 +258,26 @@ export const errorRemoteWrites = {
 export const websockets = {
   async test(ctrl, env, ctx) {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
-    const httpClient = await internalNewHttpClient(socket);
+    const _httpClient = await internalNewHttpClient(socket);
 
-    // Create a WebSocket connection using the HTTP client for fetch
-    const ws = new WebSocket(`ws://localhost:${env.HTTP_SOCKET_SERVER_PORT}/`);
+    const res = await fetch(
+      `http://localhost:${env.HTTP_SOCKET_SERVER_PORT}/`,
+      {
+        headers: {
+          Connection: 'Upgrade',
+          Upgrade: 'websocket',
+        },
+      }
+    );
+
+    const ws = res.webSocket;
+
+    if (!ws) {
+      throw new Error('WebSocket upgrade failed');
+    }
+
+    ws.accept();
+    ws.send('Hello from test client');
 
     // Test the WebSocket connection
     await new Promise((resolve, reject) => {
@@ -282,13 +286,10 @@ export const websockets = {
         reject(new Error('WebSocket test timed out after 5 seconds'));
       }, 5000);
 
-      ws.addEventListener('open', () => {
-        ws.send('Hello from test client');
-      });
-
       ws.addEventListener('message', (event) => {
         // Verify we got the welcome message
         if (event.data === 'Welcome to WebSocket server') {
+          // intentionally empty
         } else if (event.data.startsWith('Echo:')) {
           clearTimeout(timeout);
           ws.close();
@@ -499,5 +500,65 @@ export const startTlsEarlySend = {
     assert.equal(response.status, 200);
     const text = await response.text();
     assert.equal(text, 'pong');
+  },
+};
+
+export const manualProtocolThenFetcher = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
+    const writer = socket.writable.getWriter();
+    const reader = socket.readable.getReader();
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    // Manually construct and send HTTP request
+    const httpRequest =
+      'GET /ping HTTP/1.1\r\n' +
+      'Host: example.com\r\n' +
+      'Connection: keep-alive\r\n' +
+      '\r\n';
+
+    await writer.write(encoder.encode(httpRequest));
+
+    // Read the HTTP response manually
+    let responseData = '';
+    let contentLength = 0;
+    let headersParsed = false;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      responseData += chunk;
+
+      if (!headersParsed && responseData.includes('\r\n\r\n')) {
+        const [headers, body] = responseData.split('\r\n\r\n', 2);
+        const contentLengthMatch = headers.match(/content-length:\s*(\d+)/i);
+        if (contentLengthMatch) {
+          contentLength = parseInt(contentLengthMatch[1]);
+        }
+        headersParsed = true;
+
+        // Check if we have all the content
+        if (body.length >= contentLength) {
+          break;
+        }
+      }
+    }
+
+    // Verify the manual HTTP response
+    assert(responseData.includes('HTTP/1.1 200 OK'));
+    assert(responseData.includes('pong'));
+
+    // Release locks and convert to HTTP client
+    reader.releaseLock();
+    writer.releaseLock();
+
+    const httpClient = await internalNewHttpClient(socket);
+    const response = await httpClient.fetch('https://example.com/json');
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
   },
 };

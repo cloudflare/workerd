@@ -8,12 +8,12 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "process-nodejs-test.js"),
           (name = "mod", esModule = "export const { FOO } = process.env;")
         ],
-        compatibilityDate = "2024-12-28",
         compatibilityFlags = [
-          "nodejs_compat_populate_process_env",
+          "nodejs_compat",
+          "nodejs_compat_v2",
           "enable_nodejs_process_v2",
           "enable_nodejs_fs_module",
-          "experimental"
+          "nodejs_compat_populate_process_env"
         ],
         bindings = [
           (name = "FOO", text = "BAR"),

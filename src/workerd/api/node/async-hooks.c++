@@ -71,7 +71,7 @@ v8::Local<v8::Value> AsyncLocalStorage::exit(jsg::Lock& js,
   // implementing the enterWith/disable methods. We can emulate the correct
   // behavior simply by calling run with the store value set to undefined, which
   // will propagate correctly.
-  return run(js, js.v8Undefined(), kj::mv(callback), kj::mv(args));
+  return run(js, js.undefined(), kj::mv(callback), kj::mv(args));
 }
 
 v8::Local<v8::Value> AsyncLocalStorage::getStore(jsg::Lock& js) {
@@ -83,7 +83,7 @@ v8::Local<v8::Value> AsyncLocalStorage::getStore(jsg::Lock& js) {
   KJ_IF_SOME(value, defaultValue) {
     return value.getHandle(js);
   }
-  return js.v8Undefined();
+  return js.undefined();
 }
 
 kj::StringPtr AsyncLocalStorage::getName() {

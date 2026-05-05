@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "readline-nodejs-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "readline-nodejs-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_readline_module"],
+      )
+    ),
+  ],
+);

@@ -77,13 +77,13 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
           // Generating a DH key with a reasonable size can be expensive.
           // We will only allow it if there is an active IoContext so that
           // we can enforce a timeout associate with the limit enforcer.
-          JSG_REQUIRE(IoContext::hasCurrent(), Error,
+          auto& ioContext = JSG_REQUIRE_NONNULL(IoContext::tryCurrent(), Error,
               "DiffieHellman key generation requires an active request");
 
           struct Status {
             IoContext& context;
             kj::Maybe<EventOutcome> status;
-          } status{.context = IoContext::current()};
+          } status{.context = ioContext};
 
           auto dh = OSSL_NEW(DH);
           BN_GENCB cb;
@@ -150,7 +150,7 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
           }
         }
         KJ_CASE_ONEOF(gen, kj::Array<kj::byte>) {
-          JSG_REQUIRE(gen.size() <= INT32_MAX, RangeError,
+          JSG_REQUIRE(gen.size() <= OPENSSL_DH_MAX_MODULUS_BITS / CHAR_BIT, RangeError,
               "DiffieHellman init failed: generator is too large");
           JSG_REQUIRE(gen.size() > 0, Error, "DiffieHellman init failed: invalid generator");
 
@@ -207,38 +207,58 @@ kj::Maybe<int> DiffieHellman::check() {
 }
 
 void DiffieHellman::setPrivateKey(kj::ArrayPtr<kj::byte> key) {
-  OSSLCALL(DH_set0_key(dh, nullptr, toBignumUnowned(key)));
+  auto bn = toBignumOwned(key);
+  OSSLCALL(DH_set0_key(dh, nullptr, bn.get()));
+  bn.release();
 }
 
 void DiffieHellman::setPublicKey(kj::ArrayPtr<kj::byte> key) {
-  OSSLCALL(DH_set0_key(dh, toBignumUnowned(key), nullptr));
+  auto bn = toBignumOwned(key);
+
+  int checkResult;
+  JSG_REQUIRE(DH_check_pub_key(dh, bn.get(), &checkResult), Error,
+      "DiffieHellman setPublicKey() failed: could not validate public key");
+  if (checkResult) {
+    JSG_REQUIRE(!(checkResult & DH_CHECK_PUBKEY_TOO_SMALL), RangeError,
+        "DiffieHellman setPublicKey() failed: key is too small");
+    JSG_REQUIRE(!(checkResult & DH_CHECK_PUBKEY_TOO_LARGE), RangeError,
+        "DiffieHellman setPublicKey() failed: key is too large");
+    JSG_FAIL_REQUIRE(Error, "DiffieHellman setPublicKey() failed: invalid public key");
+  }
+
+  OSSLCALL(DH_set0_key(dh, bn.get(), nullptr));
+  bn.release();
 }
 
-jsg::BufferSource DiffieHellman::getPublicKey(jsg::Lock& js) {
+jsg::JsUint8Array DiffieHellman::getPublicKey(jsg::Lock& js) {
   const BIGNUM* pub_key = DH_get0_pub_key(dh);
+  JSG_REQUIRE(pub_key != nullptr, Error, "No public key");
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(js, *pub_key), Error, "Error while retrieving DiffieHellman public key");
 }
 
-jsg::BufferSource DiffieHellman::getPrivateKey(jsg::Lock& js) {
+jsg::JsUint8Array DiffieHellman::getPrivateKey(jsg::Lock& js) {
   const BIGNUM* priv_key = DH_get0_priv_key(dh);
+  JSG_REQUIRE(priv_key != nullptr, Error, "No private key");
   return JSG_REQUIRE_NONNULL(bignumToArrayPadded(js, *priv_key), Error,
       "Error while retrieving DiffieHellman private key");
 }
 
-jsg::BufferSource DiffieHellman::getGenerator(jsg::Lock& js) {
+jsg::JsUint8Array DiffieHellman::getGenerator(jsg::Lock& js) {
   const BIGNUM* g = DH_get0_g(dh);
+  JSG_REQUIRE(g != nullptr, Error, "No DiffieHellman generator");
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(js, *g), Error, "Error while retrieving DiffieHellman generator");
 }
 
-jsg::BufferSource DiffieHellman::getPrime(jsg::Lock& js) {
+jsg::JsUint8Array DiffieHellman::getPrime(jsg::Lock& js) {
   const BIGNUM* p = DH_get0_p(dh);
+  JSG_REQUIRE(p != nullptr, Error, "No DiffieHellman prime");
   return JSG_REQUIRE_NONNULL(
       bignumToArrayPadded(js, *p), Error, "Error while retrieving DiffieHellman prime");
 }
 
-jsg::BufferSource DiffieHellman::computeSecret(jsg::Lock& js, kj::ArrayPtr<kj::byte> key) {
+jsg::JsUint8Array DiffieHellman::computeSecret(jsg::Lock& js, kj::ArrayPtr<kj::byte> key) {
   JSG_REQUIRE(key.size() <= INT32_MAX, RangeError,
       "DiffieHellman computeSecret() failed: key is too large");
   JSG_REQUIRE(key.size() > 0, Error, "DiffieHellman computeSecret() failed: invalid key");
@@ -247,30 +267,31 @@ jsg::BufferSource DiffieHellman::computeSecret(jsg::Lock& js, kj::ArrayPtr<kj::b
   auto k = JSG_REQUIRE_NONNULL(
       toBignum(key), Error, "Error getting key while computing DiffieHellman secret");
 
-  size_t prime_size = DH_size(dh);
-  auto prime_enc = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, prime_size);
-
-  int size = DH_compute_key(prime_enc.asArrayPtr().begin(), k.get(), dh);
-  if (size == -1) {
-    // various error checking
-    int checkResult;
-    int checked = DH_check_pub_key(dh, k, &checkResult);
-
-    if (checked && checkResult) {
-      JSG_REQUIRE(!(checkResult & DH_CHECK_PUBKEY_TOO_SMALL), RangeError,
-          "DiffieHellman computeSecret() failed: Supplied key is too small");
-      JSG_REQUIRE(!(checkResult & DH_CHECK_PUBKEY_TOO_LARGE), RangeError,
-          "DiffieHellman computeSecret() failed: Supplied key is too large");
-    }
-    JSG_FAIL_REQUIRE(Error, "Invalid Key");
+  // Validate the peer's public key before computing the shared secret.
+  int checkResult;
+  JSG_REQUIRE(DH_check_pub_key(dh, k, &checkResult), Error,
+      "DiffieHellman computeSecret() failed: could not validate peer public key");
+  if (checkResult) {
+    JSG_REQUIRE(!(checkResult & DH_CHECK_PUBKEY_TOO_SMALL), RangeError,
+        "DiffieHellman computeSecret() failed: Supplied key is too small");
+    JSG_REQUIRE(!(checkResult & DH_CHECK_PUBKEY_TOO_LARGE), RangeError,
+        "DiffieHellman computeSecret() failed: Supplied key is too large");
+    JSG_FAIL_REQUIRE(Error, "DiffieHellman computeSecret() failed: invalid peer public key");
   }
 
+  size_t prime_size = DH_size(dh);
+  auto buf = jsg::JsUint8Array::create(js, prime_size);
+
+  int size = DH_compute_key(buf.asArrayPtr().begin(), k.get(), dh);
+  JSG_REQUIRE(
+      size != -1, Error, "DiffieHellman computeSecret() failed: error computing shared secret");
+
   KJ_ASSERT(size >= 0);
-  zeroPadDiffieHellmanSecret(size, prime_enc.asArrayPtr().begin(), prime_size);
-  return jsg::BufferSource(js, kj::mv(prime_enc));
+  zeroPadDiffieHellmanSecret(size, buf.asArrayPtr().begin(), prime_size);
+  return buf;
 }
 
-jsg::BufferSource DiffieHellman::generateKeys(jsg::Lock& js) {
+jsg::JsUint8Array DiffieHellman::generateKeys(jsg::Lock& js) {
   ClearErrorOnReturn clear_error_on_return;
   OSSLCALL(DH_generate_key(dh));
   const BIGNUM* pub_key = DH_get0_pub_key(dh);

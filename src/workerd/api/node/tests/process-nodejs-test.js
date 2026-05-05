@@ -1,6 +1,31 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
-import { readdirSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as processMod from 'node:process';
+
+const processBuiltin = processMod.getBuiltinModule('process');
+const processBuiltinScheme = processMod.getBuiltinModule('node:process');
+
+// -------------------------------------------------------
+// Ensures the globalThis process and Buffer properties are handled correctly.
+// Placement of these at the top level scope before any thing else runs is
+// intentional. Do not move these elsewhere in the test.
+queueMicrotask(() => process);
+queueMicrotask(() => Buffer);
+process.env.QUX = 1;
+// eslint-disable-next-line @typescript-eslint/no-unused-expressions
+Buffer;
+
+const originalProcess = process;
+globalThis.process = 123;
+assert.strictEqual(globalThis.process, 123);
+globalThis.process = originalProcess;
+assert.strictEqual(globalThis.process, process);
+// -------------------------------------------------------
+
+const pEnv = { ...process.env };
 
 export const processPlatform = {
   test() {
@@ -8,33 +33,77 @@ export const processPlatform = {
   },
 };
 
-process.env.QUX = 1;
-const pEnv = { ...process.env };
+// undefined process properties
+const processUndefinedKeys = [
+  '_channel',
+  '_disconnect',
+  '_handleQueue',
+  '_maxListeners',
+  '_pendingMessage',
+  '_send',
+  'exitCode',
+];
 
-// Verify process keys match default keys and features
-const keys = [
+// functions which just return
+const processNoopKeys = [
+  '_debugEnd',
+  '_debugProcess',
+  '_startProfilerIdleNotifier',
+  '_stopProfilerIdleNotifier',
+  '_tickCallback',
+  'ref',
+  'setSourceMapsEnabled',
+  'unref',
+];
+
+// functions which throw unsupported
+const processUnimplementedKeys = [
+  '_kill',
+  '_linkedBinding',
+  'binding',
+  'cpuUsage',
+  'dlopen',
+  'execve',
+  'getActiveResourcesInfo',
+  'hasUncaughtExceptionCaptureCallback',
+  'kill',
+  'setUncaughtExceptionCaptureCallback',
+  'threadCpuUsage',
+];
+
+// remaining keys
+const processImplementedOrStubbedKeys = [
+  '_events',
+  '_eventsCount',
+  '_exiting',
+  '_fatalException',
+  '_getActiveHandles',
+  '_getActiveRequests',
+  '_preload_modules',
+  '_rawDebug',
   'abort',
   'allowedNodeEnvironmentFlags',
   'arch',
   'argv',
   'argv0',
-  'binding',
+  'assert',
+  'availableMemory',
   'channel',
   'chdir',
   'config',
   'connected',
+  'constrainedMemory',
   'cwd',
   'debugPort',
   'default',
-  'dlopen',
+  'domain',
   'emitWarning',
   'env',
   'execArgv',
+  'execPath',
   'exit',
-  'exitCode',
   'features',
   'finalization',
-  'getActiveResourcesInfo',
   'getBuiltinModule',
   'getSourceMapsSupport',
   'getegid',
@@ -42,25 +111,23 @@ const keys = [
   'getgid',
   'getgroups',
   'getuid',
-  'hasUncaughtExceptionCaptureCallback',
   'hrtime',
   'initgroups',
-  'kill',
   'loadEnvFile',
   'memoryUsage',
+  'moduleLoadList',
   'nextTick',
   'noDeprecation',
+  'openStdin',
   'permission',
   'pid',
   'platform',
   'ppid',
-  'ref',
+  'reallyExit',
   'release',
   'report',
   'resourceUsage',
   'send',
-  'setSourceMapsEnabled',
-  'setUncaughtExceptionCaptureCallback',
   'setegid',
   'seteuid',
   'setgid',
@@ -70,46 +137,105 @@ const keys = [
   'stderr',
   'stdin',
   'stdout',
-  'threadCpuUsage',
   'throwDeprecation',
   'title',
   'traceDeprecation',
   'umask',
-  'unref',
   'uptime',
   'version',
   'versions',
 ];
+
+const allProcessKeys = [
+  ...processUndefinedKeys,
+  ...processUnimplementedKeys,
+  ...processNoopKeys,
+  ...processImplementedOrStubbedKeys,
+].sort();
+
 export const processKeys = {
   test() {
-    assert.deepStrictEqual(Object.keys(processMod), keys);
-    keys.splice(keys.indexOf('default'), 1);
+    assert.deepStrictEqual(Object.keys(processMod), allProcessKeys);
+    allProcessKeys.splice(allProcessKeys.indexOf('default'), 1);
+    assert.deepStrictEqual(Object.keys(process).sort(), allProcessKeys);
     assert.deepStrictEqual(
-      Object.keys(process)
-        .filter((v) => v[0] !== '_')
-        .sort(),
-      keys
+      Object.keys(processMod.default).sort(),
+      allProcessKeys
     );
+    assert.deepStrictEqual(Object.keys(processBuiltin).sort(), allProcessKeys);
     assert.deepStrictEqual(
-      Object.keys(processMod.default)
-        .filter((v) => v[0] !== '_')
-        .sort(),
-      keys
+      Object.keys(processBuiltinScheme).sort(),
+      allProcessKeys
     );
-    const processBuiltin = processMod.getBuiltinModule('process');
-    assert.deepStrictEqual(
-      Object.keys(processBuiltin)
-        .filter((v) => v[0] !== '_')
-        .sort(),
-      keys
-    );
-    const processBuiltinScheme = processMod.getBuiltinModule('node:process');
-    assert.deepStrictEqual(
-      Object.keys(processBuiltinScheme)
-        .filter((v) => v[0] !== '_')
-        .sort(),
-      keys
-    );
+  },
+};
+
+export const processUndefined = {
+  test() {
+    for (const key of processUndefinedKeys) {
+      const msg = `process.${key}`;
+      assert.strictEqual(processMod[key], undefined, msg);
+      assert.strictEqual(process[key], undefined, msg);
+      assert.strictEqual(processBuiltin[key], undefined, msg);
+      assert.strictEqual(processBuiltinScheme[key], undefined, msg);
+    }
+  },
+};
+
+export const processNoop = {
+  test() {
+    for (const key of processNoopKeys) {
+      const msg = `process.${key}`;
+
+      assert.strictEqual(typeof processMod[key], 'function', msg);
+      assert.strictEqual(typeof process[key], 'function', msg);
+      assert.strictEqual(typeof processBuiltin[key], 'function', msg);
+      assert.strictEqual(typeof processBuiltinScheme[key], 'function', msg);
+
+      assert.strictEqual(processMod[key](), undefined, msg);
+      assert.strictEqual(process[key](), undefined, msg);
+      assert.strictEqual(processBuiltin[key](), undefined, msg);
+      assert.strictEqual(processBuiltinScheme[key](), undefined, msg);
+    }
+  },
+};
+
+export const processUnimplemented = {
+  test() {
+    for (const key of processUnimplementedKeys) {
+      const msg = `process.${key}`;
+
+      assert.strictEqual(typeof processMod[key], 'function', msg);
+      assert.strictEqual(typeof process[key], 'function', msg);
+      assert.strictEqual(typeof processBuiltin[key], 'function', msg);
+      assert.strictEqual(typeof processBuiltinScheme[key], 'function', msg);
+
+      try {
+        processMod[key]();
+        assert.fail(msg);
+      } catch (e) {
+        assert.strictEqual(e.code, 'ERR_METHOD_NOT_IMPLEMENTED', msg);
+        assert.ok(e.message.includes(key), msg);
+      }
+      try {
+        process[key]();
+        assert.fail(msg);
+      } catch (e) {
+        assert.strictEqual(e.code, 'ERR_METHOD_NOT_IMPLEMENTED', msg);
+      }
+      try {
+        processBuiltin[key]();
+        assert.fail(msg);
+      } catch (e) {
+        assert.strictEqual(e.code, 'ERR_METHOD_NOT_IMPLEMENTED', msg);
+      }
+      try {
+        processBuiltinScheme[key]();
+        assert.fail(msg);
+      } catch (e) {
+        assert.strictEqual(e.code, 'ERR_METHOD_NOT_IMPLEMENTED', msg);
+      }
+    }
   },
 };
 
@@ -261,6 +387,7 @@ export const processEnv = {
       assert.strictEqual(symbol in process.env, false);
 
       // Verify that deleting a symbol key returns true.
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       assert.strictEqual(delete process.env[symbol], true);
 
       // Checks that well-known symbols like `Symbol.toStringTag` won’t throw.
@@ -325,36 +452,64 @@ export const processProperties = {
   },
 };
 
-// Properties which are undefined and NOT throwing stubs to ensure polyfillability
-// via if (!process.prop) process.prop = polyfill();
-// Some of these might be implemented at future dates.
-export const processUndefined = {
+// Test implemented process APIs - no longer undefined
+export const processImplemented = {
   test() {
-    // These may be implemented in future
-    assert.strictEqual(process.kill, undefined);
-    assert.strictEqual(process.ref, undefined);
-    assert.strictEqual(process.unref, undefined);
+    // No-op functions
+    assert.strictEqual(typeof process.ref, 'function');
+    assert.strictEqual(typeof process.unref, 'function');
+
+    // Error-throwing functions
+    assert.strictEqual(typeof process.kill, 'function');
+    assert.strictEqual(typeof process.binding, 'function');
+    assert.strictEqual(typeof process.dlopen, 'function');
+
+    // Mock implementations
+    assert.strictEqual(typeof process.memoryUsage, 'function');
+    assert.strictEqual(typeof process.resourceUsage, 'function');
+    assert.strictEqual(typeof process.threadCpuUsage, 'function');
+    assert.strictEqual(typeof process.cpuUsage, 'function');
+
+    // Properties with default values
     assert.strictEqual(process.exitCode, undefined);
-    assert.strictEqual(process.channel, undefined);
-    assert.strictEqual(process.connected, undefined);
-    assert.strictEqual(process.binding, undefined);
-    assert.strictEqual(process.debugPort, undefined);
-    assert.strictEqual(process.dlopen, undefined);
-    assert.strictEqual(process.finalization, undefined);
-    assert.strictEqual(process.getActiveResourcesInfo, undefined);
-    assert.strictEqual(process.setUncaughtExceptionCaptureCallback, undefined);
-    assert.strictEqual(process.hasUncaughtExceptionCaptureCallback, undefined);
-    assert.strictEqual(process.memoryUsage, undefined);
-    assert.strictEqual(process.noDeprecation, undefined);
-    assert.strictEqual(process.permission, undefined);
-    assert.strictEqual(process.release, undefined);
-    assert.strictEqual(process.report, undefined);
-    assert.strictEqual(process.resourceUsage, undefined);
-    assert.strictEqual(process.send, undefined);
-    assert.strictEqual(process.traceDeprecation, undefined);
-    assert.strictEqual(process.throwDeprecation, undefined);
-    assert.strictEqual(process.sourceMapsEnabled, undefined);
-    assert.strictEqual(process.threadCpuUsage, undefined);
+    assert.strictEqual(process.channel, null);
+    assert.strictEqual(process.connected, false);
+    assert.strictEqual(typeof process.debugPort, 'number');
+    assert.strictEqual(process.noDeprecation, false);
+    assert.strictEqual(process.traceDeprecation, false);
+    assert.strictEqual(process.throwDeprecation, false);
+    assert.strictEqual(process.sourceMapsEnabled, false);
+    assert.strictEqual(typeof process.execPath, 'string');
+
+    // Objects
+    assert.strictEqual(typeof process.permission, 'object');
+    assert.strictEqual(typeof process.release, 'object');
+    assert.strictEqual(typeof process.report, 'object');
+    assert.strictEqual(typeof process.finalization, 'object');
+
+    // Additional APIs
+    assert.strictEqual(typeof process.constrainedMemory, 'function');
+    assert.strictEqual(typeof process.availableMemory, 'function');
+    assert.strictEqual(typeof process.send, 'function');
+    assert.strictEqual(process.send('test'), false);
+
+    // Test that error-throwing functions actually throw
+    assert.throws(() => process.getActiveResourcesInfo(), {
+      message: /process\.getActiveResourcesInfo/,
+    });
+    assert.throws(() => process.setUncaughtExceptionCaptureCallback(), {
+      message: /process\.setUncaughtExceptionCaptureCallback/,
+    });
+    assert.throws(() => process.hasUncaughtExceptionCaptureCallback(), {
+      message: /process\.hasUncaughtExceptionCaptureCallback/,
+    });
+    assert.throws(() => process.kill(1), { message: /process\.kill/ });
+    assert.throws(() => process.binding('test'), {
+      message: /process\.binding/,
+    });
+    assert.throws(() => process.dlopen({}, 'test'), {
+      message: /process\.dlopen/,
+    });
   },
 };
 
@@ -438,6 +593,34 @@ export const processGetBuiltinModule = {
     // Should return null/undefined for non-existent modules
     const nonExistent = process.getBuiltinModule('node:nonexistent');
     assert.ok(nonExistent == null);
+
+    // Internal modules must not be accessible via getBuiltinModule.
+    // These are BUILTIN_ONLY modules that should only be importable
+    // by other built-in modules, never by user code.
+    assert.strictEqual(
+      process.getBuiltinModule('node-internal:process'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('node-internal:public_process'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('node-internal:legacy_process'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('node-internal:internal_timers_global_override'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('cloudflare-internal:env'),
+      undefined
+    );
+    assert.strictEqual(
+      process.getBuiltinModule('cloudflare-internal:filesystem'),
+      undefined
+    );
   },
 };
 
@@ -737,6 +920,7 @@ export const processLoadEnvFile = {
     // supports cwd
     {
       const originalCwd = process.cwd();
+      process.chdir('/tmp');
       writeFileSync('.env', validEnv);
       try {
         process.loadEnvFile();
@@ -778,16 +962,25 @@ assert.deepStrictEqual(readdirSync('.'), ['bundle', 'tmp', 'dev']);
 
 export const processCwd = {
   test() {
-    // cwd gets changed by iocontext
-    assert.strictEqual(process.cwd(), '/tmp');
+    assert.strictEqual(process.cwd(), '/bundle');
 
     const originalCwd = process.cwd();
 
     process.chdir('/tmp');
     assert.strictEqual(process.cwd(), '/tmp');
+    writeFileSync('foo', 'foo');
 
     process.chdir(originalCwd);
     assert.strictEqual(process.cwd(), originalCwd);
+
+    assert.throws(
+      () => {
+        readFileSync('foo');
+      },
+      { code: 'ENOENT' }
+    );
+
+    assert.strictEqual(readFileSync('/tmp/foo', 'utf8'), 'foo');
 
     assert.throws(
       () => {
@@ -954,5 +1147,28 @@ export const processStdio = {
     assert.strictEqual(process.stdin.fd, 0, 'process.stdin.fd should be 0');
     assert.strictEqual(process.stdout.fd, 1, 'process.stdout.fd should be 1');
     assert.strictEqual(process.stderr.fd, 2, 'process.stderr.fd should be 2');
+  },
+};
+
+export const processAssert = {
+  test() {
+    assert.ok('assert' in process);
+    assert.notStrictEqual(process.assert, undefined);
+    assert.strictEqual(typeof process.assert, 'function');
+  },
+};
+
+export const processToStringTag = {
+  test() {
+    assert.strictEqual(
+      Object.prototype.toString.call(process),
+      '[object process]'
+    );
+  },
+};
+
+export const processGetReport = {
+  test() {
+    assert.deepStrictEqual(process.report.getReport(), {});
   },
 };

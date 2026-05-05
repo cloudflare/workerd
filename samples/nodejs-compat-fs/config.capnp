@@ -35,6 +35,5 @@ const helloWorld :Workerd.Worker = (
   compatibilityFlags = [
     "nodejs_compat",
     "enable_nodejs_fs_module",
-    "experimental",
   ]
 );

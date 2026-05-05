@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { deepStrictEqual, strictEqual, ok } from 'node:assert';
 
 // Test for the Event and EventTarget standard Web API implementations.
@@ -56,6 +59,34 @@ export const wait = {
     // globalThis.scheduler can be monkeypatched over...
     scheduler = 'foo';
     strictEqual(globalThis.scheduler, 'foo');
+  },
+};
+
+export const sequentialAbort = {
+  async test(ctrl, env, ctx) {
+    // Sequentially wait a very long time 11k times, each time aborting via an
+    // AbortController. This exercises the abort path under heavy repetition.
+    // Test ensures that the underlying timer quota is not exceeded when the
+    // timeout is cancelled with an AbortSignal
+    const iterations = 11_000;
+    let completed = 0;
+    for (let i = 0; i < iterations; i++) {
+      const ac = new AbortController();
+      const promise = scheduler.wait(1_000_000, { signal: ac.signal });
+      ac.abort();
+      try {
+        await promise;
+        throw new Error('should have thrown');
+      } catch (err) {
+        strictEqual(err.message, 'The operation was aborted');
+      }
+      completed++;
+    }
+    strictEqual(
+      completed,
+      11_000,
+      `Expected 11000 iterations but only completed ${completed}`
+    );
   },
 };
 

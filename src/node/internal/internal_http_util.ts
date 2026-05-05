@@ -6,11 +6,16 @@ import type { IncomingMessage } from 'node:http';
 
 export type IncomingMessageCallback = (req: IncomingMessage) => void;
 
+interface OnceOptions {
+  preserveReturnValue?: boolean;
+}
+
 export function once<RT>(
   this: unknown,
   callback: (...allArgs: unknown[]) => RT,
-  { preserveReturnValue = false } = {}
+  options?: OnceOptions
 ): (...all: unknown[]) => RT {
+  const preserveReturnValue = options?.preserveReturnValue ?? false;
   let called = false;
   let returnValue: RT;
   return function (this: unknown, ...args: unknown[]): RT {

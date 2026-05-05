@@ -40,7 +40,7 @@ import type {
   SOA,
   SRV,
   TTLResponse,
-} from 'node:internal/internal_dns_client';
+} from 'node-internal:internal_dns_client';
 
 export * from 'node-internal:internal_dns_constants';
 export {
@@ -126,7 +126,7 @@ export class Resolver implements dns.Resolver {
     return resolveNs(name);
   }
 
-  esolvePtr(name: string): Promise<string[]> {
+  resolvePtr(name: string): Promise<string[]> {
     return resolvePtr(name);
   }
 

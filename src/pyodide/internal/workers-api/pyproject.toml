@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "python-workers-runtime-types"
+version = "0.1.0"
+description = "Python runtime types for Cloudflare Workers"
+requires-python = ">=3.12"
+
+[tool.hatch.build.targets.wheel]
+sources = ["src"]
+include = ["src/*"]
+
+[dependency-groups]
+dev = [
+    "build",
+]

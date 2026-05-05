@@ -95,7 +95,7 @@ export type TestRunnerConfig = {
 };
 
 type Env = {
-  unsafe: { eval: (code: string) => void };
+  unsafe: { eval: (code: string) => unknown };
   SIDECAR_HOSTNAME: string | null;
   HTTP_PORT: string | null;
   HTTPS_PORT: string | null;
@@ -141,7 +141,7 @@ class RunnerState {
 
   async validate(): Promise<void> {
     // Exception handling is set up on every promise in the test function that created it.
-    await Promise.all(this.subtests.map((t) => t.promise));
+    await Promise.all(this.subtests.map((t) => t.promise ?? Promise.resolve()));
 
     for (const cleanFn of this.completionCallbacks) {
       cleanFn();
@@ -295,7 +295,6 @@ const EXCLUDED_PATHS = new Set([
   '/resources/utils.js',
   '/common/utils.js',
   '/common/get-host-info.sub.js',
-  '/common/gc.js',
   '/common/sab.js',
 ]);
 
@@ -303,10 +302,14 @@ function replaceInterpolation(code: string): string {
   const hostInfo = getHostInfo();
 
   return code
-    .replace('{{host}}', hostInfo.REMOTE_HOST)
-    .replace('{{ports[http][0]}}', hostInfo.HTTP_PORT)
-    .replace('{{ports[http][1]}}', hostInfo.HTTP_PORT)
-    .replace('{{ports[https][0]}}', hostInfo.HTTPS_PORT);
+    .replace(/\{\{host\}\}/g, hostInfo.REMOTE_HOST)
+    .replace(/\{\{hosts\[alt\]\[www\]\}\}/g, hostInfo.REMOTE_HOST)
+    .replace(/\{\{ports\[http\]\[0\]\}\}/g, hostInfo.HTTP_PORT)
+    .replace(/\{\{ports\[http\]\[1\]\}\}/g, hostInfo.HTTP_PORT)
+    .replace(/\{\{ports\[https\]\[0\]\}\}/g, hostInfo.HTTPS_PORT)
+    .replace(/\{\{ports\[ws\]\[0\]\}\}/g, hostInfo.WS_PORT)
+    .replace(/\{\{ports\[wss\]\[0\]\}\}/g, hostInfo.WSS_PORT)
+    .replace(/\{\{ports\[h2\]\[0\]\}\}/g, hostInfo.HTTPS_PORT);
 }
 
 function getCodeAtPath(
@@ -457,7 +460,22 @@ async function runTest(
     options.after();
   }
 
-  await globalThis.state.validate();
+  // The WPT IDL harness (idlharness.js) uses eval() inside async promise callbacks
+  // (e.g., to create test objects via `eval('new URL("http://foo")')`).  The workerd
+  // runtime only allows eval() while env.unsafe.eval() is on the call stack (the
+  // evalAllowed flag is reset once env.unsafe.eval returns).  Async test callbacks
+  // run when state.validate() awaits their promises, so native eval() would fail.
+  // Install the shim here — after evalAsBlock and options.after have finished — so
+  // it covers exactly the async-callback phase.
+  const originalEval = globalThis.eval;
+  globalThis.eval = ((code: string): unknown =>
+    env.unsafe.eval(code)) as typeof globalThis.eval;
+
+  try {
+    await globalThis.state.validate();
+  } finally {
+    globalThis.eval = originalEval;
+  }
 }
 
 function printResults(

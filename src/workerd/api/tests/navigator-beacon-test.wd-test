@@ -4,8 +4,7 @@ const worker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "navigator-beacon-test.js")
   ],
-  compatibilityDate = "2023-01-15",
-  compatibilityFlags = ["nodejs_compat"],
+  compatibilityFlags = ["nodejs_compat", "global_navigator", "streams_enable_constructors"],
 );
 
 const unitTests :Workerd.Config = (

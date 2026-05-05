@@ -366,7 +366,7 @@ void URL::setPort(kj::String value) {
 }
 
 kj::String URL::getPathname() {
-  if (url->path.size() > 0) {
+  if (!url->path.empty()) {
     auto components =
         KJ_MAP(component, url->path) { return kj::str('/', kj::encodeUriPath(component)); };
     return kj::str(kj::strArray(components, ""), url->hasTrailingSlash ? "/" : "");
@@ -391,7 +391,7 @@ void URL::setPathname(kj::String value) {
     constexpr auto END_PATH_PART = kj::parse::anyOfChars("/");
     auto part = split(text, END_PATH_PART);
     if (part.size() == 2 && part[0] == '.' && part[1] == '.') {
-      if (newPath.size() != 0) {
+      if (!newPath.empty()) {
         newPath.removeLast();
       }
       newHasTrailingSlash = true;
@@ -623,6 +623,9 @@ void URLSearchParams::forEach(jsg::Lock& js,
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items
   // are added to the search params unconditionally on each iteration.
+  // Silence clang-tidy warning, using an iterator would not work correctly if callback
+  // increases the size of data.
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < this->url->query.size(); i++) {
     auto& [key, value] = this->url->query[i];
     callback(js, value, key, JSG_THIS);

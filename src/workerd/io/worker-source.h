@@ -1,5 +1,7 @@
 #pragma once
 
+#include <rust/cxx.h>
+
 #include <capnp/schema.capnp.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
@@ -28,7 +30,9 @@ struct WorkerSource {
   // These structs are the variants of the `ModuleContent` `OneOf`, defining all the different
   // module types.
   struct EsModule {
-    kj::StringPtr body;
+    kj::ArrayPtr<const char> body;
+    // Owns the body text in case it was transpiled during the load.
+    kj::Maybe<::rust::String> ownBody;
   };
   struct CommonJsModule {
     kj::StringPtr body;
@@ -82,6 +86,46 @@ struct WorkerSource {
 
     // Hack for tests: register this as an internal module. Not allowed in production.
     bool treatAsInternalForTest = false;
+
+    Module clone() {
+      Module result{.name = name};
+
+      // TODO(cleanup): kj::OneOf should have a clone() method.
+      KJ_SWITCH_ONEOF(content) {
+        KJ_CASE_ONEOF(content, EsModule) {
+          result.content = content;
+        }
+        KJ_CASE_ONEOF(content, TextModule) {
+          result.content = content;
+        }
+        KJ_CASE_ONEOF(content, DataModule) {
+          result.content = content;
+        }
+        KJ_CASE_ONEOF(content, WasmModule) {
+          result.content = content;
+        }
+        KJ_CASE_ONEOF(content, JsonModule) {
+          result.content = content;
+        }
+        KJ_CASE_ONEOF(content, CommonJsModule) {
+          result.content = CommonJsModule{.body = content.body,
+            .namedExports = content.namedExports.map([](const kj::Array<kj::StringPtr>& other) {
+            return KJ_MAP(e, other) { return e; };
+          })};
+        }
+        KJ_CASE_ONEOF(content, PythonModule) {
+          result.content = content;
+        }
+        KJ_CASE_ONEOF(content, PythonRequirement) {
+          result.content = content;
+        }
+        KJ_CASE_ONEOF(content, CapnpModule) {
+          result.content = content;
+        }
+      }
+
+      return result;
+    }
   };
 
   // Representation of source code for a worker using Service Workers syntax (deprecated, but will
@@ -123,6 +167,15 @@ struct WorkerSource {
     // The worker may have a bundle of capnp schemas attached. (In Service Workers syntax, these
     // can't be referenced directly by the app, but they may be used by bindings.)
     capnp::List<capnp::schema::Node>::Reader capnpSchemas;
+
+    ScriptSource clone() {
+      return {
+        .mainScript = mainScript,
+        .mainScriptName = mainScriptName,
+        .globals = KJ_MAP(g, globals) { return g.clone(); },
+        .capnpSchemas = capnpSchemas,
+      };
+    }
   };
 
   // Representation of source code for a worker using ES Modules syntax.
@@ -142,6 +195,16 @@ struct WorkerSource {
     // Optional Python memory snapshot. The actual capnp type is declared in the internal codebase,
     // so we use AnyStruct here. This is deprecated anyway.
     kj::Maybe<capnp::AnyStruct::Reader> pythonMemorySnapshot;
+
+    ModulesSource clone() {
+      return {
+        .mainModule = mainModule,
+        .modules = KJ_MAP(m, modules) { return m.clone(); },
+        .capnpSchemas = capnpSchemas,
+        .isPython = isPython,
+        .pythonMemorySnapshot = pythonMemorySnapshot,
+      };
+    }
   };
 
   // The overall value is either ScriptSource or ModulesSource.
@@ -152,6 +215,20 @@ struct WorkerSource {
 
   WorkerSource(ScriptSource source): variant(kj::mv(source)) {}
   WorkerSource(ModulesSource source): variant(kj::mv(source)) {}
+
+  // Clones everything owned by the `WorkerSource`. But where it contains external pointers, those
+  // pointers are kept as-is.
+  WorkerSource clone() {
+    KJ_SWITCH_ONEOF(variant) {
+      KJ_CASE_ONEOF(script, ScriptSource) {
+        return WorkerSource(script.clone());
+      }
+      KJ_CASE_ONEOF(modules, ModulesSource) {
+        return WorkerSource(modules.clone());
+      }
+    }
+    KJ_UNREACHABLE;
+  }
 };
 
 // Bit of a hack: a `WorkerSource` can contain a `DynamicEnvBuilder`, which is an object that

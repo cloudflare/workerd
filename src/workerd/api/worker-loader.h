@@ -20,9 +20,10 @@ class WorkerStub: public jsg::Object {
   WorkerStub(IoOwn<WorkerStubChannel> channel): channel(kj::mv(channel)) {}
 
   struct EntrypointOptions {
-    jsg::Optional<jsg::JsObject> props;
+    jsg::Optional<jsg::JsRef<jsg::JsObject>> props;
+    jsg::Optional<ResourceLimits> limits;
 
-    JSG_STRUCT(props);
+    JSG_STRUCT(props, limits);
   };
 
   jsg::Ref<Fetcher> getEntrypoint(jsg::Lock& js,
@@ -32,9 +33,16 @@ class WorkerStub: public jsg::Object {
       jsg::Optional<kj::Maybe<kj::String>> name,
       jsg::Optional<EntrypointOptions> options);
 
-  JSG_RESOURCE_TYPE(WorkerStub) {
+  JSG_RESOURCE_TYPE(WorkerStub, CompatibilityFlags::Reader flags) {
     JSG_METHOD(getEntrypoint);
     JSG_METHOD(getDurableObjectClass);
+
+    JSG_TS_OVERRIDE({
+      getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
+          name?: string, options?: WorkerStubEntrypointOptions): Fetcher<T>;
+      getDurableObjectClass<T extends Rpc.DurableObjectBranded | undefined>(
+          name?: string, options?: WorkerStubEntrypointOptions): DurableObjectClass<T>;
+    });
   }
 
  private:
@@ -60,8 +68,9 @@ class WorkerLoader: public jsg::Object {
     jsg::Optional<jsg::Value> json;             // arbitrary JS value, will be serialized to JSON
                                                 // and then parsed again when imported
     jsg::Optional<kj::String> py;               // Python module
+    jsg::Optional<kj::Array<const byte>> wasm;  // compiled WASM module
 
-    JSG_STRUCT(js, cjs, text, data, json, py);
+    JSG_STRUCT(js, cjs, text, data, json, py, wasm);
 
     // HACK: When we serialize the JSON in extractSource() we need to place the owned kj::String
     //   somewhere since Worker::Script::Source only gets a kj::StringPtr.
@@ -72,6 +81,8 @@ class WorkerLoader: public jsg::Object {
     kj::String compatibilityDate;
     jsg::Optional<kj::Array<kj::String>> compatibilityFlags;
     jsg::Optional<bool> allowExperimental = false;
+
+    jsg::Optional<ResourceLimits> limits;
 
     kj::String mainModule;
 
@@ -90,30 +101,45 @@ class WorkerLoader: public jsg::Object {
     // If `null`, block the global outbound (all requests throw errors).
     jsg::Optional<kj::Maybe<jsg::Ref<Fetcher>>> globalOutbound;
 
-    // TODO(someday): cache API outbound?
+    // Specify tail workers.
+    jsg::Optional<kj::Array<jsg::Ref<Fetcher>>> tails;
+    jsg::Optional<kj::Array<jsg::Ref<Fetcher>>> streamingTails;
 
-    // TODO(someday): Support specifying a list of tail workers. These should work similarly to
-    //   globalOutbound.
+    // TODO(someday): cache API outbound?
 
     JSG_STRUCT(compatibilityDate,
         compatibilityFlags,
         allowExperimental,
+        limits,
         mainModule,
         modules,
         env,
-        globalOutbound);
+        globalOutbound,
+        tails,
+        streamingTails);
   };
 
   jsg::Ref<WorkerStub> get(
-      jsg::Lock& js, kj::String name, jsg::Function<jsg::Promise<WorkerCode>()> getCode);
+      jsg::Lock& js, kj::Maybe<kj::String> name, jsg::Function<jsg::Promise<WorkerCode>()> getCode);
+
+  // Shortcut for `get(null, () => code)`.
+  jsg::Ref<WorkerStub> load(jsg::Lock& js, WorkerCode code);
 
   JSG_RESOURCE_TYPE(WorkerLoader) {
     JSG_METHOD(get);
+    JSG_METHOD(load);
+
+    JSG_TS_ROOT();
   }
 
  private:
   uint channel;
   CompatibilityDateValidation compatDateValidation;
+
+  static DynamicWorkerSource toDynamicWorkerSource(jsg::Lock& js,
+      IoContext& ioctx,
+      CompatibilityDateValidation compatDateValidation,
+      WorkerCode code);
 
   static Worker::Script::Source extractSource(jsg::Lock& js, WorkerCode& code);
   static kj::Own<CompatibilityFlags::Reader> extractCompatFlags(
@@ -125,6 +151,6 @@ class WorkerLoader: public jsg::Object {
 
 #define EW_WORKER_LOADER_ISOLATE_TYPES                                                             \
   api::WorkerStub, api::WorkerStub::EntrypointOptions, api::WorkerLoader,                          \
-      api::WorkerLoader::Module, api::WorkerLoader::WorkerCode
+      api::WorkerLoader::Module, api::WorkerLoader::WorkerCode, workerd::ResourceLimits
 
 }  // namespace workerd::api

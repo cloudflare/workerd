@@ -478,7 +478,7 @@ Object.setPrototypeOf(SlowBuffer.prototype, Uint8Array.prototype);
 Object.setPrototypeOf(SlowBuffer, Uint8Array);
 
 Buffer.isBuffer = function isBuffer(b: unknown): b is Buffer {
-  return b != null && (b as any)[kIsBuffer] && b !== Buffer.prototype;
+  return b instanceof Buffer;
 };
 
 export function compare(a: Buffer | Uint8Array, b: Buffer | Uint8Array) {

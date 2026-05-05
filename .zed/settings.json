@@ -8,7 +8,7 @@
       "formatter": {
         "external": {
           "command": "bazel-bin/build/deps/formatters/clang-format",
-          "args": ["-i", "{buffer_path}"]
+          "arguments": ["-i", "{buffer_path}"]
         }
       }
     },

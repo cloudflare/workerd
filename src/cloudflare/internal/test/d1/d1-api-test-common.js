@@ -11,7 +11,9 @@ const anything = Symbol('anything');
 const deleteAnything = (expected, actual) => {
   Object.entries(expected).forEach(([k, v]) => {
     if (v === anything) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete actual[k];
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete expected[k];
     } else if (typeof v === 'object' && typeof actual[k] === 'object') {
       deleteAnything(expected[k], actual[k]);
@@ -43,12 +45,14 @@ export const itShould = async (description, ...assertions) => {
   }
 };
 
-// Make it easy to specify only a the meta properties we're interested in
+// Make it easy to specify only a the meta properties we're interested in.
+// Anything specified here as `anything` won't be checked.
 const meta = (values) => ({
   duration: anything,
   served_by: anything,
   served_by_primary: anything,
   served_by_region: anything,
+  served_by_colo: anything,
   timings: anything,
   changes: anything,
   last_row_id: anything,
@@ -56,6 +60,7 @@ const meta = (values) => ({
   size_after: anything,
   rows_read: anything,
   rows_written: anything,
+  total_attempts: anything,
   ...values,
 });
 
@@ -532,5 +537,27 @@ export async function testD1ApiQueriesHappyPath(DB) {
         }),
       },
     ]
+  );
+}
+
+// Regression test for https://github.com/cloudflare/workerd/pull/5218.
+// exec() with invalid SQL should throw a proper D1 error, not a TypeError
+// from accessing properties on undefined meta during span aggregation.
+export async function testD1Exec(DB) {
+  await itShould('run a simple exec', () => DB.exec('select 1'), {
+    count: 1,
+    duration: anything,
+  });
+
+  await assert.rejects(
+    () => DB.exec('INVALID SQL'),
+    (e) => {
+      assert.notEqual(e.constructor, TypeError);
+      assert.ok(
+        e.message.includes('D1_EXEC_ERROR'),
+        `Expected D1 error, got: ${e.message}`
+      );
+      return true;
+    }
   );
 }

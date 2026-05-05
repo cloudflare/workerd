@@ -4,11 +4,10 @@
 
 #pragma once
 
-#include "readable.h"
-#include "transform.h"
-#include "writable.h"
-
 #include <workerd/api/encoding.h>
+#include <workerd/api/streams/readable.h>
+#include <workerd/api/streams/transform.h>
+#include <workerd/api/streams/writable.h>
 
 namespace workerd::api {
 

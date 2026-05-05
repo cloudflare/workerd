@@ -11,28 +11,31 @@
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
-#include <workerd/io/limit-enforcer.h>
+#include <workerd/io/io-timers.h>
+#include <workerd/io/observer.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace.h>
-#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-source.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/modules.h>
 #include <workerd/util/strong-bool.h>
-#include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 
 namespace v8 {
+class BackingStore;
 class Isolate;
-}
+}  // namespace v8
 
 namespace workerd {
 
 WD_STRONG_BOOL(StructuredLogging);
+WD_STRONG_BOOL(ProcessStdioPrefixed);
 
 namespace api {
 class DurableObjectState;
@@ -41,16 +44,19 @@ class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
-class Socket;
 class WebSocket;
 class WebSocketRequestResponsePair;
+class CacheContext;
 class ExecutionContext;
 namespace pyodide {
 struct ArtifactBundler_State;
-struct EmscriptenRuntime;
 KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api
+
+class IsolateLimitEnforcer;
+enum class UncaughtExceptionSource;
+class VirtualFileSystem;
 
 class ThreadContext;
 class IoContext;
@@ -89,6 +95,7 @@ struct EntrypointClasses {
 //   for a class name to end in "Instance". ("I have an instance of WorkerInstance...")
 class Worker: public kj::AtomicRefcounted {
  public:
+  using VersionInfo = Worker_VersionInfo;
   class Script;
   class Isolate;
   class Api;
@@ -118,6 +125,36 @@ class Worker: public kj::AtomicRefcounted {
     STDOUT,
   };
 
+  struct LoggingOptions {
+    ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY;
+    StructuredLogging structuredLogging = StructuredLogging::NO;
+    ProcessStdioPrefixed processStdioPrefixed = ProcessStdioPrefixed::YES;
+    kj::ConstString stdoutPrefix = "stdout:"_kjc;
+    kj::ConstString stderrPrefix = "stderr:"_kjc;
+
+    LoggingOptions() = default;
+    LoggingOptions(LoggingOptions&&) = default;
+    LoggingOptions& operator=(LoggingOptions&&) = default;
+
+    explicit LoggingOptions(ConsoleMode mode): consoleMode(mode) {}
+
+    LoggingOptions(const LoggingOptions& other)
+        : consoleMode(other.consoleMode),
+          structuredLogging(other.structuredLogging),
+          processStdioPrefixed(other.processStdioPrefixed),
+          stdoutPrefix(other.stdoutPrefix.clone()),
+          stderrPrefix(other.stderrPrefix.clone()) {}
+
+    LoggingOptions& operator=(const LoggingOptions& other) {
+      consoleMode = other.consoleMode;
+      structuredLogging = other.structuredLogging;
+      processStdioPrefixed = other.processStdioPrefixed;
+      stdoutPrefix = other.stdoutPrefix.clone();
+      stderrPrefix = other.stderrPrefix.clone();
+      return *this;
+    }
+  };
+
   explicit Worker(kj::Own<const Script> script,
       kj::Own<WorkerObserver> metrics,
       kj::FunctionParam<void(jsg::Lock& lock,
@@ -125,7 +162,7 @@ class Worker: public kj::AtomicRefcounted {
           v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports)> compileBindings,
       IsolateObserver::StartType startType,
-      TraceParentContext spans,
+      SpanParent parentSpan,
       LockType lockType,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Duration&> startupTime = kj::none);
@@ -174,19 +211,8 @@ class Worker: public kj::AtomicRefcounted {
   kj::Promise<AsyncLock> takeAsyncLockWhenActorCacheReady(
       kj::Date now, Actor& actor, RequestObserver& request) const;
 
-  // Track a set of address->callback overrides for which the connect(address) behavior should be
-  // overridden via callbacks rather than using the default Socket connect() logic.
-  // This is useful for allowing generic client libraries to connect to private local services using
-  // just a provided address (rather than requiring them to support being passed a binding to call
-  // binding.connect() on).
-  using ConnectFn = kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)>;
-  void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
-  kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
-
-  static void setupContext(jsg::Lock& lock,
-      v8::Local<v8::Context> context,
-      Worker::ConsoleMode consoleMode,
-      StructuredLogging structuredLogging);
+  static void setupContext(
+      jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions);
 
  private:
   kj::Own<const Script> script;
@@ -200,8 +226,6 @@ class Worker: public kj::AtomicRefcounted {
   struct Impl;
   kj::Own<Impl> impl;
 
-  kj::HashMap<kj::String, ConnectFn> connectOverrides;
-
   struct ActorClassInfo {
     EntrypointClass cls;
     bool missingSuperclass;
@@ -212,9 +236,8 @@ class Worker: public kj::AtomicRefcounted {
   friend constexpr bool _kj_internal_isPolymorphic(AsyncWaiter*);
 
   static void handleLog(jsg::Lock& js,
-      ConsoleMode mode,
+      const LoggingOptions& loggingOptions,
       LogLevel level,
-      StructuredLogging structuredLogging,
       const v8::Global<v8::Function>& original,
       const v8::FunctionCallbackInfo<v8::Value>& info);
 
@@ -246,6 +269,10 @@ class Worker::Script: public kj::AtomicRefcounted {
   inline kj::Maybe<kj::Arc<DynamicEnvBuilder>> getDynamicEnvBuilder() const {
     return mapAddRef(dynamicEnvBuilder);
   }
+
+  void installVirtualFileSystemOnContext(v8::Local<v8::Context> context) const;
+
+  const capnp::SchemaLoader& getSchemaLoader() const;
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
@@ -291,7 +318,9 @@ class Worker::Script: public kj::AtomicRefcounted {
       bool logNewScript,
       kj::Maybe<ValidationErrorReporter&> errorReporter,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
-      SpanParent parentSpan);
+      SpanParent parentSpan,
+      kj::Own<workerd::VirtualFileSystem> vfs,
+      kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry);
 };
 
 // Multiple zones may share the same script. We would like to compile each script only once,
@@ -328,14 +357,33 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       kj::StringPtr id,
       kj::Own<IsolateLimitEnforcer> limitEnforcer,
       InspectorPolicy inspectorPolicy,
-      ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY,
-      StructuredLogging structuredLogging = StructuredLogging::NO);
+      LoggingOptions loggingOptions = {});
 
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
 
   // Get the current Worker::Isolate from the current jsg::Lock
   static const Isolate& from(jsg::Lock& js);
+
+  // This callback gets executed when the CPU limiter is nearly out of time. It has to be signal
+  // safe since we call it in a signal handler.
+  //
+  // We give a reference to the callback to the limit enforcer, so it has to outlive the limit
+  // enforcer. The Isolate outlives the limit enforcer. If this function is called a second time, we
+  // throw to avoid invalidating references.
+  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) const;
+  // Returns a reference to cpuLimitNearlyExceededCallback. Can't outlive the Isolate.
+  kj::Maybe<kj::Function<void(void)>> getCpuLimitNearlyExceededCallback() const;
+
+  // Registers a WASM module's linear memory and offsets for receiving the "shut down" signal.
+  // At least one of signalOffset or terminatedOffset must be provided. The instance handle is
+  // used to create a weak reference for GC-based cleanup. See
+  // TrackedWasmInstanceList::registerSignal().
+  void registerTrackedWasmInstance(jsg::Lock& js,
+      v8::Local<v8::Object> instance,
+      kj::Array<kj::byte> memory,
+      kj::Maybe<uint32_t> signalOffset,
+      kj::Maybe<uint32_t> terminatedOffset) const;
 
   inline IsolateObserver& getMetrics() {
     return *metrics;
@@ -357,9 +405,12 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       const Script::Source& source,
       IsolateObserver::StartType startType,
       SpanParent parentSpan,
+      kj::Own<workerd::VirtualFileSystem> vfs,
       bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
-      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none) const;
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none,
+      kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry =
+          kj::none) const;
 
   inline IsolateLimitEnforcer& getLimitEnforcer() {
     return *limitEnforcer;
@@ -442,6 +493,15 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   bool isInspectorEnabled() const;
 
+  // Get the process stdio prefixed setting from logging options
+  inline kj::StringPtr getStdoutPrefix() const {
+    return loggingOptions.stdoutPrefix;
+  }
+
+  inline kj::StringPtr getStderrPrefix() const {
+    return loggingOptions.stderrPrefix;
+  }
+
   // Represents a weak reference back to the isolate that code within the isolate can use as an
   // indirect pointer when they want to be able to race destruction safely. A caller wishing to
   // use a weak reference to the isolate should acquire a strong reference to weakIsolateRef.
@@ -469,9 +529,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   kj::String id;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
+  kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>> cpuLimitNearlyExceededCallback;
   kj::Own<Api> api;
-  ConsoleMode consoleMode;
-  StructuredLogging structuredLogging;
+  LoggingOptions loggingOptions;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
   // compatibility enable-flags that are relevant to FL.
@@ -518,6 +578,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   size_t nextRequestId = 0;
   kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
+  kj::Own<jsg::AsyncContextFrame::StorageKey> userTraceAsyncContextKey;
 
   friend class Worker;
 };
@@ -535,6 +596,9 @@ class Worker::Api {
   // TODO(cleanup): This is a hack thrown in quickly because IoContext::current() doesn't work in
   //   the global scope (when no request is running). We need a better design here.
 
+  // Like `current()`, but returns `kj::none` if there is no current Api instance.
+  static kj::Maybe<const Api&> tryCurrent();
+
   // Take a lock on the isolate.
   virtual kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const = 0;
   // TODO(cleanup): Change all locking to a synchronous callback style rather than RAII style, so
@@ -545,8 +609,16 @@ class Worker::Api {
   // Api.
   virtual CompatibilityFlags::Reader getFeatureFlags() const = 0;
 
+  struct NewContextOptions {
+    // If the worker is using the new module registry system, this is the registry to
+    // install on the newly created context. If null, the old system is assumed.
+    kj::Maybe<const workerd::jsg::modules::ModuleRegistry&> newModuleRegistry;
+    kj::Maybe<const capnp::SchemaLoader&> schemaLoader;
+  };
+
   // Create the context (global scope) object.
-  virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const = 0;
+  virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(
+      jsg::Lock& lock, NewContextOptions options = {}) const = 0;
 
   virtual void compileModules(jsg::Lock& lock,
       const Script::ModulesSource& source,
@@ -594,6 +666,10 @@ class Worker::Api {
   virtual jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
 
+  // Hook for the embedding application to provide a CacheContext for the ctx.cache property.
+  // The default implementation returns kj::none (undefined).
+  virtual jsg::Optional<jsg::Ref<api::CacheContext>> getCtxCacheProperty(jsg::Lock& js) const;
+
   virtual const jsg::IsolateObserver& getObserver() const = 0;
   virtual void setIsolateObserver(IsolateObserver&) = 0;
 
@@ -608,9 +684,6 @@ class Worker::Api {
   virtual void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const {
     // By default does nothing.
   }
-
-  // Return the virtual file system for this worker.
-  virtual const VirtualFileSystem& getVirtualFileSystem() const = 0;
 };
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually
@@ -687,18 +760,34 @@ class Worker::Lock {
   // default handler. Returns null if this is not a modules-syntax worker (but `entrypointName`
   // must be null in that case).
   //
+  // `versionInfo` is used to populate `ctx.version` when enabled.
   // `props` is the value to place in `ctx.props`.
   //
   // If running in an actor, the name and props are ignored and the entrypoint originally used to
   // construct the actor is returned.
+  //
+  // `isDynamicDispatch` indicates the entrypoint name was supplied at request time (e.g. by the
+  // Workflows engine via dynamic dispatch) rather than baked into the pipeline at config time. When
+  // true, a missing entrypoint is surfaced as a JSG TypeError to the caller rather than being
+  // logged as an internal error, since the mismatch is attributable to user configuration.
   kj::Maybe<kj::Own<api::ExportedHandler>> getExportedHandler(
-      kj::Maybe<kj::StringPtr> entrypointName, Frankenvalue props, kj::Maybe<Worker::Actor&> actor);
+      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<VersionInfo> versionInfo,
+      Frankenvalue props,
+      kj::Maybe<Worker::Actor&> actor,
+      bool isDynamicDispatch = false);
 
   // Get the C++ object representing the global scope.
   api::ServiceWorkerGlobalScope& getGlobalScope();
 
+  // Get the timeout ID generator from this worker's ServiceWorkerGlobalScope.
+  TimeoutId::Generator& getTimeoutIdGenerator();
+
   // Get the opaque storage key to use for recording trace information in async contexts.
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
+
+  // Get the opaque storage key to use for recording user trace information in async contexts.
+  jsg::AsyncContextFrame::StorageKey& getUserTraceAsyncContextKey();
 
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
@@ -824,6 +913,9 @@ class Worker::Actor final: public kj::Refcounted {
       Worker::Actor::Id id;
     };
 
+    // Returns the nesting depth of this facet. Root = 0, direct child of root = 1, etc.
+    virtual uint getDepth() const = 0;
+
     // These methods are C++ equivalents of the JavaScript ctx.facets API.
     virtual kj::Own<IoChannelFactory::ActorChannel> getFacet(
         kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) = 0;
@@ -839,6 +931,7 @@ class Worker::Actor final: public kj::Refcounted {
       bool hasTransient,
       MakeActorCacheFunc makeActorCache,
       kj::Maybe<kj::StringPtr> className,
+      Frankenvalue props,
       MakeStorageFunc makeStorage,
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
@@ -846,7 +939,8 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t> hibernationEventType,
       kj::Maybe<rpc::Container::Client> container = kj::none,
-      kj::Maybe<FacetManager&> facetManager = kj::none);
+      kj::Maybe<FacetManager&> facetManager = kj::none,
+      kj::Maybe<ActorVersion> version = kj::none);
 
   ~Actor() noexcept(false);
 
@@ -933,7 +1027,7 @@ class Worker::Actor final: public kj::Refcounted {
 
   // If there is a scheduled or running alarm with the given `scheduledTime`, return a promise to
   // its result. This allows use to de-dupe multiple requests to a single `IoContext::run()`.
-  kj::Maybe<kj::Promise<WorkerInterface::AlarmResult>> getAlarm(kj::Date scheduledTime);
+  kj::Maybe<kj::Promise<WorkerInterface::AlarmOutcome>> getAlarm(kj::Date scheduledTime);
 
   // Wait for `Date.now()` to be greater than or equal to `scheduledTime`. If the promise resolves
   // to an `AlarmFulfiller`, then the caller is responsible for invoking `fulfill()`, `reject()`, or
@@ -957,6 +1051,47 @@ class Worker::Actor final: public kj::Refcounted {
   friend class Worker;
 
   kj::Promise<void> ensureConstructedImpl(IoContext&, ActorClassInfo& info);
+};
+
+WD_STRONG_BOOL(PopulateVersionInfoMetadata);
+
+// Version information associated with a worker. These are made available through `ctx.version`.
+// This is also available through the preferred `Worker::VersionInfo` alias. `Worker_VersionInfo`
+// exists to allow for forward declaration in a couple of niche places.
+struct Worker_VersionInfo {
+  kj::String id;
+  kj::Maybe<kj::String> cohort;
+  kj::Maybe<kj::String> key;
+  kj::Maybe<kj::String> versionOverride;
+
+  Worker_VersionInfo clone() const {
+    return {
+      .id = kj::str(id),
+      .cohort = cohort.map([](const kj::String& s) { return kj::str(s); }),
+      .key = key.map([](const kj::String& s) { return kj::str(s); }),
+      .versionOverride = versionOverride.map([](const kj::String& s) { return kj::str(s); }),
+    };
+  }
+
+  jsg::JsValue toJs(jsg::Lock& js, PopulateVersionInfoMetadata populateVersionInfoMetadata) const {
+    auto version = js.obj();
+    if (populateVersionInfoMetadata) {
+      auto metadata = js.obj();
+      metadata.set(js, "id"_kj, js.str(id));
+      version.set(js, "metadata"_kj, metadata);
+    }
+    KJ_IF_SOME(someCohort, cohort) {
+      version.set(js, "cohort"_kj, js.str(someCohort));
+    }
+    KJ_IF_SOME(someKey, key) {
+      version.set(js, "key"_kj, js.str(someKey));
+    }
+    KJ_IF_SOME(someVersionOverride, versionOverride) {
+      version.set(js, "override"_kj, js.str(someVersionOverride));
+    }
+    version.recursivelyFreeze(js);
+    return version;
+  }
 };
 
 // =======================================================================================

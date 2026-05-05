@@ -262,7 +262,7 @@ EVPKeyPointer edKeyFromJwk(const JsonWebKey& jwk, KeyType keyType) {
 
   auto& x = JSG_REQUIRE_NONNULL(jwk.x, Error, "OKP JWK missing x parameter");
   auto X = JSG_REQUIRE_NONNULL(simdutfBase64UrlDecode(x), Error, "OKP JWK invalid x parameter");
-  return EVPKeyPointer::NewRawPrivate(nid, ToNcryptoBuffer(X.asPtr().asConst()));
+  return EVPKeyPointer::NewRawPublic(nid, ToNcryptoBuffer(X.asPtr().asConst()));
 }
 }  // namespace
 

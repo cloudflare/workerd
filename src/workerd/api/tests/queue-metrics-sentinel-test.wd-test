@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "queue-metrics-sentinel-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "queue-metrics-sentinel-test.js" )
+        ],
+        bindings = [
+          ( name = "QUEUE", queue = "queue-metrics-sentinel-test" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "queues_json_messages", "capture_async_api_throws"],
+      )
+    ),
+  ],
+);

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { throws, rejects, strictEqual } from 'node:assert';
 import { mock } from 'node:test';
 
@@ -24,6 +27,32 @@ export const testStartupEval = {
     await rejects(() => import('another-module-does-eval'), {
       message: /Code generation from strings disallowed for this context/,
     });
+
+    // eval() with no args or a non-string arg is allowed (V8 returns the value
+    // as-is per spec since there is no string to compile).
+    strictEqual(eval(), undefined);
+    strictEqual(eval(undefined), undefined);
+
+    // new Function() with params and a string body is still blocked.
+    throws(() => new Function('a', 'b', 'return a + b'), {
+      message: /Code generation from strings disallowed for this context/,
+    });
+
+    // new Function() with params and undefined body is also blocked (the body
+    // becomes the string "undefined" via ToString).
+    throws(() => new Function('a', 'b', undefined), {
+      message: /Code generation from strings disallowed for this context/,
+    });
+
+    // new Function() with no arguments is allowed (the synthesized source
+    // matches the known empty-body, no-parameter pattern).
+    const emptyFn = new Function();
+    strictEqual(typeof emptyFn, 'function');
+
+    // Extending Function with super() and no arguments is also allowed.
+    class Foo extends Function {}
+    const foo = new Foo();
+    strictEqual(typeof foo, 'function');
   },
 };
 

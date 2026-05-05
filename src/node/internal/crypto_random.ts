@@ -46,6 +46,7 @@ import {
 import { Buffer, kMaxLength } from 'node-internal:internal_buffer';
 
 import { arrayBufferToUnsignedBigInt } from 'node-internal:crypto_util';
+import type { RandomUUIDOptions } from 'node:crypto';
 
 export type RandomBytesCallback = (
   err: Error | null,
@@ -86,12 +87,12 @@ export function randomFillSync(
   } else offset = 0;
   if (size !== undefined) {
     validateInteger(size, 'size', 0, maxLength - offset);
-  } else size = maxLength;
+  } else size = maxLength - offset;
   if (isAnyArrayBuffer(buffer)) {
     buffer = Buffer.from(buffer);
   }
   buffer = (buffer as Buffer).subarray(offset, offset + size);
-  return crypto.getRandomValues(buffer);
+  return crypto.getRandomValues(buffer as Uint8Array<ArrayBuffer>);
 }
 
 export type RandomFillCallback = (
@@ -242,8 +243,8 @@ export function randomInt(
     max = minOrMax;
   }
 
-  if (min > max) {
-    throw new ERR_OUT_OF_RANGE('min', 'min <= max', min);
+  if (min >= max) {
+    throw new ERR_OUT_OF_RANGE('min', 'min < max', min);
   }
 
   if (callback != null) {
@@ -264,7 +265,7 @@ export function randomInt(
   return undefined;
 }
 
-export function randomUUID(options: unknown): string {
+export function randomUUID(options?: RandomUUIDOptions): string {
   // While we do not actually use the entropy cache, we go ahead and validate
   // the input parameters as Node.js does.
   if (options !== undefined) {

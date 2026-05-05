@@ -57,16 +57,14 @@ import {
 import type { Dirent } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
 import { type Dir } from 'node-internal:internal_fs';
-import {
-  ERR_EBADF,
-  ERR_UNSUPPORTED_OPERATION,
-} from 'node-internal:internal_errors';
+import { ERR_EBADF } from 'node-internal:internal_errors';
 import {
   validateBoolean,
   validateObject,
   validateUint32,
 } from 'node-internal:validators';
 import * as constants from 'node-internal:internal_fs_constants';
+export { constants };
 import type {
   BigIntStatsFs,
   CopySyncOptions,
@@ -75,12 +73,12 @@ import type {
   GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
-  ReadAsyncOptions,
+  ReadOptionsWithBuffer,
   RmOptions,
-  RmDirOptions,
   StatsFs,
   WriteFileOptions,
 } from 'node:fs';
+import type { RmDirOptions } from 'node-internal:internal_fs_utils';
 import type {
   ReadableWebStreamOptions,
   CreateReadStreamOptions,
@@ -151,8 +149,8 @@ export class FileHandle extends EventEmitter {
   }
 
   read<T extends NodeJS.ArrayBufferView>(
-    bufferOrOptions: T | ReadAsyncOptions<T> = {},
-    offsetOrOptions: number | ReadAsyncOptions<T> = {},
+    bufferOrOptions: T | ReadOptionsWithBuffer<T> = {},
+    offsetOrOptions: number | ReadOptionsWithBuffer<T> = {},
     length?: number,
     position: Position = null
   ): Promise<{ bytesRead: number; buffer: T }> {
@@ -161,7 +159,7 @@ export class FileHandle extends EventEmitter {
         throw new ERR_EBADF({ syscall: 'stat' });
       }
 
-      let options: ReadAsyncOptions<T>;
+      let options: ReadOptionsWithBuffer<T>;
       if (isArrayBufferView(bufferOrOptions)) {
         if (typeof offsetOrOptions === 'number') {
           options = {
@@ -664,18 +662,17 @@ export function writeFile(
   });
 }
 
-export function glob(
-  _pattern: string | readonly string[],
-  _options:
+export async function* glob(
+  pattern: string | readonly string[],
+  options:
     | GlobOptions
     | GlobOptionsWithFileTypes
     | GlobOptionsWithoutFileTypes = {}
-): NodeJS.AsyncIterator<string | Dirent> {
-  // We do not yet implement the globSync function. In Node.js, this
-  // function depends heavily on the third party minimatch library
-  // which is not yet available in the workers runtime. This will be
-  // explored for implementation separately in the future.
-  throw new ERR_UNSUPPORTED_OPERATION();
+): AsyncGenerator<string | Dirent> {
+  const results = await Promise.resolve(fssync.globSync(pattern, options));
+  for (const result of results) {
+    yield result;
+  }
 }
 
 function getReadableWebStream(

@@ -1,0 +1,19 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "tracing-helpers-test.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+)
+
+wd_test(
+    src = "tracing-hierarchy-test.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
+)
+
+wd_test(
+    src = "tracing-log-attribution-test.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]),
+)

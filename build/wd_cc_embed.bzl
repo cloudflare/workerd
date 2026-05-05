@@ -49,7 +49,8 @@ def wd_cc_embed(name, src, base_name = "", is_text = None, **kwargs):
         name = embed_filename + "@c",
         out = base_name + ".embed.c",
         content = ["""#include <stddef.h>
-const {pod_data_type} {embed_name}_begin[] = {{
+// Some data (including ICU embed) requires 8-byte alignment
+__attribute__ ((aligned (8))) const {pod_data_type} {embed_name}_begin[] = {{
   #embed <{embed}>{suffix}
 }};
 size_t {embed_name}_size = sizeof({embed_name}_begin){size_adjust};
@@ -80,7 +81,10 @@ extern size_t {embed_name}_size;
         additional_compiler_inputs = [src],
         conlyopts = select({
             "@platforms//os:windows": [
-                "/std:c26",
+                # Windows doesn't recognize C23 yet, and complains about C23 extensions even with clatest.
+                "/std:clatest",
+                "-Wno-c23-extensions",
+                "-Wno-unused-command-line-argument",
                 "/clang:--embed-dir=" + workspace_root + embed_package,
                 "/clang:--embed-dir=$(GENDIR)/" + workspace_root + embed_package,
             ],

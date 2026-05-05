@@ -5,11 +5,16 @@
 
 #include "requirements.h"
 
-#include <workerd/api/pyodide/setup-emscripten.h>
+#include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
+#include <workerd/io/io-context.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/strings.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
 
+#include <capnp/dynamic.h>
+#include <capnp/schema.h>
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
@@ -17,8 +22,7 @@
 #include <kj/debug.h>
 #include <kj/string.h>
 
-// for std::sort
-#include <algorithm>
+#include <algorithm>  // for std::sort
 
 namespace workerd::api::pyodide {
 
@@ -84,6 +88,19 @@ kj::Array<kj::StringPtr> PyodideMetadataReader::getNames(
     builder.add(state->moduleInfo.names[i]);
   }
   return builder.releaseAsArray();
+}
+
+void PyodideMetadataReader::setCpuLimitNearlyExceededCallback(
+    jsg::Lock& js, kj::Array<kj::byte> wasm_memory, int sig_clock, int sig_flag) {
+  // This callback has to be implemented in C++ because we don't hold the isolate lock when we call
+  // it. It also has to be signal safe since we call it from the cpu time limiter.
+  Worker::Isolate::from(js).setCpuLimitNearlyExceededCallback(
+      [wasm_memory = kj::mv(wasm_memory), sig_clock, sig_flag]() mutable {
+    // Set signal handling clock to fire on the next check.
+    wasm_memory[sig_clock] = 0;
+    // Set signal handling to on
+    wasm_memory[sig_flag] = 1;
+  });
 }
 
 kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {
@@ -399,6 +416,32 @@ kj::Array<kj::StringPtr> PyodideMetadataReader::getBaselineSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
 }
 
+bool PyodideMetadataReader::shouldAbortIsolateOnFatalError() {
+  return util::Autogate::isEnabled(util::AutogateKey::PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR);
+}
+
+jsg::JsObject PyodideMetadataReader::getCompatibilityFlags(jsg::Lock& js) {
+  auto flags = FeatureFlags::get(js);
+  auto obj = js.objNoProto();
+  auto dynamic = capnp::toDynamic(flags);
+  auto schema = dynamic.getSchema();
+
+  for (auto field: schema.getFields()) {
+    auto annotations = field.getProto().getAnnotations();
+
+    // Note that disable flags are not exposed.
+    for (auto annotation: annotations) {
+      if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+        obj.setReadOnly(
+            js, annotation.getValue().getText(), js.boolean(dynamic.get(field).as<bool>()));
+      }
+    }
+  }
+
+  obj.seal(js);
+  return obj;
+}
+
 PyodideMetadataReader::State::State(const State& other)
     : mainModule(kj::str(other.mainModule)),
       moduleInfo(other.moduleInfo.clone()),
@@ -521,8 +564,6 @@ jsg::Optional<kj::Array<kj::byte>> DiskCache::get(jsg::Lock& js, kj::String key)
   }
 }
 
-// TODO: DiskCache is currently only used for --python-save-snapshot. Can we use ArtifactBundler for
-// this instead and remove DiskCache completely?
 void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   KJ_IF_SOME(root, cacheRoot) {
     kj::Path path(key);
@@ -538,21 +579,22 @@ void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   }
 }
 
-jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
-  js.installJspi();
-  return emscriptenRuntime.emscriptenRuntime.getHandle(js);
-}
+void DiskCache::putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
+  KJ_IF_SOME(root, snapshotRoot) {
+    kj::Path path(key);
+    auto file = root->tryOpenFile(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
-void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(emscriptenRuntime.emscriptenRuntime);
+    KJ_IF_SOME(f, file) {
+      f->writeAll(data);
+    } else {
+      KJ_LOG(ERROR, "DiskCache: Failed to open file", key);
+    }
+  } else {
+    return;
+  }
 }
 
 }  // namespace workerd::api::pyodide
-
-#include "workerd/io/compatibility-date.h"
-
-#include <capnp/dynamic.h>
-#include <capnp/schema.h>
 
 namespace workerd {
 
@@ -684,6 +726,18 @@ kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
   }
 
   return res.releaseAsArray();
+}
+
+void WorkerFatalReporter::reportFatal(jsg::Lock& js, kj::String error) {
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    kj::runCatchingExceptions([&]() { ioContext.getMetrics().setWorkerFatal(); });
+  }
+}
+
+void WorkerFatalReporter::reportPythonWorkersInternalError(jsg::Lock& js) {
+  KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+    kj::runCatchingExceptions([&]() { ioContext.getMetrics().setPythonWorkersInternalError(); });
+  }
 }
 
 }  // namespace api::pyodide

@@ -83,9 +83,9 @@ namespace workerd::jsg {
   do {                                                                                             \
     try {                                                                                          \
       KJ_REQUIRE(cond, jsErrorType ": Cloudflare internal error.");                                \
-    } catch (const kj::Exception& e) {                                                             \
+    } catch (kj::Exception & e) {                                                                  \
       KJ_LOG(ERROR, e, ##__VA_ARGS__);                                                             \
-      throw e;                                                                                     \
+      throw kj::mv(e);                                                                             \
     }                                                                                              \
   } while (0)
 
@@ -93,9 +93,9 @@ namespace workerd::jsg {
   ([&]() -> decltype(auto) {                                                                       \
     try {                                                                                          \
       return KJ_REQUIRE_NONNULL(value, jsErrorType ": Cloudflare internal error.");                \
-    } catch (const kj::Exception& e) {                                                             \
+    } catch (kj::Exception & e) {                                                                  \
       KJ_LOG(ERROR, e, ##__VA_ARGS__);                                                             \
-      throw e;                                                                                     \
+      throw kj::mv(e);                                                                             \
     }                                                                                              \
   }())
 
@@ -103,9 +103,9 @@ namespace workerd::jsg {
   do {                                                                                             \
     try {                                                                                          \
       KJ_FAIL_REQUIRE(jsErrorType ": Cloudflare internal error.");                                 \
-    } catch (const kj::Exception& e) {                                                             \
+    } catch (kj::Exception & e) {                                                                  \
       KJ_LOG(ERROR, e, ##__VA_ARGS__);                                                             \
-      throw e;                                                                                     \
+      throw kj::mv(e);                                                                             \
     }                                                                                              \
   } while (0)
 
@@ -113,7 +113,7 @@ namespace workerd::jsg {
 kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage);
 
 // Given a KJ exception's description, returns whether it contains a tunneled exception that could
-// be converted back to JavaScript via makeInternalError().
+// be converted back to JavaScript via exceptionToJs().
 bool isTunneledException(kj::StringPtr internalMessage);
 
 // Given a KJ exception's description, returns whether it contains the magic constant that indicates
@@ -143,6 +143,9 @@ struct TunneledErrorType {
 
   // Was the error created because a durable object is broken?
   bool isDurableObjectReset;
+
+  // Does the error contain the "worker_do_not_log" magic constant?
+  bool isDoNotLogException;
 };
 
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
@@ -150,6 +153,27 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
 // Annotate an internal message with the corresponding brokenness reason.
 kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennessReason);
 
+// Returns true if the exception description originated from user code throwing inside
+// blockConcurrencyWhile. Handles any leading "remote." prefixes transparently.
+bool isExceptionFromInputGateBroken(kj::StringPtr description);
+
 constexpr kj::Exception::DetailTypeId EXCEPTION_IS_USER_ERROR = 0x82aff7d637c30e47ull;
+
+struct ExceptionToJsOptions {
+  // When ignoreDetail is true, tells kjExceptionToJs() to ignore any serialized
+  // exception detail in the kj::Exception.
+  bool ignoreDetail = false;
+
+  // When trusted is true and the kj::Exception has a serialized exception detail, the
+  // stack will be included in the deserialized error if it is available. When false,
+  // the stack will be omitted.
+  bool trusted = false;
+
+  // If the deserialized exception detail is not an object, then it will be ignored
+  // and we will fall back to constructing a new error object. The default is true
+  // to preserve existing behavior, but setting this to false may be useful in some
+  // cases. When false, the kjExceptionToJs() might return a non-object value.
+  bool allowNonObjects = false;
+};
 
 }  // namespace workerd::jsg

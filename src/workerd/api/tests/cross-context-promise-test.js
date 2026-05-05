@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { match, rejects, strictEqual, throws } from 'assert';
 import { AsyncLocalStorage } from 'async_hooks';
 import { inspect } from 'util';
@@ -259,7 +262,7 @@ async function crossRequestStream(req, env, ctx) {
     const reader = readable.getReader();
     const ab = AbortSignal.abort();
     strictEqual(ab.aborted, true);
-    const read = await reader.read();
+    const _read = await reader.read();
     strictEqual(ab.aborted, true);
     return new Response('ok');
   }
@@ -324,7 +327,7 @@ async function unhandledRejection(req, env, ctx) {
   // where the promise will be rejected.
   if (globalThis.unhandled === undefined) {
     setupWaiter(ctx);
-    const { promise, reject } = Promise.withResolvers();
+    const { reject } = Promise.withResolvers();
     globalThis.unhandled = { reject };
     const ab = AbortSignal.abort();
     strictEqual(ab.aborted, true);
@@ -418,6 +421,7 @@ async function asyncIterator(req, env, ctx) {
 
   try {
     for await (const _ of foo) {
+      // intentionally empty
     }
     throw new Error('should not get here');
   } catch (err) {

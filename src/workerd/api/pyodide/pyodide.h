@@ -3,10 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/util/strong-bool.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide_static.capnp.h>
@@ -23,8 +23,13 @@
 
 namespace workerd::api::pyodide {
 
-const auto PYTHON_PACKAGES_URL =
-    "https://storage.googleapis.com/cloudflare-edgeworker-python-packages/";
+WD_STRONG_BOOL(CreateBaselineSnapshot);
+WD_STRONG_BOOL(IsTracing);
+WD_STRONG_BOOL(IsValidating);
+WD_STRONG_BOOL(IsWorkerd);
+WD_STRONG_BOOL(SnapshotToDisk);
+
+const auto PYTHON_PACKAGES_URL = "https://pyodide-capnp-bin.edgeworker.net/";
 class PyodideBundleManager {
  public:
   void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
@@ -50,11 +55,12 @@ class PyodidePackageManager {
 struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
+  kj::Maybe<kj::Own<const kj::Directory>> snapshotDirectory;
   const PyodideBundleManager pyodideBundleManager;
   const PyodidePackageManager pyodidePackageManager;
   bool createSnapshot;
   bool createBaselineSnapshot;
-  bool loadSnapshotFromDisk;
+  kj::Maybe<kj::String> loadSnapshotFromDisk;
 };
 
 // A function to read a segment of the tar file into a buffer
@@ -139,10 +145,10 @@ class PyodideMetadataReader: public jsg::Object {
         kj::String pyodideVersion,
         kj::String packagesVersion,
         kj::String packagesLock,
-        bool isWorkerd,
-        bool isTracing,
-        bool snapshotToDisk,
-        bool createBaselineSnapshot,
+        IsWorkerd isWorkerd,
+        IsTracing isTracing,
+        SnapshotToDisk snapshotToDisk,
+        CreateBaselineSnapshot createBaselineSnapshot,
         kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
@@ -182,6 +188,10 @@ class PyodideMetadataReader: public jsg::Object {
   bool isCreatingBaselineSnapshot() {
     return state->createBaselineSnapshot;
   }
+
+  // Returns whether the python-abort-isolate-on-fatal-error autogate is enabled. When true, the
+  // Python on_fatal handler should call abortIsolate() to terminate the isolate after reporting.
+  bool shouldAbortIsolateOnFatalError();
 
   kj::StringPtr getMainModule() {
     return state->mainModule;
@@ -231,6 +241,19 @@ class PyodideMetadataReader: public jsg::Object {
 
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
+  // We call this during Python setup with the wasm memory and the addresses of the signal clock and
+  // the flag to indicate whether signal handling is on or off. It sets up the isolate
+  // CpuLimitNearlyExceeded callback to trigger a signal in Python.
+  void setCpuLimitNearlyExceededCallback(
+      jsg::Lock& js, kj::Array<kj::byte> wasm_memory, int sig_clock, int sig_flag);
+
+  // Similar to Cloudflare::::getCompatibilityFlags in global-scope.c++, but the key difference is
+  // that it returns experimental flags even if `experimental` is not enabled. This avoids a gotcha
+  // where an experimental compat flag is enabled in our C++ code, but not in our JS code.
+  //
+  // This is only for use by our Python runtime.
+  jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -249,8 +272,11 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
+    JSG_METHOD(shouldAbortIsolateOnFatalError);
     JSG_METHOD(getTransitiveRequirements);
+    JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
+    JSG_METHOD(setCpuLimitNearlyExceededCallback);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -273,7 +299,8 @@ class PyodideMetadataReader: public jsg::Object {
 struct MemorySnapshotResult {
   kj::Array<kj::byte> snapshot;
   kj::Array<kj::String> importedModulesList;
-  JSG_STRUCT(snapshot, importedModulesList);
+  kj::String snapshotType;
+  JSG_STRUCT(snapshot, importedModulesList, snapshotType);
 };
 
 // This used to be declared nested as ArtifactBundler::State, but then there was a need to
@@ -295,18 +322,25 @@ struct ArtifactBundler_State {
   // to store a memory snapshot.
   bool isValidating;
 
+  // Set when the worker is a dynamically-loaded worker. Dynamic workers don't support dedicated
+  // snapshots yet, so the Python runtime uses this to skip snapshot type validation.
+  bool isDynamicWorkerFlag;
+
   ArtifactBundler_State(kj::Maybe<const PyodidePackageManager&> packageManager,
       kj::Maybe<kj::Array<const kj::byte>> existingSnapshot,
-      bool isValidating = false)
+      bool isValidating = false,
+      bool isDynamicWorker = false)
       : packageManager(packageManager),
         storedSnapshot(kj::none),
         existingSnapshot(kj::mv(existingSnapshot)),
-        isValidating(isValidating) {};
+        isValidating(isValidating),
+        isDynamicWorkerFlag(isDynamicWorker) {};
 
   kj::Own<ArtifactBundler_State> clone() {
     return kj::heap<ArtifactBundler_State>(packageManager,
         existingSnapshot.map(
-            [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }));
+            [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }),
+        isValidating, isDynamicWorkerFlag);
   }
 };
 
@@ -344,6 +378,11 @@ class ArtifactBundler: public jsg::Object {
     return inner->isValidating;
   }
 
+  // Determines whether this ArtifactBundler belongs to a dynamically-loaded worker.
+  bool isDynamicWorker() {
+    return inner->isDynamicWorkerFlag;
+  }
+
   static kj::Own<State> makeDisabledBundler() {
     return kj::heap<State>(kj::none, kj::none);
   }
@@ -379,6 +418,7 @@ class ArtifactBundler: public jsg::Object {
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(isEwValidating);
+    JSG_METHOD(isDynamicWorker);
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
     JSG_METHOD(getPackage);
@@ -402,17 +442,39 @@ class DiskCache: public jsg::Object {
   static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT;  // always set to kj::none
 
   const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot;
+  const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot;
 
  public:
-  DiskCache(): cacheRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
-  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot): cacheRoot(cacheRoot) {};
+  DiskCache(): cacheRoot(NULL_CACHE_ROOT), snapshotRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
+  DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot,
+      const kj::Maybe<kj::Own<const kj::Directory>>& snapshotRoot)
+      : cacheRoot(cacheRoot),
+        snapshotRoot(snapshotRoot) {};
 
   jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
   void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
+  void putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
 
   JSG_RESOURCE_TYPE(DiskCache) {
     JSG_METHOD(get);
     JSG_METHOD(put);
+    JSG_METHOD(putSnapshot);
+  }
+};
+
+// Reports worker fatal errors to the request observer for Runtime Analytics.
+// This is exposed to the Python runtime as a module so that the on_fatal callback
+// can report fatal errors.
+class WorkerFatalReporter: public jsg::Object {
+ public:
+  WorkerFatalReporter() {}
+
+  void reportFatal(jsg::Lock& js, kj::String error);
+  void reportPythonWorkersInternalError(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(WorkerFatalReporter) {
+    JSG_METHOD(reportFatal);
+    JSG_METHOD(reportPythonWorkersInternalError);
   }
 };
 
@@ -446,14 +508,15 @@ class SimplePythonLimiter: public jsg::Object {
     }
   }
 
-  void finishStartup() {
+  void finishStartup(kj::Maybe<kj::String> snapshotType) {
     KJ_IF_SOME(cb, getTimeCb) {
       JSG_REQUIRE(startTime != kj::none, TypeError, "Need to call `beginStartup` first.");
       auto endTime = cb();
       kj::Duration diff = endTime - KJ_ASSERT_NONNULL(startTime);
       auto diffMs = diff / kj::MILLISECONDS;
 
-      JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit");
+      JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit ",
+          diffMs, "<=", startupLimitMs, " with snapshot ", snapshotType.orDefault(kj::str("none")));
     }
   }
 
@@ -461,22 +524,6 @@ class SimplePythonLimiter: public jsg::Object {
     JSG_METHOD(beginStartup);
     JSG_METHOD(finishStartup);
   }
-};
-
-class SetupEmscripten: public jsg::Object {
- public:
-  SetupEmscripten(EmscriptenRuntime emscriptenRuntime)
-      : emscriptenRuntime(kj::mv(emscriptenRuntime)) {};
-
-  jsg::JsValue getModule(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(SetupEmscripten) {
-    JSG_METHOD(getModule);
-  }
-
- private:
-  EmscriptenRuntime emscriptenRuntime;
-  void visitForGc(jsg::GcVisitor& visitor);
 };
 
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
@@ -491,17 +538,11 @@ kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
 // Constructs the path to a Python package in the package repository
 kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);
 
-template <class Registry>
-void registerPyodideModules(Registry& registry, auto featureFlags) {
-  // We add `pyodide:` packages here including python-entrypoint-helper.js.
-  registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
-}
-
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
       api::pyodide::DisabledInternalJaeger, api::pyodide::SimplePythonLimiter,                     \
-      api::pyodide::MemorySnapshotResult, api::pyodide::SetupEmscripten
+      api::pyodide::WorkerFatalReporter, api::pyodide::MemorySnapshotResult
 
 }  // namespace workerd::api::pyodide
 

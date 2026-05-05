@@ -29,23 +29,6 @@ You might use it:
 
 [Read the blog post to learn more about these principles.](https://blog.cloudflare.com/workerd-open-source-workers-runtime/)
 
-### WARNING: This is a beta. Work in progress
-
-Although most of `workerd`'s code has been used in Cloudflare Workers for years, the `workerd` configuration format and top-level server code is brand new. We don't yet have much experience running this in production. As such, there will be rough edges, maybe even a few ridiculous bugs. Deploy to production at your own risk (but please tell us what goes wrong!).
-
-The config format may change in backwards-incompatible ways before `workerd` leaves beta, but should remain stable after that.
-
-A few caveats:
-
-* **General error logging** is awkward. Traditionally we have separated error logs into "application errors" (e.g. a Worker threw an exception from JavaScript) and "internal errors" (bugs in the implementation which the Workers team should address). We then sent these errors to completely different places. In the `workerd` world, the server admin wants to see both of these, so logging has become entirely different and, at the moment, is a bit ugly. For now, it may help to run `workerd` with the `--verbose` flag, which causes application errors to be written to standard error in the same way that internal errors are (but may also produce more noise). We'll be working on making this better out-of-the-box.
-* **Binary packages** are only available via npm, not as distro packages. This works well for testing with Miniflare, but is awkward for a production server that doesn't actually use Node at all.
-* **Multi-threading** is not implemented. `workerd` runs in a single-threaded event loop. For now, to utilize multiple cores, we suggest running multiple instances of `workerd` and balancing load across them. We will likely add some built-in functionality for this in the near future.
-* **Performance tuning** has not been done yet, and there is low-hanging fruit here. `workerd` performs decently as-is, but not spectacularly. Experiments suggest we can roughly double performance on a "hello world" load test with some tuning of compiler optimization flags and memory allocators.
-* **Durable Objects** currently always run on the same machine that requested them, using local disk storage. This is sufficient for testing and small services that fit on a single machine. In scalable production, though, you would presumably want Durable Objects to be distributed across many machines, always choosing the same machine for the same object.
-* **Parameterized workers** are not implemented yet. This is a new feature specified in the config schema, which doesn't have any precedent on Cloudflare.
-* **Tests** for most APIs are conspicuously missing. This is because the testing harness we have used for the past five years is deeply tied to the internal version of the codebase. Ideally, we need to translate those tests into the new `workerd test` format and move them to this repo; this is an ongoing effort. For the time being, we will be counting on the internal tests to catch bugs. We understand this is not ideal for external contributors trying to test their changes.
-* **Documentation** is growing quickly but is definitely still a work in progress.
-
 ### WARNING: `workerd` is not a hardened sandbox
 
 `workerd` tries to isolate each Worker so that it can only access the resources it is configured to access. However, `workerd` on its own does not contain suitable defense-in-depth against the possibility of implementation bugs. When using `workerd` to run possibly-malicious code, you must run it inside an appropriate secure sandbox, such as a virtual machine. The Cloudflare Workers hosting service in particular [uses many additional layers of defense-in-depth](https://blog.cloudflare.com/mitigating-spectre-and-other-security-threats-the-cloudflare-workers-security-model/).
@@ -73,7 +56,7 @@ To build `workerd`, you need:
   * If you use [Bazelisk](https://github.com/bazelbuild/bazelisk) (recommended), it will automatically download and use the right version of Bazel for building workerd.
 * On Linux:
   * We use the clang/LLVM toolchain to build workerd and support version 19 and higher. Earlier versions of clang may still work, but are not officially supported.
-  * Clang 19+ (e.g. package `clang-19` on Debian Bookworm). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--action_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
+  * Clang 19+ (e.g. package `clang-19` on Debian Trixie). If clang is installed as `clang-<version>` please create a symlink to it in your PATH named `clang`, or use `--repo_env=CC=clang-<version>` on `bazel` command lines to specify the compiler name.
 
   * libc++ 19+ (e.g. packages `libc++-19-dev` and `libc++abi-19-dev`)
   * LLD 19+ (e.g. package `lld-19`).
@@ -96,6 +79,12 @@ You may then build `workerd` at the command-line with:
 bazel build //src/workerd/server:workerd
 ```
 
+You can pass `--config=release` to compile in release mode:
+
+```sh
+bazel build //src/workerd/server:workerd --config=release
+```
+
 You can also build from within Visual Studio Code using the instructions in [docs/vscode.md](docs/vscode.md).
 
 The compiled binary will be located at `bazel-bin/src/workerd/server/workerd`.
@@ -103,7 +92,7 @@ The compiled binary will be located at `bazel-bin/src/workerd/server/workerd`.
 If you run a Bazel build before you've installed some dependencies (like clang or libc++), and then you install the dependencies, you must resync locally cached toolchains, or clean Bazel's cache, otherwise you might get strange errors:
 
 ```sh
-bazel sync --configure
+bazel fetch --configure --force
 ```
 
 If that fails, you can try:
@@ -165,8 +154,6 @@ addEventListener("fetch", event => {
 
 [There is also a library of sample config files.](samples)
 
-(TODO: Provide a more extended tutorial.)
-
 ### Running `workerd`
 
 To serve your config, do:
@@ -189,7 +176,7 @@ Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these.
 You can use [Wrangler](https://developers.cloudflare.com/workers/wrangler/) (v3.0 or greater) to develop Cloudflare Workers locally, using `workerd`. First, run the following command to configure Miniflare to use this build of `workerd`.
 
 ```
-$ export MINIFLARE_WORKERD_PATH="<WORKERD_REPO_DIR>/bazel-bin/src/workerd/server/workerd"
+export MINIFLARE_WORKERD_PATH="<WORKERD_REPO_DIR>/bazel-bin/src/workerd/server/workerd"
 ```
 
 Then, run:
@@ -247,4 +234,4 @@ ListenStream=0.0.0.0:443
 WantedBy=sockets.target
 ```
 
-(TODO: Fully explain how to get systemd to recognize these files and start the service.)
+Once these files are in place you can enable the service -- see the systemd documentation or ask your favorite LLM for details.

@@ -15,36 +15,44 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.DEVPROD_PAT }}
           ref: main
 
       - name: Get current date
         id: date
-        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
-      - name: Update compatibility date
         run: |
-          echo "${{ steps.date.outputs.date }}" > src/workerd/io/supported-compatibility-date.txt
+          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+          echo "max_date=$(date -d '+7 days' +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Update compatibility dates
+        run: |
+          echo "${{ steps.date.outputs.date }}" > src/workerd/io/release-version.txt
+          echo "${{ steps.date.outputs.max_date }}" > src/workerd/io/maximum-compatibility-date.txt
 
       - name: Check for changes
         id: git-check
         run: |
-          if [[ $(git status --porcelain src/workerd/io/supported-compatibility-date.txt) ]]; then
+          if [[ $(git status --porcelain src/workerd/io/release-version.txt src/workerd/io/maximum-compatibility-date.txt) ]]; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
-          echo "last_email=$(git show --format="%ae" -s)" >> $GITHUB_OUTPUT
+          if [[ $(git show --format="%ae" -s) == "workers-devprod@cloudflare.com" ]] && \
+             [[ $(git diff-tree --no-commit-id --name-only -r HEAD -- src/workerd/io/release-version.txt) ]]; then
+            echo "last_commit_is_daily_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "last_commit_is_daily_release=false" >> $GITHUB_OUTPUT
+          fi
 
-      # Publish new version if compatibility-date changed and last commit wasn't a daily release
-      # already.
+      # Publish new version if compatibility-date changed and the last commit wasn't already
+      # an automated daily release.
       - name: Commit and push change
-        if: steps.git-check.outputs.changed == 'true' && steps.git-check.outputs.last_email != 'workers-devprod@cloudflare.com'
+        if: steps.git-check.outputs.changed == 'true' && steps.git-check.outputs.last_commit_is_daily_release != 'true'
         run: |
           git config user.email "workers-devprod@cloudflare.com"
           git config user.name "Workers DevProd"
-          git add src/workerd/io/supported-compatibility-date.txt
+          git add src/workerd/io/release-version.txt src/workerd/io/maximum-compatibility-date.txt
           git commit -m "Release ${{ steps.date.outputs.date }}"
           git push

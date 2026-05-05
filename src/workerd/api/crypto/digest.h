@@ -17,14 +17,14 @@ class HmacContext final {
   KJ_DISALLOW_COPY(HmacContext);
 
   void update(kj::ArrayPtr<kj::byte> data);
-  jsg::BufferSource digest(jsg::Lock& js);
+  jsg::JsUint8Array digest(jsg::Lock& js);
 
   size_t size() const;
 
  private:
   // Will be kj::Own<HMAC_CTX> while the HMAC data is being updated,
-  // and kj::Array<kj::byte> after the digest() has been called.
-  kj::OneOf<kj::Own<HMAC_CTX>, jsg::BufferSource> state;
+  // and jsg::JsRef<jsg::JsUint8Array> after the digest() has been called.
+  kj::OneOf<kj::Own<HMAC_CTX>, jsg::JsRef<jsg::JsUint8Array>> state;
 };
 
 class HashContext final {
@@ -35,17 +35,18 @@ class HashContext final {
   KJ_DISALLOW_COPY(HashContext);
 
   void update(kj::ArrayPtr<kj::byte> data);
-  jsg::BufferSource digest(jsg::Lock& js);
+  jsg::JsUint8Array digest(jsg::Lock& js);
   HashContext clone(jsg::Lock& js, kj::Maybe<uint32_t> xofLen);
 
   size_t size() const;
 
  private:
-  HashContext(kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::BufferSource>, kj::Maybe<uint32_t> maybeXof);
+  HashContext(
+      kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::JsRef<jsg::JsUint8Array>>, kj::Maybe<uint32_t> maybeXof);
 
   // Will be kj::Own<EVP_MD_CTX> while the hash data is being updated,
-  // and jsg::BufferSource after the digest() has been called.
-  kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::BufferSource> state;
+  // and jsg::JsRef<jsg::JsUint8Array> after the digest() has been called.
+  kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::JsRef<jsg::JsUint8Array>> state;
   kj::Maybe<uint32_t> maybeXof;
 };
 }  // namespace workerd::api

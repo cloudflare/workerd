@@ -152,8 +152,7 @@ kj::Promise<void> loadPyodidePackage(const api::pyodide::PythonConfig& pyConfig,
 
   // Then check disk cache
   KJ_IF_SOME(diskCachePath, pyConfig.packageDiskCacheRoot) {
-    auto parsedPath = kj::Path::parse(path);
-
+    auto parsedPath = kj::Path::parse(filename);
     if (diskCachePath->exists(parsedPath)) {
       try {
         auto file = diskCachePath->openFile(parsedPath);

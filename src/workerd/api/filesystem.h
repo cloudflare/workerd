@@ -494,7 +494,7 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
               EntryType(jsg::JsRef(js, js.str(entry->getName(js)))), EntryType(entry.addRef()));
           return js.resolvedPromise<kj::Maybe<Type>>(kj::mv(result));
         } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
-          return js.resolvedPromise<kj::Maybe<Type>>(js.accountedUSVString(entry->getName(js)));
+          return js.resolvedPromise<kj::Maybe<Type>>(jsg::USVString(kj::str(entry->getName(js))));
         } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
           return js.resolvedPromise<kj::Maybe<Type>>(entry.addRef());
         } else {

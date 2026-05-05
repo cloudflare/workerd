@@ -2,8 +2,8 @@ name: Dependency updater
 
 on:
   schedule:
-    # Run at 00:00 UTC every Sunday
-    - cron: '0 0 * * 0'
+    # Run at 18:30 UTC every Monday
+    - cron: '30 18 * * 1'
   # Allow manual triggering for testing
   workflow_dispatch:
 
@@ -21,20 +21,29 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           show-progress: false
           token: ${{ secrets.DEVPROD_PAT }}
           ref: main
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
+        with:
+          GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
       - name: Update dependencies
         run: build/deps/update-deps.py
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Update rust dependencies
-        run: bazel run //deps/rust:crates_vendor -- --repin full
+        run: bazel run @rules_rust//tools/upstream_wrapper:cargo -- update --manifest-path=deps/rust/Cargo.toml
+      - name: Update opencode version
+        run: python3 tools/update_opencode_version.py
+        continue-on-error: true
+      - name: Reformat changed files
+        run: ./tools/cross/format.py git
       - name: Open pull request
         id: create-pr
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "update dependencies to latest version"
           branch: "automatic-update-deps"
@@ -45,6 +54,10 @@ jobs:
           body: |
             This is an automated pull request for updating the dependencies of workerd.
           delete-branch: true
+          add-paths: |
+            build/deps/gen
+            deps/rust
+            .github/workflows
       - name: Enable Pull Request Automerge
         run: gh pr merge --rebase --auto ${{ steps.create-pr.outputs.pull-request-number }}
         env:

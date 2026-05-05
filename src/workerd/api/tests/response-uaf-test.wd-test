@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    ( name = "response-uaf-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "response-uaf-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);

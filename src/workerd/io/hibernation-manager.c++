@@ -85,6 +85,11 @@ HibernationManagerImpl::HibernationManagerImpl(
       readLoopTasks(onDisconnect) {}
 
 HibernationManagerImpl::~HibernationManagerImpl() noexcept(false) {
+  // Drop our outstanding tasks, the `readLoopTasks` have weak references to the
+  // `HibernatableWebSockets` in `allWs`, and since we're about to drop all of those WebSockets,
+  // we can't allow any more events to be delivered.
+  readLoopTasks.clear();
+
   // Note that the HibernatableWebSocket destructor handles removing any references to itself in
   // `tagToWs`, and even removes the hashmap entry if there are no more entries in the bucket.
   allWs.clear();
@@ -148,7 +153,7 @@ void HibernationManagerImpl::acceptWebSocket(
   // give the task to the HibernationManager so it lives long.
   readLoopTasks.add(handleReadLoop(refToHibernatable).catch_([](kj::Exception&& e) {
     if (isInterestingException(e)) {
-      LOG_EXCEPTION("HibernationManagerImpl::handleReadLoop", e);
+      LOG_EXCEPTION_IF_INTERNAL("HibernationManagerImpl::handleReadLoop", e);
     }
   }));
 }
@@ -264,7 +269,7 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
     // Dispatch the event.
     auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
     event = workerInterface
-                ->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
+                ->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
                     hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this))
                 .ignoreResult()
                 .attach(kj::mv(workerInterface));
@@ -369,7 +374,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
     auto isClose = params.isCloseEvent();
     // Dispatch the event.
     auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
-    co_await workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
+    co_await workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
         hibernationEventType, kj::mv(params), *this));
     if (isClose) {
       co_return;

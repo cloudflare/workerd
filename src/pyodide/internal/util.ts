@@ -1,9 +1,40 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+// Callback used to report PythonWorkersInternalError construction to C++ metrics (via the
+// WorkerFatalReporter module). Registered by `python.ts` at module init in the main workerd
+// context.
+//
+// We can't `import` `pyodide-internal:fatal-reporter` (a C++ extension module) directly here
+// because `util.ts` is also esbuild-bundled into the pool context (`pool/emscriptenSetup.ts`
+// runs in a vanilla V8 isolate with no C++ extension module support). A static import would fail
+// esbuild's resolver; a dynamic import fails at runtime because workerd's dynamic module
+// resolver doesn't surface INTERNAL C++-backed modules. The callback indirection keeps
+// `util.ts` free of any reference to the C++ module while still letting the main context wire
+// in the real reporter.
+//
+// TODO: If we ever remove the Python pool, `util.ts` will no longer be pool-bundled and we can
+// drop this callback in favor of a direct static import of FatalReporter.
+let _reportInternalError: (() => void) | null = null;
+
+export function setInternalErrorReporter(cb: () => void): void {
+  _reportInternalError = cb;
+}
+
 /**
  * This is an exception we should be throwing whenever there is something unexpected in our runtime
  * that is **not** a result of the user doing something wrong, i.e. it's an internal error that is
  * a result of a bug in our runtime.
  */
-export class PythonRuntimeError extends Error {
+export class PythonWorkersInternalError extends Error {
+  constructor(message?: string) {
+    super(message);
+    try {
+      _reportInternalError?.();
+    } catch (_) {}
+  }
+
   override get name(): string {
     return this.constructor.name;
   }
@@ -65,7 +96,47 @@ export function simpleRunPython(
     // PyRun_SimpleString will have written a Python traceback to stderr.
     console.warn('Command failed:', code);
     console.warn(cause);
-    throw new PythonRuntimeError('Failed to run Python code');
+    throw new PythonWorkersInternalError(
+      'Failed to run Python code:\n' + code + '\n\nError:\n' + cause
+    );
   }
   return cause;
+}
+
+export function invalidateCaches(Module: Module): void {
+  simpleRunPython(
+    Module,
+    `from importlib import invalidate_caches; invalidate_caches(); del invalidate_caches`
+  );
+}
+
+export function unreachable(obj: never, msg?: string): never {
+  if (msg === undefined) {
+    msg = obj;
+  }
+  throw new PythonWorkersInternalError(`Unreachable: ${msg}`);
+}
+
+/**
+ * Loads a Python source file (bundled as a Uint8Array) into a fresh anonymous
+ * module and returns it. This is used for internal Python helpers that need to
+ * be invoked from JS but should not pollute the global namespace.
+ *
+ * `moduleName` is the bare name of the module (e.g. "introspection"); typically
+ * the source is the default export from `pyodide-internal:<moduleName>.py`.
+ */
+export function loadPythonMod(
+  pyodide: Pyodide,
+  moduleName: string,
+  source: Uint8Array
+): { __dict__: PyDict } {
+  const mod = pyodide.runPython(
+    `from types import ModuleType; ModuleType('${moduleName}')`
+  ) as { __dict__: PyDict };
+  const decoder = new TextDecoder();
+  pyodide.runPython(decoder.decode(source), {
+    globals: mod.__dict__,
+    filename: `${moduleName}.py`,
+  });
+  return mod;
 }

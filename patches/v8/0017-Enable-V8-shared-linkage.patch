@@ -6,26 +6,26 @@ Subject: Enable V8 shared linkage
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index c9a195c9bc2c863d2090cf28b96a9a40505957f6..1305a90ee5933f5eb86991c847e82d580f7f5d39 100644
+index 5607d8447887e140b9b35ec7a6515db91fdc2459..7025327feecce30fa939fe669b381c5bf22acd9f 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1408,6 +1408,7 @@ filegroup(
+@@ -1485,6 +1485,7 @@ filegroup(
          "src/builtins/constants-table-builder.cc",
          "src/builtins/constants-table-builder.h",
          "src/builtins/data-view-ops.h",
 +        "src/builtins/profile-data-reader.cc",
          "src/builtins/profile-data-reader.h",
+         "src/builtins/superspread.h",
          "src/codegen/aligned-slot-allocator.cc",
-         "src/codegen/aligned-slot-allocator.h",
-@@ -1591,7 +1592,6 @@ filegroup(
+@@ -1670,7 +1671,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
 -        "src/execution/isolate.cc",
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
-         "src/execution/isolate-inl.h",
-@@ -3139,7 +3139,6 @@ filegroup(
+         "src/execution/isolate-data-fields.h",
+@@ -3294,7 +3294,6 @@ filegroup(
  filegroup(
      name = "v8_compiler_files",
      srcs = [
@@ -33,7 +33,7 @@ index c9a195c9bc2c863d2090cf28b96a9a40505957f6..1305a90ee5933f5eb86991c847e82d58
          "src/compiler/access-builder.cc",
          "src/compiler/access-builder.h",
          "src/compiler/access-info.cc",
-@@ -3718,8 +3717,6 @@ filegroup(
+@@ -3902,8 +3901,6 @@ filegroup(
          "src/builtins/growable-fixed-array-gen.cc",
          "src/builtins/growable-fixed-array-gen.h",
          "src/builtins/number-builtins-reducer-inl.h",
@@ -42,7 +42,7 @@ index c9a195c9bc2c863d2090cf28b96a9a40505957f6..1305a90ee5933f5eb86991c847e82d58
          "src/builtins/setup-builtins-internal.cc",
          "src/builtins/torque-csa-header-includes.h",
          "src/codegen/turboshaft-builtins-assembler-inl.h",
-@@ -3992,6 +3989,7 @@ filegroup(
+@@ -4175,6 +4172,7 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -50,7 +50,7 @@ index c9a195c9bc2c863d2090cf28b96a9a40505957f6..1305a90ee5933f5eb86991c847e82d58
      ],
  )
  
-@@ -4102,6 +4100,10 @@ filegroup(
+@@ -4285,6 +4283,10 @@ filegroup(
      name = "noicu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",
@@ -61,7 +61,7 @@ index c9a195c9bc2c863d2090cf28b96a9a40505957f6..1305a90ee5933f5eb86991c847e82d58
      ] + select({
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/noicu/embedded.S",
-@@ -4119,6 +4121,7 @@ filegroup(
+@@ -4302,6 +4304,7 @@ filegroup(
      name = "icu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",
@@ -70,10 +70,10 @@ index c9a195c9bc2c863d2090cf28b96a9a40505957f6..1305a90ee5933f5eb86991c847e82d58
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/icu/embedded.S",
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index ef21af9febfd5cfe66c44c3044d24a084b45706d..a0c12c587c452c80e5293b8aeea08888d4181364 100644
+index 7dcf0f8646b73d860e247e51f72da71924227d56..d86fc1b7ac9dd9151e7e7202876c4953b1c38ea7 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -298,7 +298,6 @@ def v8_library(
+@@ -304,7 +304,6 @@ def v8_library(
              copts = copts + default.copts,
              linkopts = linkopts + default.linkopts,
              alwayslink = 1,
@@ -81,7 +81,7 @@ index ef21af9febfd5cfe66c44c3044d24a084b45706d..a0c12c587c452c80e5293b8aeea08888
              **kwargs
          )
  
-@@ -317,7 +316,6 @@ def v8_library(
+@@ -323,7 +322,6 @@ def v8_library(
              copts = copts + default.copts + ENABLE_I18N_SUPPORT_DEFINES,
              linkopts = linkopts + default.linkopts,
              alwayslink = 1,
@@ -89,7 +89,7 @@ index ef21af9febfd5cfe66c44c3044d24a084b45706d..a0c12c587c452c80e5293b8aeea08888
              **kwargs
          )
  
-@@ -337,7 +335,6 @@ def v8_library(
+@@ -343,7 +341,6 @@ def v8_library(
              copts = copts + default.copts,
              linkopts = linkopts + default.linkopts,
              alwayslink = 1,

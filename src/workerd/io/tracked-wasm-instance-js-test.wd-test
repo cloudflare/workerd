@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "tracked-wasm-instance-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tracked-wasm-instance-test.js"),
+          (name = "signal-basic.wasm", wasm = embed "wasm/signal-basic.wasm"),
+          (name = "signal-partial-exports.wasm", wasm = embed "wasm/signal-partial-exports.wasm"),
+          (name = "signal-terminated-only.wasm", wasm = embed "wasm/signal-terminated-only.wasm"),
+          (name = "signal-no-globals.wasm", wasm = embed "wasm/signal-no-globals.wasm"),
+          (name = "signal-bounds-check-overflow.wasm", wasm = embed "wasm/signal-bounds-check-overflow.wasm"),
+          (name = "signal-bounds-check-edge.wasm", wasm = embed "wasm/signal-bounds-check-edge.wasm"),
+          (name = "signal-bounds-check-valid.wasm", wasm = embed "wasm/signal-bounds-check-valid.wasm"),
+          (name = "signal-decoy-memory.wasm", wasm = embed "wasm/signal-decoy-memory.wasm"),
+          (name = "signal-externref-memory.wasm", wasm = embed "wasm/signal-externref-memory.wasm"),
+          (name = "signal-imported-memory.wasm", wasm = embed "wasm/signal-imported-memory.wasm"),
+          (name = "signal-memory-reclaim.wasm", wasm = embed "wasm/signal-memory-reclaim.wasm"),
+          (name = "signal-preinit.wasm", wasm = embed "wasm/signal-preinit.wasm"),
+        ],
+        compatibilityFlags = ["experimental"],
+      )
+    ),
+  ],
+);

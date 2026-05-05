@@ -294,7 +294,6 @@ export const hash_pipe_test = {
 
 export const hash_one_shot = {
   test() {
-    const string = 'Node.js';
     assert.strictEqual(
       crypto.hash('sha1', 'Node.js'),
       '10b3493287f831e81a438811a1ffba01f8cec4b7'
@@ -322,5 +321,24 @@ export const hash_one_shot = {
     assert.throws(() => crypto.hash('unknown', 'what'), {
       message: /Digest method not supported/,
     });
+  },
+};
+
+export const HashCopyAfterDigest = {
+  async test() {
+    for (let i = 0; i < 50; i++) {
+      const hash = crypto.createHash('sha256');
+      hash.update('x' + i);
+
+      const kHandle = Object.getOwnPropertySymbols(hash).find(
+        (s) => s.toString() === 'Symbol(kHandle)'
+      );
+      const handle = hash[kHandle];
+      handle.digest();
+
+      assert.throws(() => hash.copy(), {
+        message: /already been finalized/,
+      });
+    }
   },
 };

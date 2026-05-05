@@ -7,6 +7,7 @@
 #include <kj/debug.h>
 
 #include <atomic>
+#include <cstdlib>
 
 namespace workerd {
 
@@ -18,6 +19,7 @@ thread_local uint allowV8BackgroundThreadScopeCount = 0;
 
 bool multiTenantProcess = false;
 bool predictableMode = false;
+bool gcStressMode = false;
 
 // This variable is read in signal handlers, so use atomic stores and compiler barriers as
 // needed in regular code. Atomic loads are unnecessary, because we're not synchronizing with
@@ -52,6 +54,21 @@ bool isPredictableModeForTest() {
 
 void setPredictableModeForTest() {
   predictableMode = true;
+}
+
+bool isGcStressModeForTest() {
+  // Also honor the WORKERD_GC_STRESS environment variable so that gc-stress mode can be enabled
+  // in binaries that don't have a --gc-stress CLI flag (e.g., edgeworker's prod subcommand).
+  // The env var is checked once and cached; thread-safe via C++ static local initialization.
+  static const bool fromEnv = [] {
+    const char* val = std::getenv("WORKERD_GC_STRESS");
+    return val != nullptr && val[0] != '0' && val[0] != '\0';
+  }();
+  return gcStressMode || fromEnv;
+}
+
+void setGcStressModeForTest() {
+  gcStressMode = true;
 }
 
 ThreadProgressCounter::ThreadProgressCounter(uint64_t& counter)

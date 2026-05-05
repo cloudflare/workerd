@@ -12,7 +12,7 @@ class NonModuleScript final {
   NonModuleScript(jsg::Lock& js, v8::Local<v8::UnboundScript> script)
       : unboundScript(js.v8Isolate, script) {}
 
-  NonModuleScript(NonModuleScript&&) = default;
+  NonModuleScript(NonModuleScript&&) noexcept = default;
   NonModuleScript& operator=(NonModuleScript&&) = default;
   KJ_DISALLOW_COPY(NonModuleScript);
 

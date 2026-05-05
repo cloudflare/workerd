@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 // This file extends `standards.ts` with specific comments overrides for Cloudflare Workers APIs
 // that aren't adequately described by a standard .d.ts file
 
@@ -47,6 +51,11 @@ export default {
 * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
 `,
   },
+  DurableObjectStorage: {
+    primary: `* @deprecated Use \`ctx.primaryStub\` instead. `,
+    ensureReplicas: `* @deprecated Use \`ctx.configureReadReplication()\` instead. `,
+    disableReplicas: `* @deprecated Use \`ctx.configureReadReplication()\` instead. `,
+  },
   performance: {
     $: `*
 * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
@@ -76,5 +85,14 @@ export default {
   },
   WorkerGlobalScope: {
     $: undefined,
+  },
+  WebSocketAcceptOptions: {
+    allowHalfOpen: `*
+ * When set to \`true\`, receiving a server-initiated WebSocket Close frame will not
+ * automatically send a reciprocal Close frame, leaving the connection in a half-open
+ * state. This is useful for proxying scenarios where you need to coordinate closing
+ * both sides independently. Defaults to \`false\` when the
+ * \`no_web_socket_half_open_by_default\` compatibility flag is enabled.
+ `,
   },
 } satisfies CommentsData;

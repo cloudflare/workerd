@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "queue-metadata-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "queue-metadata-test.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "queue-metadata-test" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+      )
+    ),
+  ],
+);

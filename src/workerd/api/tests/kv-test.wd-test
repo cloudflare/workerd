@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "kv-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "kv-test.js" )
+        ],
+        bindings = [ ( name = "KV", kvNamespace = "kv-test" ), ],
+        # "experimental" flag is needed to test deleteBulk
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers"],
+        streamingTails = ["tail"],
+      )
+    ),
+    (name = "tail", worker = .tailWorker, ),
+  ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
+    ]
+  ) ]
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "kv-instrumentation-test.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);

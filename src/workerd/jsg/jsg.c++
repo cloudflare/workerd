@@ -12,6 +12,10 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
+#ifdef V8_ENABLE_SANDBOX
+#include <sys/mman.h>
+#endif
+
 namespace workerd::jsg {
 
 kj::String stringifyHandle(v8::Local<v8::Value> value) {
@@ -104,7 +108,7 @@ void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTrace
 
   // `other` is a traced `Data`, but once moved, we don't assume the new location is traced.
   // So, we need to make the handle strong.
-  handle.ClearWeak();
+  handle.ClearWeak<void>();
 
   // Presumably, `other` is about to be destroyed. The destructor of `TracedReference`, though,
   // does nothing, because it doesn't know if the reference is even still valid, since it
@@ -187,10 +191,20 @@ void Lock::setAllowEval(bool allow) {
   IsolateBase::from(v8Isolate).setAllowEval({}, allow);
 }
 
-void Lock::installJspi() {
-  IsolateBase::from(v8Isolate).setJspiEnabled({}, true);
-  v8Isolate->InstallConditionalFeatures(v8Context());
-  IsolateBase::from(v8Isolate).setJspiEnabled({}, false);
+void Lock::setUsingEnhancedErrorSerialization() {
+  IsolateBase::from(v8Isolate).setUsingEnhancedErrorSerialization();
+}
+
+void Lock::setUsingFastJsgStruct() {
+  IsolateBase::from(v8Isolate).setUsingFastJsgStruct();
+}
+
+bool Lock::isUsingFastJsgStruct() const {
+  return IsolateBase::from(v8Isolate).getUsingFastJsgStruct();
+}
+
+bool Lock::isUsingEnhancedErrorSerialization() const {
+  return IsolateBase::from(v8Isolate).getUsingEnhancedErrorSerialization();
 }
 
 void Lock::setCaptureThrowsAsRejections(bool capture) {
@@ -203,6 +217,10 @@ void Lock::setNodeJsCompatEnabled() {
 
 void Lock::setNodeJsProcessV2Enabled() {
   IsolateBase::from(v8Isolate).setNodeJsProcessV2Enabled({}, true);
+}
+
+void Lock::setRequireReturnsDefaultExportEnabled() {
+  IsolateBase::from(v8Isolate).setRequireReturnsDefaultExportEnabled({}, true);
 }
 
 void Lock::setThrowOnUnrecognizedImportAssertion() {
@@ -219,6 +237,14 @@ void Lock::disableTopLevelAwait() {
 
 void Lock::setToStringTag() {
   IsolateBase::from(v8Isolate).enableSetToStringTag();
+}
+
+void Lock::setImmutablePrototype() {
+  IsolateBase::from(v8Isolate).enableSetImmutablePrototype();
+}
+
+void Lock::setSpecCompliantPropertyAttributes() {
+  IsolateBase::from(v8Isolate).enableSpecCompliantPropertyAttributes();
 }
 
 void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
@@ -268,6 +294,25 @@ bool Lock::v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name) {
 
 void Lock::runMicrotasks() {
   v8Isolate->PerformMicrotaskCheckpoint();
+
+  auto& isolate = IsolateBase::from(v8Isolate);
+  // We only expect at most a handful of extra checkpoints. Keep a generous cap
+  // to flush cascaded microtasks but prevent a potential busy loop.
+  static constexpr uint MAX_EXTRA_MICROTASK_CHECKPOINTS = 64;
+  for (uint i = 0; i < MAX_EXTRA_MICROTASK_CHECKPOINTS; ++i) {
+    if (!isolate.takeExtraMicrotaskCheckpointRequested({})) {
+      return;
+    }
+    v8Isolate->PerformMicrotaskCheckpoint();
+  }
+
+  if (isolate.takeExtraMicrotaskCheckpointRequested({})) {
+    KJ_LOG(WARNING, "extra microtask checkpoint limit reached", MAX_EXTRA_MICROTASK_CHECKPOINTS);
+  }
+}
+
+void Lock::requestExtraMicrotaskCheckpoint() {
+  IsolateBase::from(v8Isolate).requestExtraMicrotaskCheckpoint({});
 }
 
 void Lock::terminateNextExecution() {
@@ -305,7 +350,8 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
     return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
-        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN);
+        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN)
+        .map([](JsValue val) { return KJ_ASSERT_NONNULL(val.tryCast<JsObject>()); });
   }
 
   // Use the original module registry implementation
@@ -315,11 +361,21 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   return jsg::JsObject(module.getHandle(*this).As<v8::Object>());
 }
 
-kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
+kj::Maybe<JsObject> Lock::resolvePublicBuiltinModule(kj::StringPtr specifier) {
+  auto& isolate = IsolateBase::from(v8Isolate);
+  KJ_ASSERT(isolate.isUsingNewModuleRegistry());
+  return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(*this, specifier,
+      jsg::modules::ResolveContext::Type::PUBLIC_BUILTIN,
+      jsg::modules::ResolveContext::Source::REQUIRE)
+      .map([](JsValue val) { return KJ_ASSERT_NONNULL(val.tryCast<JsObject>()); });
+}
+
+kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requireEsm) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
     return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
-        *this, specifier, jsg::modules::ResolveContext::Type::BUNDLE);
+        *this, specifier, jsg::modules::ResolveContext::Type::BUNDLE)
+        .map([](JsValue val) { return KJ_ASSERT_NONNULL(val.tryCast<JsObject>()); });
   }
 
   auto moduleRegistry = jsg::ModuleRegistry::from(*this);
@@ -327,6 +383,8 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
   auto spec = kj::Path::parse(specifier);
   auto& info = JSG_REQUIRE_NONNULL(
       moduleRegistry->resolve(*this, spec), Error, kj::str("No such module: ", specifier));
+  JSG_REQUIRE(!requireEsm || info.maybeSynthetic == kj::none, TypeError,
+      "Main module must be an ES module.");
   auto module = info.module.getHandle(*this);
   jsg::instantiateModule(*this, module);
   return JsObject(module->GetModuleNamespace().As<v8::Object>());
@@ -346,14 +404,12 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
     // making such a change, and that's us, and we're not.
     KJ_ASSERT(v8::Locker::IsLocked(target));
 
-    // TODO(cleanup): This is deprecated, but the replacement, v8::ExternalMemoryAccounter,
-    //   explicitly requires that the adjustment returns to zero before it is destroyed. That
-    //   isn't what we want, because we explicitly want external memory to be allowed to live
-    //   beyond the isolate in some cases. Perhaps we need to patch V8 to un-deprecate
-    //   AdjustAmountOfExternalAllocatedMemory(), or directly expose the underlying
-    //   AdjustAmountOfExternalAllocatedMemoryImpl(), which is what ExternalMemoryAccounter
-    //   uses anyway.
-    target->AdjustAmountOfExternalAllocatedMemory(amount);
+    // We use AdjustAmountOfExternalAllocatedMemoryImpl() instead of ExternalMemoryAccounter
+    // because we explicitly want external memory to be allowed to live beyond the isolate
+    // in some cases. The Impl variant bypasses the destructor check that
+    // ExternalMemoryAccounter enforces (requiring adjustment to return to zero).
+    // See patches/v8/0031-Expose-AdjustAmountOfExternalAllocatedMemoryImpl.patch
+    target->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
   } else {
     // We don't hold the isolate lock. Instead, record the adjustment to be applied the next time
     // the isolate lock is acquired.
@@ -369,7 +425,7 @@ void ExternalMemoryTarget::adjustNow(Lock& js, ssize_t amount) const {
   }
 #endif
   if (amount == 0) return;
-  js.v8Isolate->AdjustAmountOfExternalAllocatedMemory(amount);
+  js.v8Isolate->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
 }
 
 void ExternalMemoryTarget::detach() const {
@@ -383,7 +439,7 @@ ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) cons
 void ExternalMemoryTarget::applyDeferredMemoryUpdate() const {
   int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
   if (amount != 0) {
-    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemory(amount);
+    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemoryImpl(amount);
   }
 }
 
@@ -396,31 +452,13 @@ int64_t ExternalMemoryTarget::getPendingMemoryUpdateForTest() const {
 }
 
 ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
-  return IsolateBase::from(v8Isolate).getExternalMemoryAdjustment(amount);
+  auto adjustment = IsolateBase::from(v8Isolate).getExternalMemoryAdjustment(0);
+  adjustment.adjustNow(*this, amount);
+  return kj::mv(adjustment);
 }
 
 kj::Arc<const ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
   return IsolateBase::from(v8Isolate).getExternalMemoryTarget();
-}
-
-kj::String Lock::accountedKjString(kj::Array<char>&& str) {
-  size_t size = str.size();
-  return kj::String(str.attach(getExternalMemoryAdjustment(size)));
-}
-
-ByteString Lock::accountedByteString(kj::Array<char>&& str) {
-  size_t size = str.size();
-  return ByteString(str.attach(getExternalMemoryAdjustment(size)));
-}
-
-DOMString Lock::accountedDOMString(kj::Array<char>&& str) {
-  size_t size = str.size();
-  return DOMString(str.attach(getExternalMemoryAdjustment(size)));
-}
-
-USVString Lock::accountedUSVString(kj::Array<char>&& str) {
-  size_t size = str.size();
-  return USVString(str.attach(getExternalMemoryAdjustment(size)));
 }
 
 void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
@@ -437,7 +475,7 @@ ExternalMemoryAdjustment::ExternalMemoryAdjustment(
   if (amount == 0) return;
   maybeDeferAdjustment(amount);
 }
-ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other)
+ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other) noexcept
     : externalMemory(kj::mv(other.externalMemory)),
       amount(other.amount) {
   other.amount = 0;
@@ -552,5 +590,59 @@ std::unique_ptr<v8::BackingStore> Lock::allocBackingStore(size_t size, AllocOpti
   JSG_REQUIRE(store != nullptr, RangeError, "Failed to allocate ArrayBuffer backing store");
   return kj::mv(store);
 }
+
+const capnp::SchemaLoader& ContextGlobal::getSchemaLoader() {
+  return KJ_ASSERT_NONNULL(schemaLoader);
+}
+
+void ContextGlobal::setSchemaLoader(const capnp::SchemaLoader& schemaLoader) {
+  this->schemaLoader = schemaLoader;
+}
+
+#ifdef V8_ENABLE_SANDBOX
+// These are disabled by default in workerd. We do not build workerd with
+// the V8_ENABLED_SANDBOX flag. If we do decide to enable it, we will need
+// additional setup to ensure that these are handled correctly on all platforms.
+// For now, keeping it simple. This bit will only be used in the internal
+// project.
+static constexpr int kPkeyNoRestrictions = 0;
+MemoryProtectionKeyScope::MemoryProtectionKeyScope(Lock& js)
+    : pkey(js.v8Isolate->GetMemoryProtectionKey()) {}
+
+MemoryProtectionKeyScope::PkeyScope::PkeyScope(int pkey): key(pkey), saved(pkey_get(key)) {
+  pkey_set(pkey, kPkeyNoRestrictions);
+}
+MemoryProtectionKeyScope::PkeyScope::~PkeyScope() {
+  pkey_set(key, saved);
+}
+#endif
+
+namespace _ {
+
+JsgCatchScope::JsgCatchScope(Lock& js): js(js) {
+  tryCatchHolder.emplace(js.v8Isolate);
+}
+
+void JsgCatchScope::catchException(ExceptionToJsOptions options) {
+  // Be sure to release our TryCatch on the way out.
+  KJ_DEFER(tryCatchHolder = kj::none);
+
+  auto& tryCatch = KJ_ASSERT_NONNULL(tryCatchHolder).tryCatch;
+
+  // Same logic as that found in `jsg::Lock::tryCatch()`.
+  try {
+    throw;
+  } catch (JsExceptionThrown&) {
+    if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+      tryCatch.ReThrow();
+      throw;
+    }
+    caughtException.emplace(js.v8Isolate, tryCatch.Exception());
+  } catch (kj::Exception& e) {
+    caughtException.emplace(js.exceptionToJs(kj::mv(e), options));
+  }
+}
+
+}  // namespace _
 
 }  // namespace workerd::jsg

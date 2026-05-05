@@ -10,36 +10,16 @@
 
 namespace workerd::api {
 
-class WorkerStubEntrypointOutgoingFactory final: public Fetcher::OutgoingFactory {
- public:
-  WorkerStubEntrypointOutgoingFactory(kj::Own<IoChannelFactory::SubrequestChannel> channel)
-      : channel(kj::mv(channel)) {}
-
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    auto& context = IoContext::current();
-
-    return context.getMetrics().wrapSubrequestClient(context.getSubrequest(
-        [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-      return channel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
-    },
-        {.inHouse = true,
-          .wrapMetrics = true,
-          .operationName = kj::ConstString("dynamic_worker_subrequest"_kjc)}));
-  }
-
- private:
-  kj::Own<IoChannelFactory::SubrequestChannel> channel;
-};
-
 jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
     jsg::Optional<kj::Maybe<kj::String>> name,
     jsg::Optional<EntrypointOptions> options) {
   Frankenvalue props;
-
+  kj::Maybe<ResourceLimits> limits;
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(p, o.props) {
-      props = Frankenvalue::fromJs(js, p);
+      props = Frankenvalue::fromJs(js, p.getHandle(js));
     }
+    limits = o.limits;
   }
 
   kj::Maybe<kj::String> entrypointName;
@@ -51,22 +31,20 @@ jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
     }
   }
 
-  kj::Own<Fetcher::OutgoingFactory> factory = kj::heap<WorkerStubEntrypointOutgoingFactory>(
-      channel->getEntrypoint(kj::mv(entrypointName), kj::mv(props)));
-
-  return js.alloc<Fetcher>(
-      IoContext::current().addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
+  auto subreqChannel = channel->getEntrypoint(kj::mv(entrypointName), kj::mv(props), limits);
+  return js.alloc<Fetcher>(IoContext::current().addObject(kj::mv(subreqChannel)));
 }
 
 jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
     jsg::Optional<kj::Maybe<kj::String>> name,
     jsg::Optional<EntrypointOptions> options) {
   Frankenvalue props;
-
+  kj::Maybe<ResourceLimits> limits;
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(p, o.props) {
-      props = Frankenvalue::fromJs(js, p);
+      props = Frankenvalue::fromJs(js, p.getHandle(js));
     }
+    limits = o.limits;
   }
 
   kj::Maybe<kj::String> entrypointName;
@@ -79,11 +57,11 @@ jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
   }
 
   return js.alloc<DurableObjectClass>(IoContext::current().addObject(
-      channel->getActorClass(kj::mv(entrypointName), kj::mv(props))));
+      channel->getActorClass(kj::mv(entrypointName), kj::mv(props), limits)));
 }
 
 jsg::Ref<WorkerStub> WorkerLoader::get(
-    jsg::Lock& js, kj::String name, jsg::Function<jsg::Promise<WorkerCode>()> getCode) {
+    jsg::Lock& js, kj::Maybe<kj::String> name, jsg::Function<jsg::Promise<WorkerCode>()> getCode) {
   auto& ioctx = IoContext::current();
 
   auto reenterAndGetCode = ioctx.makeReentryCallback(
@@ -91,35 +69,7 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
           jsg::Lock& js) mutable {
     return getCode(js).then(
         js, [&ioctx, compatDateValidation](jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
-      auto extractedSource = extractSource(js, code);
-      auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);
-      CompatibilityFlags::Reader compatFlags = *ownCompatFlags;
-
-      Frankenvalue env;
-      KJ_IF_SOME(codeEnv, code.env) {
-        env = Frankenvalue::fromJs(js, codeEnv.getHandle(js));
-      }
-
-      kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
-      KJ_IF_SOME(maybeOut, code.globalOutbound) {
-        KJ_IF_SOME(out, maybeOut) {
-          globalOutbound = out->getSubrequestChannel(ioctx);
-        } else {
-          // Application passed `null` to disable internet access. Leave `globalOutbound` as
-          // `kj::none`.
-        }
-      } else {
-        // Inherit the calling worker's global outbound channel.
-        globalOutbound =
-            ioctx.getIoChannelFactory().getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL);
-      }
-
-      return {.source = kj::mv(extractedSource),
-        .compatibilityFlags = compatFlags,
-        .env = kj::mv(env),
-        .globalOutbound = kj::mv(globalOutbound),
-        .ownContent = ownCompatFlags.attach(kj::mv(code.modules), kj::mv(code.mainModule)),
-        .ownContentIsRpcResponse = false};
+      return toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
     });
   });
 
@@ -127,6 +77,95 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
       ioctx.getIoChannelFactory().loadIsolate(channel, kj::mv(name), kj::mv(reenterAndGetCode));
 
   return js.alloc<WorkerStub>(ioctx.addObject(kj::mv(isolateChannel)));
+}
+
+jsg::Ref<WorkerStub> WorkerLoader::load(jsg::Lock& js, WorkerCode code) {
+  auto& ioctx = IoContext::current();
+
+  auto source = toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
+
+  // Annoyingly, the callback we pass to `loadIsolate()` technically may be called any number of
+  // times. Yes, even though we aren't providing an ID. The runtime can actually evict the isolate
+  // while a stub still exists, as long as there is no active request on the stub, and then
+  // recreate the isolate on the next request. Moreover, it may ultimately destroy the `ownContent`
+  // in another thread, so we need to use atomic refcounting on it. Ugh!
+  struct OwnContentWrapper: public kj::AtomicRefcounted {
+    kj::Own<void> content;
+    OwnContentWrapper(kj::Own<void> content): content(kj::mv(content)) {}
+  };
+  auto ownContentWrapper = kj::atomicRefcounted<OwnContentWrapper>(kj::mv(source.ownContent));
+
+  auto isolateChannel = ioctx.getIoChannelFactory().loadIsolate(channel, kj::none,
+      [source = kj::mv(source), ownContentWrapper = kj::mv(ownContentWrapper)]() mutable {
+    return source.clone(kj::atomicAddRef(*ownContentWrapper));
+  });
+
+  return js.alloc<WorkerStub>(ioctx.addObject(kj::mv(isolateChannel)));
+}
+
+DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
+    IoContext& ioctx,
+    CompatibilityDateValidation compatDateValidation,
+    WorkerCode code) {
+  auto extractedSource = extractSource(js, code);
+  auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);
+  CompatibilityFlags::Reader compatFlags = *ownCompatFlags;
+
+  Frankenvalue env;
+  KJ_IF_SOME(codeEnv, code.env) {
+    env = Frankenvalue::fromJs(js, codeEnv.getHandle(js));
+  }
+
+  kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
+  KJ_IF_SOME(maybeOut, code.globalOutbound) {
+    KJ_IF_SOME(out, maybeOut) {
+      auto channel = out->getSubrequestChannel(ioctx);
+      channel->requireAllowsTransfer();
+      globalOutbound = kj::mv(channel);
+    } else {
+      // Application passed `null` to disable internet access. Leave `globalOutbound` as
+      // `kj::none`.
+    }
+  } else {
+    // Inherit the calling worker's global outbound channel.
+    //
+    // Note we don't need to enforce transferrability in this case because if it was the global
+    // outbound of the parent, it must be OK to be the global outbound of the child.
+    globalOutbound =
+        ioctx.getIoChannelFactory().getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL);
+  }
+
+  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tailChannels;
+  KJ_IF_SOME(tails, code.tails) {
+    tailChannels = KJ_MAP(tail, tails) {
+      auto channel = tail->getSubrequestChannel(ioctx);
+      channel->requireAllowsTransfer();
+      return kj::mv(channel);
+    };
+  }
+
+  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTailChannels;
+  KJ_IF_SOME(streamingTails, code.streamingTails) {
+    JSG_REQUIRE(code.allowExperimental.orDefault(false), Error,
+        "Streaming tail workers are experimental. You must pass the option "
+        "'allowExperimental: true' to the worker loader to use them");
+
+    streamingTailChannels = KJ_MAP(tail, streamingTails) {
+      auto channel = tail->getSubrequestChannel(ioctx);
+      channel->requireAllowsTransfer();
+      return kj::mv(channel);
+    };
+  }
+
+  return {.source = kj::mv(extractedSource),
+    .compatibilityFlags = compatFlags,
+    .limits = code.limits,
+    .env = kj::mv(env),
+    .globalOutbound = kj::mv(globalOutbound),
+    .tails = kj::mv(tailChannels),
+    .streamingTails = kj::mv(streamingTailChannels),
+    .ownContent = ownCompatFlags.attach(kj::mv(code.modules), kj::mv(code.mainModule)),
+    .ownContentIsRpcResponse = false};
 }
 
 Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& code) {
@@ -150,6 +189,15 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           };
         }
 
+        if (entry.name.endsWith(".ts"_kj) || entry.name.endsWith(".tsx"_kj) ||
+            entry.name.endsWith(".jsx"_kj)) {
+          JSG_FAIL_REQUIRE(TypeError,
+              "Module name must end with '.js' or '.py' (or the content must be an object ",
+              "indicating the type explicitly). Got: ", entry.name,
+              ". If you're trying to load TypeScript, bundle it first with ",
+              "'@cloudflare/worker-bundler' and pass the generated JavaScript modules.");
+        }
+
         JSG_FAIL_REQUIRE(TypeError,
             "Module name must end with '.js' or '.py' (or the content must be an object ",
             "indicating the type explicitly). Got: ", entry.name);
@@ -157,14 +205,15 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
       KJ_CASE_ONEOF(module, Module) {
         uint fieldCount = (module.js != kj::none) + (module.cjs != kj::none) +
             (module.text != kj::none) + (module.data != kj::none) + (module.json != kj::none) +
-            (module.py != kj::none);
+            (module.py != kj::none) + (module.wasm != kj::none);
         JSG_REQUIRE(fieldCount == 1, TypeError,
-            "Each module must contain exactly one of 'js', 'cjs', 'text', 'data', 'json', or 'py'. "
+            "Each module must contain exactly one of 'js', 'cjs', 'text', 'data', 'json', 'py', or 'wasm'. "
             "Module '",
             entry.name, "' contained ", fieldCount, " properties.");
 
         return {.name = entry.name, .content = [&]() -> Worker::Script::ModuleContent {
           KJ_IF_SOME(js, module.js) {
+            // TODO: this might need typescript transpilation too.
             return Worker::Script::EsModule{.body = js};
           } else KJ_IF_SOME(cjs, module.cjs) {
             return Worker::Script::CommonJsModule{.body = cjs};
@@ -175,9 +224,14 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           } else KJ_IF_SOME(json, module.json) {
             kj::StringPtr serialized =
                 module.serializedJson.emplace(js.serializeJson(kj::mv(json)));
+            // We moved out of `json`, making it an empty V8Ref, explicitly
+            // clear out the field as we don't intend to re-use this
+            module.json = kj::none;
             return Worker::Script::JsonModule{.body = serialized};
           } else KJ_IF_SOME(py, module.py) {
             return Worker::Script::PythonModule{.body = py};
+          } else KJ_IF_SOME(wasm, module.wasm) {
+            return Worker::Script::WasmModule{.body = wasm};
           } else {
             KJ_UNREACHABLE;
           }

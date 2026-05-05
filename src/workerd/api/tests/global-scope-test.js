@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   deepStrictEqual,
   strictEqual,
@@ -163,15 +166,15 @@ export const unhandledRejectionHandler = {
 
 export const unhandledRejectionHandler2 = {
   async test() {
-    let resolve;
-    const promise = new Promise((a) => (resolve = a));
     const handler = (event) => {
       throw new Error('should not have fired');
     };
     addEventListener('unhandledrejection', handler);
     try {
       await Promise.reject('boom');
-    } catch {}
+    } catch {
+      // intentionally empty
+    }
     await Promise.reject('boom').catch(() => {});
     removeEventListener('unhandledrejection', handler);
   },
@@ -196,11 +199,13 @@ export const unhandledRejectionHandler3 = {
 
 export const unhandledRejectionHandler4 = {
   async test() {
-    let resolve;
-    const promise = new Promise((a) => (resolve = a));
-    addEventListener('unhandledrejection', (event) => {
-      throw new Error('does not crash. safe to ignore in test logs');
-    });
+    addEventListener(
+      'unhandledrejection',
+      (event) => {
+        throw new Error('does not crash. safe to ignore in test logs');
+      },
+      { once: true }
+    );
 
     Promise.reject('boom');
   },
@@ -291,6 +296,50 @@ export const structuredClone = {
 
     const memory = new WebAssembly.Memory({ initial: 2, maximum: 2 });
     throws(() => globalThis.structuredClone(memory));
+
+    // This tests serialization of an API object. Only serializeable API objects (like `Headers`)
+    // can be cloned.
+    {
+      let orig = new Headers({ foo: 123, bar: 'abc' });
+      let cloned = globalThis.structuredClone(orig);
+      ok(cloned instanceof Headers);
+      strictEqual(cloned.get('foo'), '123');
+      strictEqual(cloned.get('bar'), 'abc');
+    }
+
+    // Verify that trying to serialize a non-serializable API type throws.
+    throws(() => globalThis.structuredClone(new TextEncoder()), {
+      name: 'DataCloneError',
+      code: DOMException.DATA_CLONE_ERR,
+      message:
+        'Could not serialize object of type "TextEncoder". This type does not support ' +
+        'serialization.',
+    });
+
+    // Test serialization of DOMException. This is technically an API object.
+    {
+      const de1 = new DOMException('hello', 'NotAllowedError');
+
+      const de2 = globalThis.structuredClone(de1);
+      ok(de2 instanceof DOMException);
+      strictEqual(de1.name, de2.name);
+      strictEqual(de1.message, de2.message);
+      strictEqual(de1.stack, de2.stack);
+      strictEqual(de1.code, de2.code);
+      notStrictEqual(de1, de2);
+    }
+  },
+};
+
+export const SabStructuredCloneTransfer = {
+  async test() {
+    // Can't structureClone a a SharedArrayBuffer with transfer.
+    const sab = new SharedArrayBuffer(64);
+    const view = new Uint8Array(sab);
+
+    throws(() => globalThis.structuredClone(view, { transfer: [view] }), {
+      name: 'DataCloneError',
+    });
   },
 };
 
@@ -327,7 +376,7 @@ export const base64 = {
       }
 
       var out = '';
-      for (var i = 0; i < s.length; i += 3) {
+      for (let i = 0; i < s.length; i += 3) {
         var groupsOfSix = [undefined, undefined, undefined, undefined];
         groupsOfSix[0] = s.charCodeAt(i) >> 2;
         groupsOfSix[1] = (s.charCodeAt(i) & 0x03) << 4;
@@ -505,7 +554,7 @@ export const base64 = {
       strictEqual(globalThis.atob(globalThis.btoa(input)), String(input));
     }
 
-    var tests = [
+    let tests = [
       'עברית',
       '',
       'ab',
@@ -562,7 +611,7 @@ export const base64 = {
     });
 
     var everything = '';
-    for (var i = 0; i < 256; i++) {
+    for (let i = 0; i < 256; i++) {
       everything += String.fromCharCode(i);
     }
     tests.push(['btoa(first 256 code points concatenated)', everything]);
@@ -579,7 +628,7 @@ export const base64 = {
       strictEqual(globalThis.atob(input), expected);
     }
 
-    var tests = [
+    tests = [
       '',
       'abcd',
       ' abcd',
@@ -775,5 +824,39 @@ export const reuseCtx = {
   check(_, env, ctx) {
     strictEqual(ctx.reused, undefined);
     ctx.reused = true;
+  },
+};
+
+export const structuredCloneError = {
+  test() {
+    // If it doesn't crash, we're good.
+    var globalProp = {
+      get p1() {
+        return this;
+      },
+      get trigger() {
+        function createSab() {
+          var sab = new SharedArrayBuffer(4096);
+          return sab;
+        }
+        var prop = {};
+        Object.defineProperty(prop, 'constructor', {
+          writable: true,
+          value: createSab,
+        });
+        return prop.constructor();
+      },
+      get p2() {
+        var gTCtor = globalThis.Intl.constructor;
+        var returnVal;
+        try {
+          returnVal = gTCtor.entries(this);
+        } catch (_e) {
+          // expected
+        }
+        return returnVal;
+      },
+    };
+    globalThis.structuredClone(globalProp);
   },
 };

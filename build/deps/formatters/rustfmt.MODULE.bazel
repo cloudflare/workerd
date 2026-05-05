@@ -1,0 +1,36 @@
+# Standalone rustfmt binary + shared libraries, downloaded from static.rust-lang.org.
+# This avoids going through `bazel run @rules_rust//:rustfmt` which would trigger
+# full Rust toolchain resolution (and, in edgeworker, the V8 build cache download).
+#
+# To get sha256 values when adding a platform or updating the version:
+#   curl -sL "https://static.rust-lang.org/dist/<DATE>/rustfmt-nightly-<TRIPLE>.tar.xz" | sha256sum
+#   curl -sL "https://static.rust-lang.org/dist/<DATE>/rustc-nightly-<TRIPLE>.tar.xz" | sha256sum
+
+rustfmt_standalone = use_extension("//build/deps/formatters:rustfmt_repository.bzl", "rustfmt_standalone")
+rustfmt_standalone.repo(
+    name = "rustfmt-standalone-linux-amd64",
+    iso_date = "2026-02-12",
+    rustc_sha256 = "ecff4a1dd40734c2614c56b28f265eb8d771d7dd1a3c3cb4ed0740d95deec8a7",
+    rustfmt_sha256 = "b32c674f6f00407bcc8570f376defc89c768f9ebd87616c8d2d59393b54e179a",
+    triple = "x86_64-unknown-linux-gnu",
+)
+rustfmt_standalone.repo(
+    name = "rustfmt-standalone-linux-arm64",
+    iso_date = "2026-02-12",
+    rustc_sha256 = "f07f1a4071401235870022c6bd99f29ffe890ff239223e289555f827e9f0a16a",
+    rustfmt_sha256 = "7c10fd492c921a779c59072eb950816a09d9422c83c479d73e8129fc04bbfa1f",
+    triple = "aarch64-unknown-linux-gnu",
+)
+rustfmt_standalone.repo(
+    name = "rustfmt-standalone-darwin-arm64",
+    iso_date = "2026-02-12",
+    rustc_sha256 = "44dec0af289dd4c61d135222a2cee0de2f412804b2e9774639927e63f8d64e19",
+    rustfmt_sha256 = "b4397c2247726e328c857f576a40e7e02b016f38860711f98beca92ac841d75a",
+    triple = "aarch64-apple-darwin",
+)
+use_repo(
+    rustfmt_standalone,
+    "rustfmt-standalone-darwin-arm64",
+    "rustfmt-standalone-linux-amd64",
+    "rustfmt-standalone-linux-arm64",
+)

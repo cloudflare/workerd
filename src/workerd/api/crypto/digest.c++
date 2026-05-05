@@ -38,7 +38,7 @@ class HmacKey final: public CryptoKey::Impl {
   }
 
  private:
-  jsg::BufferSource sign(jsg::Lock& js,
+  jsg::JsArrayBuffer sign(jsg::Lock& js,
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data) const override {
     return computeHmac(js, kj::mv(algorithm), data);
@@ -53,20 +53,20 @@ class HmacKey final: public CryptoKey::Impl {
         CRYPTO_memcmp(messageDigest.asArrayPtr().begin(), signature.begin(), signature.size()) == 0;
   }
 
-  jsg::BufferSource computeHmac(jsg::Lock& js,
+  jsg::JsArrayBuffer computeHmac(jsg::Lock& js,
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data) const {
     // For HMAC, the hash is specified when creating the key, not at call time.
     auto type = lookupDigestAlgorithm(keyAlgorithm.hash.name).second;
-    auto messageDigest = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, EVP_MD_size(type));
+    auto buf = jsg::JsArrayBuffer::create(js, EVP_MD_size(type));
 
     uint messageDigestSize = 0;
     auto ptr = HMAC(type, keyData.begin(), keyData.size(), data.begin(), data.size(),
-        messageDigest.asArrayPtr().begin(), &messageDigestSize);
+        buf.asArrayPtr().begin(), &messageDigestSize);
     JSG_REQUIRE(ptr != nullptr, DOMOperationError, "HMAC computation failed.");
 
-    KJ_ASSERT(messageDigestSize == messageDigest.size());
-    return jsg::BufferSource(js, kj::mv(messageDigest));
+    KJ_ASSERT(messageDigestSize == buf.size());
+    return buf;
   }
 
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override {
@@ -98,9 +98,7 @@ class HmacKey final: public CryptoKey::Impl {
       return jwk;
     }
 
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, keyData.size());
-    backing.asArrayPtr().copyFrom(keyData);
-    return jsg::BufferSource(js, kj::mv(backing));
+    return jsg::JsArrayBuffer::create(js, keyData).addRef(js);
   }
 
   kj::StringPtr getAlgorithmName() const override {
@@ -159,8 +157,9 @@ kj::Own<HMAC_CTX> initHmacContext(
       SubtleCrypto::ExportKeyData keyData = key2->exportKey(js, "raw"_kj);
 
       KJ_SWITCH_ONEOF(keyData) {
-        KJ_CASE_ONEOF(key_data, jsg::BufferSource) {
-          return handle(algorithm, key_data);
+        KJ_CASE_ONEOF(key_data, jsg::JsRef<jsg::JsArrayBuffer>) {
+          auto buf = key_data.getHandle(js);
+          return handle(algorithm, buf.asArrayPtr());
         }
         KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
           KJ_UNREACHABLE;
@@ -181,32 +180,31 @@ void HmacContext::update(kj::ArrayPtr<kj::byte> data) {
       JSG_REQUIRE(data.size() <= INT_MAX, RangeError, "data is too long");
       KJ_ASSERT(HMAC_Update(ctx.get(), data.begin(), data.size()) == 1);
     }
-    KJ_CASE_ONEOF(digest, jsg::BufferSource) {
+    KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
       JSG_FAIL_REQUIRE(DOMOperationError, "HMAC context has already been finalized.");
     }
   }
 }
 
-jsg::BufferSource HmacContext::digest(jsg::Lock& js) {
+jsg::JsUint8Array HmacContext::digest(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(ctx, kj::Own<HMAC_CTX>) {
       auto theCtx = kj::mv(ctx);
       unsigned len;
-      auto digest = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, HMAC_size(theCtx.get()));
-      JSG_REQUIRE(HMAC_Final(theCtx.get(), digest.asArrayPtr().begin(), &len), Error,
+      auto buf = jsg::JsUint8Array::create(js, HMAC_size(theCtx.get()));
+      JSG_REQUIRE(HMAC_Final(theCtx.get(), buf.asArrayPtr().begin(), &len), Error,
           "Failed to finalize HMAC");
-      KJ_ASSERT(len == digest.size());
-      auto ret = jsg::BufferSource(js, kj::mv(digest));
-      state = ret.clone(js);
-      return kj::mv(ret);
+      KJ_ASSERT(len == buf.size());
+      state = buf.addRef(js);
+      return buf;
     }
-    KJ_CASE_ONEOF(digest, jsg::BufferSource) {
-      return digest.clone(js);
+    KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
+      auto cached = digest.getHandle(js);
+      return jsg::JsUint8Array::create(js, cached.asArrayPtr());
     }
     KJ_UNREACHABLE;
   }
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsUint8Array::create(js, 0);
 }
 
 size_t HmacContext::size() const {
@@ -214,8 +212,10 @@ size_t HmacContext::size() const {
     KJ_CASE_ONEOF(ctx, kj::Own<HMAC_CTX>) {
       return 0;
     }
-    KJ_CASE_ONEOF(digest, jsg::BufferSource) {
-      return digest.size();
+    KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
+      // JsRef doesn't expose size() without a lock. Return 0 for memory tracking;
+      // the JsRef itself is tracked separately by the GC visitor.
+      return 0;
     }
   }
   KJ_UNREACHABLE;
@@ -343,8 +343,8 @@ void checkXofLen(EVP_MD_CTX* ctx, kj::Maybe<uint32_t>& maybeXof) {
 }
 }  // namespace
 
-HashContext::HashContext(
-    kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::BufferSource> state, kj::Maybe<uint32_t> maybeXof)
+HashContext::HashContext(kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::JsRef<jsg::JsUint8Array>> state,
+    kj::Maybe<uint32_t> maybeXof)
     : state(kj::mv(state)),
       maybeXof(kj::mv(maybeXof)) {
   checkXofLen(this->state.get<kj::Own<EVP_MD_CTX>>().get(), this->maybeXof);
@@ -359,52 +359,49 @@ void HashContext::update(kj::ArrayPtr<kj::byte> data) {
       JSG_REQUIRE(data.size() <= INT_MAX, RangeError, "data is too long");
       OSSLCALL(EVP_DigestUpdate(ctx.get(), data.begin(), data.size()));
     }
-    KJ_CASE_ONEOF(digest, jsg::BufferSource) {
+    KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
       JSG_FAIL_REQUIRE(DOMOperationError, "Hash context has already been finalized.");
     }
   }
 }
 
-jsg::BufferSource HashContext::digest(jsg::Lock& js) {
+jsg::JsUint8Array HashContext::digest(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(ctx, kj::Own<EVP_MD_CTX>) {
       auto theCtx = kj::mv(ctx);
       uint32_t len = EVP_MD_size(EVP_MD_CTX_md(theCtx.get()));
       KJ_IF_SOME(xof, maybeXof) {
         if (xof == len) {
-          auto digest = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, len);
-          JSG_REQUIRE(EVP_DigestFinal_ex(theCtx.get(), digest.asArrayPtr().begin(), &len) == 1,
-              Error, "Failed to compute hash digest");
-          KJ_ASSERT(len == digest.size());
-          auto ret = jsg::BufferSource(js, kj::mv(digest));
-          state = ret.clone(js);
-          return kj::mv(ret);
+          auto buf = jsg::JsUint8Array::create(js, len);
+          JSG_REQUIRE(EVP_DigestFinal_ex(theCtx.get(), buf.asArrayPtr().begin(), &len) == 1, Error,
+              "Failed to compute hash digest");
+          KJ_ASSERT(len == buf.size());
+          state = buf.addRef(js);
+          return buf;
         }
 
-        auto digest = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, xof);
-        JSG_REQUIRE(EVP_DigestFinalXOF(theCtx.get(), digest.asArrayPtr().begin(), xof) == 1, Error,
+        auto buf = jsg::JsUint8Array::create(js, xof);
+        JSG_REQUIRE(EVP_DigestFinalXOF(theCtx.get(), buf.asArrayPtr().begin(), xof) == 1, Error,
             "Failed to compute XOF hash digest");
-        auto ret = jsg::BufferSource(js, kj::mv(digest));
-        state = ret.clone(js);
-        return kj::mv(ret);
+        state = buf.addRef(js);
+        return buf;
       }
 
-      auto digest = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, len);
-      JSG_REQUIRE(EVP_DigestFinal_ex(theCtx.get(), digest.asArrayPtr().begin(), &len) == 1, Error,
+      auto buf = jsg::JsUint8Array::create(js, len);
+      JSG_REQUIRE(EVP_DigestFinal_ex(theCtx.get(), buf.asArrayPtr().begin(), &len) == 1, Error,
           "Failed to compute hash digest");
-      KJ_ASSERT(len == digest.size());
-      auto ret = jsg::BufferSource(js, kj::mv(digest));
-      state = ret.clone(js);
-      return kj::mv(ret);
+      KJ_ASSERT(len == buf.size());
+      state = buf.addRef(js);
+      return buf;
     }
-    KJ_CASE_ONEOF(digest, jsg::BufferSource) {
-      return digest.clone(js);
+    KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
+      auto cached = digest.getHandle(js);
+      return jsg::JsUint8Array::create(js, cached.asArrayPtr());
     }
     KJ_UNREACHABLE
   }
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsUint8Array::create(js, 0);
 }
 
 HashContext HashContext::clone(jsg::Lock& js, kj::Maybe<uint32_t> xofLen) {
@@ -414,8 +411,8 @@ HashContext HashContext::clone(jsg::Lock& js, kj::Maybe<uint32_t> xofLen) {
       OSSLCALL(EVP_MD_CTX_copy_ex(newCtx, ctx.get()));
       return HashContext(kj::mv(newCtx), kj::mv(xofLen));
     }
-    KJ_CASE_ONEOF(digest, jsg::BufferSource) {
-      return HashContext(digest.clone(js), kj::mv(xofLen));
+    KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
+      JSG_FAIL_REQUIRE(DOMOperationError, "Hash context has already been finalized.");
     }
   }
   KJ_UNREACHABLE;
@@ -426,8 +423,10 @@ size_t HashContext::size() const {
     KJ_CASE_ONEOF(ctx, kj::Own<EVP_MD_CTX>) {
       return 0;
     }
-    KJ_CASE_ONEOF(digest, jsg::BufferSource) {
-      return digest.size();
+    KJ_CASE_ONEOF(digest, jsg::JsRef<jsg::JsUint8Array>) {
+      // JsRef doesn't expose size() without a lock. Return 0 for memory tracking;
+      // the JsRef itself is tracked separately by the GC visitor.
+      return 0;
     }
   }
   KJ_UNREACHABLE;

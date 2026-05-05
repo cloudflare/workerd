@@ -107,14 +107,14 @@ KJ_TEST("wire format version does not change deserialization behavior on real da
       const auto key = "some-key"_kj;
       while (std::getline(file, hexStr)) {
         auto dataIn = kj::decodeHex(kj::ArrayPtr(hexStr.c_str(), hexStr.size()));
-        KJ_EXPECT(!dataIn.hadErrors, hexStr);
+        KJ_EXPECT(!dataIn.hadErrors, kj::str(hexStr.c_str()));
 
         auto oldVal = oldDeserializeV8Value(isolateLock, dataIn);
         auto oldOutput = serializeV8Value(isolateLock, oldVal);
 
         auto newVal = deserializeV8Value(isolateLock, key, dataIn);
         auto newOutput = serializeV8Value(isolateLock, newVal);
-        KJ_EXPECT(oldOutput == newOutput, hexStr);
+        KJ_EXPECT(oldOutput == newOutput, kj::str(hexStr.c_str()));
       }
     });
   });

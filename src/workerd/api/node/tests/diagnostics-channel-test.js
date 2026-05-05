@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { ok, strictEqual } from 'node:assert';
 
 import {
@@ -118,5 +121,111 @@ export const serFailureTest = {
     });
     channel1.publish(function () {});
     await promise;
+  },
+};
+
+export const DiagChannelSubscribeDuringPublish = {
+  async test() {
+    const ch = channel('test-publish');
+    let callCount = 0;
+    let duringPublishCallCount = 0;
+
+    for (let i = 0; i < 32; i++) {
+      ch.subscribe(() => {
+        callCount++;
+      });
+    }
+
+    ch.subscribe(() => {
+      callCount++;
+      for (let i = 0; i < 64; i++) {
+        ch.subscribe(() => {
+          duringPublishCallCount++;
+        });
+      }
+    });
+
+    for (let i = 0; i < 16; i++) {
+      ch.subscribe(() => {
+        callCount++;
+      });
+    }
+
+    ch.publish({ data: 'trigger' });
+
+    strictEqual(callCount, 49);
+    strictEqual(duringPublishCallCount, 0);
+  },
+};
+
+export const DiagChannelUnbindDuringRunStores = {
+  async test() {
+    const ch = channel('test');
+    const als = new AsyncLocalStorage();
+    let transformCallCount = 0;
+
+    ch.bindStore(als, (msg) => {
+      transformCallCount++;
+      ch.unbindStore(als);
+      return msg;
+    });
+
+    const result = ch.runStores({}, () => 'done');
+    strictEqual(result, 'done');
+    strictEqual(transformCallCount, 1);
+
+    ch.runStores({}, () => {});
+    strictEqual(transformCallCount, 1);
+  },
+};
+
+// Legacy-method behavior: when the `diagnostics_channel_has_subscribers_getter`
+// compat flag is NOT enabled, `Channel.hasSubscribers` and
+// `TracingChannel.hasSubscribers` are registered as methods. The associated
+// `.wd-test` opts out of the flag explicitly so that this behavior is exercised
+// under both the default and `@all-compat-flags` test variants.
+export const test_channel_hasSubscribers_is_a_method = {
+  async test() {
+    const ch = channel('method-test');
+
+    // It is a method, not a boolean property.
+    strictEqual(typeof ch.hasSubscribers, 'function');
+    strictEqual(ch.hasSubscribers(), false);
+
+    const listener = () => {};
+    ch.subscribe(listener);
+    strictEqual(ch.hasSubscribers(), true);
+
+    ch.unsubscribe(listener);
+    strictEqual(ch.hasSubscribers(), false);
+
+    // Defined on the prototype as a method (value descriptor, no getter).
+    const desc = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(ch),
+      'hasSubscribers'
+    );
+    ok(desc);
+    strictEqual(typeof desc.value, 'function');
+    strictEqual(desc.get, undefined);
+    strictEqual(desc.set, undefined);
+  },
+};
+
+export const test_tracingChannel_hasSubscribers_is_a_method = {
+  async test() {
+    const tc = tracingChannel('tracing-method-test');
+
+    strictEqual(typeof tc.hasSubscribers, 'function');
+    strictEqual(tc.hasSubscribers(), false);
+
+    const listener = () => {};
+
+    // Each sub-channel independently flips the aggregate method result.
+    for (const sub of ['start', 'end', 'asyncStart', 'asyncEnd', 'error']) {
+      tc[sub].subscribe(listener);
+      strictEqual(tc.hasSubscribers(), true, `via ${sub}`);
+      tc[sub].unsubscribe(listener);
+      strictEqual(tc.hasSubscribers(), false, `after unsubscribing ${sub}`);
+    }
   },
 };

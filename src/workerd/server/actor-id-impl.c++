@@ -1,9 +1,10 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/server/actor-id-impl.h>
+#include <workerd/util/entropy.h>
+#include <workerd/util/own-util.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <openssl/hmac.h>
-#include <openssl/rand.h>
 
 #include <kj/encoding.h>
 #include <kj/memory.h>
@@ -24,16 +25,24 @@ kj::Maybe<kj::StringPtr> ActorIdFactoryImpl::ActorIdImpl::getName() const {
   return name;
 }
 
+kj::Maybe<kj::StringPtr> ActorIdFactoryImpl::ActorIdImpl::getJurisdiction() const {
+  return kj::none;
+}
+
 bool ActorIdFactoryImpl::ActorIdImpl::equals(const ActorId& other) const {
   return kj::arrayPtr(id) == kj::arrayPtr(kj::downcast<const ActorIdImpl>(other).id);
 }
 
 kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::ActorIdImpl::clone() const {
-  return kj::heap<ActorIdImpl>(id, name.map([](kj::StringPtr str) { return kj::str(str); }));
+  return kj::heap<ActorIdImpl>(id, mapCopyString(name));
 }
 
 ActorIdFactoryImpl::ActorIdFactoryImpl(kj::StringPtr uniqueKey) {
   KJ_ASSERT(SHA256(uniqueKey.asBytes().begin(), uniqueKey.size(), key) == key);
+}
+
+ActorIdFactoryImpl::ActorIdFactoryImpl(const kj::byte keyParam[SHA256_DIGEST_LENGTH]) {
+  memcpy(key, keyParam, sizeof(key));
 }
 
 kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::newUniqueId(
@@ -52,7 +61,7 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::newUniqueId(
     kj::arrayPtr(id).slice(counter).fill(0);
     ++counter;
   } else {
-    KJ_ASSERT(RAND_bytes(id, BASE_LENGTH) == 1);
+    getEntropy(kj::arrayPtr(id, BASE_LENGTH));
   }
 
   computeMac(id);
@@ -90,7 +99,12 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromString(kj::String str
   return kj::heap<ActorIdImpl>(id, kj::none);
 }
 
-kj::Own<ActorIdFactory> ActorIdFactoryImpl::cloneWithJurisdiction(kj::StringPtr jurisdiction) {
+kj::Own<ActorIdFactory> ActorIdFactoryImpl::cloneWithJurisdiction(
+    kj::Maybe<kj::StringPtr> maybeJurisdiction) {
+  if (maybeJurisdiction == kj::none) {
+    return kj::heap<ActorIdFactoryImpl>(key);
+  }
+
   JSG_FAIL_REQUIRE(Error, "Jurisdiction restrictions are not implemented in workerd.");
 }
 

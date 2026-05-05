@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 interface ENV {
   HOME: string;
   [k: string]: string;
@@ -10,6 +14,7 @@ interface PyodideConfig {
   indexURL?: string;
   _makeSnapshot?: boolean;
   lockFileURL: '';
+  enableRunUntilComplete: boolean;
 }
 
 type SerializedHiwireValue = { path: string[] } | { serialized: any } | null;
@@ -32,12 +37,16 @@ interface API {
     stdout?: (a: string) => void,
     stderr?: (a: string) => void
   ) => void;
-  version: '0.26.0a2' | '0.27.7';
+  version: '0.26.0a2' | '0.28.2';
   pyodide_base: {
     pyimport_impl: PyCallable;
   };
-  serializeHiwireState(): SnapshotConfig;
+  serializeHiwireState(serializer: (obj: any) => any): SnapshotConfig;
   pyVersionTuple: [number, number, number];
+  scheduleCallback: (callback: () => void, timeout: number) => void;
+  // Callback invoked when Pyodide encounters a fatal error. Setting this allows
+  // the runtime to handle fatal errors (e.g., by condemning the isolate).
+  on_fatal?: (error: any) => void;
 }
 
 interface LDSO {
@@ -56,6 +65,11 @@ interface DSO {
   exports: WebAssembly.Exports;
 }
 
+// https://github.com/emscripten-core/emscripten/blob/main/src/lib/libpath.js
+interface PATH {
+  normalizeArray: (parts: string[], allowAboveRoot: boolean) => string[];
+}
+
 type PreRunHook = (mod: Module) => void;
 
 interface EmscriptenSettings {
@@ -69,9 +83,7 @@ interface EmscriptenSettings {
   ) => WebAssembly.Exports;
   reportUndefinedSymbolsNoOp: () => void;
   noInitialRun?: boolean;
-  API: {
-    config: API['config'];
-  };
+  API: Pick<API, 'config'>;
   readyPromise: Promise<Module>;
   rejectReadyPromise: (e: any) => void;
 }
@@ -84,6 +96,7 @@ interface Module {
   API: API;
   ENV: ENV;
   LDSO: LDSO;
+  PATH: PATH;
   newDSO: (path: string, opt: object | undefined, handle: string) => DSO;
   _Py_Version: number;
   _py_version_major?: () => number;
@@ -99,7 +112,6 @@ interface Module {
   addRunDependency(x: string): void;
   removeRunDependency(x: string): void;
   noInitialRun: boolean;
-  setUnsafeEval(mod: typeof import('internal:unsafe-eval').default): void;
   setGetRandomValues(
     func: typeof import('pyodide-internal:topLevelEntropy/lib').getRandomValues
   ): void;
@@ -125,4 +137,13 @@ interface Module {
   snapshotDebug?: boolean;
   getEmptyTableSlot(): number;
   freeTableIndexes: number[];
+  LD_LIBRARY_PATH: string;
+  Py_EmscriptenSignalBuffer: Uint8Array;
+  _Py_EMSCRIPTEN_SIGNAL_HANDLING: number;
+  ___memory_base: WebAssembly.Global<'i32'>;
+  compileModuleFromReadOnlyFS: (
+    Module: Module,
+    path: string
+  ) => WebAssembly.Module;
+  findLibraryFS: (libName: string, rpath: any) => string;
 }

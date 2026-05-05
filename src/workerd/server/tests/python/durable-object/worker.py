@@ -6,7 +6,7 @@ from asyncio import sleep
 from urllib.parse import urlparse
 
 from js import Date
-from workers import DurableObject, FetchResponse, Request, Response, handler
+from workers import DurableObject, FetchResponse, Request, Response, WorkerEntrypoint
 
 import pyodide
 
@@ -27,7 +27,14 @@ class DurableObjectExample(DurableObject, MixinTest):
         self.storage = state.storage
         self.alarm_triggered = False
 
-    async def on_fetch(self, request):
+        # Test blockConcurrencyWhile in the constructor with a Python async callback.
+        # This is a common pattern for initializing DO state.
+        async def init_callback():
+            await self.storage.put("initialized", True)
+
+        self.ctx.blockConcurrencyWhile(init_callback)
+
+    async def fetch(self, request):
         assert isinstance(request, Request)
 
         curr = await self.storage.getAlarm()
@@ -43,7 +50,7 @@ class DurableObjectExample(DurableObject, MixinTest):
         else:
             return Response("404")
 
-    async def on_alarm(self, alarm_info):
+    async def alarm(self, alarm_info):
         self.alarm_triggered = True
 
     async def no_args_method(self):
@@ -54,6 +61,23 @@ class DurableObjectExample(DurableObject, MixinTest):
 
     def mutate_dict(self, my_dict):
         my_dict["foo"] = 42
+
+    async def test_block_concurrency_while(self):
+        # Verify the constructor's blockConcurrencyWhile ran successfully
+        initialized = await self.storage.get("initialized")
+        assert initialized, f"Expected True but got {initialized}"
+
+        # Test blockConcurrencyWhile with a Python async callback that returns a value.
+        async def my_callback():
+            await self.storage.put("blocked", "yes")
+            return 42
+
+        result = await self.ctx.blockConcurrencyWhile(my_callback)
+        assert result == 42, f"Expected 42 but got {result}"
+        blocked = await self.storage.get("blocked")
+        assert blocked == "yes", f"Expected 'yes' but got {blocked}"
+
+        return True
 
     async def test_self_call(self):
         test_dict = dict()
@@ -70,47 +94,49 @@ class DurableObjectExample(DurableObject, MixinTest):
         return arg + 1
 
 
-@handler
-async def test(ctrl, env, ctx):
-    id = env.ns.idFromName("A")
-    obj = env.ns.get(id)
+class Default(WorkerEntrypoint):
+    async def test(self, ctrl):
+        id = self.env.ns.idFromName("A")
+        obj = self.env.ns.get(id)
 
-    first_resp = await obj.fetch("http://foo.com/counter")
-    first_resp_data = await first_resp.text()
-    assert first_resp_data == "hello from python 1"
+        first_resp = await obj.fetch("http://foo.com/counter")
+        first_resp_data = await first_resp.text()
+        assert first_resp_data == "hello from python 1"
 
-    second_resp = await obj.fetch("http://foo.com/counter")
-    second_resp_data = await second_resp.text()
-    assert second_resp_data == "hello from python 2"
+        second_resp = await obj.fetch("http://foo.com/counter")
+        second_resp_data = await second_resp.text()
+        assert second_resp_data == "hello from python 2"
 
-    no_arg_resp = await obj.no_args_method()
-    assert no_arg_resp == "value from python"
+        no_arg_resp = await obj.no_args_method()
+        assert no_arg_resp == "value from python"
 
-    arg_resp = await obj.args_method("test")
-    assert arg_resp == "value from python test"
+        arg_resp = await obj.args_method("test")
+        assert arg_resp == "value from python test"
 
-    assert await obj.test_self_call()
+        assert await obj.test_block_concurrency_while()
 
-    if pyodide.__version__ != "0.26.0a2":
-        res = await obj.jspi_method(9)
-        assert res == 10
+        assert await obj.test_self_call()
 
-    # Verify that a mixin method can be called via RPC.
-    assert await obj.test_mixin() == 1234
+        if pyodide.__version__ != "0.26.0a2":
+            res = await obj.jspi_method(9)
+            assert res == 10
 
-    # Verify that DO fetch is wrapped.
-    third_resp = await obj.fetch("http://foo.com/counter")
-    assert isinstance(third_resp, FetchResponse)
-    third_resp_data = await third_resp.text()
-    assert third_resp_data == "hello from python 3"
+        # Verify that a mixin method can be called via RPC.
+        assert await obj.test_mixin() == 1234
 
-    # Wait for alarm to get triggered.
-    for _ in range(20):
-        await sleep(0.2)
-        resp = await obj.fetch("http://foo.com/alarm")
+        # Verify that DO fetch is wrapped.
+        third_resp = await obj.fetch("http://foo.com/counter")
+        assert isinstance(third_resp, FetchResponse)
+        third_resp_data = await third_resp.text()
+        assert third_resp_data == "hello from python 3"
 
-        alarm_triggered = await resp.text() == "True"
-        if alarm_triggered:
-            break
-    else:
-        raise AssertionError("Alarm never triggered")
+        # Wait for alarm to get triggered.
+        for _ in range(20):
+            await sleep(0.2)
+            resp = await obj.fetch("http://foo.com/alarm")
+
+            alarm_triggered = await resp.text() == "True"
+            if alarm_triggered:
+                break
+        else:
+            raise AssertionError("Alarm never triggered")

@@ -1,0 +1,63 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "http-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "http-test-ts.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-test" ),
+          ( name = "CACHE_ENABLED", json = "false" ),
+          ( name = "NO_CACHE_ENABLED", json = "false" ),
+          ( name = "RELOAD_ENABLED", json = "false" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_disabled"],
+      )
+    ),
+    ( name = "http-test-cache-option-enabled",
+      worker = (
+        modules = [
+          ( name = "worker-cache-enabled", esModule = embed "http-test-ts.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-test-cache-option-enabled" ),
+          ( name = "CACHE_ENABLED", json = "true" ),
+          ( name = "NO_CACHE_ENABLED", json = "false" ),
+          ( name = "RELOAD_ENABLED", json = "false" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_enabled", "workers_api_getters_setters_on_prototype", "cache_no_cache_disabled", "cache_reload_disabled"],
+      )
+    ),
+    ( name = "http-test-cache-no-cache",
+      worker = (
+        modules = [
+          ( name = "worker-cache-no-cache", esModule = embed "http-test-ts.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-test-cache-no-cache" ),
+          ( name = "CACHE_ENABLED", json = "true" ),
+          ( name = "NO_CACHE_ENABLED", json = "true" ),
+          ( name = "RELOAD_ENABLED", json = "false" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_enabled", "cache_no_cache_enabled", "workers_api_getters_setters_on_prototype", "cache_reload_disabled"],
+      )
+    ),
+    ( name = "http-test-cache-reload",
+      worker = (
+        modules = [
+          ( name = "worker-reload", esModule = embed "http-test-ts.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-test-cache-reload" ),
+          ( name = "CACHE_ENABLED", json = "true" ),
+          ( name = "NO_CACHE_ENABLED", json = "true" ),
+          ( name = "RELOAD_ENABLED", json = "true" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers",
+        "cache_option_enabled", "cache_no_cache_enabled", "cache_reload_enabled", "workers_api_getters_setters_on_prototype"],
+      )
+    ),
+  ],
+);

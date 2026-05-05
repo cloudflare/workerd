@@ -13,6 +13,11 @@ interface D1Meta {
   served_by_region?: string;
 
   /**
+   * The three letters airport code of the colo that executed the query.
+   */
+  served_by_colo?: string;
+
+  /**
    * True if-and-only-if the database instance that executed the query was the primary.
    */
   served_by_primary?: boolean;
@@ -22,7 +27,13 @@ interface D1Meta {
      * The duration of the SQL query execution by the database instance. It doesn't include any network time.
      */
     sql_duration_ms: number;
-  }
+  };
+
+  /**
+   * Number of total attempts to execute the query, due to automatic retries.
+   * Note: All other fields in the response like `timings` only apply to the last attempt.
+   */
+  total_attempts?: number;
 }
 
 interface D1Response {
@@ -44,11 +55,11 @@ type D1SessionConstraint =
   // Indicates that the first query should go to the primary, and the rest queries
   // using the same D1DatabaseSession will go to any replica that is consistent with
   // the bookmark maintained by the session (returned by the first query).
-  | "first-primary"
+  | 'first-primary'
   // Indicates that the first query can go anywhere (primary or replica), and the rest queries
   // using the same D1DatabaseSession will go to any replica that is consistent with
   // the bookmark maintained by the session (returned by the first query).
-  | "first-unconstrained";
+  | 'first-unconstrained';
 type D1SessionBookmark = string;
 
 declare abstract class D1Database {

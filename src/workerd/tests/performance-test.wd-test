@@ -7,7 +7,6 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "performance-test.js")
         ],
-        compatibilityDate = "2023-01-15",
       )
     ),
   ],

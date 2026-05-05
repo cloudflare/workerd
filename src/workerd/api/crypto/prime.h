@@ -6,13 +6,13 @@
 
 namespace workerd::jsg {
 class Lock;
-class BufferSource;
+class JsArrayBuffer;
 }  // namespace workerd::jsg
 
 namespace workerd::api {
 
 // Generate a random prime number
-jsg::BufferSource randomPrime(jsg::Lock& js,
+jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
     uint32_t size,
     bool safe,
     kj::Maybe<kj::ArrayPtr<kj::byte>> add_buf,

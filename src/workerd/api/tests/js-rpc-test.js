@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
 import { waitUntil } from 'cloudflare:workers';
 import {
@@ -7,6 +10,7 @@ import {
   RpcProperty,
   RpcStub,
   RpcTarget,
+  ServiceStub,
 } from 'cloudflare:workers';
 
 try {
@@ -193,6 +197,13 @@ export class MyService extends WorkerEntrypoint {
     return new Response('method = ' + req.method + ', url = ' + req.url);
   }
 
+  async connect(socket) {
+    const enc = new TextEncoder();
+    let writer = socket.writable.getWriter();
+    await writer.write(enc.encode('hello'));
+    await writer.close();
+  }
+
   // Define a property to test behavior of property accessors.
   get nonFunctionProperty() {
     return { foo: 123 };
@@ -231,7 +242,9 @@ export class MyService extends WorkerEntrypoint {
   }
 
   throwingMethod() {
-    throw new Error('METHOD THREW');
+    const err = new Error('METHOD THREW');
+    err.abc = 123;
+    throw err;
   }
 
   async neverReturn() {
@@ -628,6 +641,20 @@ export let extendingEntrypointClasses = {
     assert.equal(svc instanceof WorkerEntrypoint, true);
   },
 };
+export let connectBinding = {
+  async test(controller, env, ctx) {
+    let socket = await env.MyService.connect('localhost:8081');
+    await socket.opened;
+    const dec = new TextDecoder();
+    let result = '';
+    for await (const chunk of socket.readable) {
+      result += dec.decode(chunk, { stream: true });
+    }
+    result += dec.decode();
+    assert.strictEqual(result, 'hello');
+    await socket.closed;
+  },
+};
 
 export let namedServiceBinding = {
   async test(controller, env, ctx) {
@@ -921,6 +948,7 @@ export let loopbackJsRpcTarget = {
       assert.strictEqual(stub instanceof RpcStub, true);
       assert.strictEqual(stub.increment instanceof RpcProperty, true);
       assert.strictEqual(stub.increment(1) instanceof RpcPromise, true);
+      assert.strictEqual(env.MyService instanceof ServiceStub, true);
     }
 
     // In fact, RpcStubs can be created from any old object.
@@ -1182,7 +1210,7 @@ export let crossContextSharingDoesntWork = {
     );
 
     // OK, now let's look at cases that do NOT work. These all produce the same error.
-    let expectedError = {
+    let _expectedError = {
       name: 'Error',
       message:
         'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
@@ -1411,8 +1439,7 @@ export let streams = {
       // remote knows the stream failed and can no longer be written to. The call to
       // writeToStreamExpectingError should throw because the error should be propagated
       // through the round trip.
-      const dec = new TextDecoder();
-      let result = '';
+      let _result = '';
       let writeCalled = 0;
       const writable = new WritableStream({
         write(chunk) {
@@ -1439,7 +1466,6 @@ export let streams = {
       // but we currently do not propagate the abort reason through. What ends up
       // happening is that the local stream is dropped with a generic cancelation
       // error.
-      const dec = new TextDecoder();
       const { promise, resolve } = Promise.withResolvers();
       const writable = new WritableStream({
         write(chunk) {},
@@ -1629,6 +1655,7 @@ export let serializeHttpTypes = {
     {
       let headers = await env.MyService.returnHeaders();
       assert.strictEqual(headers instanceof Headers, true);
+
       // Awkwardly, there's actually no API to get the non-lowercased header names.
       assert.deepEqual(
         [...headers],
@@ -1693,7 +1720,9 @@ export let testAsyncStackTrace = {
     try {
       await env.MyService.throwingMethod();
     } catch (e) {
-      // verify stack trace was produced
+      // check that the custom property made it through
+      assert.strictEqual(e.abc, 123);
+      // verify a local stack trace was produced
       assert.strictEqual(e.stack.includes('at async Object.test'), true);
     }
   },
@@ -1705,6 +1734,7 @@ export let testExceptionProperties = {
     try {
       await env.MyService.throwingMethod();
     } catch (e) {
+      assert.strictEqual(e.abc, 123);
       assert.strictEqual(e.remote, true);
       assert.strictEqual(e.message, 'METHOD THREW');
     }
@@ -1729,25 +1759,6 @@ export let logging = {
     assert.strictEqual(await stub.increment(1), 2);
     console.log(stub);
     assert.strictEqual(await stub.increment(1), 3);
-  },
-};
-
-// DOMException is structured cloneable
-export let domExceptionClone = {
-  test() {
-    const de1 = new DOMException('hello', 'NotAllowedError');
-
-    // custom own properties on the instance are not preserved...
-    de1.foo = 'ignored';
-
-    const de2 = structuredClone(de1);
-    assert.strictEqual(de1.name, de2.name);
-    assert.strictEqual(de1.message, de2.message);
-    assert.strictEqual(de1.stack, de2.stack);
-    assert.strictEqual(de1.code, de2.code);
-    assert.notStrictEqual(de1, de2);
-    assert.notStrictEqual(de1.foo, de2.foo);
-    assert.strictEqual(de2.foo, undefined);
   },
 };
 
@@ -2038,5 +2049,71 @@ export let portAbortCall = {
         message: 'test broken critical section',
       });
     }
+  },
+};
+
+export class Greeter extends WorkerEntrypoint {
+  async greet(name) {
+    return `${this.ctx.props.greeting}, ${name}!`;
+  }
+}
+
+export class GreeterFactory extends WorkerEntrypoint {
+  async makeGreeter(greeting) {
+    return this.ctx.exports.Greeter({ props: { greeting } });
+  }
+  async makeGreeterWrapped(greeting) {
+    return { greeter: this.ctx.exports.Greeter({ props: { greeting } }) };
+  }
+}
+
+export let sendServiceStubOverRpc = {
+  async test(controller, env, ctx) {
+    {
+      let greeter = await env.GreeterFactory.makeGreeter('Yo');
+      assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
+    }
+
+    // Test that we can pipeline on service stubs.
+    {
+      let greeter = env.GreeterFactory.makeGreeter('Yo');
+      assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
+    }
+
+    // Pipelining works a little differently when the service stub is returned as the top-level
+    // value vs. an inner value, so test an inner value too.
+    {
+      let greeter = env.GreeterFactory.makeGreeterWrapped('Yo').greeter;
+      assert.strictEqual(await greeter.greet('Alice'), 'Yo, Alice!');
+    }
+  },
+};
+
+// Make sure that calls are delivered in e-order, even in the presence of pushed externals.
+export let eOrderTest = {
+  async test(controller, env, ctx) {
+    let abortController = new AbortController();
+    let abortSignal = abortController.signal;
+
+    let _readableController;
+    let readableStream = new ReadableStream({
+      start(c) {
+        _readableController = c;
+      },
+    });
+
+    let stub = await env.MyService.makeCounter(0);
+
+    let promises = [];
+    promises.push(stub.increment(1));
+    promises.push(stub.increment(1));
+    promises.push(stub.increment(1, abortSignal));
+    promises.push(stub.increment(1));
+    promises.push(stub.increment(1, readableStream));
+    promises.push(stub.increment(1));
+
+    let results = await Promise.all(promises);
+
+    assert.deepEqual(results, [1, 2, 3, 4, 5, 6]);
   },
 };

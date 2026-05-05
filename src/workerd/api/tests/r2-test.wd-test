@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "r2-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "r2-test.js" )
+        ],
+        bindings = [
+          ( name = "BUCKET", r2Bucket = "r2-test" ),
+          ( name = "SERVICE", service = "r2-test" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "streams_enable_constructors", "r2_list_honor_include", "disable_fast_jsg_struct"],
+        streamingTails = ["tail"],
+      )
+    ),
+    (name = "tail", worker = .tailWorker, ),
+  ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
+    ]
+  ) ]
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "r2-instrumentation-test.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat", "disable_fast_jsg_struct"],
+);

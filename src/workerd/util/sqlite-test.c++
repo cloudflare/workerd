@@ -24,6 +24,14 @@
 namespace workerd {
 namespace {
 
+struct GlobalInit {
+  GlobalInit() {
+    installSqliteCustomAllocator();
+  }
+};
+
+static GlobalInit init;
+
 // Initialize the database with some data.
 void setupSql(SqliteDatabase& db) {
   // TODO(sqlite): Do this automatically and don't permit it via run().
@@ -271,6 +279,12 @@ KJ_TEST("Read-only database picks up on changes from mutable database (in-memory
 }
 
 KJ_TEST("Read-only database picks up on changes from mutable database (on-disk)") {
+#if !_WIN32
+  // doReadOnlyUpdateTest triggers the subsequent error in our memory metering because it creates
+  // two databases in the same thread. This will not happen in production. The on-disk test variant
+  // is impacted because it uses SQLite's native OS VFS, which can enable shared memory.
+  KJ_EXPECT_LOG(ERROR, "sqliteMemFree would have triggered a memoryBytes underflow.");
+#endif
   TempDirOnDisk dir;
   doReadOnlyUpdateTest(*dir);
 }
@@ -334,6 +348,9 @@ void doLockTest(bool walMode) {
   KJ_EXPECT(db.run(GET_COUNT).getInt(0) == 1);
 
   // Concurrent write allowed, as long as we're not writing at the same time.
+  // Deliberately not assigning this to a variable: We want to create a thread and join it
+  // immediately.
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   kj::Thread([&vfs = vfs]() noexcept {
     SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
     KJ_EXPECT(db2.run(GET_COUNT).getInt(0) == 1);
@@ -449,7 +466,7 @@ KJ_TEST("SQLite onWrite callback") {
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
   bool sawWrite = false;
-  db.onWrite([&]() { sawWrite = true; });
+  db.onWrite([&](bool allowUnconfirmed) { sawWrite = true; });
 
   setupSql(db);
   KJ_EXPECT(sawWrite);
@@ -482,7 +499,7 @@ RowCounts countRowsTouched(SqliteDatabase& db,
   uint64_t rowsFound = 0;
 
   // Runs a query; retrieves and discards all the data.
-  auto query = db.run(regulator, sqlCode, bindParams...);
+  auto query = db.run({.regulator = regulator}, sqlCode, bindParams...);
   while (!query.isDone()) {
     rowsFound++;
     query.nextRow();
@@ -493,8 +510,7 @@ RowCounts countRowsTouched(SqliteDatabase& db,
 
 template <typename... Params>
 RowCounts countRowsTouched(SqliteDatabase& db, kj::StringPtr sqlCode, Params... bindParams) {
-  return countRowsTouched(
-      db, SqliteDatabase::TRUSTED, sqlCode, std::forward<Params>(bindParams)...);
+  return countRowsTouched(db, SqliteDatabase::TRUSTED, sqlCode, kj::fwd<Params>(bindParams)...);
 }
 
 KJ_TEST("SQLite read row counters (basic)") {
@@ -749,10 +765,10 @@ KJ_TEST("SQLite row counters with triggers") {
 
   // A deletion incurs two writes: one for the row and one for the log.
   {
-    db.run(regulator, "DELETE FROM things");
-    db.run(regulator, "INSERT INTO things (id) VALUES (1)");
-    db.run(regulator, "INSERT INTO things (id) VALUES (2)");
-    db.run(regulator, "INSERT INTO things (id) VALUES (3)");
+    db.run({.regulator = regulator}, "DELETE FROM things");
+    db.run({.regulator = regulator}, "INSERT INTO things (id) VALUES (1)");
+    db.run({.regulator = regulator}, "INSERT INTO things (id) VALUES (2)");
+    db.run({.regulator = regulator}, "INSERT INTO things (id) VALUES (3)");
 
     RowCounts stats = countRowsTouched(db, regulator, "DELETE FROM things");
     KJ_EXPECT(stats.written == 6);
@@ -845,8 +861,8 @@ KJ_TEST("SQLite observer addQueryStats") {
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver = TestSqliteObserver();
   TestQueryStatsRegulator regulator;
-  SqliteDatabase db(
-      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, sqliteObserver);
 
   db.run(R"(
     CREATE TABLE things (
@@ -859,9 +875,9 @@ KJ_TEST("SQLite observer addQueryStats") {
   int rowsWrittenBefore = sqliteObserver.rowsWritten;
   constexpr int dbRowCount = 3;
   {
-    db.run(regulator, "INSERT INTO things (id) VALUES (10)");
-    db.run(regulator, "INSERT INTO things (id) VALUES (11)");
-    db.run(regulator, "INSERT INTO things (id) VALUES (12)");
+    db.run({.regulator = regulator}, "INSERT INTO things (id) VALUES (10)");
+    db.run({.regulator = regulator}, "INSERT INTO things (id) VALUES (11)");
+    db.run({.regulator = regulator}, "INSERT INTO things (id) VALUES (12)");
   }
   KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == dbRowCount);
   KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == dbRowCount);
@@ -906,7 +922,7 @@ KJ_TEST("SQLite observer addQueryStats") {
   rowsReadBefore = sqliteObserver.rowsRead;
   rowsWrittenBefore = sqliteObserver.rowsWritten;
   {
-    auto query = db.run(regulator, "INSERT INTO things (id) VALUES (100)");
+    auto query = db.run({.regulator = regulator}, "INSERT INTO things (id) VALUES (100)");
     db.reset();
   }
   KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == 1);
@@ -924,6 +940,7 @@ KJ_TEST("SQLite observer reportQueryEvent") {
         kj::Duration,
         uint64_t dbWalBytesWritten,
         int queryError,
+        int extendedErrorCode,
         bool isInternalQuery,
         kj::Maybe<kj::String> queryErrorDescription) override {
       KJ_IF_SOME(err, queryErrorDescription) {
@@ -936,8 +953,8 @@ KJ_TEST("SQLite observer reportQueryEvent") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver;
-  SqliteDatabase db(
-      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, sqliteObserver);
 
   db.run("PRAGMA journal_mode=WAL;");
 
@@ -1009,14 +1026,52 @@ KJ_TEST("SQLite failed statement reset") {
 
   // Same as above but with ValuePtrs, since these use a different path.
   using ValuePtr = SqliteDatabase::Query::ValuePtr;
-  ValuePtr value = int64_t(1);
+  ValuePtr value = static_cast<int64_t>(1);
   KJ_EXPECT_THROW_MESSAGE(
       "UNIQUE constraint failed: things.id", stmt.run(kj::arrayPtr<const ValuePtr>(value)));
-  value = int64_t(4);
+  value = static_cast<int64_t>(4);
   stmt.run(kj::arrayPtr<const ValuePtr>(value));
 
   // Sanity check that those queries were doing something.
   KJ_EXPECT(db.run("SELECT COUNT(*) FROM things").getInt(0) == 4);
+}
+
+KJ_TEST("SQLite extended error codes in messages") {
+  // Verify that error messages include named extended error codes when they differ from the
+  // primary error code.
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(R"(
+    CREATE TABLE things (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL
+    );
+  )");
+
+  db.run("INSERT INTO things VALUES (1, 'alice')");
+
+  // UNIQUE/PRIMARY KEY constraint: extended code should be SQLITE_CONSTRAINT_PRIMARYKEY.
+  KJ_EXPECT_THROW_MESSAGE(
+      "(extended: SQLITE_CONSTRAINT_PRIMARYKEY)", db.run("INSERT INTO things VALUES (1, 'bob')"));
+
+  // NOT NULL constraint: extended code should be SQLITE_CONSTRAINT_NOTNULL.
+  KJ_EXPECT_THROW_MESSAGE(
+      "(extended: SQLITE_CONSTRAINT_NOTNULL)", db.run("INSERT INTO things VALUES (2, NULL)"));
+
+  // Errors where extended == primary should NOT have a parenthesized suffix.
+  // SQLITE_ERROR for "no such table" has no extended variant.
+  try {
+    db.run("SELECT * FROM nonexistent");
+    KJ_FAIL_ASSERT("expected exception");
+  } catch (kj::Exception& e) {
+    auto desc = e.getDescription();
+
+    KJ_EXPECT(desc.contains("SQLITE_ERROR"), desc);
+    // The message should NOT have a parenthesized extended code like "(SQLITE_ERROR_...)".
+    KJ_EXPECT(!desc.contains("(SQLITE_ERROR_"), desc);
+  }
 }
 
 class MockRollbackCallback {
@@ -1383,7 +1438,7 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
 
   void write(uint64_t offset, kj::ArrayPtr<const byte> data) const override {
     KJ_IF_SOME(e, error) {
-      kj::throwFatalException(kj::cp(e));
+      kj::throwFatalException(e.clone());
     }
     inner->write(offset, data);
   }
@@ -1547,12 +1602,65 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   }
 };
 
+KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  // 64 KiB is large enough for the database to open and run simple queries,
+  // but zeroblob(65536) requires allocating a 64 KiB buffer which, on top of
+  // the memory already consumed by opening the database, pushes total usage
+  // past the limit. This exercises our sqliteMemMalloc limit enforcement
+  // rather than SQLite's own hard_heap_limit pragma.
+  static constexpr size_t kTestMemoryLimit = 64 * 1024;
+  SqliteDatabase db(
+      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, kTestMemoryLimit);
+  KJ_EXPECT_THROW_MESSAGE("out of memory: SQLITE_NOMEM", db.run("SELECT hex(zeroblob(65536))"));
+}
+
+KJ_TEST("SQLite memory metering tracks allocations correctly") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/1024 * 1024);
+  size_t memoryBytes = db.getSqliteMemoryBytes();
+  KJ_EXPECT(memoryBytes > 0, "memory should be greater than zero after creating a database");
+  size_t memoryBytesSnapshot = memoryBytes;
+
+  db.run("CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)");
+  memoryBytes = db.getSqliteMemoryBytes();
+  KJ_EXPECT(memoryBytes >= memoryBytesSnapshot, "memory should not decrease when creating a table");
+  memoryBytesSnapshot = memoryBytes;
+
+  db.run("INSERT INTO test VALUES (1, 'hello world')");
+  memoryBytes = db.getSqliteMemoryBytes();
+  KJ_EXPECT(
+      memoryBytes >= memoryBytesSnapshot, "memory should not decrease when inserting into a table");
+  memoryBytesSnapshot = memoryBytes;
+
+  {
+    // Note that query has a different scope so that it does not prevent `PRAGMA shrink_memory`
+    // from taking effect.
+    auto query = db.run("SELECT * FROM test WHERE id = 1");
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getInt(0) == 1);
+    KJ_EXPECT(query.getText(1) == "hello world");
+    memoryBytes = db.getSqliteMemoryBytes();
+    KJ_EXPECT(
+        memoryBytes >= memoryBytesSnapshot, "memory should not decrease when querying a table");
+    memoryBytesSnapshot = memoryBytes;
+  }
+
+  db.run("PRAGMA shrink_memory");
+  memoryBytes = db.getSqliteMemoryBytes();
+  KJ_EXPECT(memoryBytes < memoryBytesSnapshot,
+      "memory should decrease when running `PRAGMA shrink_memory`");
+}
+
 KJ_TEST("I/O exceptions pass through SQLite") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
-  db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+  db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       value INTEGER
@@ -1564,7 +1672,8 @@ KJ_TEST("I/O exceptions pass through SQLite") {
   KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
 
   // It should pass through.
-  KJ_EXPECT_THROW_MESSAGE("test-vfs-error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+  KJ_EXPECT_THROW_MESSAGE(
+      "test-vfs-error", db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     INSERT INTO things(value) VALUES (456);
   )")));
 }
@@ -1588,9 +1697,11 @@ void testCriticalError(const char* expectedErrorMessage,
     }
   });
 
+  KJ_EXPECT(!db.observedCriticalError());
   KJ_EXPECT_THROW_MESSAGE(expectedErrorMessage, triggerErrorFn(db, vfs));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_EXPECT(db.observedCriticalError());
 }
 
 KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
@@ -1611,9 +1722,9 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
   });
 
   // Use a small cache size to force flushing to disk on even a small write
-  db.run(SqliteDatabase::TRUSTED, "PRAGMA cache_size = 1");  // 1 page cache
+  db.run({.regulator = SqliteDatabase::TRUSTED}, "PRAGMA cache_size = 1");  // 1 page cache
 
-  db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+  db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       value INTEGER
@@ -1626,11 +1737,14 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
   // Now arrange for an error on write().
   KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
 
-  KJ_EXPECT_THROW_MESSAGE("test-vfs-error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+  KJ_EXPECT(!db.observedCriticalError());
+  KJ_EXPECT_THROW_MESSAGE(
+      "test-vfs-error", db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     INSERT INTO things(value) VALUES (456);
   )")));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_EXPECT(db.observedCriticalError());
 }
 
 // No test for SQLITE_BUSY as a critical error because we haven't been able to figure out how to
@@ -1651,7 +1765,8 @@ KJ_TEST("SQLite critical error handling for SQLITE_FULL") {
     auto largeData = kj::heapArray<byte>(100000, 'X');  // 100KB
 
     // This should eventually trigger SQLITE_FULL
-    db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_full VALUES (?, ?)", 1, largeData.asPtr());
+    db.run({.regulator = SqliteDatabase::TRUSTED}, "INSERT INTO test_full VALUES (?, ?)", 1,
+        largeData.asPtr());
   });
 }
 
@@ -1672,7 +1787,8 @@ KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
     // Create data that will exceed the memory limit
     auto largeData = kj::heapArray<byte>(50000, 'X');  // 50KB
 
-    db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_nomem VALUES (?, ?)", 2, largeData.asPtr());
+    db.run({.regulator = SqliteDatabase::TRUSTED}, "INSERT INTO test_nomem VALUES (?, ?)", 2,
+        largeData.asPtr());
   });
 }
 

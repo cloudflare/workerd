@@ -117,7 +117,7 @@ template <typename T, typename... Args>
 class DeferredProxyCoroutine: public kj::_::PromiseNode,
                               public kj::_::CoroutineMixin<DeferredProxyCoroutine<T, Args...>, T> {
   using InnerCoroutineAdapter =
-      typename kj::_::stdcoro::coroutine_traits<kj::Promise<T>, Args...>::promise_type;
+      kj::_::stdcoro::coroutine_traits<kj::Promise<T>, Args...>::promise_type;
 
  public:
   using Handle = kj::_::stdcoro::coroutine_handle<DeferredProxyCoroutine>;
@@ -149,11 +149,16 @@ class DeferredProxyCoroutine: public kj::_::PromiseNode,
   // Just trivially forward these.
 
   void unhandled_exception() {
-    // Reject our outer promise if it hasn't yet been fulfilled, then forward to the inner
+    // Reject our outer promise if it hasn't yet been fulfilled, or forward to the inner
     // implementation.
 
-    rejectOuterPromise();
-    inner.unhandled_exception();
+    if (!deferredProxyingHasBegun) {
+      result.addException(kj::getCaughtExceptionAsKj());
+      onReadyEvent.arm();
+      deferredProxyingHasBegun = true;
+    } else {
+      inner.unhandled_exception();
+    }
   }
 
   kj::_::stdcoro::suspend_never yield_value(decltype(BEGIN_DEFERRED_PROXYING)) {
@@ -198,16 +203,6 @@ class DeferredProxyCoroutine: public kj::_::PromiseNode,
     if (!deferredProxyingHasBegun) {
       // Our `result` is put in place already by `get_return_object()`, so all we have to do is arm
       // the event.
-      onReadyEvent.arm();
-      deferredProxyingHasBegun = true;
-    }
-  }
-
-  void rejectOuterPromise() {
-    // Reject the outer promise if it hasn't already settled.
-
-    if (!deferredProxyingHasBegun) {
-      result.addException(kj::getCaughtExceptionAsKj());
       onReadyEvent.arm();
       deferredProxyingHasBegun = true;
     }

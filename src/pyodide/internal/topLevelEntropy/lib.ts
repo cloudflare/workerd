@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 /**
  * Handle the top level getentropy() mess. See entropy_patches.py which is the
  * main file for the entropy patches.
@@ -8,8 +12,11 @@
  */
 import { default as entropyPatches } from 'pyodide-internal:topLevelEntropy/entropy_patches.py';
 import { default as entropyImportContext } from 'pyodide-internal:topLevelEntropy/entropy_import_context.py';
+import { default as entropyImportContextPackages } from 'pyodide-internal:topLevelEntropy/entropy_import_context_packages.py';
 import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
+import { default as allowEntropy } from 'pyodide-internal:topLevelEntropy/allow_entropy.py';
 import { simpleRunPython, PythonUserError } from 'pyodide-internal:util';
+import { CHECK_RNG_STATE, PROCESS_PTH_FILES } from 'pyodide-internal:metadata';
 
 let allowed_entropy_calls_addr: number;
 
@@ -53,7 +60,10 @@ let IN_REQUEST_CONTEXT = false;
  * See entropy_import_context.py where `allow_bad_entropy_calls` is used to dole
  * out the bad entropy.
  */
-export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
+export function getRandomValues(
+  Module: Module,
+  arr: Uint8Array<ArrayBuffer>
+): Uint8Array<ArrayBuffer> {
   if (IN_REQUEST_CONTEXT) {
     return crypto.getRandomValues(arr);
   }
@@ -80,24 +90,25 @@ export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
 export function entropyMountFiles(Module: Module): void {
   const cloudflareDir = Module.FS.sitePackages + '/_cloudflare';
   Module.FS.mkdir(cloudflareDir);
-  Module.FS.writeFile(cloudflareDir + '/__init__.py', new Uint8Array(0), {
-    canOwn: true,
-  });
-  Module.FS.writeFile(
-    cloudflareDir + '/entropy_patches.py',
-    new Uint8Array(entropyPatches),
-    { canOwn: true }
-  );
-  Module.FS.writeFile(
-    cloudflareDir + '/entropy_import_context.py',
-    new Uint8Array(entropyImportContext),
-    { canOwn: true }
-  );
-  Module.FS.writeFile(
-    cloudflareDir + '/import_patch_manager.py',
-    new Uint8Array(importPatchManager),
-    { canOwn: true }
-  );
+  const files: [string, ArrayBuffer][] = [
+    ['__init__.py', new ArrayBuffer(0)],
+    ['entropy_patches.py', entropyPatches],
+    ['entropy_import_context.py', entropyImportContext],
+    ['import_patch_manager.py', importPatchManager],
+    ['allow_entropy.py', allowEntropy],
+  ];
+  if (!PROCESS_PTH_FILES) {
+    files.push([
+      'entropy_import_context_packages.py',
+      entropyImportContextPackages,
+    ]);
+  }
+
+  for (const [name, contents] of files) {
+    Module.FS.writeFile(cloudflareDir + '/' + name, new Uint8Array(contents), {
+      canOwn: true,
+    });
+  }
 }
 
 /**
@@ -125,6 +136,24 @@ del before_top_level
   );
 }
 
+/**
+ * Called to check that random number generator state was not advanced by top level calls. We
+ * manually install overlays that crash when they are called in order to prevent this situation.
+ */
+export function entropyAfterSnapshot(Module: Module): void {
+  if (!CHECK_RNG_STATE) {
+    return;
+  }
+  simpleRunPython(
+    Module,
+    `
+from _cloudflare.entropy_patches import after_snapshot
+after_snapshot()
+del after_snapshot
+    `
+  );
+}
+
 let isReady = false;
 /**
  * Called to reseed rngs and turn off blocks that prevent access to rng APIs.
@@ -142,6 +171,6 @@ export function entropyBeforeRequest(Module: Module): void {
 from _cloudflare.entropy_patches import before_first_request
 before_first_request()
 del before_first_request
-  `
+    `
   );
 }

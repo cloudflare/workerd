@@ -1,3 +1,4 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 def kj_test(
@@ -9,8 +10,7 @@ def kj_test(
         **kwargs):
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
-
-    native.cc_binary(
+    cc_binary(
         name = binary_name,
         testonly = True,
         srcs = [src],
@@ -21,7 +21,11 @@ def kj_test(
             "@platforms//os:linux": 0,
             "//conditions:default": 1,
         }),
+        # For test binaries, reduce thinLTO optimizations and inlining to speed up linking. This
+        # only has an effect if thinLTO is enabled. Also apply dead_strip on macOS to manage binary
+        # sizes.
         linkopts = select({
+            "@platforms//os:linux": ["-Wl,--lto-O1", "-Wl,-mllvm,-import-instr-limit=5"],
             "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
             "//conditions:default": [""],
         }),
@@ -45,17 +49,21 @@ def kj_test(
     )
 
     sh_test(
-        name = test_name,
-        size = size,
+        name = test_name + "@",
         srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias],
-        args = ["$(location " + cross_alias + ")"],
+        args = ["$(location {})".format(cross_alias)],
+        data = data + [cross_alias],
+        tags = tags,
+        size = size,
     )
+
     sh_test(
-        name = test_name + "@all-autogates-enabled",
-        size = size,
-        env = {"WORKERD_ALL_AUTOGATES": "1"},
+        name = test_name + "@all-autogates",
         srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias],
-        args = ["$(location " + cross_alias + ")"],
+        args = ["$(location {})".format(cross_alias)],
+        data = data + [cross_alias],
+        env = {"WORKERD_ALL_AUTOGATES": "1"},
+        # Tag with no-coverage to reduce coverage CI time
+        tags = tags + ["no-coverage"],
+        size = size,
     )

@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-// @ts-ignore
+// @ts-expect-error - no type declarations for node:assert in this context
 import * as assert from 'node:assert';
 
 const encoder = new TextEncoder();
@@ -115,7 +115,7 @@ export const test_images_transform = {
     const result = await env.images
       .input(inputStream(['png']))
       .transform({ rotate: 90 })
-      .output({ format: 'image/avif' });
+      .output({ format: 'image/avif', anim: true });
 
     // Would be image/avif in real life, but mock always returns JSON
     assert.strictEqual(result.contentType(), 'application/json');
@@ -125,6 +125,7 @@ export const test_images_transform = {
       image: 'png',
       output_format: 'image/avif',
       transforms: [{ imageIndex: 0, rotate: 90 }],
+      anim: 'true',
     });
   },
 };
@@ -448,5 +449,241 @@ export const test_images_base64_small_chunks = {
       await decodeBase64ThroughImagesBinding(env, ['QUF', 'BQU', 'FB']),
       'AAAAAA'
     );
+  },
+};
+// GET metadata
+export const test_images_get_success = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const metadata = await env.images.hosted.image('test-image-id').details();
+    assert.notEqual(metadata, null);
+    assert.equal(metadata.id, 'test-image-id');
+    assert.equal(metadata.filename, 'test.jpg');
+    assert.equal(metadata.requireSignedURLs, false);
+    assert.equal(metadata.creator, 'test-creator');
+  },
+};
+
+export const test_images_get_not_found = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const metadata = await env.images.hosted.image('not-found').details();
+    assert.equal(metadata, null);
+  },
+};
+
+// GET image blob
+export const test_images_getImage_success = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const stream = await env.images.hosted.image('test-image-id').bytes();
+    assert.notEqual(stream, null);
+
+    const reader = stream.getReader();
+    let result = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      result += new TextDecoder().decode(value);
+    }
+
+    assert.equal(result, 'MOCK_IMAGE_DATA_test-image-id');
+  },
+};
+
+export const test_images_getImage_not_found = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const stream = await env.images.hosted.image('not-found').bytes();
+    assert.equal(stream, null);
+  },
+};
+
+// UPLOAD
+export const test_images_upload_with_options = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const imageData = new Blob(['test image']).stream();
+    const metadata = await env.images.hosted.upload(imageData, {
+      id: 'custom-id',
+      filename: 'upload-test.jpg',
+      requireSignedURLs: true,
+      metadata: { key: 'value' },
+      creator: 'upload-creator',
+    });
+
+    assert.equal(metadata.id, 'custom-id');
+    assert.equal(metadata.filename, 'upload-test.jpg');
+    assert.equal(metadata.requireSignedURLs, true);
+    assert.deepStrictEqual(metadata.meta, { key: 'value' });
+    assert.equal(metadata.creator, 'upload-creator');
+  },
+};
+
+export const test_images_upload_arraybuffer = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const buffer = new TextEncoder().encode('test image').buffer;
+    const metadata = await env.images.hosted.upload(buffer);
+
+    assert.notEqual(metadata, null);
+    assert.equal(typeof metadata.id, 'string');
+  },
+};
+
+// UPDATE
+export const test_images_update_success = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const metadata = await env.images.hosted.image('test-image-id').update({
+      requireSignedURLs: true,
+      metadata: { updated: true },
+      creator: 'update-creator',
+    });
+
+    assert.equal(metadata.id, 'test-image-id');
+    assert.equal(metadata.requireSignedURLs, true);
+    assert.deepStrictEqual(metadata.meta, { updated: true });
+    assert.equal(metadata.creator, 'update-creator');
+  },
+};
+
+export const test_images_update_not_found = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    /**
+     * @type {any} e;
+     */
+    let e;
+    try {
+      await env.images.hosted
+        .image('not-found')
+        .update({ requireSignedURLs: true });
+    } catch (err) {
+      e = err;
+    }
+    assert.notEqual(e, undefined);
+    assert.equal(e.message.includes('not found'), true);
+  },
+};
+
+// DELETE
+export const test_images_delete_success = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.image('test-image-id').delete();
+    assert.equal(result, true);
+  },
+};
+
+export const test_images_delete_not_found = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.image('not-found').delete();
+    assert.equal(result, false);
+  },
+};
+
+// LIST
+export const test_images_list_default = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.list();
+
+    assert.notEqual(result.images, null);
+    assert.equal(Array.isArray(result.images), true);
+    assert.equal(result.images.length, 2);
+    assert.equal(result.listComplete, true);
+  },
+};
+
+export const test_images_list_with_options = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const result = await env.images.hosted.list({
+      limit: 1,
+      sortOrder: 'asc',
+    });
+
+    assert.equal(result.images.length, 1);
+  },
+};
+
+// UPLOAD with base64 encoding
+export const test_images_upload_base64_stream = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    // Create base64-encoded data
+    const imageData = 'test image content';
+    const base64Data = btoa(imageData);
+    const stream = new Blob([base64Data]).stream();
+
+    const metadata = await env.images.hosted.upload(stream, {
+      filename: 'base64-test.jpg',
+      encoding: 'base64',
+    });
+
+    assert.equal(metadata.filename, 'base64-test.jpg');
+    assert.notEqual(metadata.id, null);
+  },
+};
+
+export const test_images_upload_base64_arraybuffer = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    // Create base64-encoded ArrayBuffer
+    const imageData = 'test image content';
+    const base64Data = btoa(imageData);
+    const buffer = new TextEncoder().encode(base64Data).buffer;
+
+    const metadata = await env.images.hosted.upload(buffer, {
+      filename: 'base64-buffer-test.jpg',
+      encoding: 'base64',
+    });
+
+    assert.equal(metadata.filename, 'base64-buffer-test.jpg');
+    assert.notEqual(metadata.id, null);
   },
 };

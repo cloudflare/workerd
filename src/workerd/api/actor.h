@@ -11,6 +11,7 @@
 
 #include <workerd/api/http.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd {
@@ -61,10 +62,15 @@ class DurableObjectId: public jsg::Object {
     return id->getName();
   }
 
+  jsg::Optional<kj::StringPtr> getJurisdiction() {
+    return id->getJurisdiction();
+  }
+
   JSG_RESOURCE_TYPE(DurableObjectId) {
     JSG_METHOD(toString);
     JSG_METHOD(equals);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
+    JSG_READONLY_INSTANCE_PROPERTY(jurisdiction, getJurisdiction);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -88,7 +94,8 @@ class DurableObject final: public Fetcher {
 
   jsg::Ref<DurableObjectId> getId() {
     return id.addRef();
-  };
+  }
+
   jsg::Optional<kj::StringPtr> getName() {
     return id->getName();
   }
@@ -101,6 +108,7 @@ class DurableObject final: public Fetcher {
 
     JSG_TS_DEFINE(interface DurableObject {
       fetch(request: Request): Response | Promise<Response>;
+      connect?(socket: Socket): void | Promise<void>;
       alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
       webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;
       webSocketClose?(ws: WebSocket, code: number, reason: string, wasClean: boolean): void | Promise<void>;
@@ -108,7 +116,7 @@ class DurableObject final: public Fetcher {
     });
     JSG_TS_OVERRIDE(
       type DurableObjectStub<T extends Rpc.DurableObjectBranded | undefined = undefined> =
-        Fetcher<T, "alarm" | "webSocketMessage" | "webSocketClose" | "webSocketError">
+        Fetcher<T, "alarm" | "connect" | "webSocketMessage" | "webSocketClose" | "webSocketError">
         & {
           readonly id: DurableObjectId;
           readonly name?: string;
@@ -143,7 +151,9 @@ class DurableObjectNamespace: public jsg::Object {
         kj::Maybe<kj::String> locationHint,
         ActorGetMode mode,
         bool enableReplicaRouting,
-        SpanParent parentSpan) = 0;
+        ActorRoutingMode routingMode,
+        SpanParent parentSpan,
+        kj::Maybe<ActorVersion> version) = 0;
   };
 
   DurableObjectNamespace(uint channel, kj::Own<ActorIdFactory> idFactory)
@@ -155,7 +165,7 @@ class DurableObjectNamespace: public jsg::Object {
 
   struct NewUniqueIdOptions {
     // Restricts the new unique ID to a set of colos within a jurisdiction.
-    jsg::Optional<kj::String> jurisdiction;
+    jsg::Optional<kj::Maybe<kj::String>> jurisdiction;
 
     JSG_STRUCT(jurisdiction);
 
@@ -182,14 +192,45 @@ class DurableObjectNamespace: public jsg::Object {
 
   struct GetDurableObjectOptions {
     jsg::Optional<kj::String> locationHint;
+    // `routingMode` may be be of interest to applications using Durable Objects replicas. It can be
+    // one of the following options:
+    //    - none: the default, indicates we will pick for the application.
+    //    - "primary-only": guarantees we route directly to the primary (skip any replicas).
+    jsg::Optional<kj::String> routingMode;
 
-    JSG_STRUCT(locationHint);
+    struct VersionOptions {
+      jsg::Optional<kj::String> cohort;
+      JSG_STRUCT(cohort);
+      JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+        if (!flags.getWorkerdExperimental()) {
+          JSG_TS_OVERRIDE(type VersionOptions = never);
+        }
+      }
+    };
+    jsg::Optional<VersionOptions> version;
 
-    JSG_STRUCT_TS_DEFINE(type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me");
-    // Possible values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#providing-a-location-hint
-    JSG_STRUCT_TS_OVERRIDE({
-      locationHint?: DurableObjectLocationHint;
-    });
+    JSG_STRUCT(locationHint, routingMode, version);
+
+    // DurableObjectLocationHint values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#providing-a-location-hint
+    JSG_STRUCT_TS_DEFINE(
+      type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me";
+      type DurableObjectRoutingMode = "primary-only");
+
+    JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+      if (flags.getWorkerdExperimental()) {
+        JSG_TS_OVERRIDE({
+          locationHint?: DurableObjectLocationHint;
+          routingMode?: DurableObjectRoutingMode;
+          version?: { cohort?: string };
+        });
+      } else {
+        JSG_TS_OVERRIDE({
+          locationHint?: DurableObjectLocationHint;
+          routingMode?: DurableObjectRoutingMode;
+          version: never;
+        });
+      }
+    }
   };
 
   // Gets a durable object by ID or creates it if it doesn't already exist.
@@ -208,14 +249,15 @@ class DurableObjectNamespace: public jsg::Object {
       jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
 
   // Creates a subnamespace with the jurisdiction hardcoded.
-  jsg::Ref<DurableObjectNamespace> jurisdiction(jsg::Lock& js, kj::String jurisdiction);
+  jsg::Ref<DurableObjectNamespace> jurisdiction(
+      jsg::Lock& js, jsg::Optional<kj::Maybe<kj::String>> maybeJurisdiction);
 
   JSG_RESOURCE_TYPE(DurableObjectNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(newUniqueId);
     JSG_METHOD(idFromName);
     JSG_METHOD(idFromString);
-    JSG_METHOD(getByName);
     JSG_METHOD(get);
+    JSG_METHOD(getByName);
     if (flags.getDurableObjectGetExisting()) {
       JSG_METHOD(getExisting);
     }
@@ -225,12 +267,14 @@ class DurableObjectNamespace: public jsg::Object {
     if (flags.getDurableObjectGetExisting()) {
       JSG_TS_OVERRIDE(<T extends Rpc.DurableObjectBranded | undefined = undefined> {
         get(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
+        getByName(name: string, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
         getExisting(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
         jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace<T>;
       });
     } else {
       JSG_TS_OVERRIDE(<T extends Rpc.DurableObjectBranded | undefined = undefined> {
         get(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
+        getByName(name: string, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
         jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace<T>;
       });
     }
@@ -254,12 +298,16 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       jsg::Ref<DurableObjectId> id,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
-      bool enableReplicaRouting)
+      bool enableReplicaRouting,
+      ActorRoutingMode routingMode,
+      kj::Maybe<ActorVersion> version)
       : channelIdOrFactory(kj::mv(channelIdOrFactory)),
         id(kj::mv(id)),
         locationHint(kj::mv(locationHint)),
         mode(mode),
-        enableReplicaRouting(enableReplicaRouting) {}
+        enableReplicaRouting(enableReplicaRouting),
+        routingMode(routingMode),
+        version(kj::mv(version)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
 
@@ -269,6 +317,8 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Maybe<kj::String> locationHint;
   ActorGetMode mode;
   bool enableReplicaRouting;
+  ActorRoutingMode routingMode;
+  kj::Maybe<ActorVersion> version;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
@@ -317,7 +367,19 @@ class DurableObjectClass: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectClass) {
     // No methods - this is just a handle that gets passed to ctx.facets.get()
+
+    JSG_TS_OVERRIDE(
+      interface DurableObjectClass<
+        _T extends Rpc.DurableObjectBranded | undefined = undefined
+      > {}
+    );
   }
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<DurableObjectClass> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::ACTOR_CLASS);
 
  private:
   kj::OneOf<uint, IoOwn<IoChannelFactory::ActorClassChannel>> channel;
@@ -326,6 +388,7 @@ class DurableObjectClass: public jsg::Object {
 #define EW_ACTOR_ISOLATE_TYPES                                                                     \
   api::ColoLocalActorNamespace, api::DurableObject, api::DurableObjectId,                          \
       api::DurableObjectNamespace, api::DurableObjectNamespace::NewUniqueIdOptions,                \
-      api::DurableObjectNamespace::GetDurableObjectOptions, api::DurableObjectClass
+      api::DurableObjectNamespace::GetDurableObjectOptions, api::DurableObjectClass,               \
+      api::DurableObjectNamespace::GetDurableObjectOptions::VersionOptions
 
 }  // namespace workerd::api

@@ -1,0 +1,156 @@
+From 418089631def5cb0cb92b550f2500bcff1230980 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sat, 15 Nov 2025 16:55:07 -0500
+Subject: Don't attempt to use rules_android
+
+
+diff --git a/MODULE.bazel b/MODULE.bazel
+index 47f7f25cfd..dc006ebba8 100644
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -14,102 +14,10 @@
+ 
+ """Perfetto Bazel module configuration for bzlmod."""
+ 
+-module(
+-    name = "perfetto",
+-    version = "0.0.0",
+-)
++module(name = "perfetto")
++bazel_dep(name = "perfetto_cfg", version = "0.0.0")
+ 
+ bazel_dep(name = "bazel_skylib", version = "1.7.1")
+-bazel_dep(name = "platforms", version = "0.0.10")
+-bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
++bazel_dep(name = "platforms", version = "1.0.0")
++bazel_dep(name = "protobuf", version = "33.4")
+ bazel_dep(name = "rules_python", version = "1.0.0")
+-bazel_dep(name = "rules_android", version = "0.6.6")
+-
+-remote_android_extensions = use_extension(
+-    "@rules_android//bzlmod_extensions:android_extensions.bzl",
+-    "remote_android_tools_extensions",
+-)
+-use_repo(remote_android_extensions, "android_tools")
+-
+-android_sdk_repository_extension = use_extension(
+-    "@rules_android//rules/android_sdk_repository:rule.bzl",
+-    "android_sdk_repository_extension",
+-)
+-
+-# When built using 'tools/bazel', 'ANDROID_HOME' environment variable points
+-# to the hermetic Android SDK installation, that should be downloaded first
+-# with 'tools/install-build-deps --android'
+-android_sdk_repository_extension.configure(
+-    api_level = 35,
+-    build_tools_version = "35.0.1",
+-)
+-use_repo(android_sdk_repository_extension, "androidsdk")
+-
+-register_toolchains("@androidsdk//:sdk-toolchain", "@androidsdk//:all")
+-
+-bazel_dep(name = "rules_jvm_external", version = "6.9")
+-bazel_dep(name = "rules_android_ndk", version = "0.1.3")
+-
+-android_ndk_repository_extension = use_extension(
+-    "@rules_android_ndk//:extension.bzl",
+-    "android_ndk_repository_extension",
+-)
+-
+-# When built using 'tools/bazel', 'ANDROID_NDK_HOME' environment variable points
+-# to the hermetic Android NDK installation, that should be downloaded first
+-# with 'tools/install-build-deps --android'
+-android_ndk_repository_extension.configure(
+-    api_level = 26,
+-)
+-use_repo(android_ndk_repository_extension, "androidndk")
+-
+-register_toolchains("@androidndk//:all")
+-
+-# Perfetto configuration repository extension.
+-# This creates @perfetto_cfg which provides PERFETTO_CONFIG struct.
+-perfetto_cfg_ext = use_extension(
+-    "//bazel:perfetto_cfg_ext.bzl",
+-    "perfetto_cfg_ext",
+-)
+-use_repo(perfetto_cfg_ext, "perfetto_cfg")
+-
+-# Perfetto third-party dependencies extension.
+-# These are the same deps defined in //bazel:deps.bzl for WORKSPACE users.
+-perfetto_deps = use_extension(
+-    "//bazel:perfetto_deps.bzl",
+-    "perfetto_deps",
+-)
+-use_repo(
+-    perfetto_deps,
+-    "perfetto_dep_expat",
+-    "perfetto_dep_linenoise",
+-    "perfetto_dep_llvm_demangle",
+-    "perfetto_dep_open_csd",
+-    "perfetto_dep_sqlite",
+-    "perfetto_dep_sqlite_src",
+-    "perfetto_dep_zlib",
+-)
+-
+-# Maven dependencies for Android instrumentation tests.
+-# Use a unique name to avoid conflicts with other modules (e.g., bazel_worker_java).
+-maven = use_extension(
+-    "@rules_jvm_external//:extensions.bzl",
+-    "maven",
+-)
+-maven.install(
+-    name = "perfetto_maven",
+-    artifacts = [
+-        "androidx.test:runner:1.6.2",
+-        "androidx.test:monitor:1.7.2",
+-        "com.google.truth:truth:1.4.4",
+-        "junit:junit:4.13.2",
+-        "androidx.test.ext:junit:1.2.1",
+-    ],
+-    repositories = [
+-        "https://maven.google.com",
+-        "https://repo1.maven.org/maven2",
+-    ],
+-    # Use rules_android's aar_import to avoid toolchain type mismatch.
+-    aar_import_bzl_label = "@rules_android//rules:rules.bzl",
+-)
+-use_repo(maven, "perfetto_maven")
+diff --git a/bazel/rules.bzl b/bazel/rules.bzl
+index 563382a18b..d7e77cf214 100644
+--- a/bazel/rules.bzl
++++ b/bazel/rules.bzl
+@@ -13,9 +13,7 @@
+ # limitations under the License.
+ 
+ load("@perfetto//bazel:proto_gen.bzl", "proto_descriptor_gen", "proto_gen")
+-load("@perfetto//bazel:run_ait_with_adb.bzl", "android_instrumentation_test")
+ load("@perfetto_cfg//:perfetto_cfg.bzl", "PERFETTO_CONFIG")
+-load("@rules_android//android:rules.bzl", "android_binary", "android_library")
+ 
+ # +----------------------------------------------------------------------------+
+ # | Base C++ rules.                                                            |
+@@ -112,12 +110,10 @@ def perfetto_jspb_proto_library(**kwargs):
+ # | Android-related rules                                                      |
+ # +----------------------------------------------------------------------------+
+ def perfetto_android_binary(**kwargs):
+-    if not _rule_override("android_binary", **kwargs):
+-        android_binary(**kwargs)
++    pass
+ 
+ def perfetto_android_library(**kwargs):
+-    if not _rule_override("android_library", **kwargs):
+-        android_library(**kwargs)
++    pass
+ 
+ def perfetto_android_jni_library(**kwargs):
+     if not _rule_override("android_jni_library", **kwargs):
+@@ -170,8 +166,7 @@ def _perfetto_android_jni_library(
+     )
+ 
+ def perfetto_android_instrumentation_test(**kwargs):
+-    if not _rule_override("android_instrumentation_test", **kwargs):
+-        android_instrumentation_test(**kwargs)
++    pass
+ 
+ # +----------------------------------------------------------------------------+
+ # | Misc rules.                                                                |

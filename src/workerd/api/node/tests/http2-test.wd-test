@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "http2-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "http2-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_http2_module"]
+      )
+    ),
+  ],
+);

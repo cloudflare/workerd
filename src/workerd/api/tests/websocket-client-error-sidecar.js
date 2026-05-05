@@ -93,5 +93,5 @@ server.listen(port, host, () => reportAddress(server));
 // Function to handle WebSocket connections
 function handleWebSocketConnection(socket) {
   // Send a welcome message
-  sendMessage(socket, new Uint8Array(2 * 1024 * 1024));
+  sendMessage(socket, new Uint8Array(33 * 1024 * 1024));
 }

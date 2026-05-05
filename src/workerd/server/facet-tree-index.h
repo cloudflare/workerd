@@ -71,7 +71,7 @@ class FacetTreeIndex {
 
   // Offset at which to write the next entry. Typically points to the end of the file (except when
   // a corrupted tail was detected).
-  uint offset;
+  uint offset = 0;
 
   struct EntryPtr;
 
@@ -114,7 +114,7 @@ class FacetTreeIndex {
   }
 
   static constexpr uint64_t MAGIC_NUMBER = 0xc4cdce5bc5b0ef57;
-  static constexpr uint MAX_ID = (uint16_t)kj::maxValue;
+  static constexpr uint MAX_ID = static_cast<uint16_t>(kj::maxValue);
 
   struct EntryHeader {
     uint16_t parentId;

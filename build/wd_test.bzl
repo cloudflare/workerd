@@ -1,4 +1,5 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
+load("@workerd//:build/lint_test.bzl", "lint_test")
 
 def wd_test(
         src,
@@ -6,7 +7,13 @@ def wd_test(
         name = None,
         args = [],
         ts_deps = [],
+        lint = True,
         python_snapshot_test = False,
+        generate_default_variant = True,
+        generate_all_autogates_variant = True,
+        generate_all_compat_flags_variant = True,
+        generate_gc_stress_variant = True,
+        compat_date = "",
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -17,6 +24,18 @@ def wd_test(
      data: Additional files which the .capnp config file may embed. All TypeScript files will be compiled,
      their resulting files will be passed to the test as well. Usually TypeScript or Javascript source files.
      args: Additional arguments to pass to `workerd`. Typically used to pass `--experimental`.
+     generate_default_variant: If True (default), generate the default variant with oldest compat date.
+     generate_all_autogates_variant: If True (default), generate @all-autogates variants.
+     generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
+     generate_gc_stress_variant: If True (default), generate @gc-stress variant.
+     compat_date: If specified, use this compat date for the default variant instead of 2000-01-01.
+        Does not affect the @all-compat-flags variant which always uses 2999-12-31.
+
+    The following test variants are generated based on the flags:
+     - name@ (if generate_default_variant): oldest compat date (2000-01-01)
+     - name@all-compat-flags (if generate_all_compat_flags_variant): newest compat date (2999-12-31)
+     - name@all-autogates (if generate_all_autogates_variant): all autogates + oldest compat date
+     - name@gc-stress (if generate_gc_stress_variant): forced GC at every continuation
     """
 
     # Add workerd binary to "data" dependencies.
@@ -29,42 +48,107 @@ def wd_test(
         name = src.removesuffix(".capnp").removesuffix(".wd-test").removesuffix(".ts-wd-test")
 
     if len(ts_srcs) != 0:
-        # Generated declarations are currently not being used, but required based on https://github.com/aspect-build/rules_ts/issues/719
-        # TODO(build perf): Consider adopting isolated_typecheck to avoid bottlebecks in TS
-        # compilation, see https://github.com/aspect-build/rules_ts/blob/f1b7b83/docs/performance.md#isolated-typecheck.
-        # This will require extensive refactoring and we may only want to enable it for some
-        # targets, but might be useful if we end up transpiling more code later on.
+        # NOTE: We intentionally do not use isolated_typecheck here. While isolated_typecheck can
+        # improve build parallelism by separating transpilation from type-checking, it requires
+        # isolatedDeclarations in tsconfig (which mandates explicit return type annotations on all
+        # exports) and uses --noResolve during transpilation. The --noResolve flag prevents
+        # TypeScript from finding @types/node, breaking IDE support for Node.js imports like
+        # 'node:assert'. Since wd_test TypeScript files are typically standalone test files (leaf
+        # nodes in the dependency graph), the parallelization benefits would be minimal anyway.
         ts_config(
             name = name + "@ts_config",
             src = "tsconfig.json",
-            deps = ["//tools:base-tsconfig"],
+            deps = ["@workerd//tools:base-tsconfig"],
         )
         ts_project(
             name = name + "@ts_project",
             srcs = ts_srcs,
             tsconfig = ":" + name + "@ts_config",
-            allow_js = True,
-            source_map = True,
-            declaration = True,
             deps = ["//src/node:node@tsproject"] + ts_deps,
         )
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
 
+    if lint:
+        lint_srcs = [s for s in data if (s.endswith(".ts") or s.endswith(".mts") or s.endswith(".js") or s.endswith(".mjs")) and not s.startswith("../") and not s.startswith("//")]
+        if lint_srcs:
+            lint_test(
+                name = name,
+                eslintrc_json = "@workerd//tools:base.eslint.config.mjs",
+                tsconfig_json = "@workerd//tools:base.tsconfig.json",
+                srcs = lint_srcs,
+                data = ["tsconfig.json"] if len(ts_srcs) > 0 else [],
+                no_copy_to_bin = [
+                    "@workerd//tools:base.eslint.config.mjs",
+                    "@workerd//tools:base.tsconfig.json",
+                ],
+            )
+
     # Add initial arguments for `workerd test` command.
-    args = [
+    base_args = [
         "$(location //src/workerd/server:workerd_cross)",
         "test",
         "$(location {})".format(src),
     ] + args
 
-    _wd_test(
-        src = src,
-        name = name,
-        data = data,
-        args = args,
-        python_snapshot_test = python_snapshot_test,
-        **kwargs
-    )
+    # Define the compat-date args for each variant
+    # Note: dates must be in range [2000-01-01, 2999-12-31] due to parsing constraints
+    default_compat_args = ["--compat-date=2000-01-01"]
+    newest_compat_args = ["--compat-date=2999-12-31"]
+
+    if compat_date:
+        default_compat_args = ["--compat-date={}".format(compat_date)]
+
+    # Generate variants based on the flags
+    # Default variant: oldest compat date
+    if generate_default_variant:
+        _wd_test(
+            src = src,
+            name = name + "@",
+            data = data,
+            args = base_args + default_compat_args,
+            python_snapshot_test = python_snapshot_test,
+            **kwargs
+        )
+
+    # All compat flags variant: newest compat date
+    if generate_all_compat_flags_variant:
+        _wd_test(
+            src = src,
+            name = name + "@all-compat-flags",
+            data = data,
+            args = base_args + newest_compat_args,
+            python_snapshot_test = python_snapshot_test,
+            **kwargs
+        )
+
+    # All autogates variant: all autogates + oldest compat date
+    if generate_all_autogates_variant:
+        _wd_test(
+            src = src,
+            name = name + "@all-autogates",
+            data = data,
+            args = base_args + default_compat_args + ["--all-autogates"],
+            python_snapshot_test = python_snapshot_test,
+            **kwargs
+        )
+
+    # GC stress variant: forced full GC at every awaitIo continuation.
+    # Uses newest compat date unless the test opted out of @all-compat-flags (meaning
+    # it is compat-date-sensitive), in which case it uses the default compat date.
+    # Tagged off-by-default so it only runs when explicitly requested.
+    if generate_gc_stress_variant:
+        gc_stress_compat = newest_compat_args if generate_all_compat_flags_variant else default_compat_args
+        gc_stress_kwargs = dict(kwargs)
+        gc_stress_tags = gc_stress_kwargs.pop("tags", []) + ["gc-stress", "no-coverage", "off-by-default"]
+        _wd_test(
+            src = src,
+            name = name + "@gc-stress",
+            data = data,
+            args = base_args + gc_stress_compat + ["--gc-stress"],
+            python_snapshot_test = python_snapshot_test,
+            tags = gc_stress_tags,
+            **gc_stress_kwargs
+        )
 
 WINDOWS_TEMPLATE = """
 @echo off
@@ -85,8 +169,14 @@ set TEST_EXIT=!ERRORLEVEL!
 exit /b !TEST_EXIT!
 """
 
-SH_TEMPLATE = """#!/bin/sh
-set -e
+SH_TEMPLATE = """#!/bin/bash
+set -euo pipefail
+
+# Set up coverage for workerd subprocess
+if [ -n "${{COVERAGE_DIR:-}}" ]; then
+    export LLVM_PROFILE_FILE="${{COVERAGE_DIR}}/%p-%m.profraw"
+    export KJ_CLEAN_SHUTDOWN=1
+fi
 
 # Run supervisor to start sidecar if specified
 if [ ! -z "{sidecar}" ]; then
@@ -113,20 +203,21 @@ SH_RUNTEST_NORMAL = """"$@" -dTEST_TMPDIR=$TEST_TMPDIR"""
 # invoke workerd twice for snapshot tests.
 
 WINDOWS_RUNTEST_SNAPSHOT = """
-powershell -Command \"%* --python-save-snapshot\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
+$PYTHON_SAVE_SNAPSHOT_OPTIONS = $ENV:PYTHON_SAVE_SNAPSHOT_ARGS -split ' '
+powershell -Command \"%* --python-save-snapshot @PYTHON_SAVE_SNAPSHOT_OPTIONS\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
 set TEST_EXIT=!ERRORLEVEL!
 if !TEST_EXIT! EQU 0 (
-    powershell -Command \"%* --python-load-snapshot\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
+    powershell -Command \"%* --python-load-snapshot snapshot.bin\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
     set TEST_EXIT=!ERRORLEVEL!
 )
 """
 
 SH_RUNTEST_SNAPSHOT = """
 echo Creating Python Snapshot
-"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-save-snapshot
+"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-save-snapshot $PYTHON_SAVE_SNAPSHOT_ARGS
 echo ""
 echo Using Python Snapshot
-"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-load-snapshot
+"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-load-snapshot snapshot.bin
 """
 
 def _wd_test_impl(ctx):
@@ -188,14 +279,23 @@ def _wd_test_impl(ctx):
         ctx,
         source_attributes = ["src", "data"],
         dependency_attributes = ["workerd", "sidecar", "sidecar_supervisor"],
-        # Include all file types that might contain testable code
-        extensions = ["cc", "c++", "cpp", "cxx", "c", "h", "hh", "hpp", "hxx", "inc", "js", "ts", "mjs", "wd-test", "capnp"],
     )
+    environment = dict(ctx.attr.env)
+    if ctx.attr.python_snapshot_test:
+        environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = ""
+    if ctx.attr.load_snapshot:
+        if ctx.attr.python_snapshot_test:
+            environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = "--python-load-snapshot load_snapshot.bin"
+        f = ctx.attr.load_snapshot.files.to_list()[0]
+        runfiles = runfiles.merge(ctx.runfiles(symlinks = {"load_snapshot.bin": f}))
 
     return [
         DefaultInfo(
             executable = executable,
             runfiles = runfiles,
+        ),
+        RunEnvironmentInfo(
+            environment = environment,
         ),
         instrumented_files_info,
     ]
@@ -217,11 +317,14 @@ _wd_test = rule(
         ),
         # Source file
         "src": attr.label(allow_single_file = True),
-        # The workerd executable is used to run all tests
+        # The workerd executable is used to run all tests.
+        # Using cfg = "target" instead of "exec" ensures workerd is built with coverage
+        # instrumentation when running `bazel coverage`. With cfg = "exec", the binary
+        # would be built in exec configuration which doesn't include coverage flags.
         "workerd": attr.label(
             allow_single_file = True,
             executable = True,
-            cfg = "exec",
+            cfg = "target",
             default = "//src/workerd/server:workerd_cross",
         ),
         # A list of files that this test requires to be present in order to run.
@@ -259,6 +362,9 @@ _wd_test = rule(
             default = "//src/workerd/api/node/tests:sidecar-supervisor",
         ),
         "python_snapshot_test": attr.bool(),
+        "load_snapshot": attr.label(allow_single_file = True),
+        # Environment variables to set when running the test
+        "env": attr.string_dict(),
         # A reference to the Windows platform label, needed for the implementation of wd_test
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },

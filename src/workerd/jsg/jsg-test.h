@@ -30,18 +30,20 @@ class Evaluator {
   //   in cases that the isolate includes types that require configuration, but currently the
   //   type is always default-constructed. What if you want to specify a test config?
  public:
-  explicit Evaluator(V8System& v8System): v8System(v8System) {}
+  explicit Evaluator(V8System& v8System, ConfigurationType config = {})
+      : v8System(v8System),
+        config(config) {}
 
   IsolateType& getIsolate() {
     // Slightly more efficient to only instantiate each isolate type once (17s vs. 20s):
     static IsolateType isolate(
-        v8System, v8::IsolateGroup::GetDefault(), ConfigurationType(), kj::heap<IsolateObserver>());
+        v8System, v8::IsolateGroup::GetDefault(), config, kj::heap<IsolateObserver>());
     return isolate;
   }
 
   void expectEvalModule(
       kj::StringPtr code, kj::StringPtr expectedType, kj::StringPtr expectedValue) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) {
       JSG_WITHIN_CONTEXT_SCOPE(lock,
           lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
         // Compile code as "main" module
@@ -86,7 +88,7 @@ class Evaluator {
   }
 
   void expectEval(kj::StringPtr code, kj::StringPtr expectedType, kj::StringPtr expectedValue) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) {
       JSG_WITHIN_CONTEXT_SCOPE(lock,
           lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
         // Create a string containing the JavaScript source code.
@@ -122,32 +124,32 @@ class Evaluator {
   }
 
   void setAllowEval(bool b) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) { lock.setAllowEval(b); });
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) { lock.setAllowEval(b); });
   }
 
   void setCaptureThrowsAsRejections(bool b) {
     getIsolate().runInLockScope(
-        [&](typename IsolateType::Lock& lock) { lock.setCaptureThrowsAsRejections(b); });
+        [&](IsolateType::Lock& lock) { lock.setCaptureThrowsAsRejections(b); });
   }
 
   void runMicrotasks() {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) { lock.runMicrotasks(); });
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) { lock.runMicrotasks(); });
   }
 
-  void runMicrotasks(typename IsolateType::Lock& lock) {
+  void runMicrotasks(IsolateType::Lock& lock) {
     lock.runMicrotasks();
   }
 
   // Run some C++ code in a new lock and context.
   template <typename Func>
   void run(Func&& func) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
+    getIsolate().runInLockScope([&](IsolateType::Lock& lock) {
       JSG_WITHIN_CONTEXT_SCOPE(lock,
           lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
         v8::TryCatch tryCatch(js.v8Isolate);
 
         try {
-          func(js);
+          func(lock);
         } catch (JsExceptionThrown&) {
           if (tryCatch.HasTerminated()) {
             KJ_FAIL_ASSERT("TerminateExecution() was called");
@@ -162,6 +164,7 @@ class Evaluator {
 
  private:
   V8System& v8System;
+  ConfigurationType config;
 };
 
 struct NumberBox: public Object {
@@ -217,7 +220,6 @@ struct NumberBox: public Object {
   }
 
   JSG_RESOURCE_TYPE(NumberBox) {
-
     JSG_METHOD(increment);
     JSG_METHOD(incrementBy);
     JSG_METHOD(incrementByBox);

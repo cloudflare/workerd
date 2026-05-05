@@ -21,7 +21,10 @@ import { debuglog } from 'node-internal:debuglog';
 export const debug = debuglog;
 export { debuglog };
 
-import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
+import {
+  ERR_INVALID_ARG_TYPE,
+  ERR_METHOD_NOT_IMPLEMENTED,
+} from 'node-internal:internal_errors';
 
 import {
   inspect,
@@ -52,12 +55,10 @@ let isString: ((val: unknown) => boolean) | undefined = undefined;
 let isSymbol: ((val: unknown) => boolean) | undefined = undefined;
 let isUndefined: ((val: unknown) => boolean) | undefined = undefined;
 
-if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol) {
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_v23) {
   isBoolean = (val: unknown): boolean => typeof val === 'boolean';
   isBuffer = (val: unknown): boolean => Buffer.isBuffer(val);
   isDate = (val: unknown): boolean => val instanceof Date;
-  // @ts-expect-error TS2339 Error.isError is not defined in the current typescript version.
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return,@typescript-eslint/no-unsafe-call
   isError = (val: unknown): boolean => Error.isError(val);
   isFunction = (val: unknown): boolean => typeof val === 'function';
   isNull = (val: unknown): boolean => val === null;
@@ -388,6 +389,16 @@ export function styleText(
   return skipColorize ? text : `${left}${text}${right}`;
 }
 
+export function _errnoException(): void {
+  // TODO(soon): We might support this in the future.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('_errnoException');
+}
+
+export function _exceptionWithHostPort(): void {
+  // TODO(soon): We might support this in the future.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('_exceptionWithHostPort');
+}
+
 export default {
   types,
   callbackify,
@@ -421,6 +432,8 @@ export default {
   getCallSite,
   getCallSites,
   isDeepStrictEqual,
+  _errnoException,
+  _exceptionWithHostPort,
 
   isArray,
   // EOL methods

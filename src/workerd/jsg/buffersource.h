@@ -102,9 +102,10 @@ class BackingStore {
 
   // Creates a new BackingStore of the given size.
   template <BufferSourceType T = v8::Uint8Array>
-  static BackingStore alloc(Lock& js, size_t size) {
-    return BackingStore(js.allocBackingStore(size), size, 0, getBufferSourceElementSize<T>(),
-        construct<T>, checkIsIntegerType<T>());
+  static BackingStore alloc(
+      Lock& js, size_t size, Lock::AllocOption init_mode = Lock::AllocOption::ZERO_INITIALIZED) {
+    return BackingStore(js.allocBackingStore(size, init_mode), size, 0,
+        getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
   }
 
   using Disposer = void(void*, size_t, void*);
@@ -310,6 +311,9 @@ class BackingStore {
 class BufferSource {
  public:
   static kj::Maybe<BufferSource> tryAlloc(Lock& js, size_t size);
+
+  // The unsafe variant does not initialize the allocated memory. Use with caution!
+  static kj::Maybe<BufferSource> tryAllocUnsafe(Lock& js, size_t size);
   static BufferSource wrap(
       Lock& js, void* data, size_t size, BackingStore::Disposer disposer, void* ctx);
 
@@ -339,6 +343,7 @@ class BufferSource {
   BackingStore detach(Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeKey = kj::none);
 
   v8::Local<v8::Value> getHandle(Lock& js);
+  JsBufferSource getJsHandle(Lock& js);
 
   template <typename T = kj::byte>
   inline kj::ArrayPtr<T> asArrayPtr() KJ_LIFETIMEBOUND {
@@ -462,7 +467,6 @@ class BufferSource {
 };
 
 // TypeWrapper implementation for the BufferSource type.
-template <typename TypeWrapper>
 class BufferSourceWrapper {
  public:
   static constexpr const char* getName(BufferSource*) {

@@ -13,9 +13,12 @@ def wd_ts_type_test(src, **kwargs):
             "../../definitions/experimental",
         ],
         data = [
-            "//types:types",
+            "//types",
             "//types:test/types/tsconfig.json",
             "//:node_modules/expect-type",
             src,
         ],
+        # Exclude from coverage: depends on //types which runs coverage-instrumented
+        # workerd binary that crashes during type generation
+        tags = ["no-coverage"],
     )

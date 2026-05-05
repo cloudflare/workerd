@@ -5,6 +5,7 @@
 #pragma once
 
 #include <kj/compat/http.h>
+#include <kj/debug.h>
 
 namespace workerd {
 

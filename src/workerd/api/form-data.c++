@@ -8,6 +8,7 @@
 
 #include <workerd/io/io-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/own-util.h>
 
 #include <kj/compat/http.h>
 #include <kj/parse/char.h>
@@ -96,7 +97,7 @@ kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
       return fromBlob(kj::mv(blob));
     }
     KJ_CASE_ONEOF(string, kj::String) {
-      return js.accountedKjString(kj::mv(string));
+      return kj::mv(string);
     }
   }
   KJ_UNREACHABLE;
@@ -133,8 +134,7 @@ void addEscapingQuotes(kj::Vector<char>& builder, kj::StringPtr value) {
 }
 
 void assertUtf8(const auto& params) {
-  KJ_IF_SOME(charsetParam, params.find("charset"_kj)) {
-    auto charset = kj::str(charsetParam);
+  KJ_IF_SOME(charset, params.find("charset"_kj)) {
     JSG_REQUIRE(strcasecmp(charset.cStr(), "utf-8") == 0 ||
             strcasecmp(charset.cStr(), "utf8") == 0 ||
             strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
@@ -241,64 +241,11 @@ void FormData::parseFormDataImpl(
 
     if (message.size() > 0) {
       // If we skipped a CR, we must avoid including it in the message data.
-      message = message.first(message.size() - uint(message.back() == '\r'));
+      message = message.first(message.size() - static_cast<uint>(message.back() == '\r'));
     }
 
     callback(name, filename.map([](auto& str) { return str.asPtr(); }), type, message.asBytes());
   }
-}
-
-kj::Array<FormData::EntryWithoutLock> FormData::parseWithoutLock(
-    kj::ArrayPtr<const char> rawText, kj::StringPtr contentType) {
-  kj::Vector<FormData::EntryWithoutLock> data;
-
-  KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
-    auto& params = parsed.params();
-    if (MimeType::FORM_DATA == parsed) {
-      auto& boundary = JSG_REQUIRE_NONNULL(params.find("boundary"_kj), TypeError,
-          "No boundary string in Content-Type header. The multipart/form-data MIME "
-          "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
-          "boundary=\"abcd\"'. See RFC 7578, section 4.");
-
-      parseFormDataImpl(rawText, boundary,
-          [&](kj::StringPtr name, kj::Maybe<kj::StringPtr> maybeFilename,
-              kj::Maybe<kj::StringPtr> maybeType, kj::ArrayPtr<const kj::byte> message) mutable {
-        KJ_IF_SOME(filename, maybeFilename) {
-          data.add(FormData::EntryWithoutLock{
-            .name = kj::str(name),
-            .filename = kj::str(filename),
-            .type = maybeType.map([](kj::StringPtr str) { return kj::str(str); }),
-            .value = kj::heapArray<kj::byte>(message),
-          });
-        } else {
-          data.add(FormData::EntryWithoutLock{
-            .name = kj::str(name),
-            .value = kj::str(message),
-          });
-        }
-      });
-      return data.releaseAsArray();
-    } else if (MimeType::FORM_URLENCODED == parsed) {
-      // Let's read the charset so we can barf if the body isn't UTF-8.
-      //
-      // TODO(conform): Transcode to UTF-8, like the spec tells us to.
-      assertUtf8(params);
-      kj::Vector<kj::Url::QueryParam> query;
-      parseQueryString(query, kj::mv(rawText));
-      data.reserve(query.size());
-      for (auto& param: query) {
-        data.add(EntryWithoutLock{
-          .name = kj::mv(param.name),
-          .value = kj::mv(param.value),
-        });
-      }
-      return data.releaseAsArray();
-    }
-  }
-  JSG_FAIL_REQUIRE(TypeError,
-      "Unrecognized Content-Type header value. FormData can only "
-      "parse the following MIME types: ",
-      MimeType::FORM_DATA.toString(), ", ", MimeType::FORM_URLENCODED.toString());
 }
 
 void FormData::parse(jsg::Lock& js,
@@ -320,22 +267,20 @@ void FormData::parse(jsg::Lock& js,
           if (convertFilesToStrings) {
             auto messageData = kj::heapArray<char>(message.asChars());
             data.add(FormData::Entry{
-              .name = js.accountedKjString(name),
-              .value = js.accountedKjString(kj::str(kj::mv(messageData))),
+              .name = kj::str(name),
+              .value = kj::str(kj::mv(messageData)),
             });
           } else {
-            auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, message.size());
-            jsg::BufferSource bytes(js, kj::mv(backing));
-            bytes.asArrayPtr().copyFrom(message);
+            auto bytes = jsg::JsArrayBuffer::create(js, message);
             data.add(FormData::Entry{.name = kj::str(name),
-              .value = js.alloc<File>(js, kj::mv(bytes), kj::str(filename),
+              .value = js.alloc<File>(js, jsg::JsBufferSource(bytes), kj::str(filename),
                   kj::str(maybeType.orDefault(nullptr)), dateNow())});
           }
         } else {
           auto messageData = kj::heapArray<char>(message.asChars());
           data.add(FormData::Entry{
-            .name = js.accountedKjString(name),
-            .value = js.accountedKjString(kj::str(kj::mv(messageData))),
+            .name = kj::str(name),
+            .value = kj::str(kj::mv(messageData)),
           });
         }
       });
@@ -350,8 +295,8 @@ void FormData::parse(jsg::Lock& js,
       data.reserve(query.size());
       for (auto& param: query) {
         data.add(Entry{
-          .name = js.accountedKjString(param.name),
-          .value = js.accountedKjString(param.value),
+          .name = kj::str(param.name),
+          .value = kj::str(param.value),
         });
       }
       return;
@@ -413,7 +358,7 @@ FormData::EntryType FormData::clone(jsg::Lock& js, FormData::EntryType& value) {
     }
     KJ_CASE_ONEOF(string, kj::String) {
       auto data = kj::heapArray<char>(string);
-      return js.accountedKjString(kj::str(kj::mv(data)));
+      return kj::str(kj::mv(data));
     }
   }
   KJ_UNREACHABLE;
@@ -512,6 +457,9 @@ void FormData::forEach(jsg::Lock& js,
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items
   // are added to the search params unconditionally on each iteration.
+  // Silence clang-tidy warning, using an iterator would not work correctly if callback
+  // increases the array size.
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < this->data.size(); i++) {
     auto& [key, value] = this->data[i];
     callback(js, clone(js, value), key, JSG_THIS);

@@ -20,7 +20,8 @@
 #endif
 
 #ifdef WORKERD_ICU_DATA_EMBED
-#include <icudata-embed.capnp.h>
+#include "icu-data-file.embed.h"
+
 #include <unicode/udata.h>
 #endif
 
@@ -154,6 +155,9 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   v8::V8::SetFlagsFromString("--js-explicit-resource-management");
   v8::V8::SetFlagsFromString("--js-float16array");
 
+  // Enable source phase imports for WebAssembly modules
+  v8::V8::SetFlagsFromString("--js-source-phase-imports");
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
@@ -165,16 +169,16 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   v8::V8::SetFlagsFromString("--single-threaded-gc");
 #endif  // __APPLE__
 
-  if (isPredictableModeForTest()) {
+  if (isPredictableModeForTest() || isGcStressModeForTest()) {
     v8::V8::SetFlagsFromString("--expose-gc");
   }
 
 #ifdef WORKERD_ICU_DATA_EMBED
   // V8's bazel build files currently don't support the option to embed ICU data, so we do it
-  // ourselves. `WORKERD_ICU_DATA_EMBED`, if defined, will refer to a `kj::ArrayPtr<const byte>`
-  // containing the data.
+  // ourselves. `ICU_DATA_FILE`, if defined, will refer to a `kj::ArrayPtr<const byte>` containing
+  // the data.
   UErrorCode err = U_ZERO_ERROR;
-  udata_setCommonData(EMBEDDED_ICU_DATA_FILE->begin(), &err);
+  udata_setCommonData(ICU_DATA_FILE.begin(), &err);
   udata_setFileAccess(UDATA_ONLY_PACKAGES, &err);
   KJ_ASSERT(err == U_ZERO_ERROR);
 #else
@@ -226,7 +230,14 @@ void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
 }
 
 void IsolateBase::deferDestruction(Item item) {
+  KJ_REQUIRE_NONNULL(ptr, "tried to defer destruction after V8 isolate was destroyed");
+  KJ_REQUIRE(queueState == QueueState::ACTIVE, "tried to defer destruction during isolate shutdown",
+      queueState);
   queue.lockExclusive()->push(kj::mv(item));
+}
+
+void IsolateBase::deferDestruction(v8::Global<v8::Data> item) {
+  deferDestruction(Item(GlobalToDelete(kj::mv(item))));
 }
 
 kj::Arc<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
@@ -255,8 +266,7 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
     // assumes droppable references are not roots. This way V8 only calls ResetRoot() on droppable
     // references, and doesn't even call `IsRoot()` on anything else. See comment about droppable
     // references in Wrappable::attachWrapper() for details.
-    : v8::EmbedderRootsHandler(),
-      isolate(isolate) {
+    : isolate(isolate) {
   isolate->AddGCPrologueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
     // We can expect that any freelisted shims will be collected during a major GC, because
@@ -300,7 +310,8 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   v8::HandleScope scope(isolate);
   auto& wrappable = *static_cast<Wrappable*>(
       handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
-          Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+          Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+          static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
   // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
@@ -361,30 +372,36 @@ static v8::Isolate* newIsolate(
   });
 }
 }  // namespace
-
 IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
     kj::Own<IsolateObserver> observer,
+    kj::Own<ExternalStringAllocator> externalStringAllocator,
     v8::IsolateGroup group)
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
+      exportsAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
-      observer(kj::mv(observer)) {
+      observer(kj::mv(observer)),
+      externalStringAllocator(kj::mv(externalStringAllocator)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     ptr->SetEmbedderRootsHandler(&heapTracer);
 
     ptr->SetFatalErrorHandler(&fatalError);
     ptr->SetOOMErrorHandler(&oomError);
+    // We also set the global OOM error handler.  This is a bit of
+    // a hack: Later in the run the allocation of a sandbox may fail
+    // due to OOM.  In that case we want our handler to be called
+    // even though there is no current isolate.
+    v8::V8::SetFatalMemoryErrorCallback(&oomError);
 
     ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
     ptr->SetData(SET_DATA_ISOLATE_BASE, this);
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
-    ptr->SetWasmJSPIEnabledCallback(&jspiEnabledCallback);
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -437,6 +454,7 @@ IsolateBase::~IsolateBase() noexcept(false) {
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
     ptr->Dispose();
+    ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
   });
@@ -448,6 +466,8 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
 }
 
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
+  KJ_REQUIRE(queueState == QueueState::ACTIVE);
+  queueState = QueueState::DROPPING;
   // Delete all wrappers.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     v8::Locker lock(ptr);
@@ -463,6 +483,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
+    KJ_DEFER(workerExportsObj.Reset());
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
     // that is destroyed before the lock is released.
@@ -470,6 +491,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Destroy all wrappers.
     heapTracer.clearWrappers();
+    queueState = QueueState::DROPPED;
   });
 }
 
@@ -490,9 +512,53 @@ void IsolateBase::oomError(const char* location, const v8::OOMDetails& oom) {
 
 v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike) {
+  // For undefined sources (e.g. eval() with no argument or eval(undefined)),
+  // there is no code generation from strings. V8 returns undefined as-is per spec.
+  // We allow it through without further checks.
+  // Note: Wasm compilation uses a separate callback (AllowWasmCodeGenerationCallback).
+  if (source->IsUndefined()) {
+    return {.codegen_allowed = true, .modified_source = {}};
+  }
+
+  // Allow empty-body, no-parameter Function constructor calls: `new Function()`, or
+  // `class Foo extends Function { constructor() { super(); } }`.
+  //
+  // V8 synthesizes the full source string before calling this callback (see
+  // CreateDynamicFunction in v8/src/builtins/builtins-function.cc). When called with
+  // no arguments (argc == 0), isCodeLike is true and the source is the exact string
+  // below — which contains no user-provided code.
+  //
+  // Security notes:
+  //   - isCodeLike is false on the eval() path, so this check cannot be reached via
+  //     eval(). An attacker cannot use eval("<evil> {\n\n}") to bypass this.
+  //   - isCodeLike is also false when any arguments are plain strings (not CodeLike
+  //     objects), so new Function('a', 'b', undefined) cannot reach this check either.
+  //   - The exact string match ensures no user content (parameters or body) is present.
+  //   - We intentionally only match the no-parameter, no-body case. Calls like
+  //     new Function('a', 'b') are always blocked since the last argument becomes the
+  //     body via ToString(), producing a non-matching source string.
+  //
+  // NOTE: This pattern is tied to V8's CreateDynamicFunction format in
+  // builtins-function.cc:46-71 and must be reviewed during V8 updates. If the format
+  // changes, the setup-test and worker-test will fail, signaling that this constant
+  // needs updating.
+  static constexpr auto kEmptyFunctionSource = "(function anonymous(\n) {\n\n})"_kj;
+  if (isCodeLike && source->IsString() &&
+      kj::str(source.As<v8::String>()) == kEmptyFunctionSource) {
+    return {.codegen_allowed = true, .modified_source = {}};
+  }
+
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
-  IsolateBase* self = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  return {.codegen_allowed = self->evalAllowed, .modified_source = {}};
+  auto& base = IsolateBase::from(isolate);
+  if (base.evalAllowed) {
+    // If eval is allowed, notify the observer so that it can take any action necessary.
+    // Once possible action is logging the source to be evaluated for auditing purposes.
+    // TODO(cleanup): Consider making it so that `onDynamicEval()` returns true or false
+    // depending on whether eval should be allowed or not.
+    base.observer->onDynamicEval(context, source, isCodeLike ? IsCodeLike::YES : IsCodeLike::NO);
+  }
+
+  return {.codegen_allowed = base.evalAllowed, .modified_source = {}};
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
@@ -500,12 +566,6 @@ bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8
   IsolateBase* self =
       static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
   return self->evalAllowed;
-}
-
-bool IsolateBase::jspiEnabledCallback(v8::Local<v8::Context> context) {
-  IsolateBase* self =
-      static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
-  return self->jspiEnabled;
 }
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
@@ -705,6 +765,9 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
       break;
     case v8::StateTag::IDLE:
       vmState = "idle";
+      break;
+    case v8::StateTag::IDLE_EXTERNAL:
+      vmState = "idle_external";
       break;
     case v8::StateTag::LOGGING:
       vmState = "logging";

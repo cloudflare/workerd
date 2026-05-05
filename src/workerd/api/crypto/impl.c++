@@ -4,7 +4,10 @@
 
 #include "impl.h"
 
+#include "simdutf.h"
+
 #include <workerd/api/util.h>
+#include <workerd/jsg/jsvalue.h>
 #include <workerd/jsg/memory.h>
 
 #include <openssl/bn.h>
@@ -100,6 +103,8 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
     case ERR_LIB_RSA:
       switch (ERR_GET_REASON(ERR_peek_last_error())) {
         MAP_ERROR(RSA_R_DATA_LEN_NOT_EQUAL_TO_MOD_LEN, "Invalid RSA signature.");
+        MAP_ERROR(RSA_R_KEY_SIZE_TOO_SMALL, "RSA key size is too small.");
+        MAP_ERROR(RSA_R_INTERNAL_ERROR, "RSA operation failed.");
 #undef MAP_ERROR
 
         default:
@@ -122,7 +127,7 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
   }
   kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line,
       kj::str("OpenSSL call failed: ", code, "; ",
-          lines.size() == 0 ? "but ERR_get_error() returned 0"_kj : kj::strArray(lines, "; "))));
+          lines.empty() ? "but ERR_get_error() returned 0"_kj : kj::strArray(lines, "; "))));
 }
 
 kj::Vector<kj::OneOf<kj::StringPtr, OpensslUntranslatedError>> consumeAllOpensslErrors() {
@@ -135,6 +140,10 @@ kj::Vector<kj::OneOf<kj::StringPtr, OpensslUntranslatedError>> consumeAllOpenssl
           switch (ERR_GET_REASON(error)) {
             case RSA_R_DATA_LEN_NOT_EQUAL_TO_MOD_LEN:
               return "Invalid RSA signature."_kj;
+            case RSA_R_KEY_SIZE_TOO_SMALL:
+              return "RSA key size is too small."_kj;
+            case RSA_R_INTERNAL_ERROR:
+              return "RSA operation failed."_kj;
           }
           break;
         case ERR_LIB_EC:
@@ -218,10 +227,6 @@ bool CryptoKey::Impl::equals(const kj::Array<kj::byte>& other) const {
   KJ_FAIL_REQUIRE("Unable to compare raw key material for this key");
 }
 
-bool CryptoKey::Impl::equals(const jsg::BufferSource& other) const {
-  KJ_FAIL_REQUIRE("Unable to compare raw key material for this key");
-}
-
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::from(jsg::Lock& js, kj::Own<EVP_PKEY> key) {
   switch (EVP_PKEY_id(key.get())) {
     case EVP_PKEY_RSA:
@@ -256,7 +261,13 @@ kj::Maybe<kj::Own<BIGNUM>> toBignum(kj::ArrayPtr<const kj::byte> data) {
 }
 
 BIGNUM* toBignumUnowned(kj::ArrayPtr<const kj::byte> data) {
-  return BN_bin2bn(data.begin(), data.size(), nullptr);
+  auto result = BN_bin2bn(data.begin(), data.size(), nullptr);
+  JSG_REQUIRE(result != nullptr, DOMOperationError, "Error importing BIGNUM");
+  return result;
+}
+
+UniqueBignum toBignumOwned(kj::ArrayPtr<const kj::byte> data) {
+  return UniqueBignum(toBignumUnowned(data), &BN_clear_free);
 }
 
 kj::Maybe<kj::Array<kj::byte>> bignumToArray(const BIGNUM& n) {
@@ -279,27 +290,28 @@ kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& n, size_t padde
   return kj::mv(result);
 }
 
-kj::Maybe<jsg::BufferSource> bignumToArray(jsg::Lock& js, const BIGNUM& n) {
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, BN_num_bytes(&n));
-  if (BN_bn2bin(&n, backing.asArrayPtr().begin()) != backing.size()) return kj::none;
-  return jsg::BufferSource(js, kj::mv(backing));
+kj::Maybe<jsg::JsUint8Array> bignumToArray(jsg::Lock& js, const BIGNUM& n) {
+  auto buf = jsg::JsUint8Array::create(js, BN_num_bytes(&n));
+  if (BN_bn2bin(&n, buf.asArrayPtr().begin()) != buf.asArrayPtr().size()) return kj::none;
+  return buf;
 }
 
-kj::Maybe<jsg::BufferSource> bignumToArrayPadded(jsg::Lock& js, const BIGNUM& n) {
-  auto result = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, BN_num_bytes(&n));
-  if (BN_bn2binpad(&n, result.asArrayPtr().begin(), result.size()) != result.size()) {
+kj::Maybe<jsg::JsUint8Array> bignumToArrayPadded(jsg::Lock& js, const BIGNUM& n) {
+  auto buf = jsg::JsUint8Array::create(js, BN_num_bytes(&n));
+  if (BN_bn2binpad(&n, buf.asArrayPtr().begin(), buf.asArrayPtr().size()) !=
+      buf.asArrayPtr().size()) {
     return kj::none;
   }
-  return jsg::BufferSource(js, kj::mv(result));
+  return buf;
 }
 
-kj::Maybe<jsg::BufferSource> bignumToArrayPadded(
+kj::Maybe<jsg::JsUint8Array> bignumToArrayPadded(
     jsg::Lock& js, const BIGNUM& n, size_t paddedLength) {
-  auto result = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, paddedLength);
-  if (BN_bn2bin_padded(result.asArrayPtr().begin(), paddedLength, &n) == 0) {
+  auto buf = jsg::JsUint8Array::create(js, paddedLength);
+  if (BN_bn2bin_padded(buf.asArrayPtr().begin(), paddedLength, &n) == 0) {
     return kj::none;
   }
-  return jsg::BufferSource(js, kj::mv(result));
+  return buf;
 }
 
 kj::Own<BIGNUM> newBignum() {
@@ -362,7 +374,7 @@ kj::Maybe<kj::Array<kj::byte>> simdutfBase64UrlDecode(kj::StringPtr input) {
   return buf.slice(0, result.count).attach(kj::mv(buf));
 }
 
-kj::Maybe<jsg::BufferSource> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr input) {
+kj::Maybe<jsg::JsUint8Array> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr input) {
   auto size = simdutf::maximal_binary_length_from_base64(input.begin(), input.size());
   KJ_STACK_ARRAY(kj::byte, buf, size, 1024, 4096);
   auto result = simdutf::base64_to_binary(
@@ -370,12 +382,10 @@ kj::Maybe<jsg::BufferSource> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr
   if (result.error != simdutf::SUCCESS) return kj::none;
   KJ_ASSERT(result.count <= size);
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, result.count);
-  backing.asArrayPtr().copyFrom(buf.first(result.count));
-  return jsg::BufferSource(js, kj::mv(backing));
+  return jsg::JsUint8Array::create(js, buf.first(result.count));
 }
 
-jsg::BufferSource simdutfBase64UrlDecodeChecked(
+jsg::JsUint8Array simdutfBase64UrlDecodeChecked(
     jsg::Lock& js, kj::StringPtr input, kj::StringPtr error) {
   return JSG_REQUIRE_NONNULL(simdutfBase64UrlDecode(js, input), Error, error);
 }

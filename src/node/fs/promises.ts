@@ -3,12 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import * as fs from 'node-internal:internal_fs_promises';
-import * as constants from 'node-internal:internal_fs_constants';
 
 export * from 'node-internal:internal_fs_promises';
-export { constants };
 
 export default {
-  constants,
   ...fs,
 };

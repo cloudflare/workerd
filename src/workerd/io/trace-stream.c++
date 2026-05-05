@@ -1,5 +1,6 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/io-own.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
@@ -9,12 +10,13 @@
 
 #include <capnp/membrane.h>
 
+#include <algorithm>
+
 namespace workerd::tracing {
 namespace {
 
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
-  V(ATTACHMENT, "attachment")                                                                      \
   V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
   V(CANCELED, "canceled")                                                                          \
@@ -22,12 +24,18 @@ namespace {
   V(CFJSON, "cfJson")                                                                              \
   V(CLOSE, "close")                                                                                \
   V(CODE, "code")                                                                                  \
+  V(CONNECT, "connect")                                                                            \
+  V(COUNT, "count")                                                                                \
   V(CPUTIME, "cpuTime")                                                                            \
   V(CRON, "cron")                                                                                  \
   V(CUSTOM, "custom")                                                                              \
   V(DAEMONDOWN, "daemonDown")                                                                      \
+  V(DEBUG, "debug")                                                                                \
   V(DIAGNOSTICCHANNEL, "diagnosticChannel")                                                        \
+  V(DIAGNOSTIC, "diagnostic")                                                                      \
+  V(DIAGNOSTICSTYPE, "diagnosticsType")                                                            \
   V(DISPATCHNAMESPACE, "dispatchNamespace")                                                        \
+  V(DROPPEDEVENTS, "droppedEvents")                                                                \
   V(EMAIL, "email")                                                                                \
   V(ENTRYPOINT, "entrypoint")                                                                      \
   V(ERROR, "error")                                                                                \
@@ -39,32 +47,28 @@ namespace {
   V(FETCH, "fetch")                                                                                \
   V(HEADERS, "headers")                                                                            \
   V(HIBERNATABLEWEBSOCKET, "hibernatableWebSocket")                                                \
-  V(HIBERNATE, "hibernate")                                                                        \
   V(ID, "id")                                                                                      \
   V(INFO, "info")                                                                                  \
+  V(INTERNALERROR, "internalError")                                                                \
   V(INVOCATIONID, "invocationId")                                                                  \
   V(JSRPC, "jsrpc")                                                                                \
   V(KILLSWITCH, "killSwitch")                                                                      \
-  V(LABEL, "label")                                                                                \
   V(LEVEL, "level")                                                                                \
-  V(LINK, "link")                                                                                  \
   V(LOADSHED, "loadShed")                                                                          \
   V(LOG, "log")                                                                                    \
   V(MAILFROM, "mailFrom")                                                                          \
   V(MESSAGE, "message")                                                                            \
   V(METHOD, "method")                                                                              \
-  V(METHODNAME, "methodName")                                                                      \
   V(NAME, "name")                                                                                  \
   V(OK, "ok")                                                                                      \
   V(ONSET, "onset")                                                                                \
   V(OUTCOME, "outcome")                                                                            \
-  V(PARENTSPANID, "parentSpanId")                                                                  \
+  V(PREVIEW, "preview")                                                                            \
   V(QUEUE, "queue")                                                                                \
   V(QUEUENAME, "queueName")                                                                        \
   V(RAWSIZE, "rawSize")                                                                            \
   V(RCPTTO, "rcptTo")                                                                              \
   V(RESPONSESTREAMDISCONNECTED, "responseStreamDisconnected")                                      \
-  V(RESUME, "resume")                                                                              \
   V(RETURN, "return")                                                                              \
   V(SCHEDULED, "scheduled")                                                                        \
   V(SCHEDULEDTIME, "scheduledTime")                                                                \
@@ -74,21 +78,25 @@ namespace {
   V(SCRIPTVERSION, "scriptVersion")                                                                \
   V(SEQUENCE, "sequence")                                                                          \
   V(SPANCLOSE, "spanClose")                                                                        \
+  V(SPANCONTEXT, "spanContext")                                                                    \
   V(SPANID, "spanId")                                                                              \
   V(SPANOPEN, "spanOpen")                                                                          \
   V(STACK, "stack")                                                                                \
   V(STATUSCODE, "statusCode")                                                                      \
+  V(SLUG, "slug")                                                                                  \
+  V(STREAMDIAGEVENT, "streamDiagEvent")                                                            \
+  V(STREAMDIAGNOSTIC, "streamDiagnostic")                                                          \
   V(TAG, "tag")                                                                                    \
   V(TIMESTAMP, "timestamp")                                                                        \
   V(TRACEID, "traceId")                                                                            \
   V(TRACE, "trace")                                                                                \
   V(TRACES, "traces")                                                                              \
-  V(TRIGGER, "trigger")                                                                            \
   V(TYPE, "type")                                                                                  \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
   V(VALUE, "value")                                                                                \
   V(WALLTIME, "wallTime")                                                                          \
+  V(WARN, "warn")                                                                                  \
   V(WASCLEAN, "wasClean")
 
 #define V(N, L) constexpr kj::LiteralStringConst N##_STR = L##_kjc;
@@ -132,9 +140,9 @@ class StringCache final {
 // and define a set of serializers to these types.
 
 // Serialize attribute value
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
+jsg::JsValue ToJs(jsg::Lock& js, const Attribute::Value& value) {
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(str, kj::String) {
+    KJ_CASE_ONEOF(str, kj::ConstString) {
       return js.str(str);
     }
     KJ_CASE_ONEOF(b, bool) {
@@ -151,7 +159,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
 }
 
 // Serialize attribute key:value(s) pair object
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Attribute& attribute, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, NAME_STR, cache.get(js, attribute.name));
 
@@ -167,8 +175,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCach
 }
 
 // Serialize "attributes" event
-jsg::JsValue ToJs(
-    jsg::Lock& js, kj::ArrayPtr<const tracing::Attribute> attributes, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, kj::ArrayPtr<const Attribute> attributes, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ATTRIBUTES_STR));
   obj.set(js, INFO_STR, js.arr(attributes, [&cache](jsg::Lock& js, const auto& attr) {
@@ -177,14 +184,14 @@ jsg::JsValue ToJs(
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchResponseInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
   obj.set(js, STATUSCODE_STR, js.num(info.statusCode));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
   obj.set(js, METHOD_STR, cache.get(js, kj::str(info.method)));
@@ -193,7 +200,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCach
     obj.set(js, CFJSON_STR, jsg::JsValue(js.parseJson(info.cfJson).getHandle(js)));
   }
 
-  auto ToJs = [](jsg::Lock& js, const tracing::FetchEventInfo::Header& header, StringCache& cache) {
+  auto ToJs = [](jsg::Lock& js, const FetchEventInfo::Header& header, StringCache& cache) {
     auto obj = js.obj();
     obj.set(js, NAME_STR, cache.get(js, header.name));
     obj.set(js, VALUE_STR, js.str(header.value));
@@ -207,29 +214,25 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCach
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::JsRpcEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const JsRpcEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, JSRPC_STR));
-  obj.set(js, METHODNAME_STR, cache.get(js, info.methodName));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const ScheduledEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SCHEDULED_STR));
   if (isPredictableModeForTest()) {
     obj.set(js, SCHEDULEDTIME_STR, js.date(kj::UNIX_EPOCH));
   } else {
-    // TODO(streaming-tail): Depending on if the schedule handler is invoked with a scheduledTime
-    // argument or not, the value in the trace can be either the current time or the scheduledTime
-    // parameter. Is this the correct behavior?
     obj.set(js, SCHEDULEDTIME_STR, js.date(info.scheduledTime));
   }
   obj.set(js, CRON_STR, js.str(info.cron));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::AlarmEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const AlarmEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ALARM_STR));
   if (isPredictableModeForTest()) {
@@ -240,7 +243,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::AlarmEventInfo& info, StringCach
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::QueueEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const QueueEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, QUEUE_STR));
   obj.set(js, QUEUENAME_STR, js.str(info.queueName));
@@ -248,7 +251,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::QueueEventInfo& info, StringCach
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::EmailEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const EmailEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, EMAIL_STR));
   obj.set(js, MAILFROM_STR, js.str(info.mailFrom));
@@ -257,7 +260,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::EmailEventInfo& info, StringCach
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::TraceEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const TraceEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, TRACE_STR));
   obj.set(js, TRACES_STR,
@@ -270,23 +273,22 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TraceEventInfo& info, StringCach
   return obj;
 }
 
-jsg::JsValue ToJs(
-    jsg::Lock& js, const tracing::HibernatableWebSocketEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const HibernatableWebSocketEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, HIBERNATABLEWEBSOCKET_STR));
 
   KJ_SWITCH_ONEOF(info.type) {
-    KJ_CASE_ONEOF(message, tracing::HibernatableWebSocketEventInfo::Message) {
+    KJ_CASE_ONEOF(message, HibernatableWebSocketEventInfo::Message) {
       auto mobj = js.obj();
       mobj.set(js, TYPE_STR, cache.get(js, MESSAGE_STR));
       obj.set(js, INFO_STR, mobj);
     }
-    KJ_CASE_ONEOF(error, tracing::HibernatableWebSocketEventInfo::Error) {
+    KJ_CASE_ONEOF(error, HibernatableWebSocketEventInfo::Error) {
       auto mobj = js.obj();
       mobj.set(js, TYPE_STR, cache.get(js, ERROR_STR));
       obj.set(js, INFO_STR, mobj);
     }
-    KJ_CASE_ONEOF(close, tracing::HibernatableWebSocketEventInfo::Close) {
+    KJ_CASE_ONEOF(close, HibernatableWebSocketEventInfo::Close) {
       auto mobj = js.obj();
       mobj.set(js, TYPE_STR, cache.get(js, CLOSE_STR));
       mobj.set(js, CODE_STR, js.num(close.code));
@@ -298,22 +300,13 @@ jsg::JsValue ToJs(
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Resume& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const ConnectEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, TYPE_STR, cache.get(js, RESUME_STR));
-
-  KJ_IF_SOME(attachment, info.attachment) {
-    jsg::Serializer::Released data{
-      .data = kj::heapArray<kj::byte>(attachment),
-    };
-    jsg::Deserializer deser(js, data);
-    obj.set(js, ATTACHMENT_STR, deser.readValue(js));
-  }
-
+  obj.set(js, TYPE_STR, cache.get(js, CONNECT_STR));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::CustomEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const CustomEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, CUSTOM_STR));
   return obj;
@@ -341,25 +334,19 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
       return cache.get(js, RESPONSESTREAMDISCONNECTED_STR);
     case EventOutcome::SCRIPT_NOT_FOUND:
       return cache.get(js, SCRIPTNOTFOUND_STR);
+    case EventOutcome::INTERNAL_ERROR:
+      return cache.get(js, INTERNALERROR_STR);
     case EventOutcome::UNKNOWN:
       return cache.get(js, UNKNOWN_STR);
   }
   KJ_UNREACHABLE;
 }
 
-template <typename Enum>
-kj::String enumToStr(const Enum& var) {
-  // TODO(cleanup): Port this to capnproto.
-  auto enums = capnp::Schema::from<Enum>().getEnumerants();
-  uint i = static_cast<uint>(var);
-  KJ_ASSERT(i < enums.size(), "invalid enum value");
-  return kj::str(enums[i].getProto().getName());
-}
-
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ONSET_STR));
-  obj.set(js, EXECUTIONMODEL_STR, cache.get(js, enumToStr(onset.workerInfo.executionModel)));
+  obj.set(js, EXECUTIONMODEL_STR, cache.get(js, kj::str(onset.workerInfo.executionModel)));
+  obj.set(js, SPANID_STR, js.str(onset.spanId.toGoString()));
 
   KJ_IF_SOME(ns, onset.workerInfo.dispatchNamespace) {
     obj.set(js, DISPATCHNAMESPACE_STR, js.str(ns));
@@ -388,52 +375,57 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
     }
     obj.set(js, SCRIPTVERSION_STR, vobj);
   }
-
-  KJ_IF_SOME(trigger, onset.trigger) {
-    auto tobj = js.obj();
-    tobj.set(js, TRACEID_STR, js.str(trigger.traceId.toGoString()));
-    tobj.set(js, INVOCATIONID_STR, js.str(trigger.invocationId.toGoString()));
-    tobj.set(js, SPANID_STR, js.str(trigger.spanId.toGoString()));
-    obj.set(js, TRIGGER_STR, tobj);
+  KJ_IF_SOME(preview, onset.workerInfo.preview) {
+    auto pobj = js.obj();
+    pobj.set(js, ID_STR, js.str(preview.id));
+    pobj.set(js, SLUG_STR, js.str(preview.slug));
+    pobj.set(js, NAME_STR, js.str(preview.name));
+    obj.set(js, PREVIEW_STR, pobj);
   }
 
   KJ_SWITCH_ONEOF(onset.info) {
-    KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
+    KJ_CASE_ONEOF(fetch, FetchEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, fetch, cache));
     }
-    KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
+    KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, jsrpc, cache));
     }
-    KJ_CASE_ONEOF(scheduled, tracing::ScheduledEventInfo) {
+    KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, scheduled, cache));
     }
-    KJ_CASE_ONEOF(alarm, tracing::AlarmEventInfo) {
+    KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, alarm, cache));
     }
-    KJ_CASE_ONEOF(queue, tracing::QueueEventInfo) {
+    KJ_CASE_ONEOF(queue, QueueEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, queue, cache));
     }
-    KJ_CASE_ONEOF(email, tracing::EmailEventInfo) {
+    KJ_CASE_ONEOF(email, EmailEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, email, cache));
     }
-    KJ_CASE_ONEOF(trace, tracing::TraceEventInfo) {
+    KJ_CASE_ONEOF(trace, TraceEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, trace, cache));
     }
-    KJ_CASE_ONEOF(hws, tracing::HibernatableWebSocketEventInfo) {
+    KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, hws, cache));
     }
-    KJ_CASE_ONEOF(resume, tracing::Resume) {
-      obj.set(js, INFO_STR, ToJs(js, resume, cache));
+    KJ_CASE_ONEOF(connect, ConnectEventInfo) {
+      obj.set(js, INFO_STR, ToJs(js, connect, cache));
     }
-    KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
+    KJ_CASE_ONEOF(custom, CustomEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, custom, cache));
     }
+  }
+
+  if (onset.attributes.size() > 0) {
+    obj.set(js, ATTRIBUTES_STR,
+        js.arr(onset.attributes.asPtr(),
+            [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); }));
   }
 
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Outcome& outcome, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Outcome& outcome, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, OUTCOME_STR));
   obj.set(js, OUTCOME_STR, ToJs(js, outcome.outcome, cache));
@@ -447,33 +439,22 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Outcome& outcome, StringCache& c
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Hibernate& hibernate, StringCache& cache) {
-  auto obj = js.obj();
-  obj.set(js, TYPE_STR, cache.get(js, HIBERNATE_STR));
-  return obj;
-}
-
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const SpanOpen& spanOpen, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
   obj.set(js, NAME_STR, js.str(spanOpen.operationName));
-
-  // TODO(streaming-tail): Finalize format for providing span ID/parent span ID
-  if (isPredictableModeForTest()) {
-    obj.set(js, PARENTSPANID_STR, js.str(kj::hex((uint64_t)0x2a2a2a2a2a2a2a2a)));
-  } else {
-    obj.set(js, PARENTSPANID_STR, js.str(kj::hex(spanOpen.parentSpanId)));
-  }
+  // Export span ID as non-truncated hex value – in practice this will be a random span ID.
+  obj.set(js, SPANID_STR, js.str(spanOpen.spanId.toGoString()));
 
   KJ_IF_SOME(info, spanOpen.info) {
     KJ_SWITCH_ONEOF(info) {
-      KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
+      KJ_CASE_ONEOF(fetch, FetchEventInfo) {
         obj.set(js, INFO_STR, ToJs(js, fetch, cache));
       }
-      KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
+      KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
         obj.set(js, INFO_STR, ToJs(js, jsrpc, cache));
       }
-      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
+      KJ_CASE_ONEOF(custom, CustomInfo) {
         obj.set(js, INFO_STR, ToJs(js, custom.asPtr(), cache));
       }
     }
@@ -481,14 +462,14 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache&
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanClose& spanClose, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANCLOSE_STR));
   obj.set(js, OUTCOME_STR, ToJs(js, spanClose.outcome, cache));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::DiagnosticChannelEvent& dce, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const DiagnosticChannelEvent& dce, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, DIAGNOSTICCHANNEL_STR));
   obj.set(js, CHANNEL_STR, cache.get(js, dce.channel));
@@ -500,7 +481,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::DiagnosticChannelEvent& dce, Str
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Exception& ex, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Exception& ex, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, EXCEPTION_STR));
   obj.set(js, NAME_STR, cache.get(js, ex.name));
@@ -512,10 +493,22 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Exception& ex, StringCache& cach
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const LogLevel& level, StringCache& cache) {
-  return cache.get(js, toLower(enumToStr<LogLevel>(level)));
+  switch (level) {
+    case LogLevel::DEBUG_:
+      return cache.get(js, DEBUG_STR);
+    case LogLevel::INFO:
+      return cache.get(js, INFO_STR);
+    case LogLevel::LOG:
+      return cache.get(js, LOG_STR);
+    case LogLevel::WARN:
+      return cache.get(js, WARN_STR);
+    case LogLevel::ERROR:
+      return cache.get(js, ERROR_STR);
+  }
+  KJ_UNREACHABLE;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Log& log, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, LOG_STR));
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
@@ -524,7 +517,20 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Log& log, StringCache& cache) {
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const StreamDiagnosticsEvent& streamDiag, StringCache& cache) {
+  auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, STREAMDIAGNOSTIC_STR));
+  // At present we only support the droppedEvents type.
+
+  // Handle droppedEvents
+  auto droppedEventsDiagnostic = js.obj();
+  droppedEventsDiagnostic.set(js, DIAGNOSTICSTYPE_STR, cache.get(js, DROPPEDEVENTS_STR));
+  droppedEventsDiagnostic.set(js, COUNT_STR, js.num(streamDiag.droppedEventsCount));
+  obj.set(js, DIAGNOSTIC_STR, kj::mv(droppedEventsDiagnostic));
+  return obj;
+}
+
+jsg::JsValue ToJs(jsg::Lock& js, const Return& ret, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, RETURN_STR));
 
@@ -535,56 +541,48 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache)
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Link& link, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, TYPE_STR, cache.get(js, LINK_STR));
-  KJ_IF_SOME(label, link.label) {
-    obj.set(js, LABEL_STR, js.str(label));
-  }
-  obj.set(js, TRACEID_STR, js.str(link.traceId.toGoString()));
-  obj.set(js, INVOCATIONID_STR, js.str(link.invocationId.toGoString()));
-  obj.set(js, SPANID_STR, js.str(link.spanId.toGoString()));
-  return obj;
-}
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& cache) {
-  auto obj = js.obj();
-  obj.set(js, TRACEID_STR, js.str(event.traceId.toGoString()));
+  // Set SpanContext
+  auto sCObj = js.obj();
+  sCObj.set(js, TRACEID_STR, js.str(event.spanContext.getTraceId().toGoString()));
+  KJ_IF_SOME(spanId, event.spanContext.getSpanId()) {
+    sCObj.set(js, SPANID_STR, js.str(spanId.toGoString()));
+  }
+  obj.set(js, SPANCONTEXT_STR, kj::mv(sCObj));
+
   obj.set(js, INVOCATIONID_STR, js.str(event.invocationId.toGoString()));
-  obj.set(js, SPANID_STR, js.str(event.spanId.toGoString()));
   obj.set(js, TIMESTAMP_STR, js.date(event.timestamp));
   obj.set(js, SEQUENCE_STR, js.num(event.sequence));
 
   KJ_SWITCH_ONEOF(event.event) {
-    KJ_CASE_ONEOF(onset, tracing::Onset) {
+    KJ_CASE_ONEOF(onset, Onset) {
       obj.set(js, EVENT_STR, ToJs(js, onset, cache));
     }
-    KJ_CASE_ONEOF(outcome, tracing::Outcome) {
+    KJ_CASE_ONEOF(outcome, Outcome) {
       obj.set(js, EVENT_STR, ToJs(js, outcome, cache));
     }
-    KJ_CASE_ONEOF(hibernate, tracing::Hibernate) {
-      obj.set(js, EVENT_STR, ToJs(js, hibernate, cache));
-    }
-    KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {
+    KJ_CASE_ONEOF(spanOpen, SpanOpen) {
       obj.set(js, EVENT_STR, ToJs(js, spanOpen, cache));
     }
-    KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {
+    KJ_CASE_ONEOF(spanClose, SpanClose) {
       obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
-    KJ_CASE_ONEOF(de, tracing::DiagnosticChannelEvent) {
+    KJ_CASE_ONEOF(de, DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
-    KJ_CASE_ONEOF(ex, tracing::Exception) {
+    KJ_CASE_ONEOF(ex, Exception) {
       obj.set(js, EVENT_STR, ToJs(js, ex, cache));
     }
-    KJ_CASE_ONEOF(log, tracing::Log) {
+    KJ_CASE_ONEOF(log, Log) {
       obj.set(js, EVENT_STR, ToJs(js, log, cache));
     }
-    KJ_CASE_ONEOF(ret, tracing::Return) {
-      obj.set(js, EVENT_STR, ToJs(js, ret, cache));
+    KJ_CASE_ONEOF(diagEvent, StreamDiagnosticsEvent) {
+      obj.set(js, EVENT_STR, ToJs(js, diagEvent, cache));
     }
-    KJ_CASE_ONEOF(link, tracing::Link) {
-      obj.set(js, EVENT_STR, ToJs(js, link, cache));
+    KJ_CASE_ONEOF(ret, Return) {
+      obj.set(js, EVENT_STR, ToJs(js, ret, cache));
     }
     KJ_CASE_ONEOF(attrs, CustomInfo) {
       obj.set(js, EVENT_STR, ToJs(js, attrs, cache));
@@ -595,40 +593,37 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
 }
 
 // Returns the name of the handler function for this type of event.
-kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
+kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
   KJ_SWITCH_ONEOF(event.event) {
-    KJ_CASE_ONEOF(_, tracing::Onset) {
+    KJ_CASE_ONEOF(_, Onset) {
       KJ_FAIL_ASSERT("Onset event should only be provided to tailStream(), not returned handler");
       // return ONSET_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Outcome) {
+    KJ_CASE_ONEOF(_, Outcome) {
       return OUTCOME_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Hibernate) {
-      return HIBERNATE_STR;
-    }
-    KJ_CASE_ONEOF(_, tracing::SpanOpen) {
+    KJ_CASE_ONEOF(_, SpanOpen) {
       return SPANOPEN_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::SpanClose) {
+    KJ_CASE_ONEOF(_, SpanClose) {
       return SPANCLOSE_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::DiagnosticChannelEvent) {
+    KJ_CASE_ONEOF(_, DiagnosticChannelEvent) {
       return DIAGNOSTICCHANNEL_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Exception) {
+    KJ_CASE_ONEOF(_, Exception) {
       return EXCEPTION_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Log) {
+    KJ_CASE_ONEOF(_, Log) {
       return LOG_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Return) {
+    KJ_CASE_ONEOF(_, StreamDiagnosticsEvent) {
+      return STREAMDIAGEVENT_STR;
+    }
+    KJ_CASE_ONEOF(_, Return) {
       return RETURN_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Link) {
-      return LINK_STR;
-    }
-    KJ_CASE_ONEOF(_, tracing::CustomInfo) {
+    KJ_CASE_ONEOF(_, CustomInfo) {
       return ATTRIBUTES_STR;
     }
   }
@@ -639,12 +634,16 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
  public:
   TailStreamTarget(IoContext& ioContext,
       kj::Maybe<kj::StringPtr> entrypointNamePtr,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
-      kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
+      kj::Own<kj::PromiseFulfiller<void>> doneFulfiller,
+      bool isDynamicDispatch)
       : weakIoContext(ioContext.getWeakRef()),
         entrypointNamePtr(kj::mv(entrypointNamePtr)),
+        versionInfo(kj::mv(versionInfo)),
         props(kj::mv(props)),
-        doneFulfiller(kj::mv(doneFulfiller)) {}
+        doneFulfiller(kj::mv(doneFulfiller)),
+        isDynamicDispatch(isDynamicDispatch) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
   ~TailStreamTarget() {
@@ -654,40 +653,39 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   }
 
   kj::Promise<void> report(ReportContext reportContext) override {
-    IoContext& ioContext = KJ_REQUIRE_NONNULL(
-        weakIoContext->tryGet(), "The destination object for this tail session no longer exists.");
+    IoContext& ioContext = KJ_REQUIRE_NONNULL(weakIoContext->tryGet(),
+        "The destination object for this tail session no longer exists.", doneReceiving);
 
     ioContext.getLimitEnforcer().topUpActor();
 
     auto ownReportContext = capnp::CallContextHook::from(reportContext).addRef();
+    // We need to be able to access the results builder from both the promise below and its
+    // exception handler.
+    auto sharedResults = kj::rc<SharedResults>(reportContext.initResults());
 
-    auto promise =
-        ioContext
-            .run([this, &ioContext, reportContext, ownReportContext = kj::mv(ownReportContext)](
-                     Worker::Lock& lock) mutable -> kj::Promise<void> {
+    auto promise = ioContext.run([this, &ioContext, sharedResults = sharedResults.addRef(),
+                                     reportContext, ownReportContext = ownReportContext->addRef()](
+                                     Worker::Lock& lock) mutable -> kj::Promise<void> {
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
-      kj::Vector<tracing::TailEvent> events(eventReaders.size());
-      for (auto reader: eventReaders) {
-        events.add(tracing::TailEvent(reader));
-      }
-      // TODO(streaming-tail): Timestamp handling here serves as a placeholder, proper
-      // implementation will be more work, incl. addressing potential spectre concerns.
-      for (auto& event: events) {
-        event.timestamp = ioContext.now();
-      }
+      kj::Array<TailEvent> events = KJ_MAP(reader, eventReaders) { return TailEvent(reader); };
 
       // If we have not yet received the onset event, the first event in the
       // received collection must be an Onset event and must be handled separately.
       // We will only dispatch the remaining events if a handler is returned.
       auto result = ([&]() -> kj::Promise<void> {
         KJ_IF_SOME(handler, maybeHandler) {
-          auto h = handler.getHandle(lock);
-          return handleEvents(
-              lock, h, ioContext, events.releaseAsArray(), reportContext.initResults());
+          KJ_IF_SOME(h, handler.tryGet()) {
+            auto handle = h.getHandle(lock);
+            return handleEvents(lock, handle, ioContext, kj::mv(events), kj::mv(sharedResults));
+          } else {
+            KJ_LOG(ERROR, "tail stream handler was destroyed while processing events");
+            JSG_FAIL_REQUIRE(Error, "Tail stream handler became invalid during event processing");
+            KJ_UNREACHABLE;
+          }
         } else {
-          return handleOnset(lock, ioContext, events.releaseAsArray(), reportContext.initResults());
+          return handleOnset(lock, ioContext, kj::mv(events), kj::mv(sharedResults));
         }
       })();
 
@@ -698,19 +696,29 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       } else {
         return kj::mv(result);
       }
-    }).catch_([](kj::Exception&& e) {
+    });
+
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
+        [&, &fulfiller = *paf.fulfiller, ownReportContext = kj::mv(ownReportContext),
+            results = kj::mv(sharedResults)](kj::Exception&& e) mutable {
+      // This is the top level exception catcher for tail events being delivered. We do not want to
+      // propagate JS exceptions to the client side here, all exceptions should stay within this
+      // customEvent. Instead, we propagate the exception to the doneFulfiller, where it is used to
+      // set the right outcome code and re-thrown if appropriate. By rejecting the doneFulfiller, we
+      // also ensure that no more tail events get delivered.
       if (jsg::isTunneledException(e.getDescription())) {
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
         if (!description.startsWith("remote.")) {
           e.setDescription(kj::str("remote.", description));
         }
       }
-      kj::throwFatalException(kj::mv(e));
+      // We still fulfill this fulfiller to disarm the cancellation check below
+      fulfiller.fulfill();
+      results->setStop(true);
+      doneReceiving = true;
+      doneFulfiller->reject(kj::mv(e));
     });
-
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
-        [&fulfiller = *paf.fulfiller](kj::Exception&& e) { fulfiller.reject(kj::mv(e)); });
     promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
       if (fulfiller->isWaiting()) {
         fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
@@ -724,6 +732,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   }
 
  private:
+  // Used to share the results builder (and send the stop signal) from both the main code path and
+  // the exception handler.
+  struct SharedResults: public kj::Refcounted, rpc::TailStreamTarget::TailStreamResults::Builder {
+    SharedResults(rpc::TailStreamTarget::TailStreamResults::Builder results)
+        : rpc::TailStreamTarget::TailStreamResults::Builder(kj::mv(results)) {}
+  };
   // Handles the very first (onset) event in the tail stream. This will cause
   // the exported tailStream handler to be called, passing the onset event
   // as the initial argument. If the tail stream wishes to continue receiving
@@ -732,16 +746,17 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   // shutdown.
   kj::Promise<void> handleOnset(Worker::Lock& lock,
       IoContext& ioContext,
-      kj::Array<tracing::TailEvent> events,
-      rpc::TailStreamTarget::TailStreamResults::Builder results) {
+      kj::Array<TailEvent> events,
+      kj::Rc<SharedResults> results) {
     // There should be only a single onset event in this batch.
-    KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
-        "Expected only a single onset event");
+    KJ_ASSERT(
+        events.size() == 1 && events[0].event.is<Onset>(), "Expected only a single onset event");
     auto& event = events[0];
 
-    auto handler = KJ_REQUIRE_NONNULL(
-        lock.getExportedHandler(entrypointNamePtr, kj::mv(props), ioContext.getActor()),
-        "Failed to get handler to worker.");
+    auto handler =
+        KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointNamePtr, kj::mv(versionInfo),
+                               kj::mv(props), ioContext.getActor(), isDynamicDispatch),
+            "Failed to get handler to worker.");
     StringCache stringCache;
 
     jsg::Lock& js = lock;
@@ -754,7 +769,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     if (!maybeFn->IsFunction()) {
       ioContext.logWarningOnce("A worker configured to act as a streaming tail worker does "
                                "not export a tailStream() handler.");
-      results.setStop(true);
+      results->setStop(true);
+      doneReceiving = true;
       doneFulfiller->fulfill();
       return kj::READY_NOW;
     }
@@ -763,7 +779,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
     kj::Maybe<v8::Local<v8::Object>> maybeCtx;
     KJ_IF_SOME(hCtx, handler->getCtx()) {
-      maybeCtx = hCtx.tryGetHandle(js);
+      maybeCtx = v8::Local<v8::Object>(
+          lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, kj::mv(hCtx)));
     }
     v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, maybeCtx != kj::none ? 3 : 2);
     handlerArgs[0] = ToJs(js, event, stringCache);
@@ -776,24 +793,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       auto result =
           jsg::check(fn->Call(js.v8Context(), target, handlerArgs.size(), handlerArgs.data()));
 
-      // We need to be able to access the results builder from both the
-      // success and failure branches of the promise we set up below.
-      struct SharedResults: public kj::Refcounted {
-        rpc::TailStreamTarget::TailStreamResults::Builder results;
-        rpc::TailStreamTarget::TailStreamResults::Builder& get() {
-          return results;
-        }
-        SharedResults(rpc::TailStreamTarget::TailStreamResults::Builder results)
-            : results(kj::mv(results)) {}
-      };
-      auto sharedResults = kj::rc<SharedResults>(kj::mv(results));
-
       // The handler can return a function, an object, undefined, or a promise
       // for any of these. We will convert the result to a promise for consistent
       // handling...
       return ioContext.awaitJs(js,
           js.toPromise(result).then(js,
-              ioContext.addFunctor([this, results = sharedResults.addRef(), &ioContext](
+              ioContext.addFunctor([this, results = results.addRef(), &ioContext](
                                        jsg::Lock& js, jsg::Value value) mutable {
         // The value here can be one of a function, an object, or undefined.
         // Any value other than these will result in a warning but will otherwise
@@ -806,7 +811,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         if (handle->IsFunction() || handle->IsObject()) {
           // Sweet! Our tail worker wants to keep receiving events. Let's store
           // the handler and return.
-          maybeHandler = jsg::JsRef(js, jsg::JsValue(handle));
+          maybeHandler = ioContext.addObjectReverse(
+              kj::heap<jsg::JsRef<jsg::JsValue>>(js, jsg::JsValue(handle)));
           return;
         }
 
@@ -821,19 +827,23 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         }
         // And finally, we'll stop the stream since the tail worker did not return
         // a handler for us to continue with.
-        results->get().setStop(true);
+        results->setStop(true);
+        doneReceiving = true;
         doneFulfiller->fulfill();
       }),
-              ioContext.addFunctor([this, results = sharedResults.addRef()](
-                                       jsg::Lock& js, jsg::Value&& error) mutable {
-        results->get().setStop(true);
-        doneFulfiller->fulfill();
+              ioContext.addFunctor(
+                  [&, results = results.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
+        // Received a JS error. Do not reject doneFulfiller yet, this will be handled when we catch
+        // the exception later.
+        results->setStop(true);
+        doneReceiving = true;
         js.throwException(kj::mv(error));
       })));
     } catch (...) {
       ioContext.logWarningOnce("A worker configured to act as a streaming tail worker did "
                                "not return a valid tailStream() handler.");
-      results.setStop(true);
+      results->setStop(true);
+      doneReceiving = true;
       doneFulfiller->fulfill();
       return kj::READY_NOW;
     }
@@ -843,8 +853,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   kj::Promise<void> handleEvents(Worker::Lock& lock,
       const jsg::JsValue& handler,
       IoContext& ioContext,
-      kj::Array<tracing::TailEvent> events,
-      rpc::TailStreamTarget::TailStreamResults::Builder results) {
+      kj::Array<TailEvent> events,
+      kj::Rc<SharedResults> results) {
     jsg::Lock& js = lock;
 
     // Should not ever happen but let's handle it anyway.
@@ -869,9 +879,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // If we already received an outcome event, we will stop processing any
       // further events.
       if (finishing) break;
-      if (event.event.is<tracing::Outcome>()) {
+      if (event.event.is<Outcome>()) {
         finishing = true;
-        results.setStop(true);
+        results->setStop(true);
+        doneReceiving = true;
         // We set doFulfill to indicate that the outcome event has been received via RPC and no more
         // events are expected.
         doFulfill = true;
@@ -915,68 +926,70 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     }
 
     KJ_IF_SOME(p, promise) {
-      // When doFulfill applies the last promise refers to the outcome event. In that case the chain
+      // When doFulfill is set, the last promise refers to the outcome event. In that case the chain
       // of promises provides all remaining events to the user tail handler, so we should fulfill
       // the doneFulfiller afterwards, indicating that TailStreamTarget has received all events over
       // the stream and has done all its work, that the stream self-evidently did not get canceled
       // prematurely. This applies even if promises were rejected.
+      // No need to catch exceptions here: They will be handled in report() alongside exceptions
+      // from the onset event etc. JSG knows how JS exceptions look like, so we don't need an
+      // identifier for them.
       if (doFulfill) {
-        p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
-            [&](jsg::Lock& js, jsg::Value&& value) { doneFulfiller->fulfill(); });
+        p = p.then(js, [&](jsg::Lock& js) {
+          doneReceiving = true;
+          doneFulfiller->fulfill();
+        });
       }
       return ioContext.awaitJs(js, kj::mv(p));
+    } else if (doFulfill) {
+      // If we have no promises, but doFulfill is true, then none of the events we have had a
+      // handler available, but we still need to indicate that we are done since we got the outcome
+      // event – do this by calling fulfill right away.
+      doneReceiving = true;
+      doneFulfiller->fulfill();
     }
     return kj::READY_NOW;
   }
 
   kj::Own<IoContext::WeakRef> weakIoContext;
   kj::Maybe<kj::StringPtr> entrypointNamePtr;
+  kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;
   // The done fulfiller is resolved when we receive the outcome event
   // or rejected if the capability is dropped before receiving the outcome
   // event.
   kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
+  bool isDynamicDispatch;
 
   // The maybeHandler will be empty until we receive and process the
   // onset event.
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
+  kj::Maybe<ReverseIoOwn<jsg::JsRef<jsg::JsValue>>> maybeHandler;
+
+  // Indicates that we told (or should have told) the client that we want no further events, used
+  // to debug events arriving when the IoContext is no longer valid.
+  bool doneReceiving = false;
 };
 }  // namespace
 
-kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run(
+EventInfo TailStreamCustomEvent::getEventInfo() const {
+  return TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr));
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<Worker::VersionInfo> versionInfo,
     Frankenvalue props,
-    kj::TaskSet& waitUntilTasks) {
+    kj::TaskSet& waitUntilTasks,
+    bool isDynamicDispatch) {
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
-        TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
-  }
-
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(kj::heap<TailStreamTarget>(
-      ioContext, kj::mv(entrypointName), kj::mv(props), kj::mv(doneFulfiller)));
+  capFulfiller->fulfill(kj::heap<TailStreamTarget>(ioContext, kj::mv(entrypointName),
+      kj::mv(versionInfo), kj::mv(props), kj::mv(doneFulfiller), isDynamicDispatch));
 
-  // What is happening here? I'm glad you asked! When this method is called we are
-  // starting a tail stream session. Our TailStreamTarget created above is an RPC
-  // server that accepts events over time as individual RPC calls. Those always
-  // start with an onset event and should always end with an outcome event. It is
-  // possible for the client stub to be dropped early before the outcome event
-  // is delivered.
-  //
-  // When either the outcome event is received, or if the client stub is dropped
-  // early, the donePromise should be fulfilled or rejected. Below we arrange for
-  // the IoContext for the tail stream request to remain alive until the donePromise
-  // is settled. We also block completion of the call to run on the same condition.
-  //
-  // Attaching the registerPendingEvent() to the promise is necessary to keep the
-  // IoContext alive during the times our tail worker is idle waiting for more
-  // events to be delivered.
-  kj::ForkedPromise<void> forked = donePromise.fork();
-  ioContext.addWaitUntil(forked.addBranch().attach(ioContext.registerPendingEvent()));
+  donePromise = donePromise.attach(ioContext.registerPendingEvent());
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
@@ -984,15 +997,27 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  co_await forked.addBranch().exclusiveJoin(ioContext.onAbort());
+  auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
+    return ioContext.waitUntilStatus();
+  }, [&incomingRequest](kj::Exception&& e) {
+    // If we have a JSG exception, just set the appropriate return code – this will already have
+    // been logged and we do not need to treat it like a KJ exception. Otherwise, re-throw the
+    // exception.
+    if (jsg::isTunneledException(e.getDescription())) {
+      incomingRequest->getMetrics().reportFailure(e);
+      return EventOutcome::EXCEPTION;
+    }
+    kj::throwRecoverableException(kj::mv(e));
+    KJ_UNREACHABLE;
+  });
+  KJ_IF_SOME(t, ioContext.getWorkerTracer()) {
+    t.setReturn(ioContext.now());
+  }
 
-  // Return the outcome. Synchronous draining is not required.
-  co_return WorkerInterface::CustomEvent::Result{
-    .outcome = ioContext.waitUntilStatus(),
-  };
+  co_return WorkerInterface::CustomEvent::Result{.outcome = eventOutcome};
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sendRpc(
+kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
@@ -1015,7 +1040,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
   cap = capnp::membrane(
       kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
 
-  this->capFulfiller->fulfill(kj::mv(cap));
+  capFulfiller->fulfill(kj::mv(cap));
 
   // Forked promise for completion of all capabilities associated with the cap stream. This is
   // expected to be resolved when the request is canceled or when the client receives the stop
@@ -1035,187 +1060,237 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
   } catch (...) {
     auto e = kj::getCaughtExceptionAsKj();
     if (revokePaf.fulfiller->isWaiting()) {
-      revokePaf.fulfiller->reject(kj::cp(e));
+      revokePaf.fulfiller->reject(e.clone());
     }
     kj::throwFatalException(kj::mv(e));
   }
 }
 
-void TailStreamWriterState::reportImpl(tracing::TailEvent&& event) {
+TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
+    : inner(kj::mv(pending)),
+      waitUntilTasks(waitUntilTasks) {}
+
+bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
   // In reportImpl, our inner state must be active.
-  auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
+  auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Vector<kj::Own<Active>>>());
 
-  // We only care about sessions that are currently active.
-  kj::Vector<kj::Own<Active>> alive(actives.size());
-  for (auto& active: actives) {
-    if (active->capability != kj::none) {
-      alive.add(kj::mv(active));
-    }
-  }
-
-  if (alive.size() == 0) {
+  // We only care about sessions that are currently active, removing any inactive ones.
+  auto activeEnd = std::remove_if(actives.begin(), actives.end(),
+      [](const auto& active) { return active->capability == kj::none; });
+  if (activeEnd == actives.begin()) {
     // Oh! We have no active sessions. Well, never mind then, let's
     // transition to a closed state and drop everything on the floor.
     inner = Closed{};
 
     // Since we have no more living sessions (e.g. because all tail workers failed to return a valid
     // handler), mark the state as closing as we can't handle future events anyway.
-    closing = true;
-    return;
+    return true;
   }
 
-  // If we're already closing, no further events should be reported.
-  if (closing) return;
-  if (event.event.is<tracing::Outcome>()) {
-    closing = true;
+  // We have at least some active sessions. Truncate the array to get rid of any inactive ones.
+  if (activeEnd != actives.end()) {
+    actives.truncate(activeEnd - actives.begin());
   }
 
+  // We do not expect any events after the outcome.
+  bool isClosing = event.event.is<Outcome>();
   // Deliver the event to the queue and make sure we are processing.
-  for (auto& active: alive) {
-    active->queue.push_back(event.clone());
+  for (auto& active: actives) {
+    // Only queue the event if we don't have an excessive queue size yet. Return and Outcome
+    // events are only provided once and thus won't be dropped.
+    if (active->queueSize < maxQueueSize || event.event.is<Outcome>() || event.event.is<Return>()) {
+      // When we get to the outcome, no more events will be dropped. Inject an internal diagnostics
+      // event indicating how many events were dropped if applicable.
+      if (event.event.is<Outcome>() && active->droppedEvents > 0) {
+        StreamDiagnosticsEvent diag(active->droppedEvents);
+        TailEvent diagTailEvent(SpanContext::clone(event.spanContext), event.invocationId,
+            event.timestamp, event.sequence, kj::mv(diag));
+        active->queue.push(kj::mv(diagTailEvent));
+        // Increment the outcome sequence number to keep things consistent.
+        event.sequence++;
+      }
+
+      // Optimization: Elide copy for last tail worker, helpful for common case of only one STW
+      // being present.
+      if (&active == &actives.back()) {
+        active->queue.push(kj::mv(event));
+      } else {
+        active->queue.push(event.clone());
+      }
+      // Adjust estimated queue size based on size hint and an arbitrary amount for serialization
+      // overhead. As long as this estimate is reasonably accurate, we won't need to check the
+      // size again when serializing the message.
+      active->queueSize += tailSerializationOverhead + sizeHint;
+    } else {
+      active->droppedEvents++;
+    }
+
     if (!active->pumping) {
       waitUntilTasks.add(pump(kj::addRef(*active)));
     }
   }
 
-  inner = alive.releaseAsArray();
+  return isClosing;
 }
 
 // Delivers the queued tail events to a streaming tail worker.
-kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
+//
+// Note: An invocation of pump() may outlive the TailStreamWriter, as it is placed in
+//   `waitUntilTasks`. Hence, it is declared `static`, and owns a strong ref to its `Active`.
+kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
   current->pumping = true;
   KJ_DEFER(current->pumping = false);
 
-  if (!current->onsetSeen) {
-    // Our first event... yay! Our first job here will be to dispatch
-    // the onset event to the tail worker. If the tail worker wishes
-    // to handle the remaining events in the stream, then it will return
-    // a new capability to which those would be reported. This is done
-    // via the "result.getPipeline()" API below. If hasPipeline()
-    // returns false then that means the tail worker did not return
-    // a handler for this stream and no further attempts to deliver
-    // events should be made for this stream.
-    current->onsetSeen = true;
-    KJ_ASSERT(!current->queue.empty());
-    auto onsetEvent = kj::mv(current->queue.front());
-    current->queue.pop_front();
-    auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
-    auto eventsBuilder = builder.initEvents(1);
-    // When sending the onset event to the tail worker, the receiving end
-    // requires that the onset event be delivered separately, without any
-    // other events in the bundle. So here we'll separate it out and deliver
-    // just the one event...
-    onsetEvent.copyTo(eventsBuilder[0]);
-    auto result = co_await builder.send();
-    if (result.getStop()) {
-      // If our call to send returns a stop signal, then we'll clear
-      // the capability and be done.
-      current->queue.clear();
-      current->capability = kj::none;
-      co_return;
+  try {
+    if (!current->onsetSeen) {
+      // Our first event... yay! Our first job here will be to dispatch
+      // the onset event to the tail worker. If the tail worker wishes
+      // to handle the remaining events in the stream, then it will return
+      // a new capability to which those would be reported. This is done
+      // via the "result.getPipeline()" API below. If hasPipeline()
+      // returns false then that means the tail worker did not return
+      // a handler for this stream and no further attempts to deliver
+      // events should be made for this stream.
+      current->onsetSeen = true;
+      auto onsetEvent = KJ_ASSERT_NONNULL(current->queue.pop());
+      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+      auto eventsBuilder = builder.initEvents(1);
+      // When sending the onset event to the tail worker, the receiving end
+      // requires that the onset event be delivered separately, without any
+      // other events in the bundle. So here we'll separate it out and deliver
+      // just the one event...
+      onsetEvent.copyTo(eventsBuilder[0]);
+      auto result = co_await builder.send();
+      if (result.getStop()) {
+        // If our call to send returns a stop signal, then we'll clear
+        // the capability and be done.
+        current->queue.clear();
+        current->capability = kj::none;
+        co_return;
+      }
     }
-  }
 
-  // If we got this far then we have a handler for all of our events.
-  // Deliver remaining streaming tail events in batches if possible.
-  while (!current->queue.empty()) {
-    auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
-    auto eventsBuilder = builder.initEvents(current->queue.size());
-    size_t n = 0;
-    for (auto& event: current->queue) {
-      event.copyTo(eventsBuilder[n++]);
+    // If we got this far then we have a handler for all of our events.
+    // Deliver remaining streaming tail events in batches if possible.
+    while (!current->queue.empty()) {
+      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+      auto eventsBuilder = builder.initEvents(current->queue.size());
+      size_t n = 0;
+
+      // We're synchronously draining the queue – reset its size.
+      current->queueSize = 0;
+      current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
+
+      auto result = co_await builder.send();
+
+      // Note that although we cleared the current.queue above, it is
+      // possible/likely that additional events were added to the queue
+      // while the above builder.send() was being awaited. If the result
+      // comes back indicating that we should stop, then we'll stop here
+      // without any further processing. We'll defensively clear the
+      // queue again and drop the client stub. Otherwise, if result.getStop()
+      // is false, we'll loop back around to send any items that have since
+      // been added to the queue or exit this loop if there are no additional
+      // events waiting to be sent.
+      if (result.getStop()) {
+        current->queue.clear();
+        current->capability = kj::none;
+        co_return;
+      }
     }
+  } catch (...) {
+    // If any RPC throws an exception, we should treat it as a stop signal, as this suggests
+    // the connection to the STW itself has been lost. (An excpetion thrown within the STW
+    // itself would have resulted in a `stop` return value instead of an exception over RPC.)
     current->queue.clear();
-
-    auto result = co_await builder.send();
-
-    // Note that although we cleared the current.queue above, it is
-    // possible/likely that additional events were added to the queue
-    // while the above builder.sent() was being awaited. If the result
-    // comes back indicating that we should stop, then we'll stop here
-    // without any further processing. We'll defensively clear the
-    // queue again and drop the client stub. Otherwise, if result.getStop()
-    // is false, we'll loop back around to send any items that have since
-    // been added to the queue or exit this loop if there are no additional
-    // events waiting to be sent.
-    if (result.getStop()) {
-      current->queue.clear();
-      current->capability = kj::none;
-      co_return;
-    }
+    current->capability = kj::none;
+    throw;
   }
 }
 
 // If we are using streaming tail workers, initialize the mechanism that will deliver events
 // to that collection of tail workers.
-kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
+kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
     kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
   if (streamingTailWorkers.size() == 0) {
     return kj::none;
   }
 
-  auto state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks);
+  return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks);
+}
 
-  return kj::refcounted<tracing::TailStreamWriter>(
-      // This lambda is called for every streaming tail event that is reported. We use
-      // the TailStreamWriterState for this stream to actually handle the event.
-      // Pay attention to the ownership of state here. The lambda holds a bare
-      // reference while the instance is attached to the kj::Own below.
-      [&state = *state, &waitUntilTasks](tracing::TailEvent&& event) mutable {
-    KJ_SWITCH_ONEOF(state.inner) {
-      KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
-        // The tail stream has already been closed because we have received either
-        // an outcome or hibernate event. The writer should have failed and we
-        // actually shouldn't get here. Assert!
-        KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback invoked after close");
-      }
-      KJ_CASE_ONEOF(pending, TailStreamWriterState::Pending) {
-        // This is our first event! It has to be an onset event, which the writer
-        // should have validated for us. Assert if it is not an onset then proceed
-        // to start each of our tail working sessions.
-        KJ_ASSERT(event.event.is<tracing::Onset>(), "First event must be an onset.");
-
-        // Transitions into the active state by grabbing the pending client capability.
-        state.inner = KJ_MAP(wi, pending) {
-          auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
-          auto result = customEvent->getCap();
-          auto active = kj::refcounted<TailStreamWriterState::Active>(kj::mv(result));
-
-          // Attach the workerInterface and customEvent to the waitUntil tasks so that they stay
-          // alive until tail worker operations including JS execution are complete, including
-          // returning the outcome.
-          waitUntilTasks.add(wi->customEvent(kj::mv(customEvent))
-                                 .attach(kj::mv(wi), kj::addRef(*active))
-                                 .ignoreResult());
-          return active;
-        };
-
-        // At this point our writer state is "active", which means the state
-        // consists of one or more streaming tail worker client stubs to which
-        // the event will be dispatched.
-      }
-      KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
-        // Event cannot be a onset, which should have been validated by the writer.
-        KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
-      }
+void TailStreamWriter::report(const InvocationSpanContext& context,
+    TailEvent::Event&& event,
+    kj::Date timestamp,
+    size_t sizeHint) {
+  // Becomes a no-op if a terminal event (close) has been reported, or if the stream closed due to
+  // not receiving a well-formed event handler. We need to disambiguate these cases as the former
+  // indicates an implementation error resulting in trailing events whereas the latter case is
+  // caused by a user error and events being reported after the stream being closed are expected –
+  // reject events following an outcome event, but otherwise just exit if the state has been closed.
+  // This could be an assert, but just log an error in case this is prevalent in some edge case.
+  if (outcomeSeen) {
+    KJ_LOG(ERROR, "reported tail stream event after stream close ", event, kj::getStackTrace());
+  }
+  if (inner.is<Closed>()) {
+    return;
+  }
+  // The onset event must be first and must only happen once.
+  if (event.is<Onset>()) {
+    KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
+    onsetSeen = true;
+  } else {
+    KJ_ASSERT(onsetSeen, "Tail stream onset was not reported");
+    if (event.is<Outcome>()) {
+      outcomeSeen = true;
     }
-    state.reportImpl(kj::mv(event));
+  }
 
-    // The state is determined to be closing when it receives a terminal event
-    // like tracing::Outcome or tracing::Hibernate. If we return true, then the
-    // writer expects more events to be received. If we return false, then the
-    // writer can release any state it is holding because we don't expect any
-    // more events to be dispatched. The writer should handle that case by
-    // dropping this lambda.
+  // A zero spanId at the TailEvent level signifies that no spanId should be provided to the tail
+  // worker (for Onset events). We go to great lengths to rule out getting an all-zero spanId by
+  // chance (see SpanId::fromEntropy()), so this should be safe.
+  TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
+      context.getSpanId() == SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()), timestamp,
+      sequence++, kj::mv(event));
 
-    return !state.closing;
-  }, []() -> kj::Date {
-    // TODO(streaming-tail): Return proper timestamps. This callback is used to
-    // acquire the timestamps used in the tail stream events. Ideally this will
-    // use the same timesource that backs `IoContext::now()` and includes the
-    // same spectre mitigations.
-    return kj::UNIX_EPOCH;
-  }).attach(kj::mv(state));
+  KJ_SWITCH_ONEOF(inner) {
+    KJ_CASE_ONEOF(closed, Closed) {
+      // The tail stream has already been closed because we have received an outcome event. The
+      // writer should have failed and we actually shouldn't get here. Assert!
+      KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback invoked after close");
+    }
+    KJ_CASE_ONEOF(pending, Pending) {
+      // This is our first event! It has to be an onset event as we have validated above. Start each
+      // of our tail working sessions.
+
+      // Transitions into the active state by grabbing the pending client capability.
+      inner = kj::Vector<kj::Own<Active>>( KJ_MAP(wi, pending) {
+        auto customEvent = kj::heap<TailStreamCustomEvent>();
+        auto result = customEvent->getCap();
+        auto active = kj::refcounted<Active>(kj::mv(result));
+
+        // Attach the workerInterface and customEvent to the waitUntil tasks so that they stay alive
+        // until tail worker operations including JS execution are complete, including returning the
+        // outcome.
+        waitUntilTasks.add(wi->customEvent(kj::mv(customEvent))
+                               .attach(kj::mv(wi), kj::addRef(*active))
+                               .ignoreResult());
+        return active;
+      });
+
+      // At this point our writer state is "active", which means the state consists of one or more
+      // streaming tail worker client stubs to which the event will be dispatched.
+    }
+    KJ_CASE_ONEOF(active, kj::Vector<kj::Own<Active>>) {
+      // active tail stream writers have already been configured, process the event.
+    }
+  }
+
+  // The state is determined to be closing when it receives a terminal event (tracing::Outcome),
+  // or if there are no active tail workers left, we can close the internal state at that point.
+  if (reportImpl(kj::mv(tailEvent), sizeHint)) {
+    inner = Closed{};
+  }
 }
 
 }  // namespace workerd::tracing

@@ -14,6 +14,6 @@ namespace workerd::api::node {
 // This is not a guarantee for compatibility, and APIs will still be incomplete,
 // but it at least can be used to indicate what Node.js version target is being
 // supported for Node.js platform code.
-static constexpr kj::StringPtr nodeVersion = "22.18.0"_kj;
+static constexpr kj::StringPtr nodeVersion = "22.19.0"_kj;
 
 }  // namespace workerd::api::node

@@ -1,6 +1,7 @@
 """capnp_embed definition"""
 
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "capnp_provider")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 def _capnp_embed_impl(ctx):
     return [
@@ -44,7 +45,7 @@ def capnp_embed(
         target_compatible_with = target_compatible_with,
         deps = deps,
     )
-    native.cc_library(
+    cc_library(
         name = name,
         target_compatible_with = target_compatible_with,
     )

@@ -7,7 +7,6 @@
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
-#include <workerd/jsg/promise.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -17,6 +16,9 @@
 #include <kj/map.h>
 
 namespace workerd::jsg {
+
+template <typename T>
+class Promise;
 
 enum class InstantiateModuleOptions {
   // Allows pending top-level await in the module when evaluated. Will cause
@@ -69,7 +71,8 @@ class ModuleRegistry {
   };
 
   static inline ModuleRegistry* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistry*>(js.v8Context()->GetAlignedPointerFromEmbedderData(2));
+    return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistry>(
+        js.v8Context(), jsg::ContextPointerSlot::MODULE_REGISTRY));
   }
 
   struct CapnpModuleInfo {
@@ -144,6 +147,15 @@ class ModuleRegistry {
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
     kj::Maybe<kj::Array<kj::String>> maybeNamedExports;
 
+    // For source phase imports - stores the module source object (e.g., WebAssembly.Module)
+    kj::Maybe<V8Ref<v8::Object>> maybeModuleSourceObject;
+
+    // Cache for mutable module exports wrapper when require_returns_default_export flag is enabled.
+    // Used to ensure require() returns the same mutable object for the same module.
+    // This enables frameworks like Next.js to patch built-in module exports.
+    // See: https://github.com/cloudflare/workerd/issues/5844
+    mutable kj::Maybe<V8Ref<v8::Object>> maybeMutableExports;
+
     ModuleInfo(jsg::Lock& js,
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
@@ -165,6 +177,19 @@ class ModuleRegistry {
 
     uint hashCode() const {
       return module.hashCode();
+    }
+
+    // Set the module source object for source phase imports
+    void setModuleSourceObject(jsg::Lock& js, v8::Local<v8::Object> sourceObject) {
+      maybeModuleSourceObject = V8Ref<v8::Object>(js.v8Isolate, sourceObject);
+    }
+
+    // Get the module source object for source phase imports
+    kj::Maybe<v8::Local<v8::Object>> getModuleSourceObject(jsg::Lock& js) const {
+      KJ_IF_SOME(sourceObject, maybeModuleSourceObject) {
+        return sourceObject.getHandle(js);
+      }
+      return kj::none;
     }
   };
 
@@ -198,7 +223,7 @@ class ModuleRegistry {
       const kj::Path& referrer,
       kj::StringPtr rawSpecifier) = 0;
 
-  virtual Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) = 0;
+  virtual Value resolveInternalImport(jsg::Lock& js, kj::StringPtr specifier) = 0;
 
   // The dynamic import callback is provided by the embedder to set up any context necessary
   // for instantiating the module during a dynamic import. The handler function passed into
@@ -242,13 +267,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   static kj::Own<ModuleRegistryImpl<TypeWrapper>> install(
       v8::Isolate* isolate, v8::Local<v8::Context> context, CompilationObserver& observer) {
     auto registry = kj::heap<ModuleRegistryImpl<TypeWrapper>>(observer);
-    context->SetAlignedPointerInEmbedderData(2, registry.get());
+    jsg::setAlignedPointerInEmbedderData(
+        context, jsg::ContextPointerSlot::MODULE_REGISTRY, registry.get());
     isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
     return kj::mv(registry);
   }
 
   static inline ModuleRegistryImpl* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistryImpl*>(js.v8Context()->GetAlignedPointerFromEmbedderData(2));
+    return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistryImpl>(
+        js.v8Context(), jsg::ContextPointerSlot::MODULE_REGISTRY));
   }
 
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
@@ -279,8 +306,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
             AllowV8BackgroundThreadsScope scope;
             auto wasmModule =
                 jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
-            return jsg::ModuleRegistry::ModuleInfo(
+            auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
                 lock, specifier, kj::none, jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+            // Uncomment iff we want to permit source phase imports for builtin Wasm modules
+            // moduleInfo.setModuleSourceObject(lock, wasmModule.template As<v8::Object>());
+            return moduleInfo;
           }, module.getType());
           return;
         case Module::DATA:
@@ -370,7 +400,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
       ResolveOption option = ResolveOption::DEFAULT,
       ResolveMethod method = ResolveMethod::IMPORT,
       kj::Maybe<kj::StringPtr> rawSpecifier = kj::none) override {
-    using Key = typename Entry::Key;
+    using Key = Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
         return entry->module(js, observer, referrer, method);
@@ -471,9 +501,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     // internal modules. If the worker bundle provided an override for the
     // built-in module, then the built-in was never registered and won't
     // be found.
-    using Key = typename Entry::Key;
+    using Key = Entry::Key;
     auto resolveOption = ModuleRegistry::ResolveOption::DEFAULT;
-    if (entries.find(Key(referrer, Type::BUILTIN)) != kj::none) {
+    if (entries.find(Key(referrer, Type::BUNDLE)) != kj::none) {
+      // The referrer is found in the module bundle, so we use the default.
+    } else if (entries.find(Key(referrer, Type::BUILTIN)) != kj::none) {
       resolveOption = ModuleRegistry::ResolveOption::INTERNAL_ONLY;
     }
 
@@ -596,7 +628,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   };
 
   struct SpecifierHashCallbacks {
-    using Key = typename Entry::Key;
+    using Key = Entry::Key;
 
     const Key keyForRow(const kj::Own<Entry>& row) const {
       return Key(row->specifier, row->type);
@@ -695,7 +727,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
       }
       return makeRejected(tryCatch.Exception());
     } catch (kj::Exception& ex) {
-      return makeRejected(makeInternalError(js.v8Isolate, kj::mv(ex)));
+      return makeRejected(js.exceptionToJs(kj::mv(ex)).getHandle(js));
     }
   }
 
@@ -739,7 +771,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
 
     return makeRejected(tryCatch.Exception());
   } catch (kj::Exception& ex) {
-    return makeRejected(makeInternalError(js.v8Isolate, kj::mv(ex)));
+    return makeRejected(exceptionToJs(js.v8Isolate, kj::mv(ex)));
   }
   KJ_UNREACHABLE;
 }

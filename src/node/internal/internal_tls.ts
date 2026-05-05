@@ -206,7 +206,7 @@ export function checkServerIdentity(
 // Convert protocols array into valid OpenSSL protocols list
 // ("\x06spdy/2\x08http/1.1\x08http/1.0")
 function convertProtocols(protocols: string[]): Buffer {
-  const lens = new Array(protocols.length).fill(0) as number[];
+  const lens = Array.from({ length: protocols.length }, () => 0);
   const buff = Buffer.allocUnsafe(
     protocols.reduce((p, c, i) => {
       const len = Buffer.byteLength(c);

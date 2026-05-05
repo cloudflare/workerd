@@ -25,8 +25,17 @@ namespace workerd::jsg {
 template <typename T, bool = isGcVisitable<T>()>
 struct OpaqueWrappable;
 
+struct OpaqueWrappableBase: public Wrappable {
+  kj::StringPtr jsgGetMemoryName() const override final {
+    return "OpaqueWrappable"_kjc;
+  }
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override final {
+    Wrappable::jsgGetMemoryInfo(tracker);
+  }
+};
+
 template <typename T>
-struct OpaqueWrappable<T, false>: public Wrappable {
+struct OpaqueWrappable<T, false>: public OpaqueWrappableBase {
   // Used to implement wrapOpaque().
 
   OpaqueWrappable(T&& value): value(kj::mv(value)) {}
@@ -34,14 +43,8 @@ struct OpaqueWrappable<T, false>: public Wrappable {
   T value;
   bool movedAway = false;
 
-  kj::StringPtr jsgGetMemoryName() const override final {
-    return "OpaqueWrappable"_kjc;
-  }
   size_t jsgGetMemorySelfSize() const override final {
     return sizeof(OpaqueWrappable);
-  }
-  void jsgGetMemoryInfo(MemoryTracker& tracker) const override final {
-    Wrappable::jsgGetMemoryInfo(tracker);
   }
 };
 
@@ -344,8 +347,8 @@ class Promise {
           [&] { check(v8Resolver.getHandle(js)->Reject(js.v8Context(), exception)); });
     }
 
-    void reject(Lock& js, kj::Exception exception) {
-      reject(js, makeInternalError(js.v8Isolate, kj::mv(exception)));
+    void reject(Lock& js, kj::Exception exception, ExceptionToJsOptions options = {}) {
+      reject(js, exceptionToJs(js.v8Isolate, kj::mv(exception), options));
     }
 
     Resolver addRef(Lock& js) {
@@ -371,6 +374,21 @@ class Promise {
   JSG_MEMORY_INFO(Promise) {
     KJ_IF_SOME(promise, v8Promise) {
       tracker.trackField("promise", promise);
+    }
+  }
+
+  // Ths is for testing/diagnostics purposes only.
+  enum class State {
+    PENDING = v8::Promise::kPending,
+    FULFILLED = v8::Promise::kFulfilled,
+    REJECTED = v8::Promise::kRejected,
+    CONSUMED = 3  // Not a real state; indicates the Promise has been consumed.
+  };
+  State getState(Lock& js) {
+    KJ_IF_SOME(promise, v8Promise) {
+      return static_cast<State>(promise.getHandle(js)->State());
+    } else {
+      return State::CONSUMED;
     }
   }
 
@@ -409,7 +427,7 @@ class Promise {
   }
 
   template <typename Result, typename FuncPair>
-  Promise<RemovePromise<Result>> thenImpl(Lock& js,
+  MaintainPromise<Result> thenImpl(Lock& js,
       FuncPair&& funcPair,
       v8::FunctionCallback thenCallback,
       v8::FunctionCallback errCallback) {
@@ -424,9 +442,8 @@ class Promise {
       auto errThen = check(v8::Function::New(
           context, errCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
 
-      using Type = RemovePromise<Result>;
-
-      return Promise<Type>(js.v8Isolate, check(consumeHandle(js)->Then(context, then, errThen)));
+      return MaintainPromise<Result>(
+          js.v8Isolate, check(consumeHandle(js)->Then(context, then, errThen)));
     });
   }
 
@@ -449,7 +466,7 @@ class Promise<kj::Promise<T>> {
 template <typename T>
 struct PromiseResolverPair {
   Promise<T> promise;
-  typename Promise<T>::Resolver resolver;
+  Promise<T>::Resolver resolver;
 
   JSG_MEMORY_INFO(PromiseResolverPair) {
     tracker.trackField("promise", promise);
@@ -487,9 +504,9 @@ Promise<T> Lock::rejectedPromise(jsg::Value exception) {
 }
 
 template <typename T>
-Promise<T> Lock::rejectedPromise(kj::Exception&& exception) {
+Promise<T> Lock::rejectedPromise(kj::Exception&& exception, ExceptionToJsOptions options) {
   return withinHandleScope(
-      [&] { return rejectedPromise<T>(makeInternalError(v8Isolate, kj::mv(exception))); });
+      [&] { return rejectedPromise<T>(exceptionToJs(kj::mv(exception), options)); });
 }
 
 template <class Func>
@@ -633,7 +650,8 @@ class PromiseWrapper {
       if (config.unwrapCustomThenables && isThenable(context, handle)) {
         auto paf = check(v8::Promise::Resolver::New(context));
         check(paf->Resolve(context, handle));
-        return tryUnwrap(js, context, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
+        return tryUnwrap(
+            js, context, paf->GetPromise(), static_cast<Promise<T>*>(nullptr), parentObject);
       }
 
       if constexpr (isVoid<T>()) {
@@ -693,6 +711,10 @@ class UnhandledRejectionHandler {
       v8::PromiseRejectEvent event,
       jsg::V8Ref<v8::Promise> promise,
       jsg::Value value);
+
+  void setUseMicrotasksCompletedCallback(bool value) {
+    useMicrotasksCompletedCallback = value;
+  }
 
   void clear();
 
@@ -786,6 +808,8 @@ class UnhandledRejectionHandler {
 
   kj::Function<Handler> handler;
   bool scheduled = false;
+  // Controlled by the unhandled_rejection_after_microtask_checkpoint compat flag.
+  bool useMicrotasksCompletedCallback = false;
 
   using UnhandledRejectionsTable =
       kj::Table<UnhandledRejection, kj::HashIndex<UnhandledRejectionCallbacks>>;
@@ -796,6 +820,10 @@ class UnhandledRejectionHandler {
   void rejectedWithNoHandler(jsg::Lock& js, jsg::V8Ref<v8::Promise> promise, jsg::Value value);
   void handledAfterRejection(jsg::Lock& js, jsg::V8Ref<v8::Promise> promise);
   void ensureProcessingWarnings(jsg::Lock& js);
+  void processWarnings(jsg::Lock& js);
+
+  // Must be static: V8 requires a plain C function pointer for this callback.
+  static void onMicrotasksCompleted(v8::Isolate* isolate, void* data);
 };
 
 }  // namespace workerd::jsg

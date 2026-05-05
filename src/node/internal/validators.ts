@@ -77,6 +77,16 @@ export function validateInteger(
   }
 }
 
+export function validateObject<T extends object>(
+  value: T | null | undefined,
+  name: string,
+  options?: number
+): asserts value is T;
+export function validateObject(
+  value: unknown,
+  name: string,
+  options?: number
+): asserts value is Record<string, unknown>;
 export function validateObject(
   value: unknown,
   name: string,
@@ -168,6 +178,20 @@ export function validateString(
   }
 }
 
+export function validateStringArray(
+  value: unknown,
+  name: string
+): asserts value is string[] {
+  validateArray(value, name);
+  for (let i = 0; i < value.length; ++i) {
+    // Don't use validateString here for performance reasons, as
+    // we would generate intermediate strings for the name.
+    if (typeof value[i] !== 'string') {
+      throw new ERR_INVALID_ARG_TYPE(`${name}[${i}]`, 'string', value[i]);
+    }
+  }
+}
+
 export function validateNumber(
   value: unknown,
   name: string,
@@ -200,11 +224,11 @@ export function validateBoolean(
   }
 }
 
-export function validateOneOf(
-  value: unknown,
+export function validateOneOf<T>(
+  value: T,
   name: string,
-  oneOf: unknown[]
-): void {
+  oneOf: T[]
+): asserts value is T {
   if (!Array.prototype.includes.call(oneOf, value)) {
     const allowed = Array.prototype.join.call(
       Array.prototype.map.call(oneOf, (v) =>
@@ -319,7 +343,7 @@ export function checkRangesOrGetDefault(
   name: string,
   lower: number,
   upper: number,
-  def: number | undefined = undefined
+  def?: number
 ): number | undefined {
   if (!checkFiniteNumber(number, name)) {
     return def;

@@ -65,6 +65,18 @@ bool isPredictableModeForTest();
 // etc. This should only be used in tests.
 void setPredictableModeForTest();
 
+// When enabled, forces a full V8 garbage collection at key points where the KJ event loop
+// re-enters JavaScript (e.g., awaitIo continuations). This helps detect KJ async objects that
+// are reachable from the JS heap without proper IoOwn wrapping — such objects would violate
+// DISALLOW_KJ_IO_DESTRUCTORS_SCOPE when collected. This makes tests significantly slower and
+// should only be used for targeted stress testing.
+//
+// Can be enabled via setGcStressModeForTest() (used by workerd's --gc-stress CLI flag) or by
+// setting the WORKERD_GC_STRESS=1 environment variable (useful for binaries without a dedicated
+// CLI flag, e.g., edgeworker tests where the test-runner spawns the server as a subprocess).
+bool isGcStressModeForTest();
+void setGcStressModeForTest();
+
 // RAII class which allows the thread's active watchdog to observe forward progress through
 // changes in a uint64_t. Use this in places where your code cannot call Watchdog::checkIn() and
 // may block for longer than the watchdog timeout, but can still observe forward progress.

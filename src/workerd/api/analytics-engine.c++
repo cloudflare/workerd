@@ -19,7 +19,8 @@ void AnalyticsEngine::writeDataPoint(
   // Optimization: For non-actors, which never have output locks, avoid the overhead of
   // awaitIo() and such by not going back to the event loop at all.
   KJ_IF_SOME(promise, context.waitForOutputLocksIfNecessary()) {
-    context.awaitIo(js, kj::mv(promise), [this, event = kj::mv(event)](jsg::Lock& js) mutable {
+    context.awaitIo(
+        js, kj::mv(promise), [this, self = JSG_THIS, event = kj::mv(event)](jsg::Lock& js) mutable {
       writeDataPointNoOutputLock(js, kj::mv(event));
     });
   } else {

@@ -45,11 +45,12 @@ class Body: public jsg::Object {
   // the POST will successfully retransmit.
   using Initializer = kj::OneOf<jsg::Ref<ReadableStream>,
       kj::String,
-      kj::Array<byte>,
+      jsg::JsRef<jsg::JsBufferSource>,
       jsg::Ref<Blob>,
       jsg::Ref<FormData>,
       jsg::Ref<URLSearchParams>,
-      jsg::Ref<url::URLSearchParams>>;
+      jsg::Ref<url::URLSearchParams>,
+      jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
 
   struct RefcountedBytes final: public kj::Refcounted {
     kj::Array<kj::byte> bytes;
@@ -72,7 +73,7 @@ class Body: public jsg::Object {
     //
     // NOTE: ownBytes may contain a v8::Global reference, hence instances of `Buffer` must exist
     //   only within the V8 heap space.
-    kj::OneOf<kj::Own<RefcountedBytes>, jsg::Ref<Blob>> ownBytes;
+    kj::OneOf<kj::Own<RefcountedBytes>, jsg::Ref<Blob>, jsg::JsRef<jsg::JsBufferSource>> ownBytes;
     // TODO(cleanup): When we integrate with V8's garbage collection APIs, we need to account for
     //   that here.
 
@@ -83,6 +84,13 @@ class Body: public jsg::Object {
     kj::ArrayPtr<const kj::byte> view;
 
     Buffer() = default;
+    Buffer(jsg::Lock& js, jsg::JsBufferSource& source)
+        : ownBytes(source.addRef(js)),
+          view(source.asArrayPtr()) {
+      // If the BufferSource is resizable, then it should have been copied into
+      // a kj::Array and passed in to that constructor.
+      KJ_ASSERT(!source.isResizable());
+    }
     Buffer(kj::Array<kj::byte> array)
         : ownBytes(kj::refcounted<RefcountedBytes>(kj::mv(array))),
           view(ownBytes.get<kj::Own<RefcountedBytes>>()->bytes) {}
@@ -100,6 +108,9 @@ class Body: public jsg::Object {
 
     JSG_MEMORY_INFO(Buffer) {
       KJ_SWITCH_ONEOF(ownBytes) {
+        KJ_CASE_ONEOF(ref, jsg::JsRef<jsg::JsBufferSource>) {
+          tracker.trackField("ref", ref);
+        }
         KJ_CASE_ONEOF(bytes, kj::Own<RefcountedBytes>) {
           tracker.trackField("bytes", bytes);
         }
@@ -175,7 +186,11 @@ class Body: public jsg::Object {
     JSG_METHOD(formData);
     JSG_METHOD(blob);
 
-    JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData);
+    if (flags.getFetchIterableTypeSupport()) {
+      JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData | Iterable<ArrayBuffer|ArrayBufferView> | AsyncIterable<ArrayBuffer|ArrayBufferView>);
+    } else {
+      JSG_TS_DEFINE(type BodyInit = ReadableStream<Uint8Array> | string | ArrayBuffer | ArrayBufferView | Blob | URLSearchParams | FormData);
+    }
     // All type aliases get inlined when exporting RTTI, but this type alias is included by
     // the official TypeScript types, so users might be depending on it.
     JSG_TS_OVERRIDE({
@@ -253,8 +268,24 @@ class Fetcher: public JsRpcClientProvider {
         requiresHost(requiresHost),
         isInHouse(isInHouse) {}
 
+  // Create a Fetcher bound to an IoChannelFactory::SubrequestChannel object rather than a numeric
+  // channel. This Fetcher will inherently be bound to the current I/O context.
+  explicit Fetcher(IoOwn<IoChannelFactory::SubrequestChannel> subrequestChannel,
+      RequiresHostAndProtocol requiresHost = RequiresHostAndProtocol::YES,
+      bool isInHouse = false)
+      : channelOrClientFactory(kj::mv(subrequestChannel)),
+        requiresHost(requiresHost),
+        isInHouse(isInHouse) {}
+
   // Used by Fetchers that use ad-hoc, single-use WorkerInterface instances, such as ones
   // created for Actors.
+  //
+  // Implementations that create HTTP connections should route through
+  // IoContext::getSubrequestNoChecks() (or getSubrequest()) internally, to ensure external memory
+  // adjustment and other subrequest accounting are applied.
+  //
+  // TODO(cleanup): Consider removing this in favor of `IoChannelFactory::SubrequestChannel`, which
+  //   is almost the same thing.
   class OutgoingFactory {
    public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
@@ -270,6 +301,9 @@ class Fetcher: public JsRpcClientProvider {
   // Used by Fetchers that obtain their HttpClient in a custom way, but which aren't tied
   // to a specific I/O context. The factory object moves with the isolate across threads and
   // contexts, and must work from any context.
+  //
+  // Same as OutgoingFactory: implementations that create HTTP connections should route through
+  // IoContext::getSubrequestNoChecks() internally.
   class CrossContextOutgoingFactory {
    public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(
@@ -302,6 +336,16 @@ class Fetcher: public JsRpcClientProvider {
   // Returns an `WorkerInterface` that is only valid for the lifetime of the current
   // `IoContext`.
   kj::Own<WorkerInterface> getClient(
+      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+
+  // Result of getClient call that includes optional trace context
+  struct ClientWithTracing {
+    kj::Own<WorkerInterface> client;
+    kj::Maybe<TraceContext> traceContext;
+  };
+
+  // Get client and optionally create trace context, all in one call
+  ClientWithTracing getClientWithTracing(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
   // Get a SubrequestChannel representing this Fetcher.
@@ -365,8 +409,10 @@ class Fetcher: public JsRpcClientProvider {
     JSG_STRUCT(outcome, ackAll, retryBatch, explicitAcks, retryMessages);
   };
 
-  jsg::Promise<QueueResult> queue(
-      jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages);
+  jsg::Promise<QueueResult> queue(jsg::Lock& js,
+      kj::String queueName,
+      kj::Array<ServiceBindingQueueMessage> messages,
+      jsg::Optional<MessageBatchMetadata> metadata);
 
   struct ScheduledOptions {
     jsg::Optional<kj::Date> scheduledTime;
@@ -419,7 +465,7 @@ class Fetcher: public JsRpcClientProvider {
       ) & {
         fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
         connect(address: SocketAddress | string, options?: SocketOptions): Socket;
-        queue(queueName: string, messages: ServiceBindingQueueMessage[]): Promise<FetcherQueueResult>;
+        queue(queueName: string, messages: ServiceBindingQueueMessage[], metadata?: MessageBatchMetadata): Promise<FetcherQueueResult>;
         scheduled(options?: FetcherScheduledOptions): Promise<FetcherScheduledResult>;
       });
     } else {
@@ -467,8 +513,17 @@ class Fetcher: public JsRpcClientProvider {
     }
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Fetcher> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
+
  private:
-  kj::OneOf<uint, kj::Own<CrossContextOutgoingFactory>, IoOwn<OutgoingFactory>>
+  kj::OneOf<uint,
+      IoOwn<IoChannelFactory::SubrequestChannel>,
+      kj::Own<CrossContextOutgoingFactory>,
+      IoOwn<OutgoingFactory>>
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
@@ -559,7 +614,16 @@ struct RequestInitializerDict {
       method, headers, body, redirect, fetcher, cf, cache, integrity, signal, encodeResponseBody);
   JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
     if (flags.getCacheOptionEnabled()) {
-      if (flags.getCacheNoCache()) {
+      if (flags.getCacheReload()) {
+        JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
+          headers?: HeadersInit;
+          body?: BodyInit | null;
+          cache?: 'no-store' | 'no-cache' | 'reload';
+          cf?: Cf;
+          encodeResponseBody?: "automatic" | "manual";
+        });
+
+      } else if (flags.getCacheNoCache()) {
         JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
           headers?: HeadersInit;
           body?: BodyInit | null;
@@ -607,6 +671,7 @@ class Request final: public Body {
     NONE,
     NOSTORE,
     NOCACHE,
+    RELOAD,
   };
 
   Request(jsg::Lock& js,
@@ -709,7 +774,7 @@ class Request final: public Body {
   // the response. There are currently a proposal to add a "full" option which is the model
   // we support. Once "full" is added, we need to update this to accept either undefined or
   // "full", and possibly decide if we want to support the "half" option.
-  // jsg::JsValue getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
+  // jsg::JsValue getDuplex(jsg::Lock& js) { return js.undefined(); }
   // TODO(conform): Might implement?
 
   // These relate to CORS support, which we do not implement. WinterTC has determined that
@@ -773,26 +838,33 @@ class Request final: public Body {
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
       if (flags.getCacheOptionEnabled()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
-        if (flags.getCacheNoCache()) {
+        if (flags.getCacheReload()) {
+          JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
+            constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
+            clone(): Request<CfHostMetadata, Cf>;
+            cache?: "no-store" | "no-cache" | "reload";
+            cf?: Cf;
+          });
+        } else if (flags.getCacheNoCache()) {
           JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
             constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
             clone(): Request<CfHostMetadata, Cf>;
             cache?: "no-store" | "no-cache";
-            get cf(): Cf | undefined;
+            cf?: Cf;
           });
         } else {
           JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
             constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
             clone(): Request<CfHostMetadata, Cf>;
             cache?: "no-store";
-            get cf(): Cf | undefined;
+            cf?: Cf;
           });
         }
       } else {
         JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
           constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
           clone(): Request<CfHostMetadata, Cf>;
-          get cf(): Cf | undefined;
+          cf?: Cf;
         });
       }
 
@@ -874,7 +946,7 @@ class Response final: public Body {
 
   Response(jsg::Lock& js,
       int statusCode,
-      kj::String statusText,
+      kj::Maybe<kj::String> statusText,
       jsg::Ref<Headers> headers,
       CfProperty&& cf,
       kj::Maybe<Body::ExtractedBody> body,
@@ -1043,7 +1115,9 @@ class Response final: public Body {
 
  private:
   int statusCode;
-  kj::String statusText;
+  // If the statusText is empty, we will derive it from the statusCode. If there's no
+  // match, it will be empty.
+  kj::Maybe<kj::String> statusText;
   jsg::Ref<Headers> headers;
   CfProperty cf;
 
@@ -1064,8 +1138,6 @@ class Response final: public Body {
   // If this response is already encoded and the user don't want to encode the
   // body twice, they can specify encodeBody: "manual".
   Response::BodyEncoding bodyEncoding;
-
-  bool hasEnabledWebSocketCompression = false;
 
   // Capturing the AsyncContextFrame when the Response is created is necessary because there's
   // a natural separation that occurs between the moment the Response is created and when we
@@ -1146,13 +1218,6 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
     kj::Maybe<jsg::Ref<WebSocket>> webSocket,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     kj::Maybe<jsg::Ref<AbortSignal>> signal = kj::none);
-
-bool isNullBodyStatusCode(uint statusCode);
-bool isRedirectStatusCode(uint statusCode);
-
-kj::String makeRandomBoundaryCharacters();
-// Make a boundary string for FormData serialization.
-// TODO(cleanup): Move to form-data.{h,c++}?
 
 #define EW_HTTP_ISOLATE_TYPES                                                                      \
   api::FetchEvent, api::Headers, api::Headers::EntryIterator, api::Headers::EntryIterator::Next,   \

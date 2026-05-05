@@ -4,6 +4,7 @@
 
 #include "sqlite.h"
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/debug.h>
@@ -83,6 +84,93 @@ kj::String namedErrorCode(int errorCode) {
 #undef LITERAL
 }
 
+// Maps extended error codes to their symbolic names.
+// See https://www.sqlite.org/rescode.html#extended_result_code_list.
+kj::Maybe<kj::String> namedExtendedErrorCode(int extendedErrorCode) {
+#define LITERAL(name)                                                                              \
+  case name:                                                                                       \
+    return kj::str(#name);
+  switch (extendedErrorCode) {
+    LITERAL(SQLITE_ABORT_ROLLBACK)
+    LITERAL(SQLITE_AUTH_USER)
+    LITERAL(SQLITE_BUSY_RECOVERY)
+    LITERAL(SQLITE_BUSY_SNAPSHOT)
+    LITERAL(SQLITE_BUSY_TIMEOUT)
+    LITERAL(SQLITE_CANTOPEN_CONVPATH)
+    LITERAL(SQLITE_CANTOPEN_DIRTYWAL)
+    LITERAL(SQLITE_CANTOPEN_FULLPATH)
+    LITERAL(SQLITE_CANTOPEN_ISDIR)
+    LITERAL(SQLITE_CANTOPEN_NOTEMPDIR)
+    LITERAL(SQLITE_CANTOPEN_SYMLINK)
+    LITERAL(SQLITE_CONSTRAINT_CHECK)
+    LITERAL(SQLITE_CONSTRAINT_COMMITHOOK)
+    LITERAL(SQLITE_CONSTRAINT_DATATYPE)
+    LITERAL(SQLITE_CONSTRAINT_FOREIGNKEY)
+    LITERAL(SQLITE_CONSTRAINT_FUNCTION)
+    LITERAL(SQLITE_CONSTRAINT_NOTNULL)
+    LITERAL(SQLITE_CONSTRAINT_PINNED)
+    LITERAL(SQLITE_CONSTRAINT_PRIMARYKEY)
+    LITERAL(SQLITE_CONSTRAINT_ROWID)
+    LITERAL(SQLITE_CONSTRAINT_TRIGGER)
+    LITERAL(SQLITE_CONSTRAINT_UNIQUE)
+    LITERAL(SQLITE_CONSTRAINT_VTAB)
+    LITERAL(SQLITE_CORRUPT_INDEX)
+    LITERAL(SQLITE_CORRUPT_SEQUENCE)
+    LITERAL(SQLITE_CORRUPT_VTAB)
+    LITERAL(SQLITE_ERROR_MISSING_COLLSEQ)
+    LITERAL(SQLITE_ERROR_RETRY)
+    LITERAL(SQLITE_ERROR_SNAPSHOT)
+    LITERAL(SQLITE_IOERR_ACCESS)
+    LITERAL(SQLITE_IOERR_AUTH)
+    LITERAL(SQLITE_IOERR_BEGIN_ATOMIC)
+    LITERAL(SQLITE_IOERR_BLOCKED)
+    LITERAL(SQLITE_IOERR_CHECKRESERVEDLOCK)
+    LITERAL(SQLITE_IOERR_CLOSE)
+    LITERAL(SQLITE_IOERR_COMMIT_ATOMIC)
+    LITERAL(SQLITE_IOERR_CONVPATH)
+    LITERAL(SQLITE_IOERR_CORRUPTFS)
+    LITERAL(SQLITE_IOERR_DATA)
+    LITERAL(SQLITE_IOERR_DELETE)
+    LITERAL(SQLITE_IOERR_DELETE_NOENT)
+    LITERAL(SQLITE_IOERR_DIR_CLOSE)
+    LITERAL(SQLITE_IOERR_DIR_FSYNC)
+    LITERAL(SQLITE_IOERR_FSTAT)
+    LITERAL(SQLITE_IOERR_FSYNC)
+    LITERAL(SQLITE_IOERR_GETTEMPPATH)
+    LITERAL(SQLITE_IOERR_LOCK)
+    LITERAL(SQLITE_IOERR_MMAP)
+    LITERAL(SQLITE_IOERR_NOMEM)
+    LITERAL(SQLITE_IOERR_RDLOCK)
+    LITERAL(SQLITE_IOERR_READ)
+    LITERAL(SQLITE_IOERR_ROLLBACK_ATOMIC)
+    LITERAL(SQLITE_IOERR_SEEK)
+    LITERAL(SQLITE_IOERR_SHMLOCK)
+    LITERAL(SQLITE_IOERR_SHMMAP)
+    LITERAL(SQLITE_IOERR_SHMOPEN)
+    LITERAL(SQLITE_IOERR_SHMSIZE)
+    LITERAL(SQLITE_IOERR_SHORT_READ)
+    LITERAL(SQLITE_IOERR_TRUNCATE)
+    LITERAL(SQLITE_IOERR_UNLOCK)
+    LITERAL(SQLITE_IOERR_VNODE)
+    LITERAL(SQLITE_IOERR_WRITE)
+    LITERAL(SQLITE_LOCKED_SHAREDCACHE)
+    LITERAL(SQLITE_LOCKED_VTAB)
+    LITERAL(SQLITE_NOTICE_RECOVER_ROLLBACK)
+    LITERAL(SQLITE_NOTICE_RECOVER_WAL)
+    LITERAL(SQLITE_OK_LOAD_PERMANENTLY)
+    LITERAL(SQLITE_READONLY_CANTINIT)
+    LITERAL(SQLITE_READONLY_CANTLOCK)
+    LITERAL(SQLITE_READONLY_DBMOVED)
+    LITERAL(SQLITE_READONLY_DIRECTORY)
+    LITERAL(SQLITE_READONLY_RECOVERY)
+    LITERAL(SQLITE_READONLY_ROLLBACK)
+    LITERAL(SQLITE_WARNING_AUTOINDEX)
+    default:
+      return kj::none;
+  }
+#undef LITERAL
+}
+
 constexpr size_t RA_MAX_METRICS_QUERY_SIZE = 1024;
 
 kj::String dbErrorMessage(int errorCode, sqlite3* db) {
@@ -91,6 +179,12 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
     msg = kj::strTree(kj::mv(msg), " at offset ", offset);
   }
   msg = kj::strTree(kj::mv(msg), ": ", namedErrorCode(errorCode));
+  int extendedCode = sqlite3_extended_errcode(db);
+  if (extendedCode != errorCode) {
+    KJ_IF_SOME(extendedName, namedExtendedErrorCode(extendedCode)) {
+      msg = kj::strTree(kj::mv(msg), " (extended: ", extendedName, ")");
+    }
+  }
   return msg.flatten();
 }
 
@@ -159,7 +253,7 @@ class SqliteCallScope {
 #define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, ...)                              \
   if (!(condition)) {                                                                              \
     regulator.onError(sqliteErrorCode, errorMessage);                                              \
-    KJ_FAIL_REQUIRE("SQLite failed", errorMessage, ##__VA_ARGS__);                                 \
+    KJ_FAIL_REQUIRE("SENTRY_DO SQLite failed", errorMessage, ##__VA_ARGS__);                       \
   }
 
 // Make a SQLite call and check the returned error code. Use this version when the call is not
@@ -186,11 +280,16 @@ class SqliteCallScope {
 
 // Version of `SQLITE_CALL` that can be called after inspecting the error code, in case some codes
 // aren't really errors.
+//
+// Temporarily marking SQLITE_BUSY as NOSENTRY to reduce sentry volume while debugging issue.
+// TODO(soon): reenable SQLITE_BUSY sentry logging.
 #define SQLITE_CALL_FAILED(code, error, ...)                                                       \
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
     handleCriticalError(error, dbErrorMessage(error, db), sqliteCallScope.getException());         \
     if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                  \
+    SQLITE_REQUIRE(error != SQLITE_BUSY, error, kj::str("NOSENTRY ", dbErrorMessage(error, db)),   \
+        ##__VA_ARGS__);                                                                            \
     SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
   } while (false);
 
@@ -378,22 +477,33 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
 
   // https://www.sqlite.org/json1.html
   "json"_kj,
+  "jsonb"_kj,
   "json_array"_kj,
+  "jsonb_array"_kj,
   "json_array_length"_kj,
   "json_extract"_kj,
+  "jsonb_extract"_kj,
   "->"_kj,
   "->>"_kj,
   "json_insert"_kj,
+  "jsonb_insert"_kj,
   "json_object"_kj,
+  "jsonb_object"_kj,
   "json_patch"_kj,
+  "jsonb_patch"_kj,
   "json_remove"_kj,
+  "jsonb_remove"_kj,
   "json_replace"_kj,
+  "jsonb_replace"_kj,
   "json_set"_kj,
+  "jsonb_set"_kj,
   "json_type"_kj,
   "json_valid"_kj,
   "json_quote"_kj,
   "json_group_array"_kj,
+  "jsonb_group_array"_kj,
   "json_group_object"_kj,
+  "jsonb_group_object"_kj,
   "json_each"_kj,
   "json_tree"_kj,
 
@@ -458,17 +568,17 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
 
-constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
-
 SqliteDatabase::SqliteDatabase(const Vfs& vfs,
     kj::Path path,
     kj::Maybe<kj::WriteMode> maybeMode,
+    size_t sqliteMaxMemoryBytes,
     SqliteObserver& sqliteObserver,
     kj::Maybe<const ActorAccountLimits&> actorAccountLimits)
     : vfs(vfs),
       path(kj::mv(path)),
       readOnly(maybeMode == kj::none),
       sqliteObserver(sqliteObserver),
+      sqliteMaxMemoryBytes(sqliteMaxMemoryBytes),
       actorAccountLimits(actorAccountLimits) {
   init(maybeMode);
 }
@@ -476,6 +586,8 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs,
 void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
   KJ_ASSERT(maybeDb == kj::none);
   sqlite3* db = nullptr;
+
+  auto memoryScope = enterMemoryScope();
 
   KJ_IF_SOME(mode, maybeMode) {
     int flags = SQLITE_OPEN_READWRITE;
@@ -494,7 +606,8 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
     KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
       // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
       // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-      SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath.toString().cStr(), &db, flags, nullptr));
+      SQLITE_CALL_NODB(
+          sqlite3_open_v2(rootedPath.toNativeString(true).cStr(), &db, flags, nullptr));
     } else {
       SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db, flags, vfs.getName().cStr()));
     }
@@ -502,8 +615,8 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
     KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
       // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
       // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-      SQLITE_CALL_NODB(
-          sqlite3_open_v2(rootedPath.toString().cStr(), &db, SQLITE_OPEN_READONLY, nullptr));
+      SQLITE_CALL_NODB(sqlite3_open_v2(
+          rootedPath.toNativeString(true).cStr(), &db, SQLITE_OPEN_READONLY, nullptr));
     } else {
       SQLITE_CALL_NODB(
           sqlite3_open_v2(path.toString().cStr(), &db, SQLITE_OPEN_READONLY, vfs.getName().cStr()));
@@ -519,6 +632,8 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
 
 SqliteDatabase::~SqliteDatabase() noexcept(false) {
   sqlite3* db = &KJ_UNWRAP_OR(maybeDb, return);
+
+  auto memoryScope = enterMemoryScope();
 
   auto err = sqlite3_close(db);
   if (err == SQLITE_BUSY) {
@@ -537,9 +652,17 @@ SqliteDatabase::operator sqlite3*() {
   return &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 }
 
-void SqliteDatabase::notifyWrite() {
+SqliteMemoryScope SqliteDatabase::enterMemoryScope() {
+  return SqliteMemoryScope(sqliteMemoryBytes, sqliteMaxMemoryBytes);
+}
+
+bool SqliteDatabase::observedCriticalError() {
+  return criticalErrorOccurred;
+}
+
+void SqliteDatabase::notifyWrite(bool allowUnconfirmed) {
   KJ_IF_SOME(cb, onWriteCallback) {
-    cb();
+    cb(allowUnconfirmed);
   }
 }
 
@@ -547,16 +670,19 @@ void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
     kj::StringPtr errorMessage,
     kj::Maybe<const kj::Exception&> maybeException) {
   KJ_IF_SOME(code, errorCode) {
-    if (code == SQLITE_FULL || code == SQLITE_IOERR || code == SQLITE_BUSY ||
-        code == SQLITE_NOMEM || code == SQLITE_INTERRUPT) {
+    // Only errors listed in https://www.sqlite.org/lang_transaction.html#response_to_errors_within_a_transaction
+    // should be considered here as SQLITE auto rollbacks the transaction when we hit these errors
+    if (code == SQLITE_FULL || code == SQLITE_IOERR || code == SQLITE_NOMEM ||
+        code == SQLITE_INTERRUPT) {
 
       sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
       // We are in a transaction
       if (inTransaction || !savepoints.empty()) {
         // The transaction was auto-rolledback, re-enabling the auto commit mode, so we should fail
         if (sqlite3_get_autocommit(db) != 0) {
+          criticalErrorOccurred = true;
           KJ_IF_SOME(cb, onCriticalErrorCallback) {
-            cb(errorMessage, maybeException);
+            cb(errorMessage, maybeException.map([](const kj::Exception& e) { return e.clone(); }));
           }
         }
       }
@@ -692,6 +818,8 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
     }
   });
 
+  auto memoryScope = enterMemoryScope();
+
   for (;;) {
     sqlite3_stmt* result;
     const char* tail;
@@ -745,7 +873,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
               KJ_DEFER(currentRegulator = regulator);
               currentParseContext = kj::none;
               KJ_DEFER(currentParseContext = parseContext);
-              cb();
+              cb(false);  // prepareSql doesn't have access to allowUnconfirmed, use safe default
             }
           }
 
@@ -755,6 +883,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
             auto dbWalSizeBefore = sqliteObserver.getDbWalSize();
 
             int err = sqlite3_step(result);
+            int extendedCode = sqlite3_extended_errcode(db);
 
             kj::Duration queryLatency = sqliteObserver.now() - start;
             auto dbWalBytesWritten = sqliteObserver.getDbWalSize() - dbWalSizeBefore;
@@ -775,7 +904,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
 
             // Report queryEvent for this statement
             sqliteObserver.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten,
-                queryLatency, dbWalBytesWritten, err, regulator.shouldAddQueryStats(),
+                queryLatency, dbWalBytesWritten, err, extendedCode, regulator.shouldAddQueryStats(),
                 kj::mv(queryErrorDescription));
 
             if (err == SQLITE_DONE) {
@@ -826,7 +955,7 @@ SqliteDatabase::IngestResult SqliteDatabase::ingestSql(
     // Slice off the next valid statement SQL
     auto nextStatement = kj::str(sqlCode.first(statementLength));
     // Create a Query object, which will prepare & execute it
-    auto q = Query(*this, regulator, nextStatement);
+    auto q = Query(*this, QueryOptions{.regulator = regulator}, nextStatement);
 
     rowsRead += q.getRowsRead();
     rowsWritten += q.getRowsWritten();
@@ -850,6 +979,8 @@ void SqliteDatabase::executeWithRegulator(
 
   currentRegulator = regulator;
   KJ_DEFER(currentRegulator = kj::none);
+
+  auto memoryScope = enterMemoryScope();
   func();
 }
 
@@ -859,6 +990,8 @@ void SqliteDatabase::reset() {
   // If transactions are open during reset(), whatever had the transaction open is going to get
   // confused at best, or lose data at worst. Let's just not allow this.
   KJ_REQUIRE(!inTransaction && savepoints.empty(), "can't reset() a database during a transaction");
+
+  auto memoryScope = enterMemoryScope();
 
   // Temporarily disable the on-write callback while resetting.
   auto writeCb = kj::mv(onWriteCallback);
@@ -1154,6 +1287,13 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         KJ_IF_SOME(moduleName, param2) {
           if (strcasecmp(moduleName.begin(), "fts5") == 0 ||
               strcasecmp(moduleName.begin(), "fts5vocab") == 0) {
+            if (util::Autogate::isEnabled(util::AutogateKey::SQL_RESTRICT_RESERVED_NAMES)) {
+              return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+            }
+            auto& tableName = KJ_ASSERT_NONNULL(param1);
+            if (tableName.size() >= 4 && strncasecmp(tableName.begin(), "_cf_", 4) == 0) {
+              LOG_WARNING_PERIODICALLY("FTS5 virtual table uses reserved _cf_ prefix");
+            }
             return true;
           }
         }
@@ -1263,16 +1403,17 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // 4. Set a progress handler or use interrupt() to limit CPU time.
   // This happens inside LimitEnforcer.
 
-  // 5. Limit heap size.
-  // Annoyingly, this sets a process-wide limit. We'll set 128MB "soft" limit (to try to control
-  // how much page caching SQLite does) and 512MB "hard" limit (to block DoS attacks from taking
-  // down the whole system).
-  // TODO(perf): Revisit as popularity grows. Maybe make configurable? Maybe patch SQLite to allow
-  //   these to be controlled per-database? Is page caching even all that important when the kernel
-  //   does its own page caching?
+  // 5. Limit process-wide heap size.
+  // Set a 128MB "soft" limit so that SQLite will purge the page cache when per-process memory
+  // consumption exceeds this value, and an 8 GiB "hard" limit as a defense in depth mechanism to
+  // prevent SQLite from consuming too much per-process memory. The primary mechanism for limiting
+  // SQLite memory consumption is the metering done in the sqlite-metering module.
   static bool doOnce KJ_UNUSED = []() {
     sqlite3_soft_heap_limit64(128u << 20);
-    sqlite3_hard_heap_limit64(512u << 20);
+    sqlite3_hard_heap_limit64(
+        util::Autogate::isEnabled(util::AutogateKey::INCREASE_SQLITE_HARD_HEAP_LIMIT)
+            ? (8ull << 30)    // 8 GiB
+            : (512u << 20));  // 512 MiB
     return false;
   }();
 
@@ -1318,12 +1459,20 @@ void SqliteDatabase::Statement::beforeSqliteReset() {
   }
 }
 
+SqliteDatabase::Statement::~Statement() noexcept(false) {
+  // Install memory scope for sqlite3_finalize called when stmt (containing StatementAndEffect
+  // with kj::Own<sqlite3_stmt>) is destroyed. Also covers prelude destruction.
+  auto memoryScope = db.enterMemoryScope();
+  auto stmtToDestroy = kj::mv(stmt);
+  auto preludeToDestroy = kj::mv(prelude);
+}
+
 SqliteDatabase::Query::Query(SqliteDatabase& db,
-    const Regulator& regulator,
+    QueryOptions options,
     Statement& statement,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
-      regulator(regulator),
+      regulator(options.regulator),
       maybeStatement(statement.prepareForExecution()),
       queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
@@ -1332,11 +1481,11 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
 }
 
 SqliteDatabase::Query::Query(SqliteDatabase& db,
-    const Regulator& regulator,
+    QueryOptions options,
     kj::StringPtr sqlCode,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
-      regulator(regulator),
+      regulator(options.regulator),
       ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
       maybeStatement(ownStatement),
       queryEvent(this->db.sqliteObserver) {
@@ -1350,8 +1499,13 @@ SqliteDatabase::Query::~Query() noexcept(false) {
 }
 
 void SqliteDatabase::Query::destroy() {
+  // Install memory scope for sqlite3_reset, sqlite3_clear_bindings, and sqlite3_finalize (via
+  // ownStatement destruction). The scope is idempotent, so this is safe even if a scope is already
+  // active from the caller.
+  auto memoryScope = db.enterMemoryScope();
+
   if (regulator.shouldAddQueryStats()) {
-    //Update the db stats that we have collected for the query
+    // Update the db stats that we have collected for the query.
     db.sqliteObserver.addQueryStats(rowsRead, rowsWritten);
   }
 
@@ -1367,9 +1521,14 @@ void SqliteDatabase::Query::destroy() {
         errorDescription.slice(0, kj::min(RA_MAX_METRICS_QUERY_SIZE, errorDescription.size()))));
   }
 
+  // Move ownStatement to a local variable so that it goes out of scope while memoryScope is still
+  // active. ownStatement is used by getStatementAndEffect(), so we cannot move it until this
+  // point.
+  auto ownStatementToDestroy = kj::mv(ownStatement);
+
   // We only need to reset the statement if we don't own it. If we own it, it's about to be
   // destroyed anyway.
-  if (ownStatement.statement.get() == nullptr) {
+  if (ownStatementToDestroy.statement.get() == nullptr) {
     KJ_IF_SOME(statement, maybeStatement) {
       // The error code returned by sqlite3_reset() actually represents the last error encountered
       // when stepping the statement. This doesn't mean that the reset failed.
@@ -1402,7 +1561,7 @@ void SqliteDatabase::Query::checkRequirements(size_t size) {
 
   KJ_IF_SOME(cb, db.onWriteCallback) {
     if (!sqlite3_stmt_readonly(statement)) {
-      cb();
+      cb(allowUnconfirmed);
     }
   }
 }
@@ -1451,26 +1610,31 @@ uint64_t SqliteDatabase::Query::getRowsWritten() {
 }
 
 void SqliteDatabase::Query::bind(uint i, kj::ArrayPtr<const byte> value) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   SQLITE_CALL(sqlite3_bind_blob(statement, i + 1, value.begin(), value.size(), SQLITE_STATIC));
 }
 
 void SqliteDatabase::Query::bind(uint i, kj::StringPtr value) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   SQLITE_CALL(sqlite3_bind_text(statement, i + 1, value.begin(), value.size(), SQLITE_STATIC));
 }
 
 void SqliteDatabase::Query::bind(uint i, long long value) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   SQLITE_CALL(sqlite3_bind_int64(statement, i + 1, value));
 }
 
 void SqliteDatabase::Query::bind(uint i, double value) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   SQLITE_CALL(sqlite3_bind_double(statement, i + 1, value));
 }
 
 void SqliteDatabase::Query::bind(uint i, decltype(nullptr)) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   SQLITE_CALL(sqlite3_bind_null(statement, i + 1));
 }
@@ -1488,9 +1652,14 @@ void SqliteDatabase::Query::nextRow(bool first) {
   KJ_DEFER(db.currentRegulator = kj::none);
   db.currentRegulator = regulator;
 
+  auto memoryScope = db.enterMemoryScope();
   SQLITE_CALL_SCOPE {
     int err = sqlite3_step(statement);
     queryEvent.setQueryResult(err);
+
+    int extendedCode = sqlite3_extended_errcode(db);
+    queryEvent.setQueryExtendedCode(extendedCode);
+
     // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
     // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
     // in the Dtor, and handle the case where the statement could be null when the Query gets
@@ -1518,11 +1687,13 @@ uint SqliteDatabase::Query::changeCount() {
 }
 
 uint SqliteDatabase::Query::columnCount() {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   return sqlite3_column_count(statement);
 }
 
 SqliteDatabase::Query::ValuePtr SqliteDatabase::Query::getValue(uint column) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   switch (sqlite3_column_type(statement, column)) {
     case SQLITE_INTEGER:
@@ -1540,38 +1711,45 @@ SqliteDatabase::Query::ValuePtr SqliteDatabase::Query::getValue(uint column) {
 }
 
 kj::StringPtr SqliteDatabase::Query::getColumnName(uint column) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   return sqlite3_column_name(statement, column);
 }
 
 kj::ArrayPtr<const byte> SqliteDatabase::Query::getBlob(uint column) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   const byte* ptr = reinterpret_cast<const byte*>(sqlite3_column_blob(statement, column));
   return kj::arrayPtr(ptr, sqlite3_column_bytes(statement, column));
 }
 
 kj::StringPtr SqliteDatabase::Query::getText(uint column) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   const char* ptr = reinterpret_cast<const char*>(sqlite3_column_text(statement, column));
   return kj::StringPtr(ptr, sqlite3_column_bytes(statement, column));
 }
 
 int SqliteDatabase::Query::getInt(uint column) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   return sqlite3_column_int(statement, column);
 }
 
 int64_t SqliteDatabase::Query::getInt64(uint column) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   return sqlite3_column_int64(statement, column);
 }
 
 double SqliteDatabase::Query::getDouble(uint column) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   return sqlite3_column_double(statement, column);
 }
 
 bool SqliteDatabase::Query::isNull(uint column) {
+  auto memoryScope = db.enterMemoryScope();
   sqlite3_stmt* statement = getStatement();
   return sqlite3_column_type(statement, column) == SQLITE_NULL;
 }
@@ -1784,7 +1962,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
   // wrapped so that it sets `currentVfsRoot` while running.
   return {
     .iVersion = kj::min(3, native.iVersion),
-    .szOsFile = native.szOsFile + (int)sizeof(WrappedNativeFileImpl),
+    .szOsFile = native.szOsFile + static_cast<int>(sizeof(WrappedNativeFileImpl)),
     .mxPathname = native.mxPathname,
     .pNext = nullptr,
     .zName = name.cStr(),
@@ -2420,7 +2598,7 @@ class SqliteDatabase::Vfs::DefaultLockManager final: public SqliteDatabase::Lock
       auto slock = state->guarded.lockExclusive();
 
       for (uint i = start; i < start + count; i++) {
-        if (slock->walLocks[i] == (uint)kj::maxValue) {
+        if (slock->walLocks[i] == static_cast<uint>(kj::maxValue)) {
           // blocked by exclusive lock
           return false;
         }

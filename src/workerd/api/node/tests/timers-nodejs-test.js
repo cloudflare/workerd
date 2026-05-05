@@ -496,3 +496,27 @@ export const timersIntervalPromise = {
     }
   },
 };
+
+export const testImmediateFromOtherContext = {
+  async test(_, env) {
+    // Set up the global setImmediate...
+    await env.SUBREQUEST.fetch('http://example.com');
+
+    // Try to access it from a different IoContext.
+    await env.SUBREQUEST.fetch('http://example.com');
+  },
+};
+
+export default {
+  fetch() {
+    if (globalThis.IMMEDIATE_TEST === undefined) {
+      globalThis.IMMEDIATE_TEST = setImmediate(() => {});
+      globalThis.IMMEDIATE_TEST[Symbol.dispose]();
+    } else {
+      throws(() => globalThis.IMMEDIATE_TEST[Symbol.dispose](), {
+        message: /perform I\/O on behalf of a different request/,
+      });
+    }
+    return new Response();
+  },
+};

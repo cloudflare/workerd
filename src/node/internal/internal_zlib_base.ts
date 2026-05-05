@@ -7,6 +7,7 @@ import {
   default as zlibUtil,
   type ZlibOptions,
   type BrotliOptions,
+  type ZstdOptions,
 } from 'node-internal:zlib';
 import { Buffer, kMaxLength } from 'node-internal:internal_buffer';
 import {
@@ -18,11 +19,12 @@ import {
   ERR_BUFFER_TOO_LARGE,
   ERR_INVALID_ARG_TYPE,
   ERR_BROTLI_INVALID_PARAM,
+  ERR_ZSTD_INVALID_PARAM,
   ERR_ZLIB_INITIALIZATION_FAILED,
   NodeError,
 } from 'node-internal:internal_errors';
 import { Transform, type DuplexOptions } from 'node-internal:streams_transform';
-import { eos as finished } from 'node-internal:streams_util';
+import { eos as finished } from 'node-internal:streams_end_of_stream';
 import {
   isArrayBufferView,
   isAnyArrayBuffer,
@@ -62,20 +64,29 @@ const {
   CONST_BROTLI_OPERATION_EMIT_METADATA,
   CONST_BROTLI_OPERATION_FINISH,
   CONST_BROTLI_OPERATION_FLUSH,
+  CONST_ZSTD_ENCODE,
+  CONST_ZSTD_DECODE,
+  CONST_ZSTD_e_continue,
+  CONST_ZSTD_e_end,
+  CONST_ZSTD_e_flush,
 } = zlibUtil;
 
 // This type contains all possible handler types.
 type ZlibHandleType =
   | zlibUtil.ZlibStream
   | zlibUtil.BrotliEncoder
-  | zlibUtil.BrotliDecoder;
+  | zlibUtil.BrotliDecoder
+  | zlibUtil.ZstdEncoder
+  | zlibUtil.ZstdDecoder;
 export const owner_symbol = Symbol('owner');
 
 const FLUSH_BOUND_IDX_NORMAL: number = 0;
 const FLUSH_BOUND_IDX_BROTLI: number = 1;
-const FLUSH_BOUND: [[number, number], [number, number]] = [
+const FLUSH_BOUND_IDX_ZSTD: number = 2;
+const FLUSH_BOUND: [[number, number], [number, number], [number, number]] = [
   [CONST_Z_NO_FLUSH, CONST_Z_BLOCK],
   [CONST_BROTLI_OPERATION_PROCESS, CONST_BROTLI_OPERATION_EMIT_METADATA],
+  [CONST_ZSTD_e_continue, CONST_ZSTD_e_end],
 ];
 
 const kFlushFlag = Symbol('kFlushFlag');
@@ -354,6 +365,8 @@ export class ZlibBase extends Transform {
   _info: boolean;
   _handle: ZlibHandleType | null = null;
   _writeState = new Uint32Array(2);
+  _writesInProgress: number = 0;
+  _hadWrites: boolean = false;
 
   [kError]: NodeError | undefined;
 
@@ -367,10 +380,12 @@ export class ZlibBase extends Transform {
     let maxOutputLength = kMaxLength;
 
     let flushBoundIdx;
-    if (mode !== CONST_BROTLI_ENCODE && mode !== CONST_BROTLI_DECODE) {
-      flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
-    } else {
+    if (mode === CONST_BROTLI_ENCODE || mode === CONST_BROTLI_DECODE) {
       flushBoundIdx = FLUSH_BOUND_IDX_BROTLI;
+    } else if (mode === CONST_ZSTD_ENCODE || mode === CONST_ZSTD_DECODE) {
+      flushBoundIdx = FLUSH_BOUND_IDX_ZSTD;
+    } else {
+      flushBoundIdx = FLUSH_BOUND_IDX_NORMAL;
     }
 
     /* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */
@@ -437,6 +452,8 @@ export class ZlibBase extends Transform {
     this._maxOutputLength = maxOutputLength;
   }
 
+  // Note: This is intentionally a getter that shadows the property from Transform
+  // @ts-expect-error TS2611 Property/accessor mismatch with Transform._closed
   get _closed(): boolean {
     return this._handle == null;
   }
@@ -459,7 +476,26 @@ export class ZlibBase extends Transform {
   // This is the _flush function called by the transform class,
   // internally, when the last chunk has been written.
   override _flush(callback: () => void): void {
-    this._transform(Buffer.alloc(0), 'utf8', callback);
+    // If there are writes in progress, wait for them to complete
+    if (this._writesInProgress > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
+      queueMicrotask(() => this._flush(callback));
+      return;
+    }
+
+    // If there were writes, add extra microtask to ensure data from processCallback has been pushed
+    if (this._hadWrites) {
+      queueMicrotask(() => {
+        const chunk = Buffer.alloc(0) as Buffer & { [kFlushFlag]?: number };
+        chunk[kFlushFlag] = this._finishFlushFlag;
+        this._transform(chunk, 'utf8', callback);
+      });
+    } else {
+      // No writes occurred, flush immediately
+      const chunk = Buffer.alloc(0) as Buffer & { [kFlushFlag]?: number };
+      chunk[kFlushFlag] = this._finishFlushFlag;
+      this._transform(chunk, 'utf8', callback);
+    }
   }
 
   // Force Transform compat behavior.
@@ -469,10 +505,7 @@ export class ZlibBase extends Transform {
 
   flush(kind: number, callback: () => void): void;
   flush(callback?: () => void): void;
-  flush(
-    kind?: number | (() => void),
-    callback: (() => void) | undefined = undefined
-  ): void {
+  flush(kind?: number | (() => void), callback?: () => void): void {
     if (typeof kind === 'function' || (kind === undefined && !callback)) {
       callback = kind as (() => void) | undefined;
       kind = this._defaultFullFlushFlag;
@@ -546,8 +579,19 @@ export class ZlibBase extends Transform {
       return;
     }
 
+    // Track that we have a write in progress
+    if (chunk.byteLength > 0) {
+      this._hadWrites = true;
+    }
+    this._writesInProgress++;
+    const originalCb = cb;
+    const wrappedCb = (): void => {
+      this._writesInProgress--;
+      originalCb();
+    };
+
     this._handle.buffer = chunk;
-    this._handle.cb = cb;
+    this._handle.cb = wrappedCb;
     this._handle.availOutBefore = this._chunkSize - this._outOffset;
     this._handle.availInBefore = chunk.byteLength;
     this._handle.inOff = 0;
@@ -764,6 +808,88 @@ export class Brotli extends ZlibBase {
     }
 
     super(options ?? {}, mode, handle, brotliDefaultOptions);
+    this._writeState = _writeState;
+  }
+}
+
+export const kMaxZstdCParam = Math.max(
+  ...Object.entries(constants).map(([key, value]) =>
+    key.startsWith('ZSTD_c_') ? value : 0
+  )
+);
+export const zstdInitCParamsArray = new Int32Array(kMaxZstdCParam + 1);
+
+export const kMaxZstdDParam = Math.max(
+  ...Object.entries(constants).map(([key, value]) =>
+    key.startsWith('ZSTD_d_') ? value : 0
+  )
+);
+export const zstdInitDParamsArray = new Int32Array(kMaxZstdDParam + 1);
+
+const zstdDefaultOptions: ZlibDefaultOptions = {
+  flush: CONST_ZSTD_e_continue,
+  finishFlush: CONST_ZSTD_e_end,
+  fullFlush: CONST_ZSTD_e_flush,
+};
+
+export class Zstd extends ZlibBase {
+  constructor(
+    options: ZstdOptions | undefined | null,
+    mode: number,
+    initParamsArray: Int32Array,
+    maxParam: number
+  ) {
+    ok(mode === CONST_ZSTD_DECODE || mode === CONST_ZSTD_ENCODE);
+    initParamsArray.fill(-1);
+
+    if (options?.params) {
+      for (const [origKey, value] of Object.entries(options.params)) {
+        const key = +origKey;
+        if (
+          Number.isNaN(key) ||
+          key < 0 ||
+          key > maxParam ||
+          ((initParamsArray[key] as number) | 0) !== -1
+        ) {
+          throw new ERR_ZSTD_INVALID_PARAM(origKey);
+        }
+
+        if (typeof value !== 'number' && typeof value !== 'boolean') {
+          throw new ERR_INVALID_ARG_TYPE(
+            'options.params[key]',
+            'number',
+            value
+          );
+        }
+        // as number is required to avoid force type coercion on runtime.
+        // boolean has number representation, but typescript doesn't understand it.
+        initParamsArray[key] = value as number;
+      }
+    }
+
+    const handle =
+      mode === CONST_ZSTD_DECODE
+        ? new zlibUtil.ZstdDecoder(mode)
+        : new zlibUtil.ZstdEncoder(mode);
+
+    const _writeState = new Uint32Array(2);
+
+    const pledgedSrcSize = options?.pledgedSrcSize;
+
+    if (
+      !handle.initialize(
+        initParamsArray,
+        _writeState,
+        () => {
+          queueMicrotask(processCallback.bind(handle));
+        },
+        pledgedSrcSize
+      )
+    ) {
+      throw new ERR_ZLIB_INITIALIZATION_FAILED();
+    }
+
+    super(options ?? {}, mode, handle, zstdDefaultOptions);
     this._writeState = _writeState;
   }
 }

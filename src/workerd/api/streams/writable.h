@@ -6,6 +6,7 @@
 
 #include "common.h"
 
+#include <workerd/util/state-machine.h>
 #include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
@@ -23,7 +24,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
   jsg::MemoizedIdentity<jsg::Promise<void>>& getReady();
-  kj::Maybe<int> getDesiredSize(jsg::Lock& js);
+  kj::Maybe<int> getDesiredSize();
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
@@ -39,7 +40,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   //   complete on this side if we don't care that they're actually read?
   jsg::Promise<void> close(jsg::Lock& js);
 
-  jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> chunk);
+  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk);
   void releaseLock(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(WritableStreamDefaultWriter, CompatibilityFlags::Reader flags) {
@@ -64,7 +65,8 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   // Internal API
 
-  void attach(WritableStreamController& controller,
+  void attach(jsg::Lock& js,
+      WritableStreamController& controller,
       jsg::Promise<void> closedPromise,
       jsg::Promise<void> readyPromise) override;
 
@@ -72,12 +74,16 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   void lockToStream(jsg::Lock& js, WritableStream& stream);
 
-  void replaceReadyPromise(jsg::Promise<void> readyPromise) override;
+  void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) override;
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
+  kj::Maybe<jsg::Promise<void>> isReady(jsg::Lock& js);
+
  private:
-  struct Initial {};
+  struct Initial {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "initial"_kj;
+  };
   // While a Writer is attached to a WritableStream, it holds a strong reference to the
   // WritableStream to prevent it from being GC'ed so long as the Writer is available.
   // Once the writer is closed, released, or GC'ed the reference to the WritableStream
@@ -85,14 +91,44 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   // it being held anywhere. If the writer is still attached to the WritableStream when
   // it is destroyed, the WritableStream's reference to the writer is cleared but the
   // WritableStream remains in the "writer locked" state, per the spec.
-  using Attached = jsg::Ref<WritableStream>;
-  struct Released {};
+  struct Attached {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "attached"_kj;
+    jsg::Ref<WritableStream> stream;
+  };
+  // Released: The user explicitly called releaseLock() to detach the writer from the stream.
+  // The stream remains usable and can be locked by a new writer.
+  struct Released {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "released"_kj;
+  };
+  // Closed: The underlying stream ended (closed or errored) while the writer was attached.
+  // The stream is no longer usable.
+  struct Closed {
+    static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+  };
+
+  // State machine for WritableStreamDefaultWriter:
+  //   Initial -> Attached (attach() called)
+  //   Attached -> Closed (detach() called when stream closes)
+  //   Attached -> Released (releaseLock() called)
+  // Closed and Released are terminal states.
+  // Initial is not terminal but most methods assert if called in this state.
+  using WriterState = StateMachine<TerminalStates<Closed, Released>,
+      ActiveState<Attached>,
+      Initial,
+      Attached,
+      Closed,
+      Released>;
 
   kj::Maybe<IoContext&> ioContext;
-  kj::OneOf<Initial, Attached, Released, StreamStates::Closed> state = Initial();
+  WriterState state;
+
+  inline void assertAttachedOrTerminal() const {
+    KJ_ASSERT(!state.is<Initial>(), "this writer was never attached");
+  }
 
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> readyPromise;
+  kj::Maybe<jsg::Promise<void>> readyPromisePending;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

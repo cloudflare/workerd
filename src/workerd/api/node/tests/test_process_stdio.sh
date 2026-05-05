@@ -16,10 +16,10 @@ FILTERED_STDOUT=$(mktemp)
 FILTERED_STDERR=$(mktemp)
 trap "rm -f $ACTUAL_STDOUT $ACTUAL_STDERR $FILTERED_STDOUT $FILTERED_STDERR" EXIT
 
-"$WORKERD_BINARY" test "$TEST_CONFIG" --experimental >"$ACTUAL_STDOUT" 2>"$ACTUAL_STDERR"
+"$WORKERD_BINARY" test "$TEST_CONFIG" --experimental >"$ACTUAL_STDOUT" 2>"$ACTUAL_STDERR" --compat-date 2025-05-01
 
 # Remove [ PASS ] [ TEST ] [ FAIL ] lines from stderr
-grep -vE "\[ PASS \]|\[ FAIL \]|\[ TEST \]" "$ACTUAL_STDERR" > "$FILTERED_STDERR"
+grep -vE "\[ PASS \]|\[ FAIL \]|\[ TEST \]" "$ACTUAL_STDERR" > "$FILTERED_STDERR" || true
 
 # Compare with expected output (normalize line endings for cross-platform compatibility)
 echo "Comparing stdout..."

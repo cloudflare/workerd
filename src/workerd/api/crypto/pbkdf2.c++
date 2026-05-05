@@ -34,15 +34,16 @@ class Pbkdf2Key final: public CryptoKey::Impl {
   }
 
  private:
-  jsg::BufferSource deriveBits(jsg::Lock& js,
+  jsg::JsArrayBuffer deriveBits(jsg::Lock& js,
       SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> maybeLength) const override {
     kj::StringPtr hashName = api::getAlgorithmName(
         JSG_REQUIRE_NONNULL(algorithm.hash, TypeError, "Missing field \"hash\" in \"algorithm\"."));
     auto hashType = lookupDigestAlgorithm(hashName).second;
-    kj::ArrayPtr<kj::byte> salt =
+    auto saltHandle =
         JSG_REQUIRE_NONNULL(algorithm.salt, TypeError, "Missing field \"salt\" in \"algorithm\".")
-            .asArrayPtr();
+            .getHandle(js);
+    kj::ArrayPtr<kj::byte> salt = saltHandle.asArrayPtr();
     int iterations = JSG_REQUIRE_NONNULL(
         algorithm.iterations, TypeError, "Missing field \"iterations\" in \"algorithm\".");
 
@@ -101,18 +102,18 @@ class Pbkdf2Key final: public CryptoKey::Impl {
 };
 }  // namespace
 
-kj::Maybe<jsg::BufferSource> pbkdf2(jsg::Lock& js,
+kj::Maybe<jsg::JsArrayBuffer> pbkdf2(jsg::Lock& js,
     size_t length,
     size_t iterations,
     const EVP_MD* digest,
     kj::ArrayPtr<const kj::byte> password,
     kj::ArrayPtr<const kj::byte> salt) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
-  auto buf = ToNcryptoBuffer(backing.asArrayPtr());
+  auto buf = jsg::JsArrayBuffer::create(js, length);
+  auto ncBuf = ToNcryptoBuffer(buf.asArrayPtr());
   if (ncrypto::pbkdf2Into(digest, ToNcryptoBuffer(password.asChars()), ToNcryptoBuffer(salt),
-          iterations, length, &buf)) {
-    return jsg::BufferSource(js, kj::mv(backing));
+          iterations, length, &ncBuf)) {
+    return kj::mv(buf);
   }
   return kj::none;
 }

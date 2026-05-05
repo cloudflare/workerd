@@ -147,6 +147,29 @@ export const invalidEncodingForToString = {
   },
 };
 
+export const toStringWithUndefinedEncoding = {
+  test(ctrl, env, ctx) {
+    // Test that Buffer.toString with undefined encoding defaults to utf8
+    const buf = Buffer.from('hello world');
+    strictEqual(buf.toString(undefined), 'hello world');
+    strictEqual(buf.toString(undefined), buf.toString('utf8'));
+
+    // Test with UTF-8 characters
+    const utf8Buf = Buffer.from('¡hέlló wôrld!');
+    strictEqual(utf8Buf.toString(undefined), '¡hέlló wôrld!');
+    strictEqual(utf8Buf.toString(undefined), utf8Buf.toString('utf8'));
+
+    // Test with start and end parameters
+    const sliceBuf = Buffer.from('hello world');
+    strictEqual(sliceBuf.toString(undefined, 0, 5), 'hello');
+    strictEqual(sliceBuf.toString(undefined, 6), 'world');
+    strictEqual(
+      sliceBuf.toString(undefined, 0, 5),
+      sliceBuf.toString('utf8', 0, 5)
+    );
+  },
+};
+
 export const zeroLengthBuffers = {
   test(ctrl, env, ctx) {
     Buffer.from('');
@@ -1959,7 +1982,6 @@ export const concat = {
       }
     );
 
-    // eslint-disable-next-line node-core/crypto-check
     const random10 = Buffer.alloc(10);
     crypto.getRandomValues(random10);
     const empty = Buffer.alloc(0);
@@ -2296,7 +2318,8 @@ export const fakes = {
     }, TypeError);
 
     throws(function () {
-      +Buffer.prototype; // eslint-disable-line no-unused-expressions
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      +Buffer.prototype;
     }, TypeError);
 
     throws(function () {
@@ -2576,6 +2599,7 @@ export const fill = {
       }
 
       // Should never be reached.
+      // eslint-disable-next-line no-undef
       if (offset < 0 || end > buf2.length) throw new ERR_OUT_OF_RANGE();
 
       if (end <= offset) return buf2;
@@ -4991,8 +5015,8 @@ export const writeUint8 = {
 
       // Test 1 to 6 bytes.
       for (let i = 1; i <= 6; i++) {
-        const range = i < 5 ? `= ${val - 1}` : ` 2 ** ${i * 8}`;
-        const received =
+        const _range = i < 5 ? `= ${val - 1}` : ` 2 ** ${i * 8}`;
+        const _received =
           i > 4 ? String(val).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1_') : val;
         ['writeUIntBE', 'writeUIntLE'].forEach((fn) => {
           throws(
@@ -5240,12 +5264,12 @@ export const writeInt = {
         ['writeIntBE', 'writeIntLE'].forEach((fn) => {
           const min = -(2 ** (i * 8 - 1));
           const max = 2 ** (i * 8 - 1) - 1;
-          let range = `>= ${min} and <= ${max}`;
+          let _range = `>= ${min} and <= ${max}`;
           if (i > 4) {
-            range = `>= -(2 ** ${i * 8 - 1}) and < 2 ** ${i * 8 - 1}`;
+            _range = `>= -(2 ** ${i * 8 - 1}) and < 2 ** ${i * 8 - 1}`;
           }
           [min - 1, max + 1].forEach((val) => {
-            const received =
+            const _received =
               i > 4
                 ? String(val).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1_')
                 : val;
@@ -5698,9 +5722,9 @@ export const toString = {
     // default utf-8 if undefined
     strictEqual(Buffer.from('utf-8').toString(), 'utf-8');
 
-    const invalidEncodings = new Array(10)
-      .fill(0)
-      .map((_, i) => String(i + 1).repeat(i + 1));
+    const invalidEncodings = Array.from({ length: 10 }, (_, i) =>
+      String(i + 1).repeat(i + 1)
+    );
     // Invalid encodings
     for (const encoding of [...invalidEncodings, null]) {
       const error = {
@@ -5996,6 +6020,18 @@ export const transcodeTest = {
       strictEqual(dest.toString(), orig.toString());
     }
 
+    // Test utf16le to ascii/latin1 output length
+    {
+      const input = Buffer.from('AAA', 'utf16le');
+      strictEqual(input.length, 6);
+      const asciiOutput = transcode(input, 'utf16le', 'ascii');
+      strictEqual(asciiOutput.length, 3);
+      deepStrictEqual(asciiOutput, Buffer.from('AAA', 'ascii'));
+      const latin1Output = transcode(input, 'utf16le', 'latin1');
+      strictEqual(latin1Output.length, 3);
+      deepStrictEqual(latin1Output, Buffer.from('AAA', 'latin1'));
+    }
+
     {
       const utf8 = Buffer.from('€'.repeat(4000), 'utf8');
       const ucs2 = Buffer.from('€'.repeat(4000), 'ucs2');
@@ -6065,6 +6101,50 @@ export const transcodeTest = {
       transcode(Buffer.from([0x80]), 'utf8', 'utf8'),
       Buffer.from([0xef, 0xbf, 0xbd])
     );
+  },
+};
+
+// TranscodeFromUTF16 should not over-allocate the output buffer.
+// Regression test for a bug where `limit * sizeof(char16_t)` doubled the
+// allocation and `destPtr.size()` passed char16_t element count instead of
+// byte count to ucnv_fromUChars.
+export const transcodeFromUTF16BufferSizeTest = {
+  test() {
+    const utf16 = Buffer.from('Hello', 'utf16le');
+    const latin1 = transcode(utf16, 'utf16le', 'latin1');
+    strictEqual(latin1.length, 5);
+    strictEqual(latin1.buffer.byteLength, latin1.length);
+  },
+};
+
+// Invalid UTF-8 input to transcode('utf8', 'utf16le') should produce
+// "Unable to transcode buffer", not an internal assertion mismatch.
+// Regression test for a bug where JSG_REQUIRE(actual == expected) threw
+// before the `if (actual == 0) return kj::none` path could be reached.
+export const transcodeUTF8ToUTF16InvalidInputTest = {
+  test() {
+    throws(
+      () =>
+        transcode(
+          Buffer.from([0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x80]),
+          'utf8',
+          'utf16le'
+        ),
+      { message: /Unable to transcode buffer/ }
+    );
+  },
+};
+
+// TranscodeFromUTF16 should reject odd-byte UTF-16LE input, matching
+// the guard that TranscodeUTF8FromUTF16 already has.
+// Regression test for a bug where `source.size() / sizeof(char16_t)`
+// silently dropped the trailing byte.
+export const transcodeFromUTF16OddByteInputTest = {
+  test() {
+    const oddInput = Buffer.from([0x41, 0x00, 0x42]);
+    throws(() => transcode(oddInput, 'utf16le', 'utf8'));
+    throws(() => transcode(oddInput, 'utf16le', 'latin1'));
+    throws(() => transcode(oddInput, 'utf16le', 'ascii'));
   },
 };
 

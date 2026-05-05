@@ -11,14 +11,19 @@ class Base64Module final: public jsg::Object {
   Base64Module() = default;
   Base64Module(jsg::Lock&, const jsg::Url&) {}
 
-  kj::Array<kj::byte> decodeArray(kj::Array<kj::byte>);
-  kj::Array<kj::byte> encodeArray(kj::Array<kj::byte>);
-  jsg::JsString encodeArrayToString(jsg::Lock&, kj::Array<kj::byte>);
+  jsg::JsBufferSource decodeArray(jsg::Lock& js, jsg::JsBufferSource source);
+  jsg::JsBufferSource encodeArray(jsg::Lock& js, jsg::JsBufferSource source);
+  jsg::JsString encodeArrayToString(jsg::Lock&, jsg::JsBufferSource source);
 
   JSG_RESOURCE_TYPE(Base64Module) {
     JSG_METHOD(encodeArray);
     JSG_METHOD(decodeArray);
     JSG_METHOD(encodeArrayToString);
+    JSG_TS_OVERRIDE({
+      decodeArray(source: ArrayBuffer | ArrayBufferView): ArrayBuffer;
+      encodeArray(source: ArrayBuffer | ArrayBufferView): ArrayBuffer;
+      encodeArrayToString(source: ArrayBuffer | ArrayBufferView): string;
+    });
   }
 };
 

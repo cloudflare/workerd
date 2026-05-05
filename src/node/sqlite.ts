@@ -1,0 +1,119 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+import { default as sqliteUtil } from 'node-internal:sqlite';
+import type sqlite from 'node:sqlite';
+
+const {
+  DatabaseSync,
+  StatementSync,
+  SQLITE_CHANGESET_OMIT,
+  SQLITE_CHANGESET_REPLACE,
+  SQLITE_CHANGESET_ABORT,
+  SQLITE_CHANGESET_DATA,
+  SQLITE_CHANGESET_NOTFOUND,
+  SQLITE_CHANGESET_CONFLICT,
+  SQLITE_CHANGESET_CONSTRAINT,
+  SQLITE_CHANGESET_FOREIGN_KEY,
+} = sqliteUtil;
+
+export const backup = sqliteUtil.backup.bind(sqliteUtil);
+
+// SQLite authorization action codes (from sqlite3.h)
+const SQLITE_OK = 0;
+const SQLITE_DENY = 1;
+const SQLITE_IGNORE = 2;
+const SQLITE_CREATE_INDEX = 1;
+const SQLITE_CREATE_TABLE = 2;
+const SQLITE_CREATE_TEMP_INDEX = 3;
+const SQLITE_CREATE_TEMP_TABLE = 4;
+const SQLITE_CREATE_TEMP_TRIGGER = 5;
+const SQLITE_CREATE_TEMP_VIEW = 6;
+const SQLITE_CREATE_TRIGGER = 7;
+const SQLITE_CREATE_VIEW = 8;
+const SQLITE_DELETE = 9;
+const SQLITE_DROP_INDEX = 10;
+const SQLITE_DROP_TABLE = 11;
+const SQLITE_DROP_TEMP_INDEX = 12;
+const SQLITE_DROP_TEMP_TABLE = 13;
+const SQLITE_DROP_TEMP_TRIGGER = 14;
+const SQLITE_DROP_TEMP_VIEW = 15;
+const SQLITE_DROP_TRIGGER = 16;
+const SQLITE_DROP_VIEW = 17;
+const SQLITE_INSERT = 18;
+const SQLITE_PRAGMA = 19;
+const SQLITE_READ = 20;
+const SQLITE_SELECT = 21;
+const SQLITE_TRANSACTION = 22;
+const SQLITE_UPDATE = 23;
+const SQLITE_ATTACH = 24;
+const SQLITE_DETACH = 25;
+const SQLITE_ALTER_TABLE = 26;
+const SQLITE_REINDEX = 27;
+const SQLITE_ANALYZE = 28;
+const SQLITE_CREATE_VTABLE = 29;
+const SQLITE_DROP_VTABLE = 30;
+const SQLITE_FUNCTION = 31;
+const SQLITE_SAVEPOINT = 32;
+const SQLITE_COPY = 0;
+const SQLITE_RECURSIVE = 33;
+
+export const constants: typeof sqlite.constants = {
+  SQLITE_CHANGESET_OMIT,
+  SQLITE_CHANGESET_REPLACE,
+  SQLITE_CHANGESET_ABORT,
+  SQLITE_CHANGESET_DATA,
+  SQLITE_CHANGESET_NOTFOUND,
+  SQLITE_CHANGESET_CONFLICT,
+  // @ts-expect-error TS2561 This is missing from node.js types
+  SQLITE_CHANGESET_CONSTRAINT,
+  SQLITE_CHANGESET_FOREIGN_KEY,
+  // Authorization action codes
+  SQLITE_OK,
+  SQLITE_DENY,
+  SQLITE_IGNORE,
+  SQLITE_CREATE_INDEX,
+  SQLITE_CREATE_TABLE,
+  SQLITE_CREATE_TEMP_INDEX,
+  SQLITE_CREATE_TEMP_TABLE,
+  SQLITE_CREATE_TEMP_TRIGGER,
+  SQLITE_CREATE_TEMP_VIEW,
+  SQLITE_CREATE_TRIGGER,
+  SQLITE_CREATE_VIEW,
+  SQLITE_DELETE,
+  SQLITE_DROP_INDEX,
+  SQLITE_DROP_TABLE,
+  SQLITE_DROP_TEMP_INDEX,
+  SQLITE_DROP_TEMP_TABLE,
+  SQLITE_DROP_TEMP_TRIGGER,
+  SQLITE_DROP_TEMP_VIEW,
+  SQLITE_DROP_TRIGGER,
+  SQLITE_DROP_VIEW,
+  SQLITE_INSERT,
+  SQLITE_PRAGMA,
+  SQLITE_READ,
+  SQLITE_SELECT,
+  SQLITE_TRANSACTION,
+  SQLITE_UPDATE,
+  SQLITE_ATTACH,
+  SQLITE_DETACH,
+  SQLITE_ALTER_TABLE,
+  SQLITE_REINDEX,
+  SQLITE_ANALYZE,
+  SQLITE_CREATE_VTABLE,
+  SQLITE_DROP_VTABLE,
+  SQLITE_FUNCTION,
+  SQLITE_SAVEPOINT,
+  SQLITE_COPY,
+  SQLITE_RECURSIVE,
+};
+
+export { DatabaseSync, StatementSync };
+
+export default {
+  DatabaseSync,
+  StatementSync,
+  constants,
+  backup,
+} satisfies typeof sqlite;

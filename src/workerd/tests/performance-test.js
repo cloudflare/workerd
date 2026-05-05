@@ -14,14 +14,23 @@ if (globalThis.performance.now() !== 0.0) {
   throw new Error('performance.now() is not 0.0');
 }
 
+if ('addEventListener' in globalThis.performance) {
+  throw new Error('performance.addEventListener should not be defined');
+}
+
+// Performance class should not be available.
+if (typeof globalThis.Performance !== 'undefined') {
+  throw new Error('Performance should not be defined');
+}
+
 export const test = {
-  async test(ctrl, env, ctx) {
+  async test(_ctrl, _env, _ctx) {
     const start = performance.now();
     // There should be at least some time elapsed.
     if (start == 0.0) {
       throw new Error('performance.now() is 0.0');
     }
-    await scheduler.wait(10);
+    await scheduler.wait(500);
     if (start == performance.now()) {
       throw new Error('performance.now() is not increasing');
     }

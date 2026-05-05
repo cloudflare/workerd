@@ -9,10 +9,10 @@
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
 #include <kj/debug.h>
+#include <kj/io.h>
 #include <kj/main.h>
+#include <kj/miniposix.h>
 #include <kj/string.h>
-
-#include <cstdio>
 
 namespace workerd::server {
 
@@ -67,7 +67,8 @@ void JsonLogger::logMessage(
 
   auto json = buildJsonLogMessage(severity, file, line, contextDepth, text);
 
-  puts(json.cStr());
+  // Write directly to stdout with no buffering.
+  kj::FdOutputStream(STDOUT_FILENO).write({json.asBytes(), "\n"_kj.asBytes()});
 }
 
 kj::Function<void(kj::Function<void()>)> JsonLogger::getThreadInitializer() {

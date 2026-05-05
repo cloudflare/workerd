@@ -42,7 +42,6 @@ import {
   type InnerExportOptions,
   type InnerCreateAsymmetricKeyOptions,
   type JsonWebKey,
-  type ParamEncoding,
   default as cryptoImpl,
 } from 'node-internal:crypto';
 
@@ -121,12 +120,16 @@ function validateExportOptions(
   } else {
     options.format = 'buffer';
   }
-  if (opts.type !== undefined) validateString(opts.type, `${name}.type`);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if ('type' in opts && opts.type !== undefined) {
+    validateString(opts.type, `${name}.type`);
+  }
   if (type === 'private') {
-    if (opts.cipher !== undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if ('cipher' in opts && opts.cipher !== undefined) {
       validateString(opts.cipher, `${name}.cipher`);
       if (typeof opts.passphrase === 'string') {
-        opts.passphrase = Buffer.from(opts.passphrase, opts.encoding as string);
+        opts.passphrase = Buffer.from(opts.passphrase, opts.encoding);
       }
       if (!isUint8Array(opts.passphrase)) {
         throw new ERR_INVALID_ARG_TYPE(
@@ -730,12 +733,10 @@ export function generateKeyPairSync(
       pair.privateKey
     );
     if (publicKeyEncoding !== undefined) {
-      publicKey = publicKey.export(publicKeyEncoding as PublicKeyExportOptions);
+      publicKey = publicKey.export(publicKeyEncoding);
     }
     if (privateKeyEncoding !== undefined) {
-      privateKey = privateKey.export(
-        privateKeyEncoding as PrivateKeyExportOptions
-      );
+      privateKey = privateKey.export(privateKeyEncoding);
     }
     return { publicKey, privateKey };
   };
@@ -817,8 +818,8 @@ export function generateKeyPairSync(
       ]);
       return handleKeyEncoding(
         cryptoImpl.generateEcKeyPair({
-          namedCurve: namedCurve,
-          paramEncoding: paramEncoding as ParamEncoding,
+          namedCurve,
+          paramEncoding,
         })
       ) as KeyObjectPair;
     }
@@ -854,8 +855,7 @@ export function generateKeyPairSync(
         return handleKeyEncoding(
           cryptoImpl.generateDhKeyPair({
             primeOrGroup: g,
-            // TODO(soon): Fix this assertion.
-            generator: generator as unknown as number,
+            generator,
           })
         ) as KeyObjectPair;
       }

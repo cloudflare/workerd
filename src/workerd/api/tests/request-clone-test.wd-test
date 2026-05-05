@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "request-clone-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "request-clone-test.js" )
+        ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+      )
+    )
+  ]
+);

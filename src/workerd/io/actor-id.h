@@ -14,6 +14,20 @@ enum class ActorGetMode {
   GET_EXISTING
 };
 
+// Routing mode for actor requests when replicas are available.
+enum class ActorRoutingMode {
+  // Use default routing behavior (may route to replicas if available).
+  DEFAULT,
+
+  // Always route to the primary, even if replicas exist.
+  PRIMARY_ONLY
+};
+
+// Version information for an actor. Used to specify cohort.
+struct ActorVersion {
+  kj::Maybe<kj::String> cohort;
+};
+
 // An abstract class that implements generation of global actor IDs in a particular namespace.
 //
 // This is NOT at I/O type. Each global actor namespace binding holds one instance of this which
@@ -36,6 +50,9 @@ class ActorIdFactory {
     // to it. Otherwise, returns null.
     virtual kj::Maybe<kj::StringPtr> getName() const = 0;
 
+    // Get the jurisdiction that was used when creating this ID.
+    virtual kj::Maybe<kj::StringPtr> getJurisdiction() const = 0;
+
     // Compare with another ID.
     //
     // This is allowed to assume the other ID was created by some other ActorIdFactory passed to
@@ -50,7 +67,8 @@ class ActorIdFactory {
   virtual kj::Own<ActorId> idFromName(kj::String name) = 0;
   virtual kj::Own<ActorId> idFromString(kj::String str) = 0;
   virtual bool matchesJurisdiction(const ActorId& id) = 0;
-  virtual kj::Own<ActorIdFactory> cloneWithJurisdiction(kj::StringPtr jurisdiction) = 0;
+  virtual kj::Own<ActorIdFactory> cloneWithJurisdiction(
+      kj::Maybe<kj::StringPtr> maybeJurisdiction) = 0;
 };
 
 }  // namespace workerd

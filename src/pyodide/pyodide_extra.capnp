@@ -38,6 +38,7 @@ struct PythonSnapshotRelease @0x89c66fb883cb6975 {
   fieldName @5 :Text;
   # Name of the corresponding feature flag
   flagName @6 :Text;
+  realPyodideVersion @7 :Text;
 }
 
 const releases :List(PythonSnapshotRelease) = [

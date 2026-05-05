@@ -4,6 +4,10 @@
 
 #pragma once
 
+#include <workerd/util/strong-bool.h>
+
+#include <v8-local-handle.h>
+
 #include <kj/common.h>
 #include <kj/exception.h>
 #include <kj/string.h>
@@ -32,6 +36,11 @@ struct ResolveObserver {
     // Like builtin, but it's a module that is *only* resolvable from a builtin
     // (like the `node-internal:...` modules)
     BUILTIN_ONLY,
+    // Resolves only user-importable built-in modules (the kBuiltin bundle),
+    // excluding both worker bundle modules and internal-only modules. Used
+    // by user-facing APIs like process.getBuiltinModule() that must not
+    // expose internal modules or return user bundle overrides.
+    PUBLIC_BUILTIN,
   };
 
   enum class Source {
@@ -147,15 +156,25 @@ struct InternalExceptionObserver {
     kj::Maybe<InternalErrorId> internalErrorId;
   };
 
-  // Called when an internal exception is created (see makeInternalError).
+  // Called when an internal exception is created (see exceptionToJs).
   // Used to collect metrics on various internal error conditions.
   virtual void reportInternalException(const kj::Exception&, Detail detail) {}
 };
+
+WD_STRONG_BOOL(IsCodeLike);
 
 struct IsolateObserver: public CompilationObserver,
                         public InternalExceptionObserver,
                         public ResolveObserver {
   virtual ~IsolateObserver() noexcept(false) {}
+
+  // Called when eval(), new Function(), or similar dynamic code generation
+  // is performed. Note that the source here may not be a string if isCodeLike
+  // is YES.
+  virtual void onDynamicEval(
+      v8::Local<v8::Context> context, v8::Local<v8::Value> source, IsCodeLike isCodeLike) {
+    // Default is to do nothing.
+  }
 };
 
 }  // namespace workerd::jsg

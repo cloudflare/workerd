@@ -31,6 +31,31 @@ class TransformStreamDefaultController;
 
 using rpc::StreamEncoding;
 
+enum class ReadAllTextOption : uint8_t {
+  NONE = 0,
+  NULL_TERMINATE = 1 << 0,
+  STRIP_BOM = 1 << 1,
+};
+
+inline ReadAllTextOption operator|(ReadAllTextOption a, ReadAllTextOption b) {
+  return static_cast<ReadAllTextOption>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+}
+
+inline ReadAllTextOption& operator|=(ReadAllTextOption& a, ReadAllTextOption b) {
+  return a = a | b;
+}
+
+inline bool operator&(ReadAllTextOption a, ReadAllTextOption b) {
+  return (static_cast<uint8_t>(a) & static_cast<uint8_t>(b)) != 0;
+}
+
+static constexpr kj::byte UTF8_BOM[] = {0xEF, 0xBB, 0xBF};
+static constexpr size_t UTF8_BOM_SIZE = sizeof(UTF8_BOM);
+
+inline bool hasUtf8Bom(kj::ArrayPtr<const kj::byte> data) {
+  return data.size() >= UTF8_BOM_SIZE && memcmp(data.begin(), UTF8_BOM, UTF8_BOM_SIZE) == 0;
+}
+
 struct ReadResult {
   jsg::Optional<jsg::Value> value;
   bool done;
@@ -44,6 +69,14 @@ struct ReadResult {
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(value);
   }
+};
+
+// Result type for draining read operations. Always returns bytes, even for value streams.
+// Used by DrainingReader for optimized pipe-to operations with vectored writes.
+// This is a C++ only type - not exposed to JavaScript.
+struct DrainingReadResult {
+  kj::Array<kj::Array<kj::byte>> chunks;  // Multiple byte arrays for vectored writes
+  bool done = false;                      // True if stream is closed/closing
 };
 
 struct StreamQueuingStrategy {
@@ -71,6 +104,11 @@ struct UnderlyingSource {
   // if user code does not provide an explicit autoAllocateChunkSize, we'll assume
   // this default.
   static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 4096;
+
+  // We want to increase the default auto allocate chunk size but we need to do
+  // so carefully to avoid introducing memory regressions and causing workers to
+  // hit OOM errors. We'll use an autogate to roll out the new default.
+  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2 = 16 * 1024;
 
   // Per the spec, the type property for the UnderlyingSource should be either
   // undefined, the empty string, or "bytes". When undefined, the empty string is
@@ -235,7 +273,8 @@ class ReadableStreamSource {
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
   kj::Promise<kj::Array<byte>> readAllBytes(uint64_t limit);
-  kj::Promise<kj::String> readAllText(uint64_t limit);
+  kj::Promise<kj::String> readAllText(
+      uint64_t limit, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE);
 
   // Hook to inform this ReadableStreamSource that the ReadableStream has been canceled. This only
   // really means anything to TransformStreams, which are supposed to propagate the error to the
@@ -261,12 +300,12 @@ class ReadableStreamSource {
 };
 
 struct PipeToOptions {
-  jsg::Optional<bool> preventClose;
   jsg::Optional<bool> preventAbort;
   jsg::Optional<bool> preventCancel;
+  jsg::Optional<bool> preventClose;
   jsg::Optional<jsg::Ref<AbortSignal>> signal;
 
-  JSG_STRUCT(preventClose, preventAbort, preventCancel, signal);
+  JSG_STRUCT(preventAbort, preventCancel, preventClose, signal);
   JSG_STRUCT_TS_OVERRIDE(StreamPipeOptions);
 
   // An additional, internal only property that is used to indicate
@@ -277,12 +316,19 @@ struct PipeToOptions {
 };
 
 namespace StreamStates {
-struct Closed {};
+struct Closed {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
+};
 using Errored = jsg::Value;
 struct Erroring {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "erroring"_kj;
   jsg::Value reason;
 
   Erroring(jsg::Value reason): reason(kj::mv(reason)) {}
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(reason);
+  }
 };
 }  // namespace StreamStates
 
@@ -351,9 +397,10 @@ class ReadableStreamController {
     size_t byteOffset = 0;
     size_t byteLength;
 
-    // The minimum number of bytes that should be read. When not specified, the default
+    // The minimum number of elements that should be read. When not specified, the default
     // is DEFAULT_AT_LEAST. This is a non-standard, Workers-specific extension to
     // support the readAtLeast method on the ReadableStreamBYOBReader object.
+    // ReaderImpl::read() converts this to bytes by multiplying by element size.
     kj::Maybe<size_t> atLeast = DEFAULT_AT_LEAST;
 
     // True if the given buffer should be detached. Per the spec, we should always be
@@ -393,7 +440,6 @@ class ReadableStreamController {
       BranchPtr(BranchPtr&& other) = default;
       BranchPtr& operator=(BranchPtr&&) = default;
       BranchPtr(BranchPtr& other) = default;
-      BranchPtr& operator=(BranchPtr&) = default;
 
       inline void doClose(jsg::Lock& js) {
         inner->doClose(js);
@@ -465,6 +511,23 @@ class ReadableStreamController {
   // are provided and the stream is not byte-oriented, the operation will return a rejected promise.
   virtual kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) = 0;
+
+  // Performs a draining read operation that:
+  // 1. Drains all currently buffered data from the queue
+  // 2. Pumps the controller for synchronously available data (respecting pull promise state)
+  // 3. Returns bytes even for value streams (converting ArrayBuffer/ArrayBufferView/string)
+  // 4. Has mutual exclusion with regular reads - returns rejected promise if pending regular reads
+  // 5. Returns done: true with final data when stream is closing
+  //
+  // This is a C++ only API (not exposed to JavaScript) intended for optimized pipe operations.
+  // Returns kj::none if the stream is locked in a way that prevents the read.
+  //
+  // The maxRead parameter provides a soft limit on how much data to read. Both the initial
+  // buffer drain and subsequent synchronous pump attempts stop when the total bytes read
+  // reaches maxRead (after finishing the current item). This prevents unbounded memory
+  // accumulation when a fast producer outpaces a slow consumer.
+  virtual kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(
+      jsg::Lock& js, size_t maxRead = kj::maxValue) = 0;
 
   // The pipeTo implementation fully consumes the stream by directing all of its data at the
   // destination. Controllers should try to be as efficient as possible here. For instance, if
@@ -593,7 +656,8 @@ class WritableStreamController {
     //
     // The controller is guaranteed to either outlive the Writer or will detach the Writer so the
     // WritableStreamController& reference should always remain valid.
-    virtual void attach(WritableStreamController& controller,
+    virtual void attach(jsg::Lock& js,
+        WritableStreamController& controller,
         jsg::Promise<void> closedPromise,
         jsg::Promise<void> readyPromise) = 0;
 
@@ -603,7 +667,7 @@ class WritableStreamController {
 
     // The ready promise can be replaced whenever backpressure is signaled by the underlying
     // controller.
-    virtual void replaceReadyPromise(jsg::Promise<void> readyPromise) = 0;
+    virtual void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) = 0;
   };
 
   struct PendingAbort {
@@ -732,13 +796,18 @@ kj::Own<WritableStreamController> newWritableStreamInternalController(IoContext&
     kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
-struct Unlocked {};
-struct Locked {};
+struct Unlocked {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "unlocked"_kj;
+};
+struct Locked {
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "locked"_kj;
+};
 
 // When a reader is locked to a ReadableStream, a ReaderLock instance
 // is used internally to represent the locked state in the ReadableStreamController.
 class ReaderLocked {
  public:
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "reader-locked"_kj;
   ReaderLocked(ReadableStreamController::Reader& reader,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
@@ -791,6 +860,7 @@ class ReaderLocked {
 // is used internally to represent the locked state in the WritableStreamController.
 class WriterLocked {
  public:
+  static constexpr kj::StringPtr NAME KJ_UNUSED = "writer-locked"_kj;
   WriterLocked(WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
@@ -821,10 +891,10 @@ class WriterLocked {
     return readyFulfiller;
   }
 
-  void setReadyFulfiller(jsg::PromiseResolverPair<void>& pair) {
+  void setReadyFulfiller(jsg::Lock& js, jsg::PromiseResolverPair<void>& pair) {
     KJ_IF_SOME(w, writer) {
       readyFulfiller = kj::mv(pair.resolver);
-      w.replaceReadyPromise(kj::mv(pair.promise));
+      w.replaceReadyPromise(js, kj::mv(pair.promise));
     }
   }
 
@@ -855,7 +925,7 @@ void maybeResolvePromise(
 }
 
 inline void maybeResolvePromise(
-    jsg::Lock& js, kj::Maybe<typename jsg::Promise<void>::Resolver>& maybeResolver) {
+    jsg::Lock& js, kj::Maybe<jsg::Promise<void>::Resolver>& maybeResolver) {
   KJ_IF_SOME(resolver, maybeResolver) {
     resolver.resolve(js);
     maybeResolver = kj::none;
@@ -884,10 +954,8 @@ jsg::Promise<T> rejectedMaybeHandledPromise(
 }
 
 inline kj::Maybe<IoContext&> tryGetIoContext() {
-  if (IoContext::hasCurrent()) {
-    return IoContext::current();
-  }
-  return kj::none;
+  // TODO(cleanup): This function is obsolete; callers should just call IoContext::tryCurrent()
+  return IoContext::tryCurrent();
 }
 
 }  // namespace workerd::api

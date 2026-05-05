@@ -6,7 +6,8 @@
 
 #include "time.h"
 
-#include <workerd/io/supported-compatibility-date.embed.h>
+#include <workerd/io/maximum-compatibility-date.embed.h>
+#include <workerd/io/release-version.embed.h>
 
 #include <capnp/dynamic.h>
 #include <capnp/schema.h>
@@ -84,7 +85,8 @@ struct CompatDate {
     struct tm t;
     KJ_ASSERT(gmtime_r(&now, &t) == &t);
 #endif
-    return {(uint)(t.tm_year + 1900), (uint)(t.tm_mon + 1), (uint)t.tm_mday};
+    return {static_cast<uint>(t.tm_year + 1900), static_cast<uint>(t.tm_mon + 1),
+      static_cast<uint>(t.tm_mday)};
   }
 
   kj::String toString() {
@@ -107,12 +109,20 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
 
   switch (dateValidation) {
     case CompatibilityDateValidation::CODE_VERSION:
-      if (KJ_ASSERT_NONNULL(CompatDate::parse(SUPPORTED_COMPATIBILITY_DATE)) < parsedCompatDate) {
+      if (KJ_ASSERT_NONNULL(CompatDate::parse(MAXIMUM_COMPATIBILITY_DATE)) < parsedCompatDate) {
         errorReporter.addError(
             kj::str("This Worker requires compatibility date \"", parsedCompatDate,
                 "\", but the newest "
                 "date supported by this server binary is \"",
-                SUPPORTED_COMPATIBILITY_DATE, "\"."));
+                MAXIMUM_COMPATIBILITY_DATE, "\"."));
+      }
+      // workerd is built with MAXIMUM_COMPATIBILITY_DATE set a little bit into the future, so
+      // that the build can support setting the compat date to today until the next release is
+      // ready. But we don't want people to actually set their compat date in the future, so let's
+      // check against the clock time as well.
+      if (CompatDate::today() < parsedCompatDate) {
+        errorReporter.addError(kj::str("Can't set compatibility date in the future: \"",
+            parsedCompatDate, "\". Today's date (UTC) is \"", CompatDate::today(), "\"."));
       }
       break;
 
@@ -206,7 +216,11 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
       errorReporter.addError(kj::str("Compatibility flags are mutually contradictory: ",
           enableFlagName, " vs ", disableFlagName));
     }
-    if (enableByFlag && enableByDate) {
+    if (enableByFlag && enableByDate &&
+        dateValidation != CompatibilityDateValidation::FUTURE_FOR_TEST) {
+      // Skip this error for FUTURE_FOR_TEST since tests may need to explicitly specify flags
+      // for the default variant (which uses an old compat date) while the all-compat-flags
+      // variant enables all flags by date.
       KJ_IF_SOME(d, enableDate) {
         errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
             " became the default as of ", d, " so does not need to be specified anymore."));

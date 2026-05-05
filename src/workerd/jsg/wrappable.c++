@@ -7,6 +7,8 @@
 #include "jsg.h"
 #include "setup.h"
 
+#include <workerd/util/thread-scopes.h>
+
 #include <cppgc/allocation.h>
 #include <cppgc/garbage-collected.h>
 #include <v8-cppgc.h>
@@ -41,10 +43,19 @@ void HeapTracer::clearWrappers() {
 
   while (!wrappers.empty()) {
     // Don't freelist the shim because we're shutting down anyway.
-    wrappers.front().detachWrapper(false);
+    auto& wrappable = wrappers.front();
+    auto ownWrappable = wrappable.detachWrapper(false);
+    // Clear the isolate pointer so that any code that later tries to use it (e.g.,
+    // maybeDeferDestruction() or GcVisitor) will see that the isolate is gone and skip
+    // V8 operations. Without this, objects that outlive their isolate (like WebSockets
+    // stored in a HibernationManager) would have a dangling isolate pointer and crash
+    // when trying to check v8::Locker::IsLocked() or create V8 handles.
+    ownWrappable->isolate = nullptr;
   }
   clearFreelistedShims();
 }
+
+using JSGWrappable = workerd::jsg::Wrappable;
 
 // V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to
 // integrate with the GC in order to receive GC visitation callbacks, so that the GC is able to
@@ -72,9 +83,9 @@ void HeapTracer::clearWrappers() {
 // reused for a future allocation, if that allocation occurs before the next major GC. When a
 // major GC occurs, the freelist is cleared, since any unreachable CppgcShim objects are likely
 // condemned after that point and will be deleted shortly thereafter.
-class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
+class Wrappable::CppgcShim final: public v8::Object::Wrappable {
  public:
-  CppgcShim(Wrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
+  CppgcShim(JSGWrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
     wrappable.cppgcShim = *this;
   }
@@ -105,7 +116,7 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
     }
   }
 
-  void Trace(cppgc::Visitor* visitor) const {
+  void Trace(cppgc::Visitor* visitor) const override {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(active, Active) {
         active.wrappable->traceFromV8(*visitor);
@@ -119,15 +130,19 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
     }
   }
 
+  const char* GetHumanReadableName() const override {
+    return "CppgcShim";
+  }
+
   struct Active {
-    kj::Own<Wrappable> wrappable;
+    kj::Own<JSGWrappable> wrappable;
   };
 
   // The JavaScript wrapper using this shim was collected in a minor GC. cppgc objects can only
   // be collected in full GC, so we freelist the shim object in the meantime.
   struct Freelisted {
-    kj::Maybe<Wrappable::CppgcShim&> next;
-    kj::Maybe<Wrappable::CppgcShim&>* prev;
+    kj::Maybe<JSGWrappable::CppgcShim&> next;
+    kj::Maybe<JSGWrappable::CppgcShim&>* prev;
     // kj::List doesn't quite work here because the list link is inside a OneOf. Also we want a
     // LIFO list anyway so we don't need a tail pointer, which makes things easier. So we do it
     // manually.
@@ -154,37 +169,40 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
   // the main thread so concurrency is not a concern.
 };
 
-void HeapTracer::addToFreelist(Wrappable::CppgcShim& shim) {
-  auto& freelisted = shim.state.init<Wrappable::CppgcShim::Freelisted>();
+void HeapTracer::addToFreelist(JSGWrappable::CppgcShim& shim) {
+  auto& freelisted = shim.state.init<JSGWrappable::CppgcShim::Freelisted>();
   freelisted.next = freelistedShims;
   KJ_IF_SOME(next, freelisted.next) {
-    next.state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelisted.next;
+    next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelisted.next;
   }
   freelisted.prev = &freelistedShims;
   freelistedShims = shim;
 }
 
-Wrappable::CppgcShim* HeapTracer::allocateShim(Wrappable& wrappable) {
-  KJ_IF_SOME(shim, freelistedShims) {
-    freelistedShims = shim.state.get<Wrappable::CppgcShim::Freelisted>().next;
-    KJ_IF_SOME(next, freelistedShims) {
-      next.state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
+JSGWrappable::CppgcShim* HeapTracer::allocateShim(JSGWrappable& wrappable) {
+  // Under gc-stress, skip freelist reuse so each shim has a unique address in logs.
+  if (!isGcStressModeForTest()) {
+    KJ_IF_SOME(shim, freelistedShims) {
+      freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
+      KJ_IF_SOME(next, freelistedShims) {
+        next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
+      }
+      shim.state = JSGWrappable::CppgcShim::Active{kj::addRef(wrappable)};
+      KJ_DASSERT(wrappable.cppgcShim == kj::none);
+      wrappable.cppgcShim = shim;
+      return &shim;
     }
-    shim.state = Wrappable::CppgcShim::Active{kj::addRef(wrappable)};
-    KJ_DASSERT(wrappable.cppgcShim == kj::none);
-    wrappable.cppgcShim = shim;
-    return &shim;
-  } else {
-    auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
-    return cppgc::MakeGarbageCollected<Wrappable::CppgcShim>(cppgcAllocHandle, wrappable);
   }
+  auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
+  auto* shim = cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, wrappable);
+  return shim;
 }
 
 void HeapTracer::clearFreelistedShims() {
   for (;;) {
     KJ_IF_SOME(shim, freelistedShims) {
-      freelistedShims = shim.state.get<Wrappable::CppgcShim::Freelisted>().next;
-      shim.state = Wrappable::CppgcShim::Dead{};
+      freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
+      shim.state = JSGWrappable::CppgcShim::Dead{};
     } else {
       break;
     }
@@ -198,7 +216,7 @@ void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   // TODO(soon): Track the other fields here?
 }
 
-kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
+kj::Own<JSGWrappable> JSGWrappable::detachWrapper(bool shouldFreelistShim) {
   KJ_IF_SOME(shim, cppgcShim) {
 #if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
     // There's a possibility that the CppgcShim has already been found to be unreachable by a GC
@@ -221,11 +239,12 @@ kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
 #endif
 
     auto& tracer = HeapTracer::getTracer(isolate);
-    auto result = kj::mv(KJ_ASSERT_NONNULL(shim.state.tryGet<CppgcShim::Active>()).wrappable);
+    auto result =
+        kj::mv(KJ_ASSERT_NONNULL(shim.state.tryGet<JSGWrappable::CppgcShim::Active>()).wrappable);
     if (shouldFreelistShim) {
       tracer.addToFreelist(shim);
     } else {
-      shim.state = CppgcShim::Dead{};
+      shim.state = JSGWrappable::CppgcShim::Dead{};
     }
     wrapper = kj::none;
     cppgcShim = kj::none;
@@ -352,9 +371,15 @@ void Wrappable::attachWrapper(
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  int indices[] = {WRAPPABLE_TAG_FIELD_INDEX, WRAPPED_OBJECT_FIELD_INDEX};
-  void* values[] = {const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG), this};
-  object->SetAlignedPointerInInternalFields(2, indices, values);
+  // The third argument is the type tag, a small integer that should be
+  // different for every pointer type to avoid type confusion attacks.  We just
+  // use the slot index for now, since we have a different pointer type for
+  // each slot.
+  auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
+  object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX));
 
   v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
 
@@ -391,7 +416,8 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
             IsolateBase::getOpaqueTemplate(isolate));
     if (!instance.IsEmpty()) {
       return *reinterpret_cast<Wrappable*>(
-          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX));
+          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX,
+              static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX)));
     }
   }
 
@@ -461,7 +487,7 @@ void GcVisitor::visit(Data& value) {
       // This is directly reachable by a strong ref, so mark the handle strong.
       if (value.tracedHandle != kj::none) {
         // Convert the handle back to strong and discard the traced reference.
-        value.handle.ClearWeak();
+        value.handle.ClearWeak<void>();
         value.tracedHandle = kj::none;
       }
     } else {
@@ -482,6 +508,41 @@ void GcVisitor::visit(Data& value) {
       KJ_IF_SOME(t, value.tracedHandle) {
         c.Trace(t);
       }
+    }
+  }
+}
+
+void GcVisitor::visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Data>& traced) {
+  if (strong.IsEmpty()) {
+    return;
+  }
+
+  // Mirror visit(Data&): make handle strength match the parent.
+  //
+  // The `parent.wrapper == kj::none` check mirrors the same condition in
+  // visit(Data&): even when strongRefcount > 0, if the JS wrapper already
+  // exists we must keep the handle in traced mode so cppgc can follow edges
+  // from it.  Only when there is no wrapper yet (object not yet exported to JS)
+  // does a positive strongRefcount alone justify keeping the handle strong.
+  if (parent.strongRefcount > 0 && parent.wrapper == kj::none) {
+    // Parent has strong Rust refs and no JS wrapper — keep handle strong,
+    // discard any traced ref.
+    if (!traced.IsEmpty()) {
+      strong.ClearWeak<void>();
+      traced.Reset();
+    }
+  } else {
+    // Parent is only reachable via GC tracing — downgrade to a TracedReference.
+    if (traced.IsEmpty()) {
+      v8::HandleScope scope(parent.isolate);
+      traced.Reset(parent.isolate, strong.Get(parent.isolate));
+      strong.SetWeak();
+    }
+  }
+
+  KJ_IF_SOME(c, cppgcVisitor) {
+    if (!traced.IsEmpty()) {
+      c.Trace(traced);
     }
   }
 }

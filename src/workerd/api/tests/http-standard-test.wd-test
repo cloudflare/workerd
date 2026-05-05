@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "http-standard-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "http-standard-test.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-standard-test" )
+        ],
+        compatibilityFlags = ["nodejs_compat", "rpc", "url_standard", "fetch_standard_url"],
+      )
+    ),
+  ],
+);

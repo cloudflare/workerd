@@ -16,21 +16,33 @@ std::optional<URLPattern::URLPatternRegexEngine::regex_type> URLPattern::URLPatt
         flags | static_cast<int>(jsg::Lock::RegExpFlags::kIGNORE_CASE));
   }
 
-  return js.tryCatch([&]() -> std::optional<regex_type> {
-    return jsg::JsRef(js, js.regexp(kj::StringPtr(pattern.data(), pattern.size()), flags));
-  }, [&](auto reason) -> std::optional<regex_type> { return std::nullopt; });
+  // std::string_view is not guaranteed to be null-terminated, but kj::StringPtr requires it.
+  // We need to create a null-terminated copy.
+  auto str = kj::str(kj::arrayPtr(pattern.data(), pattern.size()));
+  JSG_TRY(js) {
+    return jsg::JsRef(js, js.regexp(str, flags));
+  }
+  JSG_CATCH(_) {
+    return std::nullopt;
+  }
 }
 
 bool URLPattern::URLPatternRegexEngine::regex_match(
     std::string_view input, const regex_type& pattern) {
   auto& js = jsg::Lock::current();
-  return pattern.getHandle(js).match(js, kj::StringPtr(input.data(), input.size()));
+  // std::string_view is not guaranteed to be null-terminated, but kj::StringPtr requires it.
+  // We need to create a null-terminated copy.
+  auto str = kj::str(kj::arrayPtr(input.data(), input.size()));
+  return pattern.getHandle(js).match(js, str);
 }
 
 std::optional<std::vector<std::optional<std::string>>> URLPattern::URLPatternRegexEngine::
     regex_search(std::string_view input, const regex_type& pattern) {
   auto& js = jsg::Lock::current();
-  KJ_IF_SOME(matches, pattern.getHandle(js)(js, kj::StringPtr(input.data(), input.size()))) {
+  // std::string_view is not guaranteed to be null-terminated, but kj::StringPtr requires it.
+  // We need to create a null-terminated copy.
+  auto str = kj::str(kj::arrayPtr(input.data(), input.size()));
+  KJ_IF_SOME(matches, pattern.getHandle(js)(js, str)) {
     std::vector<std::optional<std::string>> results(matches.size() - 1);
     // The first value is always the input of the exec() command. Therefore
     // we should avoid it while constructing the returning vector.
@@ -77,13 +89,13 @@ URLPattern::URLPatternInit URLPattern::createURLPatternInit(
   URLPatternInit result{};
 #define V(_, name)                                                                                 \
   if (auto v = other.name) {                                                                       \
-    result.name = js.accountedUSVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));             \
+    result.name = jsg::USVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));                    \
   }
   URL_PATTERN_COMPONENTS(V)
 #undef V
 
   if (auto v = other.base_url) {
-    result.baseURL = js.accountedUSVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));
+    result.baseURL = jsg::USVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));
   }
   return result;
 }
@@ -91,17 +103,17 @@ URLPattern::URLPatternInit URLPattern::createURLPatternInit(
 URLPattern::URLPatternComponentResult URLPattern::createURLPatternComponentResult(
     jsg::Lock& js, const ada::url_pattern_component_result& other) {
   auto result = URLPatternComponentResult{
-    .input = js.str(kj::ArrayPtr(other.input.c_str(), other.input.size())),
-    .groups = js.obj(),
+    .input = jsg::JsRef(js, js.str(kj::ArrayPtr(other.input.c_str(), other.input.size()))),
+    .groups = jsg::JsRef(js, js.obj()),
   };
 
   for (auto& [key, value]: other.groups) {
     auto k = js.str(kj::ArrayPtr(key.c_str(), key.size()));
 
     if (value) {
-      result.groups.set(js, k, js.str(kj::ArrayPtr(value->c_str(), value->size())));
+      result.groups.getHandle(js).set(js, k, js.str(kj::ArrayPtr(value->c_str(), value->size())));
     } else {
-      result.groups.set(js, k, js.undefined());
+      result.groups.getHandle(js).set(js, k, js.undefined());
     }
   }
   return result;
@@ -119,12 +131,13 @@ URLPattern::URLPatternResult URLPattern::createURLPatternResult(
 #undef V
   };
 
-  auto vecInputs = kj::heapArray<kj::OneOf<jsg::JsString, URLPatternInit>>(other.inputs.size());
+  auto vecInputs =
+      kj::heapArray<kj::OneOf<jsg::JsRef<jsg::JsString>, URLPatternInit>>(other.inputs.size());
   size_t i = 0;
   for (const auto& input: other.inputs) {
     if (std::holds_alternative<std::string_view>(input)) {
       auto raw = std::get<std::string_view>(input);
-      vecInputs[i] = js.str(kj::ArrayPtr(raw.data(), raw.size()));
+      vecInputs[i] = jsg::JsRef(js, js.str(kj::ArrayPtr(raw.data(), raw.size())));
     } else {
       KJ_DASSERT(std::holds_alternative<ada::url_pattern_init>(input));
       auto obj = std::get<ada::url_pattern_init>(input);

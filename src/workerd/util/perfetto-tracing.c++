@@ -1,6 +1,6 @@
 #include "perfetto-tracing.h"
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
 
 #include "protos/perfetto/config/data_source_config.gen.h"
 #include "protos/perfetto/config/trace_config.gen.h"

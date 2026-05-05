@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Carney <dcarney@chromium.org>
+Date: Tue, 17 Feb 2026 08:45:16 +0000
+Subject: Return false on Object.hasOwnProperty with interceptors
+
+
+diff --git a/src/objects/js-objects.cc b/src/objects/js-objects.cc
+index e5aa556d80d3ac05b415f35b9d229d7c31bfde57..b3131b27be03f394056d8615f7e383762c50d0bb 100644
+--- a/src/objects/js-objects.cc
++++ b/src/objects/js-objects.cc
+@@ -158,6 +158,9 @@ Maybe<bool> JSReceiver::HasOwnProperty(Isolate* isolate,
+   if (IsJSObject(*object)) {  // Shortcut.
+     PropertyKey key(isolate, name);
+     LookupIterator it(isolate, object, key, LookupIterator::OWN);
++    if (it.state() == LookupIterator::INTERCEPTOR) {
++      return Just(false);
++    }
+     return HasProperty(&it);
+   }
+ 

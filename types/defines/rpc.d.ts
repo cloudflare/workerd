@@ -148,35 +148,70 @@ declare namespace Rpc {
   export type Provider<
     T extends object,
     Reserved extends string = never,
-  > = MaybeCallableProvider<T> & {
-    [K in Exclude<
-      keyof T,
-      Reserved | symbol | keyof StubBase<never>
-    >]: MethodOrProperty<T[K]>;
-  };
+  > = MaybeCallableProvider<T> &
+    Pick<
+      {
+        [K in keyof T]: MethodOrProperty<T[K]>;
+      },
+      Exclude<keyof T, Reserved | symbol | keyof StubBase<never>>
+    >;
 }
 
 declare namespace Cloudflare {
+  // Type of `env`.
+  //
+  // The specific project can extend `Env` by redeclaring it in project-specific files. Typescript
+  // will merge all declarations.
+  //
+  // You can use `wrangler types` to generate the `Env` type automatically.
   interface Env {}
+
+  // Project-specific parameters used to inform types.
+  //
+  // This interface is, again, intended to be declared in project-specific files, and then that
+  // declaration will be merged with this one.
+  //
+  // A project should have a declaration like this:
+  //
+  //     interface GlobalProps {
+  //       // Declares the main module's exports. Used to populate Cloudflare.Exports aka the type
+  //       // of `ctx.exports`.
+  //       mainModule: typeof import("my-main-module");
+  //
+  //       // Declares which of the main module's exports are configured with durable storage, and
+  //       // thus should behave as Durable Object namsepace bindings.
+  //       durableNamespaces: "MyDurableObject" | "AnotherDurableObject";
+  //     }
+  //
+  // You can use `wrangler types` to generate `GlobalProps` automatically.
+  interface GlobalProps {}
+
+  // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
+  // present.
+  type GlobalProp<K extends string, Default> = K extends keyof GlobalProps
+    ? GlobalProps[K]
+    : Default;
+
+  // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
+  // `mainModule` property.
+  type MainModule = GlobalProp<'mainModule', {}>;
+
+  // The type of ctx.exports, which contains loopback bindings for all top-level exports.
+  type Exports = {
+    [K in keyof MainModule]: LoopbackForExport<MainModule[K]> &
+      // If the export is listed in `durableNamespaces`, then it is also a
+      // DurableObjectNamespace.
+      (K extends GlobalProp<'durableNamespaces', never>
+        ? MainModule[K] extends new (...args: any[]) => infer DoInstance
+          ? DoInstance extends Rpc.DurableObjectBranded
+            ? DurableObjectNamespace<DoInstance>
+            : DurableObjectNamespace<undefined>
+          : DurableObjectNamespace<undefined>
+        : {});
+  };
 }
 
-declare module 'cloudflare:node' {
-  export interface DefaultHandler {
-    fetch?(request: Request): Response | Promise<Response>;
-    tail?(events: TraceItem[]): void | Promise<void>;
-    trace?(traces: TraceItem[]): void | Promise<void>;
-    scheduled?(controller: ScheduledController): void | Promise<void>;
-    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
-    test?(controller: TestController): void | Promise<void>;
-  }
-
-  export function httpServerHandler(
-    options: { port: number },
-    handlers?: Omit<DefaultHandler, 'fetch'>
-  ): DefaultHandler;
-}
-
-declare module 'cloudflare:workers' {
+declare namespace CloudflareWorkersModule {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
     new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
@@ -188,34 +223,42 @@ declare module 'cloudflare:workers' {
 
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
 
-  export abstract class WorkerEntrypoint<Env = unknown>
+  export abstract class WorkerEntrypoint<Env = Cloudflare.Env, Props = {}>
     implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
-    protected ctx: ExecutionContext;
+    protected ctx: ExecutionContext<Props>;
     protected env: Env;
     constructor(ctx: ExecutionContext, env: Env);
 
+    email?(message: ForwardableEmailMessage): void | Promise<void>;
     fetch?(request: Request): Response | Promise<Response>;
-    tail?(events: TraceItem[]): void | Promise<void>;
-    trace?(traces: TraceItem[]): void | Promise<void>;
+    connect?(socket: Socket): void | Promise<void>;
+    queue?(batch: MessageBatch): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
-    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+    tail?(events: TraceItem[]): void | Promise<void>;
+    tailStream?(
+      event: TailStream.TailEvent<TailStream.Onset>
+    ):
+      | TailStream.TailEventHandlerType
+      | Promise<TailStream.TailEventHandlerType>;
     test?(controller: TestController): void | Promise<void>;
+    trace?(traces: TraceItem[]): void | Promise<void>;
   }
 
-  export abstract class DurableObject<Env = unknown>
+  export abstract class DurableObject<Env = Cloudflare.Env, Props = {}>
     implements Rpc.DurableObjectBranded
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 
-    protected ctx: DurableObjectState;
+    protected ctx: DurableObjectState<Props>;
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
 
-    fetch?(request: Request): Response | Promise<Response>;
     alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
+    fetch?(request: Request): Response | Promise<Response>;
+    connect?(socket: Socket): void | Promise<void>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer
@@ -271,16 +314,39 @@ declare module 'cloudflare:workers' {
     type: string;
   };
 
+  export type WorkflowStepContext = {
+    step: {
+      name: string;
+      count: number;
+    };
+    attempt: number;
+    config: WorkflowStepConfig;
+  };
+
+  export interface RollbackContext<T> {
+    error: Error;
+    output: NonNullable<T> | undefined;
+    stepName: string;
+  }
+
+  export interface StepPromise<T> extends Promise<T> {
+    rollback(fn: (ctx: RollbackContext<T>) => Promise<void>): StepPromise<T>;
+    rollback(
+      config: WorkflowStepConfig,
+      fn: (ctx: RollbackContext<T>) => Promise<void>
+    ): StepPromise<T>;
+  }
+
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
-      callback: () => Promise<T>
-    ): Promise<T>;
+      callback: (ctx: WorkflowStepContext) => Promise<T>
+    ): StepPromise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
-      callback: () => Promise<T>
-    ): Promise<T>;
+      callback: (ctx: WorkflowStepContext) => Promise<T>
+    ): StepPromise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
     waitForEvent<T extends Rpc.Serializable<T>>(
@@ -289,13 +355,25 @@ declare module 'cloudflare:workers' {
         type: string;
         timeout?: WorkflowTimeoutDuration | number;
       }
-    ): Promise<WorkflowStepEvent<T>>;
+    ): StepPromise<WorkflowStepEvent<T>>;
   }
+
+  export type WorkflowInstanceStatus =
+    | 'queued'
+    | 'running'
+    | 'paused'
+    | 'errored'
+    | 'terminated'
+    | 'complete'
+    | 'waiting'
+    | 'waitingForPause'
+    | 'unknown';
 
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
-  > implements Rpc.WorkflowEntrypointBranded
+  >
+    implements Rpc.WorkflowEntrypointBranded
   {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
 
@@ -312,5 +390,20 @@ declare module 'cloudflare:workers' {
 
   export function waitUntil(promise: Promise<unknown>): void;
 
+  export function withEnv(newEnv: unknown, fn: () => unknown): unknown;
+  export function withExports(newExports: unknown, fn: () => unknown): unknown;
+  export function withEnvAndExports(
+    newEnv: unknown,
+    newExports: unknown,
+    fn: () => unknown
+  ): unknown;
+
   export const env: Cloudflare.Env;
+  export const exports: Cloudflare.Exports;
+  export const cache: CacheContext;
+  export const tracing: Tracing;
+}
+
+declare module 'cloudflare:workers' {
+  export = CloudflareWorkersModule;
 }

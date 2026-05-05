@@ -39,13 +39,13 @@ class MockCacheClient final: public CacheClient {
 };
 
 class MockTimer final: public kj::Timer {
-  kj::TimePoint now() const {
+  kj::TimePoint now() const override {
     return kj::systemCoarseMonotonicClock().now();
   }
-  kj::Promise<void> atTime(kj::TimePoint time) {
+  kj::Promise<void> atTime(kj::TimePoint time) override {
     return kj::NEVER_DONE;
   }
-  kj::Promise<void> afterDelay(kj::Duration delay) {
+  kj::Promise<void> afterDelay(kj::Duration delay) override {
     return kj::NEVER_DONE;
   }
 };
@@ -57,7 +57,7 @@ class DummyErrorHandler final: public kj::TaskSet::ErrorHandler {
 struct MockTimerChannel final: public TimerChannel {
   void syncTime() override {}
 
-  kj::Date now() override {
+  kj::Date now(kj::Maybe<kj::Date>) override {
     return kj::systemPreciseCalendarClock().now();
   }
 
@@ -70,45 +70,31 @@ struct MockTimerChannel final: public TimerChannel {
   }
 };
 
-struct DummyIoChannelFactory final: public IoChannelFactory {
-  DummyIoChannelFactory(TimerChannel& timer): timer(timer) {}
+// A TimerChannel implementation that uses real timers from the KJ event loop.
+// Useful for tests that need actual timer functionality (e.g., benchmarks with
+// simulated I/O delays).
+struct RealTimerChannel final: public TimerChannel {
+  explicit RealTimerChannel(kj::Timer& timer): timer(timer) {}
 
-  kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
-    KJ_FAIL_ASSERT("no subrequests");
+  void syncTime() override {}
+
+  kj::Date now(kj::Maybe<kj::Date>) override {
+    return kj::systemPreciseCalendarClock().now();
   }
 
-  capnp::Capability::Client getCapability(uint channel) override {
-    KJ_FAIL_ASSERT("no capabilities");
+  kj::Promise<void> atTime(kj::Date when) override {
+    auto nowTime = kj::systemPreciseCalendarClock().now();
+    if (when <= nowTime) {
+      return kj::READY_NOW;
+    }
+    return timer.afterDelay(when - nowTime);
   }
 
-  kj::Own<CacheClient> getCache() override {
-    return kj::heap<MockCacheClient>();
+  kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
+    return timer.afterDelay(t);
   }
 
-  TimerChannel& getTimer() override {
-    return timer;
-  }
-
-  kj::Promise<void> writeLogfwdr(
-      uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) override {
-    KJ_FAIL_ASSERT("no log channels");
-  }
-
-  kj::Own<ActorChannel> getGlobalActor(uint channel,
-      const ActorIdFactory::ActorId& id,
-      kj::Maybe<kj::String> locationHint,
-      ActorGetMode mode,
-      bool enableReplicaRouting,
-      SpanParent parentSpan) override {
-    KJ_FAIL_REQUIRE("no actor channels");
-  }
-
-  kj::Own<ActorChannel> getColoLocalActor(
-      uint channel, kj::StringPtr id, SpanParent parentSpan) override {
-    KJ_FAIL_REQUIRE("no actor channels");
-  }
-
-  TimerChannel& timer;
+  kj::Timer& timer;
 };
 
 static constexpr kj::StringPtr mainModuleSource = R"SCRIPT(
@@ -166,10 +152,14 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
+  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
     return 0 * kj::SECONDS;
+  }
+  size_t getSqliteMemoryUsage() const override {
+    return 0;
   }
 };
 
@@ -217,6 +207,12 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   bool hasExcessivelyExceededHeapLimit() const override {
     return false;
   }
+  const TrackedWasmInstanceList& getTrackedWasmInstances() const override {
+    return trackedWasmInstances;
+  }
+
+ private:
+  TrackedWasmInstanceList trackedWasmInstances;
 };
 
 struct MockErrorReporter final: public Worker::ValidationErrorReporter {
@@ -288,16 +284,21 @@ struct MockResponse final: public kj::HttpService::Response {
 
 class MockActorLoopback: public Worker::Actor::Loopback, public kj::Refcounted {
  public:
-  virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
+  kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
     return kj::Own<WorkerInterface>();
   };
 
-  virtual kj::Own<Worker::Actor::Loopback> addRef() {
+  kj::Own<Worker::Actor::Loopback> addRef() override {
     return kj::addRef(*this);
   };
 };
 
 }  // namespace
+
+// Out-of-line because it references file-local MockCacheClient from the anonymous namespace above.
+kj::Own<CacheClient> TestFixture::DummyIoChannelFactory::getCache() {
+  return kj::heap<MockCacheClient>();
+}
 
 using api::pyodide::PythonConfig;
 
@@ -312,7 +313,10 @@ TestFixture::TestFixture(SetupParams&& params)
       io(params.waitScope == kj::none ? kj::Maybe(kj::setupAsyncIo())
                                       : kj::Maybe<kj::AsyncIoContext>(kj::none)),
       timer(kj::heap<MockTimer>()),
-      timerChannel(kj::heap<MockTimerChannel>()),
+      timerChannel(params.useRealTimers && io != kj::none
+              ? kj::Own<TimerChannel>(
+                    kj::heap<RealTimerChannel>(KJ_ASSERT_NONNULL(io).provider->getTimer()))
+              : kj::Own<TimerChannel>(kj::heap<MockTimerChannel>())),
       entropySource(kj::heap<MockEntropySource>()),
       threadContextHeaderBundle(headerTableBuilder),
       httpOverCapnpFactory(byteStreamFactory,
@@ -322,8 +326,7 @@ TestFixture::TestFixture(SetupParams&& params)
           *entropySource,
           threadContextHeaderBundle,
           httpOverCapnpFactory,
-          byteStreamFactory,
-          false),
+          byteStreamFactory),
       errorReporter(kj::heap<MockErrorReporter>()),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(*timer)),
       isolateGroup(v8::IsolateGroup::GetDefault()),
@@ -334,9 +337,7 @@ TestFixture::TestFixture(SetupParams&& params)
           isolateGroup,
           kj::atomicRefcounted<JsgIsolateObserver>(),
           *memoryCacheProvider,
-          defaultPythonConfig,
-          kj::none /* new module registry */,
-          newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()))),
+          defaultPythonConfig)),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::atomicRefcounted<IsolateObserver>(),
           scriptId,
@@ -344,23 +345,29 @@ TestFixture::TestFixture(SetupParams&& params)
           Worker::Isolate::InspectorPolicy::DISALLOW)),
       workerScript(kj::atomicRefcounted<Worker::Script>(kj::atomicAddRef(*workerIsolate),
           scriptId,
-          server::WorkerdApi::extractSource(mainModuleName, config, *errorReporter),
+          server::WorkerdApi::extractSource(mainModuleName,
+              config,
+              params.featureFlags.orDefault(CompatibilityFlags::Reader()),
+              *errorReporter),
           IsolateObserver::StartType::COLD,
           false,
           kj::none,
           kj::none,
-          SpanParent(nullptr))),
+          SpanParent(nullptr),
+          newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()),
+          kj::none /* new module registry */)),
       worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {
             // no bindings, nothing to do
           },
           IsolateObserver::StartType::COLD,
-          TraceParentContext(nullptr, nullptr), /* spans */
+          SpanParent(nullptr),
           Worker::LockType(Worker::Lock::TakeSynchronously(kj::none)))),
       errorHandler(kj::heap<DummyErrorHandler>()),
       waitUntilTasks(*errorHandler),
-      headerTable(headerTableBuilder.build()) {
+      headerTable(headerTableBuilder.build()),
+      ioChannelFactory(kj::mv(params.ioChannelFactory)) {
   KJ_IF_SOME(id, params.actorId) {
     auto makeActorCache = [](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
                               ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
@@ -374,8 +381,9 @@ TestFixture::TestFixture(SetupParams&& params)
     };
     actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
         /*hasTransient=*/false, makeActorCache,
-        /*classname=*/kj::none, makeStorage, kj::refcounted<MockActorLoopback>(), *timerChannel,
-        kj::refcounted<ActorObserver>(), kj::none, kj::none);
+        /*classname=*/kj::none, /*props=*/Frankenvalue(), makeStorage,
+        kj::refcounted<MockActorLoopback>(), *timerChannel, kj::refcounted<ActorObserver>(),
+        kj::none, kj::none);
   }
 }
 
@@ -405,7 +413,7 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
     });
   } catch (kj::Exception& e) {
     if (!ignoreDescription(e.getDescription())) {
-      throw e;
+      throw kj::mv(e);
     }
   }
 }
@@ -413,10 +421,14 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
   auto context = kj::refcounted<IoContext>(
       threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
-  auto invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(kj::none, kj::none);
+  kj::Own<IoChannelFactory> channelFactory;
+  KJ_IF_SOME(factory, ioChannelFactory) {
+    channelFactory = factory(*timerChannel);
+  } else {
+    channelFactory = kj::heap<DummyIoChannelFactory>(*timerChannel);
+  }
   auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(*context),
-      kj::heap<DummyIoChannelFactory>(*timerChannel), kj::refcounted<RequestObserver>(), nullptr,
-      kj::mv(invocationSpanContext));
+      kj::mv(channelFactory), kj::refcounted<RequestObserver>(), kj::none, kj::none);
   incomingRequest->delivered();
   return incomingRequest;
 }
@@ -430,7 +442,10 @@ TestFixture::Response TestFixture::runRequest(
   runInIoContext([&](const TestFixture::Environment& env) {
     auto& globalScope = env.lock.getGlobalScope();
     return globalScope.request(method, url, requestHeaders, *requestBody, response, "{}"_kj,
-        env.lock, env.lock.getExportedHandler(kj::none, {}, kj::none), /* abortSignal */ kj::none);
+        env.lock,
+        env.lock.getExportedHandler(/*entryPointName=*/kj::none, /*versionInfo=*/kj::none,
+            /*props=*/{}, /*actor=*/kj::none),
+        /*abortSignal=*/kj::none);
   });
 
   return {.statusCode = response.statusCode, .body = response.body->str()};

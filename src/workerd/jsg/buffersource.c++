@@ -86,6 +86,16 @@ kj::Maybe<BufferSource> BufferSource::tryAlloc(Lock& js, size_t size) {
   return kj::none;
 }
 
+kj::Maybe<BufferSource> BufferSource::tryAllocUnsafe(Lock& js, size_t size) {
+  v8::Local<v8::ArrayBuffer> buffer;
+  if (v8::ArrayBuffer::MaybeNew(
+          js.v8Isolate, size, v8::BackingStoreInitializationMode::kUninitialized)
+          .ToLocal(&buffer)) {
+    return BufferSource(js, v8::Uint8Array::New(buffer, 0, size).As<v8::Value>());
+  }
+  return kj::none;
+}
+
 BufferSource::BufferSource(Lock& js, v8::Local<v8::Value> handle)
     : handle(js.v8Ref(handle)),
       maybeBackingStore(BackingStore(getBacking(handle),
@@ -123,6 +133,18 @@ bool BufferSource::canDetach(Lock& js) {
 
 v8::Local<v8::Value> BufferSource::getHandle(Lock& js) {
   return handle.getHandle(js);
+}
+
+JsBufferSource BufferSource::getJsHandle(Lock& js) {
+  auto handle = getHandle(js);
+  if (handle->IsArrayBuffer()) {
+    return JsBufferSource(JsArrayBuffer(handle.As<v8::ArrayBuffer>()));
+  } else if (handle->IsSharedArrayBuffer()) {
+    return JsBufferSource(handle.As<v8::SharedArrayBuffer>());
+  } else if (handle->IsArrayBufferView()) {
+    return JsBufferSource(JsArrayBufferView(handle.As<v8::ArrayBufferView>()));
+  }
+  KJ_UNREACHABLE;
 }
 
 void BufferSource::setDetachKey(Lock& js, v8::Local<v8::Value> key) {

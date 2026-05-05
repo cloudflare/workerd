@@ -7,12 +7,13 @@
 //
 // This is the most over-engineered spec...
 
-#include "streams/compression.h"
-#include "streams/encoding.h"
-#include "streams/readable.h"
-#include "streams/standard.h"
-#include "streams/transform.h"
-#include "streams/writable.h"
+#include <workerd/api/streams/compression.h>
+#include <workerd/api/streams/encoding.h>
+#include <workerd/api/streams/identity-transform-stream.h>
+#include <workerd/api/streams/readable.h>
+#include <workerd/api/streams/standard.h>
+#include <workerd/api/streams/transform.h>
+#include <workerd/api/streams/writable.h>
 
 namespace workerd::api {
 

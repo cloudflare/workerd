@@ -3,12 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import {
+  cache,
   DurableObject,
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
 } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
+
+// Check `cache` export from `cloudflare:workers` has the expected type.
+expectTypeOf(cache).toEqualTypeOf<CacheContext>();
+expectTypeOf(cache.purge).toEqualTypeOf<
+  (options: CachePurgeOptions) => Promise<CachePurgeResult>
+>();
 
 type TestType = {
   fieldString: string;
@@ -74,8 +81,10 @@ class TestCounter extends RpcTarget {
 
 const symbolMethod = Symbol('symbolMethod');
 
-class TestEntrypoint extends WorkerEntrypoint<Env> {
-  constructor(ctx: ExecutionContext, env: Env) {
+type Props = {myProp: number};
+
+class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
+  constructor(ctx: ExecutionContext<Props>, env: Env) {
     super(ctx, env);
   }
 
@@ -90,7 +99,7 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
 
   private privateInstanceProperty = 0;
   private get privateProperty() {
-    expectTypeOf(this.ctx).toEqualTypeOf<ExecutionContext>();
+    expectTypeOf(this.ctx).toEqualTypeOf<ExecutionContext<Props>>();
     expectTypeOf(this.env).toEqualTypeOf<Env>();
 
     return 1;
@@ -354,6 +363,7 @@ class TestAlarmObject extends DurableObject {
     if (alarmInfo !== undefined) {
       const _isRetry: boolean = alarmInfo.isRetry;
       const _retryCount: number = alarmInfo.retryCount;
+      const _scheduledTime: number = alarmInfo.scheduledTime;
     }
   }
 
@@ -365,6 +375,7 @@ class TestAlarmObject extends DurableObject {
     return await this.alarm({
       isRetry: true,
       retryCount: 1,
+      scheduledTime: 1000,
     });
   }
 }
@@ -458,7 +469,8 @@ export default <ExportedHandler<Env>>{
       expectTypeOf(env.RPC_SERVICE.queue).toEqualTypeOf<
         (
           queueName: string,
-          messages: ServiceBindingQueueMessage[]
+          messages: ServiceBindingQueueMessage[],
+          metadata?: MessageBatchMetadata
         ) => Promise<FetcherQueueResult>
       >();
       expectTypeOf(env.RPC_SERVICE.scheduled).toEqualTypeOf<

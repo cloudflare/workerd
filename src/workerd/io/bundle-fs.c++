@@ -85,6 +85,10 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
     kj::Path kRoot{};
     for (auto& entry: entries) {
       auto url = KJ_ASSERT_NONNULL(jsg::Url::tryParse(entry.name, "file:///"_kj));
+      // If the name is not a valid file URL path, ignore it.
+      if (url.getProtocol() != "file:"_kj) {
+        continue;
+      }
       auto pathStr = kj::str(url.getPathname().slice(1));
       auto path = kRoot.eval(pathStr);
       builder.addPath(path, File::newReadable(entry.data));

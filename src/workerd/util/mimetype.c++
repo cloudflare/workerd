@@ -8,7 +8,6 @@
 #include <workerd/util/string-buffer.h>
 
 #include <kj/debug.h>
-#include <kj/string-tree.h>
 
 namespace workerd {
 
@@ -79,13 +78,13 @@ kj::ArrayPtr<const char> skipWhitespace(kj::ArrayPtr<const char> str) {
 kj::ArrayPtr<const char> trimWhitespace(kj::ArrayPtr<const char> str) {
   auto ptr = str.end();
   while (ptr > str.begin() && isWhitespace(*(ptr - 1))) --ptr;
-  return str.first(str.size() - (str.end() - ptr));
+  return str.first(ptr - str.begin());
 }
 
 constexpr bool hasInvalidCodepoints(kj::ArrayPtr<const char> str, auto predicate) {
   bool has_invalid_codepoints = false;
-  for (const char ptr: str) {
-    has_invalid_codepoints |= !predicate(static_cast<uint8_t>(ptr));
+  for (const char c: str) {
+    has_invalid_codepoints |= !predicate(static_cast<uint8_t>(c));
   }
   return has_invalid_codepoints;
 }
@@ -99,21 +98,6 @@ kj::Maybe<size_t> findParamDelimiter(kj::ArrayPtr<const char> str) {
   return kj::none;
 }
 
-kj::String unescape(kj::ArrayPtr<const char> str) {
-  auto result = kj::strTree();
-  while (str.size() > 0) {
-    KJ_IF_SOME(pos, str.findFirst('\\')) {
-      result = kj::strTree(kj::mv(result), str.first(pos));
-      str = str.slice(pos + 1, str.size());
-    } else {
-      // No more backslashes
-      result = kj::strTree(kj::mv(result), str);
-      break;
-    }
-  }
-  return result.flatten();
-}
-
 }  // namespace
 
 MimeType MimeType::parse(kj::StringPtr input, ParseOptions options) {
@@ -121,10 +105,6 @@ MimeType MimeType::parse(kj::StringPtr input, ParseOptions options) {
 }
 
 kj::Maybe<MimeType> MimeType::tryParse(kj::ArrayPtr<const char> input, ParseOptions options) {
-  return tryParseImpl(input, kj::mv(options));
-}
-
-kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, ParseOptions options) {
   // Skip leading whitespace from start
   input = skipWhitespace(input);
   if (input.size() == 0) return kj::none;
@@ -136,13 +116,12 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
     if (typeCandidate.size() == 0 || hasInvalidCodepoints(typeCandidate, isTokenChar)) {
       return kj::none;
     }
-    maybeType = kj::str(typeCandidate);
+    maybeType = toLower(typeCandidate);
     input = input.slice(n + 1);
   } else {
     // If the solidus is not found, then it's not a valid mime type
     return kj::none;
   }
-  auto& type = KJ_ASSERT_NONNULL(maybeType);
 
   // If there's nothing else to parse at this point, it's not a valid mime type.
   if (input.size() == 0) return kj::none;
@@ -155,19 +134,18 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
     if (subtypeCandidate.size() == 0 || hasInvalidCodepoints(subtypeCandidate, isTokenChar)) {
       return kj::none;
     }
-    maybeSubtype = kj::str(subtypeCandidate);
+    maybeSubtype = toLower(subtypeCandidate);
     input = input.slice(n + 1);
   } else {
     auto subtypeCandidate = trimWhitespace(input);
     if (subtypeCandidate.size() == 0 || hasInvalidCodepoints(subtypeCandidate, isTokenChar)) {
       return kj::none;
     }
-    maybeSubtype = kj::str(subtypeCandidate);
-    input = input.slice(input.size());
+    maybeSubtype = toLower(subtypeCandidate);
+    input = {};
   }
-  auto& subtype = KJ_ASSERT_NONNULL(maybeSubtype);
 
-  MimeType result(type, subtype);
+  MimeType result(kj::mv(KJ_ASSERT_NONNULL(maybeType)), kj::mv(KJ_ASSERT_NONNULL(maybeSubtype)));
 
   if (!(options & ParseOptions::IGNORE_PARAMS)) {
     // Parse the parameters...
@@ -193,26 +171,44 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
             break;
           }
         }
+        if (input.size() == 0) break;
 
         // Check to see if the value starts off quoted or not.
         if (*input.begin() == '"') {
-          input = input.slice(1);
-          // Our parameter value is quoted. Next we'll scan up until the next
-          // quote or until the end of the string.
-          KJ_IF_SOME(p, input.findFirst('"')) {
-            auto valueCandidate = input.first(p);
-            input = input.slice(p + 1);
-            if (hasInvalidCodepoints(valueCandidate, isQuotedStringTokenChar)) {
-              continue;
+          // Collect an HTTP quoted string per Fetch spec §2.6, with extract-value=true.
+          // Process character-by-character to correctly handle backslash escapes.
+          input = input.slice(1);  // Skip opening quote
+          auto valueBuf = kj::heapString(input.size());
+          char* out = valueBuf.begin();
+          while (input.size() > 0) {
+            char c = input[0];
+            if (c == '"') {
+              // Closing quote found
+              input = input.slice(1);
+              break;
+            } else if (c == '\\') {
+              input = input.slice(1);
+              if (input.size() == 0) {
+                // Trailing backslash at end of input — append literal backslash per spec
+                *out++ = '\\';
+                break;
+              }
+              *out++ = input[0];
+              input = input.slice(1);
+            } else {
+              *out++ = c;
+              input = input.slice(1);
             }
-            result.addParam(nameCandidate, unescape(valueCandidate));
-            KJ_IF_SOME(y, input.findFirst(';')) {
-              input = input.slice(y + 1);
-              continue;
-            }
-          } else if (!hasInvalidCodepoints(input, isQuotedStringTokenChar)) {
-            result.addParam(nameCandidate, unescape(input));
           }
+          auto valueCandidate =
+              kj::heapString(kj::arrayPtr(valueBuf.begin(), out - valueBuf.begin()));
+          // Spec step 11.8.2: skip any trailing content to the next ';'
+          KJ_IF_SOME(p, input.findFirst(';')) {
+            result.addParam(nameCandidate, valueCandidate);
+            input = input.slice(p + 1);
+            continue;
+          }
+          result.addParam(nameCandidate, valueCandidate);
           break;
         } else {
           // The parameter is not quoted. Let's scan ahead for the next semi-colon.
@@ -233,7 +229,6 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
           }
           break;
         }
-        KJ_ASSERT(false);
       } else {
         // If we got here, we scanned input and did not find a semi-colon or equal
         // sign before hitting the end of the input. We treat the remaining bits as
@@ -247,8 +242,11 @@ kj::Maybe<MimeType> MimeType::tryParseImpl(kj::ArrayPtr<const char> input, Parse
 }
 
 MimeType::MimeType(kj::StringPtr type, kj::StringPtr subtype, kj::Maybe<MimeParams> params)
-    : type_(toLower(type)),
-      subtype_(toLower(subtype)) {
+    : MimeType(toLower(type), toLower(subtype), kj::mv(params)) {}
+
+MimeType::MimeType(kj::String type, kj::String subtype, kj::Maybe<MimeParams> params)
+    : type_(kj::mv(type)),
+      subtype_(kj::mv(subtype)) {
   KJ_IF_SOME(p, params) {
     params_ = kj::mv(p);
   }
@@ -320,12 +318,16 @@ void MimeType::paramsToString(MimeType::ToStringBuffer& buffer) const {
       auto view = param.value.asPtr();
       buffer.append("\"");
       while (view.size() > 0) {
-        KJ_IF_SOME(pos, view.findFirst('"')) {
-          buffer.append(view.first(pos), "\\\"");
-          view = view.slice(pos + 1);
+        // Find the next character that needs escaping (per MIME Sniffing §4.1 step 4.4.1:
+        // precede each occurrence of U+0022 (") or U+005C (\) with U+005C (\)).
+        size_t i = 0;
+        while (i < view.size() && view[i] != '"' && view[i] != '\\') ++i;
+        buffer.append(view.first(i));
+        if (i < view.size()) {
+          buffer.append("\\", view.slice(i, i + 1));
+          view = view.slice(i + 1);
         } else {
-          buffer.append(view);
-          view = view.slice(view.size());
+          break;
         }
       }
       buffer.append("\"");
@@ -352,7 +354,7 @@ MimeType MimeType::clone(ParseOptions options) const {
       copy.insert(kj::str(entry.key), kj::str(entry.value));
     }
   }
-  return MimeType(type_, subtype_, kj::mv(copy));
+  return MimeType(kj::str(type_), kj::str(subtype_), kj::mv(copy));
 }
 
 bool MimeType::operator==(const MimeType& other) const {
@@ -367,68 +369,12 @@ kj::String KJ_STRINGIFY(const MimeType& mimeType) {
   return mimeType.toString();
 }
 
-const kj::StringPtr MimeType::PLAINTEXT_STRING = "text/plain;charset=UTF-8"_kj;
-const kj::StringPtr MimeType::PLAINTEXT_ASCII_STRING = "text/plain;charset=US-ASCII"_kj;
+kj::String KJ_STRINGIFY(const ConstMimeType& state) {
+  return state.toString();
+}
+
 const MimeType MimeType::PLAINTEXT = MimeType::parse(PLAINTEXT_STRING);
 const MimeType MimeType::PLAINTEXT_ASCII = MimeType::parse(PLAINTEXT_ASCII_STRING);
-const MimeType MimeType::CSS = MimeType("text"_kj, "css"_kj);
-const MimeType MimeType::HTML = MimeType("text"_kj, "html"_kj);
-const MimeType MimeType::TEXT_JAVASCRIPT = MimeType("text"_kj, "javascript"_kj);
-const MimeType MimeType::JSON = MimeType("application"_kj, "json"_kj);
-const MimeType MimeType::FORM_URLENCODED = MimeType("application"_kj, "x-www-form-urlencoded"_kj);
-const MimeType MimeType::OCTET_STREAM = MimeType("application"_kj, "octet-stream"_kj);
-const MimeType MimeType::XHTML = MimeType("application"_kj, "xhtml+xml"_kj);
-const MimeType MimeType::JAVASCRIPT = MimeType("application"_kj, "javascript"_kj);
-const MimeType MimeType::XJAVASCRIPT = MimeType("application"_kj, "x-javascript"_kj);
-const MimeType MimeType::FORM_DATA = MimeType("multipart"_kj, "form-data"_kj);
-const MimeType MimeType::MANIFEST_JSON = MimeType("application"_kj, "manifest+json"_kj);
-const MimeType MimeType::VTT = MimeType("text"_kj, "vtt"_kj);
-const MimeType MimeType::EVENT_STREAM = MimeType("text"_kj, "event-stream"_kj);
-const MimeType MimeType::WILDCARD = MimeType("*"_kj, "*"_kj);
-
-bool MimeType::isText(const MimeType& mimeType) {
-  auto type = mimeType.type();
-  auto subtype = mimeType.subtype();
-  return type == "text" || isXml(mimeType) || isJson(mimeType) || isJavascript(mimeType) ||
-      (type == "application" && subtype == "dns-json");
-}
-
-bool MimeType::isXml(const MimeType& mimeType) {
-  auto type = mimeType.type();
-  auto subtype = mimeType.subtype();
-  return (type == "text" || type == "application") &&
-      (subtype == "xml" || subtype.endsWith("+xml"));
-}
-
-bool MimeType::isJson(const MimeType& mimeType) {
-  auto type = mimeType.type();
-  auto subtype = mimeType.subtype();
-  return (type == "text" || type == "application") &&
-      (subtype == "json" || subtype.endsWith("+json"));
-}
-
-bool MimeType::isFont(const MimeType& mimeType) {
-  auto type = mimeType.type();
-  auto subtype = mimeType.subtype();
-  return (type == "font" || type == "application") &&
-      (subtype.startsWith("font-") || subtype.startsWith("x-font-"));
-}
-
-bool MimeType::isJavascript(const MimeType& mimeType) {
-  return JAVASCRIPT == mimeType || XJAVASCRIPT == mimeType || TEXT_JAVASCRIPT == mimeType;
-}
-
-bool MimeType::isImage(const MimeType& mimeType) {
-  return mimeType.type() == "image";
-}
-
-bool MimeType::isVideo(const MimeType& mimeType) {
-  return mimeType.type() == "video";
-}
-
-bool MimeType::isAudio(const MimeType& mimeType) {
-  return mimeType.type() == "audio";
-}
 
 kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
   kj::Maybe<MimeType> mimeType;
@@ -449,7 +395,7 @@ kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
   };
 
   constexpr static auto processPart = [](auto& mimeType, auto& part) -> kj::Maybe<MimeType> {
-    KJ_IF_SOME(parsed, tryParseImpl(part)) {
+    KJ_IF_SOME(parsed, tryParse(part)) {
       if (parsed == MimeType::WILDCARD) return kj::none;
 
       KJ_IF_SOME(current, mimeType) {
@@ -487,6 +433,16 @@ kj::Maybe<MimeType> MimeType::extract(kj::StringPtr input) {
   }
 
   return kj::mv(mimeType);
+}
+
+kj::String MimeType::formDataWithBoundary(kj::StringPtr boundary) {
+  // Note that the expectation is that the boundary is already properly formed
+  // and does not need any additional quoting or escaping.
+  return kj::str("multipart/form-data; boundary=", boundary);
+}
+
+kj::String MimeType::formUrlEncodedWithCharset(kj::StringPtr charset) {
+  return kj::str("application/x-www-form-urlencoded;charset=", charset);
 }
 
 }  // namespace workerd

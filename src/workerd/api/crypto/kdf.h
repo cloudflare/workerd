@@ -4,6 +4,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/jsvalue.h>
 
 #include <kj/common.h>
 
@@ -14,7 +15,7 @@ using EVP_MD = struct env_md_st;
 namespace workerd::api {
 
 // Perform HKDF key derivation.
-kj::Maybe<jsg::BufferSource> hkdf(jsg::Lock& js,
+kj::Maybe<jsg::JsArrayBuffer> hkdf(jsg::Lock& js,
     size_t length,
     const EVP_MD* digest,
     kj::ArrayPtr<const kj::byte> key,
@@ -22,7 +23,7 @@ kj::Maybe<jsg::BufferSource> hkdf(jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> info);
 
 // Perform PBKDF2 key derivation.
-kj::Maybe<jsg::BufferSource> pbkdf2(jsg::Lock& js,
+kj::Maybe<jsg::JsArrayBuffer> pbkdf2(jsg::Lock& js,
     size_t length,
     size_t iterations,
     const EVP_MD* digest,
@@ -30,7 +31,7 @@ kj::Maybe<jsg::BufferSource> pbkdf2(jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> salt);
 
 // Perform Scrypt key derivation.
-kj::Maybe<jsg::BufferSource> scrypt(jsg::Lock& js,
+kj::Maybe<jsg::JsArrayBuffer> scrypt(jsg::Lock& js,
     size_t length,
     uint32_t N,
     uint32_t r,

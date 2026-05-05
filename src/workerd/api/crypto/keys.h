@@ -63,11 +63,11 @@ class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
       const kj::Maybe<kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>>& callTimeHash) const = 0;
 
   // Convert OpenSSL-format signature to WebCrypto-format signature, if different.
-  virtual jsg::BufferSource signatureSslToWebCrypto(
+  virtual jsg::JsArrayBuffer signatureSslToWebCrypto(
       jsg::Lock& js, kj::ArrayPtr<kj::byte> signature) const;
 
   // Convert WebCrypto-format signature to OpenSSL-format signature, if different.
-  virtual jsg::BufferSource signatureWebCryptoToSsl(
+  virtual jsg::JsArrayBuffer signatureWebCryptoToSsl(
       jsg::Lock& js, kj::ArrayPtr<const kj::byte> signature) const;
 
   // Add salt to digest context in order to generate or verify salted signature.
@@ -80,13 +80,13 @@ class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
 
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final;
 
-  virtual jsg::BufferSource exportKeyExt(jsg::Lock& js,
+  virtual jsg::JsUint8Array exportKeyExt(jsg::Lock& js,
       kj::StringPtr format,
       kj::StringPtr type,
       jsg::Optional<kj::String> cipher = kj::none,
       jsg::Optional<kj::Array<kj::byte>> passphrase = kj::none) const override final;
 
-  jsg::BufferSource sign(jsg::Lock& js,
+  jsg::JsArrayBuffer sign(jsg::Lock& js,
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data) const override;
 
@@ -119,7 +119,7 @@ class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
 
  private:
   virtual SubtleCrypto::JsonWebKey exportJwk() const = 0;
-  virtual jsg::BufferSource exportRaw(jsg::Lock& js) const = 0;
+  virtual jsg::JsArrayBuffer exportRaw(jsg::Lock& js) const = 0;
 
   mutable kj::Own<EVP_PKEY> keyData;
   // mutable because OpenSSL wants non-const pointers even when the object won't be modified...

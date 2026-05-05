@@ -180,6 +180,7 @@ KJ_TEST("WD_STRONG_BOOL comparison operators") {
   if constexpr (strongbadNo <= strongbadYes) {}
   if constexpr (strongbadNo >= strongbadYes) {}
 
+  // NOLINTBEGIN(misc-redundant-expression)
   static_assert(strongbadNo == strongbadNo);
   static_assert(strongbadYes == strongbadYes);
   static_assert(!(strongbadNo != strongbadNo));
@@ -192,6 +193,7 @@ KJ_TEST("WD_STRONG_BOOL comparison operators") {
   static_assert(strongbadNo <= strongbadYes);
   static_assert(!(strongbadYes <= strongbadNo));
   static_assert(!(strongbadNo >= strongbadYes));
+  // NOLINTEND(misc-redundant-expression)
 }
 
 KJ_TEST("WD_STRONG_BOOL logical operators") {
@@ -205,6 +207,7 @@ KJ_TEST("WD_STRONG_BOOL logical operators") {
   if (strongbadNo && strongbadYes) {}
   if (strongbadNo || strongbadYes) {}
 
+  // NOLINTBEGIN(misc-redundant-expression)
   static_assert((strongbadNo && strongbadNo) == Strongbad::NO);
   static_assert((strongbadNo && strongbadYes) == Strongbad::NO);
   static_assert((strongbadYes && strongbadNo) == Strongbad::NO);
@@ -213,6 +216,7 @@ KJ_TEST("WD_STRONG_BOOL logical operators") {
   static_assert((strongbadNo || strongbadYes) == Strongbad::YES);
   static_assert((strongbadYes || strongbadNo) == Strongbad::YES);
   static_assert((strongbadYes || strongbadYes) == Strongbad::YES);
+  // NOLINTEND(misc-redundant-expression)
 }
 
 KJ_TEST("WD_STRONG_BOOL can be stringified") {

@@ -5,8 +5,10 @@
 #pragma once
 
 #include <workerd/api/basics.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/async.h>
@@ -24,6 +26,58 @@ class WorkerQueue: public jsg::Object {
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this queue.
   WorkerQueue(uint subrequestChannel): subrequestChannel(subrequestChannel) {}
+
+  // The metrics structs below (Metrics, SendMetrics, SendBatchMetrics) are deserialized from
+  // JSON responses where the upstream service uses 0 as a sentinel for "no data" on timestamp
+  // fields. Callers MUST call clearEpochSentinel() on oldestMessageTimestamp after deserialization to convert the
+  // sentinel to kj::none (JS undefined).
+  struct Metrics {
+    double backlogCount = 0;
+    double backlogBytes = 0;
+    jsg::Optional<kj::Date> oldestMessageTimestamp;
+    JSG_STRUCT(backlogCount, backlogBytes, oldestMessageTimestamp);
+    JSG_STRUCT_TS_OVERRIDE(QueueMetrics);
+  };
+
+  struct SendMetrics {
+    double backlogCount = 0;
+    double backlogBytes = 0;
+    jsg::Optional<kj::Date> oldestMessageTimestamp;
+    JSG_STRUCT(backlogCount, backlogBytes, oldestMessageTimestamp);
+    JSG_STRUCT_TS_OVERRIDE(QueueSendMetrics);
+  };
+
+  struct SendMetadata {
+    SendMetrics metrics;
+    JSG_STRUCT(metrics);
+    JSG_STRUCT_TS_OVERRIDE(QueueSendMetadata);
+  };
+
+  struct SendResponse {
+    SendMetadata metadata;
+    JSG_STRUCT(metadata);
+    JSG_STRUCT_TS_OVERRIDE(QueueSendResponse);
+  };
+
+  struct SendBatchMetrics {
+    double backlogCount = 0;
+    double backlogBytes = 0;
+    jsg::Optional<kj::Date> oldestMessageTimestamp;
+    JSG_STRUCT(backlogCount, backlogBytes, oldestMessageTimestamp);
+    JSG_STRUCT_TS_OVERRIDE(QueueSendBatchMetrics);
+  };
+
+  struct SendBatchMetadata {
+    SendBatchMetrics metrics;
+    JSG_STRUCT(metrics);
+    JSG_STRUCT_TS_OVERRIDE(QueueSendBatchMetadata);
+  };
+
+  struct SendBatchResponse {
+    SendBatchMetadata metadata;
+    JSG_STRUCT(metadata);
+    JSG_STRUCT_TS_OVERRIDE(QueueSendBatchResponse);
+  };
 
   struct SendOptions {
     // TODO(soon): Support metadata.
@@ -65,22 +119,30 @@ class WorkerQueue: public jsg::Object {
     // NOTE: Any new fields added to SendOptions must also be added here.
   };
 
-  kj::Promise<void> send(jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options);
+  jsg::Promise<SendResponse> send(jsg::Lock& js,
+      jsg::JsValue body,
+      jsg::Optional<SendOptions> options,
+      const jsg::TypeHandler<SendResponse>& responseHandler);
 
-  kj::Promise<void> sendBatch(jsg::Lock& js,
+  jsg::Promise<SendBatchResponse> sendBatch(jsg::Lock& js,
       jsg::Sequence<MessageSendRequest> batch,
-      jsg::Optional<SendBatchOptions> options);
+      jsg::Optional<SendBatchOptions> options,
+      const jsg::TypeHandler<SendBatchResponse>& responseHandler);
 
-  JSG_RESOURCE_TYPE(WorkerQueue) {
+  jsg::Promise<Metrics> metrics(jsg::Lock& js, const jsg::TypeHandler<Metrics>& metricsHandler);
+
+  JSG_RESOURCE_TYPE(WorkerQueue, CompatibilityFlags::Reader flags) {
+    JSG_METHOD(metrics);
     JSG_METHOD(send);
     JSG_METHOD(sendBatch);
 
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE(Queue<Body = unknown> {
-      send(message: Body, options?: QueueSendOptions): Promise<void>;
+      send(message: Body, options?: QueueSendOptions): Promise<QueueSendResponse>;
       sendBatch(messages
                 : Iterable<MessageSendRequest<Body>>, options ?: QueueSendBatchOptions)
-          : Promise<void>;
+          : Promise<QueueSendBatchResponse>;
+      metrics(): Promise<QueueMetrics>;
     });
     JSG_TS_DEFINE(type QueueContentType = "text" | "bytes" | "json" | "v8");
   }
@@ -90,6 +152,24 @@ class WorkerQueue: public jsg::Object {
 };
 
 // Event handler types
+
+// Metadata delivered with a message batch in the queue() handler
+
+// Same sentinel caveat as WorkerQueue::Metrics above: the capnp path uses 0 to mean "no data"
+// for oldestMessageTimestamp. As such, we must explicitly set it to kj::none (JS undefined).
+struct MessageBatchMetrics {
+  double backlogCount = 0;
+  double backlogBytes = 0;
+  jsg::Optional<kj::Date> oldestMessageTimestamp;
+  JSG_STRUCT(backlogCount, backlogBytes, oldestMessageTimestamp);
+  JSG_STRUCT_TS_OVERRIDE(MessageBatchMetrics);
+};
+
+struct MessageBatchMetadata {
+  MessageBatchMetrics metrics;
+  JSG_STRUCT(metrics);
+  JSG_STRUCT_TS_OVERRIDE(MessageBatchMetadata);
+};
 
 // Types for other workers passing messages into and responses out of a queue handler.
 
@@ -210,6 +290,7 @@ class QueueEvent final: public ExtendableEvent {
   struct Params {
     kj::String queueName;
     kj::Array<IncomingQueueMessage> messages;
+    MessageBatchMetadata metadata;
   };
 
   explicit QueueEvent(jsg::Lock& js,
@@ -225,15 +306,20 @@ class QueueEvent final: public ExtendableEvent {
   kj::StringPtr getQueueName() {
     return queueName;
   }
+  MessageBatchMetadata getMetadata() {
+    return metadata;
+  }
 
   void retryAll(jsg::Optional<QueueRetryOptions> options);
   void ackAll();
 
-  JSG_RESOURCE_TYPE(QueueEvent) {
+  JSG_RESOURCE_TYPE(QueueEvent, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(ExtendableEvent);
 
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(messages, getMessages);
     JSG_READONLY_INSTANCE_PROPERTY(queue, getQueueName);
+
+    JSG_READONLY_INSTANCE_PROPERTY(metadata, getMetadata);
 
     JSG_METHOD(retryAll);
     JSG_METHOD(ackAll);
@@ -241,6 +327,7 @@ class QueueEvent final: public ExtendableEvent {
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE(QueueEvent<Body = unknown> {
         readonly messages: readonly Message<Body>[];
+        readonly metadata: MessageBatchMetadata;
     });
   }
 
@@ -249,6 +336,7 @@ class QueueEvent final: public ExtendableEvent {
       tracker.trackField("message", message);
     }
     tracker.trackField("queueName", queueName);
+    tracker.trackFieldWithSize("metadata", sizeof(MessageBatchMetadata));
     tracker.trackFieldWithSize("IoPtr<QueueEventResult>", sizeof(IoPtr<QueueEventResult>));
   }
 
@@ -260,10 +348,10 @@ class QueueEvent final: public ExtendableEvent {
   using CompletionStatus = kj::OneOf<Incomplete, CompletedSuccessfully, CompletedWithError>;
 
   void setCompletionStatus(CompletionStatus status) {
-    completionStatus = status;
+    completionStatus = kj::mv(status);
   }
 
-  CompletionStatus getCompletionStatus() const {
+  const CompletionStatus& getCompletionStatus() const {
     return completionStatus;
   }
 
@@ -272,6 +360,7 @@ class QueueEvent final: public ExtendableEvent {
   // array to avoid one intermediate copy?
   kj::Array<jsg::Ref<QueueMessage>> messages;
   kj::String queueName;
+  MessageBatchMetadata metadata;
   IoPtr<QueueEventResult> result;
   CompletionStatus completionStatus = Incomplete{};
 
@@ -291,6 +380,9 @@ class QueueController final: public jsg::Object {
   kj::StringPtr getQueueName() {
     return event->getQueueName();
   }
+  MessageBatchMetadata getMetadata() {
+    return event->getMetadata();
+  }
   void retryAll(jsg::Optional<QueueRetryOptions> options) {
     event->retryAll(options);
   }
@@ -298,9 +390,11 @@ class QueueController final: public jsg::Object {
     event->ackAll();
   }
 
-  JSG_RESOURCE_TYPE(QueueController) {
+  JSG_RESOURCE_TYPE(QueueController, CompatibilityFlags::Reader flags) {
     JSG_READONLY_INSTANCE_PROPERTY(messages, getMessages);
     JSG_READONLY_INSTANCE_PROPERTY(queue, getQueueName);
+
+    JSG_READONLY_INSTANCE_PROPERTY(metadata, getMetadata);
 
     JSG_METHOD(retryAll);
     JSG_METHOD(ackAll);
@@ -308,6 +402,7 @@ class QueueController final: public jsg::Object {
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE(MessageBatch<Body = unknown> {
       readonly messages: readonly Message<Body>[];
+      readonly metadata: MessageBatchMetadata;
     });
   }
 
@@ -333,16 +428,17 @@ struct QueueExportedHandler {
   JSG_STRUCT(queue);
 };
 
-class QueueCustomEventImpl final: public WorkerInterface::CustomEvent, public kj::Refcounted {
+class QueueCustomEvent final: public WorkerInterface::CustomEvent, public kj::Refcounted {
  public:
-  QueueCustomEventImpl(
-      kj::OneOf<QueueEvent::Params, rpc::EventDispatcher::QueueParams::Reader> params)
+  QueueCustomEvent(kj::OneOf<QueueEvent::Params, rpc::EventDispatcher::QueueParams::Reader> params)
       : params(kj::mv(params)) {}
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
-      kj::TaskSet& waitUntilTasks) override;
+      kj::TaskSet& waitUntilTasks,
+      bool isDynamicDispatch) override;
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
@@ -352,6 +448,8 @@ class QueueCustomEventImpl final: public WorkerInterface::CustomEvent, public kj
   uint16_t getType() override {
     return EVENT_TYPE;
   }
+
+  tracing::EventInfo getEventInfo() const override;
 
   QueueRetryBatch getRetryBatch() const {
     return {.retry = result.retryBatch.retry, .delaySeconds = result.retryBatch.delaySeconds};
@@ -372,8 +470,12 @@ class QueueCustomEventImpl final: public WorkerInterface::CustomEvent, public kj
 };
 
 #define EW_QUEUE_ISOLATE_TYPES                                                                     \
-  api::WorkerQueue, api::WorkerQueue::SendOptions, api::WorkerQueue::SendBatchOptions,             \
-      api::WorkerQueue::MessageSendRequest, api::IncomingQueueMessage, api::QueueRetryBatch,       \
+  api::WorkerQueue, api::WorkerQueue::SendMetrics, api::WorkerQueue::SendMetadata,                 \
+      api::WorkerQueue::SendResponse, api::WorkerQueue::SendBatchMetrics,                          \
+      api::WorkerQueue::SendBatchMetadata, api::WorkerQueue::SendBatchResponse,                    \
+      api::WorkerQueue::SendOptions, api::WorkerQueue::SendBatchOptions,                           \
+      api::WorkerQueue::MessageSendRequest, api::WorkerQueue::Metrics, api::MessageBatchMetrics,   \
+      api::MessageBatchMetadata, api::IncomingQueueMessage, api::QueueRetryBatch,                  \
       api::QueueRetryMessage, api::QueueResponse, api::QueueRetryOptions, api::QueueMessage,       \
       api::QueueEvent, api::QueueController, api::QueueExportedHandler
 

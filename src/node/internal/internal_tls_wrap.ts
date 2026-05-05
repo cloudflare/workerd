@@ -38,7 +38,7 @@ import type {
   TlsOptions,
   TLSSocket as TLSSocketType,
 } from 'node:tls';
-import type { Duplex } from 'node:stream';
+import type { Duplex } from 'node-internal:streams_duplex';
 import type { OnReadOpts, TcpSocketConnectOpts } from 'node:net';
 import {
   validateBuffer,
@@ -702,6 +702,7 @@ export function connect(...args: unknown[]): TLSSocket {
     );
   }
 
+  // @ts-expect-error TS2345 Type incompatibility between Node.js Duplex and internal Duplex
   const tlssock = new TLSSocket(options.socket, {
     allowHalfOpen: options.allowHalfOpen,
     pipe: !!options.path,
@@ -710,7 +711,6 @@ export function connect(...args: unknown[]): TLSSocket {
     highWaterMark: options.highWaterMark,
     secureContext: options.secureContext,
     checkServerIdentity: options.checkServerIdentity ?? checkServerIdentity,
-    // @ts-expect-error TS2412 Type inconsistencies between types/node
     onread: options.onread,
     signal: options.signal,
     lookup: options.lookup,

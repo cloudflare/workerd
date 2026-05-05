@@ -87,7 +87,12 @@ struct R2Result {
     return httpStatus == 412 && (v4ErrorCode() == 10031 || v4ErrorCode() == 10032);
   }
 
+  bool success() {
+    return httpStatus >= 200 && httpStatus < 400;
+  }
+
   kj::Maybe<uint> v4ErrorCode();
+  kj::Maybe<kj::String> getR2ErrorMessage();
   void throwIfError(kj::StringPtr action, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 };
 

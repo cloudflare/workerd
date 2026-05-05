@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { deepStrictEqual, strictEqual, throws, ok } from 'node:assert';
 import { mock } from 'node:test';
 
@@ -400,7 +403,7 @@ export const nullUndefinedHandler = {
   test() {
     // TODO(bug): Odd as it may seem, the spec allows passing null and undefined
     // to addEventListener. We currently do not handle these correctly.
-    const target = new EventTarget();
+    const _target = new EventTarget();
     // target.addEventListener('foo', null);
     // target.addEventListener('foo', undefined);
   },

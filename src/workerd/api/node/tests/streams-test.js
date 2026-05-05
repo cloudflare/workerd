@@ -1,16 +1,10 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
-  deepEqual,
   deepStrictEqual,
-  doesNotMatch,
-  doesNotReject,
-  doesNotThrow,
-  equal,
   fail,
   ifError,
-  match,
-  notDeepEqual,
-  notDeepStrictEqual,
-  notEqual,
   notStrictEqual,
   ok,
   rejects,
@@ -32,7 +26,6 @@ import {
   finished,
   isDisturbed,
   isErrored,
-  pipeline,
   promises,
   duplexPair,
 } from 'node:stream';
@@ -106,7 +99,7 @@ export const autoDestroy = {
         },
       });
 
-      let ended = false;
+      let _ended = false;
       r.resume();
       r.on('end', rEnded.resolve);
       r.on('close', rClosed.resolve);
@@ -836,8 +829,8 @@ export const destroyEventOrder = {
       read() {},
     });
 
-    let closed = false;
-    let errored = false;
+    let _closed = false;
+    let _errored = false;
 
     rs.on('close', () => events.push('close'));
 
@@ -1124,7 +1117,7 @@ export const duplexDestroy = {
     }
 
     {
-      const closed = Promise.withResolvers();
+      const _closed = Promise.withResolvers();
       const duplex = new Duplex({
         write(chunk, enc, cb) {
           cb();
@@ -1442,18 +1435,18 @@ export const duplex = {
     ok(stream.allowHalfOpen);
     strictEqual(stream.listenerCount('end'), 0);
 
-    let written;
-    let read;
+    let _written;
+    let _read;
 
     stream._write = (obj, _, cb) => {
-      written = obj;
+      _written = obj;
       cb();
     };
 
     stream._read = () => {};
 
     stream.on('data', (obj) => {
-      read = obj;
+      _read = obj;
     });
 
     stream.push({ val: 1 });
@@ -1698,6 +1691,7 @@ export const finishedTest = {
 
     {
       const finishedCalled = Promise.withResolvers();
+      const enc = new TextEncoder();
       const rs = new Readable({
         read() {
           this.push(enc.encode('a'));
@@ -2349,10 +2343,7 @@ export const writable2Writable = {
         );
       }
     }
-    const chunks = new Array(50);
-    for (let i = 0; i < chunks.length; i++) {
-      chunks[i] = 'x'.repeat(i);
-    }
+    const chunks = Array.from({ length: 50 }, (_, i) => 'x'.repeat(i));
     {
       // Verify fast writing
       const tw = new TestWriter({
@@ -3730,13 +3721,12 @@ export const readable_wrap_destroy = {
 };
 
 export const readable_non_empty_end = {
-  async test(ctrl, env, ctx) {
+  async test(_ctrl, _env, _ctx) {
     let len = 0;
-    const chunks = new Array(10);
-    for (let i = 1; i <= 10; i++) {
-      chunks[i - 1] = Buffer.allocUnsafe(i);
-      len += i;
-    }
+    const chunks = Array.from({ length: 10 }, (_el, i) => {
+      len += i + 1;
+      return Buffer.allocUnsafe(i + 1);
+    });
     const test = new Readable();
     let n = 0;
     test._read = function (size) {
@@ -4340,7 +4330,7 @@ export const stream2_large_read_stall = {
     const r = new Readable({
       highWaterMark: HWM,
     });
-    const rs = r._readableState;
+    const _rs = r._readableState;
     r._read = push;
     r.on('readable', function () {
       let ret;
@@ -6079,7 +6069,7 @@ export const writable_end_cb_error = {
       const finishCalled = Promise.withResolvers();
       writable.end('asd', (err) => {
         called = true;
-        strictEqual(err, undefined);
+        strictEqual(err, null);
         endCalled.resolve();
       });
       writable.on('error', (err) => {
@@ -7207,7 +7197,7 @@ export const uint8array = {
           ok(!(chunk instanceof Buffer));
           ok(chunk instanceof Uint8Array);
           strictEqual(chunk, ABC);
-          strictEqual(encoding, 'utf8');
+          strictEqual(encoding, undefined);
           cb();
           writeCalled.resolve();
         },
@@ -7898,9 +7888,7 @@ export const toarray = {
           [],
           [1],
           [1, 2, 3],
-          Array(100)
-            .fill()
-            .map((_, i) => i),
+          Array.from({ length: 100 }, (_, i) => i),
         ];
         for (const test of tests) {
           const stream = Readable.from(test);
@@ -7929,9 +7917,7 @@ export const toarray = {
           [],
           [1],
           [1, 2, 3],
-          Array(100)
-            .fill()
-            .map((_, i) => i),
+          Array.from({ length: 100 }, (_, i) => i),
         ];
         for (const test of tests) {
           const stream = Readable.from(test).map((x) => Promise.resolve(x));
@@ -8544,7 +8530,7 @@ export const readable_unshift = {
             highWaterMark,
           });
           // The error happened only when pushing above hwm
-          this.buffer = new Array(highWaterMark * 2).fill(0).map(String);
+          this.buffer = Array.from({ length: highWaterMark * 2 }, () => '0');
         }
         _read(size) {
           while (this.buffer.length) {
@@ -9078,8 +9064,10 @@ export const readable_object_multi_push_async = {
         }
       }
       readable.on('readable', () => {
-        let data;
-        while ((data = readable.read()) !== null) {}
+        let _data;
+        while ((_data = readable.read()) !== null) {
+          // intentionally empty
+        }
       });
       readable.on('end', () => {
         strictEqual(i, (Math.floor(MAX / BATCH) + 1) * BATCH);
@@ -9304,9 +9292,9 @@ export const readable_needreadable = {
     await Promise.all([readableCalled1.promise, ended.promise]);
 
     const readableCalled2 = Promise.withResolvers();
-    const ended2 = Promise.withResolvers();
+    const _ended2 = Promise.withResolvers();
     const dataCalled = Promise.withResolvers();
-    let readableCount = 0;
+    let _readableCount = 0;
     let dataCount = 0;
     const asyncReadable = new Readable({
       read: () => {},
@@ -10286,8 +10274,8 @@ export const readable_destroy = {
       });
       const rejected = rejects(
         (async () => {
-          // eslint-disable-next-line no-unused-vars, no-empty
-          for await (const chunk of read) {
+          for await (const _chunk of read) {
+            // intentionally empty
           }
         })(),
         /AbortError/
@@ -10630,10 +10618,10 @@ export const filter = {
       }
       // Concurrency + AbortSignal
       const ac = new AbortController();
-      let calls = 0;
+      let _calls = 0;
       const stream = Readable.from([1, 2, 3, 4]).filter(
         async (_, { signal }) => {
-          calls++;
+          _calls++;
           await once(signal, 'abort');
         },
         {
@@ -10645,7 +10633,7 @@ export const filter = {
       // pump
       await rejects(
         async () => {
-          for await (const item of stream) {
+          for await (const _item of stream) {
             // nope
           }
         },
@@ -11410,7 +11398,8 @@ export const errorHandling = {
     });
     const ns = Readable.fromWeb(rs);
     try {
-      for await (const chunk of ns) {
+      for await (const _chunk of ns) {
+        // intentionally empty
       }
       throw new Error('should have thrown');
     } catch (err) {
@@ -11430,7 +11419,8 @@ export const errorHandling2 = {
     });
     const ns = Readable.fromWeb(rs);
     try {
-      for await (const chunk of ns) {
+      for await (const _chunk of ns) {
+        // intentionally empty
       }
       throw new Error('should have thrown');
     } catch (err) {

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import http from 'node:http';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { strictEqual, ok, throws, notStrictEqual, rejects } from 'node:assert';
@@ -358,7 +361,6 @@ export const testHttpServerNonUtf8Header = {
     }
 
     {
-      const { promise, resolve } = Promise.withResolvers();
       // Test multi-value header
       await using server = http.createServer((req, res) => {
         res.writeHead(200, [
@@ -1164,6 +1166,7 @@ export const testIncomingMessageSocket = {
       ok(req.socket.remotePort >= Math.pow(2, 15));
       ok(req.socket.remotePort <= Math.pow(2, 16));
       strictEqual(req.socket.remoteFamily, 'IPv4');
+      ok('on' in req.socket);
 
       res.writeHead(200);
       res.end('Hello, World!');
@@ -1174,6 +1177,99 @@ export const testIncomingMessageSocket = {
     const res = await env.SERVICE.fetch('https://cloudflare.com');
     strictEqual(res.status, 200);
     strictEqual(await res.text(), 'Hello, World!');
+  },
+};
+
+// Test for header duplication bug where headers like "ttl: 60" become "ttl: TTL, 60"
+export const testWebPushHeaderDuplication = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(req.headers).filter(
+              ([key, _]) =>
+                key === 'ttl' || key === 'urgency' || key === 'topic'
+            )
+          )
+        )
+      );
+    });
+
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://google.com', {
+      headers: {
+        TTL: '60',
+        Urgency: 'high',
+        Topic: 'test',
+      },
+    });
+    const body = await res.json();
+    strictEqual(body.ttl, '60');
+    strictEqual(body.urgency, 'high');
+    strictEqual(body.topic, 'test');
+  },
+};
+
+export const testHttpRequestFields = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      strictEqual(req._consuming, false, 'Consuming should be false');
+      strictEqual(req._dumped, false, 'Dumped should be false');
+      strictEqual(req._paused, false, 'Paused should be false');
+      res.end('OK');
+    });
+    server.listen(8080);
+    await env.SERVICE.fetch('https://cloudflare.com');
+  },
+};
+
+export const testBufferedDataEventEmission = {
+  async test(_ctrl, env) {
+    const dataFn = mock.fn((chunk) => {
+      strictEqual(chunk instanceof Buffer, true, 'Chunk should be a Buffer');
+      strictEqual(chunk.toString(), 'test data');
+    });
+    const errorFn = mock.fn();
+    const endFn = mock.fn();
+
+    await using server = http.createServer((req, res) => {
+      // Test that data events are emitted when listener is attached after data is buffered
+      dataFn.mock.resetCalls();
+      endFn.mock.resetCalls();
+
+      req.on('data', dataFn);
+      req.on('error', errorFn);
+      req.on('end', () => {
+        endFn();
+        res.end('OK');
+      });
+    });
+    server.listen(8080);
+
+    await env.SERVICE.fetch('https://cloudflare.com', {
+      method: 'POST',
+      body: 'test data',
+    });
+    strictEqual(
+      dataFn.mock.callCount(),
+      1,
+      '.on("data") should have been called'
+    );
+    strictEqual(
+      endFn.mock.callCount(),
+      1,
+      '.on("end") should have been called'
+    );
+
+    await env.SERVICE.fetch('https://cloudflare.com', {
+      method: 'GET',
+    });
+    strictEqual(errorFn.mock.callCount(), 0, 'Error should not be emitted');
+    strictEqual(dataFn.mock.callCount(), 0);
+    strictEqual(endFn.mock.callCount(), 1);
   },
 };
 

@@ -7,6 +7,7 @@
 #include <workerd/api/basics.h>
 #include <workerd/api/hibernation-event-params.h>
 #include <workerd/api/web-socket.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
@@ -54,19 +55,21 @@ class HibernatableWebSocketEvent final: public ExtendableEvent {
   Worker::Actor::HibernationManager& getHibernationManager(jsg::Lock& lock);
 };
 
-class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::CustomEvent,
-                                                  public kj::Refcounted {
+class HibernatableWebSocketCustomEvent final: public WorkerInterface::CustomEvent,
+                                              public kj::Refcounted {
  public:
-  HibernatableWebSocketCustomEventImpl(uint16_t typeId,
+  HibernatableWebSocketCustomEvent(uint16_t typeId,
       kj::Own<HibernationReader> params,
       kj::Maybe<Worker::Actor::HibernationManager&> manager = kj::none);
-  HibernatableWebSocketCustomEventImpl(
+  HibernatableWebSocketCustomEvent(
       uint16_t typeId, HibernatableSocketParams params, Worker::Actor::HibernationManager& manager);
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
-      kj::TaskSet& waitUntilTasks) override;
+      kj::TaskSet& waitUntilTasks,
+      bool isDynamicDispatch) override;
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
@@ -76,6 +79,8 @@ class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::Custom
     return typeId;
   }
 
+  tracing::EventInfo getEventInfo() const override;
+
   kj::Promise<Result> notSupported() override {
     KJ_UNIMPLEMENTED("hibernatable web socket event not supported");
   }
@@ -84,6 +89,9 @@ class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::Custom
   // Returns `params`, but if we have a HibernationReader we convert it to a
   // HibernatableSocketParams first.
   HibernatableSocketParams consumeParams();
+
+  // Peeks at params to extract the event type for tracing, without consuming them.
+  tracing::HibernatableWebSocketEventInfo::Type getEventType() const;
 
   uint16_t typeId;
   kj::OneOf<HibernatableSocketParams, kj::Own<HibernationReader>> params;

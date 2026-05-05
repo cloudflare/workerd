@@ -1,5 +1,8 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import http from 'node:http';
-import { throws, strictEqual, ok, deepStrictEqual } from 'node:assert';
+import { throws, strictEqual, ok } from 'node:assert';
 import { httpServerHandler } from 'cloudflare:node';
 import { mock } from 'node:test';
 import stream from 'node:stream';
@@ -306,7 +309,7 @@ export const testHttpOutgoingBuffer = {
 // Test is taken from test/parallel/test-http-outgoing-finished.js
 export const testHttpOutgoingFinished = {
   async test(_ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
+    const { promise: _promise, resolve } = Promise.withResolvers();
     await using server = http.createServer(function (req, res) {
       let closed = false;
       res
@@ -372,6 +375,64 @@ export const testHttpOutgoingFirstChunkSingleByteEncoding = {
       );
       const buf = await res.arrayBuffer();
       strictEqual(Buffer.from(buf, enc).toString(), 'helloworld');
+    }
+  },
+};
+
+// Test client request lines don't cause parsing errors
+export const testHttpOutgoingClientRequestLine = {
+  async test() {
+    const msg = new http.OutgoingMessage();
+
+    // Client request line (POST /path HTTP/1.1) should not throw parsing errors
+    msg._header =
+      'POST /w/?token=BQYAAABQFGo%2b___snip___t90WZ%2bjnA%3d HTTP/1.1\r\n\r\n';
+
+    const result = msg._send('test data');
+    strictEqual(typeof result, 'boolean');
+  },
+};
+
+// Test server response lines emit _headersSent event
+export const testHttpOutgoingServerResponseLine = {
+  async test() {
+    const msg = new http.OutgoingMessage();
+    let headersSentEvent = null;
+
+    msg.on('_headersSent', (event) => {
+      headersSentEvent = event;
+    });
+
+    // Server response status line should be parsed and emit _headersSent event
+    msg._header = 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n';
+
+    const result = msg._send('test data');
+
+    strictEqual(typeof result, 'boolean');
+    ok(headersSentEvent, '_headersSent event should be emitted');
+    strictEqual(headersSentEvent.statusCode, 200);
+    strictEqual(headersSentEvent.statusMessage, 'OK');
+    strictEqual(
+      headersSentEvent.headers.get('content-type'),
+      'application/json'
+    );
+  },
+};
+
+// Test different HTTP versions work
+export const testHttpOutgoingDifferentVersions = {
+  async test() {
+    for (const version of ['HTTP/1.0', 'HTTP/1.1', 'HTTP/2.0']) {
+      const msg = new http.OutgoingMessage();
+      let headersSentEvent = null;
+      msg.on('_headersSent', (event) => {
+        headersSentEvent = event;
+      });
+      msg._header = `${version} 404 Not Found\r\n\r\n`;
+      msg._send('test');
+      ok(headersSentEvent, `${version} should work`);
+      strictEqual(headersSentEvent.statusCode, 404);
+      strictEqual(headersSentEvent.statusMessage, 'Not Found');
     }
   },
 };

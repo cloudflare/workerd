@@ -18,21 +18,32 @@ class ThreadContext {
     const kj::HttpHeaderId cfCacheStatus;  // used by cache API implementation
     const kj::HttpHeaderId cacheControl;
     const kj::HttpHeaderId pragma;
-    const kj::HttpHeaderId cfCacheNamespace;    // used by Cache binding implementation
+    const kj::HttpHeaderId cfCacheNamespace;  // used by Cache binding implementation
+    const kj::HttpHeaderId range;
+    const kj::HttpHeaderId ifModifiedSince;
+    const kj::HttpHeaderId ifNoneMatch;
     const kj::HttpHeaderId cfKvMetadata;        // used by KV binding implementation
     const kj::HttpHeaderId cfR2ErrorHeader;     // used by R2 binding implementation
     const kj::HttpHeaderId cfBlobMetadataSize;  // used by R2 binding implementation
     const kj::HttpHeaderId cfBlobRequest;       // used by R2 binding implementation
     const kj::HttpHeaderId authorization;       // used by R2 binding implementation
+    const kj::HttpHeaderId cfQueuesErrorCode;   // used by Queue binding implementation
+    const kj::HttpHeaderId cfQueuesErrorCause;  // used by Queue binding implementation
     const kj::HttpHeaderId secWebSocketProtocol;
+    const kj::HttpHeaderId userAgent;       // used in tracing instrumentation
+    const kj::HttpHeaderId contentType;     // used in tracing instrumentation
+    const kj::HttpHeaderId contentLength;   // used in tracing instrumentation
+    const kj::HttpHeaderId accept;          // used in tracing instrumentation
+    const kj::HttpHeaderId acceptEncoding;  // used in tracing instrumentation
+    const kj::HttpHeaderId cfRay;           // used in tracing instrumentation
+    const kj::HttpHeaderId origin;
   };
 
   ThreadContext(kj::Timer& timer,
       kj::EntropySource& entropySource,
       HeaderIdBundle headerIds,
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-      capnp::ByteStreamFactory& byteStreamFactory,
-      bool isFiddle);
+      capnp::ByteStreamFactory& byteStreamFactory);
 
   // This should only be used to construct TimerChannel. Everything else should use TimerChannel.
   inline kj::Timer& getUnsafeTimer() const {
@@ -53,9 +64,6 @@ class ThreadContext {
   inline capnp::ByteStreamFactory& getByteStreamFactory() const {
     return byteStreamFactory;
   }
-  inline bool isFiddle() const {
-    return fiddle;
-  }
 
  private:
   // NOTE: This timer only updates when entering the event loop!
@@ -64,7 +72,6 @@ class ThreadContext {
   HeaderIdBundle headerIds;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
-  bool fiddle;
 };
 
 }  // namespace workerd

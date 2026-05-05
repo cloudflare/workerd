@@ -32,6 +32,10 @@ class MockActorId: public ActorIdFactory::ActorId {
     return kj::none;
   }
 
+  kj::Maybe<kj::StringPtr> getJurisdiction() const override {
+    return kj::none;
+  }
+
   bool equals(const ActorId& other) const override {
     return false;
   }

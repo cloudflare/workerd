@@ -18,6 +18,7 @@ enum class JsErrorType {
 #define NODE_EXCEPTION_CODE_LIST(V)                                                                \
   V(ERR_FS_CP_EEXIST)                                                                              \
   V(ERR_FS_CP_DIR_TO_NON_DIR)                                                                      \
+  V(ERR_FS_CP_EINVAL)                                                                              \
   V(ERR_FS_CP_NON_DIR_TO_DIR)                                                                      \
   V(ERR_FS_EISDIR)
 

@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "workers-sdk-vendor-test",
+      worker = (
+        modules = [
+          (name = "main.py", pythonModule = embed "python-workers-runtime-sdk.py"),
+          %PYTHON_VENDORED_MODULES%
+        ],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "disable_python_no_global_handlers"],
+      )
+    ),
+  ],
+);

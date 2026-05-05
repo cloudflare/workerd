@@ -377,13 +377,79 @@ struct StaticContext: public ContextGlobalObject {
     }
   };
 
+  struct StaticProperties: public Object {
+    static Ref<StaticProperties> constructor(jsg::Lock& js) {
+      return js.alloc<StaticProperties>();
+    }
+
+    // Static property returning a simple value
+    static int simpleValue() {
+      return 42;
+    }
+
+    // Static property returning a string
+    static kj::String stringValue() {
+      return kj::str("static property string");
+    }
+
+    // Static property returning an array
+    static kj::Array<int> arrayValue() {
+      auto array = kj::heapArray<int>(3);
+      array[0] = 1;
+      array[1] = 2;
+      array[2] = 3;
+      return kj::mv(array);
+    }
+
+    // Static property returning void (edge case)
+    static void voidProperty() {
+      // This should be handled gracefully even though it's unusual for a property
+    }
+
+    // A getter function to be used with JSG_STATIC_READONLY_PROPERTY_NAMED
+    static double getComputedValue() {
+      return 3.14159;
+    }
+
+    // Another named property getter
+    static kj::String getDescription() {
+      return kj::str("This is a static property");
+    }
+
+    // Static property that takes Lock& as first parameter
+    static int withLockValue(jsg::Lock& js) {
+      // We can use the lock here if needed, but for testing just return a value
+      return 99;
+    }
+
+    // Static property with Lock& that returns an allocated object
+    static kj::String withLockString(jsg::Lock& js) {
+      return kj::str("property with lock");
+    }
+
+    JSG_RESOURCE_TYPE(StaticProperties) {
+      JSG_STATIC_READONLY_PROPERTY(simpleValue);
+      JSG_STATIC_READONLY_PROPERTY(stringValue);
+      JSG_STATIC_READONLY_PROPERTY(arrayValue);
+      JSG_STATIC_READONLY_PROPERTY(voidProperty);
+      JSG_STATIC_READONLY_PROPERTY_NAMED(computedValue, getComputedValue);
+      JSG_STATIC_READONLY_PROPERTY_NAMED(description, getDescription);
+      JSG_STATIC_READONLY_PROPERTY(withLockValue);
+      JSG_STATIC_READONLY_PROPERTY(withLockString);
+    }
+  };
+
   JSG_RESOURCE_TYPE(StaticContext) {
     JSG_NESTED_TYPE(StaticConstants);
     JSG_NESTED_TYPE(StaticMethods);
+    JSG_NESTED_TYPE(StaticProperties);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(
-    StaticIsolate, StaticContext, StaticContext::StaticConstants, StaticContext::StaticMethods);
+JSG_DECLARE_ISOLATE_TYPE(StaticIsolate,
+    StaticContext,
+    StaticContext::StaticConstants,
+    StaticContext::StaticMethods,
+    StaticContext::StaticProperties);
 
 KJ_TEST("Static constants are exposed as constructor properties") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
@@ -447,6 +513,84 @@ KJ_TEST("Static methods are not exposed as object instance properties") {
                "&& typeof obj.voidCallWithInfo === 'undefined'\n"
                "&& typeof obj.delete === 'undefined'\n"
                "&& typeof obj.unimplementedStaticMethod === 'undefined'",
+      "boolean", "true");
+}
+
+KJ_TEST("Static properties are exposed as constructor properties") {
+  Evaluator<StaticContext, StaticIsolate> e(v8System);
+  // Test simple value property
+  e.expectEval("StaticProperties.simpleValue", "number", "42");
+  e.expectEval("StaticProperties.simpleValue === 42", "boolean", "true");
+
+  // Test string property
+  e.expectEval("StaticProperties.stringValue", "string", "static property string");
+  e.expectEval("StaticProperties.stringValue === 'static property string'", "boolean", "true");
+
+  // Test array property
+  e.expectEval("Array.isArray(StaticProperties.arrayValue)", "boolean", "true");
+  e.expectEval("StaticProperties.arrayValue.length", "number", "3");
+  e.expectEval("StaticProperties.arrayValue[0]", "number", "1");
+  e.expectEval("StaticProperties.arrayValue[1]", "number", "2");
+  e.expectEval("StaticProperties.arrayValue[2]", "number", "3");
+
+  // Test void property (should be undefined)
+  e.expectEval("StaticProperties.voidProperty", "undefined", "undefined");
+
+  // Test named properties
+  e.expectEval("StaticProperties.computedValue", "number", "3.14159");
+  e.expectEval("StaticProperties.description", "string", "This is a static property");
+
+  // Test properties that take Lock& as first parameter
+  e.expectEval("StaticProperties.withLockValue", "number", "99");
+  e.expectEval("StaticProperties.withLockString", "string", "property with lock");
+}
+
+KJ_TEST("Static properties are read-only") {
+  Evaluator<StaticContext, StaticIsolate> e(v8System);
+  // Attempting to write to static properties should have no effect
+  e.expectEval("StaticProperties.simpleValue = 100; StaticProperties.simpleValue", "number", "42");
+  e.expectEval("StaticProperties.stringValue = 'new'; StaticProperties.stringValue", "string",
+      "static property string");
+  e.expectEval(
+      "StaticProperties.computedValue = 0; StaticProperties.computedValue", "number", "3.14159");
+  e.expectEval(
+      "StaticProperties.withLockValue = 200; StaticProperties.withLockValue", "number", "99");
+}
+
+KJ_TEST("Static properties are not functions") {
+  Evaluator<StaticContext, StaticIsolate> e(v8System);
+  // Static properties should not be callable as functions
+  e.expectEval("typeof StaticProperties.simpleValue", "string", "number");
+  e.expectEval("StaticProperties.simpleValue()", "throws",
+      "TypeError: StaticProperties.simpleValue is not a function");
+  e.expectEval("new StaticProperties.simpleValue()", "throws",
+      "TypeError: StaticProperties.simpleValue is not a constructor");
+}
+
+KJ_TEST("Static properties are not exposed as instance properties") {
+  Evaluator<StaticContext, StaticIsolate> e(v8System);
+  e.expectEval("let obj = new StaticProperties();\n"
+               "typeof obj.simpleValue === 'undefined'\n"
+               "&& typeof obj.stringValue === 'undefined'\n"
+               "&& typeof obj.arrayValue === 'undefined'\n"
+               "&& typeof obj.voidProperty === 'undefined'\n"
+               "&& typeof obj.computedValue === 'undefined'\n"
+               "&& typeof obj.description === 'undefined'\n"
+               "&& typeof obj.withLockValue === 'undefined'\n"
+               "&& typeof obj.withLockString === 'undefined'",
+      "boolean", "true");
+}
+
+KJ_TEST("Static properties are not exposed on prototype") {
+  Evaluator<StaticContext, StaticIsolate> e(v8System);
+  e.expectEval("typeof StaticProperties.prototype.simpleValue === 'undefined'\n"
+               "&& typeof StaticProperties.prototype.stringValue === 'undefined'\n"
+               "&& typeof StaticProperties.prototype.arrayValue === 'undefined'\n"
+               "&& typeof StaticProperties.prototype.voidProperty === 'undefined'\n"
+               "&& typeof StaticProperties.prototype.computedValue === 'undefined'\n"
+               "&& typeof StaticProperties.prototype.description === 'undefined'\n"
+               "&& typeof StaticProperties.prototype.withLockValue === 'undefined'\n"
+               "&& typeof StaticProperties.prototype.withLockString === 'undefined'",
       "boolean", "true");
 }
 KJ_TEST("Static methods are not exposed as object instance prototype properties") {
@@ -605,110 +749,64 @@ KJ_TEST("bundle installed works") {
 }
 
 // ========================================================================================
+// Regression test for https://github.com/cloudflare/workerd/issues/4147
 
-struct JsLazyReadonlyPropertyContext: public ContextGlobalObject {
-  JSG_RESOURCE_TYPE(JsLazyReadonlyPropertyContext) {
-    JSG_CONTEXT_JS_BUNDLE(BOOTSTRAP_BUNDLE);
+struct InspectableObject: public Object {
+  double value;
 
-    JSG_LAZY_JS_INSTANCE_READONLY_PROPERTY(bootstrapFunction, "test:resource-test-bootstrap");
-    JSG_LAZY_JS_INSTANCE_READONLY_PROPERTY(BootstrapClass, "test:resource-test-bootstrap");
+  explicit InspectableObject(double value): value(value) {}
+
+  static Ref<InspectableObject> constructor(jsg::Lock& js, double value) {
+    return js.alloc<InspectableObject>(value);
+  }
+
+  double getValue() {
+    return value;
+  }
+
+  kj::String inspectState() {
+    return kj::str("active");
+  }
+
+  JSG_RESOURCE_TYPE(InspectableObject) {
+    JSG_METHOD(getValue);
+    JSG_READONLY_PROTOTYPE_PROPERTY(value, getValue);
+    JSG_INSPECT_PROPERTY(state, inspectState);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(JsLazyReadonlyPropertyIsolate, JsLazyReadonlyPropertyContext);
 
-KJ_TEST("lazy js global function works") {
-  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate, decltype(nullptr),
-      JsLazyReadonlyPropertyIsolate_TypeWrapper>
-      e(v8System);
-  // both for module
-  e.expectEvalModule(R"(
-    export function run() { return bootstrapFunction(); }
-  )",
-      "string", "THIS_IS_BOOTSTRAP_FUNCTION");
-  // and script syntax
-  e.expectEval("bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
-}
+struct InspectContext: public ContextGlobalObject {
+  JSG_RESOURCE_TYPE(InspectContext) {
+    JSG_NESTED_TYPE(InspectableObject);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(InspectIsolate, InspectContext, InspectableObject);
 
-KJ_TEST("lazy js global class works") {
-  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate, decltype(nullptr),
-      JsLazyReadonlyPropertyIsolate_TypeWrapper>
-      e(v8System);
-  // for module syntax
-  e.expectEvalModule(R"(
-    export function run() { return new BootstrapClass().run(); }
-  )",
-      "string", "THIS_IS_BOOTSTRAP_CLASS");
-  // and for script syntax
-  e.expectEval("new BootstrapClass().run()", "string", "THIS_IS_BOOTSTRAP_CLASS");
-}
+KJ_TEST("Object.getOwnPropertyDescriptors does not throw on prototype with inspect properties") {
+  Evaluator<InspectContext, InspectIsolate> e(v8System);
 
-KJ_TEST("lazy js readonly property can not be overridden") {
-  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
-  e.expectEval("globalThis.bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string",
-      "THIS_IS_BOOTSTRAP_FUNCTION");
-  e.expectEval("bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string",
-      "THIS_IS_BOOTSTRAP_FUNCTION");
+  // The core regression: getOwnPropertyDescriptors must not throw.
+  e.expectEval("JSON.stringify(typeof Object.getOwnPropertyDescriptors("
+               "  InspectableObject.prototype))",
+      "string", "\"object\"");
+
+  // Methods should appear as data descriptors.
+  e.expectEval("typeof Object.getOwnPropertyDescriptors("
+               "  InspectableObject.prototype).getValue.value",
+      "string", "function");
+
+  // The prototype property 'value' should appear as an accessor descriptor.
+  e.expectEval("typeof Object.getOwnPropertyDescriptors("
+               "  InspectableObject.prototype).value.get",
+      "string", "function");
+
+  // Instances should also tolerate getOwnPropertyDescriptors.
+  e.expectEval("JSON.stringify(typeof Object.getOwnPropertyDescriptors("
+               "  new InspectableObject(42)))",
+      "string", "\"object\"");
 }
 
 // ========================================================================================
-
-struct JsLazyPropertyContext: public ContextGlobalObject {
-  JSG_RESOURCE_TYPE(JsLazyPropertyContext) {
-    JSG_CONTEXT_JS_BUNDLE(BOOTSTRAP_BUNDLE);
-
-    JSG_LAZY_JS_INSTANCE_PROPERTY(bootstrapFunction, "test:resource-test-bootstrap");
-    JSG_LAZY_JS_INSTANCE_PROPERTY(BootstrapClass, "test:resource-test-bootstrap");
-  }
-};
-JSG_DECLARE_ISOLATE_TYPE(JsLazyPropertyIsolate, JsLazyPropertyContext);
-
-KJ_TEST("lazy js global function works") {
-  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate, decltype(nullptr),
-      JsLazyPropertyIsolate_TypeWrapper>
-      e(v8System);
-  // both for module
-  e.expectEvalModule(R"(
-    export function run() { return bootstrapFunction(); }
-  )",
-      "string", "THIS_IS_BOOTSTRAP_FUNCTION");
-  // and script syntax
-  e.expectEval("bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
-}
-
-KJ_TEST("lazy js global class works") {
-  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate, decltype(nullptr),
-      JsLazyPropertyIsolate_TypeWrapper>
-      e(v8System);
-  // for module syntax
-  e.expectEvalModule(R"(
-    export function run() { return new BootstrapClass().run(); }
-  )",
-      "string", "THIS_IS_BOOTSTRAP_CLASS");
-  // and for script syntax
-  e.expectEval("new BootstrapClass().run()", "string", "THIS_IS_BOOTSTRAP_CLASS");
-}
-
-KJ_TEST("lazy js property can be overridden") {
-  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate, decltype(nullptr),
-      JsLazyPropertyIsolate_TypeWrapper>
-      e(v8System);
-  // for module syntax
-  e.expectEvalModule(R"(
-    globalThis.bootstrapFunction = function(){return 'boo'}
-    export function run() { return bootstrapFunction(); }
-  )",
-      "string", "boo");
-  e.expectEvalModule(R"(
-    bootstrapFunction = function(){return 'boo'}
-    export function run() { return bootstrapFunction(); }
-  )",
-      "string", "boo");
-  // for script syntax
-  e.expectEval("globalThis.bootstrapFunction = function(){return 'boo';}; bootstrapFunction()",
-      "string", "boo");
-  e.expectEval(
-      "bootstrapFunction = function(){return 'boo';}; bootstrapFunction()", "string", "boo");
-}
 
 }  // namespace
 }  // namespace workerd::jsg::test

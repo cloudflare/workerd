@@ -24,7 +24,7 @@ export type GatewayOptions = {
   retries?: GatewayRetries;
 };
 
-export type UniversalGatewayOptions = Exclude<GatewayOptions, 'id'> & {
+export type UniversalGatewayOptions = Omit<GatewayOptions, 'id'> & {
   /**
    ** @deprecated
    */
@@ -226,7 +226,11 @@ export class AiGateway {
 
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
-    options?: { gateway?: UniversalGatewayOptions; extraHeaders?: object }
+    options?: {
+      gateway?: UniversalGatewayOptions;
+      extraHeaders?: Record<string, string>;
+      signal?: AbortSignal;
+    }
   ): Promise<Response> {
     const input = Array.isArray(data) ? data : [data];
 
@@ -247,19 +251,24 @@ export class AiGateway {
       }
     }
 
+    const fetchOptions: RequestInit = {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: headers,
+    };
+    if (options?.signal) {
+      fetchOptions.signal = options.signal;
+    }
+
     return this.#fetcher.fetch(
       `https://workers-binding.ai/ai-gateway/universal/run/${this.#gatewayId}`,
-      {
-        method: 'POST',
-        body: JSON.stringify(input),
-        headers: headers,
-      }
+      fetchOptions
     );
   }
 
   #getHeadersFromOptions(
     options?: UniversalGatewayOptions,
-    extraHeaders?: object
+    extraHeaders?: Record<string, string>
   ): Headers {
     const headers = new Headers();
     headers.set('content-type', 'application/json');
@@ -320,7 +329,7 @@ export class AiGateway {
 
     if (extraHeaders) {
       for (const [key, value] of Object.entries(extraHeaders)) {
-        headers.set(key, value as string);
+        headers.set(key, value);
       }
     }
 

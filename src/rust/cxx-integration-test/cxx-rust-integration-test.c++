@@ -1,12 +1,12 @@
 #include <workerd/rust/cxx-integration-test/lib.rs.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
 
+#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
 #include <signal.h>
 
 #include <kj/async.h>
 #include <kj/test.h>
-#include <kj-rs/kj-rs.h>
 
 using namespace kj_rs;
 
@@ -33,7 +33,7 @@ KJ_TEST("err Result") {
   try {
     rust::test::result_error();
     KJ_FAIL_REQUIRE("exception is expected");
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     // this is expected
     KJ_EXPECT(e.getDescription() == "test error"_kj);
   }
@@ -163,11 +163,11 @@ KJ_TEST("opaque rust type") {
 
   // ::rust::Str is _not_ null-terminated so kj::StringPtr can't be created from
   // it. need to allocate to create c++-string (or use it as ArrayPtr).
-  auto strName = (std::string)name;
+  auto strName = std::string(name);
   KJ_EXPECT("test_name"_kj == kj::StringPtr(strName.c_str()));
 
   s->set_name("another_name");
-  KJ_EXPECT("another_name"_kj == kj::StringPtr((std::string)s->get_name()));
+  KJ_EXPECT("another_name"_kjc == kj::arrayPtr(s->get_name().data(), s->get_name().size()));
 }
 
 KJ_TEST("rust::String test") {

@@ -325,7 +325,7 @@ void CryptoKey::visitForGc(jsg::GcVisitor& visitor) {
   impl->visitForGc(visitor);
 }
 
-jsg::Promise<jsg::BufferSource> SubtleCrypto::encrypt(jsg::Lock& js,
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::encrypt(jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,
     const CryptoKey& key,
     kj::Array<const kj::byte> plainText) {
@@ -335,11 +335,11 @@ jsg::Promise<jsg::BufferSource> SubtleCrypto::encrypt(jsg::Lock& js,
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::encrypt());
-    return key.impl->encrypt(js, kj::mv(algorithm), plainText);
+    return key.impl->encrypt(js, kj::mv(algorithm), plainText).addRef(js);
   });
 }
 
-jsg::Promise<jsg::BufferSource> SubtleCrypto::decrypt(jsg::Lock& js,
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::decrypt(jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,
     const CryptoKey& key,
     kj::Array<const kj::byte> cipherText) {
@@ -349,11 +349,11 @@ jsg::Promise<jsg::BufferSource> SubtleCrypto::decrypt(jsg::Lock& js,
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::decrypt());
-    return key.impl->decrypt(js, kj::mv(algorithm), cipherText);
+    return key.impl->decrypt(js, kj::mv(algorithm), cipherText).addRef(js);
   });
 }
 
-jsg::Promise<jsg::BufferSource> SubtleCrypto::sign(jsg::Lock& js,
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::sign(jsg::Lock& js,
     kj::OneOf<kj::String, SignAlgorithm> algorithmParam,
     const CryptoKey& key,
     kj::Array<const kj::byte> data) {
@@ -363,7 +363,7 @@ jsg::Promise<jsg::BufferSource> SubtleCrypto::sign(jsg::Lock& js,
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::sign());
-    return key.impl->sign(js, kj::mv(algorithm), data);
+    return key.impl->sign(js, kj::mv(algorithm), data).addRef(js);
   });
 }
 
@@ -382,7 +382,7 @@ jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
   });
 }
 
-jsg::Promise<jsg::BufferSource> SubtleCrypto::digest(jsg::Lock& js,
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(jsg::Lock& js,
     kj::OneOf<kj::String, HashAlgorithm> algorithmParam,
     kj::Array<const kj::byte> data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
@@ -398,14 +398,12 @@ jsg::Promise<jsg::BufferSource> SubtleCrypto::digest(jsg::Lock& js,
     OSSLCALL(EVP_DigestInit_ex(digestCtx.get(), type, nullptr));
     OSSLCALL(EVP_DigestUpdate(digestCtx.get(), data.begin(), data.size()));
 
-    auto messageDigest =
-        jsg::BackingStore::alloc<v8::ArrayBuffer>(js, EVP_MD_CTX_size(digestCtx.get()));
+    auto buf = jsg::JsArrayBuffer::create(js, EVP_MD_CTX_size(digestCtx.get()));
     uint messageDigestSize = 0;
-    OSSLCALL(EVP_DigestFinal_ex(
-        digestCtx.get(), messageDigest.asArrayPtr().begin(), &messageDigestSize));
+    OSSLCALL(EVP_DigestFinal_ex(digestCtx.get(), buf.asArrayPtr().begin(), &messageDigestSize));
 
-    KJ_ASSERT(messageDigestSize == messageDigest.size());
-    return jsg::BufferSource(js, kj::mv(messageDigest));
+    KJ_ASSERT(messageDigestSize == buf.size());
+    return buf.addRef(js);
   });
 }
 
@@ -463,13 +461,12 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(jsg::Lock& js,
     // TODO(perf): For conformance, importKey() makes a copy of `secret`. In this case we really
     //   don't need to, but rather we ought to call the appropriate CryptoKey::Impl::import*()
     //   function directly.
-    auto data = kj::heapArray<kj::byte>(secret);
     return importKeySync(
-        js, "raw", kj::mv(data), kj::mv(derivedKeyAlgorithm), extractable, kj::mv(keyUsages));
+        js, "raw", secret.copy(), kj::mv(derivedKeyAlgorithm), extractable, kj::mv(keyUsages));
   });
 }
 
-jsg::Promise<jsg::BufferSource> SubtleCrypto::deriveBits(jsg::Lock& js,
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::deriveBits(jsg::Lock& js,
     kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithmParam,
     const CryptoKey& baseKey,
     jsg::Optional<kj::Maybe<int>> lengthParam) {
@@ -481,17 +478,17 @@ jsg::Promise<jsg::BufferSource> SubtleCrypto::deriveBits(jsg::Lock& js,
   KJ_IF_SOME(maybeLength, lengthParam) {
     KJ_IF_SOME(l, maybeLength) {
       JSG_REQUIRE(l >= 0, TypeError, "deriveBits length must be an unsigned long integer.");
-      length = uint32_t(l);
+      length = static_cast<uint32_t>(l);
     }
   }
 
   return js.evalNow([&] {
     validateOperation(baseKey, algorithm.name, CryptoKeyUsageSet::deriveBits());
-    return baseKey.impl->deriveBits(js, kj::mv(algorithm), length);
+    return baseKey.impl->deriveBits(js, kj::mv(algorithm), length).addRef(js);
   });
 }
 
-jsg::Promise<jsg::BufferSource> SubtleCrypto::wrapKey(jsg::Lock& js,
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::wrapKey(jsg::Lock& js,
     kj::String format,
     const CryptoKey& key,
     const CryptoKey& wrappingKey,
@@ -516,12 +513,15 @@ jsg::Promise<jsg::BufferSource> SubtleCrypto::wrapKey(jsg::Lock& js,
     auto exportedKey = key.impl->exportKey(js, kj::mv(format));
 
     KJ_SWITCH_ONEOF(exportedKey) {
-      KJ_CASE_ONEOF(k, jsg::BufferSource) {
-        return wrappingKey.impl->wrapKey(js, kj::mv(algorithm), k.asArrayPtr().asConst());
+      KJ_CASE_ONEOF(k, jsg::JsRef<jsg::JsArrayBuffer>) {
+        auto handle = k.getHandle(js);
+        return wrappingKey.impl->wrapKey(js, kj::mv(algorithm), handle.asArrayPtr().asConst())
+            .addRef(js);
       }
       KJ_CASE_ONEOF(jwk, JsonWebKey) {
         auto stringified = js.serializeJson(jwkHandler.wrap(js, kj::mv(jwk)));
-        return wrappingKey.impl->wrapKey(js, kj::mv(algorithm), stringified.asBytes().asConst());
+        return wrappingKey.impl->wrapKey(js, kj::mv(algorithm), stringified.asBytes().asConst())
+            .addRef(js);
       }
     }
 
@@ -560,7 +560,7 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js,
       importData = JSG_REQUIRE_NONNULL(jwkHandler.tryUnwrap(js, jwkDict.getHandle(js)),
           DOMDataError, "Missing \"kty\" field or corrupt JSON unwrapping key?");
     } else {
-      importData = kj::heapArray<kj::byte>(bytes);
+      importData = bytes.copy();
     }
 
     auto imported = importKeySync(js, format, kj::mv(importData), kj::mv(normalizedUnwrapAlgorithm),
@@ -652,7 +652,7 @@ jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
   });
 }
 
-bool SubtleCrypto::timingSafeEqual(jsg::BufferSource a, jsg::BufferSource b) {
+bool SubtleCrypto::timingSafeEqual(jsg::JsBufferSource a, jsg::JsBufferSource b) {
   JSG_REQUIRE(a.size() == b.size(), TypeError, "Input buffers must have the same byte length.");
 
   // The implementation here depends entirely on the characteristics of the CRYPTO_memcmp
@@ -665,7 +665,7 @@ bool SubtleCrypto::timingSafeEqual(jsg::BufferSource a, jsg::BufferSource b) {
 // =======================================================================================
 // Crypto implementation
 
-jsg::BufferSource Crypto::getRandomValues(jsg::BufferSource buffer) {
+jsg::JsArrayBufferView Crypto::getRandomValues(jsg::JsArrayBufferView buffer) {
   // NOTE: TypeMismatchError is deprecated (obviated by TypeError), but the spec and W3C tests still
   //   expect a TypeMismatchError here.
   JSG_REQUIRE(buffer.isIntegerType(), DOMTypeMismatchError,
@@ -674,7 +674,7 @@ jsg::BufferSource Crypto::getRandomValues(jsg::BufferSource buffer) {
       "getRandomValues() only accepts buffers of size <= 64K but provided ", buffer.size(),
       " bytes.");
   IoContext::current().getEntropySource().generate(buffer.asArrayPtr());
-  return kj::mv(buffer);
+  return buffer;
 }
 
 kj::String Crypto::randomUUID() {
@@ -693,14 +693,11 @@ class CRC32DigestContext final: public DigestContext {
     value = crc32(value, buffer.begin(), buffer.size());
   }
 
-  jsg::BufferSource close(jsg::Lock& js) override {
+  jsg::JsArrayBuffer close(jsg::Lock& js) override {
     auto beValue = htobe32(value);
     static_assert(sizeof(value) == sizeof(beValue), "CRC32 digest is not 32 bits?");
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sizeof(beValue));
-    jsg::BufferSource source(js, kj::mv(backing));
     kj::ArrayPtr<kj::byte> be(reinterpret_cast<kj::byte*>(&beValue), sizeof(beValue));
-    source.asArrayPtr().copyFrom(be);
-    return kj::mv(source);
+    return jsg::JsArrayBuffer::create(js, be);
   }
 
  private:
@@ -716,14 +713,11 @@ class CRC32CDigestContext final: public DigestContext {
     value = crc32c(value, buffer.begin(), buffer.size());
   }
 
-  jsg::BufferSource close(jsg::Lock& js) override {
+  jsg::JsArrayBuffer close(jsg::Lock& js) override {
     auto beValue = htobe32(value);
     static_assert(sizeof(value) == sizeof(beValue), "CRC32 digest is not 32 bits?");
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sizeof(beValue));
-    jsg::BufferSource source(js, kj::mv(backing));
     kj::ArrayPtr<kj::byte> be(reinterpret_cast<kj::byte*>(&beValue), sizeof(beValue));
-    source.asArrayPtr().copyFrom(be);
-    return kj::mv(source);
+    return jsg::JsArrayBuffer::create(js, be);
   }
 
  private:
@@ -739,14 +733,11 @@ class CRC64NVMEDigestContext final: public DigestContext {
     value = crc64nvme(value, buffer.begin(), buffer.size());
   }
 
-  jsg::BufferSource close(jsg::Lock& js) override {
+  jsg::JsArrayBuffer close(jsg::Lock& js) override {
     auto beValue = htobe64(value);
     static_assert(sizeof(value) == sizeof(beValue), "CRC64 digest is not 64 bits?");
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sizeof(beValue));
-    jsg::BufferSource source(js, kj::mv(backing));
     kj::ArrayPtr<kj::byte> be(reinterpret_cast<kj::byte*>(&beValue), sizeof(beValue));
-    source.asArrayPtr().copyFrom(be);
-    return kj::mv(source);
+    return jsg::JsArrayBuffer::create(js, be);
   }
 
  private:
@@ -770,14 +761,13 @@ class OpenSSLDigestContext final: public DigestContext {
     OSSLCALL(EVP_DigestUpdate(context.get(), buffer.begin(), buffer.size()));
   }
 
-  jsg::BufferSource close(jsg::Lock& js) override {
+  jsg::JsArrayBuffer close(jsg::Lock& js) override {
     auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
     uint size = 0;
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, EVP_MD_CTX_size(context.get()));
-    jsg::BufferSource source(js, kj::mv(backing));
-    OSSLCALL(EVP_DigestFinal_ex(context.get(), source.asArrayPtr().begin(), &size));
-    KJ_ASSERT(size, source.size());
-    return kj::mv(source);
+    auto buf = jsg::JsArrayBuffer::create(js, EVP_MD_CTX_size(context.get()));
+    OSSLCALL(EVP_DigestFinal_ex(context.get(), buf.asArrayPtr().begin(), &size));
+    KJ_ASSERT(size == buf.size());
+    return buf;
   }
 
  private:
@@ -799,20 +789,23 @@ DigestStream::DigestContextPtr DigestStream::initContext(SubtleCrypto::HashAlgor
 
 DigestStream::DigestStream(kj::Own<WritableStreamController> controller,
     SubtleCrypto::HashAlgorithm algorithm,
-    jsg::Promise<jsg::BufferSource>::Resolver resolver,
-    jsg::Promise<jsg::BufferSource> promise)
+    jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>>::Resolver resolver,
+    jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> promise)
     : WritableStream(kj::mv(controller)),
       promise(kj::mv(promise)),
       state(Ready(kj::mv(algorithm), kj::mv(resolver))) {}
 
 void DigestStream::dispose(jsg::Lock& js) {
-  js.tryCatch([&] {
+  JSG_TRY(js) {
     KJ_IF_SOME(ready, state.tryGet<Ready>()) {
       auto reason = js.typeError("The DigestStream was disposed.");
       ready.resolver.reject(js, reason);
       state.init<StreamStates::Errored>(js.v8Ref<v8::Value>(reason));
     }
-  }, [&](jsg::Value exception) { js.throwException(kj::mv(exception)); });
+  }
+  JSG_CATCH(exception) {
+    js.throwException(kj::mv(exception));
+  }
 }
 
 void DigestStream::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -854,7 +847,7 @@ kj::Maybe<StreamStates::Errored> DigestStream::close(jsg::Lock& js) {
       return errored.addRef(js);
     }
     KJ_CASE_ONEOF(ready, Ready) {
-      ready.resolver.resolve(js, ready.context->close(js));
+      ready.resolver.resolve(js, ready.context->close(js).addRef(js));
       state.init<StreamStates::Closed>();
       return kj::none;
     }
@@ -871,7 +864,7 @@ void DigestStream::abort(jsg::Lock& js, jsg::JsValue reason) {
 }
 
 jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algorithm) {
-  auto paf = js.newPromiseAndResolver<jsg::BufferSource>();
+  auto paf = js.newPromiseAndResolver<jsg::JsRef<jsg::JsArrayBuffer>>();
 
   auto stream = js.alloc<DigestStream>(newWritableStreamJsController(),
       interpretAlgorithmParam(kj::mv(algorithm)), kj::mv(paf.resolver), kj::mv(paf.promise));
@@ -881,9 +874,8 @@ jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algori
     .write = [&stream = *stream](jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
       return js.tryCatch([&] {
         // Make sure what we got can be interpreted as bytes...
-        std::shared_ptr<v8::BackingStore> backing;
         if (chunk->IsArrayBuffer() || chunk->IsArrayBufferView()) {
-          jsg::BufferSource source(js, chunk);
+          jsg::JsBufferSource source(chunk);
           if (source.size() == 0) return js.resolvedPromise();
 
           KJ_IF_SOME(error, stream.write(js, source.asArrayPtr())) {

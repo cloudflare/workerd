@@ -5,18 +5,6 @@
 import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
-  'urlpattern-compare.tentative.any.js': {
-    comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
-    omittedTests: true,
-  },
-  'urlpattern-compare.tentative.https.any.js': {
-    comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
-    omittedTests: true,
-  },
-  'urlpattern-generate.tentative.any.js': {
-    comment: 'URLPattern.generate is not part of the URLPattern spec',
-    omittedTests: true,
-  },
   'urlpattern-hasregexpgroups.any.js': {},
   'urlpattern.any.js': {},
   'urlpattern.https.any.js': {

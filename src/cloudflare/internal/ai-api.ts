@@ -4,10 +4,23 @@
 
 import { AiGateway, type GatewayOptions } from 'cloudflare-internal:aig-api';
 import { AutoRAG } from 'cloudflare-internal:autorag-api';
-import base64 from 'cloudflare-internal:base64';
+import {
+  ToMarkdownService,
+  type ConversionRequestOptions,
+  type ConversionResponse,
+  type MarkdownDocument,
+} from 'cloudflare-internal:to-markdown-api';
+
+type AiSearchService = object;
+
+const aiBindingExperimental = !!Cloudflare.compatibilityFlags['experimental'];
 
 interface Fetcher {
   fetch: typeof fetch;
+  aiSearch: () => AiSearchService;
+  gateway: (gatewayId: string) => AiGateway;
+  autorag: (autoragId?: string) => AutoRAG;
+  toMarkdown: () => ToMarkdownService;
 }
 
 interface AiError {
@@ -25,6 +38,7 @@ export type SessionOptions = {
 
 export type AiOptions = {
   gateway?: GatewayOptions;
+  websocket?: boolean;
   /** If true it will return a Response object */
   returnRawResponse?: boolean;
   prefix?: string;
@@ -33,19 +47,17 @@ export type AiOptions = {
    * @deprecated this option is deprecated, do not use this
    */
   sessionOptions?: SessionOptions;
+  signal?: AbortSignal;
 };
+
+type CleanedAiOptions = Omit<
+  AiOptions,
+  'prefix' | 'extraHeaders' | 'sessionOptions' | 'signal'
+>;
 
 export type AiInputReadableStream = {
-  body: ReadableStream;
+  body: ReadableStream | FormData;
   contentType: string;
-};
-
-export type ConversionResponse = {
-  name: string;
-  mimeType: string;
-  format: 'markdown';
-  tokens: number;
-  data: string;
 };
 
 export type AiModelsSearchParams = {
@@ -89,18 +101,12 @@ export class AiInternalError extends Error {
   }
 }
 
-async function blobToBase64(blob: Blob): Promise<string> {
-  return base64.encodeArrayToString(await blob.arrayBuffer());
+function isReadableStream(obj: unknown): obj is ReadableStream {
+  return obj instanceof ReadableStream;
 }
 
-// TODO: merge this function with the one with images-api.ts
-function isReadableStream(obj: unknown): obj is ReadableStream {
-  return !!(
-    obj &&
-    typeof obj === 'object' &&
-    'getReader' in obj &&
-    typeof obj.getReader === 'function'
-  );
+function isFormData(obj: unknown): obj is FormData {
+  return obj instanceof FormData;
 }
 
 /**
@@ -117,9 +123,9 @@ function findReadableStreamKeys(
       value &&
       typeof value === 'object' &&
       'body' in value &&
-      isReadableStream(value.body);
+      (isReadableStream(value.body) || isFormData(value.body));
 
-    if (hasReadableStreamBody || isReadableStream(value)) {
+    if (hasReadableStreamBody || isReadableStream(value) || isFormData(value)) {
       readableStreamKeys.push(key);
     }
   }
@@ -128,39 +134,168 @@ function findReadableStreamKeys(
 }
 
 export class Ai {
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private readonly fetcher: Fetcher;
+  #fetcher: Fetcher;
 
   /*
    * @deprecated this option is deprecated, do not use this
    */
-  // TODO(soon): Can we use the # syntax here?
-  // @ts-expect-error this option is deprecated, do not use this
-  // eslint-disable-next-line no-restricted-syntax
-  private logs: Array<string> = [];
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private options: AiOptions = {};
+  // @ts-expect-error: deprecated var
+  // eslint-disable-next-line no-unused-private-class-members
+  #logs: Array<string> = [];
+  #options: AiOptions = {};
+  #endpointURL = 'https://workers-binding.ai';
   lastRequestId: string | null = null;
   aiGatewayLogId: string | null = null;
   lastRequestHttpStatusCode: number | null = null;
   lastRequestInternalStatusCode: number | null = null;
 
   constructor(fetcher: Fetcher) {
-    this.fetcher = fetcher;
+    this.#fetcher = fetcher;
   }
 
   async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    return this.fetcher.fetch(input, init);
+    return this.#fetcher.fetch(input, init);
+  }
+
+  /**
+   * Generate fetch call for JSON inputs
+   * */
+  async #generateFetch(
+    inputs: object,
+    cleanedOptions: CleanedAiOptions,
+    model: string
+  ): Promise<Response> {
+    // Treat inputs as regular JS objects
+    const body = JSON.stringify({
+      inputs,
+      options: cleanedOptions,
+    });
+
+    const fetchOptions: RequestInit = {
+      method: 'POST',
+      body: body,
+      headers: {
+        ...this.#options.sessionOptions?.extraHeaders,
+        ...this.#options.extraHeaders,
+        'content-type': 'application/json',
+        'cf-consn-sdk-version': '2.0.0',
+        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
+      },
+    };
+    if (this.#options.signal) {
+      fetchOptions.signal = this.#options.signal;
+    }
+
+    let endpointUrl = `${this.#endpointURL}/run?version=3`;
+    if (cleanedOptions.gateway?.id) {
+      endpointUrl = `${this.#endpointURL}/ai-gateway/run?version=3`;
+    }
+
+    return await this.#fetcher.fetch(endpointUrl, fetchOptions);
+  }
+
+  /**
+   * Generate fetch call for inputs with ReadableStream
+   * */
+  async #generateStreamFetch(
+    inputs: Record<string, string | AiInputReadableStream>,
+    cleanedOptions: CleanedAiOptions,
+    model: string,
+    streamKeys: string[]
+  ): Promise<Response> {
+    const streamKey = streamKeys[0] ?? '';
+    const stream = streamKey ? inputs[streamKey] : null;
+    const body = (stream as AiInputReadableStream).body;
+    const contentType = (stream as AiInputReadableStream).contentType;
+
+    if (cleanedOptions.gateway?.id) {
+      throw new AiInternalError(
+        'AI Gateway does not support ReadableStreams yet.'
+      );
+    }
+
+    // Make sure user has supplied the Content-Type
+    // This allows AI binding to treat the ReadableStream correctly
+    if (!contentType) {
+      throw new AiInternalError(
+        'Content-Type is required with ReadableStream inputs'
+      );
+    }
+
+    // Pass single ReadableStream in request body
+    const fetchOptions: RequestInit = {
+      method: 'POST',
+      body: body,
+      headers: {
+        ...this.#options.sessionOptions?.extraHeaders,
+        ...this.#options.extraHeaders,
+        'content-type': contentType,
+        'cf-consn-sdk-version': '2.0.0',
+        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
+      },
+    };
+    if (this.#options.signal) {
+      fetchOptions.signal = this.#options.signal;
+    }
+
+    // Fetch the additional input params
+    const { [streamKey]: streamInput, ...userInputs } = inputs;
+
+    // Construct query params
+    // Append inputs with ai.run options that are passed to the inference request
+    const query = {
+      ...cleanedOptions,
+      version: '3',
+      userInputs: JSON.stringify({ ...userInputs }),
+    };
+    const aiEndpoint = new URL(`${this.#endpointURL}/run`);
+    for (const [key, value] of Object.entries(query)) {
+      aiEndpoint.searchParams.set(key, value as string);
+    }
+
+    return await this.#fetcher.fetch(aiEndpoint, fetchOptions);
+  }
+
+  /**
+   * Generate call to open a websocket connection
+   * */
+  async #generateWebsocketFetch(
+    inputs: object,
+    cleanedOptions: CleanedAiOptions,
+    model: string
+  ): Promise<Response> {
+    // Treat inputs as regular JS objects
+    const body = JSON.stringify({
+      inputs,
+      options: cleanedOptions,
+    });
+
+    const fetchOptions: RequestInit = {
+      headers: {
+        ...this.#options.sessionOptions?.extraHeaders,
+        ...this.#options.extraHeaders,
+        'cf-consn-sdk-version': '2.0.0',
+        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
+        Upgrade: 'websocket',
+      },
+    };
+    if (this.#options.signal) {
+      fetchOptions.signal = this.#options.signal;
+    }
+
+    const aiEndpoint = new URL(`${this.#endpointURL}/run`);
+    aiEndpoint.searchParams.set('version', '3');
+    aiEndpoint.searchParams.set('body', body);
+
+    return await this.#fetcher.fetch(aiEndpoint, fetchOptions);
   }
 
   async run(
     model: string,
-    inputs: Record<string, unknown>,
+    inputs: Record<string, string | AiInputReadableStream>,
     options: AiOptions = {}
   ): Promise<Response | ReadableStream<Uint8Array> | object | null> {
-    this.options = options;
+    this.#options = options;
     this.lastRequestId = '';
 
     // This removes some unwanted options from getting sent in the body
@@ -168,101 +303,42 @@ export class Ai {
       prefix,
       extraHeaders,
       sessionOptions,
+      signal,
       ...object
-    }): object => object)(this.options);
+    }): CleanedAiOptions => object)(this.#options);
 
     let res: Response;
-    /**
-     * Inputs that contain a ReadableStream which will be sent directly to
-     * the fetcher object along with other keys parsed as a query parameters
-     * */
-    const streamKeys = findReadableStreamKeys(inputs);
 
-    if (streamKeys.length === 0) {
-      // Treat inputs as regular JS objects
-      const body = JSON.stringify({
-        inputs,
-        options: cleanedOptions,
-      });
-
-      const fetchOptions = {
-        method: 'POST',
-        body: body,
-        headers: {
-          ...this.options.sessionOptions?.extraHeaders,
-          ...this.options.extraHeaders,
-          'content-type': 'application/json',
-          'cf-consn-sdk-version': '2.0.0',
-          'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
-        },
-      };
-
-      let endpointUrl = 'https://workers-binding.ai/run?version=3';
-      if (options.gateway?.id) {
-        endpointUrl = 'https://workers-binding.ai/ai-gateway/run?version=3';
-      }
-
-      res = await this.fetcher.fetch(endpointUrl, fetchOptions);
-    } else if (streamKeys.length > 1) {
-      throw new AiInternalError(
-        `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
-      );
+    if (this.#options.websocket) {
+      res = await this.#generateWebsocketFetch(inputs, cleanedOptions, model);
     } else {
-      const streamKey = streamKeys[0] ?? '';
-      const stream = streamKey ? inputs[streamKey] : null;
-      const body = (stream as AiInputReadableStream).body;
-      const contentType = (stream as AiInputReadableStream).contentType;
+      /**
+       * Inputs that contain a ReadableStream which will be sent directly to
+       * the fetcher object along with other keys parsed as a query parameters
+       * */
+      const streamKeys = findReadableStreamKeys(inputs);
 
-      if (options.gateway?.id) {
+      if (streamKeys.length === 0) {
+        res = await this.#generateFetch(inputs, cleanedOptions, model);
+      } else if (streamKeys.length > 1) {
         throw new AiInternalError(
-          'AI Gateway does not support ReadableStreams yet.'
+          `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
+        );
+      } else {
+        res = await this.#generateStreamFetch(
+          inputs,
+          cleanedOptions,
+          model,
+          streamKeys
         );
       }
-
-      // Make sure user has supplied the Content-Type
-      // This allows AI binding to treat the ReadableStream correctly
-      if (!contentType) {
-        throw new AiInternalError(
-          'Content-Type is required with ReadableStream inputs'
-        );
-      }
-
-      // Pass single ReadableStream in request body
-      const fetchOptions = {
-        method: 'POST',
-        body: body,
-        headers: {
-          ...this.options.sessionOptions?.extraHeaders,
-          ...this.options.extraHeaders,
-          'content-type': contentType,
-          'cf-consn-sdk-version': '2.0.0',
-          'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
-        },
-      };
-
-      // Fetch the additional input params
-      const { [streamKey]: streamInput, ...userInputs } = inputs;
-
-      // Construct query params
-      // Append inputs with ai.run options that are passed to the inference request
-      const query = {
-        ...cleanedOptions,
-        version: '3',
-        userInputs: JSON.stringify({ ...userInputs }),
-      };
-      const aiEndpoint = new URL('https://workers-binding.ai/run');
-      for (const [key, value] of Object.entries(query)) {
-        aiEndpoint.searchParams.set(key, value);
-      }
-
-      res = await this.fetcher.fetch(aiEndpoint, fetchOptions);
     }
 
     this.lastRequestId = res.headers.get('cf-ai-req-id');
     this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
     this.lastRequestHttpStatusCode = res.status;
 
-    if (this.options.returnRawResponse) {
+    if (this.#options.returnRawResponse || this.#options.websocket) {
       return res;
     }
 
@@ -317,13 +393,13 @@ export class Ai {
   async models(
     params: AiModelsSearchParams = {}
   ): Promise<AiModelsSearchObject[]> {
-    const url = new URL('https://workers-binding.ai/ai-api/models/search');
+    const url = new URL(`${this.#endpointURL}/ai-api/models/search`);
 
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value.toString());
     }
 
-    const res = await this.fetcher.fetch(url, { method: 'GET' });
+    const res = await this.#fetcher.fetch(url, { method: 'GET' });
 
     switch (res.status) {
       case 200: {
@@ -338,95 +414,53 @@ export class Ai {
     }
   }
 
+  toMarkdown(): ToMarkdownService;
   async toMarkdown(
-    files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument[],
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse[]>;
   async toMarkdown(
-    files: {
-      name: string;
-      blob: Blob;
-    },
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    files: MarkdownDocument,
+    options?: ConversionRequestOptions
   ): Promise<ConversionResponse>;
-  async toMarkdown(
-    files: { name: string; blob: Blob } | { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
-  ): Promise<ConversionResponse | ConversionResponse[]> {
-    const input = Array.isArray(files) ? files : [files];
+  toMarkdown(
+    files?: MarkdownDocument | MarkdownDocument[],
+    options?: ConversionRequestOptions
+  ): ToMarkdownService | Promise<ConversionResponse | ConversionResponse[]> {
+    const service = aiBindingExperimental
+      ? this.#fetcher.toMarkdown()
+      : new ToMarkdownService(this.#fetcher);
 
-    const processedFiles = [];
-    for (const file of input) {
-      processedFiles.push({
-        name: file.name,
-        mimeType: file.blob.type,
-        data: await blobToBase64(file.blob),
-      });
-    }
+    if (arguments.length < 1 || !files) return service;
 
-    const fetchOptions = {
-      method: 'POST',
-      body: JSON.stringify({
-        files: processedFiles,
-        options: options,
-      }),
-      headers: {
-        ...options?.extraHeaders,
-        'content-type': 'application/json',
-      },
-    };
-
-    const endpointUrl =
-      'https://workers-binding.ai/to-everything/markdown/transformer';
-
-    const res = await this.fetcher.fetch(endpointUrl, fetchOptions);
-
-    if (!res.ok) {
-      const content = await res.text();
-      let parsedContent;
-
-      try {
-        parsedContent = JSON.parse(content) as {
-          errors: { message: string }[];
-        };
-      } catch {
-        throw new AiInternalError(content);
-      }
-
-      throw new AiInternalError(
-        parsedContent.errors.at(0)?.message || 'Internal Error'
-      );
-    }
-
-    const data = (await res.json()) as { result: ConversionResponse[] };
-
-    if (data.result.length === 0) {
-      throw new AiInternalError(
-        'Internal Error Converting files into Markdown'
-      );
-    }
-
-    // If the user sent a list of files, return an array of results, otherwise, return just the first object
-    if (Array.isArray(files)) {
-      return data.result;
-    }
-
-    const obj = data.result.at(0);
-    if (!obj) {
-      throw new AiInternalError(
-        'Internal Error Converting files into Markdown'
-      );
-    }
-
-    return obj;
+    // NOTE(nunopereira): assuming type A = { name: string; blob: Blob }, 'files' here can be of type A | A[].
+    // However, 'service.transform' has no overload that accepts that union, rather it has one overload for each variant.
+    // We know the type of 'files' satisfies whatever type 'service.transform' expects and
+    // instead it's Typescript that is failing to narrow the type, so just ignore this error.
+    // @ts-expect-error unable to narrow type of file to either { name: string; blob: Blob } or { name: string; blob: Blob }[]
+    return service.transform(files, options);
   }
 
-  gateway(gatewayId: string): AiGateway {
-    return new AiGateway(this.fetcher, gatewayId);
+  gateway(gatewayId: string, options?: { beta?: boolean }): AiGateway {
+    // Use RPC if the `beta` flag is set or if the "experimental" compat flag is in use. Note that
+    // this is explicitly structured to allow opting out with `{beta: false}`, even if
+    // "experimental" is set, because currently `AbortSignal` does not work over RPC, and Gadgets
+    // needs it (and sets "experimental" for other reasons).
+    if (options?.beta ?? aiBindingExperimental) {
+      return this.#fetcher.gateway(gatewayId);
+    }
+    return new AiGateway(this.#fetcher, gatewayId);
   }
 
   autorag(autoragId?: string): AutoRAG {
-    return new AutoRAG(this.fetcher, autoragId);
+    if (aiBindingExperimental) {
+      return this.#fetcher.autorag(autoragId);
+    }
+    return new AutoRAG(this.#fetcher, autoragId);
+  }
+
+  aiSearch(): AiSearchService {
+    return this.#fetcher.aiSearch();
   }
 }
 

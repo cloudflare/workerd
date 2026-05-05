@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   strictEqual,
   deepStrictEqual,
@@ -293,7 +296,8 @@ export const objectHandlers = {
           }
 
           // Run the iterator down until it's done.
-          for (let [k, v] of iterator) {
+          for (let [_k, _v] of iterator) {
+            // intentionally empty
           }
           // .next() should now be idempotent.
           let result = iterator.next();
@@ -451,7 +455,7 @@ export const objectHandlers = {
       .onDocument(documentHandlers)
       .on('*', elementHandlers);
 
-    let count = 0;
+    let _count = 0;
 
     const enc = new TextEncoder();
     const kInput = [
@@ -908,6 +912,64 @@ export const exceptionPropagation = {
   },
 };
 
+// handled HTMLRewriter errors must not poison the IoContext.
+export const continueAfterException = {
+  async test() {
+    const errorResponse = new HTMLRewriter()
+      .on('*', {
+        element() {
+          throw new Error('intentional error for testing');
+        },
+      })
+      .transform(new Response('<div>test</div>'));
+
+    await rejects(errorResponse.text(), {
+      message: 'intentional error for testing',
+    });
+
+    const successResponse = new HTMLRewriter()
+      .on('div', {
+        element(el) {
+          el.setInnerContent('success');
+        },
+      })
+      .transform(new Response('<div>original</div>'));
+
+    strictEqual(await successResponse.text(), '<div>success</div>');
+  },
+};
+
+export const continueAfterException2 = {
+  async test() {
+    const errorResponse = new HTMLRewriter()
+      .on('*', {
+        element() {
+          throw new Error('intentional error for pipeTo testing');
+        },
+      })
+      .transform(new Response('<div>test</div>'));
+
+    const { writable } = new TransformStream();
+
+    await rejects(errorResponse.body.pipeTo(writable), {
+      message: 'intentional error for pipeTo testing',
+    });
+
+    const successResponse = new HTMLRewriter()
+      .on('div', {
+        element(el) {
+          el.setInnerContent('success after pipeTo');
+        },
+      })
+      .transform(new Response('<div>original</div>'));
+
+    strictEqual(
+      await successResponse.text(),
+      '<div>success after pipeTo</div>'
+    );
+  },
+};
+
 export const sameToken = {
   async test() {
     const obj = {};
@@ -945,6 +1007,113 @@ export const sameToken = {
       .text();
 
     await r;
+  },
+};
+
+// Regression test for VULN-122672: HTMLRewriter AttributesIterator UAF.
+// When element attributes are modified during iteration (adding new attributes
+// that cause the underlying Vec to reallocate), the iterator's stale pointers
+// would read from freed memory. The fix invalidates all live iterators when
+// setAttribute() or removeAttribute() is called.
+export const attributesIteratorInvalidatedOnSetAttribute = {
+  async test() {
+    const html = `<div a="1" b="2" c="3">test</div>`;
+
+    const rewriter = new HTMLRewriter().on('div', {
+      element(el) {
+        const iter = el.attributes[Symbol.iterator]();
+
+        // Read first attribute - valid.
+        const first = iter.next();
+        strictEqual(first.done, false);
+
+        // Mutate attributes — this must invalidate the iterator.
+        el.setAttribute('newattr', 'value');
+
+        // Subsequent next() must throw, not read freed memory.
+        throws(() => iter.next(), {
+          message:
+            'The attributes of this element have been modified during iteration. ' +
+            'You must create a new iterator after modifying attributes.',
+        });
+      },
+    });
+
+    await rewriter.transform(new Response(html)).text();
+  },
+};
+
+export const attributesIteratorInvalidatedOnRemoveAttribute = {
+  async test() {
+    const html = `<div a="1" b="2" c="3">test</div>`;
+
+    const rewriter = new HTMLRewriter().on('div', {
+      element(el) {
+        const iter = el.attributes[Symbol.iterator]();
+        iter.next(); // consume first
+
+        // removeAttribute also must invalidate the iterator.
+        el.removeAttribute('b');
+
+        throws(() => iter.next(), {
+          message:
+            'The attributes of this element have been modified during iteration. ' +
+            'You must create a new iterator after modifying attributes.',
+        });
+      },
+    });
+
+    await rewriter.transform(new Response(html)).text();
+  },
+};
+
+// After mutation, creating a fresh iterator must work normally.
+export const attributesIteratorFreshAfterMutation = {
+  async test() {
+    const html = `<div a="1">test</div>`;
+    let attrs = [];
+
+    const rewriter = new HTMLRewriter().on('div', {
+      element(el) {
+        el.setAttribute('b', '2');
+
+        // A new iterator created after mutation should work fine.
+        for (const [name, value] of el.attributes) {
+          attrs.push([name, value]);
+        }
+      },
+    });
+
+    await rewriter.transform(new Response(html)).text();
+
+    // Should see both original and newly-set attribute.
+    strictEqual(attrs.length, 2);
+    deepStrictEqual(attrs[0], ['a', '1']);
+    deepStrictEqual(attrs[1], ['b', '2']);
+  },
+};
+
+// Iterating without mutation must still work as before.
+export const attributesIteratorNormalIteration = {
+  async test() {
+    const html = `<div x="1" y="2" z="3">test</div>`;
+    let attrs = [];
+
+    const rewriter = new HTMLRewriter().on('div', {
+      element(el) {
+        for (const [name, value] of el.attributes) {
+          attrs.push([name, value]);
+        }
+      },
+    });
+
+    await rewriter.transform(new Response(html)).text();
+
+    deepStrictEqual(attrs, [
+      ['x', '1'],
+      ['y', '2'],
+      ['z', '3'],
+    ]);
   },
 };
 
@@ -1013,5 +1182,32 @@ export const hugeNumberOfHandlersForAnElement = {
     for (let i = 0; i < numReads; i++) {
       await reader.read();
     }
+  },
+};
+
+// Test HTMLRewriter with JS-backed ReadableStream
+// This test was moved from streams-respond-test.js because it triggers
+// a flaky ASAN failure related to V8's cppgc memory validation.
+export const htmlRewriterStream = {
+  async test() {
+    const enc = new TextEncoder();
+
+    const readable = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(enc.encode('Hello World!'));
+        controller.close();
+      },
+    });
+
+    let response = new Response(readable, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    });
+
+    response = new HTMLRewriter().transform(response);
+
+    strictEqual(await response.text(), 'Hello World!');
   },
 };

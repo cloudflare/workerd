@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "new-module-registry-dns-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "new-module-registry-dns-test.js"),
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_v2",
+          "new_module_registry",
+          "experimental",
+        ],
+      ),
+    ),
+  ],
+);

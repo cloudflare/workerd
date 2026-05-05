@@ -246,7 +246,6 @@ FOR_EACH_NUMBER_TYPE(DECLARE_NUMBER_TYPE)
   F(kj::String)                                                                                    \
   F(kj::StringPtr)                                                                                 \
   F(v8::String)                                                                                    \
-  F(ByteString)                                                                                    \
   F(USVString)                                                                                     \
   F(DOMString)                                                                                     \
   F(jsg::JsString)
@@ -383,7 +382,8 @@ FOR_EACH_MAYBE_TYPE(DECLARE_MAYBE_TYPE)
   F(kj::ArrayPtr)                                                                                  \
   F(kj::HashSet)                                                                                   \
   F(jsg::Sequence)                                                                                 \
-  F(jsg::AsyncGenerator)
+  F(jsg::AsyncGenerator)                                                                           \
+  F(jsg::AsyncGeneratorIgnoringStrings)
 
 template <typename Configuration>
 struct BuildRtti<Configuration, jsg::JsArray> {
@@ -468,6 +468,10 @@ struct BuildRtti<Configuration, v8::Promise> {
   };
 
 #define FOR_EACH_BUILTIN_TYPE(F, ...)                                                              \
+  F(jsg::JsUint8Array, BuiltinType::Type::V8_UINT8_ARRAY)                                          \
+  F(jsg::JsArrayBuffer, BuiltinType::Type::V8_ARRAY_BUFFER)                                        \
+  F(jsg::JsArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                               \
+  F(jsg::JsBufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                     \
   F(jsg::BufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                       \
   F(kj::Date, BuiltinType::Type::KJ_DATE)                                                          \
   F(v8::ArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                                  \
@@ -496,7 +500,6 @@ FOR_EACH_BUILTIN_TYPE(DECLARE_BUILTIN_TYPE)
   F(jsg::Name, JsgImplType::Type::JSG_NAME)                                                        \
   F(jsg::SelfRef, JsgImplType::Type::JSG_SELF_REF)                                                 \
   F(jsg::Unimplemented, JsgImplType::Type::JSG_UNIMPLEMENTED)                                      \
-  F(jsg::Varargs, JsgImplType::Type::JSG_VARARGS)                                                  \
   F(v8::Isolate*, JsgImplType::Type::V8_ISOLATE)                                                   \
   F(v8::FunctionCallbackInfo<v8::Value>, JsgImplType::Type::V8_FUNCTION_CALLBACK_INFO)             \
   F(v8::PropertyCallbackInfo<v8::Value>, JsgImplType::Type::V8_PROPERTY_CALLBACK_INFO)
@@ -536,7 +539,7 @@ struct BuildRtti<Configuration, jsg::Function<Fn>> {
     auto fn = builder.initFunction();
     using Traits = FunctionTraits<Fn>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(fn.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(fn.initArgs(std::tuple_size_v<Args>), rtti);
   }
 };
@@ -578,7 +581,7 @@ struct MemberCounter {
   template <typename Type, typename GetNamedMethod, GetNamedMethod getNamedMethod>
   inline void registerWildcardProperty() { /* not a member */ }
 
-  template <const char* name, typename Method, Method method>
+  template <const char* name, auto Method>
   inline void registerMethod() {
     ++members;
   }
@@ -644,16 +647,16 @@ struct MemberCounter {
     ++members;
   }
 
-  template <const char* name, const char* moduleName, bool readOnly>
-  inline void registerLazyJsInstanceProperty() {
-    ++members;
-  }
-
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() { /* not included */ }
 
   template <const char* name, typename T>
   inline void registerStaticConstant(T value) {
+    ++members;
+  }
+
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerStaticProperty() {
     ++members;
   }
 
@@ -751,17 +754,6 @@ struct MembersBuilder {
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
 
-  template <const char* name, const char* moduleName, bool readOnly>
-  inline void registerLazyJsInstanceProperty() {
-    auto prop = members[memberIndex++].initProperty();
-    prop.setName(name);
-    prop.setReadonly(readOnly);
-    prop.setLazy(true);
-    auto jsBuiltin = prop.initType().initJsBuiltin();
-    jsBuiltin.setModule(moduleName);
-    jsBuiltin.setExport(name);
-  }
-
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerPrototypeProperty() {
     auto prop = members[memberIndex++].initProperty();
@@ -794,6 +786,16 @@ struct MembersBuilder {
     // BuildRtti<Configuration, T>::build(constant.initType());
   }
 
+  template <const char* name, typename Getter, Getter getter>
+  inline void registerStaticProperty() {
+    auto prop = members[memberIndex++].initProperty();
+    prop.setName(name);
+    prop.setReadonly(true);
+    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
+    using GetterTraits = FunctionTraits<Getter>;
+    BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
+  }
+
   template <typename Property, Property Self::*property>
   void registerStructProperty(const char* name) {
     auto prop = members[memberIndex++].initProperty();
@@ -801,16 +803,16 @@ struct MembersBuilder {
     BuildRtti<Configuration, Property>::build(prop.initType(), rtti);
   }
 
-  template <const char* name, typename Method, Method>
+  template <const char* name, auto Method>
   inline void registerMethod() {
     auto method = members[memberIndex++].initMethod();
 
     method.setName(name);
-    method.setFastApiCompatible(isFastApiCompatible<Method>);
+    method.setFastApiCompatible(isFastApiCompatible<decltype(Method)>);
 
-    using Traits = FunctionTraits<Method>;
+    using Traits = FunctionTraits<decltype(Method)>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -820,7 +822,7 @@ struct MembersBuilder {
 
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(func.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(func.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -834,7 +836,7 @@ struct MembersBuilder {
 
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -846,7 +848,7 @@ struct MembersBuilder {
     method.setName(name);
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -858,7 +860,7 @@ struct MembersBuilder {
     method.setName(name);
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -870,7 +872,7 @@ struct MembersBuilder {
     method.setName(name);
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -882,7 +884,7 @@ struct MembersBuilder {
     method.setName(name);
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
+    using Args = Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
@@ -914,23 +916,17 @@ struct MembersBuilder {
   }
 };
 
-// true when the T has registerMembers() function generated by JSG_RESOURCE/JSG_STRUCT
-template <typename T, typename = int>
-struct HasRegisterMembers: std::false_type {};
-
+// Concept: true when T has registerMembers() function generated by JSG_RESOURCE/JSG_STRUCT
 template <typename T>
-struct HasRegisterMembers<T, decltype(T::template registerMembers<MemberCounter, T>, 0)>
-    : std::true_type {};
+concept HasRegisterMembers = requires { T::template registerMembers<MemberCounter, T>; };
 
-// true when the T has constructor() function
-template <typename T, typename = int>
-struct HasConstructor: std::false_type {};
-
+// Concept: true when T has constructor() function
 template <typename T>
-struct HasConstructor<T, decltype(T::constructor, 0)>: std::true_type {};
+concept HasConstructor = requires { T::constructor; };
 
 template <typename Configuration, typename T>
-struct BuildRtti<Configuration, T, std::enable_if_t<HasRegisterMembers<T>::value>> {
+  requires HasRegisterMembers<T>
+struct BuildRtti<Configuration, T> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     auto structure = builder.initStructure();
     structure.setName(jsg::typeName(typeid(T)));
@@ -950,7 +946,7 @@ struct BuildRtti<Configuration, T, std::enable_if_t<HasRegisterMembers<T>::value
     }
     auto membersCount = counter.members;
 
-    if constexpr (HasConstructor<T>::value) {
+    if constexpr (HasConstructor<T>) {
       membersCount++;
     }
 
@@ -964,10 +960,10 @@ struct BuildRtti<Configuration, T, std::enable_if_t<HasRegisterMembers<T>::value
       T::template registerMembers<decltype(membersBuilder), T>(membersBuilder);
     }
 
-    if constexpr (HasConstructor<T>::value) {
+    if constexpr (HasConstructor<T>) {
       auto constructor = members[membersBuilder.memberIndex++].initConstructor();
       using Traits = FunctionTraits<decltype(T::constructor)>;
-      using Args = typename Traits::ArgsTuple;
+      using Args = Traits::ArgsTuple;
       TupleRttiBuilder<Configuration, Args>::build(
           constructor.initArgs(std::tuple_size_v<Args>), rtti);
     }

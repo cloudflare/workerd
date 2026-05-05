@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { strictEqual, ok, throws, rejects } from 'node:assert';
 import { WorkerEntrypoint, RpcTarget } from 'cloudflare:workers';
 
@@ -428,7 +431,7 @@ export const rpcAbortSignalManyClients = {
     const signal = AbortSignal.timeout(200);
 
     const responses = await Promise.all(
-      Array(5).fill(env.RpcRemoteEnd.countToInfinity(signal))
+      Array.from({ length: 5 }, () => env.RpcRemoteEnd.countToInfinity(signal))
     );
     strictEqual(responses.length, 5);
 

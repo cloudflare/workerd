@@ -2,7 +2,7 @@ We use a combination of micro and macro benchmarks for performance testing worke
 
 # Building benchmarks
 
-Benchmarks should be built using `--config=benchmark` configuration, which is builds a release
+Benchmarks should be built using `--config=benchmark` configuration, which builds a release
 binary with additional debug info.
 
 To obtain most consistent results it is recommended to disable CPU frequency scaling

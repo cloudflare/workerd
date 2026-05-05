@@ -4,12 +4,8 @@ load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
-
-config_setting(
-    name = "is_linux",
-    constraint_values = ["@platforms//os:linux"],
-)
 
 # Flag that can be used to force-disable tcmalloc. Mainly used for ASAN builds.
 # TODO(cleanup): This feels ugly but I've exceeded my timebox for fighting Bazel for now.
@@ -23,11 +19,21 @@ config_setting(
     flag_values = {"use_tcmalloc": "True"},
 )
 
+bool_flag(
+    name = "use_transpiler",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "set_use_transpiler",
+    flag_values = {"use_transpiler": "True"},
+)
+
 selects.config_setting_group(
     name = "really_use_tcmalloc",
     match_all = [
         ":set_use_tcmalloc",
-        ":is_linux",
+        "//:is_linux",
     ],
 )
 
@@ -36,9 +42,23 @@ wd_cc_library(
     name = "malloc",
     visibility = ["//visibility:public"],
     deps = select({
-        ":really_use_tcmalloc": ["@com_google_tcmalloc//tcmalloc"],
+        ":really_use_tcmalloc": ["@tcmalloc//tcmalloc"],
         "//conditions:default": ["@bazel_tools//tools/cpp:malloc"],
     }),
+)
+
+wd_cc_embed(
+    name = "workerd-capnp-schema",
+    src = "workerd.capnp",
+    base_name = "workerd-capnp-schema",
+    is_text = True,
+)
+
+wd_cc_embed(
+    name = "cpp-capnp-schema",
+    src = "@capnp-cpp//src/capnp:c++.capnp",
+    base_name = "cpp-capnp-schema",
+    is_text = True,
 )
 
 wd_cc_binary(
@@ -47,10 +67,11 @@ wd_cc_binary(
     malloc = ":malloc",
     visibility = ["//visibility:public"],
     deps = [
+        ":cpp-capnp-schema",
         ":json-logger",
         ":server",
         ":v8-platform-impl",
-        ":workerd-meta_capnp",
+        ":workerd-capnp-schema",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/rust/cxx-integration",
@@ -89,8 +110,10 @@ wd_cc_library(
     deps = [
         "//src/workerd/io:actor-id",
         "//src/workerd/jsg:exception",
+        "//src/workerd/util:entropy",
+        "//src/workerd/util:own-util",
         "//src/workerd/util:thread-scopes",
-        "@capnp-cpp//src/kj:kj",
+        "@capnp-cpp//src/kj",
         "@ssl",
     ],
 )
@@ -116,6 +139,20 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "workerd-debug-port-client",
+    srcs = [
+        "workerd-debug-port-client.c++",
+    ],
+    hdrs = [
+        "workerd-debug-port-client.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
     name = "workerd-api",
     srcs = [
         "workerd-api.c++",
@@ -123,13 +160,27 @@ wd_cc_library(
     hdrs = [
         "workerd-api.h",
     ],
+    implementation_deps = [
+        "//src/workerd/api:analytics-engine",
+        "//src/workerd/api:capnp",
+        "//src/workerd/api:kv",
+        "//src/workerd/api:streams",
+        "//src/workerd/api:urlpattern",
+        "//src/workerd/api:urlpattern-standard",
+        "//src/workerd/api:worker-loader",
+        "//src/workerd/io:promise-wrapper",
+    ],
+    local_defines = select({
+        ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
         ":fallback-service",
         ":pyodide",
+        ":workerd-debug-port-client",
         ":workerd_capnp",
-        "//deps/rust:runtime",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide:pyodide_static",
@@ -142,10 +193,25 @@ wd_cc_library(
         "//src/workerd/api:rtti",
         "//src/workerd/api/node",
         "//src/workerd/io",
+        "//src/workerd/io:worker-modules",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
+    ] + select({
+        ":set_use_transpiler": ["//src/rust/transpiler"],
+        "//conditions:default": [],
+    }),
+)
+
+wd_cc_library(
+    name = "channel-token",
+    srcs = ["channel-token.c++"],
+    hdrs = ["channel-token.h"],
+    deps = [
+        ":channel-token_capnp",
+        "//src/workerd/io",
+        "//src/workerd/util:entropy",
     ],
 )
 
@@ -160,19 +226,20 @@ wd_cc_library(
     deps = [
         ":actor-id-impl",
         ":alarm-scheduler",
+        ":channel-token",
+        ":channel-token_capnp",
         ":container-client",
         ":facet-tree-index",
         ":fallback-service",
         ":workerd-api",
         ":workerd_capnp",
-        "//deps/rust:runtime",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide:pyodide_static",
         "//src/workerd/api:memory-cache",
         "//src/workerd/api:pyodide",
         "//src/workerd/io",
-        "//src/workerd/io:trace-stream",
+        "//src/workerd/io:bundle-fs",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
@@ -185,6 +252,13 @@ wd_cc_library(
 wd_capnp_library(src = "docker-api.capnp")
 
 wd_capnp_library(src = "log-schema.capnp")
+
+wd_capnp_library(
+    src = "channel-token.capnp",
+    deps = [
+        "//src/workerd/io:frankenvalue_capnp",
+    ],
+)
 
 wd_cc_library(
     name = "json-logger",
@@ -204,9 +278,14 @@ wd_cc_library(
     hdrs = ["container-client.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":channel-token",
         ":docker-api_capnp",
+        "//src/workerd/io",
         "//src/workerd/io:container_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util:strings",
+        "//src/workerd/util:uuid",
+        "@ada-url",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
@@ -270,17 +349,19 @@ wd_capnp_library(
     ],
 )
 
-wd_capnp_library(
-    src = "workerd-meta.capnp",
-    deps = [":workerd_capnp"],
-)
-
 kj_test(
     size = "large",
     src = "server-test.c++",
     deps = [
         ":server",
         "//src/workerd/util:test-util",
+    ],
+)
+
+kj_test(
+    src = "channel-token-test.c++",
+    deps = [
+        ":server",
     ],
 )
 
@@ -299,6 +380,14 @@ copy_file(
     name = "pyodide.capnp.bin@rule",
     src = "//src/pyodide:pyodide.capnp.bin_cross",
     out = "pyodide.capnp.bin",
+)
+
+kj_test(
+    src = "container-client-test.c++",
+    deps = [
+        ":container-client",
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 kj_test(

@@ -15,7 +15,6 @@ kj_test(
     src = "import_parsing.c++",
     deps = [
         ":python-parser",
-        "//deps/rust:runtime",
         "//src/rust/cxx-integration",
     ],
 )

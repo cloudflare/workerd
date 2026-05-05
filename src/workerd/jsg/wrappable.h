@@ -10,6 +10,7 @@
 
 #include <v8-context.h>
 #include <v8-object.h>
+#include <v8-version.h>
 
 #include <kj/common.h>
 #include <kj/debug.h>
@@ -17,11 +18,66 @@
 #include <kj/refcount.h>
 #include <kj/vector.h>
 
+// Niche value optimization for v8::TracedReference<T>. This teaches kj::Maybe to use
+// TracedReference's built-in empty state (IsEmpty()) as the "none" representation, eliminating
+// the extra bool + alignment padding that kj::Maybe normally adds. This saves 8 bytes per
+// Maybe<TracedReference<T>> instance while preserving full type safety.
+namespace kj {
+template <typename T>
+struct MaybeTraits<v8::TracedReference<T>> {
+  static void initNone(v8::TracedReference<T>* ptr) noexcept {
+    ctor(*ptr);
+  }
+  static bool isNone(const v8::TracedReference<T>& ref) noexcept {
+    return ref.IsEmpty();
+  }
+  static constexpr bool noneIsMoveSafe = false;
+};
+}  // namespace kj
+
 namespace cppgc {
 class Visitor;
 }
 
 namespace workerd::jsg {
+
+// The ContextPointerSlot enum defines the embedder slots we use in v8::Context for
+// storing pointers to various important objects.
+enum class ContextPointerSlot : int {
+  // Pointer slot 0 is special and should never be used by us.
+  RESERVED = 0,
+  GLOBAL_WRAPPER = 1,
+  MODULE_REGISTRY = 2,
+  EXTENDED_CONTEXT_WRAPPER = 3,
+  VIRTUAL_FILE_SYSTEM = 4,
+  // Keep the MAX_POINTER_SLOT as the last entry and always set to
+  // to the highest value of the other entries. We use this to
+  // ensure that the highest used index is always initialized in
+  // every context we create without having to update the specific
+  // callsites whenever we add a new slot. We can just make the
+  // change here.
+  MAX_POINTER_SLOT = VIRTUAL_FILE_SYSTEM,
+};
+
+inline void setAlignedPointerInEmbedderData(
+    v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
+  // The type tag is a small integer that should be different for every pointer
+  // type to avoid type confusion attacks.  We just use the slot index for now,
+  // since we have a different pointer type for each slot.
+  KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
+  context->SetAlignedPointerInEmbedderData(
+      static_cast<int>(slot), ptr, static_cast<v8::EmbedderDataTypeTag>(slot));
+}
+
+template <typename T>
+kj::Maybe<T&> getAlignedPointerFromEmbedderData(
+    v8::Local<v8::Context> context, ContextPointerSlot slot) {
+  KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
+  void* ptr = context->GetAlignedPointerFromEmbedderData(
+      static_cast<int>(slot), static_cast<v8::EmbedderDataTypeTag>(slot));
+  if (ptr == nullptr) return kj::none;
+  return *reinterpret_cast<T*>(ptr);
+}
 
 class MemoryTracker;
 
@@ -70,14 +126,19 @@ class Wrappable: public kj::Refcounted {
   //
   // This value was chosen randomly.
   static constexpr uint16_t WORKERD_WRAPPABLE_TAG = 0xeb04;
+  static constexpr uint16_t WORKERD_RUST_WRAPPABLE_TAG = 0xeb05;
 
   static bool isWorkerdApiObject(v8::Local<v8::Object> object) {
-    return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX) ==
+    return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX,
+               static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX)) ==
         &WORKERD_WRAPPABLE_TAG;
   }
 
   void addStrongRef();
   void removeStrongRef();
+  uint getStrongRefcount() const {
+    return strongRefcount;
+  }
 
   // Called by jsg::Ref<T> to ensure that its Wrappable is destroyed under the isolate lock.
   // `ownSelf` keeps the raw `self` pointer valid -- they are passed separately because Wrappable is
@@ -274,11 +335,13 @@ T& extractInternalPointer(
 
   if constexpr (isContext) {
     // V8 docs say EmbedderData slot 0 is special, so we use slot 1. (See comments in newContext().)
-    return *reinterpret_cast<T*>(context->GetAlignedPointerFromEmbedderData(1));
+    return KJ_ASSERT_NONNULL(
+        getAlignedPointerFromEmbedderData<T>(context, ContextPointerSlot::GLOBAL_WRAPPER));
   } else {
     KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
     return *reinterpret_cast<T*>(
-        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+            static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
   }
 }
 

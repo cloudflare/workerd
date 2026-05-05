@@ -22,8 +22,9 @@ bool Channel::hasSubscribers() {
 }
 
 void Channel::publish(jsg::Lock& js, jsg::Value message) {
-  for (auto& sub: subscribers) {
-    sub.value(js, message.addRef(js), name.clone(js));
+  auto snapshot = KJ_MAP(sub, subscribers) -> MessageCallback { return sub.value.addRef(js); };
+  for (auto& cb: snapshot) {
+    cb(js, message.addRef(js), name.clone(js));
   }
 
   auto& context = IoContext::current();
@@ -91,10 +92,18 @@ v8::Local<v8::Value> Channel::runStores(jsg::Lock& js,
     jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
     jsg::Optional<v8::Local<v8::Value>> maybeReceiver,
     jsg::Arguments<jsg::Value> args) {
-  auto storageScopes = KJ_MAP(store, stores) {
-    return kj::heap<jsg::AsyncContextFrame::StorageScope>(
-        js, *store.key, store.transform(js, message.addRef(js)));
+  struct StoreSnapshot {
+    kj::Own<jsg::AsyncContextFrame::StorageKey> key;
+    TransformCallback transform;
   };
+  auto snapshot = KJ_MAP(store, stores) -> StoreSnapshot {
+    return {kj::addRef(*store.key), store.transform.addRef(js)};
+  };
+  kj::Vector<kj::Own<jsg::AsyncContextFrame::StorageScope>> storageScopes;
+  for (auto& entry: snapshot) {
+    storageScopes.add(kj::heap<jsg::AsyncContextFrame::StorageScope>(
+        js, *entry.key, entry.transform(js, message.addRef(js))));
+  }
 
   publish(js, message.addRef(js));
 

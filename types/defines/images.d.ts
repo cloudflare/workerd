@@ -32,7 +32,9 @@ type ImageTransform = {
   fit?: 'scale-down' | 'contain' | 'pad' | 'squeeze' | 'cover' | 'crop';
   flip?: 'h' | 'v' | 'hv';
   gamma?: number;
+  segment?: 'foreground';
   gravity?:
+    | 'face'
     | 'left'
     | 'right'
     | 'top'
@@ -91,7 +93,104 @@ type ImageOutputOptions = {
     | 'rgba';
   quality?: number;
   background?: string;
+  anim?: boolean;
 };
+
+interface ImageMetadata {
+  id: string;
+  filename?: string;
+  uploaded?: string;
+  requireSignedURLs: boolean;
+  meta?: Record<string, unknown>;
+  variants: string[];
+  draft?: boolean;
+  creator?: string;
+}
+
+interface ImageUploadOptions {
+  id?: string;
+  filename?: string;
+  requireSignedURLs?: boolean;
+  metadata?: Record<string, unknown>;
+  creator?: string;
+  encoding?: 'base64';
+}
+
+interface ImageUpdateOptions {
+  requireSignedURLs?: boolean;
+  metadata?: Record<string, unknown>;
+  creator?: string;
+}
+
+interface ImageListOptions {
+  limit?: number;
+  cursor?: string;
+  sortOrder?: 'asc' | 'desc';
+  creator?: string;
+}
+
+interface ImageList {
+  images: ImageMetadata[];
+  cursor?: string;
+  listComplete: boolean;
+}
+
+interface ImageHandle {
+  /**
+   * Get metadata for a hosted image
+   * @returns Image metadata, or null if not found
+   */
+  details(): Promise<ImageMetadata | null>;
+
+  /**
+   * Get the raw image data for a hosted image
+   * @returns ReadableStream of image bytes, or null if not found
+   */
+  bytes(): Promise<ReadableStream<Uint8Array> | null>;
+
+  /**
+   * Update hosted image metadata
+   * @param options Properties to update
+   * @returns Updated image metadata
+   * @throws {@link ImagesError} if update fails
+   */
+  update(options: ImageUpdateOptions): Promise<ImageMetadata>;
+
+  /**
+   * Delete a hosted image
+   * @returns True if deleted, false if not found
+   */
+  delete(): Promise<boolean>;
+}
+
+interface HostedImagesBinding {
+  /**
+   * Get a handle for a hosted image
+   * @param imageId The ID of the image (UUID or custom ID)
+   * @returns A handle for per-image operations
+   */
+  image(imageId: string): ImageHandle;
+
+  /**
+   * Upload a new hosted image
+   * @param image The image file to upload
+   * @param options Upload configuration
+   * @returns Metadata for the uploaded image
+   * @throws {@link ImagesError} if upload fails
+   */
+  upload(
+    image: ReadableStream<Uint8Array> | ArrayBuffer,
+    options?: ImageUploadOptions
+  ): Promise<ImageMetadata>;
+
+  /**
+   * List hosted images with pagination
+   * @param options List configuration
+   * @returns List of images with pagination info
+   * @throws {@link ImagesError} if list fails
+   */
+  list(options?: ImageListOptions): Promise<ImageList>;
+}
 
 interface ImagesBinding {
   /**
@@ -112,6 +211,11 @@ interface ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions
   ): ImageTransformer;
+
+  /**
+   * Access hosted images CRUD operations
+   */
+  readonly hosted: HostedImagesBinding;
 }
 
 interface ImageTransformer {

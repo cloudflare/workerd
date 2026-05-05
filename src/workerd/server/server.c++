@@ -4,6 +4,7 @@
 
 #include "server.h"
 
+#include "alarm-scheduler.h"
 #include "container-client.h"
 #include "pyodide.h"
 #include "workerd-api.h"
@@ -21,6 +22,7 @@
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/hibernation-manager.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/limit-enforcer.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/worker-entrypoint.h>
@@ -30,8 +32,10 @@
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/facet-tree-index.h>
 #include <workerd/server/fallback-service.h>
+#include <workerd/util/exception.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/stream-utils.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/websocket-error-handler.h>
@@ -155,13 +159,17 @@ static kj::String escapeJsonString(kj::StringPtr text) {
   return kj::str("\"", escaped.releaseAsArray(), "\"");
 }
 
-// TODO(now): Temporary
-class ServerResolveObserver final: public jsg::ResolveObserver {};
-const ServerResolveObserver serverResolveObserver;
-
 template <typename T>
 static inline kj::Own<T> fakeOwn(T& ref) {
   return kj::Own<T>(&ref, kj::NullDisposer::instance);
+}
+
+void throwDynamicEntrypointTransferError() {
+  JSG_FAIL_REQUIRE(DOMDataCloneError,
+      "Entrypoints to dynamically-loaded workers cannot be transferred to other Workers, "
+      "because the system does not know how to reload this Worker from scratch. Instead, "
+      "have the parent Worker expose an entrypoint which constructs the dynamic worker "
+      "and forwards to it.");
 }
 
 }  // namespace
@@ -170,17 +178,20 @@ static inline kj::Own<T> fakeOwn(T& ref) {
 
 Server::Server(kj::Filesystem& fs,
     kj::Timer& timer,
+    const kj::MonotonicClock& monotonicClock,
     kj::Network& network,
     kj::EntropySource& entropySource,
-    Worker::ConsoleMode consoleMode,
+    Worker::LoggingOptions loggingOptions,
     kj::Function<void(kj::String)> reportConfigError)
     : fs(fs),
       timer(timer),
+      monotonicClock(monotonicClock),
       network(network),
       entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)),
-      consoleMode(consoleMode),
+      loggingOptions(loggingOptions),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
+      channelTokenHandler(*this),
       tasks(*this) {}
 
 struct Server::GlobalContext {
@@ -199,8 +210,7 @@ struct Server::GlobalContext {
             server.entropySource,
             headerTableBuilder,
             httpOverCapnpFactory,
-            byteStreamFactory,
-            false /* isFiddle -- TODO(beta): support */),
+            byteStreamFactory),
         headerTable(headerTableBuilder.getFutureTable()) {}
 };
 
@@ -216,7 +226,8 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
 
   // Begin an incoming request. Returns a `WorkerInterface` object that will be used for one
   // request then discarded.
-  virtual kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) = 0;
+  virtual kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata) override = 0;
 
   // Returns true if the service exports the given handler, e.g. `fetch`, `scheduled`, etc.
   virtual bool hasHandler(kj::StringPtr handlerName) = 0;
@@ -225,6 +236,17 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
   // with EntrypointService.
   virtual Service* service() {
     return this;
+  }
+
+  // Implemented by EntrypointService for loopback ctx.exports entrypoints, to allow props to be
+  // specified.
+  virtual kj::Own<Service> forProps(Frankenvalue props) {
+    KJ_FAIL_REQUIRE("can't override props for this service");
+  }
+
+  void requireAllowsTransfer() override {
+    // We consider all `Service` implementations to be safe to transfer, except for dynamic workers
+    // which we'll handle explicitly.
   }
 };
 
@@ -253,6 +275,10 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
   // Start a request on the actor. (The actor must have been created using newActor().)
   virtual kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
+
+  virtual kj::Own<ActorClass> forProps(Frankenvalue props) {
+    KJ_FAIL_REQUIRE("can't override props for this actor class");
+  }
 };
 
 Server::~Server() noexcept {
@@ -410,7 +436,7 @@ class Server::HttpRewriter {
 
     KJ_IF_SOME(h, cfBlobHeader) {
       KJ_IF_SOME(b, cfBlobJson) {
-        result.headers->set(h, b);
+        result.headers->setPtr(h, b);
       } else {
         result.headers->unset(h);
       }
@@ -494,7 +520,7 @@ class Server::HttpRewriter {
     void apply(kj::HttpHeaders& headers) {
       for (auto& header: injectedHeaders) {
         KJ_IF_SOME(v, header.value) {
-          headers.set(header.id, v);
+          headers.setPtr(header.id, v);
         } else {
           headers.unset(header.id);
         }
@@ -529,6 +555,11 @@ class Server::InvalidConfigService final: public Service {
 
 class Server::InvalidConfigActorClass final: public ActorClass {
  public:
+  void requireAllowsTransfer() override {
+    // Can't get here because workerd would have failed to start.
+    KJ_UNREACHABLE;
+  }
+
   kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
       Worker::Actor::Id actorId,
       Worker::Actor::MakeActorCacheFunc makeActorCache,
@@ -1553,8 +1584,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   ~RequestObserverWithTracer() noexcept(false) {
     KJ_IF_SOME(t, tracer) {
-      if (fetchStatus != 0) {
-        t->setFetchResponseInfo(tracing::FetchResponseInfo(fetchStatus));
+      // for a more precise end time, set the end timestamp now, if available
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+        auto time = ioContext.now();
+        t->recordTimestamp(time);
       }
       t->setOutcome(
           outcome, 0 * kj::MILLISECONDS /* cpu time */, 0 * kj::MILLISECONDS /* wall time */);
@@ -1569,8 +1602,9 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     return worker;
   }
 
-  void reportFailure(const kj::Exception& exception, FailureSource source) override {
-    outcome = EventOutcome::EXCEPTION;
+  void reportFailure(
+      const kj::Exception& exception, FailureSource source = FailureSource::OTHER) override {
+    outcome = RequestObserver::outcomeFromException(exception, source);
   }
 
   void setOutcome(EventOutcome newOutcome) override {
@@ -1587,9 +1621,15 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       SimpleResponseObserver responseWrapper(&fetchStatus, response);
       co_await KJ_ASSERT_NONNULL(inner).request(method, url, headers, requestBody, responseWrapper);
     } catch (...) {
-      fetchStatus = 500;
       auto exception = kj::getCaughtExceptionAsKj();
-      reportFailure(exception, FailureSource::OTHER);
+      // Overloaded-type exceptions generally represent some resource exhaustion (i.e. not
+      // necessarily an internal error) and correspond to HTTP error 503.
+      if (exception.getType() == kj::Exception::Type::OVERLOADED) {
+        fetchStatus = 503;
+      } else {
+        fetchStatus = 500;
+      }
+      reportFailure(exception);
       kj::throwFatalException(kj::mv(exception));
     }
   }
@@ -1604,7 +1644,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
           host, headers, connection, response, settings);
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
-      reportFailure(exception, FailureSource::OTHER);
+      reportFailure(exception);
       kj::throwFatalException(kj::mv(exception));
     }
   }
@@ -1614,7 +1654,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       co_return co_await KJ_ASSERT_NONNULL(inner).prewarm(url);
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
-      reportFailure(exception, FailureSource::OTHER);
+      reportFailure(exception);
       kj::throwFatalException(kj::mv(exception));
     }
   }
@@ -1624,7 +1664,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       co_return co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
-      reportFailure(exception, FailureSource::OTHER);
+      reportFailure(exception);
       kj::throwFatalException(kj::mv(exception));
     }
   }
@@ -1634,7 +1674,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       co_return co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
-      reportFailure(exception, FailureSource::OTHER);
+      reportFailure(exception);
       kj::throwFatalException(kj::mv(exception));
     }
   }
@@ -1644,7 +1684,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       co_return co_await KJ_ASSERT_NONNULL(inner).test();
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
-      reportFailure(exception, FailureSource::OTHER);
+      reportFailure(exception);
       kj::throwFatalException(kj::mv(exception));
     }
   }
@@ -1654,9 +1694,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       co_return co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
-      reportFailure(exception, FailureSource::OTHER);
+      reportFailure(exception);
       kj::throwFatalException(kj::mv(exception));
     }
+  }
+
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    co_return co_await KJ_ASSERT_NONNULL(inner).abandonAlarm(scheduledTime);
   }
 
  private:
@@ -1666,32 +1710,45 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   kj::uint fetchStatus = 0;
 };
 
-class WorkerTracerSpanObserver: public SpanObserver,
-                                public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
+class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
-  WorkerTracerSpanObserver(kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
-      : workerTracer(kj::mv(workerTracer)) {}
-
-  [[nodiscard]] kj::Own<SpanObserver> newChild() override {
-    return addRefToThis().toOwn();
-  }
-
-  void report(const Span& span) override {
-    KJ_IF_SOME(tracer, this->workerTracer) {
-      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
-
-      for (const auto& tag: span.tags) {
-        tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+  SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer)
+      : weakTracer(kj::mv(weakTracer)) {}
+  void submitSpanClose(
+      tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) override {
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      tracing::SpanEndData spanEnd(spanId, endTime, kj::mv(tags));
+      if (isPredictableModeForTest()) {
+        startTime = spanEnd.endTime = kj::UNIX_EPOCH;
       }
 
-      CompleteSpan completeSpan(tracing::SpanId::nullId, tracing::SpanId::nullId,
-          kj::ConstString(kj::str(span.operationName)), span.startTime, span.endTime, kj::mv(tags));
-      tracer->addSpan(kj::mv(completeSpan));
-    }
+      tracer.addSpanClose(kj::mv(spanEnd), startTime);
+    });
   }
 
+  bool submitSpanOpen(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime) override {
+    bool submitted = false;
+    weakTracer->runIfAlive([&](BaseTracer& tracer) {
+      if (isPredictableModeForTest()) {
+        startTime = kj::UNIX_EPOCH;
+      }
+      tracer.addSpanOpen(spanId, parentSpanId, kj::mv(operationName), startTime);
+      submitted = true;
+    });
+    return submitted;
+  }
+
+  tracing::SpanId makeSpanId() override {
+    return tracing::SpanId(nextSpanId++);
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(SequentialSpanSubmitter);
+
  private:
-  kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
+  uint64_t nextSpanId = 1;
+  kj::Own<BaseTracer::WeakRef> weakTracer;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
@@ -1757,6 +1814,13 @@ class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   bool hasExcessivelyExceededHeapLimit() const override {
     return false;
   }
+
+  const TrackedWasmInstanceList& getTrackedWasmInstances() const override {
+    return trackedWasmInstances;
+  }
+
+ private:
+  TrackedWasmInstanceList trackedWasmInstances;
 };
 
 }  // namespace
@@ -1768,6 +1832,7 @@ struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
   kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
   kj::HashSet<kj::String> actorClasses;
+  kj::HashSet<kj::String> workflowClasses;
 
   void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
     kj::HashSet<kj::String> set;
@@ -1794,6 +1859,7 @@ struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
       set.insert(kj::mv(method));
     }
     namedEntrypoints.insert(kj::str(exportName), kj::mv(set));
+    workflowClasses.insert(kj::str(exportName));
   }
 };
 
@@ -1841,24 +1907,35 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<ActorClass>> actorClass;
     kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> cache;
     kj::Maybe<const kj::Directory&> actorStorage;
-    AlarmScheduler& alarmScheduler;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
     kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
+    kj::Maybe<kj::Network&> workerdDebugPortNetwork;
   };
   using LinkCallback =
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
   using AbortActorsCallback = kj::Function<void(kj::Maybe<const kj::Exception&> reason)>;
+  using DeleteActorsCallback = kj::Function<void(kj::Maybe<const kj::Exception&> reason)>;
 
-  WorkerService(ThreadContext& threadContext,
+  WorkerService(ChannelTokenHandler& channelTokenHandler,
+      kj::Maybe<kj::StringPtr> serviceName,
+      ThreadContext& threadContext,
+      const kj::MonotonicClock& monotonicClock,
       kj::Own<const Worker> worker,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
       kj::HashSet<kj::String> actorClassEntrypointsParam,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
-      kj::Maybe<kj::String> dockerPathParam)
-      : threadContext(threadContext),
+      DeleteActorsCallback deleteActorsCallback,
+      kj::Maybe<kj::String> dockerPathParam,
+      kj::Maybe<kj::String> containerEgressInterceptorImageParam,
+      bool isDynamic,
+      kj::Maybe<kj::Function<void()>> abortIsolateCallback = kj::none)
+      : channelTokenHandler(channelTokenHandler),
+        serviceName(serviceName),
+        threadContext(threadContext),
+        monotonicClock(monotonicClock),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
@@ -1866,7 +1943,11 @@ class Server::WorkerService final: public Service,
         actorClassEntrypoints(kj::mv(actorClassEntrypointsParam)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
-        dockerPath(kj::mv(dockerPathParam)) {}
+        deleteActorsCallback(kj::mv(deleteActorsCallback)),
+        dockerPath(kj::mv(dockerPathParam)),
+        containerEgressInterceptorImage(kj::mv(containerEgressInterceptorImageParam)),
+        isDynamic(isDynamic),
+        abortIsolateCallback(kj::mv(abortIsolateCallback)) {}
 
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
@@ -1886,11 +1967,16 @@ class Server::WorkerService final: public Service,
       }
 
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
-      auto ns =
-          kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value, threadContext.getUnsafeTimer(),
-              threadContext.getByteStreamFactory(), network, dockerPath, waitUntilTasks);
+      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
+          kj::systemPreciseCalendarClock(), threadContext.getUnsafeTimer(),
+          threadContext.getByteStreamFactory(), channelTokenHandler, network, dockerPath,
+          containerEgressInterceptorImage, waitUntilTasks);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
+  }
+
+  void requireAllowsTransfer() override {
+    if (isDynamic) throwDynamicEntrypointTransferError();
   }
 
   kj::Maybe<kj::Own<Service>> getEntrypoint(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
@@ -1909,7 +1995,7 @@ class Server::WorkerService final: public Service,
         //         "entrypoint will fail at runtime, but historically this was not a startup-time "
         //         "error. Future versions of workerd may make this a startup-time error."));
 
-        const kj::HashSet<kj::String> EMPTY_HANDLERS;
+        static const kj::HashSet<kj::String> EMPTY_HANDLERS;
         name = className;  // replace with more-permanent string
         handlers = &EMPTY_HANDLERS;
       } else {
@@ -1933,12 +2019,41 @@ class Server::WorkerService final: public Service,
     return kj::refcounted<EntrypointService>(*this, name, kj::mv(props), *handlers);
   }
 
+  // Like getEntrypoint() but used specifically to get the entrypoint for use in ctx.exports,
+  // where it can be used raw (props are empty), or can be specialized with props.
+  kj::Own<Service> getLoopbackEntrypoint(kj::Maybe<kj::StringPtr> name) {
+    const kj::HashSet<kj::String>* handlers;
+    KJ_IF_SOME(n, name) {
+      KJ_IF_SOME(entry, namedEntrypoints.findEntry(n)) {
+        name = entry.key;  // replace with more-permanent string
+        handlers = &entry.value;
+      } else {
+        KJ_FAIL_REQUIRE("getLoopbackEntrypoint() called for entrypoint that doesn't exist");
+      }
+    } else {
+      KJ_IF_SOME(d, defaultEntrypointHandlers) {
+        handlers = &d;
+      } else {
+        KJ_FAIL_REQUIRE("getLoopbackEntrypoint() called for entrypoint that doesn't exist");
+      }
+    }
+    return kj::refcounted<EntrypointService>(*this, name, kj::none, *handlers);
+  }
+
   kj::Maybe<kj::Own<ActorClass>> getActorClass(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
     KJ_IF_SOME(className, actorClassEntrypoints.find(KJ_UNWRAP_OR(name, return kj::none))) {
       return kj::refcounted<ActorClassImpl>(*this, className, kj::mv(props));
     } else {
       return kj::none;
     }
+  }
+
+  kj::Own<ActorClass> getLoopbackActorClass(kj::StringPtr name) {
+    // Look up a more permanent class name string. (Also validates this is actually an export.)
+    kj::StringPtr className = KJ_REQUIRE_NONNULL(actorClassEntrypoints.find(name),
+        "getLoopbackActorClass() called for actor class that doesn't exist");
+
+    return kj::refcounted<ActorClassImpl>(*this, className, kj::none);
   }
 
   bool hasDefaultEntrypoint() {
@@ -1949,13 +2064,17 @@ class Server::WorkerService final: public Service,
     return KJ_MAP(e, namedEntrypoints) -> kj::StringPtr { return e.key; };
   }
 
+  kj::Array<kj::StringPtr> getActorClassNames() {
+    return KJ_MAP(name, actorClassEntrypoints) -> kj::StringPtr { return name; };
+  }
+
   void link(Worker::ValidationErrorReporter& errorReporter) override {
     LinkCallback callback =
         kj::mv(KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkCallback>(), "already called link()"));
     auto linked = callback(*this, errorReporter);
 
     for (auto& ns: actorNamespaces) {
-      ns.value->link(linked.actorStorage, linked.alarmScheduler);
+      ns.value->link(linked.actorStorage);
     }
 
     ioChannels = kj::mv(linked);
@@ -2005,7 +2124,7 @@ class Server::WorkerService final: public Service,
 
     auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
 
-    kj::Vector<kj::Own<WorkerInterface>> legacyTailWorkers(channels.tails.size());
+    kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers(channels.tails.size());
     kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers(channels.streamingTails.size());
     auto addWorkerIfNotRecursiveTracer = [this, isTracer](
                                              kj::Vector<kj::Own<WorkerInterface>>& workers,
@@ -2048,66 +2167,64 @@ class Server::WorkerService final: public Service,
     // here.
     if (entrypointName.orDefault("") != "test"_kj) {
       for (auto& service: channels.tails) {
-        addWorkerIfNotRecursiveTracer(legacyTailWorkers, *service);
+        addWorkerIfNotRecursiveTracer(bufferedTailWorkers, *service);
       }
-
-      if (worker->getIsolate().getApi().getFeatureFlags().getStreamingTailWorker()) {
-        for (auto& service: channels.streamingTails) {
-          addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
-        }
+      for (auto& service: channels.streamingTails) {
+        addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
       }
     }
 
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
-    kj::Own<RequestObserver> observer = kj::refcounted<RequestObserver>();
 
-    if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
-      // Setting up legacy tail workers support, but only if we actually have tail workers
+    if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
+      // Setting up buffered tail workers support, but only if we actually have tail workers
       // configured.
-      auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
       auto tailStreamWriter = tracing::initializeTailStreamWriter(
           streamingTailWorkers.releaseAsArray(), waitUntilTasks);
-      KJ_IF_SOME(t, tailStreamWriter) {
-        tracer->addTailStreamWriter(kj::addRef(*t));
-      }
-      workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
-          kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
-          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
-          kj::none /* entrypoint */, kj::mv(tailStreamWriter));
+      auto trace = kj::refcounted<Trace>(kj::none /* stableId */, kj::none /* scriptName */,
+          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, kj::none /* scriptId */,
+          nullptr /* scriptTags */, mapCopyString(entrypointName), executionModel,
+          kj::none /* durableObjectId */);
+      kj::Own<WorkerTracer> tracer = kj::refcounted<WorkerTracer>(
+          kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
 
-      // When the tracer is complete, deliver the traces to both the parent
-      // and the legacy tail workers. We do NOT want to attach the tracer to the
-      // tracer->onComplete() promise here because it is the destructor of
-      // the PipelineTracer that resolves the onComplete promise. If we attach
-      // the tracer to the promise the tracer won't be destroyed while the
-      // promise is still pending! Fortunately, the WorkerTracer we created
-      // will hold a strong reference to the worker tracer for as long as it
-      // is needed. As long as the WorkerTracer is still alive, the PipelineTracer
-      // will be. See below, we end up creating two references to the WorkerTracer,
-      // one held by the observer and one that will be passed to the IoContext.
-      // The PipelineTracer will be destroyed once both of those are freed.
-      waitUntilTasks.add(tracer->onComplete().then(
-          kj::coCapture([tailWorkers = legacyTailWorkers.releaseAsArray()](
-                            kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
-        for (auto& worker: tailWorkers) {
-          auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
-              workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
-          co_await worker->customEvent(kj::mv(event)).ignoreResult();
-        }
-        co_return;
-      })));
+      // When the tracer is complete, deliver traces to any buffered tail workers. We end up
+      // creating two references to the WorkerTracer, one held by the observer and one that will be
+      // passed to the IoContext. This ensures that the tracer lives long enough to receive all
+      // events.
+      if (!bufferedTailWorkers.empty()) {
+        waitUntilTasks.add(tracer->onComplete().then(
+            kj::coCapture([tailWorkers = bufferedTailWorkers.releaseAsArray()](
+                              kj::Own<Trace> trace) mutable -> kj::Promise<void> {
+          for (auto& worker: tailWorkers) {
+            auto event = kj::heap<workerd::api::TraceCustomEvent>(
+                workerd::api::TraceCustomEvent::TYPE, kj::arr(kj::addRef(*trace)));
+            co_await worker->customEvent(kj::mv(event)).ignoreResult();
+          }
+          co_return;
+        })));
+      }
+      workerTracer = kj::mv(tracer);
     }
 
     KJ_IF_SOME(w, workerTracer) {
-      if (worker->getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans()) {
-        auto tracerSpanObserver = kj::refcounted<WorkerTracerSpanObserver>(mapAddRef(workerTracer));
-        SpanBuilder userSpanParent(kj::mv(tracerSpanObserver), "worker"_kjc);
-        w->setUserRequestSpan(kj::mv(userSpanParent));
+      w->setMakeUserRequestSpanFunc([&w = *w](tracing::TraceId traceId) {
+        return SpanParent(kj::refcounted<UserSpanObserver>(
+            kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef()), kj::mv(traceId)));
+      });
+    }
+    kj::Own<RequestObserver> observer =
+        kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
+
+    kj::Maybe<tracing::InvocationSpanContext> triggerContext;
+    KJ_IF_SOME(ctx, metadata.userSpanParent.toSpanContext()) {
+      KJ_IF_SOME(spanId, ctx.getSpanId()) {
+        triggerContext =
+            tracing::InvocationSpanContext(ctx.getTraceId(), tracing::TraceId::nullId, spanId);
       }
     }
-    observer = kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
@@ -2116,38 +2233,68 @@ class Server::WorkerService final: public Service,
         waitUntilTasks,
         true,                  // tunnelExceptions
         kj::mv(workerTracer),  // workerTracer
-        kj::mv(metadata.cfBlobJson));
+        kj::mv(metadata.cfBlobJson),
+        kj::none,  // versionInfo
+        kj::mv(triggerContext));
   }
 
   class ActorNamespace final {
    public:
     ActorNamespace(kj::Own<ActorClass> actorClass,
         const ActorConfig& config,
+        const kj::Clock& clock,
         kj::Timer& timer,
         capnp::ByteStreamFactory& byteStreamFactory,
+        ChannelTokenHandler& channelTokenHandler,
         kj::Network& dockerNetwork,
         kj::Maybe<kj::StringPtr> dockerPath,
+        kj::Maybe<kj::StringPtr> containerEgressInterceptorImage,
         kj::TaskSet& waitUntilTasks)
         : actorClass(kj::mv(actorClass)),
           config(config),
+          clock(clock),
           timer(timer),
           byteStreamFactory(byteStreamFactory),
+          channelTokenHandler(channelTokenHandler),
           dockerNetwork(dockerNetwork),
           dockerPath(dockerPath),
+          containerEgressInterceptorImage(containerEgressInterceptorImage),
           waitUntilTasks(waitUntilTasks) {}
 
-    // Called at link time to provide needed resources.
-    void link(kj::Maybe<const kj::Directory&> serviceActorStorage,
-        kj::Maybe<AlarmScheduler&> alarmScheduler) {
+    void link(kj::Maybe<const kj::Directory&> serviceActorStorage) {
       KJ_IF_SOME(dir, serviceActorStorage) {
         KJ_IF_SOME(d, config.tryGet<Durable>()) {
-          // Create a subdirectory for this namespace based on the unique key.
           this->actorStorage.emplace(dir.openSubdir(
               kj::Path({d.uniqueKey}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY));
         }
       }
 
-      this->alarmScheduler = alarmScheduler;
+      KJ_IF_SOME(d, config.tryGet<Durable>()) {
+        auto idFactory = kj::heap<ActorIdFactoryImpl>(d.uniqueKey);
+        AlarmScheduler::GetActorFn getActor =
+            [this, idFactory = kj::mv(idFactory)](
+                kj::String idStr) mutable -> kj::Own<WorkerInterface> {
+          Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
+          auto actorContainer = this->getActorContainer(kj::mv(id));
+          return newPromisedWorkerInterface(actorContainer->startRequest({}));
+        };
+
+        KJ_IF_SOME(as, this->actorStorage) {
+          // Create per-namespace alarm scheduler backed by on-disk storage in the
+          // namespace directory, alongside the per-actor .sqlite files.
+          this->ownAlarmScheduler = kj::heap<AlarmScheduler>(
+              clock, timer, as.vfs, kj::Path({"metadata.sqlite"}), kj::mv(getActor));
+        } else {
+          // No on-disk storage -- create an in-memory alarm scheduler.
+          auto memDir = kj::newInMemoryDirectory(clock);
+          auto vfs = kj::heap<SqliteDatabase::Vfs>(*memDir);
+          this->ownAlarmScheduler = kj::heap<AlarmScheduler>(
+              clock, timer, *vfs, kj::Path({"metadata.sqlite"}), kj::mv(getActor))
+                                        .attach(kj::mv(vfs), kj::mv(memDir));
+        }
+
+        this->alarmScheduler = *KJ_ASSERT_NONNULL(ownAlarmScheduler);
+      }
     }
 
     const ActorConfig& getConfig() {
@@ -2156,11 +2303,14 @@ class Server::WorkerService final: public Service,
 
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
       KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
-        // To emulate production, we have to recreate this ID.
-        ActorIdFactoryImpl::ActorIdImpl* idImpl =
-            dynamic_cast<ActorIdFactoryImpl::ActorIdImpl*>(doId.get());
-        KJ_ASSERT(idImpl != nullptr, "Unexpected ActorId type?");
-        idImpl->clearName();
+        KJ_IF_SOME(name, doId->getName()) {
+          // To emulate production, we preserve the name on the id, but only if it's <= 1024 bytes.
+          if (name.size() > 1024) {
+            auto* idImpl = dynamic_cast<ActorIdFactoryImpl::ActorIdImpl*>(doId.get());
+            KJ_ASSERT(idImpl != nullptr, "Unexpected ActorId type?");
+            idImpl->clearName();
+          }
+        }
       }
 
       return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)));
@@ -2243,6 +2393,11 @@ class Server::WorkerService final: public Service,
           auto reason = 0;
           a->shutdown(reason);
         }
+
+        // Drop the container client reference
+        // If setInactivityTimeout() was called, there's still a timer holding a reference
+        // If not, this may be the last reference and the ContainerClient destructor will run
+        containerClient = kj::none;
       }
 
       void active() override {
@@ -2322,7 +2477,10 @@ class Server::WorkerService final: public Service,
             co_await promise;
           }
 
-          start(actorClass, id);
+          // A concurrent request could have started the actor, so check again.
+          if (actor == kj::none) {
+            start(actorClass, id);
+          }
         }
 
         co_return KJ_ASSERT_NONNULL(actor)->addRef();
@@ -2368,11 +2526,24 @@ class Server::WorkerService final: public Service,
         manager = kj::none;
         tracker->shutdown();
         actor = kj::none;
+        containerClient = kj::none;
 
         KJ_IF_SOME(r, reason) {
-          brokenReason = kj::cp(r);
+          brokenReason = r.clone();
         } else {
           brokenReason = JSG_KJ_EXCEPTION(FAILED, Error, "Actor aborted for uknown reason.");
+        }
+      }
+
+      // Resets the actor's SQLite database while the connection is still open,
+      // avoiding file-locking issues on Windows.
+      void resetStorage() {
+        KJ_IF_SOME(a, actor) {
+          KJ_IF_SOME(cache, a->getPersistent()) {
+            KJ_IF_SOME(db, cache.getSqliteDatabase()) {
+              kj::runCatchingExceptions([&]() { db.reset(); });
+            }
+          }
         }
       }
 
@@ -2393,6 +2564,13 @@ class Server::WorkerService final: public Service,
         });
 
         return entry.value->addRef();
+      }
+
+      uint getDepth() const override {
+        KJ_IF_SOME(p, parent) {
+          return 1 + p.getDepth();
+        }
+        return 0;
       }
 
       kj::Own<IoChannelFactory::ActorChannel> getFacet(
@@ -2438,6 +2616,9 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
       kj::Maybe<kj::Exception> brokenReason;
+
+      // Reference to the ContainerClient (if container is enabled for this actor)
+      kj::Maybe<kj::Own<ContainerClient>> containerClient;
 
       // If this is a `ForkedPromise<void>`, await the promise. When it has resolved, then
       // `classAndId` will have been replaced with the resolved `ClassAndId` value.
@@ -2526,7 +2707,7 @@ class Server::WorkerService final: public Service,
 
       void requireNotBroken() {
         KJ_IF_SOME(e, brokenReason) {
-          kj::throwFatalException(kj::cp(e));
+          kj::throwFatalException(e.clone());
         }
       }
 
@@ -2610,6 +2791,11 @@ class Server::WorkerService final: public Service,
         }
         // Destroy the last strong Worker::Actor reference.
         actor = kj::none;
+
+        // Drop our reference to the ContainerClient
+        // If setInactivityTimeout() was called, the timer still holds a reference
+        // so the container stays alive until the timeout expires
+        containerClient = kj::none;
       }
 
       void start(kj::Own<ActorClass>& actorClass, Worker::Actor::Id& id) {
@@ -2624,8 +2810,7 @@ class Server::WorkerService final: public Service,
               kj::Own<ActorSqlite::Hooks> sqliteHooks;
               if (parent == kj::none) {
                 KJ_IF_SOME(a, ns.alarmScheduler) {
-                  sqliteHooks = kj::heap<ActorSqliteHooks>(
-                      a, ActorKey{.uniqueKey = d.uniqueKey, .actorId = key});
+                  sqliteHooks = kj::heap<ActorSqliteHooks>(a, ActorKey{.actorId = key});
                 } else {
                   // No alarm scheduler available, use default hooks instance.
                   sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
@@ -2659,7 +2844,7 @@ class Server::WorkerService final: public Service,
               });
 
               return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
-                  []() -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
+                  [](SpanParent) -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
                   .attach(kj::mv(sqliteHooks));
             } else {
               // Create an ActorCache backed by a fake, empty storage. Elsewhere, we configure
@@ -2694,10 +2879,8 @@ class Server::WorkerService final: public Service,
 
         auto loopback = kj::refcounted<Loopback>(*this);
 
-        kj::Maybe<rpc::Container::Client> containerClient = kj::none;
+        kj::Maybe<rpc::Container::Client> container = kj::none;
         KJ_IF_SOME(config, containerOptions) {
-          auto& dockerPathRef = KJ_ASSERT_NONNULL(ns.dockerPath,
-              "dockerPath needs to be defined in order enable containers on this durable object.");
           KJ_ASSERT(config.hasImageName(), "Image name is required");
           auto imageName = config.getImageName();
           kj::String containerId;
@@ -2709,15 +2892,14 @@ class Server::WorkerService final: public Service,
               containerId = kj::str(existingId);
             }
           }
-          containerClient = kj::heap<ContainerClient>(ns.byteStreamFactory, timer, ns.dockerNetwork,
-              kj::str(dockerPathRef),
-              kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId),
-              kj::str(imageName), ns.waitUntilTasks);
+
+          container = ns.getContainerClient(
+              kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId), imageName);
         }
 
         auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
             kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(),
-            kj::mv(containerClient), *this);
+            kj::mv(container), *this);
         onBrokenTask = monitorOnBroken(*actor);
         this->actor = kj::mv(actor);
       }
@@ -2755,6 +2937,73 @@ class Server::WorkerService final: public Service,
       })->addRef();
     }
 
+    kj::Own<ContainerClient> getContainerClient(
+        kj::StringPtr containerId, kj::StringPtr imageName) {
+      KJ_IF_SOME(existingClient, containerClients.find(containerId)) {
+        return existingClient->addRef();
+      }
+
+      // No existing container in the map, create a new one
+      auto& dockerPathRef = KJ_ASSERT_NONNULL(
+          dockerPath, "dockerPath must be defined to enable containers on this Durable Object.");
+
+      // Grab a branch of any pending cleanup from a previous ContainerClient for this
+      // container. If it exists, pass it to the container client so it knows that it has to sync.
+      kj::Promise<void> previousCleanup = kj::READY_NOW;
+      KJ_IF_SOME(state, containerCleanupState.find(containerId)) {
+        previousCleanup = state.promise.addBranch();
+      }
+
+      // Upsert the cleanup state for this container ID. Replacing the
+      // canceler auto-cancels any in-flight cleanup tasks from the previous
+      // client's destructor. The generation counter is bumped on replacement
+      // so the cleanup callback can detect stale ownership without relying
+      // on raw pointer identity (which is vulnerable to address reuse).
+      auto canceler = kj::heap<kj::Canceler>();
+      uint64_t capturedGeneration = 0;
+      containerCleanupState.upsert(kj::str(containerId),
+          ContainerCleanupState{.canceler = kj::mv(canceler)},
+          [&capturedGeneration](ContainerCleanupState& existing, ContainerCleanupState&& incoming) {
+        existing.canceler = kj::mv(incoming.canceler);
+        capturedGeneration = ++existing.generation;
+      });
+
+      // Cleanup callback: invoked from the ContainerClient destructor with the joined
+      // with a cleanup promise
+      kj::Function<void(kj::Promise<void>)> cleanupCallback =
+          [this, containerId = kj::str(containerId), capturedGeneration](
+              kj::Promise<void> cleanupPromise) mutable {
+        KJ_IF_SOME(state, containerCleanupState.find(containerId)) {
+          if (state.generation != capturedGeneration) {
+            // A newer ContainerClient has replaced us already with another destructor.
+            // drop the promise.
+            return;
+          }
+
+          containerClients.erase(containerId);
+          // Wrap with the canceler so a future client creation can cancel these
+          // tasks
+          auto cancellable =
+              state.canceler->wrap(kj::mv(cleanupPromise)).catch_([](kj::Exception&&) {});
+
+          auto forked = kj::mv(cancellable).fork();
+          waitUntilTasks.add(forked.addBranch());
+          state.promise = kj::mv(forked);
+        }
+      };
+
+      auto client = kj::refcounted<ContainerClient>(byteStreamFactory, timer, dockerNetwork,
+          kj::str(dockerPathRef), kj::str(containerId), kj::str(imageName),
+          kj::str(KJ_ASSERT_NONNULL(containerEgressInterceptorImage,
+              "containerEgressInterceptorImage must be configured for containers.")),
+          waitUntilTasks, kj::mv(previousCleanup), kj::mv(cleanupCallback), channelTokenHandler);
+
+      // Store raw pointer in map (does not own)
+      containerClients.insert(kj::str(containerId), client.get());
+
+      return kj::mv(client);
+    }
+
     void abortAll(kj::Maybe<const kj::Exception&> reason) {
       for (auto& actor: actors) {
         actor.value->abort(reason);
@@ -2762,9 +3011,26 @@ class Server::WorkerService final: public Service,
       actors.clear();
     }
 
+    // Resets all actor databases, aborts all actors, and cancels all alarms so DOs
+    // can be recreated with clean state.
+    void deleteAll(kj::Maybe<const kj::Exception&> reason) {
+      // Reset databases before aborting so connections are still open (avoids
+      // Windows file-locking issues with deferred handle release).
+      for (auto& actor: actors) {
+        actor.value->resetStorage();
+      }
+
+      abortAll(reason);
+
+      KJ_IF_SOME(scheduler, ownAlarmScheduler) {
+        scheduler->deleteAll();
+      }
+    }
+
    private:
     kj::Own<ActorClass> actorClass;
     const ActorConfig& config;
+    const kj::Clock& clock;
 
     struct ActorStorage {
       kj::Own<const kj::Directory> directory;
@@ -2775,19 +3041,50 @@ class Server::WorkerService final: public Service,
             vfs(*directory) {}
     };
 
-    // Note: The Vfs must not be torn down until all actors have been torn down, so we have to
-    //   declare `actorStorage` before `actors`.
+    // Note: The Vfs, actorStorage, and ownAlarmScheduler must not be torn down until all actors
+    // have been torn down, so we declare them before `actors`.
     kj::Maybe<ActorStorage> actorStorage;
+    kj::Maybe<kj::Own<AlarmScheduler>> ownAlarmScheduler;
+
+    // Tracks the canceler and cleanup promise for a Docker container's lifecycle cleanup.
+    // Useful to await on async calls of a ContainerClient destructor when the new
+    // one appears before they've been resolved.
+    struct ContainerCleanupState {
+      // Canceler that wraps the promise fired in ~ContainerClient. Replacing
+      // it cancels any pending cleanup, which resolves the promise immediately.
+      kj::Own<kj::Canceler> canceler;
+
+      // Forked cleanup promise. A branch is added to waitUntilTasks to keep the I/O alive,
+      // and another branch is passed to the next ContainerClient so its status() can await.
+      kj::ForkedPromise<void> promise = kj::Promise<void>(kj::READY_NOW).fork();
+
+      // Monotonically increasing counter, bumped each time the canceler is replaced
+      // via upsert. The cleanup callback captures the generation at creation time and
+      // compares it to detect whether a newer ContainerClient has taken ownership,
+      // avoiding a raw-pointer identity check that is vulnerable to address reuse.
+      uint64_t generation = 0;
+    };
+
+    // Per-container cleanup state: canceler + forked cleanup promise.
+    kj::HashMap<kj::String, ContainerCleanupState> containerCleanupState;
+
+    // Map of container IDs to ContainerClients (for reconnection support with inactivity timeouts).
+    // The map holds raw pointers (not ownership) - ContainerClients are owned by actors and timers.
+    // When the last reference is dropped, the destructor removes the entry from this map.
+    kj::HashMap<kj::String, ContainerClient*> containerClients;
 
     // If the actor is broken, we remove it from the map. However, if it's just evicted due to
     // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
     // request comes in, we recreate the Own<Worker::Actor>.
     ActorMap actors;
+
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
     capnp::ByteStreamFactory& byteStreamFactory;
+    ChannelTokenHandler& channelTokenHandler;
     kj::Network& dockerNetwork;
     kj::Maybe<kj::StringPtr> dockerPath;
+    kj::Maybe<kj::StringPtr> containerEgressInterceptorImage;
     kj::TaskSet& waitUntilTasks;
     kj::Maybe<AlarmScheduler&> alarmScheduler;
 
@@ -2833,11 +3130,11 @@ class Server::WorkerService final: public Service,
      public:
       Loopback(ActorContainer& actorContainer): actorContainer(actorContainer) {}
 
-      kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
+      kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
         return newPromisedWorkerInterface(actorContainer.startRequest(kj::mv(metadata)));
       }
 
-      kj::Own<Worker::Actor::Loopback> addRef() {
+      kj::Own<Worker::Actor::Loopback> addRef() override {
         return kj::addRef(*this);
       }
 
@@ -2851,7 +3148,9 @@ class Server::WorkerService final: public Service,
           : alarmScheduler(alarmScheduler),
             actor(actor) {}
 
-      kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {
+      // We ignore the priorTask in workerd because everything should run synchronously.
+      kj::Promise<void> scheduleRun(
+          kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
         KJ_IF_SOME(scheduledTime, newAlarmTime) {
           alarmScheduler.setAlarm(actor, scheduledTime);
         } else {
@@ -2871,7 +3170,7 @@ class Server::WorkerService final: public Service,
    public:
     EntrypointService(WorkerService& worker,
         kj::Maybe<kj::StringPtr> entrypoint,
-        Frankenvalue props,
+        kj::Maybe<Frankenvalue> props,
         const kj::HashSet<kj::String>& handlers)
         : worker(kj::addRef(worker)),
           entrypoint(entrypoint),
@@ -2884,7 +3183,13 @@ class Server::WorkerService final: public Service,
 
     kj::Own<WorkerInterface> startRequest(
         IoChannelFactory::SubrequestMetadata metadata, bool isTracer) {
-      return worker->startRequest(kj::mv(metadata), entrypoint, props.clone(), kj::none, isTracer);
+      Frankenvalue props;
+      KJ_IF_SOME(p, this->props) {
+        props = p.clone();
+      } else {
+        // Calling ctx.exports loopback without specifying props. Use empty props.
+      }
+      return worker->startRequest(kj::mv(metadata), entrypoint, kj::mv(props), kj::none, isTracer);
     }
 
     bool hasHandler(kj::StringPtr handlerName) override {
@@ -2896,19 +3201,47 @@ class Server::WorkerService final: public Service,
       return worker;
     }
 
+    kj::Own<Service> forProps(Frankenvalue props) override {
+      if (this->props != kj::none) {
+        // This entrypoint is already specialized. Delegate to the default implementation (which
+        // will throw an exception).
+        return Service::forProps(kj::mv(props));
+      }
+
+      return kj::refcounted<EntrypointService>(*worker, entrypoint, kj::mv(props), handlers);
+    }
+
+    void requireAllowsTransfer() override {
+      worker->requireAllowsTransfer();
+    }
+
+    kj::Array<byte> getToken(ChannelTokenUsage usage) override {
+      worker->requireAllowsTransfer();
+
+      // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
+      // Unspecialized loopback entrypoints are not serializable, so if we get here we must have
+      // props.
+      return worker->channelTokenHandler.encodeSubrequestChannelToken(
+          usage, KJ_ASSERT_NONNULL(worker->serviceName), entrypoint, KJ_ASSERT_NONNULL(props));
+    }
+
    private:
     kj::Own<WorkerService> worker;
     kj::Maybe<kj::StringPtr> entrypoint;
     const kj::HashSet<kj::String>& handlers;
-    Frankenvalue props;
+    kj::Maybe<Frankenvalue> props;
   };
 
   class ActorClassImpl final: public ActorClass {
    public:
-    ActorClassImpl(WorkerService& service, kj::StringPtr className, Frankenvalue props)
+    ActorClassImpl(WorkerService& service, kj::StringPtr className, kj::Maybe<Frankenvalue> props)
         : service(kj::addRef(service)),
           className(className),
           props(kj::mv(props)) {}
+
+    void requireAllowsTransfer() override {
+      service->requireAllowsTransfer();
+    }
 
     kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
         Worker::Actor::Id actorId,
@@ -2924,9 +3257,16 @@ class Server::WorkerService final: public Service,
       // work for local development we need to pass an event type.
       static constexpr uint16_t hibernationEventTypeId = 8;
 
+      Frankenvalue props;
+      KJ_IF_SOME(p, this->props) {
+        props = p.clone();
+      } else {
+        // Using ctx.exports class loopback without specifying props. Use empty props.
+      }
+
       return kj::refcounted<Worker::Actor>(*service->worker, tracker, kj::mv(actorId), true,
-          kj::mv(makeActorCache), className, kj::mv(makeStorage), kj::mv(loopback), timerChannel,
-          kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
+          kj::mv(makeActorCache), className, kj::mv(props), kj::mv(makeStorage), kj::mv(loopback),
+          timerChannel, kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
           kj::mv(container), facetManager);
     }
 
@@ -2937,13 +3277,40 @@ class Server::WorkerService final: public Service,
       return service->startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
     }
 
+    kj::Own<ActorClass> forProps(Frankenvalue props) override {
+      if (this->props != kj::none) {
+        // This entrypoint is already specialized. Delegate to the default implementation (which
+        // will throw an exception).
+        return ActorClass::forProps(kj::mv(props));
+      }
+
+      return kj::refcounted<ActorClassImpl>(*service, className, kj::mv(props));
+    }
+
+    kj::Array<byte> getToken(ChannelTokenUsage usage) override {
+      service->requireAllowsTransfer();
+
+      // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
+      // Unspecialized loopback entrypoints are not serializable, so if we get here we must have
+      // props.
+      return service->channelTokenHandler.encodeActorClassChannelToken(
+          usage, KJ_ASSERT_NONNULL(service->serviceName), className, KJ_ASSERT_NONNULL(props));
+    }
+
    private:
     kj::Own<WorkerService> service;
     kj::StringPtr className;
-    Frankenvalue props;
+    kj::Maybe<Frankenvalue> props;
   };
 
+  ChannelTokenHandler& channelTokenHandler;
+
+  // This service's name as defined in the original config, or null if it's a dynamic isolate.
+  // Used only for serialization.
+  kj::Maybe<kj::StringPtr> serviceName;
+
   ThreadContext& threadContext;
+  const kj::MonotonicClock& monotonicClock;
 
   // LinkedIoChannels owns the SqliteDatabase::Vfs, so make sure it is destroyed last.
   kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
@@ -2955,7 +3322,11 @@ class Server::WorkerService final: public Service,
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
+  DeleteActorsCallback deleteActorsCallback;
   kj::Maybe<kj::String> dockerPath;
+  kj::Maybe<kj::String> containerEgressInterceptorImage;
+  bool isDynamic;
+  kj::Maybe<kj::Function<void()>> abortIsolateCallback;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
@@ -3025,8 +3396,7 @@ class Server::WorkerService final: public Service,
         kj::Maybe<kj::String> cacheName,
         kj::Maybe<kj::String> cfBlobJson,
         SpanParent parentSpan)
-        : client(asHttpClient(parent.startRequest(
-              {kj::mv(cfBlobJson), TraceParentContext(kj::mv(parentSpan), nullptr)}))),
+        : client(asHttpClient(parent.startRequest({kj::mv(cfBlobJson), kj::mv(parentSpan)}))),
           cacheName(kj::mv(cacheName)),
           cacheNamespaceHeader(cacheNamespaceHeader) {}
 
@@ -3047,7 +3417,7 @@ class Server::WorkerService final: public Service,
         const kj::HttpHeaders& headers, kj::Maybe<kj::StringPtr> cacheName) {
       auto headersCopy = headers.cloneShallow();
       KJ_IF_SOME(name, cacheName) {
-        headersCopy.set(cacheNamespaceHeader, name);
+        headersCopy.setPtr(cacheNamespaceHeader, name);
       }
 
       return headersCopy;
@@ -3084,13 +3454,7 @@ class Server::WorkerService final: public Service,
     co_await context.waitForOutputLocks();
 
     auto innerReq = client->request(kj::HttpMethod::POST, urlStr, headers, requestJson.size());
-
-    struct RefcountedWrapper: public kj::Refcounted {
-      explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
-      kj::Own<kj::HttpClient> client;
-    };
-    auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
-    auto request = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
+    auto request = attachToRequest(kj::mv(innerReq), kj::refcountedWrapper(kj::mv(client)));
 
     co_await request.body->write(requestJson.asBytes())
         .attach(kj::mv(requestJson), kj::mv(request.body));
@@ -3102,13 +3466,24 @@ class Server::WorkerService final: public Service,
     co_return;
   }
 
-  kj::Own<SubrequestChannel> getSubrequestChannel(uint channel) override {
+  kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
+      kj::Maybe<Frankenvalue> props,
+      kj::Maybe<VersionRequest> versionRequest) override {
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
     KJ_REQUIRE(channel < channels.subrequest.size(), "invalid subrequest channel number");
 
-    return kj::addRef(*channels.subrequest[channel]);
+    SubrequestChannel& channelRef = *channels.subrequest[channel];
+
+    KJ_IF_SOME(p, props) {
+      // Requesting specialization of loopback (ctx.exports) entrypoint with props.
+      auto& service = KJ_REQUIRE_NONNULL(kj::dynamicDowncastIfAvailable<Service>(channelRef),
+          "referenced channel is not a loopback channel");
+      return service.forProps(kj::mv(p));
+    }
+
+    return kj::addRef(channelRef);
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel,
@@ -3116,10 +3491,23 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
-      SpanParent parentSpan) override {
+      ActorRoutingMode routingMode,
+      SpanParent parentSpan,
+      kj::Maybe<ActorVersion> version) override {
     JSG_REQUIRE(mode == ActorGetMode::GET_OR_CREATE, Error,
         "workerd only supports GET_OR_CREATE mode for getting actor stubs");
     JSG_REQUIRE(!enableReplicaRouting, Error, "workerd does not support replica routing.");
+
+    // Compile-time assert that we have considered every routing mode here.
+    switch (routingMode) {
+      case ActorRoutingMode::PRIMARY_ONLY:
+        // Workerd-only configs only supports primaries anyway.
+        break;
+      case ActorRoutingMode::DEFAULT:
+        // In workerd-only configs, DEFAULT means PRIMARY_ONLY.
+        break;
+    }
+
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
@@ -3142,22 +3530,68 @@ class Server::WorkerService final: public Service,
     return ns.getActorChannel(kj::str(id));
   }
 
-  kj::Own<ActorClassChannel> getActorClass(uint channel) override {
+  kj::Own<ActorClassChannel> getActorClass(uint channel, kj::Maybe<Frankenvalue> props) override {
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
     KJ_REQUIRE(channel < channels.actorClass.size(), "invalid actor class channel number");
 
-    return kj::addRef(*channels.actorClass[channel]);
+    ActorClass& cls = *channels.actorClass[channel];
+
+    KJ_IF_SOME(p, props) {
+      return cls.forProps(kj::mv(p));
+    }
+
+    return kj::addRef(cls);
   }
 
   void abortAllActors(kj::Maybe<kj::Exception&> reason) override {
     abortActorsCallback(reason);
   }
 
+  void deleteAllActors(kj::Maybe<kj::Exception&> reason) override {
+    deleteActorsCallback(reason);
+  }
+
+  // For now, in workerd just abort the process for non-dynamic workers.
+  void abortIsolate(kj::StringPtr reason) noexcept override {
+    KJ_IF_SOME(cb, abortIsolateCallback) {
+      // Removes the isolate from the isolates map.
+      //
+      // TODO: Should abort all outstanding calls to the isolate causing them to
+      // throw the reason as the error.
+      cb();
+    } else {
+      // Otherwise, abort the process. Throwing from a noexcept function will call
+      // std::terminate, which produces a nicer error message than ::abort().
+      if (reason == nullptr) {
+        KJ_FAIL_REQUIRE("abortIsolate() called, terminating process");
+      } else {
+        KJ_FAIL_REQUIRE("abortIsolate() called, terminating process", reason);
+      }
+    }
+  }
+
   kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
-      kj::String name,
+      kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override;
+
+  kj::Network& getWorkerdDebugPortNetwork() override {
+    auto& channels =
+        KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+    return KJ_REQUIRE_NONNULL(channels.workerdDebugPortNetwork,
+        "workerdDebugPort binding is not enabled for this worker");
+  }
+
+  kj::Own<SubrequestChannel> subrequestChannelFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) override {
+    return channelTokenHandler.decodeSubrequestChannelToken(usage, token);
+  }
+
+  kj::Own<ActorClassChannel> actorClassFromToken(
+      ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) override {
+    return channelTokenHandler.decodeActorClassChannelToken(usage, token);
+  }
 
   // ---------------------------------------------------------------------------
   // implements TimerChannel
@@ -3166,12 +3600,20 @@ class Server::WorkerService final: public Service,
     // Nothing to do
   }
 
-  kj::Date now() override {
+  kj::Date now(kj::Maybe<kj::Date>) override {
     return kj::systemPreciseCalendarClock().now();
   }
 
   kj::Promise<void> atTime(kj::Date when) override {
-    return threadContext.getUnsafeTimer().afterDelay(when - now());
+    auto delay = when - now(kj::none);
+    // We can't use `afterDelay(delay)` here because kj::Timer::afterDelay() is equivalent to
+    // `atTime(timer.now() + delay)`, and kj::Timer::now() only advances when the event loop
+    // polls for I/O. If JavaScript executed for a significant amount of time since the last
+    // poll (e.g. compiling/running a script before the first setTimeout), timer.now() will be
+    // stale and the delay will effectively be shortened by that staleness, causing the timer
+    // to fire too early. Instead, we compute the target time using a fresh reading from the
+    // monotonic clock so the delay is measured from the actual present.
+    return threadContext.getUnsafeTimer().atTime(monotonicClock.now() + delay);
   }
 
   kj::Promise<void> afterLimitTimeout(kj::Duration t) override {
@@ -3208,10 +3650,14 @@ class Server::WorkerService final: public Service,
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
+  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
     return 0 * kj::SECONDS;
+  }
+  size_t getSqliteMemoryUsage() const override {
+    return 0;
   }
 };
 
@@ -3239,8 +3685,20 @@ struct FutureActorChannel {
 };
 
 struct FutureActorClassChannel {
-  config::ServiceDesignator::Reader designator;
+  kj::OneOf<config::ServiceDesignator::Reader, kj::Own<Server::ActorClass>> designator;
   kj::String errorContext;
+
+  kj::Own<Server::ActorClass> lookup(Server& server) && {
+    KJ_SWITCH_ONEOF(designator) {
+      KJ_CASE_ONEOF(conf, config::ServiceDesignator::Reader) {
+        return server.lookupActorClass(conf, kj::mv(errorContext));
+      }
+      KJ_CASE_ONEOF(channel, kj::Own<Server::ActorClass>) {
+        return kj::mv(channel);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
 };
 
 struct FutureWorkerLoaderChannel {
@@ -3256,6 +3714,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     kj::Vector<FutureActorChannel>& actorChannels,
     kj::Vector<FutureActorClassChannel>& actorClassChannels,
     kj::Vector<FutureWorkerLoaderChannel>& workerLoaderChannels,
+    bool& hasWorkerdDebugPortBinding,
     kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
     bool experimental) {
   // creates binding object or returns null and reports an error
@@ -3389,7 +3848,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::SERVICE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getService(), kj::mv(errorContext)});
       return makeGlobal(
           Global::Fetcher{.channel = channel, .requiresHost = true, .isInHouse = false});
@@ -3423,7 +3883,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
         });
       }
 
-      uint channel = (uint)actorChannels.size();
+      uint channel = static_cast<uint>(actorChannels.size());
       actorChannels.add(FutureActorChannel{actorBinding, kj::mv(errorContext)});
 
       KJ_SWITCH_ONEOF(*actorConfig) {
@@ -3440,27 +3900,31 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::KV_NAMESPACE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getKvNamespace(), kj::mv(errorContext)});
 
-      return makeGlobal(Global::KvNamespace{.subrequestChannel = channel});
+      return makeGlobal(Global::KvNamespace{
+        .subrequestChannel = channel, .bindingName = kj::str(binding.getName())});
     }
 
     case config::Worker::Binding::R2_BUCKET: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getR2Bucket(), kj::mv(errorContext)});
-      return makeGlobal(Global::R2Bucket{.subrequestChannel = channel});
+      return makeGlobal(Global::R2Bucket{.subrequestChannel = channel,
+        .bucket = kj::str(binding.getR2Bucket().getName()),
+        .bindingName = kj::str(binding.getName())});
     }
 
-    case config::Worker::Binding::R2_ADMIN: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
-      subrequestChannels.add(FutureSubrequestChannel{binding.getR2Admin(), kj::mv(errorContext)});
-      return makeGlobal(Global::R2Admin{.subrequestChannel = channel});
-    }
+    case config::Worker::Binding::OBSOLETE0:
+      errorReporter.addError(kj::str(errorContext, " uses an obsolete binding type."));
+      return kj::none;
 
     case config::Worker::Binding::QUEUE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getQueue(), kj::mv(errorContext)});
 
       return makeGlobal(Global::QueueBinding{.subrequestChannel = channel});
@@ -3472,8 +3936,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
         KJ_IF_SOME(global,
             createBinding(workerName, conf, innerBinding, errorReporter, subrequestChannels,
-                actorChannels, actorClassChannels, workerLoaderChannels, actorConfigs,
-                experimental)) {
+                actorChannels, actorClassChannels, workerLoaderChannels, hasWorkerdDebugPortBinding,
+                actorConfigs, experimental)) {
           innerGlobals.add(kj::mv(global));
         } else {
           // we've already communicated the error
@@ -3505,7 +3969,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
             "You must run workerd with `--experimental` to use this feature."));
       }
 
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getAnalyticsEngine(), kj::mv(errorContext)});
 
@@ -3516,7 +3981,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       });
     }
     case config::Worker::Binding::HYPERDRIVE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getHyperdrive().getDesignator(), kj::mv(errorContext)});
       return makeGlobal(Global::Hyperdrive{
@@ -3599,6 +4065,18 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       workerLoaderChannels.add(kj::mv(channel));
       return makeGlobal(Global::WorkerLoader{.channel = channelNumber});
     }
+
+    case config::Worker::Binding::WORKERD_DEBUG_PORT: {
+      if (!experimental) {
+        errorReporter.addError(kj::str(
+            "workerdDebugPort bindings are an experimental feature which may change or go away "
+            "in the future. You must run workerd with `--experimental` to use this feature."));
+        return kj::none;
+      }
+
+      hasWorkerdDebugPortBinding = true;
+      return makeGlobal(Global::WorkerdDebugPort{});
+    }
   }
   errorReporter.addError(kj::str(errorContext,
       "has unrecognized type. Was the config compiled with a newer version of "
@@ -3627,6 +4105,25 @@ void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
   }
 }
 
+void Server::deleteAllActors(kj::Maybe<const kj::Exception&> reason) {
+  for (auto& service: services) {
+    if (WorkerService* worker = dynamic_cast<WorkerService*>(&*service.value)) {
+      for (auto& [className, ns]: worker->getActorNamespaces()) {
+        bool isEvictable = true;
+        KJ_SWITCH_ONEOF(ns->getConfig()) {
+          KJ_CASE_ONEOF(c, Durable) {
+            isEvictable = c.isEvictable;
+          }
+          KJ_CASE_ONEOF(c, Ephemeral) {
+            isEvictable = c.isEvictable;
+          }
+        }
+        if (isEvictable) ns->deleteAll(reason);
+      }
+    }
+  }
+}
+
 // WorkerDef is an intermediate representation of everything from `config::Worker::Reader` that
 // `Server::makeWorkerImpl()` needs. Similar to `WorkerSource`, we factor out this intermediate
 // representation so that we can potentially build it dynamically from input that isn't a
@@ -3636,6 +4133,7 @@ struct Server::WorkerDef {
   WorkerSource source;
   kj::Maybe<kj::StringPtr> moduleFallback;
   const kj::HashMap<kj::String, ActorConfig>& localActorConfigs;
+  bool isDynamic;
 
   FutureSubrequestChannel globalOutbound;
   kj::Maybe<FutureSubrequestChannel> cacheApiOutbound;
@@ -3643,6 +4141,7 @@ struct Server::WorkerDef {
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
+  bool hasWorkerdDebugPortBinding = false;
   kj::Array<FutureSubrequestChannel> tails;
   kj::Array<FutureSubrequestChannel> streamingTails;
 
@@ -3657,6 +4156,14 @@ struct Server::WorkerDef {
   // constructed in a vastly different way for dynamically-loaded workers.
   kj::Function<void(jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target)>
       compileBindings;
+
+  // If the WorkerDef was created from a DymamicWorkerSource and that
+  // source contains a clone of the source bundle, this will take ownership.
+  kj::Maybe<kj::Own<void>> maybeOwnedSourceCode;
+
+  // Callback invoked when abortIsolate() is called. Used by dynamic workers to remove
+  // themselves from the loader's isolate map.
+  kj::Maybe<kj::Function<void()>> abortIsolateCallback;
 };
 
 class Server::WorkerLoaderNamespace: public kj::Refcounted {
@@ -3672,19 +4179,36 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
   }
 
   kj::Own<WorkerStubChannel> loadIsolate(
-      kj::String name, kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
-    return isolates
-        .findOrCreate(name,
-            [&]() -> decltype(isolates)::Entry {
-      // This name isn't actually used in any maps nor is it ever revealed back to the app, but it
-      // may be used in error logs.
-      auto isolateName = kj::str(namespaceName, ':', name);
+      kj::Maybe<kj::String> name, kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
+    KJ_IF_SOME(n, name) {
+      return isolates
+          .findOrCreate(n,
+              [&]() -> decltype(isolates)::Entry {
+        // This name isn't actually used in any maps nor is it ever revealed back to the app, but it
+        // may be used in error logs.
+        auto isolateName = kj::str(namespaceName, ':', n);
 
-      return {.key = kj::mv(name),
-        .value = kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::mv(fetchSource))};
-    })
-        .addRef()
-        .toOwn();
+        // On abort, remove the entry from this namespace's isolates map so
+        // subsequent loadIsolate() calls with the same name will create a fresh
+        // isolate.
+        kj::Function<void()> onAborted = [this, mapKey = kj::str(n)]() { removeIsolate(mapKey); };
+
+        return {.key = kj::mv(n),
+          .value = kj::rc<WorkerStubImpl>(
+              server, kj::mv(isolateName), kj::mv(onAborted), kj::mv(fetchSource))};
+      })
+          .addRef()
+          .toOwn();
+    } else {
+      auto isolateName = kj::str(namespaceName, ":dynamic:", randomUUID(server.entropySource));
+      return kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::none, kj::mv(fetchSource))
+          .toOwn();
+    }
+  }
+
+  void removeIsolate(kj::StringPtr name) {
+    // This is called by abortIsolate()
+    isolates.erase(name);
   }
 
  private:
@@ -3701,16 +4225,33 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           "This worker is not permitted to access the internet via global functions like fetch(). "
           "It must use capabilities (such as bindings in 'env') to talk to the outside world.");
     }
+
+    void requireAllowsTransfer() override {
+      // It's difficult to get here, because the null outbound is not normally something you can
+      // reference. That said, it is possible to get a `Fetcher` representing the `next` outbound
+      // by pulling it off an incoming `Request` object, and in practice that points to the same
+      // thing as the null outbound. You could then try to transfer it.
+      //
+      // We disallow this for now because it's not clear why it would be needed. That said, if it
+      // is needed for some reason, it wouldn't be hard to support. But we might want to change
+      // the error message it throws from startRequest(), since the error would be somewhat
+      // misleading after the channel has been transferred.
+      JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
+    }
   };
 
-  class WorkerStubImpl final: public WorkerStubChannel,
-                              public kj::Refcounted,
-                              public kj::EnableAddRefToThis<WorkerStubImpl> {
+  class WorkerStubImpl final: public WorkerStubChannel, public kj::Refcounted {
    public:
     WorkerStubImpl(Server& server,
         kj::String isolateName,
+        kj::Maybe<kj::Function<void()>> onAborted,
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource)
-        : startupTask(start(server, kj::mv(isolateName), kj::mv(fetchSource)).fork()) {}
+        : onAborted(kj::mv(onAborted)),
+          startupTask(start(server, kj::mv(isolateName), kj::mv(fetchSource)).fork()) {}
+
+    ~WorkerStubImpl() {
+      unlink();
+    }
 
     void unlink() {
       KJ_IF_SOME(s, service) {
@@ -3719,29 +4260,73 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
     }
 
     kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
-        kj::Maybe<kj::String> name, Frankenvalue props) override {
+        kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
       return kj::refcounted<SubrequestChannelImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
     }
 
     kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
-        kj::Maybe<kj::String> name, Frankenvalue props) override {
+        kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
       return kj::refcounted<ActorClassImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
     }
 
    private:
+    // Callback to remove the worker stub from the isolates map. None for
+    // unnamed dynamic isolates.
+    kj::Maybe<kj::Function<void()>> onAborted;
+
     kj::Maybe<kj::Own<WorkerService>> service;  // null if still starting up
     kj::ForkedPromise<void> startupTask;        // resolves when `service` is non-null
+
+    void onAbortIsolate() {
+      KJ_IF_SOME(cb, onAborted) {
+        auto callback = kj::mv(cb);
+        onAborted = kj::none;
+        callback();
+      }
+    }
 
     kj::Promise<void> start(Server& server,
         kj::String isolateName,
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
       auto source = co_await fetchSource();
       static const kj::HashMap<kj::String, ActorConfig> EMPTY_ACTOR_CONFIGS;
+
+      // Rewrite the capabilities in `env` in order to build the I/O channel table.
+      kj::Vector<FutureSubrequestChannel> subrequestChannels;
+      kj::Vector<FutureActorClassChannel> actorClassChannels;
+      source.env.rewriteCaps([&](kj::Own<Frankenvalue::CapTableEntry> entry) {
+        if (auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(entry.get())) {
+          uint channelNumber =
+              subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+          subrequestChannels.add(FutureSubrequestChannel{
+            .designator = kj::addRef(*channel),
+            .errorContext = kj::str("Worker's env"),
+          });
+          return kj::heap<IoChannelCapTableEntry>(
+              IoChannelCapTableEntry::SUBREQUEST, channelNumber);
+        } else if (auto channel = dynamic_cast<ActorClass*>(entry.get())) {
+          uint channelNumber = actorClassChannels.size();
+          actorClassChannels.add(FutureActorClassChannel{
+            .designator = kj::addRef(*channel),
+            .errorContext = kj::str("Worker's env"),
+          });
+          return kj::heap<IoChannelCapTableEntry>(
+              IoChannelCapTableEntry::ACTOR_CLASS, channelNumber);
+        } else {
+          // Generally, it shouldn't be possible to get here, but just in case, let's at least
+          // provide some sort of error, although it's a vague one.
+          JSG_FAIL_REQUIRE(DOMDataCloneError,
+              "Dynamic 'env' contains one or more objects that are not supported for use in "
+              "'env', although they would be supported in 'props'.");
+        }
+      });
+
       WorkerDef def{
         .featureFlags = source.compatibilityFlags,
         .source = kj::mv(source.source),
         .moduleFallback = kj::none,
         .localActorConfigs = EMPTY_ACTOR_CONFIGS,
+        .isDynamic = true,
 
         // clang-format off
         .globalOutbound{
@@ -3750,10 +4335,36 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           .errorContext = kj::str("Worker's globalOutbound"),
         },
 
+        .subrequestChannels = kj::mv(subrequestChannels),
+        .actorClassChannels = kj::mv(actorClassChannels),
+
+        .tails = KJ_MAP(tail, source.tails) -> FutureSubrequestChannel {
+          return {
+            .designator = kj::mv(tail),
+            .errorContext = kj::str("Worker's tail"),
+          };
+        },
+        .streamingTails = KJ_MAP(tail, source.streamingTails) -> FutureSubrequestChannel {
+          return {
+            .designator = kj::mv(tail),
+            .errorContext = kj::str("Worker's streaming tail"),
+          };
+        },
+
         .compileBindings = [env = kj::mv(source.env)](
-            jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) {
+            jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) mutable {
           env.populateJsObject(js, jsg::JsObject(target));
         },
+
+        // Note here that we always keep the ownContent from the source, even if
+        // ownContentIsRpcResponse is true. This is safe in workerd because we
+        // are single-threaded here and we don't need to worry about the cross-thread
+        // ownership issues. For the downstream use, however, we need to be careful
+        // to not copy the ownContent if it is an RPC response.
+        .maybeOwnedSourceCode = kj::mv(source.ownContent),
+        // The callback is owned by the WorkerService, which is owned by `this`, so a raw
+        // pointer is safe.
+        .abortIsolateCallback = kj::Function<void()>([this]() { onAbortIsolate(); }),
         // clang-format on
       };
 
@@ -3779,13 +4390,20 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
       kj::Own<WorkerInterface> startRequest(
           IoChannelFactory::SubrequestMetadata metadata) override {
         if (isolate->service == kj::none) {
-          return newPromisedWorkerInterface(
-              isolate->startupTask.addBranch().then([this, metadata = kj::mv(metadata)]() mutable {
-            return startRequestImpl(kj::mv(metadata));
+          // Capture a refcounted reference rather than a raw `this` pointer so that the
+          // SubrequestChannelImpl is kept alive until the startup task resolves, even if the
+          // owning Fetcher is garbage-collected while the deferred promise is pending.
+          return newPromisedWorkerInterface(isolate->startupTask.addBranch().then(
+              [self = kj::addRef(*this), metadata = kj::mv(metadata)]() mutable {
+            return self->startRequestImpl(kj::mv(metadata));
           }));
         } else {
           return startRequestImpl(kj::mv(metadata));
         }
+      }
+
+      void requireAllowsTransfer() override {
+        throwDynamicEntrypointTransferError();
       }
 
      private:
@@ -3801,7 +4419,17 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           entrypointService = service->getEntrypoint(entrypointName, kj::mv(props));
         }
         KJ_IF_SOME(ep, entrypointService) {
-          return ep->startRequest(kj::mv(metadata));
+          // Attach a refcounted reference to `this` (SubrequestChannelImpl) to the returned
+          // WorkerInterface. This keeps the SubrequestChannelImpl alive for the duration of
+          // the request, which in turn keeps the WorkerStubImpl alive (via Rc), preventing
+          // WorkerStubImpl::unlink() from destroying the WorkerService's I/O channels while
+          // the request's IoContext still holds raw pointers to the WorkerService.
+          //
+          // Without this, if the JS Fetcher object is garbage-collected mid-request (e.g.
+          // because it was a temporary expression), the SubrequestChannelImpl is destroyed,
+          // the WorkerStubImpl refcount drops to zero, unlink() clears the WorkerService's
+          // LinkedIoChannels, and the child worker's IoContext crashes accessing them.
+          return ep->startRequest(kj::mv(metadata)).attach(kj::addRef(*this));
         } else {
           KJ_IF_SOME(en, entrypointName) {
             JSG_FAIL_REQUIRE(Error, "Worker has no such entrypoint: ", en);
@@ -3820,6 +4448,10 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
             entrypointName(kj::mv(entrypointName)),
             props(kj::mv(props)) {}
 
+      void requireAllowsTransfer() override {
+        throwDynamicEntrypointTransferError();
+      }
+
       kj::Maybe<kj::Promise<void>> whenReady() override {
         if (inner != kj::none) return kj::none;
 
@@ -3828,11 +4460,13 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           return kj::none;
         }
 
-        // Have to wait for the isolate to start up.
-        return isolate->startupTask.addBranch().then([this]() {
-          if (inner == kj::none) {
-            inner =
-                KJ_ASSERT_NONNULL(isolate->service)->getActorClass(entrypointName, kj::mv(props));
+        // Have to wait for the isolate to start up. Capture a refcounted reference rather than
+        // a raw `this` pointer so that the ActorClassImpl stays alive until the startup task
+        // resolves, even if the owning object is garbage-collected while waiting.
+        return isolate->startupTask.addBranch().then([self = kj::addRef(*this)]() mutable {
+          if (self->inner == kj::none) {
+            self->inner = KJ_ASSERT_NONNULL(self->isolate->service)
+                              ->getActorClass(self->entrypointName, kj::mv(self->props));
           }
         });
       }
@@ -3880,7 +4514,7 @@ void Server::unlinkWorkerLoaders() {
 }
 
 kj::Own<WorkerStubChannel> Server::WorkerService::loadIsolate(uint loaderChannel,
-    kj::String name,
+    kj::Maybe<kj::String> name,
     kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
   auto& channels =
       KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
@@ -3901,7 +4535,19 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   // TODO(beta): Factor out FeatureFlags from WorkerBundle.
   auto featureFlags = arena.initRoot<CompatibilityFlags>();
 
-  if (conf.hasCompatibilityDate()) {
+  KJ_IF_SOME(overrideDate, testCompatibilityDateOverride) {
+    // When testCompatibilityDateOverride is set, the config must NOT specify compatibilityDate.
+    if (conf.hasCompatibilityDate()) {
+      errorReporter.addError(kj::str(
+          "Worker specifies compatibilityDate but --compat-date was provided. "
+          "When using --compat-date, workers must not specify compatibilityDate in the config. "
+          "Use compatibilityFlags to enable/disable specific flags if needed."));
+    }
+    // Use FUTURE_FOR_TEST to allow any valid date (including far future like 2999-12-31)
+    // without validation against CODE_VERSION or current date.
+    compileCompatibilityFlags(overrideDate, conf.getCompatibilityFlags(), featureFlags,
+        errorReporter, experimental, CompatibilityDateValidation::FUTURE_FOR_TEST);
+  } else if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(),
         featureFlags, errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION);
   } else {
@@ -3912,13 +4558,15 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
   kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
+  bool hasWorkerdDebugPortBinding = false;
 
   auto confBindings = conf.getBindings();
   kj::Vector<WorkerdApi::Global> globals(confBindings.size());
   for (auto binding: confBindings) {
     KJ_IF_SOME(global,
         createBinding(name, conf, binding, errorReporter, subrequestChannels, actorChannels,
-            actorClassChannels, workerLoaderChannels, actorConfigs, experimental)) {
+            actorClassChannels, workerLoaderChannels, hasWorkerdDebugPortBinding, actorConfigs,
+            experimental)) {
       globals.add(kj::mv(global));
     }
   }
@@ -3926,9 +4574,10 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   // Construct `WorkerDef` from `conf`.
   WorkerDef def{
     .featureFlags = featureFlags.asReader(),
-    .source = WorkerdApi::extractSource(name, conf, errorReporter),
+    .source = WorkerdApi::extractSource(name, conf, featureFlags.asReader(), errorReporter),
     .moduleFallback = conf.hasModuleFallback() ? kj::some(conf.getModuleFallback()) : kj::none,
     .localActorConfigs = localActorConfigs,
+    .isDynamic = false,
 
     .globalOutbound{
       .designator = conf.getGlobalOutbound(),
@@ -3946,25 +4595,26 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     .actorChannels = kj::mv(actorChannels),
     .actorClassChannels = kj::mv(actorClassChannels),
     .workerLoaderChannels = kj::mv(workerLoaderChannels),
+    .hasWorkerdDebugPortBinding = hasWorkerdDebugPortBinding,
 
+    // clang-format off
     .tails = KJ_MAP(tail, conf.getTails()) -> FutureSubrequestChannel {
-    return {
-      .designator = tail,
-      .errorContext = kj::str("Worker \"", name, "\"'s tails"),
-    };
-  },
+      return {
+        .designator = tail,
+        .errorContext = kj::str("Worker \"", name, "\"'s tails"),
+      };
+    },
 
     .streamingTails = KJ_MAP(streamingTail, conf.getStreamingTails()) -> FutureSubrequestChannel {
-    return {
-      .designator = streamingTail,
-      .errorContext = kj::str("Worker \"", name, "\"'s streaming tails"),
-    };
-  },
+      return {
+        .designator = streamingTail,
+        .errorContext = kj::str("Worker \"", name, "\"'s streaming tails"),
+      };
+    },
 
     .actorStorageConf = conf.getDurableObjectStorage(),
     .containerEngineConf = conf.getContainerEngine(),
 
-    // clang-format off
     .compileBindings = [globals = kj::mv(globals)](
         jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
       return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);
@@ -3993,8 +4643,19 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // config. So for now this just uses the defaults.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
 
-  kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
-  if (def.featureFlags.getNewModuleRegistry()) {
+  // TODO(soon): Either make python workers support the new module registry before
+  // NMR is defaulted on, or disable NMR by default when python workers are enabled.
+  // While NMR is experimental, we'll just throw an error if both are enabled.
+  if (def.featureFlags.getPythonWorkers()) {
+    KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(),
+        "Python workers do not currently support the new ModuleRegistry implementation. "
+        "Please disable the new ModuleRegistry feature flag to use Python workers.");
+  }
+
+  bool usingNewModuleRegistry = def.featureFlags.getNewModuleRegistry();
+  kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
+  // TODO(soon): Python workers do not currently support the new module registry.
+  if (usingNewModuleRegistry) {
     KJ_REQUIRE(experimental,
         "The new ModuleRegistry implementation is an experimental feature. "
         "You must run workerd with `--experimental` to use this feature.");
@@ -4019,7 +4680,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
         ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
         : ArtifactBundler::makeDisabledBundler();
 
-    newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver,
+    newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(*jsgobserver,
         def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags, pythonConfig,
         bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler));
   }
@@ -4027,20 +4688,20 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   auto isolateGroup = v8::IsolateGroup::GetDefault();
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig, kj::mv(newModuleRegistry), kj::mv(workerFs));
+      pythonConfig);
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
+  Worker::LoggingOptions isolateLoggingOptions = loggingOptions;
+  isolateLoggingOptions.consoleMode =
+      def.source.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
+      ? Worker::ConsoleMode::INSPECTOR_ONLY
+      : loggingOptions.consoleMode;
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
-      kj::mv(limitEnforcer), inspectorPolicy,
-      def.source.variant.is<WorkerSource::ScriptSource>() &&
-              !def.featureFlags.getNewModuleRegistry()
-          ? Worker::ConsoleMode::INSPECTOR_ONLY
-          : consoleMode,
-      structuredLogging);
+      kj::mv(limitEnforcer), inspectorPolicy, kj::mv(isolateLoggingOptions));
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
@@ -4048,7 +4709,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     isolateRegistrar->registerIsolate(name, isolate.get());
   }
 
-  if (!def.featureFlags.getNewModuleRegistry()) {
+  if (!usingNewModuleRegistry) {
     KJ_IF_SOME(moduleFallback, def.moduleFallback) {
       KJ_REQUIRE(experimental,
           "The module fallback service is an experimental feature. "
@@ -4057,20 +4718,22 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       // to load certain modules from a fallback service. This is generally intended for local
       // dev/testing purposes only.
       auto& apiIsolate = isolate->getApi();
+      auto fallbackClient =
+          kj::heap<workerd::fallback::FallbackServiceClient>(kj::str(moduleFallback));
       apiIsolate.setModuleFallbackCallback(
-          [address = kj::str(moduleFallback), featureFlags = apiIsolate.getFeatureFlags()](
+          [client = kj::mv(fallbackClient), featureFlags = apiIsolate.getFeatureFlags()](
               jsg::Lock& js, kj::StringPtr specifier, kj::Maybe<kj::String> referrer,
               jsg::CompilationObserver& observer, jsg::ModuleRegistry::ResolveMethod method,
               kj::Maybe<kj::StringPtr> rawSpecifier) mutable
           -> kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>> {
         kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
         KJ_IF_SOME(moduleOrRedirect,
-            workerd::fallback::tryResolve(workerd::fallback::Version::V1,
+            client->tryResolve(workerd::fallback::Version::V1,
                 method == jsg::ModuleRegistry::ResolveMethod::IMPORT
                     ? workerd::fallback::ImportType::IMPORT
                     : workerd::fallback::ImportType::REQUIRE,
-                address, specifier, rawSpecifier.orDefault(nullptr),
-                referrer.orDefault(kj::String()), attributes)) {
+                specifier, rawSpecifier.orDefault(nullptr), referrer.orDefault(kj::String()),
+                attributes)) {
           KJ_SWITCH_ONEOF(moduleOrRedirect) {
             KJ_CASE_ONEOF(redirect, kj::String) {
               // If a string is returned, then the fallback service returned a 301 redirect.
@@ -4099,23 +4762,25 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       : ArtifactBundler::makeDisabledBundler();
 
   auto script = isolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
-      SpanParent(nullptr), false, errorReporter, kj::mv(artifactBundler));
+      SpanParent(nullptr), workerFs.attach(kj::mv(def.maybeOwnedSourceCode)), false, errorReporter,
+      kj::mv(artifactBundler), kj::mv(newModuleRegistry));
 
   using Global = WorkerdApi::Global;
   jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
-  auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
-      [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
-          v8::Local<v8::Object> ctxExports) {
+  auto compileBindings = [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
+                             v8::Local<v8::Object> ctxExports) {
     // We can't fill in ctx.exports yet because we need to run the validator first to discover
     // entrypoints, which we cannot do until after the Worker constructor completes. We are
     // permitted to hold a handle until then, though.
     ctxExportsHandle = lock.v8Ref(ctxExports);
 
     return def.compileBindings(lock, api, target);
-  },
-      IsolateObserver::StartType::COLD,
-      TraceParentContext(nullptr, nullptr),  // systemTracer -- TODO(beta): factor out
+  };
+  auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
+      kj::mv(compileBindings), IsolateObserver::StartType::COLD, SpanParent(nullptr),
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
+
+  uint totalActorChannels = 0;
 
   worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
     lock.validateHandlers(errorReporter);
@@ -4130,33 +4795,57 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
         def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
     if (errorReporter.defaultEntrypoint != kj::none) {
       ctxExports.add(Global{.name = kj::str("default"),
-        .value = Global::Fetcher{
-          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+        .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
     }
     for (auto& ep: errorReporter.namedEntrypoints) {
-      ctxExports.add(Global{.name = kj::str(ep.key),
-        .value = Global::Fetcher{
-          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+      // Workflow classes are treated as stateless entrypoints for runtime purposes, but should
+      // NOT be reflected in ctx.exports.
+      // TODO(someday): Currently Workflows must be given a name independent of their class name,
+      //   and the binding must reference that name. If the name were just the class name -- like
+      //   Durable Object namespaces -- then we could put a `Workflow` binding into `ctx.exports`.
+      if (!errorReporter.workflowClasses.contains(ep.key)) {
+        ctxExports.add(Global{.name = kj::str(ep.key),
+          .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
+      }
     }
 
-    // Start numbering loopback channels for actor classes after the last actor channel used by
-    // bindings.
+    // Start numbering loopback channels for actor classes after the last actor channel and actor
+    // class channel used by bindings. Note that every exported actor class will have a ctx.exports
+    // entry, but only the ones that have storage configured will be namespace bindings; the others
+    // will be simply actor class bindings, which can be used with facets. We will iterate over
+    // the exported class names and cross-reference with the storage config. Note that if the
+    // storage config contains a class name that isn't among the exports, we won't create a
+    // ctx.exports entry for it (it wouldn't work anyway).
     uint nextActorChannel = def.actorChannels.size();
-    for (auto& ns: def.localActorConfigs) {
+    uint nextActorClassChannel = def.actorClassChannels.size();
+    for (auto& className: errorReporter.actorClasses) {
+      uint actorClassChannel = nextActorClassChannel++;
+
       decltype(Global::value) value;
-      KJ_SWITCH_ONEOF(ns.value) {
-        KJ_CASE_ONEOF(durable, Durable) {
-          value = Global::DurableActorNamespace{
-            .actorChannel = nextActorChannel++, .uniqueKey = durable.uniqueKey};
+      KJ_IF_SOME(ns, def.localActorConfigs.find(className)) {
+        // This class has storage attached. We'll create a loopback actor namespace binding.
+        KJ_SWITCH_ONEOF(ns) {
+          KJ_CASE_ONEOF(durable, Durable) {
+            value = Global::LoopbackDurableActorNamespace{
+              .actorChannel = nextActorChannel++,
+              .uniqueKey = durable.uniqueKey,
+              .classChannel = actorClassChannel,
+            };
+          }
+          KJ_CASE_ONEOF(ephemeral, Ephemeral) {
+            value = Global::LoopbackEphemeralActorNamespace{
+              .actorChannel = nextActorChannel++,
+              .classChannel = actorClassChannel,
+            };
+          }
         }
-        KJ_CASE_ONEOF(ephemeral, Ephemeral) {
-          value = Global::EphemeralActorNamespace{
-            .actorChannel = nextActorChannel++,
-          };
-        }
+      } else {
+        // No storage attached. We'll create an actual class binding (for use with facets).
+        value = Global::LoopbackActorClass{.channel = actorClassChannel};
       }
-      ctxExports.add(Global{.name = kj::str(ns.key), .value = kj::mv(value)});
+      ctxExports.add(Global{.name = kj::str(className), .value = kj::mv(value)});
     }
+    totalActorChannels = nextActorChannel;
 
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
       WorkerdApi::from(worker->getIsolate().getApi())
@@ -4167,11 +4856,15 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     { auto drop = kj::mv(ctxExportsHandle); }
   });
 
-  auto linkCallback = [this, def = kj::mv(def)](WorkerService& workerService,
+  // Extract abortIsolateCallback before moving def into linkCallback lambda
+  auto abortIsolateCallback = kj::mv(def.abortIsolateCallback);
+
+  auto linkCallback = [this, def = kj::mv(def), totalActorChannels](WorkerService& workerService,
                           Worker::ValidationErrorReporter& errorReporter) mutable {
-    WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
+    WorkerService::LinkedIoChannels result;
 
     auto entrypointNames = workerService.getEntrypointNames();
+    auto actorClassNames = workerService.getActorClassNames();
 
     auto services = kj::heapArrayBuilder<kj::Own<IoChannelFactory::SubrequestChannel>>(
         def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT +
@@ -4193,29 +4886,24 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     // in exactyl the same order as the channels were allocated earlier when we compiled the
     // ctx.exports bindings.
     if (workerService.hasDefaultEntrypoint()) {
-      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(/*name=*/kj::none, /*props=*/{})));
+      services.add(workerService.getLoopbackEntrypoint(/*name=*/kj::none));
     }
     for (auto& ep: entrypointNames) {
-      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(ep, /*props=*/{})));
+      services.add(workerService.getLoopbackEntrypoint(ep));
     }
 
     result.subrequest = services.finish();
 
     // Set up actor class channels
-    auto actorClasses = kj::heapArrayBuilder<kj::Own<ActorClass>>(def.actorClassChannels.size());
+    auto actorClasses = kj::heapArrayBuilder<kj::Own<ActorClass>>(
+        def.actorClassChannels.size() + actorClassNames.size());
 
     for (auto& channel: def.actorClassChannels) {
-      actorClasses.add(lookupActorClass(channel.designator, kj::mv(channel.errorContext)));
+      actorClasses.add(kj::mv(channel).lookup(*this));
     }
 
-    // TODO(facets): Implement self-referential actor classes (i.e. in ctx.exports). What about
-    //   classes that actually have a namespace defined? Can the self-referential namespace binding
-    //   also be used as a class binding?
-
-    result.actorClass = actorClasses.finish();
-
-    auto linkedActorChannels = kj::heapArrayBuilder<kj::Maybe<WorkerService::ActorNamespace&>>(
-        def.actorChannels.size() + def.localActorConfigs.size());
+    auto linkedActorChannels =
+        kj::heapArrayBuilder<kj::Maybe<WorkerService::ActorNamespace&>>(totalActorChannels);
 
     for (auto& channel: def.actorChannels) {
       WorkerService* targetService = &workerService;
@@ -4240,15 +4928,19 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     // Link the ctx.exports self-referential actor channels. Again, it's important that these
     // be added in the same order as before. kj::HashMap iteration order is deterministic, and
     // is exactly insertion order as long as no entries have been removed, so we can expect that
-    // `workerService.getActorNamespaces()` iterates in the same order as `localActorConfigs` did
-    // earlier.
+    // `workerService.getActorClassNames()` iterates in the same order as
+    // `errorReporter.actorClasses` did earlier. As before, every exported class gets an actor
+    // class channel, but only the ones with configured storage will also get namespace channels.
     auto& selfActorNamespaces = workerService.getActorNamespaces();
-    KJ_ASSERT(selfActorNamespaces.size() == def.localActorConfigs.size());
-    for (auto& ns: selfActorNamespaces) {
-      linkedActorChannels.add(*ns.value);
+    for (auto& className: actorClassNames) {
+      actorClasses.add(workerService.getLoopbackActorClass(className));
+      KJ_IF_SOME(ns, selfActorNamespaces.find(className)) {
+        linkedActorChannels.add(*ns);
+      }
     }
 
     result.actor = linkedActorChannels.finish();
+    result.actorClass = actorClasses.finish();
 
     KJ_IF_SOME(out, def.cacheApiOutbound) {
       result.cache = kj::mv(out).lookup(*this);
@@ -4274,24 +4966,6 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       }
     }
 
-    kj::HashMap<kj::StringPtr, WorkerService::ActorNamespace&> durableNamespacesByUniqueKey;
-    for (auto& [className, ns]: workerService.getActorNamespaces()) {
-      KJ_IF_SOME(config, ns->getConfig().tryGet<Server::Durable>()) {
-        auto& actorNs =
-            ns;  // clangd gets confused trying to use ns directly in the capture below??
-
-        auto idFactory = kj::heap<ActorIdFactoryImpl>(config.uniqueKey);
-
-        alarmScheduler->registerNamespace(config.uniqueKey,
-            [&actorNs, idFactory = kj::mv(idFactory)](
-                kj::String idStr) mutable -> kj::Own<WorkerInterface> {
-          Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
-          auto actorContainer = actorNs->getActorContainer(kj::mv(id));
-          return newPromisedWorkerInterface(actorContainer->startRequest({}));
-        });
-      }
-    }
-
     result.tails = KJ_MAP(tail, def.tails) { return kj::mv(tail).lookup(*this); };
 
     result.streamingTails = KJ_MAP(tail, def.streamingTails) { return kj::mv(tail).lookup(*this); };
@@ -4312,23 +4986,39 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       }
     };
 
+    if (def.hasWorkerdDebugPortBinding) {
+      result.workerdDebugPortNetwork = network;
+    }
+
     return result;
   };
 
   kj::Maybe<kj::String> dockerPath = kj::none;
+  kj::Maybe<kj::String> containerEgressInterceptorImage = kj::none;
   switch (def.containerEngineConf.which()) {
     case config::Worker::ContainerEngine::NONE:
       // No container engine configured
       break;
-    case config::Worker::ContainerEngine::LOCAL_DOCKER:
-      dockerPath = kj::str(def.containerEngineConf.getLocalDocker().getSocketPath());
+    case config::Worker::ContainerEngine::LOCAL_DOCKER: {
+      auto dockerConf = def.containerEngineConf.getLocalDocker();
+      dockerPath = kj::str(dockerConf.getSocketPath());
+      if (dockerConf.hasContainerEgressInterceptorImage()) {
+        containerEgressInterceptorImage = kj::str(dockerConf.getContainerEgressInterceptorImage());
+      }
       break;
+    }
   }
 
-  auto result = kj::refcounted<WorkerService>(globalContext->threadContext, kj::mv(worker),
-      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath));
+  kj::Maybe<kj::StringPtr> serviceName;
+  if (!def.isDynamic) serviceName = name;
+
+  auto result =
+      kj::refcounted<WorkerService>(channelTokenHandler, serviceName, globalContext->threadContext,
+          monotonicClock, kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
+          kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
+          kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors),
+          KJ_BIND_METHOD(*this, deleteAllActors), kj::mv(dockerPath),
+          kj::mv(containerEgressInterceptorImage), def.isDynamic, kj::mv(abortIsolateCallback));
   result->initActorNamespaces(def.localActorConfigs, network);
   co_return result;
 }
@@ -4484,7 +5174,148 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
   }
 }
 
+kj::Own<IoChannelFactory::SubrequestChannel> Server::resolveEntrypoint(
+    kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) {
+  auto& service = *JSG_REQUIRE_NONNULL(services.find(serviceName), Error,
+      "Stub refers to a service that doesn't exist: ", serviceName);
+
+  auto& worker = JSG_REQUIRE_NONNULL(kj::tryDowncast<WorkerService>(service), Error,
+      "Stub refers to a service that is not a Worker: ", serviceName);
+
+  return JSG_REQUIRE_NONNULL(worker.getEntrypoint(entrypoint, kj::mv(props)), Error,
+      "Stub refers to a an entrypoint of the target service that doesn't exist: ",
+      entrypoint.orDefault("default"));
+}
+
+kj::Own<IoChannelFactory::ActorClassChannel> Server::resolveActorClass(
+    kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) {
+  auto& service = *JSG_REQUIRE_NONNULL(services.find(serviceName), Error,
+      "Stub refers to a service that doesn't exist: ", serviceName);
+
+  auto& worker = JSG_REQUIRE_NONNULL(kj::tryDowncast<WorkerService>(service), Error,
+      "Stub refers to a service that is not a Worker: ", serviceName);
+
+  return JSG_REQUIRE_NONNULL(worker.getActorClass(entrypoint, kj::mv(props)), Error,
+      "Stub refers to a an entrypoint of the target service that doesn't exist: ",
+      entrypoint.orDefault("default"));
+}
+
 // =======================================================================================
+
+class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
+ public:
+  WorkerdBootstrapImpl(kj::Own<IoChannelFactory::SubrequestChannel> service,
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+      : service(kj::mv(service)),
+        httpOverCapnpFactory(httpOverCapnpFactory) {}
+
+  kj::Promise<void> startEvent(StartEventContext context) override {
+    // Extract the optional cf blob from the RPC params and pass it along with the
+    // service channel to EventDispatcherImpl. The cf blob will be included in
+    // SubrequestMetadata when creating the WorkerInterface for HTTP events.
+    kj::Maybe<kj::String> cfBlobJson;
+    auto params = context.getParams();
+    if (params.hasCfBlobJson()) {
+      cfBlobJson = kj::str(params.getCfBlobJson());
+    }
+    context.initResults(capnp::MessageSize{4, 1})
+        .setDispatcher(kj::heap<EventDispatcherImpl>(
+            httpOverCapnpFactory, kj::addRef(*service), kj::mv(cfBlobJson)));
+    return kj::READY_NOW;
+  }
+
+ private:
+  kj::Own<IoChannelFactory::SubrequestChannel> service;
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+
+  class EventDispatcherImpl final: public rpc::EventDispatcher::Server {
+   public:
+    EventDispatcherImpl(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+        kj::Own<IoChannelFactory::SubrequestChannel> service,
+        kj::Maybe<kj::String> cfBlobJson)
+        : httpOverCapnpFactory(httpOverCapnpFactory),
+          service(kj::mv(service)),
+          cfBlobJson(kj::mv(cfBlobJson)) {}
+
+    kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
+      // Create WorkerInterface with cf blob metadata (if provided via startEvent).
+      IoChannelFactory::SubrequestMetadata metadata;
+      KJ_IF_SOME(cf, cfBlobJson) {
+        metadata.cfBlobJson = kj::str(cf);
+      }
+      auto worker = getService()->startRequest(kj::mv(metadata));
+      context.initResults(capnp::MessageSize{4, 1})
+          .setHttp(httpOverCapnpFactory.kjToCapnp(kj::mv(worker)));
+      return kj::READY_NOW;
+    }
+
+    kj::Promise<void> sendTraces(SendTracesContext context) override {
+      auto traces =
+          KJ_MAP(trace, context.getParams().getTraces()){ return kj::refcounted<Trace>(trace); };
+      auto event = kj::heap<api::TraceCustomEvent>(api::TraceCustomEvent::TYPE, kj::mv(traces));
+      auto worker = getWorker();
+      auto result = co_await worker->customEvent(kj::mv(event));
+      auto resp = context.getResults().getResult();
+      resp.setOutcome(result.outcome);
+    }
+
+    kj::Promise<void> prewarm(PrewarmContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> runScheduled(RunScheduledContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> runAlarm(RunAlarmContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> queue(QueueContext context) override {
+      throwUnsupported();
+    }
+
+    kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
+      return api::JsRpcSessionCustomEvent::receiveRpc(context, getWorker());
+    }
+
+    kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
+      auto customEvent = kj::heap<tracing::TailStreamCustomEvent>();
+      auto cap = customEvent->getCap();
+      capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
+      pipelineBuilder.setTopLevel(cap);
+      context.setPipeline(pipelineBuilder.build());
+      context.getResults().setTopLevel(kj::mv(cap));
+
+      auto worker = getWorker();
+      auto result = co_await worker->customEvent(kj::mv(customEvent)).attach(kj::mv(worker));
+      auto response = context.getResults();
+      response.setResult(result.outcome);
+    }
+
+   private:
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+    kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> service;
+    kj::Maybe<kj::String> cfBlobJson;
+
+    kj::Own<IoChannelFactory::SubrequestChannel> getService() {
+      auto result =
+          kj::mv(KJ_ASSERT_NONNULL(service, "EventDispatcher can only be used for one request"));
+      service = kj::none;
+      return result;
+    }
+
+    kj::Own<WorkerInterface> getWorker() {
+      // For non-HTTP events (RPC, traces, etc.), create WorkerInterface with
+      // empty metadata since there's no HTTP request to extract cf from.
+      return getService()->startRequest({});
+    }
+
+    [[noreturn]] void throwUnsupported() {
+      JSG_FAIL_REQUIRE(Error, "RPC connections don't yet support this event type.");
+    }
+  };
+};
 
 class Server::HttpListener final: public kj::Refcounted {
  public:
@@ -4580,110 +5411,11 @@ class Server::HttpListener final: public kj::Refcounted {
       return s.accept(conn);
     }
 
-    // Capnp server not initialized. Create in now.
-    auto& s = capnpServer.emplace(kj::heap<WorkerdBootstrapImpl>(*this));
+    // Capnp server not initialized. Create it now.
+    auto& s = capnpServer.emplace(
+        kj::heap<WorkerdBootstrapImpl>(kj::addRef(*service), httpOverCapnpFactory));
     return s.accept(conn);
   }
-
-  class WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
-   public:
-    WorkerdBootstrapImpl(HttpListener& parent): parent(parent) {}
-
-    kj::Promise<void> startEvent(StartEventContext context) {
-      // TODO(someday): Use cfBlobJson from the connection if there is one, or from RPC params
-      //   if we add that? (Note that if a connection-level cf blob exists, it should take
-      //   priority; we should only accept a cf blob from the client if we have a cfBlobHeader
-      //   configured, which hints that this service trusts the client to provide the cf blob.)
-
-      context.initResults(capnp::MessageSize{4, 1})
-          .setDispatcher(kj::heap<EventDispatcherImpl>(parent, parent.service->startRequest({})));
-      return kj::READY_NOW;
-    }
-
-   private:
-    HttpListener& parent;
-  };
-
-  class EventDispatcherImpl final: public rpc::EventDispatcher::Server {
-   public:
-    EventDispatcherImpl(HttpListener& parent, kj::Own<WorkerInterface> worker)
-        : parent(parent),
-          worker(kj::mv(worker)) {}
-
-    kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
-      context.initResults(capnp::MessageSize{4, 1})
-          .setHttp(parent.httpOverCapnpFactory.kjToCapnp(getWorker()));
-      return kj::READY_NOW;
-    }
-
-    kj::Promise<void> sendTraces(SendTracesContext context) override {
-      auto traces =
-          KJ_MAP(trace, context.getParams().getTraces()){ return kj::refcounted<Trace>(trace); };
-      auto event =
-          kj::heap<api::TraceCustomEventImpl>(api::TraceCustomEventImpl::TYPE, kj::mv(traces));
-      auto worker = getWorker();
-      auto result = co_await worker->customEvent(kj::mv(event));
-      auto resp = context.getResults().getResult();
-      resp.setOutcome(result.outcome);
-    }
-
-    kj::Promise<void> prewarm(PrewarmContext context) override {
-      throwUnsupported();
-    }
-
-    kj::Promise<void> runScheduled(RunScheduledContext context) override {
-      throwUnsupported();
-    }
-
-    kj::Promise<void> runAlarm(RunAlarmContext context) override {
-      throwUnsupported();
-    }
-
-    kj::Promise<void> queue(QueueContext context) override {
-      throwUnsupported();
-    }
-
-    kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
-      auto customEvent = kj::heap<api::JsRpcSessionCustomEventImpl>(
-          api::JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
-
-      auto cap = customEvent->getCap();
-      capnp::PipelineBuilder<JsRpcSessionResults> pipelineBuilder;
-      pipelineBuilder.setTopLevel(cap);
-      context.setPipeline(pipelineBuilder.build());
-      context.getResults().setTopLevel(kj::mv(cap));
-
-      auto worker = getWorker();
-      return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
-    }
-
-    kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
-      auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
-      auto cap = customEvent->getCap();
-      capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
-      pipelineBuilder.setTopLevel(cap);
-      context.setPipeline(pipelineBuilder.build());
-      context.getResults().setTopLevel(kj::mv(cap));
-
-      auto worker = getWorker();
-      return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
-    }
-
-   private:
-    HttpListener& parent;
-    kj::Maybe<kj::Own<WorkerInterface>> worker;
-
-    kj::Own<WorkerInterface> getWorker() {
-      auto result =
-          kj::mv(KJ_ASSERT_NONNULL(worker, "EventDispatcher can only be used for one request"));
-      worker = kj::none;
-      return result;
-    }
-
-    [[noreturn]] void throwUnsupported() {
-      JSG_FAIL_REQUIRE(Error, "RPC connections don't yet support this event type.");
-    }
-  };
 
   struct Connection final: public kj::HttpService, public kj::HttpServerErrorHandler {
     Connection(HttpListener& parent, kj::Maybe<kj::String> cfBlobJson)
@@ -4741,7 +5473,7 @@ class Server::HttpListener final: public kj::Refcounted {
         kj::HttpService::Response& response) override {
       TRACE_EVENT("workerd", "Connection:request()");
       IoChannelFactory::SubrequestMetadata metadata;
-      metadata.cfBlobJson = cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); });
+      metadata.cfBlobJson = mapCopyString(cfBlobJson);
 
       Response* wrappedResponse = &response;
       kj::Own<ResponseWrapper> ownResponse;
@@ -4767,17 +5499,20 @@ class Server::HttpListener final: public kj::Refcounted {
         kj::AsyncIoStream& connection,
         ConnectResponse& response,
         kj::HttpConnectSettings settings) override {
+      TRACE_EVENT("workerd", "Connection:connect()");
       KJ_IF_SOME(h, parent.rewriter->getCapnpConnectHost()) {
         if (h == host) {
           // Client is requesting to open a capnp session!
           response.accept(200, "OK", kj::HttpHeaders(parent.headerTable));
-          return parent.acceptCapnpConnection(connection);
+          co_return co_await parent.acceptCapnpConnection(connection);
         }
       }
 
-      // TODO(someday): Deliver connect() event to to worker? For now we call the default
-      //   implementation which throws an exception.
-      return kj::HttpService::connect(host, headers, connection, response, kj::mv(settings));
+      IoChannelFactory::SubrequestMetadata metadata;
+      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+
+      auto worker = parent.service->startRequest(kj::mv(metadata));
+      co_return co_await worker->connect(host, headers, connection, response, kj::mv(settings));
     }
 
     // ---------------------------------------------------------------------------
@@ -4797,6 +5532,57 @@ class Server::HttpListener final: public kj::Refcounted {
   };
 };
 
+class Server::TcpListener final: public kj::Refcounted {
+ public:
+  TcpListener(Server& owner,
+      kj::Own<kj::ConnectionReceiver> listener,
+      kj::Own<Service> service,
+      kj::HttpHeaderTable& headerTable,
+      kj::StringPtr addrStr)
+      : owner(owner),
+        listener(kj::mv(listener)),
+        service(kj::mv(service)),
+        headerTable(headerTable),
+        addrStr(addrStr) {}
+
+  kj::Promise<void> run() {
+    TRACE_EVENT("workerd", "TcpListener::run");
+    for (;;) {
+      kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
+      TRACE_EVENT("workerd", "TcpListener handle connection");
+
+      IoChannelFactory::SubrequestMetadata metadata;
+      auto req = service->startRequest(kj::mv(metadata));
+      auto response = kj::heap<ResponseWrapper>();
+      kj::HttpHeaders headers(headerTable);
+      owner.tasks.add(req->connect(addrStr, headers, *stream.stream, *response, {})
+                          .attach(kj::mv(stream.stream), kj::mv(response))
+                          .attach(kj::mv(req)));
+    }
+  }
+
+ private:
+  Server& owner;
+  kj::Own<kj::ConnectionReceiver> listener;
+  kj::Own<Service> service;
+  kj::HttpHeaderTable& headerTable;
+  kj::StringPtr addrStr;
+
+  struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
+    void accept(
+        uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+      // Ok.. we're accepting the connection... anything to do?
+    }
+    kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+        kj::StringPtr statusText,
+        const kj::HttpHeaders& headers,
+        kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+      // Doh... we're rejecting the connection... anything to do?
+      return newNullOutputStream();
+    }
+  };
+};
+
 kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
     kj::Own<Service> service,
     kj::StringPtr physicalProtocol,
@@ -4805,6 +5591,149 @@ kj::Promise<void> Server::listenHttp(kj::Own<kj::ConnectionReceiver> listener,
       kj::refcounted<HttpListener>(*this, kj::mv(listener), kj::mv(service), physicalProtocol,
           kj::mv(rewriter), globalContext->headerTable, timer, globalContext->httpOverCapnpFactory);
   co_return co_await obj->run();
+}
+
+kj::Promise<void> Server::listenTcp(
+    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::StringPtr addrStr) {
+  auto obj = kj::refcounted<TcpListener>(
+      *this, kj::mv(listener), kj::mv(service), globalContext->headerTable, addrStr);
+  co_return co_await obj->run();
+}
+
+// =======================================================================================
+// Debug port for exposing all services via RPC
+
+class Server::DebugPortListener {
+ public:
+  DebugPortListener(Server& owner,
+      kj::Own<kj::ConnectionReceiver> listener,
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+      : owner(owner),
+        listener(kj::mv(listener)),
+        httpOverCapnpFactory(httpOverCapnpFactory) {}
+
+  kj::Promise<void> run() {
+    capnp::TwoPartyServer server(kj::heap<WorkerdDebugPortImpl>(&owner, httpOverCapnpFactory));
+    co_return co_await server.listen(*listener);
+  }
+
+ private:
+  Server& owner;
+  kj::Own<kj::ConnectionReceiver> listener;
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+
+  class WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
+   public:
+    WorkerdDebugPortImpl(
+        workerd::server::Server* srvPtr, capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+        : srv(*srvPtr),
+          httpOverCapnpFactory(httpOverCapnpFactory) {}
+
+    kj::Promise<void> getEntrypoint(GetEntrypointContext context) override {
+      auto params = context.getParams();
+      auto serviceName = params.getService();
+      auto propsReader = params.getProps();
+
+      // Look up the service.
+      auto& serviceEntry = KJ_ASSERT_NONNULL(srv.services.find(serviceName),
+          kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
+      auto service = serviceEntry->service();
+
+      // Convert props from Frankenvalue if provided
+      Frankenvalue props;
+      if (params.hasProps()) {
+        props = Frankenvalue::fromCapnp(propsReader);
+      }
+
+      kj::Own<Service> targetService;
+
+      // Try to cast to WorkerService to support entrypoints and props
+      auto* workerService = dynamic_cast<WorkerService*>(service);
+      if (workerService != nullptr) {
+        // This is a WorkerService, use getEntrypoint which supports both entrypoints and props
+        kj::Maybe<kj::StringPtr> maybeEntrypoint;
+        if (params.hasEntrypoint()) {
+          maybeEntrypoint = params.getEntrypoint();
+        }
+
+        targetService =
+            KJ_ASSERT_NONNULL(workerService->getEntrypoint(maybeEntrypoint, kj::mv(props)),
+                kj::str("jsg.Error: Worker does not export an entrypoint named \"",
+                    maybeEntrypoint.orDefault("(default)"), "\""));
+      } else {
+        // Not a WorkerService
+        KJ_ASSERT(!params.hasEntrypoint(), "jsg.Error: Worker does not support named entrypoints");
+
+        // Try to apply props if the service supports it
+        if (params.hasProps()) {
+          targetService = service->forProps(kj::mv(props));
+        } else {
+          // No props, just use the service as-is
+          targetService = kj::addRef(*service);
+        }
+      }
+
+      // Return a WorkerdBootstrap that wraps this service using the generic implementation.
+      context.initResults(capnp::MessageSize{4, 1})
+          .setEntrypoint(
+              kj::heap<WorkerdBootstrapImpl>(kj::mv(targetService), httpOverCapnpFactory));
+      return kj::READY_NOW;
+    }
+
+    kj::Promise<void> getActor(GetActorContext context) override {
+      auto params = context.getParams();
+      auto serviceName = params.getService();
+      auto entrypointName = params.getEntrypoint();
+      auto actorIdStr = params.getActorId();
+
+      // Look up the service
+      auto& serviceEntry = KJ_ASSERT_NONNULL(srv.services.find(serviceName),
+          kj::str("jsg.Error: Worker \"", serviceName, "\" not found"));
+      auto service = serviceEntry->service();
+
+      // Try to cast to WorkerService
+      auto* workerService = dynamic_cast<WorkerService*>(service);
+      KJ_REQUIRE(workerService != nullptr, "jsg.Error: Worker does not support Durable Objects");
+
+      // Look up the actor namespace
+      auto& actorNamespace = KJ_ASSERT_NONNULL(workerService->getActorNamespace(entrypointName),
+          kj::str("jsg.Error: Worker does not export a Durable Object class named \"",
+              entrypointName, "\""));
+
+      // Create an actor ID - use the namespace config to determine if it's durable or ephemeral
+      Worker::Actor::Id actorId;
+      KJ_SWITCH_ONEOF(actorNamespace.getConfig()) {
+        KJ_CASE_ONEOF(c, Durable) {
+          // Durable Object ID (hex-encoded SHA256 hash)
+          auto decoded = kj::decodeHex(actorIdStr);
+          KJ_REQUIRE(decoded.size() == SHA256_DIGEST_LENGTH,
+              "Invalid Durable Object ID: expected 64 hex characters (32 bytes)", decoded.size());
+          kj::Own<ActorIdFactory::ActorId> id =
+              kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none);
+          actorId = kj::mv(id);
+        }
+        KJ_CASE_ONEOF(c, Ephemeral) {
+          // Ephemeral actor ID (plain string)
+          actorId = kj::str(actorIdStr);
+        }
+      }
+
+      // Wrap the actor channel using the generic WorkerdBootstrap implementation.
+      context.initResults(capnp::MessageSize{4, 1})
+          .setActor(kj::heap<WorkerdBootstrapImpl>(
+              actorNamespace.getActorChannel(kj::mv(actorId)), httpOverCapnpFactory));
+      return kj::READY_NOW;
+    }
+
+   private:
+    workerd::server::Server& srv;
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  };
+};
+
+kj::Promise<void> Server::listenDebugPort(kj::Own<kj::ConnectionReceiver> listener) {
+  DebugPortListener obj(*this, kj::mv(listener), globalContext->httpOverCapnpFactory);
+  co_return co_await obj.run();
 }
 
 // =======================================================================================
@@ -4831,8 +5760,19 @@ kj::Promise<void> Server::run(
     jsg::V8System& v8System, config::Config::Reader config, kj::Promise<void> drainWhen) {
   TRACE_EVENT("workerd", "Server.run");
 
-  // Update structured logging setting from config
-  structuredLogging = StructuredLogging(config.getStructuredLogging());
+  // Update logging settings from config (overridding structuredLogging when so)
+  if (config.hasLogging()) {
+    auto logging = config.getLogging();
+    loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
+    if (logging.hasStdoutPrefix()) {
+      loggingOptions.stdoutPrefix = kj::ConstString(kj::str(logging.getStdoutPrefix()));
+    }
+    if (logging.hasStderrPrefix()) {
+      loggingOptions.stderrPrefix = kj::ConstString(kj::str(logging.getStderrPrefix()));
+    }
+  } else {
+    loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
+  }
 
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
@@ -4854,17 +5794,6 @@ kj::Promise<void> Server::run(
   auto ownHeaderTable = headerTableBuilder.build();
 
   co_return co_await listenPromise.exclusiveJoin(kj::mv(fatalPromise));
-}
-
-void Server::startAlarmScheduler(config::Config::Reader config) {
-  auto& clock = kj::systemPreciseCalendarClock();
-  auto dir = kj::newInMemoryDirectory(clock);
-  auto vfs = kj::heap<SqliteDatabase::Vfs>(*dir).attach(kj::mv(dir));
-
-  // TODO(someday): support persistent storage for alarms
-
-  alarmScheduler =
-      kj::heap<AlarmScheduler>(clock, timer, *vfs, kj::Path({"alarms.sqlite"})).attach(kj::mv(vfs));
 }
 
 // Configure and start the inspector socket, returning the port the socket started on.
@@ -5057,21 +5986,52 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
     kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
     auto tlsNetwork = tls->wrapNetwork(*publicNetwork);
 
+    // Attaching to refcounted NetworkService is safe since services map is long-lived
     auto service = kj::refcounted<NetworkService>(globalContext->headerTable, timer, entropySource,
         kj::mv(publicNetwork), kj::mv(tlsNetwork), *tls)
-                       .attach(kj::mv(tls));
+                       .attachToThisReference(kj::mv(tls));
 
     return decltype(services)::Entry{kj::str("internet"_kj), kj::mv(service)};
   });
-
-  // Start the alarm scheduler before linking services
-  startAlarmScheduler(config);
 
   // Third pass: Cross-link services.
   for (auto& service: services) {
     ConfigErrorReporter errorReporter(*this, service.key);
     service.value->link(errorReporter);
   }
+}
+
+kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
+    config::Socket::Reader sock, kj::StringPtr name) {
+  switch (sock.which()) {
+    case config::Socket::HTTP: {
+      SocketTypeConfig result;
+      result.defaultPort = 80;
+      result.httpOptions = sock.getHttp();
+      result.physicalProtocol = "http";
+      return kj::mv(result);
+    }
+    case config::Socket::HTTPS: {
+      auto https = sock.getHttps();
+      SocketTypeConfig result;
+      result.defaultPort = 443;
+      result.httpOptions = https.getOptions();
+      result.tls = makeTlsContext(https.getTlsOptions());
+      result.physicalProtocol = "https";
+      return kj::mv(result);
+    }
+    case config::Socket::TCP: {
+      auto tcp = sock.getTcp();
+      SocketTypeConfig result;
+      if (tcp.hasTlsOptions()) {
+        result.tls = makeTlsContext(tcp.getTlsOptions());
+      }
+      return kj::mv(result);
+    }
+  }
+  reportConfigError(kj::str("Encountered unknown socket type in \"", name,
+      "\". Was the config compiled with a newer version of the schema?"));
+  return kj::none;
 }
 
 kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
@@ -5110,31 +6070,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       continue;
     }
 
-    uint defaultPort = 0;
-    config::HttpOptions::Reader httpOptions;
-    kj::Maybe<kj::Own<kj::TlsContext>> tls;
-    kj::StringPtr physicalProtocol;
-    switch (sock.which()) {
-      case config::Socket::HTTP:
-        defaultPort = 80;
-        httpOptions = sock.getHttp();
-        physicalProtocol = "http";
-        goto validSocket;
-      case config::Socket::HTTPS: {
-        auto https = sock.getHttps();
-        defaultPort = 443;
-        httpOptions = https.getOptions();
-        tls = makeTlsContext(https.getTlsOptions());
-        physicalProtocol = "https";
-        goto validSocket;
-      }
-    }
-    reportConfigError(kj::str("Encountered unknown socket type in \"", name,
-        "\". Was the config compiled with a "
-        "newer version of the schema?"));
-    continue;
+    auto maybeSocketConfig = parseSocketType(sock, name);
+    if (maybeSocketConfig == kj::none) continue;
+    auto& socketConfig = KJ_ASSERT_NONNULL(maybeSocketConfig);
 
-  validSocket:
     using PromisedReceived = kj::Promise<kj::Own<kj::ConnectionReceiver>>;
     PromisedReceived listener = nullptr;
     KJ_IF_SOME(l, listenerOverride) {
@@ -5143,10 +6082,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       listener = ([](kj::Promise<kj::Own<kj::NetworkAddress>> promise) -> PromisedReceived {
         auto parsed = co_await promise;
         co_return parsed->listen();
-      })(network.parseAddress(addrStr, defaultPort));
+      })(network.parseAddress(addrStr, socketConfig.defaultPort));
     }
 
-    KJ_IF_SOME(t, tls) {
+    KJ_IF_SOME(t, socketConfig.tls) {
       listener = ([](kj::Promise<kj::Own<kj::ConnectionReceiver>> promise,
                       kj::Own<kj::TlsContext> tls) -> PromisedReceived {
         auto port = co_await promise;
@@ -5156,12 +6095,19 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
     // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
     // be available later.
-    auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
+    auto rewriter = kj::heap<HttpRewriter>(socketConfig.httpOptions, headerTableBuilder);
 
     auto handle = kj::coCapture(
-        [this, service = kj::mv(service), rewriter = kj::mv(rewriter), physicalProtocol, name](
+        [this, service = kj::mv(service), rewriter = kj::mv(rewriter),
+            physicalProtocol = socketConfig.physicalProtocol, name,
+            isHttp = sock.which() != config::Socket::TCP, addrStr](
             kj::Promise<kj::Own<kj::ConnectionReceiver>> promise) mutable -> kj::Promise<void> {
-      TRACE_EVENT("workerd", "setup listenHttp");
+      if (isHttp) {
+        TRACE_EVENT("workerd", "setup listenHttp");
+      } else {
+        TRACE_EVENT("workerd", "setup listenTcp");
+      }
+
       auto listener = co_await promise;
       KJ_IF_SOME(stream, controlOverride) {
         auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name,
@@ -5172,9 +6118,37 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
           KJ_LOG(ERROR, e);
         }
       }
-      co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
+
+      if (isHttp) {
+        co_await listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
+      } else {
+        co_await listenTcp(kj::mv(listener), kj::mv(service), addrStr);
+      }
     });
     tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
+  }
+
+  // Start debug port if configured
+  KJ_IF_SOME(addr, debugPortOverride) {
+    auto handle = kj::coCapture(
+        [this, addr = kj::str(addr)](kj::ForkedPromise<void>& drain) mutable -> kj::Promise<void> {
+      auto parsed = co_await network.parseAddress(addr, 0);
+      auto listener = parsed->listen();
+
+      KJ_IF_SOME(stream, controlOverride) {
+        auto message = kj::str("{\"event\":\"listen\",\"socket\":\"debug-port"
+                               "\",\"port\":",
+            listener->getPort(), "}\n");
+        try {
+          stream->write(message.asBytes());
+        } catch (kj::Exception& e) {
+          KJ_LOG(ERROR, e);
+        }
+      }
+
+      co_await listenDebugPort(kj::mv(listener));
+    });
+    tasks.add(handle(forkedDrainWhen).exclusiveJoin(forkedDrainWhen.addBranch()));
   }
 
   for (auto& unmatched: socketOverrides) {
@@ -5224,6 +6198,20 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     config::Config::Reader config,
     kj::StringPtr servicePattern,
     kj::StringPtr entrypointPattern) {
+
+  if (config.hasLogging()) {
+    auto logging = config.getLogging();
+    loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
+    if (logging.hasStdoutPrefix()) {
+      loggingOptions.stdoutPrefix = kj::ConstString(kj::str(logging.getStdoutPrefix()));
+    }
+    if (logging.hasStderrPrefix()) {
+      loggingOptions.stderrPrefix = kj::ConstString(kj::str(logging.getStderrPrefix()));
+    }
+  } else {
+    loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
+  }
+
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
   invalidConfigServiceSingleton = kj::refcounted<InvalidConfigService>();
@@ -5261,7 +6249,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     //   stderr wouldn't work.
     KJ_LOG(DBG, kj::str("[ TEST ] "_kj, name));
     auto req = service.startRequest({});
-    auto start = kj::systemPreciseMonotonicClock().now();
+    auto start = monotonicClock.now();
 
     bool result = co_await req->test();
     if (result) {
@@ -5270,7 +6258,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
       ++failCount;
     }
 
-    auto end = kj::systemPreciseMonotonicClock().now();
+    auto end = monotonicClock.now();
     auto duration = end - start;
 
     KJ_LOG(DBG, kj::str(result ? "[ PASS ] "_kj : "[ FAIL ] "_kj, name, " (", duration, ")"));

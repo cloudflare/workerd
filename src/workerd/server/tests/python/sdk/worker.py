@@ -1,11 +1,18 @@
+# The tests in this file are primarily spread across Default.fetch() (in this module) and
+# Default.fetch() (in server.py).
+#
+# The code in `Default.test()` (in this module) is used to actually perform the testing and its
+# behaviour doesn't need to strictly be held consistent. In fact it uses the JS fetch, so it's not
+# going to follow the SDK at all.
+
 from contextlib import asynccontextmanager
 from http import HTTPMethod, HTTPStatus
 
 import js
-from workers import Blob, File, FormData, Request, Response, WorkerEntrypoint, fetch
+from workers import Blob, File, FormData, Request, Response, WorkerEntrypoint
 
 import pyodide.http
-from pyodide.ffi import to_js
+from pyodide.ffi import JsProxy, to_js
 
 
 @asynccontextmanager
@@ -28,14 +35,14 @@ class Default(WorkerEntrypoint):
     async def fetch(self, request):
         assert isinstance(request, Request)
         if request.url.endswith("/modify"):
-            resp = await fetch("https://example.com/sub")
+            resp = await self.env.SERVER.fetch("https://example.com/sub")
             return Response(
                 resp.body,
                 status=201,
                 headers={"Custom-Header-That-Should-Passthrough": "modified"},
             )
         elif request.url.endswith("/modify_tuple"):
-            resp = await fetch("https://example.com/sub")
+            resp = await self.env.SERVER.fetch("https://example.com/sub")
             return Response(
                 resp.body,
                 headers=[
@@ -44,7 +51,7 @@ class Default(WorkerEntrypoint):
                 ],
             )
         elif request.url.endswith("/fetch_opts"):
-            resp = await fetch(
+            resp = await self.env.SERVER.fetch(
                 "https://example.com/sub_headers",
                 method=HTTPMethod.GET,
                 body=None,
@@ -57,7 +64,7 @@ class Default(WorkerEntrypoint):
             # that way accidentally to make sure we give them a reasonable error
             # message.
             try:
-                resp = await fetch(
+                resp = await self.env.SERVER.fetch(
                     "https://example.com/sub",
                     {"headers": {"Custom-Req-Header": 123}},
                 )
@@ -77,7 +84,7 @@ class Default(WorkerEntrypoint):
                 assert opts.foobarbaz == 42
 
             async with _mock_fetch(fetch_check):
-                resp = await fetch(
+                resp = await self.env.SERVER.fetch(
                     "https://example.com/redirect", redirect="manual", foobarbaz=42
                 )
 
@@ -101,7 +108,7 @@ class Default(WorkerEntrypoint):
         elif request.url.endswith("/formdata"):
             # server.py creates a new FormData and verifies that it can be passed
             # to Response.
-            resp = await fetch("https://example.com/formdata")
+            resp = await self.env.SERVER.fetch("https://example.com/formdata")
             data = await resp.formData()
             if data["field"] == "value":
                 return Response("success")
@@ -110,7 +117,7 @@ class Default(WorkerEntrypoint):
         elif request.url.endswith("/formdatablob"):
             # server.py creates a new FormData and verifies that it can be passed
             # to Response.
-            resp = await fetch("https://example.com/formdatablob")
+            resp = await self.env.SERVER.fetch("https://example.com/formdatablob")
             data = await resp.formData()
             assert data["field"] == "value"
             assert (await data["blob.py"].text()) == "print(42)"
@@ -119,7 +126,7 @@ class Default(WorkerEntrypoint):
 
             return Response("success")
         elif request.url.endswith("/cf_opts"):
-            resp = await fetch(
+            resp = await self.env.SERVER.fetch(
                 "http://example.com/redirect",
                 redirect="manual",
                 cf={
@@ -136,20 +143,52 @@ class Default(WorkerEntrypoint):
             #
             # Try to grab headers which should contain a duplicated header.
             headers = request.headers.get_all("X-Custom-Header")
-            assert "some_value" in headers
-            assert "some_other_value" in headers
+            assert "some_value, some_other_value" in headers
             return Response("success")
         else:
-            resp = await fetch("https://example.com/sub")
+            resp = await self.env.SERVER.fetch("https://example.com/sub")
             return resp
+
+    async def scheduled(self, ctrl, env, ctx):
+        assert ctrl.scheduledTime == 1000
+        assert ctrl.cron == "* * * * 30"
+
+    async def test(self):
+        js_env = self.env._env
+        await can_support_scheduled_cron_trigger(js_env)
+        await can_return_custom_fetch_response(js_env)
+        await can_modify_response(js_env)
+        await can_use_duplicate_headers(js_env)
+        await can_use_fetch_opts(js_env)
+        await gets_nice_error_on_jsism(js_env)
+        await can_use_undefined_options_and_redirect(js_env)
+        await can_use_inherited_response_methods(js_env)
+        await errors_on_invalid_input_to_redirect(js_env)
+        await can_use_response_json(js_env)
+        await can_request_form_data(js_env)
+        await form_data_unit_tests(js_env)
+        await blob_unit_tests(js_env)
+        await can_request_form_data_blob(js_env)
+        await replace_body_unit_tests(js_env)
+        await can_use_cf_fetch_opts(js_env)
+        await request_unit_tests(js_env)
+        await can_use_event_decorator(js_env)
+        await response_unit_tests(js_env)
+        await response_buffer_source_unit_tests(js_env)
 
 
 # TODO: Right now the `fetch` that's available on a binding is the JS fetch.
 # We may wish to rewrite it to be the same as the `fetch` defined in
 # `cloudflare.workers`. Doing so will require a feature flag.
+#
+# WARNING: Don't expect the below code itself to make use of the features in the SDK, it's mostly
+# calling the JS fetch via the FFI.
 
 
 async def can_return_custom_fetch_response(env):
+    assert isinstance(env, JsProxy), (
+        "Expecting the env for these tests not to be wrapped"
+    )
     response = await env.SELF.fetch(
         "http://example.com/",
     )
@@ -342,6 +381,7 @@ async def can_use_cf_fetch_opts(env):
 async def request_unit_tests(env):
     req = Request("https://test.com", method=HTTPMethod.POST)
     assert req.method == HTTPMethod.POST
+    assert repr(req) == "Request(method='POST', url='https://test.com/')"
 
     # Verify that we can pass JS headers to Request
     js_headers = js.Headers.new()
@@ -372,8 +412,48 @@ async def request_unit_tests(env):
     req_with_dup_headers = Request("http://example.com", headers=js_headers)
     assert req_with_dup_headers.url == "http://example.com/"
     encoding = req_with_dup_headers.headers.get_all("Accept-encoding")
-    assert "deflate" in encoding
-    assert "gzip" in encoding
+    assert encoding == ["deflate, gzip"]
+
+    # Verify that header values containing commas are preserved.
+    js_headers = js.Headers.new()
+    js_headers.set("User-Agent", "Example, Agent/1.0")
+    req_with_user_agent = Request("http://example.com", headers=js_headers)
+    assert req_with_user_agent.headers.get("User-Agent") == "Example, Agent/1.0"
+    assert req_with_user_agent.headers.get_all("User-Agent") == ["Example, Agent/1.0"]
+
+    # Verify that header values with commas are preserved when using Python dict.
+    req_dict_comma = Request(
+        "http://example.com",
+        headers={
+            "User-Agent": "Python, Client/2.0",
+            "Accept": "text/html, application/json",
+        },
+    )
+    assert req_dict_comma.headers.get("User-Agent") == "Python, Client/2.0"
+    assert "text/html" in req_dict_comma.headers.get("Accept")
+    assert "application/json" in req_dict_comma.headers.get("Accept")
+
+    # Verify that Set-Cookie headers are preserved as distinct values.
+    js_headers = js.Headers.new()
+    js_headers.append("Set-Cookie", "a=b, c=d")
+    js_headers.append("Set-Cookie", "e=f")
+    req_with_set_cookie = Request("http://example.com", headers=js_headers)
+    assert req_with_set_cookie.headers.get_all("Set-Cookie") == ["a=b, c=d", "e=f"]
+
+    # Verify that Set-Cookie headers work with Python list of tuples.
+    req_tuple_cookies = Request(
+        "http://example.com",
+        headers=[
+            ("Set-Cookie", "session=abc123"),
+            ("Set-Cookie", "token=xyz789"),
+            ("X-Custom", "value"),
+        ],
+    )
+    assert req_tuple_cookies.headers.get_all("Set-Cookie") == [
+        "session=abc123",
+        "token=xyz789",
+    ]
+    assert req_tuple_cookies.headers.get("X-Custom") == "value"
 
     # Verify that we can get a Blob.
     req_for_blob = Request("http://example.com", body="foobar", method="POST")
@@ -402,6 +482,16 @@ async def can_use_event_decorator(env):
 async def response_unit_tests(env):
     response_json = Response.json([1, 2, 3])
     assert await response_json.text() == "[1, 2, 3]"
+    assert (
+        repr(response_json)
+        == "Response(status=200, status_text='OK', content_type='application/json')"
+    )
+
+    response_json = Response.from_json([1, 2, 3])
+    assert await response_json.text() == "[1, 2, 3]"
+
+    response_json = Response("[1, 2, 3]")
+    assert await response_json.json() == [1, 2, 3]
 
     response_json = Response.json("test")
     assert await response_json.text() == '"test"'
@@ -424,6 +514,10 @@ async def response_unit_tests(env):
     response_none = Response(None, status=204)
     assert response_none.status == 204
     assert response_none.body is None
+
+    response_bytes = Response(b"test")
+    assert response_bytes.status == 200
+    assert await response_bytes.text() == "test"
 
     class Test:
         def __init__(self, x):
@@ -451,28 +545,52 @@ async def response_unit_tests(env):
         assert str(err) == "Unsupported type in Response: Test"
 
     response_ws = Response(
-        "test", status=201, web_socket=js.WebSocket.new("ws://example.com")
+        None, status=101, web_socket=js.WebSocket.new("ws://example.com/ignore")
     )
     # TODO: it doesn't seem possible to access webSocket even in JS
-    assert response_ws.status == 201
+    assert response_ws.status == 101
 
 
-async def test(ctrl, env):
-    await can_return_custom_fetch_response(env)
-    await can_modify_response(env)
-    await can_use_duplicate_headers(env)
-    await can_use_fetch_opts(env)
-    await gets_nice_error_on_jsism(env)
-    await can_use_undefined_options_and_redirect(env)
-    await can_use_inherited_response_methods(env)
-    await errors_on_invalid_input_to_redirect(env)
-    await can_use_response_json(env)
-    await can_request_form_data(env)
-    await form_data_unit_tests(env)
-    await blob_unit_tests(env)
-    await can_request_form_data_blob(env)
-    await replace_body_unit_tests(env)
-    await can_use_cf_fetch_opts(env)
-    await request_unit_tests(env)
-    await can_use_event_decorator(env)
-    await response_unit_tests(env)
+async def response_buffer_source_unit_tests(env):
+    buffer_source_cases = [
+        # TODO: Float16Array is not supported in Pyodide <= 0.29 (pyodide/pyodide#6005)
+        ("ArrayBuffer", js.Uint8Array.new(to_js([1, 2, 3, 4, 5, 6, 7, 8])).buffer),
+        ("DataView", js.DataView.new(js.Uint8Array.new(to_js([9, 10, 11, 12])).buffer)),
+        ("Uint8Array", js.Uint8Array.new(to_js([1, 2, 3, 4]))),
+        ("Uint8ClampedArray", js.Uint8ClampedArray.new(to_js([1, 2, 3, 4]))),
+        ("Int8Array", js.Int8Array.new(to_js([1, -1, 2, -2]))),
+        ("Uint16Array", js.Uint16Array.new(to_js([1, 2, 3, 4]))),
+        ("Int16Array", js.Int16Array.new(to_js([1, -2, 3, -4]))),
+        ("Uint32Array", js.Uint32Array.new(to_js([1, 2, 3, 4]))),
+        ("Int32Array", js.Int32Array.new(to_js([1, -2, 3, -4]))),
+        ("Float32Array", js.Float32Array.new(to_js([1.5, -2.5, 3.25, -4.75]))),
+        ("Float64Array", js.Float64Array.new(to_js([1.5, -2.5]))),
+        # BigInt64 not supported in Pyodide <= 0.26
+        # ("BigInt64Array", js.BigInt64Array.new(to_js([2**53 + 1, -(2**53 + 1), 2**54 + 2, -(2**54 + 2)]))),
+        # ("BigUint64Array", js.BigUint64Array.new(to_js([2**53 + 1, 2**54 + 2, 2**55 + 3, 2**56 + 4]))),
+        # Test partial views to verify they work correctly when not viewing the whole backing buffer
+        (
+            "Uint8Array.subarray",
+            js.Uint8Array.new(to_js([0, 1, 2, 3, 4, 5])).subarray(1),
+        ),
+        ("Int8Array.subarray", js.Int8Array.new(to_js([0, 1, -1, 2, -2])).subarray(1)),
+    ]
+
+    for type_name, body in buffer_source_cases:
+        expected_length = int(body.byteLength)
+        try:
+            response = Response(body)
+        except TypeError as exc:
+            raise AssertionError(
+                f"Response rejected BufferSource type {type_name}"
+            ) from exc
+
+        buffer = await response.buffer()
+        assert int(buffer.byteLength) == expected_length, (
+            f"Response buffer length mismatch for {type_name}"
+        )
+
+
+async def can_support_scheduled_cron_trigger(env):
+    result = await env.SELF.scheduled(scheduledTime=1000, cron="* * * * 30")
+    assert result.outcome == "ok"

@@ -41,7 +41,7 @@ constexpr bool isIoOwn() {
   return RemoveIoOwn_<T>::is;
 }
 template <typename T>
-using RemoveIoOwn = typename RemoveIoOwn_<T>::Type;
+using RemoveIoOwn = RemoveIoOwn_<T>::Type;
 
 struct OwnedObject {
   kj::Maybe<kj::Own<OwnedObject>> next;
@@ -68,7 +68,7 @@ class OwnedObjectList {
 };
 
 // Object which receives possibly-cross-thread deletions of owned objects.
-class DeleteQueue: public kj::AtomicRefcounted, public kj::EnableAddRefToThis<DeleteQueue> {
+class DeleteQueue: public kj::AtomicRefcounted {
  public:
   DeleteQueue(): crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}) {}
 
@@ -200,7 +200,7 @@ template <typename T>
 class IoOwn {
 
  public:
-  IoOwn(IoOwn&& other);
+  IoOwn(IoOwn&& other) noexcept;
   IoOwn(decltype(nullptr)): item(nullptr) {}
   ~IoOwn() noexcept(false);
   KJ_DISALLOW_COPY(IoOwn);
@@ -276,7 +276,7 @@ class IoPtr {
 template <typename T>
 class ReverseIoOwn {
  public:
-  ReverseIoOwn(ReverseIoOwn&& other);
+  ReverseIoOwn(ReverseIoOwn&& other) noexcept;
   ReverseIoOwn(decltype(nullptr)): item(nullptr) {}
   ~ReverseIoOwn() noexcept(false);
   KJ_DISALLOW_COPY(ReverseIoOwn);
@@ -288,6 +288,16 @@ class ReverseIoOwn {
   operator kj::Own<T>() &&;
   ReverseIoOwn& operator=(ReverseIoOwn&& other);
   ReverseIoOwn& operator=(decltype(nullptr));
+
+  // Try to get the underlying object if safe to dereference.
+  // Returns kj::none if the IoContext has been destroyed or if this is null.
+  // This is a safe alternative to operator->() that won't throw or crash.
+  kj::Maybe<T&> tryGet() {
+    if (item != nullptr && weakRef->isValid()) {
+      return *item->ptr.get();
+    }
+    return kj::none;
+  }
 
  private:
   friend class IoContext;
@@ -302,8 +312,8 @@ class ReverseIoOwn {
 };
 
 template <typename T>
-IoOwn<T>::IoOwn(IoOwn&& other): deleteQueue(kj::mv(other.deleteQueue)),
-                                item(other.item) {
+IoOwn<T>::IoOwn(IoOwn&& other) noexcept: deleteQueue(kj::mv(other.deleteQueue)),
+                                         item(other.item) {
   other.item = nullptr;
 }
 
@@ -373,7 +383,7 @@ inline T* IoPtr<T>::operator->() {
 }
 
 template <typename T>
-ReverseIoOwn<T>::ReverseIoOwn(ReverseIoOwn&& other)
+ReverseIoOwn<T>::ReverseIoOwn(ReverseIoOwn&& other) noexcept
     : weakRef(kj::mv(other.weakRef)),
       item(other.item) {
   other.item = nullptr;

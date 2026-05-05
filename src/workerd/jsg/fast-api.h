@@ -26,10 +26,9 @@
 
 namespace workerd::jsg {
 
-class ByteString;
 class DOMString;
-class Lock;
 class USVString;
+class Lock;
 template <typename T>
 class Promise;
 

@@ -4,6 +4,7 @@
 
 #include "web-socket.h"
 
+#include "blob.h"
 #include "events.h"
 #include "messagechannel.h"
 #include "util.h"
@@ -13,6 +14,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/compat/url.h>
@@ -52,7 +54,10 @@ WebSocket::WebSocket(
       url(kj::mv(package.url)),
       protocol(kj::mv(package.protocol)),
       extensions(kj::mv(package.extensions)),
+      binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
+                                                                        : BinaryType::ARRAYBUFFER),
       serializedAttachment(kj::mv(package.serializedAttachment)),
+      allowHalfOpen(package.allowHalfOpen),
       farNative(initNative(ioContext,
           ws,
           kj::mv(KJ_REQUIRE_NONNULL(package.maybeTags)),
@@ -67,9 +72,12 @@ jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
   return js.alloc<WebSocket>(js, IoContext::current(), ws, kj::mv(package));
 }
 
-WebSocket::WebSocket(kj::Own<kj::WebSocket> native)
+WebSocket::WebSocket(jsg::Lock& js, kj::Own<kj::WebSocket> native)
     : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
       url(kj::none),
+      binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
+                                                                        : BinaryType::ARRAYBUFFER),
+      allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
   auto nativeObj = kj::heap<Native>();
@@ -77,9 +85,12 @@ WebSocket::WebSocket(kj::Own<kj::WebSocket> native)
   farNative = IoContext::current().addObject(kj::mv(nativeObj));
 }
 
-WebSocket::WebSocket(kj::String url)
+WebSocket::WebSocket(jsg::Lock& js, kj::String url)
     : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
       url(kj::mv(url)),
+      binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
+                                                                        : BinaryType::ARRAYBUFFER),
+      allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())) {
   auto nativeObj = kj::heap<Native>();
@@ -209,46 +220,49 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
       urlRecord.fragment == kj::none, DOMSyntaxError, wsErr, "The url fragment must be empty.");
 
   kj::HttpHeaders headers(context.getHeaderTable());
-  auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
 
   // Set protocols header if necessary.
   KJ_IF_SOME(variant, protocols) {
     // String consisting of the protocol(s) we send to the server.
-    kj::String protoString;
+    kj::Maybe<kj::String> maybeProtoString;
 
     KJ_SWITCH_ONEOF(variant) {
       KJ_CASE_ONEOF(proto, kj::String) {
         JSG_REQUIRE(
             validProtoToken(proto), DOMSyntaxError, wsErr, "The protocol header token is invalid.");
-        protoString = kj::mv(proto);
+        maybeProtoString = kj::mv(proto);
       }
       KJ_CASE_ONEOF(protoArr, kj::Array<kj::String>) {
-        JSG_REQUIRE(
-            kj::size(protoArr) > 0, DOMSyntaxError, wsErr, "The protocols array cannot be empty.");
-        // Search for duplicates by checking for their presence in the set.
-        kj::HashSet<kj::String> present;
+        // Per the WebSocket spec, an empty protocols array is valid and equivalent to not
+        // specifying any protocols - we simply don't set the Sec-WebSocket-Protocol header.
+        if (protoArr.size() > 0) {
+          // Search for duplicates by checking for their presence in the set.
+          kj::HashSet<kj::String> present;
 
-        for (const auto& proto: protoArr) {
-          JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
-              "One of the protocol header tokens is invalid.");
-          JSG_REQUIRE(!present.contains(proto), DOMSyntaxError, wsErr,
-              "The protocols header cannot have repeating values.");
+          for (const auto& proto: protoArr) {
+            JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
+                "One of the protocol header tokens is invalid.");
+            JSG_REQUIRE(!present.contains(proto), DOMSyntaxError, wsErr,
+                "The protocols header cannot have repeating values.");
 
-          present.insert(kj::str(proto));
+            present.insert(kj::str(proto));
+          }
+          constexpr auto delim = ", "_kj;
+          maybeProtoString = kj::str(kj::delimited(protoArr, delim));
         }
-        const auto delim = ", "_kj;
-        protoString = kj::str(kj::delimited(protoArr, delim));
       }
     }
-    auto protoHeaderId = context.getHeaderIds().secWebSocketProtocol;
-    headers.set(protoHeaderId, kj::mv(protoString));
+    KJ_IF_SOME(protoString, maybeProtoString) {
+      auto protoHeaderId = context.getHeaderIds().secWebSocketProtocol;
+      headers.set(protoHeaderId, kj::mv(protoString));
+    }
   }
 
   // Any userinfo, username and/or password, should be removed.
   // Users should use Authorization header for this purpose.
   kj::String connUrl =
       uriEncodeControlChars(urlRecord.toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
-  auto ws = js.alloc<WebSocket>(kj::mv(url));
+  auto ws = js.alloc<WebSocket>(js, kj::mv(url));
 
   headers.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, kj::str("permessage-deflate"));
   // By default, browsers set the compression extension header for `new WebSocket()`.
@@ -259,6 +273,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
   }
 
+  auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
   auto prom =
       ([](auto& context, auto connUrl, auto headers, auto client) -> kj::Promise<PackedWebSocket> {
     auto response = co_await client->openWebSocket(connUrl, headers);
@@ -386,7 +401,7 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(
   co_return co_await promise;
 }
 
-void WebSocket::accept(jsg::Lock& js) {
+void WebSocket::accept(jsg::Lock& js, jsg::Optional<AcceptOptions> options) {
   auto& native = *farNative;
   JSG_REQUIRE(!native.state.is<AwaitingConnection>(), TypeError,
       "Websockets obtained from the 'new WebSocket()' constructor cannot call accept");
@@ -400,6 +415,12 @@ void WebSocket::accept(jsg::Lock& js) {
     // an established connection. This is probably okay? It might spare the worker devs a class of
     // errors they do not care care about.
     return;
+  }
+
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(value, opts.allowHalfOpen) {
+      allowHalfOpen = AllowHalfOpen(value);
+    }
   }
 
   internalAccept(js, IoContext::current().getCriticalSection());
@@ -475,8 +496,16 @@ WebSocket::Accepted::~Accepted() noexcept(false) {
   }
 }
 
+// Default max WebSocket message size limit. Note that kj-http's own default is 1MiB
+// (`kj::WebSocket::SUGGESTED_MAX_MESSAGE_SIZE`). We've found this to be too small for many commmon
+// use cases, such as proxying Chrome Devtools Protocol messages.
+//
+// JS-RPC messages are size-limited to 32MiB, and it seems to be working well, so we're setting the
+// WebSocket default max message size to match that.
+static constexpr size_t WEBSOCKET_MAX_MESSAGE_SIZE = 32u << 20;
+
 void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
-  size_t maxMessageSize = kj::WebSocket::SUGGESTED_MAX_MESSAGE_SIZE;
+  size_t maxMessageSize = WEBSOCKET_MAX_MESSAGE_SIZE;
   if (FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
     maxMessageSize = 128u << 20;
   }
@@ -538,7 +567,7 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
         tryReleaseNative(js);
       } else {
         native.closedIncoming = true;
-        reportError(js, kj::cp(e));
+        reportError(js, e.clone());
       }
     }
   })));
@@ -585,17 +614,50 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
     KJ_UNREACHABLE;
   }();
 
-  auto pendingAutoResponses =
-      autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
-  autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
   outgoingMessages->insert(
-      GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg), pendingAutoResponses});
+      GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg), getPendingAutoResponseCount()});
 
   ensurePumping(js);
 }
 
-void WebSocket::close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<kj::String> reason) {
+void WebSocket::close(
+    jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<jsg::USVString> reason) {
   auto& native = *farNative;
+
+  // Per the spec, close code and reason validation must happen before any readyState checks.
+  // See https://websockets.spec.whatwg.org/#dom-websocket-close step 1.
+  KJ_IF_SOME(c, code) {
+    if (FeatureFlags::get(js).getPedanticWpt()) {
+      // The WHATWG WebSocket spec allows only 1000 (Normal Closure) or the range 3000-4999
+      // (reserved for libraries/frameworks and private use, per RFC 6455 Section 7.4.2).
+      JSG_REQUIRE(c == 1000 || (c >= 3000 && c <= 4999), DOMInvalidAccessError,
+          "Invalid WebSocket close code: ", c, ".");
+    } else {
+      // Legacy behavior: accept the full 1000-4999 range, only rejecting four codes that
+      // RFC 6455 Section 7.4.1 reserves and forbids endpoints from sending in a Close frame:
+      //   1004 - Reserved (no defined meaning)
+      //   1005 - No Status Rcvd (only used internally to indicate no code was present)
+      //   1006 - Abnormal Closure (only used internally when connection drops without a Close frame)
+      //   1015 - TLS Handshake failure (only used internally, never sent over the wire)
+      JSG_REQUIRE(c >= 1000 && c < 5000 && c != 1004 && c != 1005 && c != 1006 && c != 1015,
+          DOMInvalidAccessError, "Invalid WebSocket close code: ", c, ".");
+    }
+  }
+
+  // Per the WHATWG WebSocket spec and RFC 6455 Section 5.5, the close frame body must not exceed
+  // 125 bytes (2-byte status code + up to 123 bytes of reason). Throw a SyntaxError if the
+  // reason's UTF-8 encoding is longer than 123 bytes.
+  if (FeatureFlags::get(js).getWebsocketCloseReasonByteLimit()) {
+    KJ_IF_SOME(r, reason) {
+      JSG_REQUIRE(r.size() <= 123, DOMSyntaxError,
+          "WebSocket close reason must not be longer than 123 bytes when UTF-8 encoded.");
+    }
+  }
+
+  // The default code of 1005 cannot have a reason, per the standard, so if a reason is specified
+  // then there must be a code, too.
+  JSG_REQUIRE(reason == kj::none || code != kj::none, DOMInvalidAccessError,
+      "If you specify a WebSocket close reason, you must also specify a code.");
 
   // Handle close before connection is established for websockets obtained through `new WebSocket()`.
   KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
@@ -624,33 +686,13 @@ void WebSocket::close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<kj::
 
   assertNoError(js);
 
-  KJ_IF_SOME(c, code) {
-    JSG_REQUIRE(c >= 1000 && c < 5000 && c != 1004 && c != 1005 && c != 1006 && c != 1015,
-        TypeError, "Invalid WebSocket close code: ", c, ".");
-  }
-  if (reason != kj::none) {
-    // The default code of 1005 cannot have a reason, per the standard, so if a reason is specified
-    // then there must be a code, too.
-    JSG_REQUIRE(code != kj::none, TypeError,
-        "If you specify a WebSocket close reason, you must also specify a code.");
-  }
-
-  // pendingAutoResponses stores the number of queuedAutoResponses that will be pumped before sending
-  // the current GatedMessage, guaranteeing order.
-  // queuedAutoResponses stores the total number of auto-response messages that are already in accounted
-  // for in previous GatedMessages. This is useful to easily calculate the number of pendingAutoResponses
-  // for each new GateMessage.
-  auto pendingAutoResponses =
-      autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
-  autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
-
   outgoingMessages->insert(GatedMessage{IoContext::current().waitForOutputLocksIfNecessary(),
     kj::WebSocket::Close{
       // Code 1005 actually translates to sending a close message with no body on the wire.
       static_cast<uint16_t>(code.orDefault(1005)),
-      kj::mv(reason).orDefault(nullptr),
+      kj::mv(reason).orDefault(jsg::USVString(kj::str())),
     },
-    pendingAutoResponses});
+    getPendingAutoResponseCount()});
 
   native.closedOutgoing = true;
   closedOutgoingForHib = true;
@@ -740,7 +782,14 @@ void WebSocket::serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) {
 void WebSocket::setAutoResponseStatus(
     kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) {
   autoResponseTimestamp = time;
-  autoResponseStatus.ongoingAutoResponse = kj::mv(autoResponsePromise);
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
+    autoResponseStatus.ongoingAutoResponse.emplace(
+        context.addObject(kj::heap(kj::mv(autoResponsePromise))));
+  } else {
+    // Called outside an IoContext (e.g. from the hibernation manager's readLoop).
+    // Use plain kj::Own; the caller manages the promise lifecycle.
+    autoResponseStatus.ongoingAutoResponse.emplace(kj::heap(kj::mv(autoResponsePromise)));
+  }
 }
 
 kj::Maybe<kj::Date> WebSocket::getAutoResponseTimestamp() {
@@ -815,12 +864,17 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
 
 kj::Promise<void> WebSocket::sendAutoResponse(kj::String message, kj::WebSocket& ws) {
   if (autoResponseStatus.isPumping) {
-    autoResponseStatus.pendingAutoResponseDeque.push_back(kj::mv(message));
+    autoResponseStatus.pendingAutoResponseDeque.push(kj::mv(message));
   } else if (!autoResponseStatus.isClosed) {
     auto p = ws.send(message).fork();
-    autoResponseStatus.ongoingAutoResponse = p.addBranch();
+    KJ_IF_SOME(context, IoContext::tryCurrent()) {
+      autoResponseStatus.ongoingAutoResponse.emplace(context.addObject(kj::heap(p.addBranch())));
+    } else {
+      // Called outside an IoContext (e.g. from the hibernation manager's readLoop).
+      autoResponseStatus.ongoingAutoResponse.emplace(kj::heap(p.addBranch()));
+    }
     co_await p;
-    autoResponseStatus.ongoingAutoResponse = kj::READY_NOW;
+    autoResponseStatus.ongoingAutoResponse = kj::none;
   }
 }
 
@@ -873,9 +927,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
     autoResponse.isPumping = false;
 
-    if (autoResponse.pendingAutoResponseDeque.size() > 0) {
-      autoResponse.pendingAutoResponseDeque.clear();
-    }
+    autoResponse.pendingAutoResponseDeque.clear();
 
     if (!completed) {
       // We didn't make it to `completed = true` at the end of this function, so either an
@@ -888,8 +940,17 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
   // If we have a ongoingAutoResponse, we must co_await it here because there's a ws.send()
   // in progress. Otherwise there can occur ws.send() race problems.
-  co_await autoResponse.ongoingAutoResponse;
-  autoResponse.ongoingAutoResponse = kj::READY_NOW;
+  KJ_IF_SOME(promiseHolder, autoResponse.ongoingAutoResponse) {
+    KJ_SWITCH_ONEOF(promiseHolder) {
+      KJ_CASE_ONEOF(ioOwned, IoOwn<kj::Promise<void>>) {
+        co_await *ioOwned;
+      }
+      KJ_CASE_ONEOF(owned, kj::Own<kj::Promise<void>>) {
+        co_await *owned;
+      }
+    }
+    autoResponse.ongoingAutoResponse = kj::none;
+  }
 
   do {
     while (outgoingMessages.size() > 0) {
@@ -901,10 +962,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
       auto size = countBytesFromMessage(gatedMessage.message);
 
       while (gatedMessage.pendingAutoResponses > 0) {
-        KJ_ASSERT(
-            autoResponse.pendingAutoResponseDeque.size() >= gatedMessage.pendingAutoResponses);
-        auto message = kj::mv(autoResponse.pendingAutoResponseDeque.front());
-        autoResponse.pendingAutoResponseDeque.pop_front();
+        auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
         gatedMessage.pendingAutoResponses--;
         autoResponse.queuedAutoResponses--;
         co_await ws.send(message);
@@ -937,9 +995,8 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
     // If there are any auto-responses left to process, we should do it now.
     // We should also check if the last sent message was a close. Shouldn't happen.
-    while (autoResponse.pendingAutoResponseDeque.size() > 0 && !autoResponse.isClosed) {
-      auto message = kj::mv(autoResponse.pendingAutoResponseDeque.front());
-      autoResponse.pendingAutoResponseDeque.pop_front();
+    while (!autoResponse.pendingAutoResponseDeque.empty() && !autoResponse.isClosed) {
+      auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
       co_await ws.send(message);
     }
 
@@ -949,6 +1006,13 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
   } while (outgoingMessages.size() > 0);
 
   completed = true;
+}
+
+size_t WebSocket::getPendingAutoResponseCount() {
+  auto count =
+      autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
+  autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
+  return count;
 }
 
 void WebSocket::tryReleaseNative(jsg::Lock& js) {
@@ -1006,12 +1070,35 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
             dispatchEventImpl(js, js.alloc<MessageEvent>(js, js.str(text)));
           }
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
-            dispatchEventImpl(js,
-                js.alloc<MessageEvent>(
-                    js, jsg::JsValue(js.arrayBuffer(kj::mv(data)).getHandle(js))));
+            if (binaryType_ == BinaryType::BLOB) {
+              // Per the WHATWG spec, deliver binary messages as Blob when binaryType is "blob".
+              auto ab = jsg::JsArrayBuffer::create(js, data);
+              auto blob = js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::str());
+              dispatchEventImpl(js, js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob)));
+            } else {
+              auto ab = js.arrayBuffer(kj::mv(data)).getHandle(js);
+              dispatchEventImpl(js, js.alloc<MessageEvent>(js, jsg::JsValue(ab)));
+            }
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
             native.closedIncoming = true;
+            if (!allowHalfOpen.toBool() && !native.closedOutgoing && !native.outgoingAborted &&
+                !native.state.is<Released>()) {
+              // When allowHalfOpen is false (the spec-compliant default with the
+              // web_socket_auto_reply_to_close compat flag), automatically send a reciprocal
+              // Close frame through the outgoing message pump so that readyState is CLOSED (3)
+              // when the close event fires. Skip if a close frame was already sent (e.g. the
+              // application called close() before the server sent its Close), or if the outgoing
+              // side is otherwise unusable.
+              outgoingMessages->insert(
+                  GatedMessage{IoContext::current().waitForOutputLocksIfNecessary(),
+                    kj::WebSocket::Close{close.code, kj::str(close.reason)},
+                    getPendingAutoResponseCount()});
+
+              native.closedOutgoing = true;
+              closedOutgoingForHib = true;
+              ensurePumping(js);
+            }
             dispatchEventImpl(js, js.alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
             // Native WebSocket no longer needed; release.
             tryReleaseNative(js);
@@ -1033,7 +1120,7 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
 jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock& js) {
   auto pipe = kj::newWebSocketPipe();
   auto pair = js.alloc<WebSocketPair>(
-      js.alloc<WebSocket>(kj::mv(pipe.ends[0])), js.alloc<WebSocket>(kj::mv(pipe.ends[1])));
+      js.alloc<WebSocket>(js, kj::mv(pipe.ends[0])), js.alloc<WebSocket>(js, kj::mv(pipe.ends[1])));
   auto first = pair->getFirst();
   auto second = pair->getSecond();
 
@@ -1050,7 +1137,7 @@ jsg::Ref<WebSocketPair::PairIterator> WebSocketPair::entries(jsg::Lock& js) {
 }
 
 void WebSocket::reportError(jsg::Lock& js, kj::Exception&& e) {
-  reportError(js, js.exceptionToJsValue(kj::cp(e)));
+  reportError(js, js.exceptionToJsValue(e.clone()));
 }
 
 void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
@@ -1060,7 +1147,7 @@ void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
     error = err.addRef(js);
 
     dispatchEventImpl(js,
-        js.alloc<ErrorEvent>(kj::str("error"),
+        js.alloc<ErrorEvent>(
             ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we
@@ -1157,6 +1244,7 @@ WebSocket::HibernationPackage WebSocket::buildPackageForHibernation() {
     .serializedAttachment = kj::mv(serializedAttachment),
     .maybeTags = kj::none,
     .closedOutgoingConnection = closedOutgoingForHib,
+    .allowHalfOpen = allowHalfOpen,
   };
 }
 
@@ -1254,6 +1342,19 @@ bool WebSocket::Accepted::isHibernatable() {
 void WebSocketPair::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField(nullptr, sockets[0]);
   tracker.trackField(nullptr, sockets[1]);
+}
+
+kj::StringPtr WebSocket::getBinaryType() {
+  return binaryType_ == BinaryType::BLOB ? "blob"_kj : "arraybuffer"_kj;
+}
+
+void WebSocket::setBinaryType(kj::String value) {
+  if (value == "blob") {
+    binaryType_ = BinaryType::BLOB;
+  } else if (value == "arraybuffer") {
+    binaryType_ = BinaryType::ARRAYBUFFER;
+  }
+  // Per the spec, invalid values are silently ignored — the existing binaryType is retained.
 }
 
 void WebSocket::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

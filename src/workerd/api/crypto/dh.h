@@ -20,12 +20,12 @@ class DiffieHellman final {
   void setPrivateKey(kj::ArrayPtr<kj::byte> key);
   void setPublicKey(kj::ArrayPtr<kj::byte> key);
 
-  jsg::BufferSource getPublicKey(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
-  jsg::BufferSource getPrivateKey(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
-  jsg::BufferSource getGenerator(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
-  jsg::BufferSource getPrime(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
-  jsg::BufferSource computeSecret(jsg::Lock& js, kj::ArrayPtr<kj::byte> key) KJ_WARN_UNUSED_RESULT;
-  jsg::BufferSource generateKeys(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+  jsg::JsUint8Array getPublicKey(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+  jsg::JsUint8Array getPrivateKey(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+  jsg::JsUint8Array getGenerator(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+  jsg::JsUint8Array getPrime(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+  jsg::JsUint8Array computeSecret(jsg::Lock& js, kj::ArrayPtr<kj::byte> key) KJ_WARN_UNUSED_RESULT;
+  jsg::JsUint8Array generateKeys(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   kj::Maybe<int> check() KJ_WARN_UNUSED_RESULT;
 

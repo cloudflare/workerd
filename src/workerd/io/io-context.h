@@ -9,10 +9,12 @@
 
 #include <workerd/api/deferred-proxy.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/io/external-pusher.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/io-thread-context.h>
 #include <workerd/io/io-timers.h>
+#include <workerd/io/limit-enforcer.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/async-context.h>
@@ -49,56 +51,6 @@ WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 
 class IoContext;
 
-// A WarningAggregator is a helper utility for deduplicating related warning messages.
-// It is a ref-counted object that is initially acquired from the IoContext, but is
-// capable of outliving the IoContext. When destroyed, if there are any pending warnings,
-// those will be emitted all at once with a single header message followed by contextual
-// information for each individual collected instance.
-class WarningAggregator final: public kj::AtomicRefcounted {
- public:
-  // The IoContext will maintain a map of WarningAggregators based on an opaque key.
-  class Key final {
-   public:
-    Key(): hash(kj::hashCode(this)) {}
-    KJ_DISALLOW_COPY_AND_MOVE(Key);
-    inline uint hashCode() const {
-      return hash;
-    }
-    inline bool operator==(const Key& other) const {
-      return this == &other;
-    }
-
-   private:
-    uint hash;
-  };
-
-  // Captures the contextual information for a specific aggregated warning.
-  class WarningContext {
-   public:
-    virtual ~WarningContext() noexcept(false) = default;
-    virtual kj::String toString(jsg::Lock& js) = 0;
-  };
-
-  // The EmitCallback is called when the WarningAggregator is destroyed. It is
-  // responsible for actually emitting the warnings that are collected. It will
-  // only be called once and only if there are any collected warnings.
-  using EmitCallback =
-      kj::Function<void(Worker::Lock& lock, kj::Array<kj::Own<WarningContext>> warnings)>;
-
-  WarningAggregator(IoContext& context, EmitCallback emitter);
-  ~WarningAggregator() noexcept(false);
-
-  void add(kj::Own<WarningContext> warning) const;
-
-  using Map = kj::HashMap<const Key&, kj::Own<WarningAggregator>>;
-
- private:
-  kj::Own<const Worker> worker;
-  kj::Own<RequestObserver> requestMetrics;
-  EmitCallback emitter;
-  kj::MutexGuarded<kj::Vector<kj::Own<WarningContext>>> warnings;
-};
-
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
 // there is only ever one IncomingRequest per IoContext, but with actors there could be many.
 //
@@ -119,7 +71,7 @@ class IoContext_IncomingRequest final {
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-      tracing::InvocationSpanContext invocationSpanContext);
+      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -147,8 +99,8 @@ class IoContext_IncomingRequest final {
   kj::Promise<void> drain();
 
   // Waits for all "waitUntil" tasks to finish, up to the time limit for scheduled events, as
-  // defined by `scheduledTimeoutMs` in `WorkerLimits`. Returns an enum indicating if the
-  // event completed successfully, hit a timeout, or was aborted.
+  // defined by `scheduledTimeoutMs` in `WorkerLimits`. Returns an enum indicating the event outcome
+  // based on whether the given tasks completed successfully, hit a timeout, or were aborted.
   //
   // Note that, while this is similar in some ways to `drain()`, `finishScheduled()` is intended
   // to be called synchronously during request handling, i.e. where a client is waiting for the
@@ -158,8 +110,12 @@ class IoContext_IncomingRequest final {
   // This method is also used by some custom event handlers (see WorkerInterface::CustomEvent) that
   // need similar behavior, as well as the test handler. TODO(cleanup): Rename to something more
   // generic?
-  enum class FinishScheduledResult { COMPLETED, ABORTED, TIMEOUT };
-  kj::Promise<FinishScheduledResult> finishScheduled();
+  kj::Promise<EventOutcome> finishScheduled();
+
+  // Access the event loop's current time point. This will remain constant between ticks. This is
+  // used to implement IoContext::now(), which should be preferred so that time can be adjusted
+  // based on setTimeout() when needed.
+  kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none);
 
   RequestObserver& getMetrics() {
     return *metrics;
@@ -169,11 +125,15 @@ class IoContext_IncomingRequest final {
     return workerTracer;
   }
 
+  // Returns a new reference to the root user trace span for this incoming request, or
+  // SpanParent(nullptr) if the request has no user-tracing root span.
+  SpanParent getRootUserTraceSpan() {
+    return rootUserTraceSpan.addRef();
+  }
+
   // The invocation span context is a unique identifier for a specific
   // worker invocation.
-  tracing::InvocationSpanContext& getInvocationSpanContext() {
-    return invocationSpanContext;
-  }
+  tracing::InvocationSpanContext& getInvocationSpanContext();
 
  private:
   kj::Own<IoContext> context;
@@ -181,10 +141,19 @@ class IoContext_IncomingRequest final {
   kj::Maybe<kj::Own<BaseTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
 
+  // Root user trace span for this request. Populated during delivered() via
+  // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references
+  // is owned by workerTracer above; because user-tracing SpanSubmitters hold only a
+  // BaseTracer::WeakRef, stale SpanParent references (e.g. in AsyncContextFrame storage via
+  // IoOwn, kept alive past ~IncomingRequest by the IoContext's delete queue) cannot extend
+  // tracer lifetime.
+  SpanParent rootUserTraceSpan = SpanParent(nullptr);
+
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
   // has a root span, even if it is not explicitly traced.
-  tracing::InvocationSpanContext invocationSpanContext;
+  kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan;
+  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
 
   bool wasDelivered = false;
 
@@ -265,6 +234,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return getCurrentIncomingRequest().getWorkerTracer();
   }
 
+  // Returns the root user trace span for the current incoming request, if any.
+  SpanParent getRootUserTraceSpan() {
+    if (incomingRequests.empty()) return SpanParent(nullptr);
+    return getCurrentIncomingRequest().getRootUserTraceSpan();
+  }
+
   LimitEnforcer& getLimitEnforcer() {
     return *limitEnforcer;
   }
@@ -314,14 +289,18 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Promise<T> lockOutputWhile(kj::Promise<T> promise);
 
   bool isInspectorEnabled();
-  bool isFiddle();
 
-  // Log a warning to the inspector. This is a no-op if the inspector is not enabled.
+  // Returns true if there is something listening for warnings — the Chrome DevTools inspector,
+  // a streaming tail worker tracer, or --verbose stderr logging. Use this to guard expensive
+  // warning-message construction that should be skipped when nobody would see the result.
+  bool hasWarningHandler();
+
+  // Log a warning. Emits to the Chrome DevTools inspector (if connected), stderr, and to the
+  // streaming tail worker tracer (if active).
   void logWarning(kj::StringPtr description);
 
-  // Log a warning to the inspector. This is a no-op if the inspector is not enabled. Deduplicates
-  // warning messages such that a single unique message will only be logged once for the lifetime of
-  // an isolate.
+  // Log a warning, deduplicating so that each unique message is only logged once for the lifetime
+  // of an isolate. Emits to the same destinations as logWarning().
   void logWarningOnce(kj::StringPtr description);
 
   // Log an internal error message. Deduplicates log messages such that a single unique message will
@@ -390,11 +369,21 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Throws an exception if there is no current context (see hasCurrent() below).
   static IoContext& current();
 
+  // Like current(), but returns kj::none if there is no current context.
+  static kj::Maybe<IoContext&> tryCurrent();
+
   // True if there is a current IoContext for the thread (current() will not throw).
   static bool hasCurrent();
 
   // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
   bool isCurrent();
+
+  // Check if a current request is available. Used to provide better diagnostics when this is
+  // unexpectedly absent when reporting a user span.
+  // TODO(cleanup): This is a hack, remove after addressing the underlying issue.
+  bool hasCurrentIncomingRequest() {
+    return !incomingRequests.empty();
+  }
 
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.
   void requireCurrentOrThrowJs();
@@ -438,6 +427,35 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func);
+
+  // Attach the objects to the promise by creating a continuation that holds them.
+  // This ensures the attachments stay alive until the promise resolves.
+  // This should ONLY be used with TraceContext or SpanBuilder objects.
+  template <typename T, typename... Attachments>
+  jsg::Promise<T> attachSpans(jsg::Lock& js, jsg::Promise<T> promise, Attachments&&... attachments)
+    requires(... &&
+        (kj::isSameType<Attachments, SpanBuilder>() || kj::isSameType<Attachments, TraceContext>()))
+  {
+    return attachSpansInternalOnly(js, kj::mv(promise), kj::fwd<Attachments>(attachments)...);
+  }
+
+  // public for tests
+  template <typename T, typename... Attachments>
+  jsg::Promise<T> attachSpansInternalOnly(
+      jsg::Lock& js, jsg::Promise<T> promise, Attachments&&... attachments) {
+    auto attachmentTuple = addObject(kj::heap(kj::tuple(kj::fwd<Attachments>(attachments)...)));
+
+    if constexpr (kj::isSameType<T, void>()) {
+      return promise.then(js, [attachmentTuple = kj::mv(attachmentTuple)](jsg::Lock&) {
+        // The attachments are kept alive in this lambda's capture
+      });
+    } else {
+      return promise.then(js, [attachmentTuple = kj::mv(attachmentTuple)](jsg::Lock&, T result) {
+        // The attachments are kept alive in this lambda's capture
+        return result;
+      });
+    }
+  }
 
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
   // JavaScript promise for the result of that. If no `func` is provided, no transformation is
@@ -685,7 +703,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Date now();
 
   TmpDirStoreScope& getTmpDirStoreScope() {
-    return *tmpDirStoreScope;
+    KJ_IF_SOME(scope, tmpDirStoreScope) {
+      return *scope;
+    }
+    return *tmpDirStoreScope.emplace(TmpDirStoreScope::create());
   }
 
   // Returns a promise that resolves once `now() >= when`.
@@ -721,6 +742,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return thread.getHeaderIds();
   }
 
+  kj::Rc<ExternalPusherImpl> getExternalPusher();
+
   // Subrequest channel numbers for the two special channels.
   // NULL = The channel used by global fetch() when the Request has no fetcher attached.
   // NEXT = DEPRECATED: The fetcher attached to Requests delivered by a FetchEvent, so that we can
@@ -749,6 +772,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     kj::Maybe<TraceContext&> existingTraceContext;
   };
 
+  // Wraps a WorkerInterface factory with subrequest accounting: tracing, optional metrics wrapping,
+  // and an external memory adjustment to pressure V8's GC. All code paths that create HTTP
+  // connections (including those built from capnp capabilities via getHttpOverCapnpFactory())
+  // should route through this function or getSubrequest().
   kj::Own<WorkerInterface> getSubrequestNoChecks(
       kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
       SubrequestOptions options);
@@ -807,12 +834,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<WorkerInterface> getSubrequestChannel(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
 
-  kj::Own<WorkerInterface> getSubrequestChannelWithSpans(uint channel,
-      bool isInHouse,
-      kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName,
-      kj::Vector<Span::Tag> tags);
-
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
       bool isInHouse,
@@ -828,23 +849,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Own<kj::HttpClient> getHttpClient(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
-
-  // As above, but with list of span tags to add, analogous to getSubrequestChannelWithSpans().
-  kj::Own<kj::HttpClient> getHttpClientWithSpans(uint channel,
-      bool isInHouse,
-      kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName,
-      kj::Vector<Span::Tag> tags);
-
-  // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
-  // to HttpClient.
-  kj::Own<kj::HttpClient> getHttpClientNoChecks(uint channel,
-      bool isInHouse,
-      kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<kj::ConstString> operationName = kj::none);
   // TODO(cleanup): Make it the caller's job to call asHttpClient() on the result of
   //   getSubrequest*().
 
+  // Get a raw Cap'n Proto capability for the given channel. This is appropriate for pure RPC use
+  // cases (e.g. actor operations, email dispatch) that don't create HTTP connections. If you're
+  // converting the capability to an HTTP service via getHttpOverCapnpFactory(), use
+  // getSubrequestNoChecks() instead and call channelFactory.getCapability() from the callback,
+  // so that the external memory adjustment and other subrequest accounting are applied.
   capnp::Capability::Client getCapnpChannel(uint channel) {
     return getIoChannelFactory().getCapability(channel);
   }
@@ -854,9 +866,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting,
-      SpanParent parentSpan) {
-    return getIoChannelFactory().getGlobalActor(
-        channel, id, kj::mv(locationHint), mode, enableReplicaRouting, kj::mv(parentSpan));
+      ActorRoutingMode routingMode,
+      SpanParent parentSpan,
+      kj::Maybe<ActorVersion> version) {
+    return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint), mode,
+        enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
   }
   kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(
       uint channel, kj::StringPtr id, SpanParent parentSpan) {
@@ -864,8 +878,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   }
 
   void abortAllActors(kj::Maybe<kj::Exception&> reason) {
-    return getIoChannelFactory().abortAllActors(reason);
+    getIoChannelFactory().abortAllActors(reason);
   }
+
+  void deleteAllActors(kj::Maybe<kj::Exception&> reason) {
+    getIoChannelFactory().deleteAllActors(reason);
+  }
+
+  // Condemn and terminate JS isolate
+  void abortIsolate(kj::StringPtr reason = nullptr);
 
   // Get an HttpClient to use for Cache API subrequests.
   kj::Own<CacheClient> getCacheClient();
@@ -875,20 +896,39 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::AsyncContextFrame::StorageScope makeAsyncTraceScope(
       Worker::Lock& lock, kj::Maybe<SpanParent> spanParent = kj::none) KJ_WARN_UNUSED_RESULT;
 
+  // Returns an object that ensures an async JS operation started in the current scope captures
+  // the given user trace span, or the current incoming request's root user trace span if none is
+  // given. Storing the span in the AsyncContextFrame (which on actors outlives individual
+  // requests via the IoContext's delete queue) is safe because user-tracing SpanSubmitter
+  // implementations hold only a BaseTracer::WeakRef - stale references cannot extend tracer
+  // lifetime.
+  jsg::AsyncContextFrame::StorageScope makeUserAsyncTraceScope(
+      Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
+
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
   SpanParent getCurrentTraceSpan();
   SpanParent getCurrentUserTraceSpan();
 
-  tracing::InvocationSpanContext& getInvocationSpanContext() {
-    return getCurrentIncomingRequest().invocationSpanContext;
+  // Returns the invocation's traceId/invocationId paired with the currently-active user
+  // span's spanId (as pushed by `ctx.tracing.enterSpan`), falling back to the invocation
+  // root's spanId when no user span is active.
+  tracing::InvocationSpanContext getInvocationSpanContext() {
+    auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
+    tracing::SpanId sid = getCurrentUserTraceSpan().getSpanId();
+    if (sid != tracing::SpanId::nullId) {
+      return tracing::InvocationSpanContext(base.getTraceId(), base.getInvocationId(), sid);
+    }
+    return base.clone();
   }
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.
   [[nodiscard]] SpanBuilder makeTraceSpan(kj::ConstString operationName);
-  [[nodiscard]] SpanBuilder makeUserTraceSpan(kj::ConstString operationName);
+  // Returns both an internal and a user tracing span, this ensures that all user spans are
+  // available in internal tracing.
+  [[nodiscard]] TraceContext makeUserTraceSpan(kj::ConstString operationName);
 
   // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
   // request and get a possibly wrapped stream back.
@@ -911,10 +951,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   jsg::JsObject getPromiseContextTag(jsg::Lock& js);
 
-  // Returns the existing WarningAggregator for the specified key, or calls load to create one.
-  kj::Own<WarningAggregator> getWarningAggregator(
-      const WarningAggregator::Key& key, kj::Function<kj::Own<WarningAggregator>(IoContext&)> load);
-
   // The IoChannelFactory must be accessed through the
   // currentIncomingRequest because it has some tracing context built in.
   //
@@ -931,7 +967,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
 
-  kj::Own<TmpDirStoreScope> tmpDirStoreScope;
+  kj::Maybe<kj::Own<TmpDirStoreScope>> tmpDirStoreScope;
 
   kj::Own<const Worker> worker;
   kj::Maybe<Worker::Actor&> actor;
@@ -966,17 +1002,27 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Maybe<PendingEvent&> pendingEvent;
   kj::Maybe<kj::Promise<void>> abortFromHangTask;
 
-  WarningAggregator::Map warningAggregatorMap;
-
   // Objects pointed to by IoOwn<T>s.
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed
   //   objects which reference `deleteQueue` in their destructors.
   OwnedObjectList ownedObjects;
 
+  kj::Maybe<kj::Rc<ExternalPusherImpl>> externalPusher;
+
   // Implementation detail of makeCachePutStream().
 
   // TODO: Used for Cache PUT serialization.
   kj::Promise<void> cachePutSerializer;
+
+  // The timeout manager needs to live below `deleteQueue` because the promises may refer to
+  // objects in the queue.
+  //
+  // ATTENTION: `timeoutManager` MUST be declared before both `waitUntilTasks` and `tasks` so it
+  // outlives them. During TaskSet destruction, deferred callbacks (e.g. the one in Scheduler::wait
+  // that clears the timer slot via clearTimeoutImpl) still need a live timeoutManager. C++ destroys
+  // members in reverse declaration order, so declaring timeoutManager first ensures it is destroyed
+  // last among these three.
+  kj::Own<TimeoutManager> timeoutManager;
 
   kj::TaskSet waitUntilTasks;
   EventOutcome waitUntilStatusValue = EventOutcome::OK;
@@ -989,17 +1035,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   uint addTaskCounter = 0;
   kj::TaskSet tasks;
-
-  // The timeout manager needs to live below `deleteQueue` because the promises may refer to
-  // objects in the queue.
-
-  // ATTENTION: `tasks` and `timeoutManager` MUST be destructed before any other member.
-  // If any other member is destructed after (is declared later in the class than) these two
-  // members, then there is a possibility that callbacks will attempt to use a partially or fully
-  // destructed IoContext object. For the same reason, any promises stored outside of the
-  // IoContext (e.g. in the ActorContext) MUST be canceled when the IoContext is
-  // destructed.
-  kj::Own<TimeoutManager> timeoutManager;
 
   // This canceler will be canceled when the IoContext is destroyed. Use it to wrap promises that
   // need to be held externally but which should error if the IoContext is canceled. This is used
@@ -1056,7 +1091,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     using Type = kj::Maybe<kj::Exception>;
   };
   template <typename T>
-  using ExceptionOr = typename ExceptionOr_<T>::Type;
+  using ExceptionOr = ExceptionOr_<T>::Type;
 
   template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIoImpl(
@@ -1115,15 +1150,16 @@ struct SuppressIoContextScope {
 
 template <typename T>
 kj::Promise<T> IoContext::lockOutputWhile(kj::Promise<T> promise) {
-  return getActorOrThrow().getOutputGate().lockWhile(kj::mv(promise));
+  return getActorOrThrow().getOutputGate().lockWhile(kj::mv(promise), getCurrentTraceSpan());
 }
 
 template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
-    return cs.get()->wait().then(
-        [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
+    return cs.get()
+        ->wait(getCurrentTraceSpan())
+        .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
       return run(kj::fwd<Func>(func), kj::mv(inputLock));
     });
   } else {
@@ -1137,14 +1173,15 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
   // been aborted, there's likely not an active request so later operations will fail anyway.
   KJ_IF_SOME(ex, abortException) {
-    return kj::cp(ex);
+    return ex.clone();
   }
 
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
     if (inputLock == kj::none) {
-      return a.getInputGate().wait().then(
-          [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
+      return a.getInputGate()
+          .wait(getCurrentTraceSpan())
+          .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
         return run(kj::fwd<Func>(func), kj::mv(inputLock));
       });
     }
@@ -1485,8 +1522,10 @@ auto IoContext::makeReentryCallback(Func func) {
     fulfiller->fulfill();
   });
 
+  auto ioFunc = addObjectReverse(kj::heap(kj::fwd<Func>(func)));
+
   return [self = getWeakRef(), cs = getCriticalSection(), releaseNotifier = kj::mv(releaseNotifier),
-             func = kj::fwd<Func>(func)](auto&&... params) mutable {
+             ioFunc = kj::mv(ioFunc)](auto&&... params) mutable {
     auto& ctx = JSG_REQUIRE_NONNULL(self->tryGet(), Error,
         "The execution context which hosts this callback is no longer running.");
 
@@ -1495,8 +1534,11 @@ auto IoContext::makeReentryCallback(Func func) {
     }
 
     return ctx.canceler.wrap(ctx.run(
-        [&ctx, &func, ... params = kj::fwd<decltype(params)>(params)](Worker::Lock& lock) mutable {
+        [&ctx, &ioFunc, ... params = kj::fwd<decltype(params)>(params)](
+            Worker::Lock& lock) mutable {
       using ResultType = kj::Decay<decltype(func(lock, kj::fwd<decltype(params)>(params)...))>;
+
+      auto& func = *ioFunc;
 
       if constexpr (kj::isSameType<ResultType, void>()) {
         (void)ctx;
@@ -1507,7 +1549,8 @@ auto IoContext::makeReentryCallback(Func func) {
         (void)ctx;
         return func(lock, kj::fwd<decltype(params)>(params)...);
       }
-    }, kj::mv(cs)));
+    },
+        kj::mv(cs)));
   };
 }
 
@@ -1548,11 +1591,11 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   auto cs = lock.startCriticalSection();
   auto cs2 = kj::addRef(*cs);
 
-  using T = jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>>;
+  using T = jsg::RemovePromise<jsg::ReturnType<Func, void, true>>;
   auto [result, resolver] = js.newPromiseAndResolver<T>();
 
   addTask(
-      cs->wait()
+      cs->wait(getCurrentTraceSpan())
           .then([this, callback = kj::mv(callback),
                     maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](
                     InputGate::Lock inputLock) mutable {

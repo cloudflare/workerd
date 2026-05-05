@@ -26,6 +26,28 @@
 import { validateFunction } from 'node-internal:validators';
 import { default as timersUtil } from 'node-internal:timers';
 
+// Capture original global timer functions at module load time, before they might be
+// overridden by the enable_nodejs_global_timers compat flag. This avoids circular
+// dependency issues when our setTimeout/setInterval return Timeout objects.
+// Cast to number-returning functions since we know we're capturing the original
+// implementations before any override.
+const originalSetTimeout = globalThis.setTimeout.bind(globalThis) as (
+  callback: (...args: unknown[]) => unknown,
+  ms?: number,
+  ...args: unknown[]
+) => number;
+const originalSetInterval = globalThis.setInterval.bind(globalThis) as (
+  callback: (...args: unknown[]) => unknown,
+  ms?: number,
+  ...args: unknown[]
+) => number;
+const originalClearTimeout = globalThis.clearTimeout.bind(globalThis) as (
+  id?: number
+) => void;
+const originalClearInterval = globalThis.clearInterval.bind(globalThis) as (
+  id?: number
+) => void;
+
 let clearTimeoutImpl: (obj: Timeout) => void;
 
 export class Timeout {
@@ -54,18 +76,17 @@ export class Timeout {
   }
 
   #constructTimer(): number {
-    // @ts-expect-error TS2322 Due to difference between Node.js and globals
     this.#timer = this.#isRepeat
-      ? globalThis.setInterval(this.#callback, this.#after, ...this.#args)
-      : globalThis.setTimeout(this.#callback, this.#after, ...this.#args);
+      ? originalSetInterval(this.#callback, this.#after, ...this.#args)
+      : originalSetTimeout(this.#callback, this.#after, ...this.#args);
     return this.#timer;
   }
 
   #clearTimeout(): void {
     if (this.#isRepeat) {
-      globalThis.clearInterval(this.#timer);
+      originalClearInterval(this.#timer);
     } else {
-      globalThis.clearTimeout(this.#timer);
+      originalClearTimeout(this.#timer);
     }
   }
 
@@ -133,7 +154,7 @@ export function clearTimeout(
   if (timer instanceof Timeout) {
     clearTimeoutImpl(timer);
   } else if (typeof timer === 'number') {
-    globalThis.clearTimeout(timer);
+    originalClearTimeout(timer);
   }
 }
 
@@ -162,7 +183,7 @@ export function clearInterval(
   if (timer instanceof Timeout) {
     clearTimeoutImpl(timer);
   } else if (typeof timer === 'number') {
-    globalThis.clearInterval(timer);
+    originalClearInterval(timer);
   }
 }
 
@@ -182,7 +203,7 @@ export function unenroll(timer: unknown): void {
   if (timer instanceof Timeout) {
     clearTimeoutImpl(timer);
   } else if (typeof timer === 'number') {
-    globalThis.clearTimeout(timer);
+    originalClearTimeout(timer);
   }
 }
 

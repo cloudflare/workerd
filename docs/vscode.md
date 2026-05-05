@@ -56,7 +56,7 @@ keybinding in VSCode, but can be found with the command palette with `shift+ctrl
 
 There are workerd debugging targets within Visual Studio Code which are supported on Linux, OS X, and Windows.
 
-The [.vscode/launch.json](../.vscode/launch.json) file has launch targets to that can be debugged within VSCode.
+The [.vscode/launch.json](../.vscode/launch.json) file has launch targets that can be debugged within VSCode.
 
 Before you start debugging, ensure that you have saved a vscode workspace for workerd,
 "File → Save Workspace As...". For more information about workspaces, see <https://code.visualstudio.com/docs/editor/workspaces>.
@@ -81,7 +81,7 @@ Launching "workerd wd-test case (dbg)" will prompt for wd-test file to provide t
 ## Clangd code completion, navigation, language server
 
 We use clangd for code completion and navigation within the Visual Code. We use the simple
-[compile_flags.txt](../compile_flags.txt) option provide compiler arguments for clangd to analyze sources.
+[compile_flags.txt](../compile_flags.txt) option to provide compiler arguments for clangd to analyze sources.
 
 If `compile_flags.txt` is not working well on your system, try running:
 
@@ -92,7 +92,7 @@ bazel build --copt="-MD" --cxxopt="-MD" //src/workerd/server:workerd
 to generate dependency files and:
 
 ```sh
-find bazel-out/ -name '*.d'`
+find bazel-out/ -name '*.d'
 ```
 
 to locate the generated dependency files. These files will help you align the include paths in

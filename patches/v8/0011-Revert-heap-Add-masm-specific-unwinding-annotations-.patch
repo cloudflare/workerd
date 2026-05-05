@@ -14,12 +14,12 @@ of getting our V8 upgrade unblocked.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.gn b/BUILD.gn
-index ea4eddb93336b511d1007ab9f3853c5429f2dbff..5f1f4873d12bf179f04be50d15c4d81a1d581059 100644
+index a5c7d8477815b437cf5415ab34ca40bb1f43273a..625abc390a285b2c53f85486bb4afc3bde08574d 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4365,8 +4365,8 @@ v8_header_set("v8_internal_headers") {
-     "src/temporal/temporal-parser.h",
-     "src/third_party/rapidhash-v8/rapidhash.h",
+@@ -4637,8 +4637,8 @@ v8_header_set("v8_internal_headers") {
+     "src/tasks/operations-barrier.h",
+     "src/tasks/task-utils.h",
      "src/torque/runtime-macro-shims.h",
 -    "src/tracing/trace-event-no-perfetto.h",
      "src/tracing/trace-event.h",
@@ -27,7 +27,7 @@ index ea4eddb93336b511d1007ab9f3853c5429f2dbff..5f1f4873d12bf179f04be50d15c4d81a
      "src/tracing/trace-id.h",
      "src/tracing/traced-value.h",
      "src/tracing/tracing-category-observer.h",
-@@ -7069,12 +7069,7 @@ v8_source_set("v8_heap_base") {
+@@ -7535,12 +7535,7 @@ v8_source_set("v8_heap_base") {
    ]
  
    if (current_cpu == "x64") {
@@ -42,7 +42,7 @@ index ea4eddb93336b511d1007ab9f3853c5429f2dbff..5f1f4873d12bf179f04be50d15c4d81a
      sources += [ "src/heap/base/asm/ia32/push_registers_asm.cc" ]
    } else if (current_cpu == "arm") {
 diff --git a/src/heap/base/asm/x64/push_registers_asm.cc b/src/heap/base/asm/x64/push_registers_asm.cc
-index 554caddfa77ff91c907c377aa95cc6b1eb907e5c..73f8c4c078e091c378868de49b5254cc89a0a688 100644
+index d1d79dcfd5a8fce8240d8981b25c8027e220b03b..3f17db19310ff64e9316d0bb8308e399f5ce1422 100644
 --- a/src/heap/base/asm/x64/push_registers_asm.cc
 +++ b/src/heap/base/asm/x64/push_registers_asm.cc
 @@ -14,16 +14,61 @@
@@ -112,10 +112,10 @@ index 554caddfa77ff91c907c377aa95cc6b1eb907e5c..73f8c4c078e091c378868de49b5254cc
  asm(
  #ifdef __APPLE__
      ".globl _PushAllRegistersAndIterateStack            \n"
-@@ -64,3 +109,5 @@ asm(
+@@ -81,3 +126,5 @@ asm(
      ".Lfunc_end0-PushAllRegistersAndIterateStack        \n"
  #endif  // !defined(__APPLE__)
-     );
+     ".cfi_endproc                                      \n");
 +
 +#endif  // !_WIN64
 diff --git a/src/heap/base/asm/x64/push_registers_masm.asm b/src/heap/base/asm/x64/push_registers_masm.asm

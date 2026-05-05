@@ -1,3 +1,6 @@
+// Copyright (c) 2024 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import assert from 'node:assert';
 import { Buffer } from 'node:buffer';
 import {
@@ -93,7 +96,6 @@ export const crc32Test = {
       [0x0, ']{.[.+?+[[=;[?}_#&;[=)__$$:+=_', 30, 0xf652deac],
       [0x0, '-%.)=/[@].:.(:,()$;=%@-$?]{%+%', 30, 0xaf39a5a9],
       [0x0, '+]#$(@&.=:,*];/.!]%/{:){:@(;)$', 30, 0x6bebb4cf],
-      // eslint-disable-next-line no-template-curly-in-string
       [0x0, ')-._.:?[&:.=+}(*$/=!.${;(=$@!}', 30, 0x76430bac],
       [0x0, ':(_*&%/[[}+,?#$&*+#[([*-/#;%(]', 30, 0x6c80c388],
       [0x0, '{[#-;:$/{)(+[}#]/{&!%(@)%:@-$:', 30, 0xd54d977d],
@@ -176,7 +178,6 @@ export const crc32Test = {
       [0x8a45a2b8, ']{.[.+?+[[=;[?}_#&;[=)__$$:+=_', 30, 0x78af45de],
       [0xcbe95b78, '-%.)=/[@].:.(:,()$;=%@-$?]{%+%', 30, 0x25b06b59],
       [0x4ef8a54b, '+]#$(@&.=:,*];/.!]%/{:){:@(;)$', 30, 0x4ba0d08f],
-      // eslint-disable-next-line no-template-curly-in-string
       [0x76ad267a, ')-._.:?[&:.=+}(*$/=!.${;(=$@!}', 30, 0xe26b6aac],
       [0x569e613c, ':(_*&%/[[}+,?#$&*+#[([*-/#;%(]', 30, 0x7e2b0a66],
       [0x36aa61da, '{[#-;:$/{)(+[}#]/{&!%(@)%:@-$:', 30, 0xb3430dc7],
@@ -333,6 +334,71 @@ export const constantsTest = {
       'INFLATERAW',
       'UNZIP',
       'ZLIB_VERNUM',
+      'ZSTD_CLEVEL_DEFAULT',
+      'ZSTD_COMPRESS',
+      'ZSTD_DECODE',
+      'ZSTD_DECOMPRESS',
+      'ZSTD_ENCODE',
+      'ZSTD_btlazy2',
+      'ZSTD_btopt',
+      'ZSTD_btultra',
+      'ZSTD_btultra2',
+      'ZSTD_c_chainLog',
+      'ZSTD_c_checksumFlag',
+      'ZSTD_c_compressionLevel',
+      'ZSTD_c_contentSizeFlag',
+      'ZSTD_c_dictIDFlag',
+      'ZSTD_c_enableLongDistanceMatching',
+      'ZSTD_c_hashLog',
+      'ZSTD_c_jobSize',
+      'ZSTD_c_ldmBucketSizeLog',
+      'ZSTD_c_ldmHashLog',
+      'ZSTD_c_ldmHashRateLog',
+      'ZSTD_c_ldmMinMatch',
+      'ZSTD_c_minMatch',
+      'ZSTD_c_nbWorkers',
+      'ZSTD_c_overlapLog',
+      'ZSTD_c_searchLog',
+      'ZSTD_c_strategy',
+      'ZSTD_c_targetLength',
+      'ZSTD_c_windowLog',
+      'ZSTD_d_windowLogMax',
+      'ZSTD_dfast',
+      'ZSTD_e_continue',
+      'ZSTD_e_end',
+      'ZSTD_e_flush',
+      'ZSTD_error_GENERIC',
+      'ZSTD_error_checksum_wrong',
+      'ZSTD_error_corruption_detected',
+      'ZSTD_error_dictionaryCreation_failed',
+      'ZSTD_error_dictionary_corrupted',
+      'ZSTD_error_dictionary_wrong',
+      'ZSTD_error_dstBuffer_null',
+      'ZSTD_error_dstSize_tooSmall',
+      'ZSTD_error_frameParameter_unsupported',
+      'ZSTD_error_frameParameter_windowTooLarge',
+      'ZSTD_error_init_missing',
+      'ZSTD_error_literals_headerWrong',
+      'ZSTD_error_maxSymbolValue_tooLarge',
+      'ZSTD_error_maxSymbolValue_tooSmall',
+      'ZSTD_error_memory_allocation',
+      'ZSTD_error_noForwardProgress_destFull',
+      'ZSTD_error_noForwardProgress_inputEmpty',
+      'ZSTD_error_no_error',
+      'ZSTD_error_parameter_combination_unsupported',
+      'ZSTD_error_parameter_outOfBound',
+      'ZSTD_error_parameter_unsupported',
+      'ZSTD_error_prefix_unknown',
+      'ZSTD_error_srcSize_wrong',
+      'ZSTD_error_stabilityCondition_notRespected',
+      'ZSTD_error_stage_wrong',
+      'ZSTD_error_tableLog_tooLarge',
+      'ZSTD_error_version_unsupported',
+      'ZSTD_error_workSpace_tooSmall',
+      'ZSTD_fast',
+      'ZSTD_greedy',
+      'ZSTD_lazy',
+      'ZSTD_lazy2',
       'Z_BEST_COMPRESSION',
       'Z_BEST_SPEED',
       'Z_BLOCK',
@@ -650,7 +716,7 @@ export const zlibDestroyTest = {
     {
       // Ensure 'error' is only emitted once.
       const decompress = zlib.createGunzip(15);
-      const { promise, resolve, reject } = Promise.withResolvers();
+      const { promise, resolve, reject: _reject } = Promise.withResolvers();
       promises.push(promise);
       let errorCount = 0;
       decompress.on('error', (err) => {
@@ -2180,6 +2246,63 @@ export const maxOutputLength = {
   },
 };
 
+// Test for maxOutputLength: 0 - should throw immediately instead of infinite loop
+export const maxOutputLengthZero = {
+  async test() {
+    const expectedError = {
+      name: 'RangeError',
+      message:
+        /The value of "options\.maxOutputLength" is out of range\. It must be >= 1/,
+    };
+
+    // Sync zlib - deflateSync with maxOutputLength: 0 should throw
+    assert.throws(
+      () => zlib.deflateSync('data', { maxOutputLength: 0 }),
+      expectedError
+    );
+
+    // Sync zlib - inflateSync with maxOutputLength: 0 should throw
+    const compressed = zlib.deflateSync('data');
+    assert.throws(
+      () => zlib.inflateSync(compressed, { maxOutputLength: 0 }),
+      expectedError
+    );
+
+    // Sync brotli - brotliCompressSync with maxOutputLength: 0 should throw
+    assert.throws(
+      () => zlib.brotliCompressSync('data', { maxOutputLength: 0 }),
+      expectedError
+    );
+
+    // Sync brotli - brotliDecompressSync with maxOutputLength: 0 should throw
+    const brotliCompressed = zlib.brotliCompressSync('data');
+    assert.throws(
+      () => zlib.brotliDecompressSync(brotliCompressed, { maxOutputLength: 0 }),
+      expectedError
+    );
+
+    // Async zlib - deflate with maxOutputLength: 0 should error
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.deflate('data', { maxOutputLength: 0 }, (err) => {
+        assert.match(err.message, expectedError.message);
+        resolve();
+      });
+      await promise;
+    }
+
+    // Async brotli - brotliCompress with maxOutputLength: 0 should error
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      zlib.brotliCompress('data', { maxOutputLength: 0 }, (err) => {
+        assert.match(err.message, expectedError.message);
+        resolve();
+      });
+      await promise;
+    }
+  },
+};
+
 // Test taken from
 // https://github.com/nodejs/node/blob/24302c9fe94e1dd755ac8a8cc1f6aa4444f75cb3/test/parallel/test-zlib-invalid-arg-value-brotli-compress.js
 export const invalidArgValueBrotliCompress = {
@@ -2629,5 +2752,270 @@ export const compatFlagTest = {
       { status: 'fulfilled', value: 'true' },
       { status: 'fulfilled', value: 'true' },
     ]);
+  },
+};
+
+export const stateSizeTest = {
+  test() {
+    const Uint32Array_orig = Uint32Array;
+    assert.throws(
+      () => {
+        const message = 'Come on, Fhqwhgads.';
+        const buffer = Buffer.from(message);
+        globalThis.Uint32Array = function (...args) {
+          if (args.length == 1 && arguments[0] == 2) {
+            return new Uint32Array_orig(new ArrayBuffer(32), 32);
+          }
+          return new Uint32Array_orig(...args);
+        };
+
+        const zipper = new zlib.Gzip();
+        const zipped = zipper._processChunk(buffer, zlib.constants.FINISH);
+        const unzipper = new zlib.Gunzip();
+        unzipper._processChunk(zipped, zlib.constants.FINISH);
+      },
+      {
+        message: /Invalid write result buffer/,
+      }
+    );
+    globalThis.Uint32Array = Uint32Array_orig;
+  },
+};
+
+export const zlibStreamTest = {
+  async test() {
+    const imgBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII';
+
+    const buf = Buffer.from(imgBase64, 'base64');
+    const imageStream = Readable.from(Buffer.from(imgBase64, 'base64'));
+    const g = zlib.createGzip();
+
+    const { promise, resolve } = Promise.withResolvers();
+    const chunks = [];
+    const w = new Writable({
+      construct(callback) {
+        // Double queueMicrotask is intentional to reproduce the bug.
+        // Do not remove any of them.
+        queueMicrotask(() => {
+          queueMicrotask(() => {
+            callback(null);
+          });
+        });
+      },
+      write(chunk, encoding, callback) {
+        chunks.push(chunk);
+        callback();
+      },
+    });
+    w.on('close', resolve);
+    const pp = imageStream.pipe(g);
+    pp.pipe(w);
+
+    await promise;
+
+    assert.strictEqual(
+      zlib.gunzipSync(Buffer.concat(chunks)).toString('hex'),
+      buf.toString('hex')
+    );
+  },
+};
+
+// Regression test: after writeSync() returns, z_stream must not retain stale
+// buffer pointers.  When handle.params() is called directly (bypassing the
+// TypeScript wrapper's flush-before-params protection), deflateParams() may
+// internally call deflate(Z_BLOCK) to flush pending data.  Before the fix,
+// z_stream.next_out still pointed into the kj::Array that backed the output
+// buffer — memory whose BackingStore ref had already been released.  If the
+// JS ArrayBuffer was then garbage-collected, that write went to freed memory.
+// The fix clears z_stream buffer pointers after every write, so
+// deflateParams() sees avail_out=0 and returns Z_BUF_ERROR (non-fatal)
+// instead of writing through a dangling pointer.
+export const zlibParamsAfterWriteNoStalePointers = {
+  test() {
+    // Configuration that leaves data pending in zlib's internal buffers:
+    // level 0 (stored blocks) + minimum memory/window + Z_NO_FLUSH.
+    const deflate = zlib.createDeflateRaw({
+      level: 0,
+      memLevel: 1,
+      windowBits: 9,
+    });
+
+    const handle = deflate._handle;
+    assert.ok(handle, 'native handle should be accessible');
+
+    const input = Buffer.from('A'.repeat(64));
+    const output1 = Buffer.alloc(1024);
+
+    // Step 1: writeSync with Z_NO_FLUSH — data is buffered internally.
+    handle.writeSync(0, input, 0, input.length, output1, 0, output1.length);
+
+    // Capture how many bytes were produced so far.
+    const state = deflate._writeState;
+    const bytesOut1 = output1.length - state[0];
+
+    // Step 2: params() directly on native handle — no preceding flush.
+    // Before the fix this could write to a stale next_out pointer.
+    // After the fix this safely returns Z_BUF_ERROR (handled as non-fatal).
+    handle.params(
+      zlib.constants.Z_DEFAULT_COMPRESSION,
+      zlib.constants.Z_DEFAULT_STRATEGY
+    );
+
+    // Step 3: finish the stream — must still produce a valid deflate stream.
+    const output2 = Buffer.alloc(1024);
+    handle.writeSync(
+      zlib.constants.Z_FINISH,
+      Buffer.alloc(0),
+      0,
+      0,
+      output2,
+      0,
+      output2.length
+    );
+    const bytesOut2 = output2.length - state[0];
+
+    // Step 4: concatenate both output chunks and decompress.
+    const compressed = Buffer.concat([
+      output1.slice(0, bytesOut1),
+      output2.slice(0, bytesOut2),
+    ]);
+    const decompressed = zlib.inflateRawSync(compressed, { windowBits: 9 });
+    assert.strictEqual(
+      decompressed.toString(),
+      input.toString(),
+      'round-trip through write/params/finish must preserve data'
+    );
+  },
+};
+
+// Regression test for https://github.com/cloudflare/workerd/issues/6286
+// inflateRawSync throws "Memory limit exceeded" when maxOutputLength is set
+// to exactly the decompressed size. This is an off-by-one error in the
+// GrowableBuffer: after zlib fills the buffer completely (avail_out == 0),
+// the processing loop tries to add another chunk which exceeds maxCapacity.
+export const maxOutputLengthExactSize = {
+  test() {
+    // Create a known payload and compress it with deflateRaw
+    const original = Buffer.from('a]b]c]d]e]f]g]h]i]j]k]l]m]n]o]p]'.repeat(32));
+    const compressed = zlib.deflateRawSync(original);
+    const exactSize = original.length;
+
+    // This should succeed — maxOutputLength is exactly the output size.
+    // Before the fix, this throws RangeError: "Memory limit exceeded"
+    const decompressed = zlib.inflateRawSync(compressed, {
+      maxOutputLength: exactSize,
+    });
+    assert.deepStrictEqual(decompressed, original);
+
+    // Sanity check: maxOutputLength + 1 also works
+    const decompressed2 = zlib.inflateRawSync(compressed, {
+      maxOutputLength: exactSize + 1,
+    });
+    assert.deepStrictEqual(decompressed2, original);
+
+    // Same bug affects inflateSync
+    const compressedZlib = zlib.deflateSync(original);
+    const decompressed3 = zlib.inflateSync(compressedZlib, {
+      maxOutputLength: exactSize,
+    });
+    assert.deepStrictEqual(decompressed3, original);
+
+    // And gunzipSync
+    const compressedGzip = zlib.gzipSync(original);
+    const decompressed4 = zlib.gunzipSync(compressedGzip, {
+      maxOutputLength: exactSize,
+    });
+    assert.deepStrictEqual(decompressed4, original);
+
+    // And brotliDecompressSync
+    const compressedBrotli = zlib.brotliCompressSync(original);
+    const decompressed5 = zlib.brotliDecompressSync(compressedBrotli, {
+      maxOutputLength: exactSize,
+    });
+    assert.deepStrictEqual(decompressed5, original);
+
+    // Verify that a maxOutputLength that's genuinely too small still throws
+    assert.throws(
+      () => zlib.inflateRawSync(compressed, { maxOutputLength: exactSize - 1 }),
+      RangeError
+    );
+  },
+};
+
+// Regression test for the exception-safety gap in the clearBuffers() fix.
+//
+// When the writeState buffer passed to initialize() is too small (fewer
+// than 2 uint32 elements), updateWriteResult() throws after deflate()
+// has already run.  The original clearBuffers() fix placed explicit calls
+// *after* updateWriteResult(), so the exception unwinds past them —
+// leaving z_stream.next_out pointing into the output buffer's BackingStore.
+// If that buffer is later garbage-collected, a subsequent call to
+// params() -> deflateParams() -> flush_pending() writes to freed memory.
+//
+// The fix uses KJ_DEFER so clearBuffers() runs on every scope exit,
+// including exception unwinding.
+//
+// NOTE: The actual UAF only manifests when GC frees the backing stores
+// (detectable via ASAN + forced gc()).  This test exercises the vulnerable
+// code path to guard against regressions and ensure no crash occurs; the
+// memory-safety guarantee is provided by the KJ_DEFER fix itself.
+export const zlibParamsAfterFailedWriteNoStalePointers = {
+  test() {
+    const streams = [];
+    for (let j = 0; j < 10; j++) {
+      // Access the native handle directly and re-initialize with a writeState
+      // buffer that is intentionally too small (1 uint32 instead of 2).
+      // This causes updateWriteResult() to throw after a successful deflate.
+      const handle = new zlib.DeflateRaw({ level: 0 })._handle;
+      handle.initialize(
+        15,
+        0,
+        8,
+        0,
+        Buffer.from(new Uint32Array(1).buffer),
+        () => {},
+        undefined
+      );
+
+      const payload = Buffer.alloc(64, 0x41);
+      let outputBuffer = Buffer.alloc(4096);
+
+      // writeSync succeeds in deflate() but throws in updateWriteResult()
+      // due to the undersized writeState.  Before the KJ_DEFER fix, this
+      // left z_stream.next_out pointing into outputBuffer.
+      try {
+        handle.writeSync(
+          0,
+          payload,
+          0,
+          payload.length,
+          outputBuffer,
+          0,
+          outputBuffer.length
+        );
+      } catch (_e) {
+        // Expected: "Invalid write result buffer"
+      }
+      streams.push({ handle, outputBuffer });
+    }
+
+    // Drop JS references to output buffers.
+    for (const s of streams) s.outputBuffer = null;
+
+    // params() calls deflateParams() which may internally flush.  Before the
+    // fix, this could write through a dangling next_out pointer.  After the
+    // fix, next_out points to a safe dummy byte with avail_out=0, so
+    // deflateParams() returns Z_BUF_ERROR (non-fatal).
+    for (const s of streams) {
+      try {
+        s.handle.params(
+          zlib.constants.Z_DEFAULT_COMPRESSION,
+          zlib.constants.Z_DEFAULT_STRATEGY
+        );
+      } catch (_e) {
+        // May throw due to stream state; that's fine — the point is no UAF.
+      }
+    }
   },
 };

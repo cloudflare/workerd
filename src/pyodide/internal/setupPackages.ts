@@ -1,8 +1,13 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { parseTarInfo } from 'pyodide-internal:tar';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
 import { LOCKFILE } from 'pyodide-internal:metadata';
 import {
-  PythonRuntimeError,
+  invalidateCaches,
+  PythonWorkersInternalError,
   PythonUserError,
   simpleRunPython,
 } from 'pyodide-internal:util';
@@ -79,7 +84,7 @@ class VirtualizedDir {
     const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
     overlayInfo.children!.forEach((val, key) => {
       if (dest.children!.has(key)) {
-        throw new PythonRuntimeError(
+        throw new PythonWorkersInternalError(
           `File/folder ${key} being written by multiple packages`
         );
       }
@@ -151,6 +156,7 @@ class VirtualizedDir {
     return this.dynlibTarFs;
   }
 
+  /** Only used for Pyodide 0.26.0a2 */
   getSoFilesToLoad(): FilePath[] {
     return this.soFiles;
   }
@@ -211,7 +217,7 @@ export function patchLoadPackage(pyodide: Pyodide): void {
 }
 
 function disabledLoadPackage(): never {
-  throw new PythonRuntimeError(
+  throw new PythonWorkersInternalError(
     'pyodide.loadPackage is disabled because packages are encoded in the binary'
   );
 }
@@ -223,10 +229,7 @@ export function mountWorkerFiles(Module: Module): void {
   Module.FS.mkdirTree('/session/metadata');
   const mdFS = createMetadataFS(Module);
   Module.FS.mount(mdFS, {}, '/session/metadata');
-  simpleRunPython(
-    Module,
-    `from importlib import invalidate_caches; invalidate_caches(); del invalidate_caches`
-  );
+  invalidateCaches(Module);
 }
 
 /**

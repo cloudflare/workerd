@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { ok, strictEqual, deepStrictEqual } from 'node:assert';
+import { ok, strictEqual, deepStrictEqual, throws } from 'node:assert';
 
 export const test = {
   async test() {
@@ -34,5 +34,15 @@ export const bytes = {
     const u8_2 = await res.bytes();
     deepStrictEqual(u8_2, check);
     ok(u8_2 instanceof Uint8Array);
+  },
+};
+
+export const noResizable = {
+  test() {
+    const ab = new ArrayBuffer(8, { maxByteLength: 16 });
+    throws(() => new Blob([ab]), {
+      name: 'TypeError',
+      message: 'Cannot create a Blob with a resizable ArrayBuffer',
+    });
   },
 };

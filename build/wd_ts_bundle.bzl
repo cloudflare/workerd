@@ -1,5 +1,5 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
-load("@workerd//:build/eslint_test.bzl", "eslint_test")
+load("@workerd//:build/lint_test.bzl", "lint_test")
 load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 def to_js(filenames):
@@ -52,7 +52,7 @@ def wd_ts_bundle(
     ts_config(
         name = name + "@tsconfig",
         src = tsconfig_json,
-        deps = ["//tools:base-tsconfig"],
+        deps = ["@workerd//tools:base-tsconfig"],
     )
 
     srcs = modules + internal_modules
@@ -89,7 +89,7 @@ def wd_ts_bundle(
     )
 
     if lint:
-        eslint_test(
+        lint_test(
             name = name,
             eslintrc_json = eslintrc_json,
             tsconfig_json = tsconfig_json,

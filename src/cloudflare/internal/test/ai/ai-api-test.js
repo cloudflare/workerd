@@ -58,6 +58,7 @@ export const tests = {
           }
         );
         // Test request internal status code is present
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
         assert.deepEqual;
         assert.deepStrictEqual(env.ai.lastRequestInternalStatusCode, 1001);
       }
@@ -161,7 +162,7 @@ export const tests = {
         async () => {
           const arr = [1, 2, 3];
           const encoder = new TextEncoder();
-          const resp = await env.ai.run('readableStreamIputs', {
+          const _resp = await env.ai.run('readableStreamIputs', {
             audio: {
               body: new ReadableStream({
                 start(controller) {
@@ -195,7 +196,7 @@ export const tests = {
               controller.close();
             },
           });
-          const resp = await env.ai.run('readableStreamIputs', {
+          const _resp = await env.ai.run('readableStreamIputs', {
             audio: {
               body: stream,
               contentType: 'audio/wav',
@@ -212,6 +213,25 @@ export const tests = {
             'Multiple ReadableStreams are not supported. Found streams in keys: [audio, image]',
         }
       );
+    }
+
+    {
+      // Test form data input
+      const form = new FormData();
+      form.append('prompt', 'cat');
+      const resp = await env.ai.run('formDataInputs', {
+        audio: {
+          body: form,
+          contentType: 'multipart/form-data',
+        },
+      });
+
+      assert.deepStrictEqual(resp, {
+        inputs: {},
+        options: { userInputs: '{}', version: '3' },
+        requestUrl:
+          'https://workers-binding.ai/run?version=3&userInputs=%7B%7D',
+      });
     }
 
     {
@@ -325,77 +345,109 @@ export const tests = {
     }
 
     {
-      // Test toMarkdown with single file
-      const resp = await env.ai.toMarkdown(
-        {
-          name: 'random.md',
-          blob: new Blob([`# Random Markdown`], { type: 'text/markdown' }),
-        },
-        { gateway: { id: 'my-gateway' } }
+      // Test websocket option with basic inputs
+      const resp = await env.ai.run(
+        '@cf/test/websocket',
+        { encoding: 'utf8' },
+        { websocket: true }
       );
-
-      assert.deepStrictEqual(resp, {
-        name: 'random.md',
-        mimeType: 'text/markdown',
-        format: 'markdown',
-        tokens: 0,
-        data: '# Random Markdown',
+      assert.deepStrictEqual(resp instanceof Response, true);
+      const respData = await resp.json();
+      assert.deepStrictEqual(respData, {
+        inputs: { encoding: 'utf8' },
+        options: { websocket: true },
+        requestUrl:
+          'https://workers-binding.ai/run?version=3&body=%7B%22inputs%22%3A%7B%22encoding%22%3A%22utf8%22%7D%2C%22options%22%3A%7B%22websocket%22%3Atrue%7D%7D',
+        headers: {
+          'cf-consn-sdk-version': '2.0.0',
+          'cf-consn-model-id': '@cf/test/websocket',
+          upgrade: 'websocket',
+        },
       });
     }
 
     {
-      // Test toMarkdown with extra headers
-      const resp = await env.ai.toMarkdown(
-        {
-          name: 'headers.md',
-          blob: new Blob([`# Random Markdown`], { type: 'text/markdown' }),
-        },
-        { extraHeaders: { example: 'header' } }
+      // Test signal option is not included in request body
+      const controller = new AbortController();
+      const resp = await env.ai.run(
+        'rawInputs',
+        { prompt: 'test' },
+        { signal: controller.signal }
       );
 
       assert.deepStrictEqual(resp, {
-        name: 'headers.md',
-        mimeType: 'text/markdown',
-        format: 'markdown',
-        tokens: 0,
-        data: { 'content-type': 'application/json', example: 'header' },
+        inputs: { prompt: 'test' },
+        options: {},
+        requestUrl: 'https://workers-binding.ai/run?version=3',
       });
     }
 
     {
-      // Test toMarkdown with multiple file
-      const resp = await env.ai.toMarkdown([
-        {
-          name: 'random.md',
-          blob: new Blob([`# Random Markdown`], { type: 'text/markdown' }),
+      // Test already-aborted signal throws AbortError for websocket requests
+      await assert.rejects(
+        async () => {
+          await env.ai.run(
+            '@cf/test/websocket',
+            { encoding: 'utf8' },
+            { websocket: true, signal: AbortSignal.abort() }
+          );
         },
-        {
-          name: 'cat.png',
-          blob: new Blob(
-            [
-              `The image shows a white and orange cat standing on a beige floor`,
-            ],
-            { type: 'image/png' }
-          ),
-        },
-      ]);
+        { name: 'AbortError' }
+      );
+    }
 
-      assert.deepStrictEqual(resp, [
-        {
-          name: 'random.md',
-          mimeType: 'text/markdown',
-          format: 'markdown',
-          tokens: 0,
-          data: '# Random Markdown',
+    {
+      // Test already-aborted signal throws AbortError for readable stream inputs
+      await assert.rejects(
+        async () => {
+          await env.ai.run(
+            'readableStreamIputs',
+            {
+              audio: {
+                body: new ReadableStream({
+                  start(controller) {
+                    controller.enqueue(new TextEncoder().encode('1'));
+                    controller.close();
+                  },
+                }),
+                contentType: 'audio/wav',
+              },
+            },
+            { signal: AbortSignal.abort() }
+          );
         },
-        {
-          name: 'cat.png',
-          mimeType: 'image/png',
-          format: 'markdown',
-          tokens: 0,
-          data: 'The image shows a white and orange cat standing on a beige floor',
+        { name: 'AbortError' }
+      );
+    }
+
+    {
+      // Test already-aborted signal throws AbortError
+      await assert.rejects(
+        async () => {
+          await env.ai.run(
+            'rawInputs',
+            { prompt: 'test' },
+            { signal: AbortSignal.abort() }
+          );
         },
-      ]);
+        { name: 'AbortError' }
+      );
+    }
+
+    {
+      // Test aborting an in-flight request
+      const controller = new AbortController();
+      let resolved = false;
+      const promise = env.ai
+        .run('hangingModel', { prompt: 'test' }, { signal: controller.signal })
+        .finally(() => {
+          resolved = true;
+        });
+      // Wait a moment for the request to start.
+      await scheduler.wait(10);
+      assert.deepStrictEqual(resolved, false);
+      controller.abort();
+      await assert.rejects(promise, { name: 'AbortError' });
     }
   },
 };

@@ -35,7 +35,7 @@
 # to execute!
 
 # Any capnp files imported here must be:
-# 1. embedded into workerd-meta.capnp
+# 1. embedded using wd_cc_embed
 # 2. added to `tryImportBulitin` in workerd.c++ (grep for '"/workerd/workerd.capnp"').
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::server::config");
@@ -90,6 +90,25 @@ struct Config {
   # When false, logs use the traditional human-readable format.
   # This affects the format of logs from KJ_LOG and exception reporting as well as js logs.
   # This won't work for logs coming from service worker syntax workers with the old module registry.
+  # Note: This field is obsolete and deprecated. Use the logging struct instead.
+
+  logging @6 : LoggingOptions;
+  # Console and Stdio logging configuration options.
+}
+
+struct LoggingOptions {
+  structuredLogging @0 :Bool = false;
+  # Override of top-level structured logging (only when true).
+  # If true, logs will be emitted as JSON for structured logging.
+  # When false, logs use the traditional human-readable format.
+  # This affects the format of logs from KJ_LOG and exception reporting as well as js logs.
+  # This won't work for logs coming from service worker syntax workers with the old module registry.
+
+  stdoutPrefix @1 :Text;
+  # Set a custom prefix for process.stdout. Defaults to "stdout: ".
+
+  stderrPrefix @2 :Text;
+  # Set a custom prefix for process.stderr. Defaults to "stderr: ".
 }
 
 # ========================================================================================
@@ -124,8 +143,11 @@ struct Socket {
       options @3 :HttpOptions;
       tlsOptions @4 :TlsOptions;
     }
+    tcp :group {
+      tlsOptions @6 :TlsOptions;
+    }
 
-    # TODO(someday): TCP, TCP proxy, SMTP, Cap'n Proto, ...
+    # TODO(someday): TCP proxy, SMTP, Cap'n Proto, ...
   }
 
   service @5 :ServiceDesignator;
@@ -378,9 +400,10 @@ struct Worker {
       # given service name.
 
       r2Bucket @12 :ServiceDesignator;
-      r2Admin @13 :ServiceDesignator;
-      # R2 bucket and admin API bindings. Similar to KV namespaces, these turn operations into
-      # HTTP requests aimed at the named service.
+      # R2 bucket binding. Similar to KV namespaces, this turns operations into HTTP requests aimed
+      # at the named service.
+
+      obsolete0 @13 :ServiceDesignator;
 
       wrapped @14 :WrappedBinding;
       # Wraps a collection of inner bindings in a common api functionality.
@@ -441,6 +464,16 @@ struct Worker {
         # (If omitted, the binding will not share a cache with any other binding.)
       }
 
+      workerdDebugPort @28 :Void;
+      # A binding that provides a connect() method to dynamically connect to any workerd
+      # instance's debug port. This allows dynamic access to worker entrypoints via the
+      # WorkerdDebugPort RPC interface.
+      #
+      # Usage: const client = await env.DEBUG_PORT.connect("localhost:1234");
+      #        const fetcher = await client.getEntrypoint("service", "entrypoint");
+      #
+      # This is a workerd-only API intended for local development and testing.
+
       # TODO(someday): dispatch, other new features
     }
 
@@ -460,11 +493,12 @@ struct Worker {
         durableObjectNamespace @7 :Void;
         kvNamespace @8 :Void;
         r2Bucket @9 :Void;
-        r2Admin @10 :Void;
+        obsolete0 @10 :Void;
         queue @11 :Void;
         analyticsEngine @12 : Void;
         hyperdrive @13: Void;
         durableObjectClass @14: Void;
+        workerdDebugPort @15: Void;
       }
     }
 
@@ -703,6 +737,12 @@ struct Worker {
   struct DockerConfiguration {
     socketPath @0 :Text;
     # Path to the Docker socket.
+
+    containerEgressInterceptorImage @1 :Text;
+    # Docker image name for the container egress interceptor sidecar.
+    # This sidecar intercepts outbound traffic from containers and routes it
+    # through workerd for egress mappings (setEgressHttp bindings).
+    # You can find this image in repositories like DockerHub: https://hub.docker.com/r/cloudflare/proxy-everything
   }
 }
 

@@ -24,6 +24,10 @@ class Default(WorkerEntrypoint):
                 filename="metadata.json",
             )
             return Response(data)
+        elif request.url.endswith("/ignore"):
+            # Just a test path that we ignore, used for requests that we don't care about
+            # the result of.
+            return Response("ignored")
         else:
             raise ValueError("Unexpected path " + request.url)
 

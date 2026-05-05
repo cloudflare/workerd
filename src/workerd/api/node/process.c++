@@ -24,7 +24,7 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   }
 
   if (FeatureFlags::get(js).getNewModuleRegistry()) {
-    KJ_IF_SOME(mod, js.resolveInternalModule(specifier)) {
+    KJ_IF_SOME(mod, js.resolvePublicBuiltinModule(specifier)) {
       return mod;
     }
     return js.undefined();
@@ -33,7 +33,14 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   auto registry = jsg::ModuleRegistry::from(js);
   if (registry == nullptr) return js.undefined();
 
-  // Handle process module redirection based on enable_nodejs_process_v2 flag
+  // getBuiltinModule is a user-facing API that must only return modules that
+  // are normally importable by user code. Default to BUILTIN_ONLY which only
+  // resolves user-importable built-ins, not internal-only modules.
+  auto resolveOption = jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY;
+
+  // Handle process module redirection based on enable_nodejs_process_v2 flag.
+  // This is a special case where we need to redirect to an internal module,
+  // so we escalate to INTERNAL_ONLY only for this specific redirect.
   if (isNode && specifier == "node:process") {
     auto featureFlags = FeatureFlags::get(js);
     if (featureFlags.getEnableNodeJsProcessV2()) {
@@ -41,14 +48,10 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
     } else {
       specifier = kj::str("node-internal:legacy_process");
     }
+    resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
   }
 
   auto path = kj::Path::parse(specifier);
-
-  // Use INTERNAL_ONLY for node-internal: modules, BUILTIN_ONLY for others
-  auto resolveOption = specifier.startsWith("node-internal:")
-      ? jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY
-      : jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY;
 
   KJ_IF_SOME(info,
       registry->resolve(js, path, kj::none, resolveOption,
@@ -110,11 +113,73 @@ namespace {
 }  // namespace
 
 jsg::JsObject ProcessModule::getVersions(jsg::Lock& js) const {
-  auto versions = js.obj();
   // Node.js version - represents the most current Node.js version supported
   // by the platform, as defined in node-version.h
-  versions.set(js, "node"_kj, js.str(nodeVersion));
-  return versions;
+  // We don't want to provide real versions, these are provided as empty strings just for compat.
+
+  static const kj::StringPtr keys[] = {
+    "node"_kj,
+    "v8"_kj,
+    "modules"_kj,
+    "zlib"_kj,
+    "brotli"_kj,
+    "zstd"_kj,
+    "ares"_kj,
+    "napi"_kj,
+    "llhttp"_kj,
+    "nghttp2"_kj,
+    "acorn"_kj,
+    "ada"_kj,
+    "simdutf"_kj,
+    "nbytes"_kj,
+    "ncrypto"_kj,
+    "uvwasi"_kj,
+    "uv"_kj,
+    "openssl"_kj,
+    "sqlite"_kj,
+    "icu"_kj,
+    "undici"_kj,
+    "simdjson"_kj,
+    "unicode"_kj,
+    "cldr"_kj,
+    "tz"_kj,
+    "cjs_module_lexer"_kj,
+    "amaro"_kj,
+    "merve"_kj,
+  };
+
+  jsg::JsValue values[] = {
+    js.str(nodeVersion),  // node
+    js.str(""_kj),        // v8
+    js.str(""_kj),        // modules (Node.js ABI version)
+    js.str(""_kj),        // zlib
+    js.str(""_kj),        // brotli
+    js.str(""_kj),        // zstd
+    js.str(""_kj),        // ares
+    js.str(""_kj),        // napi
+    js.str(""_kj),        // llhttp
+    js.str(""_kj),        // nghttp2
+    js.str(""_kj),        // acorn
+    js.str(""_kj),        // ada
+    js.str(""_kj),        // simdutf
+    js.str(""_kj),        // nbytes
+    js.str(""_kj),        // ncrypto
+    js.str(""_kj),        // uvwasi
+    js.str(""_kj),        // uv
+    js.str(""_kj),        // openssl (BoringSSL compat)
+    js.str(""_kj),        // sqlite
+    js.str(""_kj),        // icu
+    js.str(""_kj),        // undici
+    js.str(""_kj),        // simdjson
+    js.str(""_kj),        // unicode
+    js.str(""_kj),        // cldr
+    js.str(""_kj),        // tz
+    js.str(""_kj),        // cjs_module_lexer
+    js.str(""_kj),        // amaro
+    js.str(""_kj),        // merve
+  };
+
+  return js.obj(kj::arrayPtr(keys, kj::size(keys)), kj::arrayPtr(values, kj::size(values)));
 }
 
 kj::StringPtr ProcessModule::getPlatform(jsg::Lock& js) const {
@@ -150,11 +215,11 @@ kj::String ProcessModule::getCwd(jsg::Lock& js) {
 void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
   static constexpr size_t MAX_PATH_LENGTH = 4096;
   if (path.size() > MAX_PATH_LENGTH) {
-    node::THROW_ERR_UV_ENAMETOOLONG(js, "chdir"_kj);
+    node::THROW_ERR_UV_ENAMETOOLONG(js, "chdir"_kj, nullptr, path);
   }
 
   if (path.size() == 0) {
-    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj);
+    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj, nullptr, path);
   }
 
   auto& vfs = VirtualFileSystem::current(js);
@@ -176,19 +241,19 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
   KJ_IF_SOME(stat, vfs.getRoot(js)->stat(js, resolvedPath)) {
     KJ_SWITCH_ONEOF(stat) {
       KJ_CASE_ONEOF(fsError, FsError) {
-        node::THROW_ERR_UV_ENOENT(js, "chdir"_kj);
+        node::THROW_ERR_UV_ENOENT(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
       }
       KJ_CASE_ONEOF(statInfo, workerd::Stat) {
         if (statInfo.type != FsType::DIRECTORY) {
-          node::THROW_ERR_UV_ENOTDIR(js, "chdir"_kj);
+          node::THROW_ERR_UV_ENOTDIR(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
         }
-        if (!setCurrentWorkingDirectory(kj::mv(resolvedPath))) {
-          node::THROW_ERR_UV_EPERM(js, "chdir"_kj);
+        if (!setCurrentWorkingDirectory(resolvedPath.clone())) {
+          node::THROW_ERR_UV_EPERM(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
         }
       }
     }
   } else {
-    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj);
+    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
   }
 }
 

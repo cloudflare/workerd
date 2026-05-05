@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mike Aizatsky <maizatskyi@cloudflare.com>
+Date: Wed, 4 Mar 2026 13:19:20 -0800
+Subject: Remove @libcxx dep from defs.bzl: not resolvable via http_archive
+
+When V8 is loaded as an http_archive (not a bzlmod module), V8's own
+MODULE.bazel is not processed by Bazel, so @libcxx cannot be created
+via use_repo_rule. Remove the dependency since workerd provides its
+own toolchain that includes libc++.
+
+Author: Workerd Maintainers <workers-dev@cloudflare.com>
+
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index 0dbc6def7bb39d392c7178d3191972ebf4ec471d..609b9f07bfcb06a7451caf3f7db222bf740cd9b9 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -97,7 +97,7 @@ v8_config = rule(
+ 
+ def _default_args():
+     return struct(
+-        deps = [":define_flags", "@libcxx//:libc++"],
++        deps = [":define_flags"],
+         defines = select({
+             "@v8//bazel/config:is_windows": [
+                 "UNICODE",

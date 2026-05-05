@@ -13,11 +13,6 @@ namespace workerd::api {
 
 // Implements the FormData interface as prescribed by:
 // https://xhr.spec.whatwg.org/#interface-formdata
-//
-// NOTE: This class is actually reused by some internal code implementing the fiddle service, for
-//   lack of any other C++ form data parser implementation. In that usage, there is no isolate.
-//   It uses `parse()` and `getData()`. This relies on the ability to construct `File` objects
-//   without an isolate.
 class FormData: public jsg::Object {
 private:
   using EntryType = kj::OneOf<jsg::Ref<File>, kj::String>;
@@ -54,11 +49,6 @@ public:
     kj::Maybe<kj::String> type;
     kj::OneOf<kj::Array<kj::byte>, kj::String> value;
   };
-
-  // Provided for cases where parsing FormData outside of any direct JS
-  // API usage (such as in fiddle internally).
-  static kj::Array<EntryWithoutLock> parseWithoutLock(kj::ArrayPtr<const char> rawText,
-                                                      kj::StringPtr contentType);
 
   // Parse `rawText`, storing the results in this FormData object. `contentType` must be either
   // multipart/form-data or application/x-www-form-urlencoded.
@@ -157,9 +147,11 @@ public:
 
     if (flags.getFormDataParserSupportsFiles()) {
       JSG_TS_OVERRIDE({
+        append(name: string, value: string | Blob): void;
         append(name: string, value: string): void;
         append(name: string, value: Blob, filename?: string): void;
 
+        set(name: string, value: string | Blob): void;
         set(name: string, value: string): void;
         set(name: string, value: Blob, filename?: string): void;
 
@@ -173,9 +165,11 @@ public:
         get(name: string): string | null;
         getAll(name: string): string[];
 
+        append(name: string, value: string | Blob): void;
         append(name: string, value: string): void;
         append(name: string, value: Blob, filename?: string): void;
 
+        set(name: string, value: string | Blob): void;
         set(name: string, value: string): void;
         set(name: string, value: Blob, filename?: string): void;
 
@@ -203,9 +197,9 @@ private:
     }
     auto& [key, value] = state.parent->data[state.index++];
     if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-      return kj::arr<EntryType>(js.accountedKjString(key), clone(js, value));
+      return kj::arr<EntryType>(kj::str(key), clone(js, value));
     } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
-      return js.accountedKjString(key);
+      return kj::str(key);
     } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
       return clone(js, value);
     } else {

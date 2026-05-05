@@ -69,6 +69,7 @@ import {
   privateDecrypt,
   privateEncrypt,
   getCipherInfo,
+  getCiphers,
 } from 'node-internal:crypto_cipher';
 
 import { hkdf, hkdfSync } from 'node-internal:crypto_hkdf';
@@ -173,14 +174,8 @@ export {
   privateDecrypt,
   privateEncrypt,
   getCipherInfo,
+  getCiphers,
 };
-
-export function getCiphers(): string[] {
-  // prettier-ignore
-  return ["aes-128-cbc", "aes-192-cbc", "aes-256-cbc", "aes-128-ctr", "aes-192-ctr", "aes-256-ctr",
-  "aes-128-ecb", "aes-192-ecb", "aes-256-ecb", "aes-128-gcm", "aes-192-gcm", "aes-256-gcm",
-  "aes-128-ofb", "aes-192-ofb", "aes-256-ofb", "des-ecb", "des-ede", "des-ede-cbc", "rc2-cbc"];
-}
 
 export function getCurves(): string[] {
   // Hardcoded list of supported curves. Note that prime256v1 is equivalent to secp256r1, we follow
@@ -533,6 +528,30 @@ Object.defineProperties(constants, {
   },
 });
 
+// Deprecated but required for backwards compatibility.
+export const pseudoRandomBytes = randomBytes;
+
+export const CryptoKey = globalThis.CryptoKey;
+
+export let createCipher: (() => void) | undefined = undefined;
+export let createDecipher: (() => void) | undefined = undefined;
+export let Cipher: (() => void) | undefined = undefined;
+export let Decipher: (() => void) | undefined = undefined;
+
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_v22) {
+  createCipher = (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createCipher');
+  };
+  createDecipher = (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createDecipher');
+  };
+  Cipher = (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Cipher');
+  };
+  Decipher = (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Decipher');
+  };
+}
 export default {
   constants,
   // DH
@@ -557,6 +576,7 @@ export default {
   createSecretKey,
   // Random
   getRandomValues,
+  pseudoRandomBytes,
   randomBytes,
   randomFillSync,
   randomFill,
@@ -621,6 +641,13 @@ export default {
   privateDecrypt,
   privateEncrypt,
   getCipherInfo,
+  CryptoKey,
+
+  // EOL
+  createCipher,
+  createDecipher,
+  Cipher,
+  Decipher,
 };
 
 // Classes
@@ -652,6 +679,8 @@ export default {
 //   * [x] crypto.privateEncrypt(privateKey, buffer)
 //   * [x] crypto.publicDecrypt(key, buffer)
 //   * [x] crypto.publicEncrypt(key, buffer)
+//   * [x] crypto.Decipher
+//   * [x] crypto.Cipher
 // * DiffieHellman
 //   * [x] crypto.createDiffieHellman(prime[, primeEncoding][, generator][, generatorEncoding])
 //   * [x] crypto.createDiffieHellman(primeLength[, generator])
@@ -705,3 +734,4 @@ export default {
 // * WebCrypto
 //   * [x] crypto.subtle
 //   * [x] crypto.webcrypto
+//   * [x] crypto.CryptoKey

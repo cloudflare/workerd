@@ -4,23 +4,27 @@
 
 #include "jsg.h"
 #include "setup.h"
+#include "util.h"
 
 #include <v8-wasm.h>
 
 #include <kj/mutex.h>
 
-#include <set>
-
 namespace workerd::jsg {
+
 namespace {
 
-// Implementation of `v8::Module::ResolveCallback`.
-v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
+// Generalized module resolution callback that handles both evaluation and source phase imports
+template <bool IsSourcePhase>
+v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolveModuleCallback(
+    v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
+  using ReturnType = std::conditional_t<IsSourcePhase, v8::Object, v8::Module>;
+
   auto& js = Lock::current();
-  v8::MaybeLocal<v8::Module> result;
+  v8::MaybeLocal<ReturnType> result;
 
   // The specification for import attributes strongly recommends that embedders
   // reject import attributes and types they do not understand/implement. This
@@ -51,15 +55,17 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     }
 
     // Handle process module redirection based on enable_nodejs_process_v2 flag
-    if (spec == "node:process") {
-      auto specifierPath =
-          kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
-                                                       : "node-internal:legacy_process"_kj);
-      KJ_IF_SOME(info,
-          registry->resolve(
-              js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
-        result = info.module.getHandle(js.v8Isolate);
-        return;
+    if constexpr (!IsSourcePhase) {
+      if (spec == "node:process") {
+        auto specifierPath =
+            kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                         : "node-internal:legacy_process"_kj);
+        KJ_IF_SOME(info,
+            registry->resolve(
+                js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
+          result = info.module.getHandle(js.v8Isolate);
+          return;
+        }
       }
     }
 
@@ -84,7 +90,18 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
             internalOnly ? ModuleRegistry::ResolveOption::INTERNAL_ONLY
                          : ModuleRegistry::ResolveOption::DEFAULT,
             ModuleRegistry::ResolveMethod::IMPORT, spec.asPtr())) {
-      result = resolved.module.getHandle(js);
+      if constexpr (!IsSourcePhase) {
+        result = resolved.module.getHandle(js);
+      } else {
+        KJ_IF_SOME(sourceObject, resolved.getModuleSourceObject(js)) {
+          result = sourceObject;
+        } else {
+          js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
+              kj::str("Source phase import not available for module: ", targetPath.toString(),
+                  ".\n  imported from \"", ref.specifier.toString(), "\"")))));
+          return;
+        }
+      }
     } else {
       // This is a bit annoying. If the module was not found, then
       // we need to check to see if it is a prefixed specifier. If it is,
@@ -97,7 +114,14 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
             registry->resolve(js, kj::Path::parse(spec), ref.specifier,
                 ModuleRegistry::ResolveOption::DEFAULT, ModuleRegistry::ResolveMethod::IMPORT,
                 spec.asPtr())) {
-          result = resolve.module.getHandle(js);
+          if constexpr (!IsSourcePhase) {
+            result = resolve.module.getHandle(js);
+          } else {
+            js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
+                kj::str("Source phase import not available for module: ", targetPath.toString(),
+                    ".\n  imported from \"", ref.specifier.toString(), "\"")))));
+            return;
+          }
           return;
         }
       }
@@ -109,7 +133,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     // which we do not want here. Instead, we'll schedule an exception on the isolate
     // directly and set the result to an empty v8::MaybeLocal.
     js.v8Isolate->ThrowException(value.getHandle(js));
-    result = v8::MaybeLocal<v8::Module>();
+    result = v8::MaybeLocal<ReturnType>();
   });
 
   return result;
@@ -239,7 +263,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
   })) {
     // V8 doc comments say in the case of an error, throw the error and return an empty Maybe.
     // I.e. NOT a rejected promise. OK...
-    js.v8Isolate->ThrowException(makeInternalError(js.v8Isolate, kj::mv(exception)));
+    js.v8Isolate->ThrowException(js.exceptionToJsValue(kj::mv(exception)).getHandle(js));
     result = v8::Local<v8::Promise>();
   }
 
@@ -249,8 +273,8 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
 }  // namespace
 
 ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
-  return static_cast<ModuleRegistry*>(
-      isolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(2));
+  return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistry>(
+      isolate->GetCurrentContext(), jsg::ContextPointerSlot::MODULE_REGISTRY));
 }
 
 void instantiateModule(
@@ -271,7 +295,8 @@ void instantiateModule(
   if (status == v8::Module::Status::kEvaluated || status == v8::Module::Status::kEvaluating) return;
 
   if (status == v8::Module::Status::kUninstantiated) {
-    jsg::check(module->InstantiateModule(context, &resolveCallback));
+    jsg::check(module->InstantiateModule(
+        context, resolveModuleCallback<false>, resolveModuleCallback<true>));
   }
 
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
@@ -503,7 +528,34 @@ JsValue ModuleRegistry::requireImpl(Lock& js, ModuleInfo& info, RequireImplOptio
         js.v8Context(), v8StrIntern(js.v8Isolate, "default"))));
   }
 
-  return JsValue(module->GetModuleNamespace());
+  // When the flag is disabled, return the original module namespace
+  // to maintain backward compatibility (same object as ESM import returns).
+  if (!isRequireReturnsDefaultExportEnabled(js)) {
+    return JsValue(module->GetModuleNamespace());
+  }
+
+  // When require_returns_default_export flag is enabled:
+  // 1. If module has default export: return it directly (it should be mutable)
+  // 2. If no default export: return a mutable copy of the namespace
+  // This matches Node.js require(esm) behavior and allows monkey-patching.
+  // See: https://github.com/cloudflare/workerd/issues/5844
+
+  JsObject moduleNamespace(module->GetModuleNamespace().As<v8::Object>());
+  if (moduleNamespace.has(js, "default"_kj)) {
+    // Default export should be a regular mutable object, return it directly.
+    // No caching needed here since we're returning the module's own default export.
+    // Note: Modules should NOT re-export namespace objects as their default.
+    // If they do, the default export will be read-only which breaks monkey-patching.
+    return moduleNamespace.get(js, "default"_kj);
+  }
+
+  // No default export - return a cached mutable copy of the namespace, or create one.
+  KJ_IF_SOME(cached, info.maybeMutableExports) {
+    return JsValue(cached.getHandle(js));
+  }
+  auto mutableExports = createMutableModuleExports(js, moduleNamespace);
+  info.maybeMutableExports = V8Ref<v8::Object>(js.v8Isolate, mutableExports);
+  return mutableExports;
 }
 
 }  // namespace workerd::jsg

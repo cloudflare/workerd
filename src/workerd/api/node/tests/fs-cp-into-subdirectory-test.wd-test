@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fs-cp-into-subdirectory-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "fs-cp-into-subdirectory-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_fs_module"]
+      )
+    ),
+  ],
+);

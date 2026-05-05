@@ -1,3 +1,8 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+// Copyright Joyent and Node contributors. All rights reserved. MIT license.
+
 import * as zlib from 'node-internal:internal_zlib';
 import { crc32 } from 'node-internal:internal_zlib';
 import { constants, codes } from 'node-internal:internal_zlib_constants';
@@ -41,6 +46,10 @@ const {
   UNZIP,
   BROTLI_DECODE,
   BROTLI_ENCODE,
+  ZSTD_ENCODE,
+  ZSTD_DECODE,
+  ZSTD_COMPRESS,
+  ZSTD_DECOMPRESS,
 
   Z_MIN_WINDOWBITS,
   Z_MAX_WINDOWBITS,
@@ -115,6 +124,34 @@ const {
   BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2,
   BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES,
   BROTLI_DECODER_ERROR_UNREACHABLE,
+  ZSTD_error_no_error,
+  ZSTD_error_GENERIC,
+  ZSTD_error_prefix_unknown,
+  ZSTD_error_version_unsupported,
+  ZSTD_error_frameParameter_unsupported,
+  ZSTD_error_frameParameter_windowTooLarge,
+  ZSTD_error_corruption_detected,
+  ZSTD_error_checksum_wrong,
+  ZSTD_error_literals_headerWrong,
+  ZSTD_error_dictionary_corrupted,
+  ZSTD_error_dictionary_wrong,
+  ZSTD_error_dictionaryCreation_failed,
+  ZSTD_error_parameter_unsupported,
+  ZSTD_error_parameter_combination_unsupported,
+  ZSTD_error_parameter_outOfBound,
+  ZSTD_error_tableLog_tooLarge,
+  ZSTD_error_maxSymbolValue_tooLarge,
+  ZSTD_error_maxSymbolValue_tooSmall,
+  ZSTD_error_stabilityCondition_notRespected,
+  ZSTD_error_stage_wrong,
+  ZSTD_error_init_missing,
+  ZSTD_error_memory_allocation,
+  ZSTD_error_workSpace_tooSmall,
+  ZSTD_error_dstSize_tooSmall,
+  ZSTD_error_srcSize_wrong,
+  ZSTD_error_dstBuffer_null,
+  ZSTD_error_noForwardProgress_destFull,
+  ZSTD_error_noForwardProgress_inputEmpty,
 } = constants;
 
 function protectMethod(method: unknown): unknown {
@@ -136,6 +173,8 @@ const InflateRaw = protectMethod(zlib.InflateRaw);
 const Unzip = protectMethod(zlib.Unzip);
 const BrotliCompress = protectMethod(zlib.BrotliCompress);
 const BrotliDecompress = protectMethod(zlib.BrotliDecompress);
+const ZstdCompress = protectMethod(zlib.ZstdCompress);
+const ZstdDecompress = protectMethod(zlib.ZstdDecompress);
 
 const createGzip = protectMethod(zlib.createGzip);
 const createGunzip = protectMethod(zlib.createGunzip);
@@ -146,6 +185,8 @@ const createInflateRaw = protectMethod(zlib.createInflateRaw);
 const createUnzip = protectMethod(zlib.createUnzip);
 const createBrotliCompress = protectMethod(zlib.createBrotliCompress);
 const createBrotliDecompress = protectMethod(zlib.createBrotliDecompress);
+const createZstdCompress = protectMethod(zlib.createZstdCompress);
+const createZstdDecompress = protectMethod(zlib.createZstdDecompress);
 
 const inflate = protectMethod(zlib.inflate);
 const inflateSync = protectMethod(zlib.inflateSync);
@@ -165,6 +206,10 @@ const brotliCompress = protectMethod(zlib.brotliCompress);
 const brotliCompressSync = protectMethod(zlib.brotliCompressSync);
 const brotliDecompress = protectMethod(zlib.brotliDecompress);
 const brotliDecompressSync = protectMethod(zlib.brotliDecompressSync);
+const zstdCompress = protectMethod(zlib.zstdCompress);
+const zstdCompressSync = protectMethod(zlib.zstdCompressSync);
+const zstdDecompress = protectMethod(zlib.zstdDecompress);
+const zstdDecompressSync = protectMethod(zlib.zstdDecompressSync);
 
 export {
   crc32,
@@ -181,6 +226,8 @@ export {
   Unzip,
   BrotliCompress,
   BrotliDecompress,
+  ZstdCompress,
+  ZstdDecompress,
 
   // Convenience methods to create classes
   createGzip,
@@ -192,6 +239,8 @@ export {
   createUnzip,
   createBrotliCompress,
   createBrotliDecompress,
+  createZstdCompress,
+  createZstdDecompress,
 
   // One-shot methods
   inflate,
@@ -212,6 +261,10 @@ export {
   brotliDecompressSync,
   brotliCompress,
   brotliCompressSync,
+  zstdCompress,
+  zstdCompressSync,
+  zstdDecompress,
+  zstdDecompressSync,
 
   // NodeJS also exports all constants directly under zlib, but this is deprecated
   Z_NO_FLUSH,
@@ -248,6 +301,8 @@ export {
   UNZIP,
   BROTLI_DECODE,
   BROTLI_ENCODE,
+  ZSTD_ENCODE,
+  ZSTD_DECODE,
   Z_MIN_WINDOWBITS,
   Z_MAX_WINDOWBITS,
   Z_DEFAULT_WINDOWBITS,
@@ -320,6 +375,36 @@ export {
   BROTLI_DECODER_ERROR_ALLOC_RING_BUFFER_2,
   BROTLI_DECODER_ERROR_ALLOC_BLOCK_TYPE_TREES,
   BROTLI_DECODER_ERROR_UNREACHABLE,
+  ZSTD_COMPRESS,
+  ZSTD_DECOMPRESS,
+  ZSTD_error_no_error,
+  ZSTD_error_GENERIC,
+  ZSTD_error_prefix_unknown,
+  ZSTD_error_version_unsupported,
+  ZSTD_error_frameParameter_unsupported,
+  ZSTD_error_frameParameter_windowTooLarge,
+  ZSTD_error_corruption_detected,
+  ZSTD_error_checksum_wrong,
+  ZSTD_error_literals_headerWrong,
+  ZSTD_error_dictionary_corrupted,
+  ZSTD_error_dictionary_wrong,
+  ZSTD_error_dictionaryCreation_failed,
+  ZSTD_error_parameter_unsupported,
+  ZSTD_error_parameter_combination_unsupported,
+  ZSTD_error_parameter_outOfBound,
+  ZSTD_error_tableLog_tooLarge,
+  ZSTD_error_maxSymbolValue_tooLarge,
+  ZSTD_error_maxSymbolValue_tooSmall,
+  ZSTD_error_stabilityCondition_notRespected,
+  ZSTD_error_stage_wrong,
+  ZSTD_error_init_missing,
+  ZSTD_error_memory_allocation,
+  ZSTD_error_workSpace_tooSmall,
+  ZSTD_error_dstSize_tooSmall,
+  ZSTD_error_srcSize_wrong,
+  ZSTD_error_dstBuffer_null,
+  ZSTD_error_noForwardProgress_destFull,
+  ZSTD_error_noForwardProgress_inputEmpty,
 };
 
 export default {
@@ -339,6 +424,8 @@ export default {
   Unzip,
   BrotliCompress,
   BrotliDecompress,
+  ZstdCompress,
+  ZstdDecompress,
 
   // Convenience methods to create classes
   createGzip,
@@ -350,6 +437,8 @@ export default {
   createUnzip,
   createBrotliCompress,
   createBrotliDecompress,
+  createZstdCompress,
+  createZstdDecompress,
 
   // One-shot methods
   inflate,
@@ -370,4 +459,8 @@ export default {
   brotliDecompressSync,
   brotliCompress,
   brotliCompressSync,
+  zstdCompress,
+  zstdCompressSync,
+  zstdDecompress,
+  zstdDecompressSync,
 };

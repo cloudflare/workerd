@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "stub-storage-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "stub-storage-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "allow_irrevocable_stub_storage",
+          "experimental",
+          "rpc",
+          "enable_ctx_exports",
+          "service_binding_extra_handlers",
+          "fetcher_no_get_put_delete",
+        ],
+        durableObjectNamespaces = [
+          (className = "MyActor", uniqueKey = "foo", enableSql = true),
+        ],
+        durableObjectStorage = (inMemory = void),
+      )
+    ),
+  ],
+);

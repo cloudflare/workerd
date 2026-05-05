@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import {
   createSign,
   createVerify,
@@ -103,7 +106,7 @@ export const ed25519SignVerifyObjects = {
         const key = createPrivateKey(env['ed25519_private.pem']);
         const signer = createSign('sha256');
         signer.update('hello world');
-        const signature = signer.sign(key, 'hex');
+        const _signature = signer.sign(key, 'hex');
       },
       {
         message: 'Failed to set signature digest',
@@ -177,5 +180,37 @@ export const testSignLength = {
       // It will only verify correctly if the signature is the correct length.
       ok(verify.verify(keyPair.publicKey, sig));
     }
+  },
+};
+
+// Test that Web Crypto keys (from crypto.subtle) can be used with
+// Node.js crypto sign/verify one-shot functions.
+export const webCryptoKeySignVerify = {
+  async test() {
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+    const data = Buffer.from('hello world');
+    const sig = sign('SHA256', data, keyPair.privateKey);
+    ok(sig instanceof Buffer);
+    ok(sig.length > 0);
+    ok(verify('SHA256', data, keyPair.publicKey, sig));
+  },
+};
+
+export const webCryptoKeySignVerifyP384 = {
+  async test() {
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-384' },
+      true,
+      ['sign', 'verify']
+    );
+    const data = Buffer.from('test data');
+    const sig = sign('SHA384', data, keyPair.privateKey);
+    ok(sig instanceof Buffer);
+    ok(sig.length > 0);
+    ok(verify('SHA384', data, keyPair.publicKey, sig));
   },
 };

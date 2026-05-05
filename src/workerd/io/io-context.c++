@@ -9,7 +9,10 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/util/autogate.h>
+#include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
 
 #include <kj/debug.h>
@@ -46,6 +49,18 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
 
   TimeoutId setTimeout(
       IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) override {
+    // Verify the generator is from the correct ServiceWorkerGlobalScope. If we have been passed a
+    // different `timeoutIdGenerator`, then that means this IoContext is active at a time when
+    // JavaScript in a different V8 context is executing. This _should_ be impossible, but we're
+    // occasionally seeing timeout ID collision assertion failures in `addState()`, and one possible
+    // explanation is that an IoContext is somehow current for a different V8 context.
+    //
+    // TODO(cleanup): Find a more general way to assert that the JS API surface is being used under
+    //   the correct IoContext, get rid of this function's `generator` parameter, and instead rely
+    //   on the IoContext to provide the generator.
+    KJ_ASSERT(&generator == &context.getCurrentLock().getTimeoutIdGenerator(),
+        "TimeoutId Generator mismatch - using a generator from wrong ServiceWorkerGlobalScope");
+
     auto [id, it] = addState(generator, kj::mv(params));
     setTimeoutImpl(context, it);
     return id;
@@ -137,16 +152,15 @@ IoContext::IoContext(ThreadContext& thread,
     kj::Maybe<Worker::Actor&> actorParam,
     kj::Own<LimitEnforcer> limitEnforcerParam)
     : thread(thread),
-      tmpDirStoreScope(TmpDirStoreScope::create()),
       worker(kj::mv(workerParam)),
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
       threadId(getThreadId()),
       deleteQueue(kj::arc<DeleteQueue>()),
       cachePutSerializer(kj::READY_NOW),
+      timeoutManager(kj::heap<TimeoutManagerImpl>()),
       waitUntilTasks(*this),
       tasks(*this),
-      timeoutManager(kj::heap<TimeoutManagerImpl>()),
       deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
@@ -181,6 +195,9 @@ IoContext::IoContext(ThreadContext& thread,
 
     return promise;
   };
+  KJ_IF_SOME(cb, this->worker->getIsolate().getCpuLimitNearlyExceededCallback()) {
+    limitEnforcer->setCpuLimitNearlyExceededCallback(kj::mv(cb));
+  }
 
   // Arrange to abort when limits expire.
   abortWhen(makeLimitsPromise());
@@ -201,12 +218,27 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Own<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
     kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-    tracing::InvocationSpanContext invocationSpanContext)
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)),
-      invocationSpanContext(kj::mv(invocationSpanContext)) {}
+      maybeTriggerInvocationSpan(kj::mv(maybeTriggerInvocationSpan)) {}
+
+tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanContext() {
+  // Creating a new InvocationSpanContext can be a bit expensive since it needs to
+  // generate random IDs, so we only create it lazily when requested, which should
+  // only be when tracing is enabled and we need to record spans.
+  KJ_IF_SOME(ctx, invocationSpanContext) {
+    return ctx;
+  }
+
+  invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
+      maybeTriggerInvocationSpan.map(
+          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
+      context->getEntropySource());
+  return KJ_ASSERT_NONNULL(invocationSpanContext);
+}
 
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
 // that sets waitedForWaitUntil). So, we can now safely add the request to
@@ -231,6 +263,19 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   deliveredLocation = location;
   metrics->delivered();
 
+  // Create the root user trace span once per request. Stale references to the span (e.g. from
+  // AsyncContextFrame storage via IoOwn, which for actors can outlive this request via the
+  // IoContext's delete queue) are safe: user-tracing SpanSubmitters hold only a
+  // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
+  KJ_IF_SOME(workerTracer, workerTracer) {
+    if (util::Autogate::isEnabled(util::AutogateKey::USER_SPAN_CONTEXT_PROPAGATION)) {
+      auto traceId = getInvocationSpanContext().getTraceId();
+      rootUserTraceSpan = workerTracer->makeUserRequestSpan(kj::mv(traceId));
+    } else {
+      rootUserTraceSpan = workerTracer->makeUserRequestSpan(tracing::TraceId(nullptr));
+    }
+  }
+
   KJ_IF_SOME(a, context->actor) {
     // Re-synchronize the timer and top up limits for every new incoming request to an actor.
     ioChannelFactory->getTimer().syncTime();
@@ -244,10 +289,25 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   }
 }
 
+kj::Date IoContext::IncomingRequest::now(kj::Maybe<kj::Date> nextTimeout) {
+  metrics->clockRead();
+  return ioChannelFactory->getTimer().now(kj::mv(nextTimeout));
+}
+
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (!wasDelivered) {
+    KJ_IF_SOME(w, workerTracer) {
+      w->markUnused();
+    }
     // Request was never added to context->incomingRequests in the first place.
     return;
+  }
+
+  // Hack: We need to report an accurate time stamps for the STW outcome event, but the timer may
+  // not be available when the outcome event gets reported. Define the outcome event time as the
+  // time when the incoming request shuts down.
+  KJ_IF_SOME(w, workerTracer) {
+    w->recordTimestamp(now());
   }
 
   if (&context->incomingRequests.front() == this) {
@@ -260,8 +320,6 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
           kj::getStackTrace());
     }
   }
-
-  context->incomingRequests.remove(*this);
 
   KJ_IF_SOME(a, context->actor) {
     a.getMetrics().endRequest();
@@ -289,10 +347,15 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
       context->waitUntilTasks.clear();
     }
   }
+
+  // Remove incoming request after canceling waitUntil tasks, which may have spans attached that
+  // require accessing a timer from the active request.
+  context->incomingRequests.remove(*this);
 }
 
 InputGate::Lock IoContext::getInputLock() {
-  return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context").addRef();
+  return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context")
+      .addRef(getCurrentTraceSpan());
 }
 
 kj::Maybe<kj::Own<InputGate::CriticalSection>> IoContext::getCriticalSection() {
@@ -317,7 +380,8 @@ bool IoContext::hasOutputGate() {
 }
 
 kj::Maybe<kj::Promise<void>> IoContext::waitForOutputLocksIfNecessary() {
-  return actor.map([](Worker::Actor& actor) { return actor.getOutputGate().wait(); });
+  return actor.map(
+      [this](Worker::Actor& actor) { return actor.getOutputGate().wait(getCurrentTraceSpan()); });
 }
 
 kj::Maybe<IoOwn<kj::Promise<void>>> IoContext::waitForOutputLocksIfNecessaryIoOwn() {
@@ -337,8 +401,9 @@ bool IoContext::isInspectorEnabled() {
   return worker->getIsolate().isInspectorEnabled();
 }
 
-bool IoContext::isFiddle() {
-  return thread.isFiddle();
+bool IoContext::hasWarningHandler() {
+  return isInspectorEnabled() || getWorkerTracer() != kj::none ||
+      ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO);
 }
 
 void IoContext::logWarning(kj::StringPtr description) {
@@ -410,13 +475,17 @@ void IoContext::abort(kj::Exception&& e) {
   if (abortException != kj::none) {
     return;
   }
-  abortException = kj::cp(e);
+  abortException = e.clone();
   KJ_IF_SOME(a, actor) {
     // Stop the ActorCache from flushing any scheduled write operations to prevent any unnecessary
     // or unintentional async work
-    a.shutdownActorCache(kj::cp(e));
+    a.shutdownActorCache(e.clone());
   }
   abortFulfiller->reject(kj::mv(e));
+}
+
+void IoContext::abortIsolate(kj::StringPtr reason) {
+  getIoChannelFactory().abortIsolate(reason);
 }
 
 void IoContext::abortWhen(kj::Promise<void> promise) {
@@ -492,15 +561,21 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     timeoutPromise = timeoutPromise.exclusiveJoin(kj::mv(drainPaf.promise));
   } else {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
-    timeoutPromise = context->limitEnforcer->limitDrain();
+    auto timeoutLogPromise = [this]() -> kj::Promise<void> {
+      return context->run([this](Worker::Lock&) {
+        context->logWarning(
+            "waitUntil() tasks did not complete within the allowed time after invocation end and have been cancelled. "
+            "See: https://developers.cloudflare.com/workers/runtime-apis/context/#waituntil");
+      });
+    };
+    timeoutPromise = context->limitEnforcer->limitDrain().then(kj::mv(timeoutLogPromise));
   }
   return context->waitUntilTasks.onEmpty()
       .exclusiveJoin(kj::mv(timeoutPromise))
       .exclusiveJoin(context->onAbort().catch_([](kj::Exception&&) {}));
 }
 
-kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::IncomingRequest::
-    finishScheduled() {
+kj::Promise<EventOutcome> IoContext::IncomingRequest::finishScheduled() {
   // TODO(someday): In principle we should be able to support delivering the "scheduled" event type
   //   to an actor, and this may be important if we open up the whole of WorkerInterface to be
   //   callable from any stub. However, the logic around async tasks would have to be different. We
@@ -514,14 +589,19 @@ kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::Incomin
   KJ_ASSERT(context->incomingRequests.size() == 1);
   context->incomingRequests.front().waitedForWaitUntil = true;
 
-  auto timeoutPromise = context->limitEnforcer->limitScheduled().then(
-      [] { return IoContext_IncomingRequest::FinishScheduledResult::TIMEOUT; });
+  auto timeoutPromise = context->limitEnforcer->limitScheduled().then([] {
+    // TODO(soon): The limit being hit here is a wall time limit. Can we report an
+    // "exceededWallTime" outcome instead?
+    return EventOutcome::EXCEEDED_CPU;
+  });
   return context->waitUntilTasks.onEmpty()
-      .then([]() { return IoContext_IncomingRequest::FinishScheduledResult::COMPLETED; })
+      .then([]() { return EventOutcome::OK; })
       .exclusiveJoin(kj::mv(timeoutPromise))
       .exclusiveJoin(context->onAbort().then([] {
-    return IoContext_IncomingRequest::FinishScheduledResult::ABORTED;
-  }, [](kj::Exception&&) { return IoContext_IncomingRequest::FinishScheduledResult::ABORTED; }));
+    // abortFulfiller should only ever be rejected instead of being fulfilled, return an
+    // internalError outcome if it does happen
+    return EventOutcome::INTERNAL_ERROR;
+  }, [](kj::Exception&& e) { return RequestObserver::outcomeFromException(e); }));
 }
 
 class IoContext::PendingEvent: public kj::Refcounted {
@@ -583,7 +663,7 @@ kj::Own<void> IoContext::registerPendingEvent() {
     return kj::addRef(pe);
   } else {
     KJ_IF_SOME(e, abortException) {
-      kj::throwFatalException(kj::cp(e));
+      kj::throwFatalException(e.clone());
     }
 
     // Cancel any already-scheduled finalization.
@@ -670,8 +750,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
   auto paf = kj::newPromiseAndFulfiller<void>();
 
-  // Always schedule the timeout relative to what Date.now() currently returns, so that the delay
-  // appear exact. Otherwise, the delay could reveal non-determinism containing side channels.
+  // Schedule relative to Date.now() so the delay appears exact to the application.
   auto when = context.now() + state.params.msDelay * kj::MILLISECONDS;
   // TODO(cleanup): The manual use of run() here (including carrying over the critical section) is
   //   kind of ugly, but using awaitIo() doesn't work here because we need the ability to cancel
@@ -824,38 +903,39 @@ size_t IoContext::getTimeoutCount() {
 }
 
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
-  kj::Date adjustedTime = incomingRequest.ioChannelFactory->getTimer().now();
-  incomingRequest.metrics->clockRead();
-
-  KJ_IF_SOME(maybeNextTimeout, timeoutManager->getNextTimeout()) {
-    // Don't return a time beyond when the next setTimeout() callback is intended to run. This
-    // ensures that Date.now() inside the callback itself always returns exactly the time at which
-    // the callback was scheduled (hiding non-determinism which could contain side channels), and
-    // that the time returned by Date.now() never goes backwards.
-    return kj::min(adjustedTime, maybeNextTimeout);
-  } else {
-    return adjustedTime;
+  if (getWorker().getScript().getIsolate().getApi().getFeatureFlags().getPreciseTimers()) {
+    auto now = kj::systemPreciseCalendarClock().now();
+    // Round to 3ms granularity
+    int64_t ms = (now - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+    int64_t roundedMs = (ms / 3) * 3;
+    return kj::UNIX_EPOCH + roundedMs * kj::MILLISECONDS;
   }
+
+  // Let TimerChannel decide whether to clamp to the next timeout time. This is how Spectre
+  // mitigations ensure Date.now() inside a callback returns exactly the scheduled time.
+  return incomingRequest.now(timeoutManager->getNextTimeout());
 }
 
 kj::Date IoContext::now() {
   return now(getCurrentIncomingRequest());
 }
 
+kj::Rc<ExternalPusherImpl> IoContext::getExternalPusher() {
+  KJ_IF_SOME(ep, externalPusher) {
+    return ep.addRef();
+  } else {
+    return externalPusher.emplace(kj::rc<ExternalPusherImpl>(getByteStreamFactory())).addRef();
+  }
+}
+
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
-  SpanBuilder span = nullptr;
-  SpanBuilder userSpan = nullptr;
-
+  TraceContext tracing;
   KJ_IF_SOME(n, options.operationName) {
-    // TODO(cleanup): Using kj::Maybe<kj::LiteralStringConst> for operationName instead would remove
-    // a memory allocation here, but there might be use cases for dynamically allocated strings.
-    span = makeTraceSpan(kj::ConstString(kj::str(n)));
-    userSpan = makeUserTraceSpan(kj::ConstString(kj::mv(n)));
+    tracing = makeUserTraceSpan(n.clone());
   }
 
-  TraceContext tracing(kj::mv(span), kj::mv(userSpan));
   kj::Own<WorkerInterface> ret;
   KJ_IF_SOME(existing, options.existingTraceContext) {
     ret = func(existing, getIoChannelFactory());
@@ -870,11 +950,18 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
 
-  if (tracing.span.isObserved()) {
-    ret = ret.attach(kj::mv(tracing.span));
+  if (tracing.isObserved()) {
+    auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing)));
+    ret = ret.attach(kj::mv(ioOwnedSpan));
   }
-  if (tracing.userSpan.isObserved()) {
-    ret = ret.attach(kj::mv(tracing.userSpan));
+
+  // Subrequests use a lot of unaccounted C++ memory, so we adjust V8's external memory counter to
+  // pressure the GC and protect against OOMs. We apply this adjustment to ALL subrequests (not
+  // just fetch). We only apply this when the JS lock is held (i.e., when JS code initiated the
+  // subrequest); infrastructure paths that bypass JS don't need it.
+  KJ_IF_SOME(lock, currentLock) {
+    jsg::Lock& js = lock;
+    ret = ret.attach(js.getExternalMemoryAdjustment(8 * 1024));
   }
 
   return kj::mv(ret);
@@ -915,26 +1002,6 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       });
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    kj::ConstString operationName,
-    kj::Vector<Span::Tag> tags) {
-  return getSubrequest(
-      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
-    for (Span::Tag& tag: tags) {
-      tracing.userSpan.setTag(kj::mv(tag.key), kj::mv(tag.value));
-    }
-    return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
-  },
-      SubrequestOptions{
-        .inHouse = isInHouse,
-        .wrapMetrics = !isInHouse,
-        .operationName = kj::mv(operationName),
-      });
-}
-
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
@@ -958,8 +1025,9 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     IoChannelFactory& channelFactory) {
   IoChannelFactory::SubrequestMetadata metadata{
     .cfBlobJson = kj::mv(cfBlobJson),
-    .tracing = tracing,
-    .featureFlagsForFl = worker->getIsolate().getFeatureFlagsForFl(),
+    .parentSpan = tracing.getInternalSpanParent(),
+    .userSpanParent = tracing.getUserSpanParent(),
+    .featureFlagsForFl = mapCopyString(worker->getIsolate().getFeatureFlagsForFl()),
   };
 
   auto client = channelFactory.startSubrequest(channel, kj::mv(metadata));
@@ -973,26 +1041,9 @@ kj::Own<kj::HttpClient> IoContext::getHttpClient(
       getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
 }
 
-kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    kj::ConstString operationName,
-    kj::Vector<Span::Tag> tags) {
-  return asHttpClient(getSubrequestChannelWithSpans(
-      channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
-}
-
 kj::Own<kj::HttpClient> IoContext::getHttpClient(
     uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext) {
   return asHttpClient(getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), traceContext));
-}
-
-kj::Own<kj::HttpClient> IoContext::getHttpClientNoChecks(uint channel,
-    bool isInHouse,
-    kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<kj::ConstString> operationName) {
-  return asHttpClient(
-      getSubrequestChannelNoChecks(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
 }
 
 kj::Own<CacheClient> IoContext::getCacheClient() {
@@ -1001,22 +1052,57 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   //   subrequest limit still applied. Since I can't currently think of a use case for more than 50
   //   cache API requests per request, I'm leaving it as-is for now.
   limitEnforcer->newSubrequest(false);
-  return getIoChannelFactory().getCache();
+  auto ret = getIoChannelFactory().getCache();
+
+  // Apply external memory adjustment for Cache API subrequests (same as other subrequests in
+  // getSubrequestNoChecks).
+  KJ_IF_SOME(lock, currentLock) {
+    jsg::Lock& js = lock;
+    ret = ret.attach(js.getExternalMemoryAdjustment(8 * 1024));
+  }
+
+  return kj::mv(ret);
 }
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
+  static const SpanParent dummySpanParent = nullptr;
+
   jsg::Lock& js = lock;
   kj::Own<SpanParent> spanParent;
   KJ_IF_SOME(spo, kj::mv(spanParentOverride)) {
     spanParent = kj::heap(kj::mv(spo));
   } else {
-    spanParent = kj::heap(getMetrics().getSpan());
+    // TODO(cleanup): Can we also elide the other memory allocations for the (unused) storage
+    // scope if tracing is disabled?
+    SpanParent metricsSpan = getMetrics().getSpan();
+    if (!metricsSpan.isObserved()) {
+      // const_cast is ok: There's no state that could be changed in a non-observed span parent.
+      spanParent = kj::Own<SpanParent>(
+          &const_cast<SpanParent&>(dummySpanParent), kj::NullDisposer::instance);
+    } else {
+      spanParent = kj::heap(kj::mv(metricsSpan));
+    }
   }
   auto ioOwnSpanParent = IoContext::current().addObject(kj::mv(spanParent));
   auto spanHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnSpanParent));
   return jsg::AsyncContextFrame::StorageScope(
       js, lock.getTraceAsyncContextKey(), js.v8Ref(spanHandle));
+}
+
+jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
+    Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
+  jsg::Lock& js = lock;
+  kj::Own<SpanParent> userSpan;
+  KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
+    userSpan = kj::heap(kj::mv(sp));
+  } else {
+    userSpan = kj::heap(getRootUserTraceSpan());
+  }
+  auto ioOwnSpan = IoContext::current().addObject(kj::mv(userSpan));
+  auto spanHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnSpan));
+  return jsg::AsyncContextFrame::StorageScope(
+      js, lock.getUserTraceAsyncContextKey(), js.v8Ref(spanHandle));
 }
 
 SpanParent IoContext::getCurrentTraceSpan() {
@@ -1038,20 +1124,38 @@ SpanParent IoContext::getCurrentTraceSpan() {
 }
 
 SpanParent IoContext::getCurrentUserTraceSpan() {
-  // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
-  // context, as with Jaeger spans.
-  KJ_IF_SOME(workerTracer, getWorkerTracer()) {
-    return workerTracer.getUserRequestSpan();
+  // Skip the AsyncContextFrame probe when user tracing isn't wired up: an unobserved
+  // root means enterSpan can't have pushed anything (see Tracing::enterSpan).
+  if (incomingRequests.empty()) {
+    return SpanParent(nullptr);
   }
-  return SpanParent(nullptr);
+  SpanParent root = getCurrentIncomingRequest().getRootUserTraceSpan();
+  if (!root.isObserved()) {
+    return kj::mv(root);
+  }
+
+  // If called while lock is held, try to use the trace info stored in the async context.
+  KJ_IF_SOME(lock, currentLock) {
+    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
+      KJ_IF_SOME(value, frame.get(lock.getUserTraceAsyncContextKey())) {
+        auto handle = value.getHandle(lock);
+        jsg::Lock& js = lock;
+        auto& userSpan = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
+        return userSpan->addRef();
+      }
+    }
+  }
+  return kj::mv(root);
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
   return getCurrentTraceSpan().newChild(kj::mv(operationName));
 }
 
-SpanBuilder IoContext::makeUserTraceSpan(kj::ConstString operationName) {
-  return getCurrentUserTraceSpan().newChild(kj::mv(operationName));
+TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
+  auto span = makeTraceSpan(operationName.clone());
+  auto userSpan = getCurrentUserTraceSpan().newChild(kj::mv(operationName));
+  return TraceContext(kj::mv(span), kj::mv(userSpan));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {
@@ -1059,7 +1163,7 @@ void IoContext::taskFailed(kj::Exception&& exception) {
     KJ_IF_SOME(status, limitEnforcer->getLimitsExceeded()) {
       waitUntilStatusValue = status;
     } else {
-      waitUntilStatusValue = EventOutcome::EXCEPTION;
+      waitUntilStatusValue = RequestObserver::outcomeFromException(exception);
     }
   }
 
@@ -1193,6 +1297,15 @@ void IoContext::runImpl(Runnable& runnable,
         }
       }
 
+      // With --gc-stress, force a full GC after microtasks run. This catches objects that
+      // became unreachable during JS execution / microtask processing (e.g., a
+      // ReadableStreamDefaultReader with no JS variable binding whose closed promise is
+      // still pending).
+      if (isGcStressModeForTest()) {
+        workerLock.getIsolate()->RequestGarbageCollectionForTesting(
+            v8::Isolate::kFullGarbageCollection);
+      }
+
       // Run FinalizationRegistry cleanup tasks without an IoContext
       {
         SuppressIoContextScope noIoCtxt;
@@ -1225,6 +1338,16 @@ void IoContext::runImpl(Runnable& runnable,
       }
     });
 
+    // With --gc-stress, force a full GC before each awaitIo continuation. This helps detect
+    // KJ async objects (promises, streams, etc.) stored on the JS heap without IoOwn
+    // wrapping. Such objects crash under DISALLOW_KJ_IO_DESTRUCTORS_SCOPE when collected
+    // by GC, but normally the timing window is too brief to hit. Forcing GC at every
+    // continuation makes these bugs deterministic.
+    if (isGcStressModeForTest()) {
+      workerLock.getIsolate()->RequestGarbageCollectionForTesting(
+          v8::Isolate::kFullGarbageCollection);
+    }
+
     v8::TryCatch tryCatch(workerLock.getIsolate());
     try {
       runnable.run(workerLock);
@@ -1239,7 +1362,7 @@ void IoContext::runImpl(Runnable& runnable,
         // Check if we were aborted. TerminateExecution() may be called after abort() in order
         // to prevent any more JavaScript from executing.
         KJ_IF_SOME(e, abortException) {
-          kj::throwFatalException(kj::cp(e));
+          kj::throwFatalException(e.clone());
         }
 
         // That should have thrown, so we shouldn't get here.
@@ -1289,6 +1412,14 @@ IoContext& IoContext::current() {
   }
 }
 
+kj::Maybe<IoContext&> IoContext::tryCurrent() {
+  if (threadLocalRequest == nullptr) {
+    return kj::none;
+  } else {
+    return *threadLocalRequest;
+  }
+}
+
 bool IoContext::hasCurrent() {
   return threadLocalRequest != nullptr;
 }
@@ -1298,8 +1429,8 @@ bool IoContext::isCurrent() {
 }
 
 auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
-  if (hasCurrent()) {
-    return IoContext::current().getWeakRef();
+  KJ_IF_SOME(ioContext, tryCurrent()) {
+    return ioContext.getWeakRef();
   } else {
     return kj::none;
   }
@@ -1456,51 +1587,4 @@ kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
     context->abort(kj::getCaughtExceptionAsKj());
   }
 }
-
-// ======================================================================================
-
-WarningAggregator::WarningAggregator(IoContext& context, EmitCallback emitter)
-    : worker(kj::atomicAddRef(context.getWorker())),
-      requestMetrics(kj::addRef(context.getMetrics())),
-      emitter(kj::mv(emitter)) {}
-
-WarningAggregator::~WarningAggregator() noexcept(false) {
-  auto lock = warnings.lockExclusive();
-  if (lock->size() > 0) {
-    auto emitter = kj::mv(this->emitter);
-    auto warnings = lock->releaseAsArray();
-    if (IoContext::hasCurrent()) {
-      // We are currently in a JavaScript execution context. The object is likely being
-      // destroyed during garbage collection. V8 does not like having most of its API
-      // invoked in the middle of GC. So we'll delay our warning until GC finished.
-      auto& context = IoContext::current();
-      context.addTask(
-          context.run([emitter = kj::mv(emitter), warnings = kj::mv(warnings)](
-                          Worker::Lock& lock) mutable { emitter(lock, kj::mv(warnings)); }));
-    } else {
-      // We aren't in any JavaScript context. The object might be being destroyed during
-      // IoContext shutdown or maybe even during deferred proxying. So, avoid touching
-      // the IoContext. Instead, we'll lock the worker directly.
-      worker->runInLockScope(Worker::Lock::TakeSynchronously(*requestMetrics),
-          [emitter = kj::mv(emitter), warnings = kj::mv(warnings)](Worker::Lock& lock) mutable {
-        JSG_WITHIN_CONTEXT_SCOPE(
-            lock, lock.getContext(), [&](jsg::Lock& js) { emitter(lock, kj::mv(warnings)); });
-      });
-    }
-  }
-}
-
-void WarningAggregator::add(kj::Own<WarningContext> warning) const {
-  warnings.lockExclusive()->add(kj::mv(warning));
-}
-
-kj::Own<WarningAggregator> IoContext::getWarningAggregator(
-    const WarningAggregator::Key& key, kj::Function<kj::Own<WarningAggregator>(IoContext&)> load) {
-  auto& instance = warningAggregatorMap.findOrCreate(
-      key, [this, load = kj::mv(load), &key]() mutable -> WarningAggregator::Map::Entry {
-    return {key, load(*this)};
-  });
-  return kj::atomicAddRef(*instance);
-}
-
 }  // namespace workerd

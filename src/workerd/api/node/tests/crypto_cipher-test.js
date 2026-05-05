@@ -15,6 +15,10 @@ import {
   createPrivateKey,
   getCiphers,
   getCipherInfo,
+  createCipher,
+  createDecipher,
+  Cipher,
+  Decipher,
 } from 'node:crypto';
 
 import { strictEqual, deepStrictEqual, throws, ok } from 'node:assert';
@@ -38,6 +42,7 @@ const authTagTests = [
   { name: 'aes-128-gcm', size: 16, iv: 16 },
   { name: 'aes-192-gcm', size: 24, iv: 16 },
   { name: 'aes-256-gcm', size: 32, iv: 16 },
+  { name: 'chacha20-poly1305', size: 32, iv: 12 },
 ];
 
 export const cipheriv = {
@@ -102,6 +107,8 @@ export const cipheriv = {
       data += cipher.final('hex');
 
       const tag = cipher.getAuthTag();
+
+      //tag[1] = 0xbb;
 
       const decipher = createDecipheriv(test.name, key, iv);
       decipher.setAuthTag(tag);
@@ -363,5 +370,14 @@ export const test_cipher_info4 = {
       keyLength: -1,
     });
     strictEqual(info, undefined);
+  },
+};
+
+export const testUnimplemented = {
+  async test() {
+    strictEqual(typeof Cipher, 'function');
+    strictEqual(typeof Decipher, 'function');
+    strictEqual(typeof createCipher, 'function');
+    strictEqual(typeof createDecipher, 'function');
   },
 };

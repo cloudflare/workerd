@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { Server as HttpServer } from 'node-internal:internal_http_server';
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import type { Server as _Server } from 'node:https';
@@ -9,7 +13,7 @@ export class Server extends HttpServer implements _Server {
     throw new ERR_METHOD_NOT_IMPLEMENTED('addContext');
   }
 
-  getTicketKeys(): Buffer {
+  getTicketKeys(): Buffer<ArrayBuffer> {
     // We don't support TLS ticket keys.
     throw new ERR_METHOD_NOT_IMPLEMENTED('getTicketKeys');
   }

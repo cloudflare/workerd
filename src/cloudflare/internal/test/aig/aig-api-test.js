@@ -210,5 +210,57 @@ export const tests = {
         success: true,
       });
     }
+
+    {
+      // Test already-aborted signal throws AbortError
+      await assert.rejects(
+        async () => {
+          await env.ai.gateway('my-gateway').run(
+            {
+              provider: 'workers-ai',
+              endpoint: '@cf/meta/llama-3.1-8b-instruct',
+              headers: {
+                Authorization: 'Bearer abcde',
+                'Content-Type': 'application/json',
+              },
+              query: {
+                prompt: 'What is Cloudflare?',
+              },
+            },
+            { signal: AbortSignal.abort() }
+          );
+        },
+        { name: 'AbortError' }
+      );
+    }
+
+    {
+      // Test aborting an in-flight request
+      const controller = new AbortController();
+      let resolved = false;
+      const promise = env.ai
+        .gateway('my-gateway')
+        .run(
+          {
+            provider: 'workers-ai',
+            endpoint: 'hang',
+            headers: {
+              Authorization: 'Bearer abcde',
+              'Content-Type': 'application/json',
+            },
+            query: {
+              prompt: 'What is Cloudflare?',
+            },
+          },
+          { signal: controller.signal }
+        )
+        .finally(() => {
+          resolved = true;
+        });
+      await scheduler.wait(10);
+      assert.deepStrictEqual(resolved, false);
+      controller.abort();
+      await assert.rejects(promise, { name: 'AbortError' });
+    }
   },
 };

@@ -146,7 +146,10 @@ export class EventEmitterAsyncResource
   }
 }
 
-export function addAbortListener(signal: AbortSignal, listener: any) {
+export function addAbortListener(
+  signal: AbortSignal | undefined,
+  listener: any
+) {
   if (signal === undefined) {
     throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
   }
@@ -185,6 +188,7 @@ EventEmitter.errorMonitor = kErrorMonitor;
 EventEmitter.EventEmitterAsyncResource = EventEmitterAsyncResource;
 
 export const captureRejectionSymbol = EventEmitter.captureRejectionSymbol;
+export const captureRejections = false;
 export const errorMonitor = EventEmitter.errorMonitor;
 export const getMaxListeners = _getMaxListeners;
 export const usingDomains = EventEmitter.usingDomains;
@@ -249,6 +253,7 @@ EventEmitter.init = function (this: EventEmitter, opts?: EventEmitterOptions) {
   }
 
   (this as any)._maxListeners ??= undefined;
+  (this as any).domain = null;
 
   if (opts?.captureRejections) {
     validateBoolean(opts.captureRejections, 'options.captureRejections');

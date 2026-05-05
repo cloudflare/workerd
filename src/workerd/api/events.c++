@@ -1,5 +1,6 @@
 #include "events.h"
 
+#include "blob.h"
 #include "messagechannel.h"
 
 namespace workerd::api {
@@ -37,7 +38,7 @@ MessageEvent::MessageEvent(jsg::Lock& js,
       maybeOrigin(urlForOrigin.map([](auto& url) { return url.getOrigin(); })) {}
 MessageEvent::MessageEvent(jsg::Lock& js,
     kj::String type,
-    jsg::JsRef<jsg::JsValue> data,
+    kj::OneOf<jsg::JsRef<jsg::JsValue>, jsg::Ref<Blob>> data,
     kj::String lastEventId,
     kj::Maybe<jsg::Ref<MessagePort>> source,
     kj::Maybe<jsg::Url&> urlForOrigin)
@@ -52,8 +53,16 @@ jsg::Ref<MessageEvent> MessageEvent::constructor(
   return js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
 }
 
-jsg::JsValue MessageEvent::getData(jsg::Lock& js) {
-  return data.getHandle(js);
+kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(data) {
+    KJ_CASE_ONEOF(jsValue, jsg::JsRef<jsg::JsValue>) {
+      return jsValue.getHandle(js);
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      return blob.addRef();
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::Maybe<kj::ArrayPtr<const char>> MessageEvent::getOrigin() {
@@ -78,18 +87,42 @@ kj::ArrayPtr<jsg::Ref<MessagePort>> MessageEvent::getPorts() {
 }
 
 void MessageEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackField("data", data);
+  KJ_SWITCH_ONEOF(data) {
+    KJ_CASE_ONEOF(jsValue, jsg::JsRef<jsg::JsValue>) {
+      tracker.trackField("data", jsValue);
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      tracker.trackField("data", blob);
+    }
+  }
   tracker.trackField("source", maybeSource);
 }
 
 void MessageEvent::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(data);
+  KJ_SWITCH_ONEOF(data) {
+    KJ_CASE_ONEOF(jsValue, jsg::JsRef<jsg::JsValue>) {
+      visitor.visit(jsValue);
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      visitor.visit(blob);
+    }
+  }
   visitor.visit(maybeSource);
 }
+
+// ======================================================================================
+namespace {
+const kj::StringPtr kDefaultErrorEventName = "error"_kj;
+}  // namespace
+
+ErrorEvent::ErrorEvent(ErrorEventInit init): Event(kDefaultErrorEventName), init(kj::mv(init)) {}
 
 ErrorEvent::ErrorEvent(kj::String type, ErrorEventInit init)
     : Event(kj::mv(type)),
       init(kj::mv(init)) {}
+
+ErrorEvent::ErrorEvent(jsg::Lock& js, jsg::JsValue error)
+    : ErrorEvent(ErrorEventInit{.error = jsg::JsRef(js, error)}) {}
 
 jsg::Ref<ErrorEvent> ErrorEvent::constructor(
     jsg::Lock& js, kj::String type, jsg::Optional<ErrorEventInit> init) {
@@ -129,5 +162,30 @@ void ErrorEvent::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
 void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(init.error);
 }
+
+// ======================================================================================
+namespace {
+constexpr kj::StringPtr kUnhandledRejectionEventName = "unhandledrejection"_kj;
+constexpr kj::StringPtr kRejectionHandledEventName = "rejectionhandled"_kj;
+
+constexpr kj::StringPtr getPromiseRejectionEventName(v8::PromiseRejectEvent type) {
+  switch (type) {
+    case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler:
+      return kUnhandledRejectionEventName;
+    case v8::PromiseRejectEvent::kPromiseHandlerAddedAfterReject:
+      return kRejectionHandledEventName;
+    default:
+      // Events are not emitted for the other reject types.
+      KJ_UNREACHABLE;
+  }
+}
+
+}  // namespace
+
+PromiseRejectionEvent::PromiseRejectionEvent(
+    v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason)
+    : Event(getPromiseRejectionEventName(type)),
+      promise(kj::mv(promise)),
+      reason(kj::mv(reason)) {}
 
 }  // namespace workerd::api

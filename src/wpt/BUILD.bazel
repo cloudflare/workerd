@@ -1,4 +1,3 @@
-load("//:build/eslint_test.bzl", "eslint_test")
 load("//:build/wd_ts_project.bzl", "wd_ts_project")
 load("//:build/wpt_test.bzl", "wpt_test")
 
@@ -16,21 +15,12 @@ filegroup(
 wd_ts_project(
     name = "wpt-all@tsproject",
     srcs = srcs,
+    eslintrc_json = "eslint.config.mjs",
     source_map = False,
     tsconfig_json = "tsconfig.json",
     deps = [
         "//:node_modules/@types/node",
     ],
-)
-
-eslint_test(
-    name = "wpt-all",
-    srcs = srcs,
-    data = [
-        "//:node_modules/@types/node",
-    ],
-    eslintrc_json = "eslint.config.mjs",
-    tsconfig_json = "tsconfig.json",
 )
 
 wpt_test(
@@ -62,7 +52,6 @@ wpt_test(
 
 wpt_test(
     name = "dom/events",
-    compat_flags = ["pedantic_wpt"],
     config = "dom/events-test.ts",
     wpt_directory = "@wpt//:dom/events@module",
 )
@@ -70,6 +59,7 @@ wpt_test(
 wpt_test(
     name = "fetch/api",
     size = "large",
+    compat_flags = ["strip_bom_in_read_all_text"],
     config = "fetch/api-test.ts",
     start_server = True,
     target_compatible_with = select({
@@ -83,6 +73,13 @@ wpt_test(
 
 wpt_test(
     name = "encoding",
+    size = "large",
+    compat_flags = [
+        "encoder_stream_spec_compliant_backpressure",
+        "fixup-transform-stream-backpressure",
+        "text_decoder_cjk_decoder",
+        "transformstream_enable_standard_constructor",
+    ],
     config = "encoding-test.ts",
     wpt_directory = "@wpt//:encoding@module",
 )
@@ -90,12 +87,18 @@ wpt_test(
 wpt_test(
     name = "compression",
     config = "compression-test.ts",
+    start_server = True,
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     wpt_directory = "@wpt//:compression@module",
 )
 
 wpt_test(
     name = "WebCryptoAPI",
     size = "enormous",
+    compat_flags = ["disable_fast_jsg_struct"],
     config = "WebCryptoAPI-test.ts",
     target_compatible_with = select({
         # Too slow on Windows
@@ -108,6 +111,7 @@ wpt_test(
 wpt_test(
     name = "streams",
     size = "large",
+    compat_flags = ["writable_stream_spec_compliant_writer"],
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )
@@ -118,4 +122,48 @@ wpt_test(
     compat_flags = ["enable_web_file_system"],
     config = "fs-test.ts",
     wpt_directory = "@wpt//:fs@module",
+)
+
+wpt_test(
+    name = "performance-timeline",
+    config = "performance-timeline-test.ts",
+    wpt_directory = "@wpt//:performance-timeline@module",
+)
+
+wpt_test(
+    name = "websockets",
+    size = "large",
+    compat_flags = [
+        "websocket_standard_binary_type",
+        "web_socket_auto_reply_to_close",
+    ],
+    config = "websockets-test.ts",
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:websockets@module",
+)
+
+wpt_test(
+    name = "eventsource",
+    size = "large",
+    config = "eventsource-test.ts",
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:eventsource@module",
+)
+
+wpt_test(
+    name = "webidl",
+    config = "webidl-test.ts",
+    wpt_directory = "@wpt//:webidl@module",
 )

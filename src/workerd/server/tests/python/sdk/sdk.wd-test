@@ -6,42 +6,20 @@ const python :Workerd.Worker = (
   ],
   bindings = [
     ( name = "SELF", service = "python-sdk" ),
+    ( name = "SERVER", service = "python-server" ),
   ],
-  compatibilityDate = "2024-10-01",
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "service_binding_extra_handlers", "rpc", "python_no_global_handlers", "fetch_standard_url", "formdata_parser_supports_files", "python_request_headers_preserve_commas"],
 );
 
 const server :Workerd.Worker = (
   modules = [
     (name = "server.py", pythonModule = embed "server.py")
   ],
-  compatibilityDate = "2024-10-01",
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
-);
-
-# We need this proxy so that internal requests made to fetch packages for Python Workers are sent
-# out to the open internet and not to the python-server worker.
-const jsChooserProxy :Workerd.Worker = (
-  modules = [
-    (name = "proxy.js", esModule = embed "proxy.js")
-  ],
-  bindings = [
-    ( name = "PYTHON", service = "python-server" ),
-    ( name = "INTERNET", service = "external" ),
-  ],
-  compatibilityDate = "2024-10-01",
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "rpc", "python_no_global_handlers", "fetch_standard_url", "formdata_parser_supports_files", "python_request_headers_preserve_commas"],
 );
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "external",
-      network = (
-        tlsOptions = (trustBrowserCas = true)
-      )
-    ),
-    ( name = "internet",
-      worker = .jsChooserProxy
-    ),
     ( name = "python-server",
       worker = .server
     ),

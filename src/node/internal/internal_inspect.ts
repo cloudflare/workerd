@@ -1125,9 +1125,10 @@ function formatValue(
 
   // Memorize the context for custom inspection on proxies.
   const context = value;
+  let proxies = 0;
   // Always check for proxies to prevent side effects and to prevent triggering
   // any proxy handlers.
-  const proxy = internal.getProxyDetails(value);
+  let proxy = internal.getProxyDetails(value);
   if (proxy !== undefined) {
     if (proxy === null || proxy.target === null) {
       return ctx.stylize('<Revoked Proxy>', 'special');
@@ -1135,7 +1136,18 @@ function formatValue(
     if (ctx.showProxy) {
       return formatProxy(ctx, proxy, recurseTimes);
     }
-    value = proxy.target;
+    do {
+      if (proxy === null || proxy.target === null) {
+        let formatted = ctx.stylize('<Revoked Proxy>', 'special');
+        for (let i = 0; i < proxies; i++) {
+          formatted = `${ctx.stylize('Proxy(', 'special')}${formatted}${ctx.stylize(')', 'special')}`;
+        }
+        return formatted;
+      }
+      value = proxy.target;
+      proxy = internal.getProxyDetails(value);
+      proxies += 1;
+    } while (proxy !== undefined);
   }
 
   // Provide a hook for user-specified inspect functions.
@@ -1169,8 +1181,7 @@ function formatValue(
       // This makes sure the recurseTimes are reported as before while using
       // a counter internally.
       const depth = ctx.depth === null ? null : ctx.depth - recurseTimes;
-      const isCrossContext =
-        proxy !== undefined || !(context instanceof Object);
+      const isCrossContext = proxies !== 0 || !(context instanceof Object);
       const ret = Function.prototype.call.call(
         maybeCustom,
         context,
@@ -1206,7 +1217,15 @@ function formatValue(
     return ctx.stylize(`[Circular *${index}]`, 'special');
   }
 
-  return formatRaw(ctx, value, recurseTimes, typedArray);
+  let formatted = formatRaw(ctx, value, recurseTimes, typedArray);
+
+  if (proxies !== 0) {
+    for (let i = 0; i < proxies; i++) {
+      formatted = `${ctx.stylize('Proxy(', 'special')}${formatted}${ctx.stylize(')', 'special')}`;
+    }
+  }
+
+  return formatted;
 }
 
 function formatRaw(
@@ -1878,12 +1897,12 @@ function groupArrayElements(
     outputLength--;
   }
   const separatorSpace = 2; // Add 1 for the space and 1 for the separator.
-  const dataLen = new Array(outputLength);
+  const dataLen = Array.from<number>({ length: outputLength });
   // Calculate the total length of all output entries and the individual max
   // entries length of all output entries. We have to remove colors first,
   // otherwise the length would not be calculated properly.
   for (; i < outputLength; i++) {
-    const len = getStringWidth(output[i]!, ctx.colors);
+    const len = getStringWidth(output[i] as string, ctx.colors);
     dataLen[i] = len;
     totalLength += len + separatorSpace;
     if (maxLength < len) maxLength = len;
@@ -1933,7 +1952,9 @@ function groupArrayElements(
     for (let i = 0; i < columns; i++) {
       let lineMaxLength = 0;
       for (let j = i; j < output.length; j += columns) {
-        if (dataLen[j] > lineMaxLength) lineMaxLength = dataLen[j];
+        if ((dataLen[j] as number) > lineMaxLength) {
+          lineMaxLength = dataLen[j] as number;
+        }
       }
       lineMaxLength += separatorSpace;
       maxLineLength[i] = lineMaxLength;
@@ -1957,14 +1978,15 @@ function groupArrayElements(
         // Calculate extra color padding in case it's active. This has to be
         // done line by line as some lines might contain more colors than
         // others.
-        const padding = maxLineLength[j - i]! + output[j]!.length - dataLen[j];
+        const padding =
+          maxLineLength[j - i]! + output[j]!.length - (dataLen[j] as number);
         str += order.call(`${output[j]}, `, padding, ' ');
       }
       if (order === String.prototype.padStart) {
         const padding =
           maxLineLength[j - i]! +
           output[j]!.length -
-          dataLen[j] -
+          (dataLen[j] as number) -
           separatorSpace;
         str += output[j]!.padStart(padding, ' ');
       } else {
@@ -2650,10 +2672,10 @@ function hasBuiltInToString(value: object): boolean {
   // Prevent triggering proxy traps.
   const proxyTarget = internal.getProxyDetails(value);
   if (proxyTarget !== undefined) {
-    if (proxyTarget === null) {
+    if (proxyTarget === null || proxyTarget.target === null) {
       return true;
     }
-    value = proxyTarget.target as object;
+    return hasBuiltInToString(proxyTarget.target as object);
   }
 
   // Count objects that have no `toString` function as built-in.
@@ -3001,6 +3023,18 @@ export function formatLog(
 
 function isBuiltinPrototype(proto: unknown) {
   if (proto === null) return true;
+  // JSG resource type prototypes carry the kResourceTypeInspect symbol.
+  // These are not "built-in" in the JS-engine sense even though their
+  // constructors are own properties of globalThis (per Web IDL).  The
+  // prototype walk must continue through them to collect accessor
+  // properties (e.g. Blob.prototype.size).
+  if (
+    typeof proto === 'object' &&
+    proto !== null &&
+    internal.kResourceTypeInspect in (proto as Record<PropertyKey, unknown>)
+  ) {
+    return false;
+  }
   const descriptor = Object.getOwnPropertyDescriptor(proto, 'constructor');
   return (
     descriptor !== undefined &&
@@ -3013,7 +3047,7 @@ function isRpcWildcardType(value: unknown) {
   return (
     value instanceof internalWorkers.RpcStub ||
     value instanceof internalWorkers.RpcPromise ||
-    value instanceof internalWorkers.RpcPromise
+    value instanceof internalWorkers.RpcProperty
   );
 }
 

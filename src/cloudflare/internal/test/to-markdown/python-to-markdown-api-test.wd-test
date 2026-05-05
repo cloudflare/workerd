@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "to-markdown-api-test",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "to-markdown-api-test.py")
+        ],
+        compatibilityFlags = ["nodejs_compat", "disable_python_no_global_handlers", %PYTHON_FEATURE_FLAGS],
+        bindings = [
+        (
+          name = "ai",
+          wrapped = (
+            moduleName = "cloudflare-internal:ai-api",
+            innerBindings = [(
+              name = "fetcher",
+              service = "to-markdown-mock"
+            )],
+          )
+        )
+        ],
+      )
+    ),
+    ( name = "to-markdown-mock",
+      worker = (
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+        modules = [
+          (name = "worker", esModule = embed "to-markdown-mock.js")
+        ],
+      )
+    )
+  ]
+);

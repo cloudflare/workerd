@@ -5,13 +5,16 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  # Read repo
+  contents: read
+
+  # Read/write artifacts
+  actions: write
 
 jobs:
   test:
     uses: ./.github/workflows/_bazel.yml
     with:
-      image: ubuntu-22.04
       os_name: linux
       suffix: ''
       extra_bazel_args: '--config=ci-test'
@@ -21,6 +24,7 @@ jobs:
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+      GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
 
   report:
     needs: [test]

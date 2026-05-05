@@ -1,17 +1,24 @@
-// Temporarily disable linting for this file while it is a work in progress.
-/* eslint-disable */
+// Copyright (c) 2017-2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { type TestRunnerConfig } from 'harness/harness';
 
 const root = await navigator.storage.getDirectory();
 const tmp = await root.getDirectoryHandle('tmp');
 // The root is read-only, so we need to use a writable subdirectory
 // to actually run the tests.
-navigator.storage.getDirectory = async () => {
-  // Let's create a new random tmp subdirectory for each test run to avoid interference
-  return tmp.getDirectoryHandle(crypto.randomUUID(), { create: true });
-};
+navigator.storage.getDirectory =
+  async (): Promise<FileSystemDirectoryHandle> => {
+    // Let's create a new random tmp subdirectory for each test run to avoid interference
+    return tmp.getDirectoryHandle(crypto.randomUUID(), { create: true });
+  };
 
 export default {
+  'FileSystemBaseHandle-IndexedDB.https.any.js': {
+    comment: 'IndexedDB is not implemented in workers',
+    disabledTests: true,
+  },
   'FileSystemBaseHandle-buckets.https.any.js': {
     comment: 'StorageBuckets is not implemented in workers',
     disabledTests: true,
@@ -19,10 +26,6 @@ export default {
   'FileSystemBaseHandle-getUniqueId.https.any.js': {
     comment: '...',
     expectedFailures: [],
-  },
-  'FileSystemBaseHandle-IndexedDB.https.any.js': {
-    comment: 'IndexedDB is not implemented in workers',
-    disabledTests: true,
   },
   'FileSystemBaseHandle-isSameEntry.https.any.js': {
     comment: '...',
@@ -36,10 +39,6 @@ export default {
     comment: 'postMessage is not implemented in workers',
     disabledTests: true,
   },
-  'FileSystemBaseHandle-postMessage-frames.https.window.js': {
-    comment: 'Frames are not implemented in workers',
-    disabledTests: true,
-  },
   'FileSystemBaseHandle-postMessage-MessagePort-frames.https.window.js': {
     comment: 'postMessage and MessagePort are not implemented in workers',
     disabledTests: true,
@@ -50,6 +49,10 @@ export default {
   },
   'FileSystemBaseHandle-postMessage-MessagePort-workers.https.window.js': {
     comment: 'postMessage and MessagePort are not implemented in workers',
+    disabledTests: true,
+  },
+  'FileSystemBaseHandle-postMessage-frames.https.window.js': {
+    comment: 'Frames are not implemented in workers',
     disabledTests: true,
   },
   'FileSystemBaseHandle-postMessage-windows.https.window.js': {
@@ -97,11 +100,6 @@ export default {
     comment: 'We do not yet implement sync access handles',
     disabledTests: ['Attempt to create a sync access handle.'],
   },
-  'FileSystemFileHandle-cross-primitive-locking.https.tentative.worker.js': {
-    comment:
-      'The importScripts utility is not implemented in our test hardness',
-    disabledTests: true,
-  },
   'FileSystemFileHandle-getFile.https.any.js': {
     comment: '...',
     expectedFailures: [
@@ -142,44 +140,6 @@ export default {
       'FileSystemFileHandles are references, not paths',
     ],
   },
-  'FileSystemFileHandle-sync-access-handle-back-forward-cache.https.tentative.window.js':
-    {
-      comment: 'We currently do not implement sync access handles',
-      disabledTests: true,
-    },
-  'FileSystemFileHandle-sync-access-handle-lock-modes.https.tentative.worker.js':
-    {
-      comment: 'We currently do not implement sync access handles',
-      disabledTests: true,
-    },
-  'FileSystemFileHandle-writable-file-stream-back-forward-cache.https.tentative.window.js':
-    {
-      comment:
-        'The test harness requires a method getCodeAtPath that is not currently implemented in our test harness.',
-      disabledTests: true,
-    },
-  'FileSystemFileHandle-writable-file-stream-lock-modes.https.tentative.worker.js':
-    {
-      comment: 'We currently do not implement lock modes',
-      disabledTests: true,
-    },
-  'FileSystemObserver.https.tentative.any.js': {
-    comment: 'FileSystemObserver is not implemented in workers',
-    disabledTests: true,
-  },
-  'FileSystemObserver-sync-access-handle.https.tentative.worker.js': {
-    comment:
-      'We currently do not implement sync access handles or FileSystemObserver',
-    disabledTests: true,
-  },
-  'FileSystemObserver-unsupported-global.https.tentative.any.js': {
-    comment: 'We do not implement FileSystemObserver',
-    disabledTests: true,
-  },
-  'FileSystemObserver-writable-file-stream.https.tentative.any.js': {
-    comment: 'We do not implement FileSystemObserver',
-    disabledTests: true,
-  },
   'FileSystemSyncAccessHandle-close.https.worker.js': {
     comment: 'We currently do not implement sync access handles',
     disabledTests: true,
@@ -200,13 +160,6 @@ export default {
     comment: 'We currently do not implement sync access handles',
     disabledTests: true,
   },
-  'FileSystemWritableFileStream.https.any.js': {
-    comment:
-      'There is currently a bug in the web platform tests that causes this to fail',
-    expectedFailures: [
-      'createWritable() can be called on two handles representing the same file',
-    ],
-  },
   'FileSystemWritableFileStream-piped.https.any.js': {
     comment: 'The test requires streams/resources/recording-streams.js',
     // TODO(node-fs): These tests require a resource file from the streams wpt
@@ -223,10 +176,32 @@ export default {
       'write() with an invalid blob to an empty file should reject',
     ],
   },
+  'FileSystemWritableFileStream.https.any.js': {
+    comment:
+      'There is currently a bug in the web platform tests that causes this to fail',
+    expectedFailures: [
+      'createWritable() can be called on two handles representing the same file',
+    ],
+  },
   'idlharness.https.any.js': {
-    comment: 'The WebIDLParser.js is not found',
-    // TODO(node-fs): Revisit this
-    disabledTests: true,
+    comment:
+      'Remaining IDL failures: prototype chain issues, operation .length mismatches',
+    expectedFailures: [
+      'FileSystemHandle interface: operation isSameEntry(FileSystemHandle)',
+      'FileSystemFileHandle interface: existence and properties of interface object',
+      'FileSystemFileHandle interface: operation getFile()',
+      'FileSystemFileHandle interface: operation createWritable(optional FileSystemCreateWritableOptions)',
+      'FileSystemDirectoryHandle interface: existence and properties of interface object',
+      'FileSystemDirectoryHandle interface: operation getFileHandle(USVString, optional FileSystemGetFileOptions)',
+      'FileSystemDirectoryHandle interface: operation getDirectoryHandle(USVString, optional FileSystemGetDirectoryOptions)',
+      'FileSystemDirectoryHandle interface: operation removeEntry(USVString, optional FileSystemRemoveOptions)',
+      'FileSystemDirectoryHandle interface: operation resolve(FileSystemHandle)',
+      'FileSystemWritableFileStream interface: existence and properties of interface object',
+      'FileSystemWritableFileStream interface: operation write(FileSystemWriteChunkType)',
+      'FileSystemWritableFileStream interface: operation seek(unsigned long long)',
+      'FileSystemWritableFileStream interface: operation truncate(unsigned long long)',
+      'StorageManager interface: operation getDirectory()',
+    ],
   },
   'opaque-origin.https.window.js': {
     comment: 'Not relevant to workers',
@@ -240,35 +215,7 @@ export default {
     ],
   },
 
-  'script-tests/FileSystemFileHandle-getFile.js': {
-    comment: 'script-test files are imported and tested above',
-    disabledTests: true,
-  },
-  'script-tests/FileSystemFileHandle-move.js': {
-    comment: 'script-test files are imported and tested above',
-    disabledTests: true,
-  },
-  'script-tests/FileSystemObserver.js': {
-    comment: 'script-test files are imported and tested above',
-    disabledTests: true,
-  },
-  'script-tests/FileSystemObserver-writable-file-stream.js': {
-    comment: 'script-test files are imported and tested above',
-    disabledTests: true,
-  },
-  'script-tests/FileSystemSyncAccessHandle-flush.js': {
-    comment: 'script-test files are imported and tested above',
-    disabledTests: true,
-  },
-  'script-tests/FileSystemWritableFileStream.js': {
-    comment: 'script-test files are imported and tested above',
-    disabledTests: true,
-  },
-  'script-tests/FileSystemWritableFileStream-piped.js': {
-    comment: 'script-test files are imported and tested above',
-    disabledTests: true,
-  },
-  'script-tests/FileSystemWritableFileStream-write.js': {
+  'script-tests/FileSystemBaseHandle-IndexedDB.js': {
     comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
@@ -277,10 +224,6 @@ export default {
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-getUniqueId.js': {
-    comment: 'script-test files are imported and tested above',
-    disabledTests: true,
-  },
-  'script-tests/FileSystemBaseHandle-IndexedDB.js': {
     comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
@@ -296,10 +239,6 @@ export default {
     comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
-  'script-tests/FileSystemBaseHandle-postMessage-frames.js': {
-    comment: 'script-test files are imported and tested above',
-    disabledTests: true,
-  },
   'script-tests/FileSystemBaseHandle-postMessage-MessagePort-frames.js': {
     comment: 'script-test files are imported and tested above',
     disabledTests: true,
@@ -309,6 +248,10 @@ export default {
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-postMessage-MessagePort-workers.js': {
+    comment: 'script-test files are imported and tested above',
+    disabledTests: true,
+  },
+  'script-tests/FileSystemBaseHandle-postMessage-frames.js': {
     comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
@@ -345,6 +288,38 @@ export default {
     disabledTests: true,
   },
   'script-tests/FileSystemFileHandle-create-sync-access-handle.js': {
+    comment: 'script-test files are imported and tested above',
+    disabledTests: true,
+  },
+  'script-tests/FileSystemFileHandle-getFile.js': {
+    comment: 'script-test files are imported and tested above',
+    disabledTests: true,
+  },
+  'script-tests/FileSystemFileHandle-move.js': {
+    comment: 'script-test files are imported and tested above',
+    disabledTests: true,
+  },
+  'script-tests/FileSystemObserver-writable-file-stream.js': {
+    comment: 'script-test files are imported and tested above',
+    disabledTests: true,
+  },
+  'script-tests/FileSystemObserver.js': {
+    comment: 'script-test files are imported and tested above',
+    disabledTests: true,
+  },
+  'script-tests/FileSystemSyncAccessHandle-flush.js': {
+    comment: 'script-test files are imported and tested above',
+    disabledTests: true,
+  },
+  'script-tests/FileSystemWritableFileStream-piped.js': {
+    comment: 'script-test files are imported and tested above',
+    disabledTests: true,
+  },
+  'script-tests/FileSystemWritableFileStream-write.js': {
+    comment: 'script-test files are imported and tested above',
+    disabledTests: true,
+  },
+  'script-tests/FileSystemWritableFileStream.js': {
     comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },

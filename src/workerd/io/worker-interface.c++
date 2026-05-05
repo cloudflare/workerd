@@ -4,6 +4,9 @@
 
 #include "worker-interface.h"
 
+#include <workerd/util/http-util.h>
+#include <workerd/util/stream-utils.h>
+
 #include <kj/debug.h>
 
 using kj::byte;
@@ -57,8 +60,8 @@ class PromisedWorkerInterface final: public WorkerInterface {
   }
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
-    KJ_IF_SOME(w, worker) {
-      co_return co_await w->runScheduled(scheduledTime, cron);
+    KJ_IF_SOME(wrk, worker) {
+      co_return co_await wrk->runScheduled(scheduledTime, cron);
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
@@ -74,6 +77,15 @@ class PromisedWorkerInterface final: public WorkerInterface {
     }
   }
 
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w->abandonAlarm(scheduledTime);
+    } else {
+      co_await promise;
+      co_return co_await KJ_ASSERT_NONNULL(worker)->abandonAlarm(scheduledTime);
+    }
+  }
+
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     KJ_IF_SOME(w, worker) {
       co_return co_await w->customEvent(kj::mv(event));
@@ -82,7 +94,7 @@ class PromisedWorkerInterface final: public WorkerInterface {
         co_await promise;
       } catch (...) {
         // Due to the exception, we're going to discard our CustomEvent. But we should tell it
-        // about why it failed first. This is important for JsRpcSessionCustomEventImpl in
+        // about why it failed first. This is important for JsRpcSessionCustomEvent in
         // particular, as it needs to resolve the RPC client to the correct error.
         auto exception = kj::getCaughtExceptionAsKj();
         event->failed(exception);
@@ -115,7 +127,7 @@ class RevocableWebSocket final: public kj::WebSocket {
       : ws(kj::mv(ws)),
         revokeProm(revokeProm
                        .catch_([this](kj::Exception&& e) -> kj::Promise<void> {
-                         canceler.cancel(kj::cp(e));
+                         canceler.cancel(e.clone());
                          KJ_IF_SOME(ws, this->ws.tryGet<kj::Own<kj::WebSocket>>()) {
                            (ws)->abort();
                          }
@@ -184,7 +196,7 @@ class RevocableWebSocket final: public kj::WebSocket {
   kj::WebSocket& getInner() {
     KJ_SWITCH_ONEOF(ws) {
       KJ_CASE_ONEOF(e, kj::Exception) {
-        kj::throwFatalException(kj::cp(e));
+        kj::throwFatalException(e.clone());
       }
       KJ_CASE_ONEOF(ws, kj::Own<kj::WebSocket>) {
         return *ws.get();
@@ -262,9 +274,22 @@ kj::Promise<void> RevocableWebSocketWorkerInterface::connect(kj::StringPtr host,
     kj::AsyncIoStream& connection,
     ConnectResponse& response,
     kj::HttpConnectSettings settings) {
-  KJ_UNIMPLEMENTED(
-      "TODO(someday): RevocableWebSocketWorkerInterface::connect() should be implemented to "
-      "disconnect long-lived connections similar to how it treats WebSockets");
+  // We give TCP sockets the same treatment as WebSockets because the purpose here is to
+  // disconnect long-running connections, e.g. on a code update for a Durable Object, and that
+  // applies equally to TCP sockets.
+  auto wrappedConnection = newNeuterableIoStream(connection);
+  auto* wrappedConnectionPtr = wrappedConnection.get();
+  auto revokeTask =
+      revokeProm.addBranch()
+          .catch_([&connection, wrappedConnectionPtr](kj::Exception&& e) -> kj::Promise<void> {
+    wrappedConnectionPtr->neuter(e.clone());
+    connection.abortWrite(kj::mv(e));
+    connection.abortRead();
+    return kj::READY_NOW;
+  }).eagerlyEvaluate(nullptr);
+
+  return worker.connect(host, headers, *wrappedConnection, response, kj::mv(settings))
+      .attach(kj::mv(wrappedConnection), kj::mv(revokeTask));
 }
 
 RevocableWebSocketWorkerInterface::RevocableWebSocketWorkerInterface(
@@ -305,7 +330,7 @@ namespace {
 
 class ErrorWorkerInterface final: public WorkerInterface {
  public:
-  ErrorWorkerInterface(kj::Exception&& exception): exception(exception) {}
+  ErrorWorkerInterface(kj::Exception&& exception): exception(kj::mv(exception)) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -404,10 +429,26 @@ kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(
   req.setRetryCount(retryCount);
   return req.send().then([](auto resp) {
     auto respResult = resp.getResult();
+    kj::Maybe<kj::String> errorDescription;
+    if (respResult.hasErrorDescription()) {
+      errorDescription = kj::str(respResult.getErrorDescription());
+    }
     return WorkerInterface::AlarmResult{.retry = respResult.getRetry(),
       .retryCountsAgainstLimit = respResult.getRetryCountsAgainstLimit(),
-      .outcome = respResult.getOutcome()};
+      .outcome = respResult.getOutcome(),
+      .errorDescription = kj::mv(errorDescription)};
   });
+}
+
+kj::Promise<kj::Maybe<kj::Date>> RpcWorkerInterface::abandonAlarm(kj::Date scheduledTime) {
+  auto req = dispatcher.abandonAlarmRequest();
+  req.setScheduledTimeMs((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+  auto response = co_await req.send();
+  auto storedAlarmTimeMs = response.getStoredAlarmTimeMs();
+  if (storedAlarmTimeMs != 0) {
+    co_return kj::UNIX_EPOCH + storedAlarmTimeMs* kj::MILLISECONDS;
+  }
+  co_return kj::Maybe<kj::Date>(kj::none);
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> RpcWorkerInterface::customEvent(
@@ -417,7 +458,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RpcWorkerInterface::customEven
 
 // ======================================================================================
 WorkerInterface::AlarmFulfiller::AlarmFulfiller(
-    kj::Own<kj::PromiseFulfiller<AlarmResult>> fulfiller)
+    kj::Own<kj::PromiseFulfiller<AlarmOutcome>> fulfiller)
     : maybeFulfiller(kj::mv(fulfiller)) {}
 
 WorkerInterface::AlarmFulfiller::~AlarmFulfiller() noexcept(false) {
@@ -426,7 +467,7 @@ WorkerInterface::AlarmFulfiller::~AlarmFulfiller() noexcept(false) {
   }
 }
 
-void WorkerInterface::AlarmFulfiller::fulfill(const AlarmResult& result) {
+void WorkerInterface::AlarmFulfiller::fulfill(const AlarmOutcome& result) {
   KJ_IF_SOME(fulfiller, getFulfiller()) {
     fulfiller.fulfill(kj::cp(result));
   }
@@ -434,20 +475,20 @@ void WorkerInterface::AlarmFulfiller::fulfill(const AlarmResult& result) {
 
 void WorkerInterface::AlarmFulfiller::reject(const kj::Exception& e) {
   KJ_IF_SOME(fulfiller, getFulfiller()) {
-    fulfiller.reject(kj::cp(e));
+    fulfiller.reject(e.clone());
   }
 }
 
 void WorkerInterface::AlarmFulfiller::cancel() {
   KJ_IF_SOME(fulfiller, getFulfiller()) {
-    fulfiller.fulfill(AlarmResult{
+    fulfiller.fulfill(AlarmOutcome{
       .retry = false,
       .outcome = EventOutcome::CANCELED,
     });
   }
 }
 
-kj::Maybe<kj::PromiseFulfiller<WorkerInterface::AlarmResult>&> WorkerInterface::AlarmFulfiller::
+kj::Maybe<kj::PromiseFulfiller<WorkerInterface::AlarmOutcome>&> WorkerInterface::AlarmFulfiller::
     getFulfiller() {
   KJ_IF_SOME(fulfiller, maybeFulfiller) {
     if (fulfiller.get()->isWaiting()) {

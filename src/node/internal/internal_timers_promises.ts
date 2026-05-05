@@ -37,9 +37,9 @@ const kScheduler = Symbol.for('kScheduler');
 type OnCancelCallback = (() => void) | undefined;
 
 export async function setTimeout<T = void>(
-  delay: number | undefined,
+  delay?: number,
   value?: T,
-  options: { signal?: AbortSignal; ref?: boolean } = {}
+  options: { signal?: AbortSignal | undefined; ref?: boolean | undefined } = {}
 ): Promise<T> {
   if (delay !== undefined) {
     validateNumber(delay, 'delay');
@@ -84,9 +84,9 @@ export async function setTimeout<T = void>(
   return promise;
 }
 
-export async function setImmediate<T>(
+export async function setImmediate<T = void>(
   value?: T,
-  options: { signal?: AbortSignal; ref?: boolean } = {}
+  options: { signal?: AbortSignal | undefined; ref?: boolean | undefined } = {}
 ): Promise<T> {
   validateObject(options, 'options');
 
@@ -130,8 +130,11 @@ export async function setImmediate<T>(
 export async function* setInterval<T = void>(
   delay?: number,
   value?: T,
-  options: { signal?: AbortSignal; ref?: boolean } = {}
-): AsyncGenerator<T> {
+  options: {
+    signal?: AbortSignal | undefined;
+    ref?: boolean | undefined;
+  } = {}
+): AsyncGenerator<T, undefined> {
   if (delay !== undefined) {
     validateNumber(delay, 'delay');
   }
@@ -203,9 +206,9 @@ export async function* setInterval<T = void>(
 }
 
 declare global {
-  var scheduler: {
+  interface Scheduler {
     wait: (delay: number, options?: { signal?: AbortSignal }) => Promise<void>;
-  };
+  }
 }
 
 // TODO(@jasnell): Scheduler is an API currently being discussed by WICG
@@ -223,9 +226,19 @@ class Scheduler {
     return setImmediate();
   }
 
-  wait(...args: Parameters<typeof globalThis.scheduler.wait>): Promise<void> {
+  wait(delay: number, options?: { signal?: AbortSignal }): Promise<void> {
     if (!this[kScheduler]) throw new ERR_INVALID_THIS('Scheduler');
-    return globalThis.scheduler.wait(...args);
+    // TODO(soon): The cast through `unknown` is needed because the local `class Scheduler`
+    // shadows the global `Scheduler` interface augmentation, causing TS to see two incompatible
+    // `Scheduler` types. Refactor to avoid the name collision (e.g. rename the local class).
+    return (
+      globalThis.scheduler as unknown as {
+        wait: (
+          delay: number,
+          options?: { signal?: AbortSignal }
+        ) => Promise<void>;
+      }
+    ).wait(delay, options);
   }
 }
 

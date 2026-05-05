@@ -62,6 +62,13 @@ class R2Bucket: public jsg::Object {
         adminBucket(kj::mv(bucket)) {}
 
   explicit R2Bucket(
+      FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String binding)
+      : featureFlags(featureFlags),
+        clientIndex(clientIndex),
+        bucket(kj::mv(bucket)),
+        binding(kj::mv(binding)) {}
+
+  explicit R2Bucket(
       FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String jwt, friend_tag_t)
       : featureFlags(featureFlags),
         clientIndex(clientIndex),
@@ -125,11 +132,11 @@ class R2Bucket: public jsg::Object {
           sha384(kj::mv(sha384)),
           sha512(kj::mv(sha512)) {}
 
-    jsg::Optional<jsg::BufferSource> getMd5(jsg::Lock& js);
-    jsg::Optional<jsg::BufferSource> getSha1(jsg::Lock& js);
-    jsg::Optional<jsg::BufferSource> getSha256(jsg::Lock& js);
-    jsg::Optional<jsg::BufferSource> getSha384(jsg::Lock& js);
-    jsg::Optional<jsg::BufferSource> getSha512(jsg::Lock& js);
+    jsg::Optional<jsg::JsArrayBuffer> getMd5(jsg::Lock& js);
+    jsg::Optional<jsg::JsArrayBuffer> getSha1(jsg::Lock& js);
+    jsg::Optional<jsg::JsArrayBuffer> getSha256(jsg::Lock& js);
+    jsg::Optional<jsg::JsArrayBuffer> getSha384(jsg::Lock& js);
+    jsg::Optional<jsg::JsArrayBuffer> getSha512(jsg::Lock& js);
 
     StringChecksums toJSON();
 
@@ -197,11 +204,11 @@ class R2Bucket: public jsg::Object {
     jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
     jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
-    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> md5;
-    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> sha1;
-    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> sha256;
-    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> sha384;
-    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> sha512;
+    jsg::Optional<kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, jsg::NonCoercible<kj::String>>> md5;
+    jsg::Optional<kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, jsg::NonCoercible<kj::String>>> sha1;
+    jsg::Optional<kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, jsg::NonCoercible<kj::String>>> sha256;
+    jsg::Optional<kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, jsg::NonCoercible<kj::String>>> sha384;
+    jsg::Optional<kj::OneOf<jsg::JsRef<jsg::JsBufferSource>, jsg::NonCoercible<kj::String>>> sha512;
     jsg::Optional<kj::String> storageClass;
     jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
 
@@ -253,17 +260,17 @@ class R2Bucket: public jsg::Object {
           storageClass(kj::mv(storageClass)),
           ssecKeyMd5(kj::mv(ssecKeyMd5)) {}
 
-    kj::String getName() const {
-      return kj::str(name);
+    kj::StringPtr getName() const {
+      return name;
     }
-    kj::String getVersion() const {
-      return kj::str(version);
+    kj::StringPtr getVersion() const {
+      return version;
     }
     double getSize() const {
       return size;
     }
-    kj::String getEtag() const {
-      return kj::str(etag);
+    kj::StringPtr getEtag() const {
+      return etag;
     }
     kj::String getHttpEtag() const {
       return kj::str('"', etag, '"');
@@ -548,13 +555,22 @@ class R2Bucket: public jsg::Object {
     return adminBucket;
   }
 
+  kj::Maybe<kj::StringPtr> bucketName() const {
+    return bucket;
+  }
+
+  kj::Maybe<kj::StringPtr> bindingName() const {
+    return binding;
+  }
+
  private:
   FeatureFlags featureFlags;
   uint clientIndex;
   kj::Maybe<kj::String> adminBucket;
+  kj::Maybe<kj::String> bucket;
+  kj::Maybe<kj::String> binding;
   kj::Maybe<kj::String> jwt;
 
-  friend class R2Admin;
   friend class R2MultipartUpload;
 };
 
@@ -564,5 +580,7 @@ kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(jsg::Lock& js,
     kj::StringPtr action,
     R2Result& r2Result,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+
+void addHeadResultSpanTags(jsg::Lock& js, TraceContext& traceContext, R2Bucket::HeadResult& result);
 
 }  // namespace workerd::api::public_beta

@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { deepStrictEqual, strictEqual, throws, ok } from 'node:assert';
 
 // Test for the Encoding standard Web API implementation.
@@ -40,7 +43,7 @@ const utf8Labels = ['unicode-1-1-utf-8', 'utf-8', 'utf8'];
 
 export const decodeStreamingTest = {
   test() {
-    let results = [];
+    let _results = [];
 
     for (const label of windows1252Labels) {
       ok(
@@ -99,7 +102,7 @@ export const decodeStreamingTest = {
             'code point fragment (tail) to be replaced with replacement character'
           );
 
-          const errMsg = 'Failed to decode input.';
+          const _errMsg = 'Failed to decode input.';
 
           // Exception to be thrown decoding code point fragment (tail) in fatal mode
           throws(() => fatalDecoder.decode(head));
@@ -153,6 +156,23 @@ export const decodeStreamingTest = {
     ok(
       decodeStreaming(fatalIgnoreBomDecoder, bomBom) === '\ufeff\ufeff',
       'first BOM not to be stripped by TextDecoder with ignoreBOM set'
+    );
+
+    const shiftJisDecoder = new TextDecoder('shift_jis');
+    let shiftJisResult = '';
+    shiftJisResult += shiftJisDecoder.decode(new Uint8Array([0x82]), {
+      stream: true,
+    });
+    shiftJisResult += shiftJisDecoder.decode(new Uint8Array(), {
+      stream: true,
+    });
+    shiftJisResult += shiftJisDecoder.decode(new Uint8Array([0xa0]), {
+      stream: true,
+    });
+    shiftJisResult += shiftJisDecoder.decode();
+    ok(
+      shiftJisResult === 'あ',
+      'streaming Shift_JIS should tolerate empty chunks without flushing state'
     );
   },
 };
@@ -307,7 +327,7 @@ export const encodeWptTest = {
             destinationLength
           );
           const fullView = new Uint8Array(buffer);
-          const control = new Array(bufferLength);
+          const control = Array.from({ length: bufferLength }, () => 0);
           let byte = destinationFiller;
           for (let i = 0; i < bufferLength; i++) {
             if (destinationFiller === 'random') {
@@ -356,7 +376,10 @@ export const encodeWptTest = {
         throws(() => enc.encodeInto('', new view(new ArrayBuffer(0))));
       });
 
-      throws(() => enc.encodeInto('', new ArrayBuffer(0)));
+      {
+        const enc = new TextEncoder();
+        throws(() => enc.encodeInto('', new ArrayBuffer(0)));
+      }
     }
   },
 };
@@ -401,10 +424,10 @@ export const allTheDecoders = {
       ['utf-8', 'utf-8'],
       ['utf8', 'utf-8'],
       ['x-unicode20utf8', 'utf-8'],
-      ['866', 'ibm-866'],
-      ['cp866', 'ibm-866'],
-      ['csibm866', 'ibm-866'],
-      ['ibm866', 'ibm-866'],
+      ['866', 'ibm866'],
+      ['cp866', 'ibm866'],
+      ['csibm866', 'ibm866'],
+      ['ibm866', 'ibm866'],
       ['csisolatin2', 'iso-8859-2'],
       ['iso-8859-2', 'iso-8859-2'],
       ['iso-ir-101', 'iso-8859-2'],
@@ -589,14 +612,14 @@ export const allTheDecoders = {
       ['x-euc-jp', 'euc-jp'],
       ['csiso2022jp', 'iso-2022-jp'],
       ['iso-2022-jp', 'iso-2022-jp'],
-      ['csshiftjis', 'shift-jis'],
-      ['ms932', 'shift-jis'],
-      ['ms_kanji', 'shift-jis'],
-      ['shift-jis', 'shift-jis'],
-      ['shift_jis', 'shift-jis'],
-      ['sjis', 'shift-jis'],
-      ['windows-31j', 'shift-jis'],
-      ['x-sjis', 'shift-jis'],
+      ['csshiftjis', 'shift_jis'],
+      ['ms932', 'shift_jis'],
+      ['ms_kanji', 'shift_jis'],
+      ['shift-jis', 'shift_jis'],
+      ['shift_jis', 'shift_jis'],
+      ['sjis', 'shift_jis'],
+      ['windows-31j', 'shift_jis'],
+      ['x-sjis', 'shift_jis'],
       ['cseuckr', 'euc-kr'],
       ['csksc56011987', 'euc-kr'],
       ['euc-kr', 'euc-kr'],
@@ -622,7 +645,7 @@ export const allTheDecoders = {
       ['unicodefeff', 'utf-16le'],
       ['utf-16', 'utf-16le'],
       ['utf-16le', 'utf-16le'],
-      ['x-user-defined', undefined],
+      ['x-user-defined', 'x-user-defined'],
       // Test that match is case-insensitive
       ['UTF-8', 'utf-8'],
       ['UtF-8', 'utf-8'],
@@ -645,6 +668,284 @@ export const allTheDecoders = {
   },
 };
 
+// Test that windows-1252 correctly decodes bytes 0x80-0x9F.
+// These bytes differ between windows-1252 and ISO-8859-1/Latin-1.
+// Per the WHATWG Encoding Standard, labels like "ascii", "latin1", and
+// "iso-8859-1" all map to windows-1252, so they must produce the
+// windows-1252 code points — not the raw byte values (C1 control chars).
+// See: https://encoding.spec.whatwg.org/#names-and-labels
+export const windows1252Decode = {
+  test() {
+    // The windows-1252 mapping for bytes 0x80-0x9F per the WHATWG Encoding Standard.
+    // See: https://encoding.spec.whatwg.org/index-windows-1252.txt
+    // Bytes 0x81, 0x8D, 0x8F, 0x90, 0x9D map to their C1 control character
+    // code points (identity) rather than being undefined.
+    const win1252UpperTable = {
+      0x80: 0x20ac, // € Euro Sign
+      0x81: 0x0081, // <control>
+      0x82: 0x201a, // ‚ Single Low-9 Quotation Mark
+      0x83: 0x0192, // ƒ Latin Small Letter F With Hook
+      0x84: 0x201e, // „ Double Low-9 Quotation Mark
+      0x85: 0x2026, // … Horizontal Ellipsis
+      0x86: 0x2020, // † Dagger
+      0x87: 0x2021, // ‡ Double Dagger
+      0x88: 0x02c6, // ˆ Modifier Letter Circumflex Accent
+      0x89: 0x2030, // ‰ Per Mille Sign
+      0x8a: 0x0160, // Š Latin Capital Letter S With Caron
+      0x8b: 0x2039, // ‹ Single Left-Pointing Angle Quotation Mark
+      0x8c: 0x0152, // Œ Latin Capital Ligature OE
+      0x8d: 0x008d, // <control>
+      0x8e: 0x017d, // Ž Latin Capital Letter Z With Caron
+      0x8f: 0x008f, // <control>
+      0x90: 0x0090, // <control>
+      0x91: 0x2018, // ' Left Single Quotation Mark
+      0x92: 0x2019, // ' Right Single Quotation Mark
+      0x93: 0x201c, // " Left Double Quotation Mark
+      0x94: 0x201d, // " Right Double Quotation Mark
+      0x95: 0x2022, // • Bullet
+      0x96: 0x2013, // – En Dash
+      0x97: 0x2014, // — Em Dash
+      0x98: 0x02dc, // ˜ Small Tilde
+      0x99: 0x2122, // ™ Trade Mark Sign
+      0x9a: 0x0161, // š Latin Small Letter S With Caron
+      0x9b: 0x203a, // › Single Right-Pointing Angle Quotation Mark
+      0x9c: 0x0153, // œ Latin Small Ligature OE
+      0x9d: 0x009d, // <control>
+      0x9e: 0x017e, // ž Latin Small Letter Z With Caron
+      0x9f: 0x0178, // Ÿ Latin Capital Letter Y With Diaeresis
+    };
+
+    // Test with all aliases that map to windows-1252
+    for (const label of [
+      'windows-1252',
+      'ascii',
+      'latin1',
+      'iso-8859-1',
+      'us-ascii',
+    ]) {
+      const decoder = new TextDecoder(label);
+      for (const [byte, expectedCodePoint] of Object.entries(
+        win1252UpperTable
+      )) {
+        const byteVal = Number(byte);
+        const decoded = decoder.decode(Uint8Array.of(byteVal));
+        const actualCodePoint = decoded.codePointAt(0);
+        strictEqual(
+          actualCodePoint,
+          expectedCodePoint,
+          `${label}: byte 0x${byteVal.toString(16)} should decode to ` +
+            `U+${expectedCodePoint.toString(16).toUpperCase().padStart(4, '0')}, ` +
+            `got U+${actualCodePoint.toString(16).toUpperCase().padStart(4, '0')}`
+        );
+      }
+    }
+
+    // Verify that bytes outside 0x80-0x9F still work correctly
+    const decoder = new TextDecoder('windows-1252');
+    // ASCII range (0x00-0x7F) should be identity
+    strictEqual(decoder.decode(Uint8Array.of(0x41)).codePointAt(0), 0x41); // 'A'
+    strictEqual(decoder.decode(Uint8Array.of(0x7f)).codePointAt(0), 0x7f);
+    // 0xA0-0xFF range is identical between latin-1 and windows-1252
+    strictEqual(decoder.decode(Uint8Array.of(0xa2)).codePointAt(0), 0xa2); // ¢
+    strictEqual(decoder.decode(Uint8Array.of(0xff)).codePointAt(0), 0xff); // ÿ
+  },
+};
+
+// Per the WHATWG encoding spec (section 10.1.1), GBK's decoder is gb18030's decoder.
+// The .encoding property must still return "gbk", but decoding results must match gb18030.
+// https://encoding.spec.whatwg.org/#gbk-decoder
+export const gbkDecoderIsGb18030Decoder = {
+  test() {
+    const gbk = new TextDecoder('gbk');
+    const gb18030 = new TextDecoder('gb18030');
+
+    // .encoding property must still distinguish the two
+    strictEqual(gbk.encoding, 'gbk');
+    strictEqual(gb18030.encoding, 'gb18030');
+
+    // Decoding results must be identical. These byte pairs exercise boundary
+    // conditions where gbk and gb18030 would diverge if the ICU converter
+    // for gbk were used directly instead of delegating to gb18030.
+    const testBytes = [
+      [0, 255],
+      [128, 255],
+      [129, 48],
+      [129, 255],
+      [254, 48],
+      [254, 255],
+      [255, 0],
+      [255, 255],
+    ];
+    for (const bytes of testBytes) {
+      const u8 = Uint8Array.from(bytes);
+      strictEqual(
+        gbk.decode(u8),
+        gb18030.decode(u8),
+        `gbk and gb18030 must decode [${bytes}] identically`
+      );
+    }
+  },
+};
+
+const gbVersionAndRangesTest = (encoding) => {
+  const loose = new TextDecoder(encoding);
+  const checkAll = (...list) => list.forEach((x) => check(...x));
+  const check = (bytes, str, invalid = false) => {
+    const fatal = new TextDecoder(encoding, { fatal: true });
+    const u8 = Uint8Array.from(bytes);
+    strictEqual(loose.decode(u8), str);
+    if (!invalid) strictEqual(fatal.decode(u8), str);
+    if (invalid) throws(() => fatal.decode(u8));
+  };
+
+  check([0x84, 0x31, 0xa4, 0x36], '\uFFFC');
+  check([0x84, 0x31, 0xa4, 0x37], '\uFFFD');
+  check([0x84, 0x31, 0xa4, 0x38], '\uFFFE');
+  check([0x84, 0x31, 0xa4, 0x39], '\uFFFF');
+  check([0x84, 0x31, 0xa5, 0x30], '\uFFFD', true);
+  check([0x8f, 0x39, 0xfe, 0x39], '\uFFFD', true);
+  check([0x90, 0x30, 0x81, 0x30], String.fromCodePoint(0x1_00_00));
+  check([0x90, 0x30, 0x81, 0x31], String.fromCodePoint(0x1_00_01));
+
+  check([0xe3, 0x32, 0x9a, 0x35], String.fromCodePoint(0x10_ff_ff));
+  check([0xe3, 0x32, 0x9a, 0x36], '\uFFFD', true);
+  check([0xe3, 0x32, 0x9a, 0x37], '\uFFFD', true);
+
+  check([0xfe, 0x39, 0xfe, 0x39], '\uFFFD', true);
+  check([0xff, 0x39, 0xfe, 0x39], '\uFFFD9\uFFFD', true);
+  check([0xfe, 0x40, 0xfe, 0x39], '\uFA0C\uFFFD', true);
+  check([0xfe, 0x39, 0xff, 0x39], '\uFFFD9\uFFFD9', true);
+  check([0xfe, 0x39, 0xfe, 0x40], '\uFFFD9\uFA0C', true);
+
+  checkAll(
+    [[0xa8, 0xbb], '\u0251'],
+    [[0xa8, 0xbc], '\u1E3F'],
+    [[0xa8, 0xbd], '\u0144']
+  );
+  check([0x81, 0x35, 0xf4, 0x36], '\u1E3E');
+  check([0x81, 0x35, 0xf4, 0x37], '\uE7C7');
+  check([0x81, 0x35, 0xf4, 0x38], '\u1E40');
+
+  checkAll(
+    [[0xa6, 0xd9], '\uFE10'],
+    [[0xa6, 0xed], '\uFE18'],
+    [[0xa6, 0xf3], '\uFE19']
+  );
+  checkAll([[0xfe, 0x59], '\u9FB4'], [[0xfe, 0xa0], '\u9FBB']);
+};
+
+export const gb18030VersionAndRanges = {
+  test() {
+    gbVersionAndRangesTest('gb18030');
+  },
+};
+
+export const gbkVersionAndRanges = {
+  test() {
+    gbVersionAndRangesTest('gbk');
+  },
+};
+
+// Verify that the WHATWG-required mapping corrections also produce the
+// correct output when the corrected byte sequences appear inside a larger
+// buffer (surrounded by ASCII), not only when they are the entire input.
+export const gb18030OverridesEmbedded = {
+  test() {
+    const d = new TextDecoder('gb18030');
+
+    // 0x80 → U+20AC (Euro sign) surrounded by ASCII
+    strictEqual(d.decode(Uint8Array.of(0x41, 0x80, 0x42)), 'A\u20ACB');
+
+    // Two-byte mapping corrections surrounded by ASCII
+    strictEqual(d.decode(Uint8Array.of(0x41, 0xa8, 0xbb, 0x42)), 'A\u0251B');
+    strictEqual(d.decode(Uint8Array.of(0x41, 0xa8, 0xbc, 0x42)), 'A\u1E3FB');
+    strictEqual(d.decode(Uint8Array.of(0x41, 0xa8, 0xbd, 0x42)), 'A\u0144B');
+
+    // Vertical form corrections surrounded by ASCII
+    strictEqual(d.decode(Uint8Array.of(0x41, 0xa6, 0xd9, 0x42)), 'A\uFE10B');
+
+    // CJK extension corrections surrounded by ASCII
+    strictEqual(d.decode(Uint8Array.of(0x41, 0xfe, 0x59, 0x42)), 'A\u9FB4B');
+  },
+};
+
+export const replacementPushbackAsciiCharactersLoose = {
+  test() {
+    const vectors = {
+      big5: [
+        [[0x80], '\uFFFD'],
+        [[0x81, 0x40], '\uFFFD@'],
+        [[0x83, 0x5c], '\uFFFD\\'],
+        [[0x87, 0x87, 0x40], '\uFFFD@'],
+        [[0x81, 0x81], '\uFFFD'],
+      ],
+      'iso-2022-jp': [
+        [[0x1b, 0x24], '\uFFFD$'],
+        [[0x1b, 0x24, 0x40, 0x1b, 0x24], '\uFFFD\uFFFD'],
+      ],
+      'euc-jp': [
+        [[0x80], '\uFFFD'],
+        [[0x8d, 0x8d], '\uFFFD\uFFFD'],
+        [[0x8e, 0x8e], '\uFFFD'],
+      ],
+    };
+
+    for (const [encoding, list] of Object.entries(vectors)) {
+      const d = new TextDecoder(encoding);
+      for (const [bytes, text] of list) {
+        strictEqual(d.decode(Uint8Array.from(bytes)), text);
+      }
+    }
+  },
+};
+
+export const stickyMultibyteStateIso2022JpLoose = {
+  test() {
+    const vectors = [
+      [[27], '\uFFFD'],
+      [[27, 0x28], '\uFFFD('],
+      [[0x1b, 0x28, 0x49], ''],
+    ];
+
+    const d = new TextDecoder('iso-2022-jp');
+    for (const [bytes, text] of vectors) {
+      strictEqual(d.decode(Uint8Array.of(0x40)), '@');
+      strictEqual(d.decode(Uint8Array.from(bytes)), text);
+      strictEqual(d.decode(Uint8Array.of(0x40)), '@');
+      strictEqual(d.decode(Uint8Array.of(0x2a)), '*');
+      strictEqual(d.decode(Uint8Array.of(0x42)), 'B');
+    }
+  },
+};
+
+export const fatalStreamGb18030Gbk = {
+  test() {
+    for (const encoding of ['gb18030', 'gbk']) {
+      {
+        const d = new TextDecoder(encoding, { fatal: true });
+        strictEqual(d.decode(Uint8Array.of(0x80), { stream: true }), '\u20AC');
+        throws(() =>
+          d.decode(Uint8Array.of(0x81, 0x30, 0x21, 0x21, 0x21), {
+            stream: true,
+          })
+        );
+        strictEqual(d.decode(Uint8Array.of(0x80)), '\u20AC');
+      }
+
+      {
+        const d = new TextDecoder(encoding, { fatal: true });
+        strictEqual(d.decode(Uint8Array.of(0x80), { stream: true }), '\u20AC');
+        throws(() =>
+          d.decode(Uint8Array.of(0x81, 0x30, 0x81, 0x42, 0x42), {
+            stream: true,
+          })
+        );
+        strictEqual(d.decode(Uint8Array.of(0x80)), '\u20AC');
+      }
+    }
+  },
+};
+
 export const textDecoderStream = {
   test() {
     const stream = new TextDecoderStream('utf-16', {
@@ -657,5 +958,173 @@ export const textDecoderStream = {
 
     const enc = new TextEncoderStream();
     strictEqual(enc.encoding, 'utf-8');
+  },
+};
+
+// Per WHATWG Big5 decoder step 1, when end-of-queue is reached with a
+// pending lead byte, the decoder must return error (U+FFFD in replacement
+// mode, throw in fatal mode). This tests the streaming case where a lead
+// byte is buffered in one call and then flushed without a trail byte.
+export const big5OrphanedLeadOnFlush = {
+  test() {
+    // 0xA4 is a valid Big5 lead byte (e.g., first byte of 中 = 0xA4 0xA4).
+    // Streaming it alone, then flushing, must produce U+FFFD.
+    {
+      const dec = new TextDecoder('big5');
+      strictEqual(dec.decode(Uint8Array.of(0xa4), { stream: true }), '');
+      strictEqual(dec.decode(), '\uFFFD');
+    }
+
+    // Fatal mode must throw on the orphaned lead.
+    {
+      const dec = new TextDecoder('big5', { fatal: true });
+      strictEqual(dec.decode(Uint8Array.of(0xa4), { stream: true }), '');
+      throws(() => dec.decode());
+    }
+
+    // Orphaned lead followed by an invalid trail byte on flush: the lead
+    // must produce U+FFFD. 0x20 (space) is not a valid Big5 trail byte
+    // (valid trails are 0x40-0x7E and 0xA1-0xFE).
+    {
+      const dec = new TextDecoder('big5');
+      strictEqual(dec.decode(Uint8Array.of(0xa4), { stream: true }), '');
+      const result = dec.decode(Uint8Array.of(0x20));
+      // The orphaned lead must produce at least one U+FFFD.
+      ok(
+        result.includes('\uFFFD'),
+        `expected U+FFFD in output, got: ${JSON.stringify(result)}`
+      );
+      // The space byte must not be swallowed.
+      ok(
+        result.includes(' '),
+        `expected space in output, got: ${JSON.stringify(result)}`
+      );
+    }
+
+    // Streaming a complete pair across two calls must still work.
+    {
+      const dec = new TextDecoder('big5');
+      strictEqual(dec.decode(Uint8Array.of(0xa4), { stream: true }), '');
+      strictEqual(dec.decode(Uint8Array.of(0xa4)), '中');
+    }
+  },
+};
+
+// Test x-user-defined encoding per WHATWG spec
+// https://encoding.spec.whatwg.org/#x-user-defined-decoder
+export const xUserDefinedDecode = {
+  test() {
+    const decoder = new TextDecoder('x-user-defined');
+    strictEqual(decoder.encoding, 'x-user-defined');
+    strictEqual(decoder.fatal, false);
+    strictEqual(decoder.ignoreBOM, false);
+
+    // Test ASCII bytes (0x00-0x7F) - identity mapping
+    strictEqual(decoder.decode(Uint8Array.of(0x41)), 'A');
+    strictEqual(decoder.decode(Uint8Array.of(0x00)), '\u0000');
+    strictEqual(decoder.decode(Uint8Array.of(0x7f)), '\u007F');
+
+    // Test high bytes (0x80-0xFF) - map to Private Use Area U+F780-U+F7FF
+    strictEqual(decoder.decode(Uint8Array.of(0x80)), '\uF780');
+    strictEqual(decoder.decode(Uint8Array.of(0x81)), '\uF781');
+    strictEqual(decoder.decode(Uint8Array.of(0xff)), '\uF7FF');
+
+    // Test mixed sequence
+    const mixed = new Uint8Array([0x00, 0x7f, 0x80, 0x81, 0xff]);
+    strictEqual(decoder.decode(mixed), '\u0000\u007F\uF780\uF781\uF7FF');
+
+    // Test empty input
+    strictEqual(decoder.decode(new Uint8Array([])), '');
+    strictEqual(decoder.decode(), '');
+
+    // Test pure ASCII input (fast path)
+    strictEqual(
+      decoder.decode(new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f])),
+      'Hello'
+    );
+
+    // Test streaming (x-user-defined is single-byte, streaming is trivial)
+    const streamDecoder = new TextDecoder('x-user-defined');
+    let result = '';
+    result += streamDecoder.decode(Uint8Array.of(0x41), { stream: true });
+    result += streamDecoder.decode(Uint8Array.of(0x80), { stream: true });
+    result += streamDecoder.decode(Uint8Array.of(0xff), { stream: true });
+    result += streamDecoder.decode();
+    strictEqual(result, 'A\uF780\uF7FF');
+  },
+};
+
+// Test x-user-defined with fatal option (all 256 bytes are valid)
+export const xUserDefinedFatal = {
+  test() {
+    const decoder = new TextDecoder('x-user-defined', { fatal: true });
+    strictEqual(decoder.fatal, true);
+
+    // All 256 byte values are valid, fatal mode should never throw
+    for (let byte = 0; byte < 256; byte++) {
+      const decoded = decoder.decode(Uint8Array.of(byte));
+      if (byte < 0x80) {
+        strictEqual(decoded.codePointAt(0), byte);
+      } else {
+        strictEqual(decoded.codePointAt(0), 0xf700 + byte);
+      }
+    }
+  },
+};
+
+// Verify that streaming with zero-length input works for every legacy
+// encoding handled by the Rust LegacyDecoder. An empty chunk in streaming
+// mode must produce an empty string and leave the decoder in a valid state
+// for subsequent calls.
+export const legacyStreamEmptyInput = {
+  test() {
+    const encodings = [
+      'big5',
+      'euc-jp',
+      'euc-kr',
+      'gb18030',
+      'gbk',
+      'iso-2022-jp',
+      'shift_jis',
+      'windows-1252',
+      'x-user-defined',
+    ];
+
+    const empty = new Uint8Array(0);
+
+    for (const label of encodings) {
+      for (const fatal of [false, true]) {
+        const dec = new TextDecoder(label, { fatal });
+
+        // Empty stream chunk must produce empty string.
+        strictEqual(
+          dec.decode(empty, { stream: true }),
+          '',
+          `${label} (fatal=${fatal}): empty stream chunk should be ''`
+        );
+
+        // A second empty stream chunk must also be fine.
+        strictEqual(
+          dec.decode(empty, { stream: true }),
+          '',
+          `${label} (fatal=${fatal}): second empty stream chunk should be ''`
+        );
+
+        // Final flush with no pending bytes must produce empty string.
+        strictEqual(
+          dec.decode(),
+          '',
+          `${label} (fatal=${fatal}): flush after empty chunks should be ''`
+        );
+
+        // Decoder must still work normally after the empty-stream sequence.
+        // Feed a single ASCII byte to verify.
+        strictEqual(
+          dec.decode(Uint8Array.of(0x41)),
+          'A',
+          `${label} (fatal=${fatal}): decode 'A' after empty stream should work`
+        );
+      }
+    }
   },
 };

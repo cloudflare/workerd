@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-v24-nodejs-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "streams-v24-nodejs-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_streams_nodejs_v24_compat"],
+      )
+    ),
+    ( name = "internet", network = ( allow = ["private"] ) ),
+  ],
+);

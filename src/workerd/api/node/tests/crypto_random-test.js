@@ -1,3 +1,6 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 import { ok, rejects, strictEqual, throws } from 'node:assert';
 
 import {
@@ -398,6 +401,40 @@ export const test = {
 export const timingSafeEqualTest = {
   test() {
     timingSafeEqual(new Uint8Array(1), new Uint8Array(1));
+  },
+};
+
+export const randomIntTest = {
+  async test() {
+    const { randomInt } = await import('node:crypto');
+
+    // min === max should throw, not infinite-loop
+    throws(() => randomInt(5, 5), { code: 'ERR_OUT_OF_RANGE' });
+
+    // min > max should throw
+    throws(() => randomInt(10, 5), { code: 'ERR_OUT_OF_RANGE' });
+
+    // Valid range returns value in [min, max)
+    const val = randomInt(0, 10);
+    ok(val >= 0 && val < 10);
+
+    // Single-arg form: randomInt(max) means [0, max)
+    strictEqual(randomInt(1), 0);
+  },
+};
+
+export const randomFillSyncTest = {
+  async test() {
+    const { randomFillSync } = await import('node:crypto');
+
+    // With offset but no size, should fill only buf.length - offset bytes
+    const buf = Buffer.alloc(10, 0);
+    randomFillSync(buf, 4);
+
+    // First 4 bytes must be untouched (all zero)
+    for (let i = 0; i < 4; i++) {
+      strictEqual(buf[i], 0, `byte ${i} should be untouched`);
+    }
   },
 };
 

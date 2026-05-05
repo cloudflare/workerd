@@ -29,7 +29,7 @@ export default {
 
         if (
           event.message ===
-          'Uncaught Error: WebSocket protocol error; protocolError.statusCode = 1009; protocolError.description = Message is too large: 2097152 > 1048576'
+          'Uncaught Error: WebSocket protocol error; protocolError.statusCode = 1009; protocolError.description = Message is too large: 34603008 > 33554432'
         ) {
           resolve({
             source: 'client-error',

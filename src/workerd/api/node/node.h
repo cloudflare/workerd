@@ -6,9 +6,9 @@
 
 #include <workerd/api/node/async-hooks.h>
 #include <workerd/api/node/buffer.h>
-#include <workerd/api/node/dns.h>
 #include <workerd/api/node/module.h>
 #include <workerd/api/node/process.h>
+#include <workerd/api/node/sqlite.h>
 #include <workerd/api/node/timers.h>
 #include <workerd/api/node/url.h>
 #include <workerd/api/node/util.h>
@@ -16,6 +16,8 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
+#include <workerd/rust/api/lib.rs.h>
+#include <workerd/rust/jsg/jsg.h>
 
 #include <node/node.capnp.h>
 
@@ -33,8 +35,8 @@ namespace workerd::api::node {
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
   V(UrlUtil, "node-internal:url")                                                                  \
-  V(DnsUtil, "node-internal:dns")                                                                  \
-  V(TimersUtil, "node-internal:timers")
+  V(TimersUtil, "node-internal:timers")                                                            \
+  V(SqliteUtil, "node-internal:sqlite")
 
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
 // node.js compat C++ modules that should be guarded by the experimental compat
@@ -63,6 +65,14 @@ constexpr bool isNodeOsModule(kj::StringPtr name) {
   return name == "node:os"_kj;
 }
 
+constexpr bool isNodeHttp2Module(kj::StringPtr name) {
+  return name == "node:http2"_kj;
+}
+
+constexpr bool isNodeConsoleModule(kj::StringPtr name) {
+  return name == "node:console"_kj;
+}
+
 template <class Registry>
 void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 #define V(T, N)                                                                                    \
@@ -85,11 +95,8 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return module.getType() == jsg::ModuleType::INTERNAL;
     }
 
-    // node:fs will be considered experimental until it's completed,
-    // so unless the experimental flag is enabled, don't register them.
-    // TODO(soon): Remove the experimental flag check.
     if (isNodeJsCompatFsModule(module.getName())) {
-      return featureFlags.getEnableNodeJsFsModule() && featureFlags.getWorkerdExperimental();
+      return featureFlags.getEnableNodeJsFsModule();
     }
 
     // We put node:http and node:https modules behind a compat flag
@@ -101,12 +108,88 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     // We put node:_http_server and related features behind a compat flag
     // for securing backward compatibility.
     if (isNodeHttpServerModule(module.getName())) {
-      return featureFlags.getEnableNodejsHttpServerModules() &&
-          featureFlags.getWorkerdExperimental();
+      return featureFlags.getEnableNodejsHttpServerModules();
     }
 
     if (isNodeOsModule(module.getName())) {
-      return featureFlags.getEnableNodeJsOsModule() && featureFlags.getWorkerdExperimental();
+      return featureFlags.getEnableNodeJsOsModule();
+    }
+
+    if (isNodeHttp2Module(module.getName())) {
+      return featureFlags.getEnableNodeJsHttp2Module();
+    }
+
+    if (isNodeConsoleModule(module.getName())) {
+      return featureFlags.getEnableNodeJsConsoleModule();
+    }
+
+    if (module.getName() == "node:vm"_kj) {
+      return featureFlags.getEnableNodeJsVmModule();
+    }
+
+    if (module.getName() == "node:perf_hooks"_kj) {
+      return featureFlags.getEnableNodeJsPerfHooksModule();
+    }
+
+    if (module.getName() == "node:domain"_kj) {
+      return featureFlags.getEnableNodeJsDomainModule();
+    }
+
+    if (module.getName() == "node:child_process"_kj) {
+      return featureFlags.getEnableNodeJsChildProcessModule();
+    }
+
+    if (module.getName() == "node:v8"_kj) {
+      return featureFlags.getEnableNodeJsV8Module();
+    }
+
+    if (module.getName() == "node:tty"_kj) {
+      return featureFlags.getEnableNodeJsTtyModule();
+    }
+
+    if (module.getName() == "node:punycode"_kj) {
+      return featureFlags.getEnableNodeJsPunycodeModule();
+    }
+
+    if (module.getName() == "node:cluster"_kj) {
+      return featureFlags.getEnableNodeJsClusterModule();
+    }
+
+    if (module.getName() == "node:worker_threads"_kj) {
+      return featureFlags.getEnableNodeJsWorkerThreadsModule();
+    }
+
+    if (module.getName() == "node:_stream_wrap"_kj) {
+      return featureFlags.getEnableNodeJsStreamWrapModule();
+    }
+
+    if (module.getName() == "node:wasi"_kj) {
+      return featureFlags.getEnableNodeJsWasiModule();
+    }
+
+    if (module.getName() == "node:dgram"_kj) {
+      return featureFlags.getEnableNodeJsDgramModule();
+    }
+
+    if (module.getName() == "node:inspector"_kj ||
+        module.getName() == "node:inspector/promises"_kj) {
+      return featureFlags.getEnableNodeJsInspectorModule();
+    }
+
+    if (module.getName() == "node:trace_events"_kj) {
+      return featureFlags.getEnableNodeJsTraceEventsModule();
+    }
+
+    if (module.getName() == "node:readline"_kj || module.getName() == "node:readline/promises"_kj) {
+      return featureFlags.getEnableNodeJsReadlineModule();
+    }
+
+    if (module.getName() == "node:repl"_kj) {
+      return featureFlags.getEnableNodeJsReplModule();
+    }
+
+    if (module.getName() == "node:sqlite"_kj) {
+      return featureFlags.getEnableNodeJsSqliteModule();
     }
 
     return true;
@@ -124,6 +207,9 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       }
     }
   }
+
+  ::workerd::rust::jsg::RustModuleRegistry r(registry);
+  ::workerd::rust::api::register_nodejs_modules(r);
 }
 
 template <class TypeWrapper>
@@ -139,6 +225,14 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(auto fea
   }
 #undef V
   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE);
+
+  // Register Rust-implemented Node.js modules using the reusable adapter
+  // that bridges Rust ModuleCallback into BuiltinBuilder::addSynthetic.
+  {
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
+    ::workerd::rust::api::register_nodejs_modules(adapter);
+  }
+
   return builder.finish();
 }
 
@@ -146,7 +240,79 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
   jsg::modules::ModuleBundle::BuiltinBuilder builder(
       jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
   if (isNodeJsCompatEnabled(featureFlags)) {
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, NODE_BUNDLE);
+    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(
+        builder, NODE_BUNDLE, [&](jsg::Module::Reader module) -> bool {
+      if (isNodeJsCompatFsModule(module.getName())) {
+        return featureFlags.getEnableNodeJsFsModule();
+      }
+      if (isNodeHttpModule(module.getName())) {
+        return featureFlags.getEnableNodejsHttpModules();
+      }
+      if (isNodeHttpServerModule(module.getName())) {
+        return featureFlags.getEnableNodejsHttpServerModules();
+      }
+      if (isNodeOsModule(module.getName())) {
+        return featureFlags.getEnableNodeJsOsModule();
+      }
+      if (isNodeHttp2Module(module.getName())) {
+        return featureFlags.getEnableNodeJsHttp2Module();
+      }
+      if (isNodeConsoleModule(module.getName())) {
+        return featureFlags.getEnableNodeJsConsoleModule();
+      }
+      if (module.getName() == "node:vm") {
+        return featureFlags.getEnableNodeJsVmModule();
+      }
+      if (module.getName() == "node:perf_hooks") {
+        return featureFlags.getEnableNodeJsPerfHooksModule();
+      }
+      if (module.getName() == "node:domain") {
+        return featureFlags.getEnableNodeJsDomainModule();
+      }
+      if (module.getName() == "node:child_process") {
+        return featureFlags.getEnableNodeJsChildProcessModule();
+      }
+      if (module.getName() == "node:v8") {
+        return featureFlags.getEnableNodeJsV8Module();
+      }
+      if (module.getName() == "node:tty") {
+        return featureFlags.getEnableNodeJsTtyModule();
+      }
+      if (module.getName() == "node:punycode") {
+        return featureFlags.getEnableNodeJsPunycodeModule();
+      }
+      if (module.getName() == "node:cluster") {
+        return featureFlags.getEnableNodeJsClusterModule();
+      }
+      if (module.getName() == "node:worker_threads") {
+        return featureFlags.getEnableNodeJsWorkerThreadsModule();
+      }
+      if (module.getName() == "node:_stream_wrap") {
+        return featureFlags.getEnableNodeJsStreamWrapModule();
+      }
+      if (module.getName() == "node:wasi") {
+        return featureFlags.getEnableNodeJsWasiModule();
+      }
+      if (module.getName() == "node:dgram") {
+        return featureFlags.getEnableNodeJsDgramModule();
+      }
+      if (module.getName() == "node:inspector" || module.getName() == "node:inspector/promises") {
+        return featureFlags.getEnableNodeJsInspectorModule();
+      }
+      if (module.getName() == "node:trace_events") {
+        return featureFlags.getEnableNodeJsTraceEventsModule();
+      }
+      if (module.getName() == "node:readline" || module.getName() == "node:readline/promises") {
+        return featureFlags.getEnableNodeJsReadlineModule();
+      }
+      if (module.getName() == "node:repl") {
+        return featureFlags.getEnableNodeJsReplModule();
+      }
+      if (module.getName() == "node:sqlite") {
+        return featureFlags.getEnableNodeJsSqliteModule();
+      }
+      return true;
+    });
   } else if (featureFlags.getNodeJsAls()) {
     // The AsyncLocalStorage API can be enabled independently of the rest
     // of the nodejs_compat layer.
@@ -171,5 +337,5 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
   EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
-      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES,          \
-      EW_NODE_TIMERS_ISOLATE_TYPES
+      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES,       \
+      EW_NODE_SQLITE_ISOLATE_TYPES

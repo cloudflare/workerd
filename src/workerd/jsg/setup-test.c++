@@ -21,6 +21,24 @@ KJ_TEST("eval() is blocked") {
   e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)", "throws",
       "EvalError: Code generation from strings disallowed for this context");
 
+  // eval() with no args or a non-string arg is allowed even when eval is blocked
+  // (V8 returns the value as-is per spec since there is no string to compile).
+  e.expectEval("eval()", "undefined", "undefined");
+  e.expectEval("eval(undefined)", "undefined", "undefined");
+
+  // new Function() with no arguments is allowed even when eval is blocked (the
+  // synthesized source matches the known empty-body, no-parameter pattern).
+  e.expectEval("typeof new Function()", "string", "function");
+
+  // new Function() with params and an undefined body is blocked (the body becomes
+  // the string "undefined" via ToString, producing a non-empty source).
+  e.expectEval("new Function('a', 'b', undefined)", "throws",
+      "EvalError: Code generation from strings disallowed for this context");
+
+  // Extending Function with super() and no arguments is also allowed.
+  e.expectEval("class Foo extends Function { constructor() { super(); } }; typeof new Foo()",
+      "string", "function");
+
   e.getIsolate().runInLockScope([&](EvalIsolate::Lock& lock) { lock.setAllowEval(true); });
 
   e.expectEval("eval('123')", "number", "123");

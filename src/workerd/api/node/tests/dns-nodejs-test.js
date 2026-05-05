@@ -95,9 +95,15 @@ export const errorCodesExist = {
 export const resolveTxt = {
   async test() {
     function validateResult(result) {
+      ok(
+        result.length > 0,
+        `Result length should be greater than 0 but got ${inspect(result)}`
+      );
       ok(Array.isArray(result[0]));
-      strictEqual(result.length, 1);
-      ok(result[0][0].startsWith('v=spf1'));
+      ok(
+        result.some((record) => record[0].startsWith('v=spf1')),
+        `Expected SPF record but got ${inspect(result[0])}`
+      );
     }
 
     validateResult(await dnsPromises.resolveTxt(addresses.TXT_HOST));
@@ -362,6 +368,96 @@ export const getServers = {
       '1.0.0.1',
       '2606:4700:4700::1001',
     ]);
+  },
+};
+
+// Regression: dns.lookup() with all:true and family:0 must return family:6 for
+// IPv6 addresses (was returning family:4 due to copy-paste bug).
+export const lookupAllFamilyZeroIPv6Family = {
+  async test() {
+    const results = await dnsPromises.lookup(addresses.INET_HOST, {
+      all: true,
+      family: 0,
+    });
+    ok(Array.isArray(results), 'expected array of addresses');
+    ok(results.length > 0, 'expected at least one address');
+
+    for (const entry of results) {
+      strictEqual(typeof entry.address, 'string');
+      ok(
+        entry.family === 4 || entry.family === 6,
+        `family must be 4 or 6, got ${entry.family}`
+      );
+    }
+
+    // If any IPv6 addresses are returned, they must have family:6
+    const ipv6Entries = results.filter((e) => e.address.includes(':'));
+    for (const entry of ipv6Entries) {
+      strictEqual(
+        entry.family,
+        6,
+        `IPv6 address ${entry.address} should have family:6 but got family:${entry.family}`
+      );
+    }
+
+    // If any IPv4 addresses are returned, they must have family:4
+    const ipv4Entries = results.filter((e) => !e.address.includes(':'));
+    for (const entry of ipv4Entries) {
+      strictEqual(
+        entry.family,
+        4,
+        `IPv4 address ${entry.address} should have family:4 but got family:${entry.family}`
+      );
+    }
+  },
+};
+
+// Regression: dns.lookup() with default family (0) and all:false must resolve
+// hosts that only have A records (was only querying AAAA, failing for IPv4-only).
+export const lookupDefaultFamilyResolvesIPv4 = {
+  async test() {
+    // Default options (family:0, all:false) — should return an address
+    const result = await dnsPromises.lookup(addresses.INET4_HOST);
+    ok(result != null, 'expected a result');
+    strictEqual(typeof result.address, 'string');
+    ok(result.address.length > 0, 'expected non-empty address');
+    ok(
+      result.family === 4 || result.family === 6,
+      `family must be 4 or 6, got ${result.family}`
+    );
+
+    // Also verify via callback API
+    const { promise, resolve, reject } = Promise.withResolvers();
+    dns.lookup(addresses.INET4_HOST, (error, address, family) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      strictEqual(typeof address, 'string');
+      ok(address.length > 0, 'expected non-empty address from callback');
+      ok(family === 4 || family === 6, `family must be 4 or 6, got ${family}`);
+      resolve();
+    });
+    await promise;
+  },
+};
+
+// Regression: Resolver.resolvePtr must exist (was misspelled as 'esolvePtr').
+export const resolverResolvePtrExists = {
+  async test() {
+    const resolver = new dnsPromises.Resolver();
+    strictEqual(
+      typeof resolver.resolvePtr,
+      'function',
+      'Resolver.resolvePtr should be a function'
+    );
+    // Actually call it to verify it works end-to-end
+    const result = await resolver.resolvePtr(addresses.PTR_HOST);
+    ok(Array.isArray(result), 'expected array result');
+    ok(result.length > 0, 'expected at least one PTR record');
+    for (const item of result) {
+      strictEqual(typeof item, 'string');
+    }
   },
 };
 

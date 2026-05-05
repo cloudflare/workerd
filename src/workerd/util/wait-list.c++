@@ -30,7 +30,7 @@ CrossThreadWaitList::Waiter::Waiter(
   auto lock = state.waiters.lockExclusive();
   if (__atomic_load_n(&state.done, __ATOMIC_ACQUIRE)) {
     KJ_IF_SOME(e, state.exception) {
-      fulfiller->reject(kj::cp(e));
+      fulfiller->reject(e.clone());
     } else {
       fulfiller->fulfill();
     }
@@ -59,7 +59,7 @@ CrossThreadWaitList::Waiter::~Waiter() noexcept(false) {
 kj::Promise<void> CrossThreadWaitList::addWaiter() const {
   if (__atomic_load_n(&state->done, __ATOMIC_ACQUIRE)) {
     KJ_IF_SOME(e, state->exception) {
-      return kj::cp(e);
+      return e.clone();
     } else {
       return kj::READY_NOW;
     }
@@ -141,7 +141,7 @@ void CrossThreadWaitList::State::reject(kj::Exception&& e) const {
 
   for (auto& waiter: *lock) {
     lock->remove(waiter);
-    waiter.fulfiller->reject(kj::cp(exceptionRef));
+    waiter.fulfiller->reject(exceptionRef.clone());
     __atomic_store_n(&waiter.unlinked, true, __ATOMIC_RELEASE);
   }
 }
@@ -158,7 +158,7 @@ void CrossThreadWaitList::State::lostFulfiller() const {
   if (!lock->empty()) {
     for (auto& waiter: *lock) {
       lock->remove(waiter);
-      waiter.fulfiller->reject(kj::cp(exceptionRef));
+      waiter.fulfiller->reject(exceptionRef.clone());
       __atomic_store_n(&waiter.unlinked, true, __ATOMIC_RELEASE);
     }
   }

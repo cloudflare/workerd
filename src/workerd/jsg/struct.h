@@ -12,7 +12,69 @@
 #include <workerd/jsg/value.h>
 #include <workerd/jsg/web-idl.h>
 
+#include <concepts>
+#include <type_traits>
+
 namespace workerd::jsg {
+
+template <typename T>
+constexpr bool isV8LocalOrData = isV8Local<T>() || std::is_base_of_v<v8::Data, T> || IsJsValue<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<kj::Maybe<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<Optional<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<LenientOptional<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<kj::Array<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<kj::ArrayPtr<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<Dict<T>> = isV8LocalOrData<T>;
+
+template <typename T, typename... Rest>
+constexpr bool isV8LocalOrData<kj::OneOf<T, Rest...>> =
+    isV8LocalOrData<T> || (isV8LocalOrData<Rest> || ...);
+
+// JSG_STRUCT member fields really should not be v8::Locals, v8::Datas, or JsValues because
+// there's no guarantee the v8::HandleScope will be valid when the field is accessed. Instead
+// they should be wrapped in jsg::V8Ref or jsg::JsRef. However, we only want to enforce this
+// for JSG_STRUCTs that we *receive* from JS, not for JSG_STRUCTs that we *send* to JS, so
+// we only actually apply this check when unwrapping (JS -> C++). Why? Great question! It's
+// because when we are sending a struct to JS, we know we have a valid v8::HandleScope and
+// it's fairly expensive to create a jsg::JsRef/jsg::V8Ref, especially when we need to do
+// so repeatedly (e.g. for an iterator, for instance).
+template <typename T>
+concept NotV8Local = !isV8LocalOrData<T>;
+
+// Just to be sure we got the concept right...
+static_assert(NotV8Local<int>);
+static_assert(NotV8Local<kj::String>);
+static_assert(NotV8Local<kj::Array<int>>);
+static_assert(NotV8Local<kj::Maybe<kj::String>>);
+static_assert(NotV8Local<kj::OneOf<int, kj::String>>);
+static_assert(!NotV8Local<kj::Maybe<v8::Local<v8::Object>>>);
+static_assert(!NotV8Local<kj::Maybe<JsValue>>);
+static_assert(!NotV8Local<jsg::Optional<v8::Local<v8::Object>>>);
+static_assert(!NotV8Local<jsg::Optional<JsObject>>);
+static_assert(!NotV8Local<kj::OneOf<int, v8::Local<v8::Object>>>);
+static_assert(!NotV8Local<kj::OneOf<int, JsValue>>);
+static_assert(!NotV8Local<kj::OneOf<int, kj::String, kj::Maybe<JsValue>>>);
+static_assert(
+    !NotV8Local<kj::OneOf<int, kj::String, kj::Maybe<kj::OneOf<int, kj::Maybe<JsValue>>>>>);
+static_assert(!NotV8Local<v8::Local<v8::Object>>);
+static_assert(!NotV8Local<JsValue>);
+static_assert(!NotV8Local<v8::Local<v8::Value>>);
+static_assert(!NotV8Local<v8::Value>);
+static_assert(!NotV8Local<kj::Array<JsValue>>);
+static_assert(!NotV8Local<kj::Array<v8::Local<v8::Object>>>);
+static_assert(!NotV8Local<Dict<JsValue>>);
 
 template <typename TypeWrapper,
     typename Struct,
@@ -29,6 +91,9 @@ class FieldWrapper {
   explicit FieldWrapper(v8::Isolate* isolate)
       : nameHandle(isolate, v8StrIntern(isolate, exportedName)) {}
 
+  // The is the original, slow-path wrap implementation that uses Set(). Prefer the other overload
+  // for better performance. It is, however, a breaking change to remove this overload so we
+  // need to keep it with a compatibility flag.
   void wrap(Lock& js,
       TypeWrapper& wrapper,
       v8::Isolate* isolate,
@@ -41,7 +106,7 @@ class FieldWrapper {
     } else if constexpr (kj::isSameType<T, Unimplemented>() || kj::isSameType<T, WontImplement>()) {
       // Fields with these types are required NOT to be present, so don't try to convert them.
     } else {
-      if constexpr (webidl::isOptional<Type>) {
+      if constexpr (webidl::OptionalType<Type>) {
         // Don't even set optional fields that aren't present.
         if (in.*field == kj::none) return;
       }
@@ -50,10 +115,29 @@ class FieldWrapper {
     }
   }
 
+  void wrap(Lock& js,
+      TypeWrapper& wrapper,
+      v8::Isolate* isolate,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Struct& in,
+      v8::MaybeLocal<v8::Value>& out,
+      size_t& idx) {
+    if constexpr (kj::isSameType<T, SelfRef>()) {
+      // Ignore SelfRef when converting to JS.
+    } else if constexpr (kj::isSameType<T, Unimplemented>() || kj::isSameType<T, WontImplement>()) {
+      // Fields with these types are required NOT to be present, so don't try to convert them.
+    } else {
+      idx++;
+      out = wrapper.wrap(js, context, creator, kj::mv(in.*field));
+    }
+  }
+
   Type unwrap(TypeWrapper& wrapper,
       v8::Isolate* isolate,
       v8::Local<v8::Context> context,
       v8::Local<v8::Object> in) {
+    static_assert(NotV8Local<Type>);
     v8::Local<v8::Value> jsValue = check(in->Get(context, nameHandle.Get(isolate)));
     auto& js = Lock::from(isolate);
     return wrapper.template unwrap<Type>(
@@ -72,7 +156,7 @@ struct TypeTuple {
 template <typename Self,
     typename T,
     typename FieldWrapperTuple,
-    typename Indices = typename FieldWrapperTuple::Indexes>
+    typename Indices = FieldWrapperTuple::Indexes>
 class StructWrapper;
 
 // TypeWrapper mixin for struct types (application-defined C++ structs declared with a
@@ -86,16 +170,47 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     return typeid(T);
   }
 
+  // A count of the JSG_STRUCT fields that are usable for the v8::DictionaryTemplate
+  // version of wrap (i.e. not SelfRef, Unimplemented, or WontImplement).
+  static constexpr size_t kCountOfUsableFields =
+      ((isUsableStructField<typename FieldWrappers::Type> ? 1 : 0) + ...);
+
   v8::Local<v8::Object> wrap(
       Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
     auto isolate = js.v8Isolate;
-    v8::EscapableHandleScope handleScope(isolate);
     auto& fields = getFields(isolate);
+
+    // Fast path using a cached dictionary template.
+    if (js.isUsingFastJsgStruct()) {
+      v8::MaybeLocal<v8::Value> values[kCountOfUsableFields]{};
+
+      size_t idx = 0;
+      (kj::get<indices>(fields).wrap(
+           js, static_cast<Self&>(*this), isolate, context, creator, in, values[idx], idx),
+          ...);
+
+      // We use a cached dictionary template to improve performance on repeated struct wraps.
+
+      v8::Local<v8::DictionaryTemplate> tmpl;
+      if (templateHandle.IsEmpty()) {
+        tmpl = T::template jsgGetTemplate<T>(isolate);
+        templateHandle.Reset(isolate, tmpl);
+      } else {
+        tmpl = templateHandle.Get(isolate);
+      }
+
+      // Make sure we filled in the expected number of fields.
+      KJ_ASSERT(idx == kCountOfUsableFields);
+
+      return tmpl->NewInstance(context, values);
+    }
+
+    // Original slow path.
     v8::Local<v8::Object> out = v8::Object::New(isolate);
     (kj::get<indices>(fields).wrap(
          js, static_cast<Self&>(*this), isolate, context, creator, in, out),
         ...);
-    return handleScope.Escape(out);
+    return out;
   }
 
   kj::Maybe<T> tryUnwrap(Lock& js,
@@ -117,7 +232,7 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     // dictionary has required members, we throw.
 
     if (handle->IsUndefined() || handle->IsNull()) {
-      if constexpr (((webidl::isOptional<typename FieldWrappers::Type> ||
+      if constexpr (((webidl::OptionalType<typename FieldWrappers::Type> ||
                          kj::isSameType<typename FieldWrappers::Type, Unimplemented>()) &&
                         ...)) {
         return T{};
@@ -130,7 +245,6 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
 
     if (!handle->IsObject()) return kj::none;
 
-    v8::HandleScope handleScope(js.v8Isolate);
     auto& fields = getFields(js.v8Isolate);
     auto in = handle.As<v8::Object>();
 
@@ -156,6 +270,7 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
   void getTemplate() = delete;
 
  private:
+  v8::Global<v8::DictionaryTemplate> templateHandle;
   kj::Maybe<kj::Tuple<FieldWrappers...>> lazyFields;
 
   kj::Tuple<FieldWrappers...>& getFields(v8::Isolate* isolate) {

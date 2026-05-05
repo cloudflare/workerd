@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "pth-file",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py"),
+          # The .pth file must live in python_modules/ so that addsitedir() picks
+          # it up.
+          (name = "python_modules/setup.pth", data = embed "setup.pth"),
+          # The .pth file adds "extra_dir" (relative to python_modules/) to
+          # sys.path. extra_module lives there.
+          (name = "python_modules/extra_dir/extra_module.py",
+              pythonModule = embed "extra_module.py"),
+        ],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "disable_python_no_global_handlers", "python_process_pth_files"],
+      )
+    ),
+  ],
+);

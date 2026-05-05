@@ -4,13 +4,27 @@
 
 #pragma once
 
-#include <workerd/io/observer.h>
-#include <workerd/jsg/jsg.h>
+#include <workerd/io/outcome.capnp.h>
+#include <workerd/io/tracked-wasm-instance.h>
+
+#include <v8-isolate.h>
+
+#include <kj/async.h>   // For Promise
+#include <kj/debug.h>   // For KJ_REQUIRE
+#include <kj/memory.h>  // for Own
+#include <kj/one-of.h>  // for OneOf
+#include <kj/time.h>    // for Duration
 
 namespace workerd {
+class IsolateObserver;
+class RequestObserver;
 
 struct ActorCacheSharedLruOptions;
 class IoContext;
+
+namespace jsg {
+class Lock;
+}  // namespace jsg
 
 static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 100'000;
 
@@ -85,6 +99,21 @@ class IsolateLimitEnforcer: public kj::Refcounted {
   }
 
   virtual bool hasExcessivelyExceededHeapLimit() const = 0;
+
+  // Returns the TrackedWasmInstanceList for this isolate. Subclasses own the list and provide
+  // it here. The returned object provides lock-guarded mutation methods and a read-only accessor
+  // for signal-handler use.
+  virtual const TrackedWasmInstanceList& getTrackedWasmInstances() const = 0;
+
+  // Inserts a custom mark event named `name` into this isolate's perf event data stream. At
+  // present, this is only implemented internally. Call this function from various APIs to be able
+  // to correlate perf event data with usage of those APIs.
+  //
+  // TODO(cleanup): This isn't strictly related to limit enforcement, so it's a bit odd here. It's
+  //  observability-related. However, our internal perf event observability is fairly tightly
+  //  coupled with our CPU time limiting system, so adding this function here is a path of least
+  //  resistance.
+  virtual void markPerfEvent(kj::LiteralStringConst name) const {};
 };
 
 // Abstract interface that enforces resource limits on a IoContext.
@@ -146,6 +175,9 @@ class LimitEnforcer {
   // Returns a promise that will reject if and when a limit is exceeded that prevents further
   // JavaScript execution, such as the CPU or memory limit.
   virtual kj::Promise<void> onLimitsExceeded() = 0;
+  // Sets a callback to call when the cpu limit is nearly exceeded. The callback must be signal safe
+  // and cannot take the isolate lock.
+  virtual void setCpuLimitNearlyExceededCallback(kj::Function<void(void)>) = 0;
 
   // Throws an exception if a limit has already been exceeded which prevents further JavaScript
   // execution, such as the CPU or memory limit.
@@ -156,6 +188,9 @@ class LimitEnforcer {
 
   // Only used downstream for internal metrics.
   virtual kj::Duration consumeTimeElapsedForPeriodicLogging() = 0;
+
+  // Only used for internal metrics.
+  virtual size_t getSqliteMemoryUsage() const = 0;
 };
 
 }  // namespace workerd
