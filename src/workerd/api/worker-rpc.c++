@@ -2173,6 +2173,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
+  // Server-side jsRpcSession spans wrap the membrane lifetime, from delivered()
+  // through to all caps being dropped. The user span is parented to the caller's
+  // enclosing user span via USER_SPAN_CONTEXT_PROPAGATION -- the
+  // metadata.userSpanParent set on the client side flows here as the IoContext's
+  // current user span.
+  auto jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
+  auto jsRpcSessionSpan = ioctx.getCurrentUserTraceSpan().newChild("jsRpcSession"_kjc, ioctx.now());
+
   EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
       kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
   capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
