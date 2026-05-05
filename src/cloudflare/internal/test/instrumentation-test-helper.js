@@ -90,11 +90,23 @@ export function createHierarchyAwareCollector() {
     invocationPromises: [],
     spans: new Map(),
     topLevelSpans: new Map(),
+    // Per-invocation metadata captured from onset events. Useful for cross-invocation
+    // assertions (e.g. RPC propagation): the streaming-tail uses per-invocation
+    // sequential span IDs but the trigger context on the onset carries the real
+    // upstream spanId, so direct parentSpanId equality won't work across invocations.
+    //   traceId       -- shared across an entire trace tree
+    //   triggerSpanId -- the spanContext.spanId on the onset event; non-empty when
+    //                    this invocation was triggered by a span in another invocation
+    invocations: new Map(),
   };
 
   const tailStream = (event, env, ctx) => {
     // Record the onset event's spanId as the top-level span for this invocation.
     state.topLevelSpans.set(event.invocationId, event.event.spanId);
+    state.invocations.set(event.invocationId, {
+      traceId: event.spanContext.traceId,
+      triggerSpanId: event.spanContext.spanId,
+    });
 
     let resolveFn;
     state.invocationPromises.push(

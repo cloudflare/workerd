@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import unsafe from 'workerd:unsafe';
 import {
   createHierarchyAwareCollector,
   findSpanByName,
@@ -142,6 +143,47 @@ export const validateHierarchy = {
     // was emitted in order: invocationPromises only resolve on "outcome", and
     // waitForCompletion() awaits them all. BaseTracer::WeakRef prevents the abandoned
     // SpanImpl from pinning the tracer past end-of-request.
+
+    // ---------- Case 7: jsRpcInsideEnterSpan ----------
+    // The server-side jsRpcSession span produced by JsRpcSessionCustomEvent::run lives
+    // on the *callee*'s invocation, parented (via USER_SPAN_CONTEXT_PROPAGATION) to the
+    // caller's enterSpan. We can't assert this via direct parentSpanId equality: each
+    // invocation has its own SequentialSpanSubmitter that mints span IDs starting at
+    // 1, while cross-invocation references in the streaming-tail (the trigger context
+    // on the callee's onset) carry the real 64-bit spanId. Instead we assert the
+    // structural propagation we actually care about:
+    //   - jsRpcSession lives on a separate callee invocation,
+    //   - and, when USER_SPAN_CONTEXT_PROPAGATION is enabled (@all-autogates), the
+    //     callee shares the caller's traceId and onset's trigger context references
+    //     a span on the caller's invocation.
+    // In the default variant the autogate is off and these cross-invocation linkages
+    // are not propagated; the structural assertion above is all we can verify.
+    {
+      const outer = findSpanByName(state, 'hierarchy-rpc-outer');
+      assert.strictEqual(outer.case, 'jsRpcInsideEnterSpan');
+      assert.ok(outer.closed);
+      const rpcSpan = findSpanByName(state, 'jsRpcSession');
+      assert.notStrictEqual(
+        rpcSpan.invocationId,
+        outer.invocationId,
+        'jsRpcSession should live on a separate (callee) invocation'
+      );
+      if (unsafe.isTestAutogateEnabled()) {
+        const callerInv = state.invocations.get(outer.invocationId);
+        const calleeInv = state.invocations.get(rpcSpan.invocationId);
+        assert.ok(callerInv && calleeInv, 'invocation metadata missing');
+        assert.strictEqual(
+          calleeInv.traceId,
+          callerInv.traceId,
+          "callee should share the caller's traceId"
+        );
+        assert.ok(
+          calleeInv.triggerSpanId,
+          'callee invocation should have a non-empty trigger spanId from the caller'
+        );
+      }
+      assertTopLevelParent(outer, 'jsRpcInsideEnterSpan');
+    }
 
     console.log('All tracing-hierarchy tests passed!');
   },

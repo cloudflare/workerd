@@ -11,12 +11,16 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "tracing-hierarchy-test.js"),
         ],
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "rpc"],
         streamingTails = ["tail"],
         bindings = [
           (
             name = "fetchTarget",
             service = "tracing-hierarchy-mock"
+          ),
+          (
+            name = "rpcTarget",
+            service = (name = "tracing-hierarchy-mock", entrypoint = "RpcTarget")
           ),
           (
             name = "tracingTest",
@@ -29,10 +33,13 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "tracing-hierarchy-mock",
       worker = (
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "rpc"],
         modules = [
           (name = "worker", esModule = embed "tracing-hierarchy-mock.js"),
         ],
+        # Tail the mock as well so callee-side spans (e.g. server-side jsRpcSession
+        # in JsRpcSessionCustomEvent::run) are observable in the same tail stream.
+        streamingTails = ["tail"],
       )
     ),
     ( name = "tail", worker = .tailWorker, ),
@@ -44,5 +51,7 @@ const tailWorker :Workerd.Worker = (
     (name = "worker", esModule = embed "tracing-hierarchy-instrumentation-test.js"),
     (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js")
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  # unsafe_module exposes `workerd:unsafe`, used by Case 7 to query whether
+  # USER_SPAN_CONTEXT_PROPAGATION is enabled in the current variant.
+  compatibilityFlags = ["experimental", "nodejs_compat", "unsafe_module"],
 );

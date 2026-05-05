@@ -2,10 +2,17 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Minimal fetch target used by tracing-hierarchy-test. Just echoes the request path so
-// the runtime-generated "fetch" span has something to observe.
+// Minimal fetch + RPC target used by tracing-hierarchy-test.
+import { WorkerEntrypoint } from 'cloudflare:workers';
+
 export default {
   async fetch(request) {
     return new Response('ok', { status: 200 });
   },
 };
+
+export class RpcTarget extends WorkerEntrypoint {
+  async ping() {
+    return 'pong';
+  }
+}
