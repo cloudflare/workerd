@@ -12,7 +12,6 @@
 | `jsg-macros/`        | Proc macros: `#[jsg_struct]`, `#[jsg_method]`, `#[jsg_resource]`, `#[jsg_oneof]`, `#[jsg_static_constant]`, `#[jsg_constructor]` |
 | `jsg-test/`          | Test harness (`Harness`) for JSG Rust bindings                                                         |
 | `api/`               | Rust-implemented Node.js APIs; registers modules via `register_nodejs_modules()`                       |
-| `dns/`               | DNS record parsing (CAA, NAPTR) via CXX bridge; legacy duplicate of `api/dns.rs`, pending removal      |
 | `net/`               | Single function: `canonicalize_ip()`                                                                   |
 | `kj/`                | Rust bindings for KJ library (`http`, `io`, `own` submodules); `Result<T>` = `Result<T, cxx::KjError>` |
 | `cxx-integration/`   | Tokio runtime init; called from C++ `main()` before anything else                                      |
