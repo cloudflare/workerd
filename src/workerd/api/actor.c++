@@ -15,13 +15,15 @@
 
 namespace workerd::api {
 
-kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
+Fetcher::OutgoingFactory::Result LocalActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
   auto& context = IoContext::current();
 
-  return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
+  kj::Maybe<TraceContextParent> spanParents;
+  auto client = context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, actorId.asPtr());
+    spanParents = tracing.getSpanParents();
 
     // Lazily initialize actorChannel
     if (actorChannel == kj::none) {
@@ -37,15 +39,18 @@ kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+  return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
-kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
+Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
   auto& context = IoContext::current();
 
-  return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
+  kj::Maybe<TraceContextParent> spanParents;
+  auto client = context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, id->toString());
+    spanParents = tracing.getSpanParents();
 
     // Lazily initialize actorChannel
     if (actorChannel == kj::none) {
@@ -70,15 +75,18 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+  return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
-kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
+Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
   auto& context = IoContext::current();
 
-  return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
+  kj::Maybe<TraceContextParent> spanParents;
+  auto client = context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, actorId.asPtr());
+    spanParents = tracing.getSpanParents();
 
     // Unlike in `GlobalActorOutgoingFactory`, we do not create this lazily, since our channel was
     // already open prior to this DO starting up.
@@ -89,6 +97,7 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+  return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
 jsg::Ref<Fetcher> ColoLocalActorNamespace::get(jsg::Lock& js, kj::String actorId) {
