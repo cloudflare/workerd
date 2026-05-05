@@ -10,7 +10,7 @@ both target and exec configurations as generator tools depend on them.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index ff38e11bbbaa668ad9a5348ebab40baebbd81f32..c49861e5a9e46c8b70db478840c0d4f9cb6987b7 100644
+index f79d7f3e434a126daa41b8effd6e98f0d487e773..1ab690b670cbb9c717fe1f368f0e073e85830d4a 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -19,6 +19,7 @@ load(
@@ -21,7 +21,7 @@ index ff38e11bbbaa668ad9a5348ebab40baebbd81f32..c49861e5a9e46c8b70db478840c0d4f9
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -4486,22 +4487,20 @@ filegroup(
+@@ -4504,22 +4505,20 @@ filegroup(
      ],
  )
  
@@ -50,7 +50,7 @@ index ff38e11bbbaa668ad9a5348ebab40baebbd81f32..c49861e5a9e46c8b70db478840c0d4f9
  )
  
  v8_mksnapshot(
-@@ -4722,7 +4721,6 @@ v8_binary(
+@@ -4740,7 +4739,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",

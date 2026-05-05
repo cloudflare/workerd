@@ -8,10 +8,10 @@ Subject: Add methods to get heap and external memory sizes directly.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index 98ba3aadc19cda8b2dff0a8bd7bc2490f7d7c862..2d075ddde2fb8c88368e1dfc7c927f838e2c2d27 100644
+index 141fece655b6003921452b493f4879baefb9169a..33900f10e20b5046b57643755c0c8d5fbd8bf6c6 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -1083,6 +1083,16 @@ class V8_EXPORT Isolate {
+@@ -1085,6 +1085,16 @@ class V8_EXPORT Isolate {
    V8_DEPRECATE_SOON("Use ExternalMemoryAccounter instead.")
    int64_t AdjustAmountOfExternalAllocatedMemory(int64_t change_in_bytes);
  
@@ -29,10 +29,10 @@ index 98ba3aadc19cda8b2dff0a8bd7bc2490f7d7c862..2d075ddde2fb8c88368e1dfc7c927f83
     * Returns heap profiler for this isolate. Will return NULL until the isolate
     * is initialized.
 diff --git a/src/api/api.cc b/src/api/api.cc
-index b5a577092b1ad93d1a501bf539366fd4f979d13e..a703ceec6006a67f3befdb9924c1cb4f2ef024e8 100644
+index 8754d87f1db985d4021faf9ce275783ae1229dc8..e5c24959acc33dd61f42afee2c81d19e3d8332a2 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -10398,6 +10398,14 @@ void Isolate::GetHeapStatistics(HeapStatistics* heap_statistics) {
+@@ -10443,6 +10443,14 @@ void Isolate::GetHeapStatistics(HeapStatistics* heap_statistics) {
  #endif  // V8_ENABLE_WEBASSEMBLY
  }
  
