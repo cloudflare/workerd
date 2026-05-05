@@ -1124,6 +1124,16 @@ SpanParent IoContext::getCurrentTraceSpan() {
   return getMetrics().getSpan();
 }
 
+SpanParent TraceContext::getUserSpanParent() {
+  if (userSpan.isObserved()) {
+    return SpanParent(userSpan);
+  }
+  if (IoContext::hasCurrent()) {
+    return IoContext::current().getCurrentUserTraceSpan();
+  }
+  return SpanParent(nullptr);
+}
+
 SpanParent IoContext::getCurrentUserTraceSpan() {
   // Skip the AsyncContextFrame probe when user tracing isn't wired up: an unobserved
   // root means enterSpan can't have pushed anything (see Tracing::enterSpan).

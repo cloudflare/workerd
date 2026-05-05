@@ -334,9 +334,15 @@ class Fetcher: public JsRpcClientProvider {
         isInHouse(isInHouse) {}
 
   // Returns an `WorkerInterface` that is only valid for the lifetime of the current
-  // `IoContext`.
+  // `IoContext`. Creates a tracing span named `operationName` at the dispatch site.
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+
+  // Like getClient() but doesn't create a span at the dispatch site -- for callers
+  // that emit their own user span downstream (e.g. the RPC dispatch path, where
+  // JsRpcSessionCustomEvent owns the jsRpcSession span). The caller's current user
+  // span is still forwarded as metadata.userSpanParent so trigger context propagates.
+  kj::Own<WorkerInterface> getClient(IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::None);
 
   // Result of getClient call that includes optional trace context
   struct ClientWithTracing {
@@ -520,6 +526,13 @@ class Fetcher: public JsRpcClientProvider {
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
  private:
+  // Shared body of the two getClient() overloads. The TraceContext is built lazily
+  // because OutgoingFactory variants emit their own outer span and don't want a
+  // dispatch-site span synthesized on top.
+  ClientWithTracing buildClient(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::FunctionParam<TraceContext()> makeTraceContext);
+
   kj::OneOf<uint,
       IoOwn<IoChannelFactory::SubrequestChannel>,
       kj::Own<CrossContextOutgoingFactory>,

@@ -2121,7 +2121,10 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethodInternal(jsg::Lock& js, 
 rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto& ioContext = IoContext::current();
-  auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
+  // Pass kj::none for the operation name: the client-side jsRpcSession span is
+  // emitted by JsRpcSessionCustomEvent::sendRpc (cross-process dispatch only), so
+  // we don't want a duplicate at the dispatch site.
+  auto worker = getClient(ioContext, kj::none, kj::none);
   auto event = kj::heap<api::JsRpcSessionCustomEvent>(
       JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
@@ -2407,17 +2410,33 @@ kj::Own<WorkerInterface> Fetcher::getClient(
   return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
 }
 
+kj::Own<WorkerInterface> Fetcher::getClient(
+    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::None) {
+  // No dispatch-site span: the caller emits its own user span downstream. The
+  // default-constructed TraceContext has no owned userSpan, so getUserSpanParent()
+  // falls back to the IoContext's current user span -- preserving the propagation
+  // that previously happened implicitly via the dispatch-site jsRpcSession.
+  auto clientWithTracing = buildClient(ioContext, kj::mv(cfStr), [] { return TraceContext(); });
+  return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
+}
+
 Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
+  return buildClient(ioContext, kj::mv(cfStr),
+      [&] { return ioContext.makeUserTraceSpan(kj::mv(operationName)); });
+}
+
+Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::FunctionParam<TraceContext()> makeTraceContext) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
-      // For channels, create trace context
-      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto traceContext = makeTraceContext();
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto traceContext = makeTraceContext();
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
         return channel->startRequest({.cfBlobJson = kj::mv(cfStr),
@@ -2433,7 +2452,9 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
       // Outgoing factories are responsible for routing through getSubrequestNoChecks() (or
       // getSubrequest()) internally if they create HTTP connections, to ensure external memory
-      // adjustment and other subrequest accounting are applied.
+      // adjustment and other subrequest accounting are applied. They also emit their own
+      // outer span (e.g. durable_object_subrequest), so we skip makeTraceContext() here
+      // -- otherwise we'd synthesize a redundant dispatch-site span on top.
       auto client = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
       return ClientWithTracing{kj::mv(client), kj::none};
     }

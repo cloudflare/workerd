@@ -182,7 +182,7 @@ const E = {
   jsrpcGetCounter:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"getCounter"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["getCounter called"]}{"type":"return"}{"type":"log","level":"log","message":["increment called on transient"]}{"type":"log","level":"log","message":["getValue called on transient"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   jsrpcDoSubrequest:
-    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000002"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000003"}{"type":"attributes","info":[{"name":"objectId","value":"af6dd8b6678e07bac992dae1bbbb3f385af19ebae7e5ea8c66d6341b246d3328"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"objectId","value":"af6dd8b6678e07bac992dae1bbbb3f385af19ebae7e5ea8c66d6341b246d3328"}]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
   // cacheMode
   cacheMode:
@@ -301,12 +301,17 @@ const expectedWithPropagation = [
   n(E.localAddressViaServiceBinding),
   n(E.connectTarget),
 
-  // jsrpc DO subrequest test: caller has children (MyService + MyActor DO calls)
-  n(E.jsrpcDoSubrequest, [
-    n(E.myActorJsrpc),
-    n(E.jsrpcGetCounter),
-    n(E.jsrpcNonFunction),
-  ]),
+  // jsrpc DO subrequest test: the dispatch-site jsRpcSession user span has moved
+  // into JsRpcSessionCustomEvent::sendRpc (cross-process only), so for these
+  // in-process calls no client-side jsRpcSession fires. The caller's only remaining
+  // user span at the dispatch site is durable_object_subrequest. The MyActor DO call
+  // links under it via metadata.userSpanParent; the two service binding calls
+  // (MyService.*) have no enclosing user span at dispatch and so forward the root
+  // user trace span, whose spanId is nullId -- they appear as top-level invocations
+  // under propagation.
+  n(E.jsrpcDoSubrequest, [n(E.myActorJsrpc)]),
+  n(E.jsrpcGetCounter),
+  n(E.jsrpcNonFunction),
 
   // http-test: main test handler with subrequest children
   n(E.httpTest, [
