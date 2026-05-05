@@ -1533,7 +1533,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonProcessPthFiles @176 :Bool
       $compatEnableFlag("python_process_pth_files")
-      $compatDisableFlag("disable_python_process_pth_files");
+      $compatDisableFlag("disable_python_process_pth_files")
+      $compatEnableDate("2026-05-26");
   # When enabled, Python Workers process `.pth` files placed in the
   # `python_modules/` directory by calling `site.addsitedir()` on it during
   # startup. This allows packages to extend `sys.path` declaratively (e.g. to
