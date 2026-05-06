@@ -467,8 +467,15 @@ class ConsumerImpl final {
           js.v8Isolate, js.typeError("Cannot call read while there is a pending draining read"_kj));
       return request.reject(js, error);
     }
+    // handleRead may trigger the pull callback (via onConsumerWantsData), which
+    // may synchronously call reader.cancel(). Cancel can destroy this ConsumerImpl
+    // (ByteReadable::cancel sets state = kj::none). We must guard the subsequent
+    // maybeDrainAndSetState call against use-after-free by taking a weak ref before
+    // handleRead and checking if we're still alive after it returns.
+    auto weak = selfRef.addRef();
     Self::handleRead(js, ready, *this, queue, kj::mv(request));
-    return maybeDrainAndSetState(js);
+    // Both read() and maybeDrainAndSetState() are void — no return value is lost.
+    weak->runIfAlive([&](ConsumerImpl& self) { self.maybeDrainAndSetState(js); });
   }
 
   void reset() {

@@ -3,6 +3,12 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    src = "streams-byte-cancel-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byte-cancel-uaf-test.js"],
+)
+
+wd_test(
     src = "structuredclone-error-serialize-test.wd-test",
     args = ["--experimental"],
     data = ["structuredclone-error-serialize-test.js"],
