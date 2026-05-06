@@ -230,6 +230,12 @@ wd_test(
 )
 
 wd_test(
+    src = "zlib-leak-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-leak-nodejs-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "zlib-zstd-nodejs-test.wd-test",
     args = ["--experimental"],
