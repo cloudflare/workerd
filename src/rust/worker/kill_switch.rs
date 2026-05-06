@@ -43,7 +43,7 @@ pub struct Worker {}
 impl Worker {
     fn error(file: &str, line: u32) -> Result<()> {
         Err(KjError::new(
-            cxx::KjExceptionType::Overloaded,
+            cxx::KjExceptionType::Failed,
             "jsg.Error: This script has been killed.".to_owned(),
         )
         .with_details(vec![(SCRIPT_KILLED_DETAIL_ID, vec![])])
