@@ -469,22 +469,40 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
     return js.tryCatch([&]() -> JsRpcPromiseAndPipeline {
       auto& ioContext = IoContext::current();
 
-      // Per-call client-side dispatch span. Wraps the entire RPC call lifetime: stub
-      // resolution, the customEvent task, and the wire round-trip until the response
-      // resolves. Pushed onto the async-context frame so that synchronous code below
-      // (notably getClientForOneCall -> getClient -> buildClient) sees it as the
-      // current user span -- this is what gets forwarded as metadata.userSpanParent
-      // so the callee parents under it. Closed when the awaitIo callback below is
-      // destroyed (i.e. when the call resolves or is dropped).
+      // Per-call client-side dispatch span. Wraps the RPC call lifetime: stub
+      // resolution, the customEvent task, and the wire round-trip up to when the
+      // response settles. The span is captured by the awaitIo callback below and
+      // closes when that callback runs or is dropped (cancellation paths close the
+      // span without an outcome -- matches existing SpanBuilder semantics).
+      //
+      // We push it onto the async-context frame so synchronous descendants (notably
+      // getClientForOneCall -> getClient -> buildClient -> startRequest) pick it up
+      // via getCurrentUserTraceSpan() and forward it as metadata.userSpanParent --
+      // that is what makes the callee's onset parent under this span. The push is
+      // guarded because callImpl is reachable from paths that don't hold a
+      // jsg::Lock (capnp dispatch / network re-entry); without a lock there is no
+      // async-context frame to push onto, but the span itself still records.
       auto jsRpcCallSpan =
-          ioContext.getCurrentUserTraceSpan().newChild("jsRpcCall:client"_kjc, ioContext.now());
-      auto userTraceScope =
-          ioContext.makeUserAsyncTraceScope(ioContext.getCurrentLock(), SpanParent(jsRpcCallSpan));
+          ioContext.getCurrentUserTraceSpan().newChild("jsRpcCall"_kjc, ioContext.now());
 
-      // `path` will be filled in with the path of property names leading from the stub represented by
-      // `client` to the specific property / method that we're trying to invoke.
+      // Resolve the stub under a StorageScope that publishes jsRpcCallSpan as the
+      // current user span -- this is what gets captured by getClient -> buildClient
+      // -> startRequest as metadata.userSpanParent and ultimately makes the callee's
+      // onset parent under this span. The scope only needs to cover the synchronous
+      // resolution; once `client` is built, the metadata is already attached.
+      // `path` is filled in with the chain of property names leading to the method.
       kj::Vector<kj::StringPtr> path;
-      auto client = parent.getClientForOneCall(js, path);
+      auto resolveClient = [&] { return parent.getClientForOneCall(js, path); };
+      auto client = [&] {
+        KJ_IF_SOME(lock, ioContext.tryGetCurrentLock()) {
+          auto userTraceScope = ioContext.makeUserAsyncTraceScope(lock, SpanParent(jsRpcCallSpan));
+          return resolveClient();
+        }
+        // No lock held (capnp dispatch / network re-entry path) -- no async-context
+        // frame to push onto. The span still records; we just lose the parent
+        // forwarding for this dispatch.
+        return resolveClient();
+      }();
 
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
         // Replace the client with a promise client that will delay the call until the output gate
