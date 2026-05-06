@@ -182,7 +182,7 @@ const E = {
   jsrpcGetCounter:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"jsrpc.method","value":"getCounter"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["getCounter called"]}{"type":"return"}{"type":"log","level":"log","message":["increment called on transient"]}{"type":"log","level":"log","message":["getValue called on transient"]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   jsrpcDoSubrequest:
-    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"objectId","value":"af6dd8b6678e07bac992dae1bbbb3f385af19ebae7e5ea8c66d6341b246d3328"}]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcCall:client","spanId":"0000000000000001"}{"type":"spanOpen","name":"jsRpcCall:client","spanId":"0000000000000002"}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000003"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall:client","spanId":"0000000000000004"}{"type":"spanClose","outcome":"ok"}{"type":"attributes","info":[{"name":"objectId","value":"af6dd8b6678e07bac992dae1bbbb3f385af19ebae7e5ea8c66d6341b246d3328"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall:client","spanId":"0000000000000005"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall:client","spanId":"0000000000000006"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
   // cacheMode
   cacheMode:
@@ -301,17 +301,19 @@ const expectedWithPropagation = [
   n(E.localAddressViaServiceBinding),
   n(E.connectTarget),
 
-  // jsrpc DO subrequest test: callees gain a server-side jsRpcSession user span
-  // (from JsRpcSessionCustomEvent::run). Every callee invocation, plus the caller's
-  // durable_object_subrequest, has a span with sequential id 0000000000000001 under
-  // workerd-standalone's SequentialSpanSubmitter. The buildTree heuristic uses
-  // sequential per-invocation span IDs to resolve cross-invocation parents and so
-  // mis-links the MyActor DO callee under MyService.getCounter. The shape below
-  // reflects that test-infra limitation, not actual misparenting -- traceIds and
-  // triggerSpanIds remain correct.
-  n(E.jsrpcDoSubrequest),
-  n(E.jsrpcGetCounter, [n(E.myActorJsrpc)]),
-  n(E.jsrpcNonFunction),
+  // jsrpc DO subrequest test: caller gets a jsRpcCall:client span per RPC dispatch
+  // (from callImpl), each of which forwards as metadata.userSpanParent. Each callee
+  // invocation parents under its jsRpcCall:client; durable_object_subrequest is
+  // nested under the jsRpcCall:client for the MyActor DO call. The mis-link of
+  // nonFunctionProperty under getCounter is a workerd-standalone test-infra artifact
+  // -- both callees' server-side jsRpcSession spans land on sequential id
+  // 0000000000000001 within the same trace, and buildTree resolves
+  // nonFunctionProperty's parentSpanId to whichever invocation re-indexes that id
+  // first. Real production span IDs are random 64-bit; no collision occurs there.
+  n(E.jsrpcDoSubrequest, [
+    n(E.myActorJsrpc),
+    n(E.jsrpcGetCounter, [n(E.jsrpcNonFunction)]),
+  ]),
 
   // http-test: main test handler with subrequest children
   n(E.httpTest, [

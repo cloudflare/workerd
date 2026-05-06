@@ -467,12 +467,24 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
 
   try {
     return js.tryCatch([&]() -> JsRpcPromiseAndPipeline {
+      auto& ioContext = IoContext::current();
+
+      // Per-call client-side dispatch span. Wraps the entire RPC call lifetime: stub
+      // resolution, the customEvent task, and the wire round-trip until the response
+      // resolves. Pushed onto the async-context frame so that synchronous code below
+      // (notably getClientForOneCall -> getClient -> buildClient) sees it as the
+      // current user span -- this is what gets forwarded as metadata.userSpanParent
+      // so the callee parents under it. Closed when the awaitIo callback below is
+      // destroyed (i.e. when the call resolves or is dropped).
+      auto jsRpcCallSpan =
+          ioContext.getCurrentUserTraceSpan().newChild("jsRpcCall:client"_kjc, ioContext.now());
+      auto userTraceScope =
+          ioContext.makeUserAsyncTraceScope(ioContext.getCurrentLock(), SpanParent(jsRpcCallSpan));
+
       // `path` will be filled in with the path of property names leading from the stub represented by
       // `client` to the specific property / method that we're trying to invoke.
       kj::Vector<kj::StringPtr> path;
       auto client = parent.getClientForOneCall(js, path);
-
-      auto& ioContext = IoContext::current();
 
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
         // Replace the client with a promise client that will delay the call until the output gate
@@ -579,8 +591,8 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       // RemotePromise lets us consume its pipeline and promise portions independently; we consume
       // the promise here and we consume the pipeline below, both via kj::mv().
       auto jsPromise = ioContext.awaitIo(js, kj::mv(callResult),
-          [weakRef = kj::atomicAddRef(*weakRef), resultStreamSink = kj::mv(resultStreamSink)](
-              jsg::Lock& js,
+          [weakRef = kj::atomicAddRef(*weakRef), resultStreamSink = kj::mv(resultStreamSink),
+              jsRpcCallSpan = kj::mv(jsRpcCallSpan)](jsg::Lock& js,
               capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable -> jsg::Value {
         auto jsResult = deserializeRpcReturnValue(js, response, resultStreamSink);
 

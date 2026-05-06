@@ -29,6 +29,8 @@ export const test = {
       durable_object_storage_get: 18,
       durable_object_storage_transaction: 8,
       durable_object_subrequest: 47,
+      jsRpcCall: 35,
+      jsRpcSession: 35,
       durable_object_storage_deleteAll: 1,
       createStringTable: 4,
       runActorFunc: 4,
