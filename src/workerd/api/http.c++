@@ -388,7 +388,6 @@ jsg::Ref<Request> Request::constructor(
   Redirect redirect = Redirect::FOLLOW;
   CacheMode cacheMode = CacheMode::NONE;
   Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
-
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(u, kj::String) {
       url = kj::mv(u);
@@ -457,6 +456,57 @@ jsg::Ref<Request> Request::constructor(
       redirect = oldRequest->getRedirectEnum();
       fetcher = oldRequest->getFetcher();
       signal = oldRequest->getSignal();
+    }
+    KJ_CASE_ONEOF(p, jsg::Proxy<RequestProxy>) {
+      auto value = kj::mv(p.value);
+      url = kj::mv(value.url);
+      if (FeatureFlags::get(js).getFetchStandardUrl()) {
+        auto parsed = JSG_REQUIRE_NONNULL(
+            jsg::Url::tryParse(url.asPtr()), TypeError, kj::str("Invalid URL: ", url));
+        url = kj::str(parsed.getHref());
+      }
+      KJ_IF_SOME(m, value.method) {
+        // Same parsing as initDict (lines 478-503)
+        KJ_IF_SOME(code, tryParseHttpMethod(m)) {
+          method = code;
+        } else KJ_IF_SOME(code, kj::tryParseHttpMethod(toUpper(m))) {
+          method = code;
+          if (!FeatureFlags::get(js).getUpperCaseAllHttpMethods()) {
+            switch (method) {
+              case kj::HttpMethod::GET:
+              case kj::HttpMethod::POST:
+              case kj::HttpMethod::PUT:
+              case kj::HttpMethod::DELETE:
+              case kj::HttpMethod::HEAD:
+              case kj::HttpMethod::OPTIONS:
+                break;
+              default:
+                JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
+            }
+          }
+        } else {
+          JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
+        }
+      }
+      KJ_IF_SOME(h, value.headers) {
+        headers = Headers::constructor(js, kj::mv(h));
+      }
+      KJ_IF_SOME(r, value.redirect) {
+        redirect = JSG_REQUIRE_NONNULL(Request::tryParseRedirect(r), TypeError,
+            "Invalid redirect value, must be one of \"follow\" or \"manual\" ...");
+      }
+      KJ_IF_SOME(s, value.signal) {
+        signal = kj::mv(s);
+      }
+      KJ_IF_SOME(c, value.cf) {
+        auto cloned = c.deepClone(js);
+        cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
+      }
+      KJ_IF_SOME(b, kj::mv(value.body).orDefault(kj::none)) {
+        body = Body::extractBody(js, kj::mv(b));
+        JSG_REQUIRE(method != kj::HttpMethod::GET && method != kj::HttpMethod::HEAD, TypeError,
+            "Request with a GET or HEAD method cannot have a body.");
+      }
     }
   }
 

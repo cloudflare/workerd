@@ -442,7 +442,8 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public ObjectWrapper<Self>,
                    public V8HandleWrapper,
                    public UnimplementedWrapper,
-                   public JsValueWrapper {
+                   public JsValueWrapper,
+                   public ProxyWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
  public:
   template <typename MetaConfiguration>
@@ -506,6 +507,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(V8HandleWrapper);
   USING_WRAPPER(UnimplementedWrapper);
   USING_WRAPPER(JsValueWrapper);
+  USING_WRAPPER(ProxyWrapper<Self>);
 #undef USING_WRAPPER
 
   template <typename U>
