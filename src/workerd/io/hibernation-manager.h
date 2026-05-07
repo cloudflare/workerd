@@ -6,6 +6,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/web-socket-data-message.h>
 #include <workerd/api/web-socket.h>
 #include <workerd/jsg/jsg.h>
 
@@ -35,8 +36,8 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
   // This converts our activeOrPackage from an api::WebSocket to a HibernationPackage.
   void hibernateWebSockets(Worker::Lock& lock) override;
 
-  void setWebSocketAutoResponse(
-      kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) override;
+  void setWebSocketAutoResponse(kj::Maybe<api::WebSocketDataMessage> request,
+      kj::Maybe<api::WebSocketDataMessage> response) override;
   kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
       jsg::Lock& js) override;
   void setTimerChannel(TimerChannel& timerChannel) override;
@@ -165,13 +166,13 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
     TagCollection(TagCollection&& other) = default;
   };
 
-  // This structure will hold the request and corresponding response for hibernatable websockets
-  // auto-response feature. Although we store 2 kj::Maybe strings, if we don't have a request set
-  // we can't have a response, and vice versa.
-  // TODO(cleanup): Remove kj::Maybe from request and response strings.
+  // Holds the request/response pair for hibernatable websockets auto-response feature.
   struct AutoRequestResponsePair {
-    kj::Maybe<kj::String> request = kj::none;
-    kj::Maybe<kj::String> response = kj::none;
+    struct Pair {
+      api::WebSocketDataMessage request;
+      api::WebSocketDataMessage response;
+    };
+    kj::Maybe<Pair> pair;
   };
 
   // A hashmap of tags to HibernatableWebSockets associated with the tag.

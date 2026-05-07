@@ -85,6 +85,7 @@ filegroup(
         "unsafe.h",
         "url-standard.h",
         "web-socket.h",
+        "web-socket-data-message.h",
         "worker-rpc.h",
     ] + glob(
         [

@@ -777,9 +777,12 @@ export interface DurableObjectSetAlarmOptions {
   allowUnconfirmed?: boolean;
 }
 export declare class WebSocketRequestResponsePair {
-  constructor(request: string, response: string);
-  get request(): string;
-  get response(): string;
+  constructor(
+    request: (ArrayBuffer | ArrayBufferView) | string,
+    response: (ArrayBuffer | ArrayBufferView) | string,
+  );
+  get request(): ArrayBuffer | string;
+  get response(): ArrayBuffer | string;
 }
 export interface DurableObjectFacets {
   get<T extends Rpc.DurableObjectBranded | undefined = undefined>(

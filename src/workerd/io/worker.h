@@ -5,6 +5,7 @@
 #pragma once
 // Classes to manage lifetime of workers, scripts, and isolates.
 
+#include <workerd/api/web-socket-data-message.h>
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
@@ -888,8 +889,8 @@ class Worker::Actor final: public kj::Refcounted {
     virtual kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(
         jsg::Lock& js, kj::Maybe<kj::StringPtr> tag) = 0;
     virtual void hibernateWebSockets(Worker::Lock& lock) = 0;
-    virtual void setWebSocketAutoResponse(
-        kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) = 0;
+    virtual void setWebSocketAutoResponse(kj::Maybe<api::WebSocketDataMessage> request,
+        kj::Maybe<api::WebSocketDataMessage> response) = 0;
     virtual kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
         jsg::Lock& js) = 0;
     virtual void setTimerChannel(TimerChannel& timerChannel) = 0;

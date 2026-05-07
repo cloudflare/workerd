@@ -9,6 +9,7 @@
 
 #include <workerd/api/actor.h>
 #include <workerd/api/container.h>
+#include <workerd/api/web-socket-data-message.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
@@ -537,20 +538,23 @@ class ActorState: public jsg::Object {
 
 class WebSocketRequestResponsePair: public jsg::Object {
  public:
-  WebSocketRequestResponsePair(kj::String request, kj::String response)
+  WebSocketRequestResponsePair(WebSocketDataMessage request, WebSocketDataMessage response)
       : request(kj::mv(request)),
         response(kj::mv(response)) {};
 
-  static jsg::Ref<WebSocketRequestResponsePair> constructor(
-      jsg::Lock& js, kj::String request, kj::String response) {
-    return js.alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
+  static jsg::Ref<WebSocketRequestResponsePair> constructor(jsg::Lock& js,
+      kj::OneOf<kj::Array<kj::byte>, kj::String> request,
+      kj::OneOf<kj::Array<kj::byte>, kj::String> response) {
+    auto req = WebSocketDataMessage(kj::mv(request));
+    auto resp = WebSocketDataMessage(kj::mv(response));
+    return js.alloc<WebSocketRequestResponsePair>(kj::mv(req), kj::mv(resp));
   };
 
-  kj::StringPtr getRequest() {
-    return request.asPtr();
+  kj::OneOf<kj::Array<kj::byte>, kj::String> getRequest() {
+    return toJsgOneOf(request);
   }
-  kj::StringPtr getResponse() {
-    return response.asPtr();
+  kj::OneOf<kj::Array<kj::byte>, kj::String> getResponse() {
+    return toJsgOneOf(response);
   }
 
   JSG_RESOURCE_TYPE(WebSocketRequestResponsePair) {
@@ -559,13 +563,25 @@ class WebSocketRequestResponsePair: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("request", request);
-    tracker.trackField("response", response);
+    tracker.trackFieldWithSize("request", request.size());
+    tracker.trackFieldWithSize("response", response.size());
   }
 
  private:
-  kj::String request;
-  kj::String response;
+  WebSocketDataMessage request;
+  WebSocketDataMessage response;
+
+  static kj::OneOf<kj::Array<kj::byte>, kj::String> toJsgOneOf(const WebSocketDataMessage& msg) {
+    KJ_SWITCH_ONEOF(msg.asOneOf()) {
+      KJ_CASE_ONEOF(text, kj::StringPtr) {
+        return kj::str(text);
+      }
+      KJ_CASE_ONEOF(bytes, kj::ArrayPtr<const kj::byte>) {
+        return kj::heapArray(bytes);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
 };
 
 // The type passed as the first parameter to durable object class's constructor.

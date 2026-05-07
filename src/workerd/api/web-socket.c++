@@ -862,11 +862,11 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
   }
 }
 
-kj::Promise<void> WebSocket::sendAutoResponse(kj::String message, kj::WebSocket& ws) {
+kj::Promise<void> WebSocket::sendAutoResponse(WebSocketDataMessage message, kj::WebSocket& ws) {
   if (autoResponseStatus.isPumping) {
     autoResponseStatus.pendingAutoResponseDeque.push(kj::mv(message));
   } else if (!autoResponseStatus.isClosed) {
-    auto p = ws.send(message).fork();
+    auto p = message.sendVia(ws).fork();
     KJ_IF_SOME(context, IoContext::tryCurrent()) {
       autoResponseStatus.ongoingAutoResponse.emplace(context.addObject(kj::heap(p.addBranch())));
     } else {
@@ -965,7 +965,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
         auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
         gatedMessage.pendingAutoResponses--;
         autoResponse.queuedAutoResponses--;
-        co_await ws.send(message);
+        co_await message.sendVia(ws);
       }
 
       KJ_SWITCH_ONEOF(gatedMessage.message) {
@@ -997,7 +997,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
     // We should also check if the last sent message was a close. Shouldn't happen.
     while (!autoResponse.pendingAutoResponseDeque.empty() && !autoResponse.isClosed) {
       auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
-      co_await ws.send(message);
+      co_await message.sendVia(ws);
     }
 
     // While we were `co_await`ing the auto-response send, more messages could have been queued
