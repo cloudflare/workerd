@@ -192,8 +192,6 @@ void HibernationManagerImpl::setWebSocketAutoResponse(
     kj::Maybe<api::WebSocketDataMessage> request, kj::Maybe<api::WebSocketDataMessage> response) {
   KJ_IF_SOME(req, request) {
     auto& resp = KJ_REQUIRE_NONNULL(response);
-    KJ_REQUIRE(req.isText() == resp.isText(),
-        "request and response must be the same type (both text or both binary)");
     autoResponsePair->pair = AutoRequestResponsePair::Pair{kj::mv(req), kj::mv(resp)};
     return;
   }
@@ -203,8 +201,6 @@ void HibernationManagerImpl::setWebSocketAutoResponse(
 kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::
     getWebSocketAutoResponse(jsg::Lock& js) {
   KJ_IF_SOME(pair, autoResponsePair->pair) {
-    KJ_DASSERT(pair.request.isText() == pair.response.isText(),
-        "stored auto-response pair has mismatched types");
     return js.alloc<api::WebSocketRequestResponsePair>(
         pair.request.asPtr().toOwned(), pair.response.asPtr().toOwned());
   }

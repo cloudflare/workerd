@@ -547,8 +547,6 @@ class WebSocketRequestResponsePair: public jsg::Object {
       kj::OneOf<kj::Array<kj::byte>, kj::String> response) {
     auto req = WebSocketDataMessage(kj::mv(request));
     auto resp = WebSocketDataMessage(kj::mv(response));
-    JSG_REQUIRE(req.isText() == resp.isText(), TypeError,
-        "Request and response must be the same type (both text or both binary).");
     return js.alloc<WebSocketRequestResponsePair>(kj::mv(req), kj::mv(resp));
   };
 

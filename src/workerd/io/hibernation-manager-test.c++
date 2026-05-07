@@ -1209,16 +1209,34 @@ KJ_TEST(
   end1->receive().wait(fixture.getWaitScope());
 }
 
-KJ_TEST("HibernationManager: setWebSocketAutoResponse rejects mismatched types") {
+KJ_TEST("HibernationManager: setWebSocketAutoResponse allows mismatched types") {
   DispatchStats stats;
   TestFixture fixture(stubLoopbackParams(stats, kj::str("mixed-types")));
   auto hm = makeTestHm(fixture);
 
   kj::byte binaryData[] = {0x01, 0x02, 0x03};
 
-  KJ_EXPECT_THROW_MESSAGE("request and response must be the same type",
-      hm->setWebSocketAutoResponse(api::WebSocketDataMessage(kj::str("ping")),
-          api::WebSocketDataMessage(kj::heapArray<kj::byte>(binaryData))));
+  hm->setWebSocketAutoResponse(api::WebSocketDataMessage(kj::str("ping")),
+      api::WebSocketDataMessage(kj::heapArray<kj::byte>(binaryData)));
+
+  auto request = fixture.newIncomingRequest();
+
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto maybePair = hm->getWebSocketAutoResponse(env.js);
+    auto pair = KJ_ASSERT_NONNULL(kj::mv(maybePair));
+    auto gotReq = pair->getRequest();
+    auto gotResp = pair->getResponse();
+
+    KJ_ASSERT(gotReq.is<kj::String>());
+    KJ_ASSERT(gotReq.get<kj::String>() == "ping"_kj);
+
+    KJ_ASSERT(gotResp.is<kj::Array<kj::byte>>());
+    auto& respBytes = gotResp.get<kj::Array<kj::byte>>();
+    KJ_ASSERT(respBytes.size() == 3 && respBytes[0] == 0x01 && respBytes[1] == 0x02 &&
+        respBytes[2] == 0x03);
+  });
+
+  fixture.drainAndDestroy(kj::mv(request));
 }
 
 }  // namespace
