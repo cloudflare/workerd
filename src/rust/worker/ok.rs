@@ -8,10 +8,10 @@ use std::time::SystemTime;
 use cxx::KjError;
 use cxx::KjExceptionType;
 use kj::http::ConnectResponse;
-use kj::http::HttpConnectSettings;
-use kj::http::HttpHeadersRef;
-use kj::http::HttpMethod;
-use kj::http::HttpServiceResponse;
+use kj::http::ConnectSettings;
+use kj::http::HeadersRef;
+use kj::http::Method;
+use kj::http::ServiceResponse;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 
@@ -46,14 +46,14 @@ impl Worker {
 }
 
 #[async_trait::async_trait(?Send)]
-impl kj::http::HttpService for Worker {
+impl kj::http::Service for Worker {
     async fn request<'a>(
         &'a mut self,
-        _method: HttpMethod,
+        _method: Method,
         _url: &'a [u8],
-        headers: HttpHeadersRef<'a>,
+        headers: HeadersRef<'a>,
         _request_body: Pin<&'a mut AsyncInputStream>,
-        response: HttpServiceResponse<'a>,
+        response: ServiceResponse<'a>,
     ) -> crate::Result<()> {
         let headers = headers.clone_shallow();
         let mut body = response.send(200, "OK", &headers, Some(2_u64))?;
@@ -64,10 +64,10 @@ impl kj::http::HttpService for Worker {
     async fn connect<'a>(
         &'a mut self,
         _host: &'a [u8],
-        _headers: HttpHeadersRef<'a>,
+        _headers: HeadersRef<'a>,
         _connection: Pin<&'a mut AsyncIoStream>,
         _response: ConnectResponse<'a>,
-        _settings: HttpConnectSettings<'a>,
+        _settings: ConnectSettings<'a>,
     ) -> crate::Result<()> {
         Err(Self::not_implemented("connect"))
     }
