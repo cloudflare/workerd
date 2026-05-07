@@ -545,6 +545,8 @@ class WebSocketRequestResponsePair: public jsg::Object {
   static jsg::Ref<WebSocketRequestResponsePair> constructor(jsg::Lock& js,
       kj::OneOf<kj::String, kj::Array<kj::byte>> request,
       kj::OneOf<kj::String, kj::Array<kj::byte>> response) {
+    JSG_REQUIRE(request.is<kj::String>() == response.is<kj::String>(), TypeError,
+        "Request and response must be the same type (both text or both binary).");
     return js.alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
   };
 

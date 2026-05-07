@@ -194,14 +194,16 @@ void HibernationManagerImpl::setWebSocketAutoResponse(
   KJ_IF_SOME(req, request) {
     // If we have a request, we must also have a response. If response is kj::none, we'll throw.
     auto resp = KJ_REQUIRE_NONNULL(response);
+    KJ_REQUIRE(req.is<kj::StringPtr>() == resp.is<kj::StringPtr>(),
+        "request and response must be the same type (both text or both binary)");
     KJ_SWITCH_ONEOF(req) {
       KJ_CASE_ONEOF(text, kj::StringPtr) {
-        autoResponsePair->pair = AutoRequestResponsePair::TextPair{
-          kj::str(text), kj::str(KJ_ASSERT_NONNULL(resp.tryGet<kj::StringPtr>()))};
+        autoResponsePair->pair =
+            AutoRequestResponsePair::TextPair{kj::str(text), kj::str(resp.get<kj::StringPtr>())};
       }
       KJ_CASE_ONEOF(bytes, kj::ArrayPtr<const kj::byte>) {
-        autoResponsePair->pair = AutoRequestResponsePair::BinaryPair{kj::heapArray(bytes),
-          kj::heapArray(KJ_ASSERT_NONNULL(resp.tryGet<kj::ArrayPtr<const kj::byte>>()))};
+        autoResponsePair->pair = AutoRequestResponsePair::BinaryPair{
+          kj::heapArray(bytes), kj::heapArray(resp.get<kj::ArrayPtr<const kj::byte>>())};
       }
     }
     return;

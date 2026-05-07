@@ -1211,5 +1211,20 @@ KJ_TEST(
   end1->receive().wait(fixture.getWaitScope());
 }
 
+KJ_TEST("HibernationManager: setWebSocketAutoResponse rejects mismatched types") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("mixed-types")));
+  auto hm = makeTestHm(fixture);
+
+  using AutoResponseData = kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>;
+  auto textRequest = kj::Maybe<AutoResponseData>(AutoResponseData("ping"_kj));
+  kj::byte binaryData[] = {0x01, 0x02, 0x03};
+  auto binaryResponse =
+      kj::Maybe<AutoResponseData>(AutoResponseData(kj::ArrayPtr<const kj::byte>(binaryData)));
+
+  KJ_EXPECT_THROW_MESSAGE("request and response must be the same type",
+      hm->setWebSocketAutoResponse(kj::mv(textRequest), kj::mv(binaryResponse)));
+}
+
 }  // namespace
 }  // namespace workerd
