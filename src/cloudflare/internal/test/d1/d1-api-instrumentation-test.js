@@ -44,6 +44,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 0,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -99,6 +100,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 0,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -125,6 +127,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 0,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -151,6 +154,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 0,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -177,6 +181,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 0,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -209,6 +214,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 2,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -235,6 +241,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 2,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -267,6 +274,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 2,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -293,6 +301,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -319,6 +328,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -345,6 +355,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -371,6 +382,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -397,6 +409,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -423,6 +436,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -449,6 +463,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -475,6 +490,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -501,6 +517,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -527,6 +544,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -553,6 +571,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -579,6 +598,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -605,6 +625,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -631,6 +652,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -657,6 +679,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -683,6 +706,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -712,6 +736,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -738,6 +763,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -764,6 +790,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -790,6 +817,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -816,6 +844,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -842,6 +871,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -873,6 +903,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 5,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -899,6 +930,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -925,6 +957,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -951,6 +984,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -977,6 +1011,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -1003,6 +1038,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {
@@ -1030,6 +1066,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.served_by_colo': 'DFW',
     closed: true,
   },
   {

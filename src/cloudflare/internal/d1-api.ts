@@ -20,6 +20,11 @@ interface D1Meta {
   served_by_region?: string;
 
   /**
+   * The three-letter airport code of the colo that executed the query.
+   */
+  served_by_colo?: string;
+
+  /**
    * True if-and-only-if the database instance that executed the query was the primary.
    */
   served_by_primary?: boolean;
@@ -754,6 +759,10 @@ function addD1MetaToSpan(span: Span, meta: D1Meta): void {
     meta.served_by_region
   );
   span.setAttribute(
+    'cloudflare.d1.response.served_by_colo',
+    meta.served_by_colo
+  );
+  span.setAttribute(
     'cloudflare.d1.response.served_by_primary',
     meta.served_by_primary
   );
@@ -794,6 +803,9 @@ function aggregateD1Meta(metas: PartialD1Meta[]): D1Meta {
     aggregatedMeta.last_row_id = meta.last_row_id ?? 0;
     if (meta.served_by_region) {
       aggregatedMeta.served_by_region = meta.served_by_region;
+    }
+    if (meta.served_by_colo) {
+      aggregatedMeta.served_by_colo = meta.served_by_colo;
     }
     if (meta.served_by_primary) {
       aggregatedMeta.served_by_primary = meta.served_by_primary;

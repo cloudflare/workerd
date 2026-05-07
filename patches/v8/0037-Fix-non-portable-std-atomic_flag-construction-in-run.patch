@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Carney <dcarney@cloudflare.com>
+Date: Tue, 5 May 2026 16:08:11 +0000
+Subject: Fix non-portable std::atomic_flag construction in runtime-test.cc
+
+std::atomic_flag has only a default constructor (per C++20+); MSVC's
+standard library correctly rejects 'std::atomic_flag flag{false}'.
+Initial state of a default-constructed atomic_flag is unspecified
+before C++20, but cleared from C++20 onward, which matches the
+intent of the original code (which used the equivalent of false).
+
+diff --git a/src/runtime/runtime-test.cc b/src/runtime/runtime-test.cc
+index 12a2ead2d07900e70100d862f58db68401d96901..00ff940e335df0224081cd93198c293f748b964a 100644
+--- a/src/runtime/runtime-test.cc
++++ b/src/runtime/runtime-test.cc
+@@ -1173,7 +1173,7 @@ RUNTIME_FUNCTION(Runtime_SetAllocationTimeout) {
+   CONVERT_INT32_ARG_FUZZ_SAFE(timeout, 1);
+   isolate->heap()->set_allocation_timeout(timeout);
+ #else   // !V8_ENABLE_ALLOCATION_TIMEOUT
+-  static std::atomic_flag printed_warning{false};
++  static std::atomic_flag printed_warning;
+   if (!printed_warning.test_and_set()) {
+     base::OS::PrintError(
+         "Warning: %%SetAllocationTimeout has no effect in this build. Set the "

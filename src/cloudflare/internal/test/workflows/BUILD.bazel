@@ -5,16 +5,3 @@ wd_test(
     args = ["--experimental"],
     data = glob(["*.js"]),
 )
-
-wd_test(
-    src = "workflows-step-promise-test.wd-test",
-    args = ["--experimental"],
-    data = glob(["*.js"]),
-)
-
-wd_test(
-    src = "workflows-no-rollback-test.wd-test",
-    args = ["--experimental"],
-    data = glob(["*.js"]),
-    # Flag-disabled regression: same JS, no workflows_step_rollback flag.
-)

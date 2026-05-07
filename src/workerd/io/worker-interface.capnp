@@ -24,6 +24,17 @@ struct TraceId {
   low @1 :UInt64;
 }
 
+# W3C trace flags from an upstream traceparent.
+# Bit 0 = sampled. Only meaningful when set to a value.
+# When the field is missing or the union is unset, no upstream sampling decision
+# was made and the tail worker should make its own sampling decision.
+struct TraceFlags {
+  value :union {
+    unset @0 :Void;
+    set @1 :UInt8;
+  }
+}
+
 # InvocationSpanContext used to identify the current tracing context. Only used internally so far.
 struct InvocationSpanContext {
   # The 128-bit ID uniquely identifying a trace.
@@ -32,6 +43,8 @@ struct InvocationSpanContext {
   invocationId @1 :TraceId;
   # The 64-bit span ID identifying an individual span within a worker stage invocation.
   spanId @2 :UInt64;
+  # W3C trace flags.
+  traceFlags @3 :TraceFlags;
 }
 
 # Span context for a tail event – this is provided for each tail event.
@@ -49,6 +62,8 @@ struct SpanContext {
     empty @1 :Void;
     spanId @2 :UInt64;
   }
+  # W3C trace flags.
+  traceFlags @3 :TraceFlags;
 }
 
 struct Trace @0x8e8d911203762d34 {

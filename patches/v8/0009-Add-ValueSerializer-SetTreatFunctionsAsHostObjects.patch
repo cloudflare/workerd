@@ -30,10 +30,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 143455f17aad7a96d742bca54fef720d84b6d4c3..8304456b2a1c49769078800b98ba52dad410e8fb 100644
+index 2c226e1467d952fd80c5356f7993f8af00c5f35d..877765bf5f57a2953aa2d1e0869ae5db12e8b6b1 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3579,6 +3579,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3588,6 +3588,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  
@@ -45,7 +45,7 @@ index 143455f17aad7a96d742bca54fef720d84b6d4c3..8304456b2a1c49769078800b98ba52da
                                          Local<Value> value) {
    auto i_isolate = i::Isolate::Current();
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 324bf5298c9d93f160946caf13f3df74351de17e..a0460c95b91d5089010db3a53cc8592c6155a6c4 100644
+index fc4dc2477d48c97145237e922d3bcba16140c47d..97b7f51664dda24ffb0c94e4033b2eff2ba4daee 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -335,6 +335,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {

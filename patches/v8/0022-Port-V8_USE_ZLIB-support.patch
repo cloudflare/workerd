@@ -6,7 +6,7 @@ Subject: Port V8_USE_ZLIB support
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index d859282148a9198008f44d287df3747305ed6060..6a5b53b4b67436176f38b50822876b9044630c83 100644
+index 71db68eef5cce90ec721dabdef446aee224bce9a..42ed7c61f0a5bcb5316e624e8c5b29c19d355970 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -162,6 +162,11 @@ v8_flag(name = "v8_enable_verify_predictable")
@@ -29,7 +29,7 @@ index d859282148a9198008f44d287df3747305ed6060..6a5b53b4b67436176f38b50822876b90
      },
      defines = [
          "GOOGLE3",
-@@ -4658,6 +4664,8 @@ v8_library(
+@@ -4676,6 +4682,8 @@ v8_library(
          "@highway//:hwy",
          "@fast_float",
          "@simdutf",
@@ -39,7 +39,7 @@ index d859282148a9198008f44d287df3747305ed6060..6a5b53b4b67436176f38b50822876b90
  )
  
 diff --git a/src/deoptimizer/frame-translation-builder.cc b/src/deoptimizer/frame-translation-builder.cc
-index 3c1ed7cf1e45ab4b87dd134430f7cda321e5e338..fa41e87973bebbe36da35e90a513653779bc1915 100644
+index 497f11e5cd2c20b33b86a71615fb12e48c32048f..b2bbe6aca39bec6299551be0932eda89034775e8 100644
 --- a/src/deoptimizer/frame-translation-builder.cc
 +++ b/src/deoptimizer/frame-translation-builder.cc
 @@ -11,7 +11,7 @@
@@ -52,7 +52,7 @@ index 3c1ed7cf1e45ab4b87dd134430f7cda321e5e338..fa41e87973bebbe36da35e90a5136537
  
  namespace v8 {
 diff --git a/src/objects/deoptimization-data.cc b/src/objects/deoptimization-data.cc
-index b6f9151bd9acb5c82cb8de0d9f26d00c51b305f7..589d5947d17ca2f12e360fb2934149c19fd6d288 100644
+index db3b6ee16e17c8eb0c338e76054dc59c08967c24..be26237d335be4cde756f147940227262f6917ed 100644
 --- a/src/objects/deoptimization-data.cc
 +++ b/src/objects/deoptimization-data.cc
 @@ -14,7 +14,7 @@
