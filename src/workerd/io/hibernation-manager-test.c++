@@ -136,9 +136,8 @@ kj::Own<Worker::Actor::HibernationManager> makeTestHm(TestFixture& fixture) {
 kj::Own<Worker::Actor::HibernationManager> makeTestHm(
     TestFixture& fixture, kj::StringPtr autoRequest, kj::StringPtr autoResponse) {
   auto hm = makeTestHm(fixture);
-  using AutoResponseData = kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>;
-  hm->setWebSocketAutoResponse(kj::Maybe<AutoResponseData>(AutoResponseData(autoRequest)),
-      kj::Maybe<AutoResponseData>(AutoResponseData(autoResponse)));
+  hm->setWebSocketAutoResponse(api::WebSocketDataMessage(kj::str(autoRequest)),
+      api::WebSocketDataMessage(kj::str(autoResponse)));
   return hm;
 }
 
@@ -146,9 +145,8 @@ kj::Own<Worker::Actor::HibernationManager> makeTestHm(TestFixture& fixture,
     kj::ArrayPtr<const kj::byte> autoRequest,
     kj::ArrayPtr<const kj::byte> autoResponse) {
   auto hm = makeTestHm(fixture);
-  using AutoResponseData = kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>;
-  hm->setWebSocketAutoResponse(kj::Maybe<AutoResponseData>(AutoResponseData(autoRequest)),
-      kj::Maybe<AutoResponseData>(AutoResponseData(autoResponse)));
+  hm->setWebSocketAutoResponse(api::WebSocketDataMessage(kj::heapArray(autoRequest)),
+      api::WebSocketDataMessage(kj::heapArray(autoResponse)));
   return hm;
 }
 
@@ -1097,12 +1095,12 @@ KJ_TEST("HibernationManager: getWebSocketAutoResponse round-trips binary data") 
     auto gotReq = pair->getRequest();
     auto gotResp = pair->getResponse();
 
-    KJ_ASSERT(gotReq.is<kj::ArrayPtr<const kj::byte>>());
-    auto& reqBytes = gotReq.get<kj::ArrayPtr<const kj::byte>>();
+    KJ_ASSERT(gotReq.is<kj::Array<kj::byte>>());
+    auto& reqBytes = gotReq.get<kj::Array<kj::byte>>();
     KJ_ASSERT(reqBytes.size() == 2 && reqBytes[0] == 0xde && reqBytes[1] == 0xad);
 
-    KJ_ASSERT(gotResp.is<kj::ArrayPtr<const kj::byte>>());
-    auto& respBytes = gotResp.get<kj::ArrayPtr<const kj::byte>>();
+    KJ_ASSERT(gotResp.is<kj::Array<kj::byte>>());
+    auto& respBytes = gotResp.get<kj::Array<kj::byte>>();
     KJ_ASSERT(respBytes.size() == 2 && respBytes[0] == 0xbe && respBytes[1] == 0xef);
   });
 
@@ -1121,11 +1119,11 @@ KJ_TEST("HibernationManager: getWebSocketAutoResponse round-trips text data") {
     auto gotReq = pair->getRequest();
     auto gotResp = pair->getResponse();
 
-    KJ_ASSERT(gotReq.is<kj::StringPtr>());
-    KJ_ASSERT(gotReq.get<kj::StringPtr>() == "hello"_kj);
+    KJ_ASSERT(gotReq.is<kj::String>());
+    KJ_ASSERT(gotReq.get<kj::String>() == "hello"_kj);
 
-    KJ_ASSERT(gotResp.is<kj::StringPtr>());
-    KJ_ASSERT(gotResp.get<kj::StringPtr>() == "world"_kj);
+    KJ_ASSERT(gotResp.is<kj::String>());
+    KJ_ASSERT(gotResp.get<kj::String>() == "world"_kj);
   });
 
   fixture.drainAndDestroy(kj::mv(request));
@@ -1216,14 +1214,11 @@ KJ_TEST("HibernationManager: setWebSocketAutoResponse rejects mismatched types")
   TestFixture fixture(stubLoopbackParams(stats, kj::str("mixed-types")));
   auto hm = makeTestHm(fixture);
 
-  using AutoResponseData = kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>;
-  auto textRequest = kj::Maybe<AutoResponseData>(AutoResponseData("ping"_kj));
   kj::byte binaryData[] = {0x01, 0x02, 0x03};
-  auto binaryResponse =
-      kj::Maybe<AutoResponseData>(AutoResponseData(kj::ArrayPtr<const kj::byte>(binaryData)));
 
   KJ_EXPECT_THROW_MESSAGE("request and response must be the same type",
-      hm->setWebSocketAutoResponse(kj::mv(textRequest), kj::mv(binaryResponse)));
+      hm->setWebSocketAutoResponse(api::WebSocketDataMessage(kj::str("ping")),
+          api::WebSocketDataMessage(kj::heapArray<kj::byte>(binaryData))));
 }
 
 }  // namespace

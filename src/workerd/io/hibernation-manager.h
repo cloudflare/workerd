@@ -6,6 +6,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/web-socket-data-message.h>
 #include <workerd/api/web-socket.h>
 #include <workerd/jsg/jsg.h>
 
@@ -35,9 +36,8 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
   // This converts our activeOrPackage from an api::WebSocket to a HibernationPackage.
   void hibernateWebSockets(Worker::Lock& lock) override;
 
-  void setWebSocketAutoResponse(
-      kj::Maybe<kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>> request,
-      kj::Maybe<kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>> response) override;
+  void setWebSocketAutoResponse(kj::Maybe<api::WebSocketDataMessage> request,
+      kj::Maybe<api::WebSocketDataMessage> response) override;
   kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
       jsg::Lock& js) override;
   void setTimerChannel(TimerChannel& timerChannel) override;
@@ -168,15 +168,11 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
 
   // Holds the request/response pair for hibernatable websockets auto-response feature.
   struct AutoRequestResponsePair {
-    struct TextPair {
-      kj::String request;
-      kj::String response;
+    struct Pair {
+      api::WebSocketDataMessage request;
+      api::WebSocketDataMessage response;
     };
-    struct BinaryPair {
-      kj::Array<kj::byte> request;
-      kj::Array<kj::byte> response;
-    };
-    kj::Maybe<kj::OneOf<TextPair, BinaryPair>> pair;
+    kj::Maybe<Pair> pair;
   };
 
   // A hashmap of tags to HibernatableWebSockets associated with the tag.

@@ -9,6 +9,7 @@
 
 #include <workerd/api/actor.h>
 #include <workerd/api/container.h>
+#include <workerd/api/web-socket-data-message.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
@@ -537,40 +538,25 @@ class ActorState: public jsg::Object {
 
 class WebSocketRequestResponsePair: public jsg::Object {
  public:
-  WebSocketRequestResponsePair(kj::OneOf<kj::String, kj::Array<kj::byte>> request,
-      kj::OneOf<kj::String, kj::Array<kj::byte>> response)
+  WebSocketRequestResponsePair(WebSocketDataMessage request, WebSocketDataMessage response)
       : request(kj::mv(request)),
         response(kj::mv(response)) {};
 
   static jsg::Ref<WebSocketRequestResponsePair> constructor(jsg::Lock& js,
-      kj::OneOf<kj::String, kj::Array<kj::byte>> request,
-      kj::OneOf<kj::String, kj::Array<kj::byte>> response) {
-    JSG_REQUIRE(request.is<kj::String>() == response.is<kj::String>(), TypeError,
+      kj::OneOf<kj::Array<kj::byte>, kj::String> request,
+      kj::OneOf<kj::Array<kj::byte>, kj::String> response) {
+    auto req = WebSocketDataMessage(kj::mv(request));
+    auto resp = WebSocketDataMessage(kj::mv(response));
+    JSG_REQUIRE(req.isText() == resp.isText(), TypeError,
         "Request and response must be the same type (both text or both binary).");
-    return js.alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
+    return js.alloc<WebSocketRequestResponsePair>(kj::mv(req), kj::mv(resp));
   };
 
-  kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>> getRequest() {
-    KJ_SWITCH_ONEOF(request) {
-      KJ_CASE_ONEOF(s, kj::String) {
-        return kj::StringPtr(s);
-      }
-      KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {
-        return kj::ArrayPtr<const kj::byte>(b);
-      }
-    }
-    KJ_UNREACHABLE;
+  kj::OneOf<kj::Array<kj::byte>, kj::String> getRequest() {
+    return toJsgOneOf(request);
   }
-  kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>> getResponse() {
-    KJ_SWITCH_ONEOF(response) {
-      KJ_CASE_ONEOF(s, kj::String) {
-        return kj::StringPtr(s);
-      }
-      KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {
-        return kj::ArrayPtr<const kj::byte>(b);
-      }
-    }
-    KJ_UNREACHABLE;
+  kj::OneOf<kj::Array<kj::byte>, kj::String> getResponse() {
+    return toJsgOneOf(response);
   }
 
   JSG_RESOURCE_TYPE(WebSocketRequestResponsePair) {
@@ -579,25 +565,25 @@ class WebSocketRequestResponsePair: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    auto track = [&](const char* name, const MessageData& data) {
-      KJ_SWITCH_ONEOF(data) {
-        KJ_CASE_ONEOF(s, kj::String) {
-          tracker.trackField(name, s);
-        }
-        KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {
-          tracker.trackField(name, b);
-        }
-      }
-    };
-    track("request", request);
-    track("response", response);
+    tracker.trackFieldWithSize("request", request.size());
+    tracker.trackFieldWithSize("response", response.size());
   }
 
  private:
-  using MessageData = kj::OneOf<kj::String, kj::Array<kj::byte>>;
+  WebSocketDataMessage request;
+  WebSocketDataMessage response;
 
-  MessageData request;
-  MessageData response;
+  static kj::OneOf<kj::Array<kj::byte>, kj::String> toJsgOneOf(const WebSocketDataMessage& msg) {
+    KJ_SWITCH_ONEOF(msg.asOneOf()) {
+      KJ_CASE_ONEOF(text, kj::StringPtr) {
+        return kj::str(text);
+      }
+      KJ_CASE_ONEOF(bytes, kj::ArrayPtr<const kj::byte>) {
+        return kj::heapArray(bytes);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
 };
 
 // The type passed as the first parameter to durable object class's constructor.

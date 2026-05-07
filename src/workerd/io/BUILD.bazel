@@ -101,6 +101,7 @@ wd_cc_library(
         "//src/workerd/api:fuzzilli",
         "//src/workerd/api:hibernation-event-params",
         "//src/workerd/api:url",
+        "//src/workerd/api:web-socket-data-message",
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",

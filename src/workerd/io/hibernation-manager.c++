@@ -189,23 +189,12 @@ kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
 }
 
 void HibernationManagerImpl::setWebSocketAutoResponse(
-    kj::Maybe<kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>> request,
-    kj::Maybe<kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>> response) {
+    kj::Maybe<api::WebSocketDataMessage> request, kj::Maybe<api::WebSocketDataMessage> response) {
   KJ_IF_SOME(req, request) {
-    // If we have a request, we must also have a response. If response is kj::none, we'll throw.
-    auto resp = KJ_REQUIRE_NONNULL(response);
-    KJ_REQUIRE(req.is<kj::StringPtr>() == resp.is<kj::StringPtr>(),
+    auto& resp = KJ_REQUIRE_NONNULL(response);
+    KJ_REQUIRE(req.isText() == resp.isText(),
         "request and response must be the same type (both text or both binary)");
-    KJ_SWITCH_ONEOF(req) {
-      KJ_CASE_ONEOF(text, kj::StringPtr) {
-        autoResponsePair->pair =
-            AutoRequestResponsePair::TextPair{kj::str(text), kj::str(resp.get<kj::StringPtr>())};
-      }
-      KJ_CASE_ONEOF(bytes, kj::ArrayPtr<const kj::byte>) {
-        autoResponsePair->pair = AutoRequestResponsePair::BinaryPair{
-          kj::heapArray(bytes), kj::heapArray(resp.get<kj::ArrayPtr<const kj::byte>>())};
-      }
-    }
+    autoResponsePair->pair = AutoRequestResponsePair::Pair{kj::mv(req), kj::mv(resp)};
     return;
   }
   autoResponsePair->pair = kj::none;
@@ -214,17 +203,10 @@ void HibernationManagerImpl::setWebSocketAutoResponse(
 kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::
     getWebSocketAutoResponse(jsg::Lock& js) {
   KJ_IF_SOME(pair, autoResponsePair->pair) {
-    KJ_SWITCH_ONEOF(pair) {
-      KJ_CASE_ONEOF(textPair, AutoRequestResponsePair::TextPair) {
-        return api::WebSocketRequestResponsePair::constructor(
-            js, kj::str(textPair.request), kj::str(textPair.response));
-      }
-      KJ_CASE_ONEOF(binPair, AutoRequestResponsePair::BinaryPair) {
-        return api::WebSocketRequestResponsePair::constructor(
-            js, kj::heapArray(binPair.request.asPtr()), kj::heapArray(binPair.response.asPtr()));
-      }
-    }
-    KJ_UNREACHABLE;
+    KJ_DASSERT(pair.request.isText() == pair.response.isText(),
+        "stored auto-response pair has mismatched types");
+    return js.alloc<api::WebSocketRequestResponsePair>(
+        pair.request.asPtr().toOwned(), pair.response.asPtr().toOwned());
   }
   return kj::none;
 }
@@ -312,16 +294,13 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
 
     KJ_IF_SOME(pair, autoResponsePair->pair) {
       bool matched = false;
-      KJ_SWITCH_ONEOF(pair) {
-        KJ_CASE_ONEOF(textPair, AutoRequestResponsePair::TextPair) {
-          KJ_IF_SOME(text, message.tryGet<kj::String>()) {
-            matched = (text == textPair.request);
-          }
+      if (pair.request.isText()) {
+        KJ_IF_SOME(text, message.tryGet<kj::String>()) {
+          matched = (text == pair.request);
         }
-        KJ_CASE_ONEOF(binPair, AutoRequestResponsePair::BinaryPair) {
-          KJ_IF_SOME(data, message.tryGet<kj::Array<kj::byte>>()) {
-            matched = (data == binPair.request);
-          }
+      } else if (pair.request.isBinary()) {
+        KJ_IF_SOME(data, message.tryGet<kj::Array<kj::byte>>()) {
+          matched = (data == pair.request);
         }
       }
 
@@ -339,32 +318,15 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
           KJ_CASE_ONEOF(apiWs, jsg::Ref<api::WebSocket>) {
             apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, kj::READY_NOW);
             // Response sending is managed in web-socket to avoid racing with regular messages.
-            KJ_SWITCH_ONEOF(pair) {
-              KJ_CASE_ONEOF(t, AutoRequestResponsePair::TextPair) {
-                co_await apiWs->sendAutoResponse(kj::str(t.response), ws);
-              }
-              KJ_CASE_ONEOF(b, AutoRequestResponsePair::BinaryPair) {
-                co_await apiWs->sendAutoResponse(kj::heapArray(b.response.asPtr()), ws);
-              }
-            }
+            co_await apiWs->sendAutoResponse(pair.response.asPtr().toOwned(), ws);
           }
           KJ_CASE_ONEOF(package, api::WebSocket::HibernationPackage) {
             if (!package.closedOutgoingConnection) {
               // Store the autoResponsePromise so that if the WebSocket unhibernates mid-send,
               // the new api::WebSocket can await it to avoid send races.
-              auto p = [&]() -> kj::ForkedPromise<void> {
-                KJ_SWITCH_ONEOF(pair) {
-                  KJ_CASE_ONEOF(t, AutoRequestResponsePair::TextPair) {
-                    return ws.send(t.response.asArray()).fork();
-                  }
-                  KJ_CASE_ONEOF(b, AutoRequestResponsePair::BinaryPair) {
-                    return ws.send(b.response.asPtr()).fork();
-                  }
-                }
-                KJ_UNREACHABLE;
-              }();
+              auto p = pair.response.sendVia(ws).fork();
               hib.autoResponsePromise = p.addBranch();
-              co_await p;
+              co_await p.addBranch();
               hib.autoResponsePromise = kj::READY_NOW;
             }
           }
