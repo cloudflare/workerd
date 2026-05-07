@@ -826,11 +826,11 @@ export interface DurableObjectSetAlarmOptions {
 }
 export declare class WebSocketRequestResponsePair {
   constructor(
-    request: string | (ArrayBuffer | ArrayBufferView),
-    response: string | (ArrayBuffer | ArrayBufferView),
+    request: (ArrayBuffer | ArrayBufferView) | string,
+    response: (ArrayBuffer | ArrayBufferView) | string,
   );
-  get request(): string | ArrayBufferView;
-  get response(): string | ArrayBufferView;
+  get request(): ArrayBuffer | string;
+  get response(): ArrayBuffer | string;
 }
 export interface DurableObjectFacets {
   get<T extends Rpc.DurableObjectBranded | undefined = undefined>(
