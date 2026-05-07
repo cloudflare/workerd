@@ -36,7 +36,8 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
   void hibernateWebSockets(Worker::Lock& lock) override;
 
   void setWebSocketAutoResponse(
-      kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) override;
+      kj::Maybe<kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>> request,
+      kj::Maybe<kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>> response) override;
   kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
       jsg::Lock& js) override;
   void setTimerChannel(TimerChannel& timerChannel) override;
@@ -165,13 +166,17 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
     TagCollection(TagCollection&& other) = default;
   };
 
-  // This structure will hold the request and corresponding response for hibernatable websockets
-  // auto-response feature. Although we store 2 kj::Maybe strings, if we don't have a request set
-  // we can't have a response, and vice versa.
-  // TODO(cleanup): Remove kj::Maybe from request and response strings.
+  // Holds the request/response pair for hibernatable websockets auto-response feature.
   struct AutoRequestResponsePair {
-    kj::Maybe<kj::String> request = kj::none;
-    kj::Maybe<kj::String> response = kj::none;
+    struct TextPair {
+      kj::String request;
+      kj::String response;
+    };
+    struct BinaryPair {
+      kj::Array<kj::byte> request;
+      kj::Array<kj::byte> response;
+    };
+    kj::Maybe<kj::OneOf<TextPair, BinaryPair>> pair;
   };
 
   // A hashmap of tags to HibernatableWebSockets associated with the tag.

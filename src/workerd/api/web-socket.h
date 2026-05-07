@@ -336,7 +336,8 @@ class WebSocket: public EventTarget {
   // These methods are c++ only and are not exposed to our js interface.
   kj::Maybe<kj::Date> getAutoResponseTimestamp();
 
-  kj::Promise<void> sendAutoResponse(kj::String message, kj::WebSocket& ws);
+  kj::Promise<void> sendAutoResponse(
+      kj::OneOf<kj::String, kj::Array<kj::byte>> message, kj::WebSocket& ws);
 
   int getReadyState();
 
@@ -599,7 +600,7 @@ class WebSocket: public EventTarget {
     using OwnedAutoResponsePromise =
         kj::OneOf<IoOwn<kj::Promise<void>>, kj::Own<kj::Promise<void>>>;
     kj::Maybe<OwnedAutoResponsePromise> ongoingAutoResponse;
-    workerd::util::Queue<kj::String> pendingAutoResponseDeque;
+    workerd::util::Queue<kj::OneOf<kj::String, kj::Array<kj::byte>>> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
     bool isClosed = false;
@@ -607,7 +608,16 @@ class WebSocket: public EventTarget {
     JSG_MEMORY_INFO(AutoResponse) {
       tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
       pendingAutoResponseDeque.forEach(
-          [&](const kj::String& message) { tracker.trackField(nullptr, message); });
+          [&](const kj::OneOf<kj::String, kj::Array<kj::byte>>& message) {
+        KJ_SWITCH_ONEOF(message) {
+          KJ_CASE_ONEOF(s, kj::String) {
+            tracker.trackField(nullptr, s);
+          }
+          KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {
+            tracker.trackField(nullptr, b);
+          }
+        }
+      });
     }
   };
 

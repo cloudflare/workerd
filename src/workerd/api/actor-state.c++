@@ -1223,16 +1223,30 @@ void DurableObjectState::setWebSocketAutoResponse(
   auto reqResp = KJ_REQUIRE_NONNULL(kj::mv(maybeReqResp));
   auto maxRequestOrResponseSize = 2048;
 
-  JSG_REQUIRE(reqResp->getRequest().size() <= maxRequestOrResponseSize, RangeError,
+  auto sizeOf = [](const auto& oneOf) -> size_t {
+    KJ_SWITCH_ONEOF(oneOf) {
+      KJ_CASE_ONEOF(s, kj::StringPtr) {
+        return s.size();
+      }
+      KJ_CASE_ONEOF(b, kj::ArrayPtr<const kj::byte>) {
+        return b.size();
+      }
+    }
+    KJ_UNREACHABLE;
+  };
+
+  auto request = reqResp->getRequest();
+  auto response = reqResp->getResponse();
+
+  JSG_REQUIRE(sizeOf(request) <= maxRequestOrResponseSize, RangeError,
       kj::str("Request cannot be larger than ", maxRequestOrResponseSize, " bytes. ",
-          "A request of size ", reqResp->getRequest().size(), " was provided."));
+          "A request of size ", sizeOf(request), " was provided."));
 
-  JSG_REQUIRE(reqResp->getResponse().size() <= maxRequestOrResponseSize, RangeError,
+  JSG_REQUIRE(sizeOf(response) <= maxRequestOrResponseSize, RangeError,
       kj::str("Response cannot be larger than ", maxRequestOrResponseSize, " bytes. ",
-          "A response of size ", reqResp->getResponse().size(), " was provided."));
+          "A response of size ", sizeOf(response), " was provided."));
 
-  maybeInitHibernationManager(a).setWebSocketAutoResponse(
-      reqResp->getRequest(), reqResp->getResponse());
+  maybeInitHibernationManager(a).setWebSocketAutoResponse(request, response);
 }
 
 kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> DurableObjectState::getWebSocketAutoResponse(

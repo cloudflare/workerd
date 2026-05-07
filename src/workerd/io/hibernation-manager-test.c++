@@ -136,7 +136,19 @@ kj::Own<Worker::Actor::HibernationManager> makeTestHm(TestFixture& fixture) {
 kj::Own<Worker::Actor::HibernationManager> makeTestHm(
     TestFixture& fixture, kj::StringPtr autoRequest, kj::StringPtr autoResponse) {
   auto hm = makeTestHm(fixture);
-  hm->setWebSocketAutoResponse(autoRequest, autoResponse);
+  using AutoResponseData = kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>;
+  hm->setWebSocketAutoResponse(kj::Maybe<AutoResponseData>(AutoResponseData(autoRequest)),
+      kj::Maybe<AutoResponseData>(AutoResponseData(autoResponse)));
+  return hm;
+}
+
+kj::Own<Worker::Actor::HibernationManager> makeTestHm(TestFixture& fixture,
+    kj::ArrayPtr<const kj::byte> autoRequest,
+    kj::ArrayPtr<const kj::byte> autoResponse) {
+  auto hm = makeTestHm(fixture);
+  using AutoResponseData = kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>;
+  hm->setWebSocketAutoResponse(kj::Maybe<AutoResponseData>(AutoResponseData(autoRequest)),
+      kj::Maybe<AutoResponseData>(AutoResponseData(autoResponse)));
   return hm;
 }
 
@@ -941,6 +953,262 @@ KJ_TEST("HibernationManager: auto-response (hibernated) bypasses the output gate
   paf.fulfiller->fulfill();
   blocker.wait(fixture.getWaitScope());
   fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: binary auto-response matches binary frame (active)") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("bin-autoresp-active")));
+  auto req = kj::heapArray<kj::byte>({0x01, 0x02, 0x03});
+  auto resp = kj::heapArray<kj::byte>({0x04, 0x05, 0x06});
+  auto hm = makeTestHm(fixture, req.asPtr(), resp.asPtr());
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  end1->send(req.asPtr()).wait(fixture.getWaitScope());
+
+  auto msg = end1->receive().wait(fixture.getWaitScope());
+  KJ_ASSERT(msg.is<kj::Array<kj::byte>>());
+  auto& got = msg.get<kj::Array<kj::byte>>();
+  KJ_ASSERT(got.size() == 3);
+  KJ_ASSERT(got[0] == 0x04 && got[1] == 0x05 && got[2] == 0x06);
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 0, "binary auto-response should not dispatch to worker",
+      stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: binary auto-response matches binary frame (hibernated)") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("bin-autoresp-hib")));
+  auto req = kj::heapArray<kj::byte>({0x01, 0x02, 0x03});
+  auto resp = kj::heapArray<kj::byte>({0x04, 0x05, 0x06});
+  auto hm = makeTestHm(fixture, req.asPtr(), resp.asPtr());
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+
+  end1->send(req.asPtr()).wait(fixture.getWaitScope());
+  auto msg = end1->receive().wait(fixture.getWaitScope());
+  KJ_ASSERT(msg.is<kj::Array<kj::byte>>());
+  auto& got = msg.get<kj::Array<kj::byte>>();
+  KJ_ASSERT(got.size() == 3);
+  KJ_ASSERT(got[0] == 0x04 && got[1] == 0x05 && got[2] == 0x06);
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls == 0, "binary auto-response should not dispatch",
+      stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: binary auto-response does NOT match text frame") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("bin-autoresp-no-text")));
+  auto req = kj::heapArray<kj::byte>({0x70, 0x69, 0x6e, 0x67});   // "ping" as bytes
+  auto resp = kj::heapArray<kj::byte>({0x70, 0x6f, 0x6e, 0x67});  // "pong" as bytes
+  auto hm = makeTestHm(fixture, req.asPtr(), resp.asPtr());
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  // Send "ping" as a TEXT frame — should NOT match the binary auto-response.
+  end1->send("ping"_kj).wait(fixture.getWaitScope());
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls >= 1,
+      "text frame should be dispatched despite matching binary content", stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: text auto-response does NOT match binary frame") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("text-autoresp-no-bin")));
+  auto hm = makeTestHm(fixture, "ping"_kj, "pong"_kj);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  // Send "ping" as a BINARY frame — should NOT match the text auto-response.
+  auto pingBytes = kj::heapArray<kj::byte>({0x70, 0x69, 0x6e, 0x67});
+  end1->send(pingBytes.asPtr()).wait(fixture.getWaitScope());
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls >= 1,
+      "binary frame should be dispatched despite matching text content", stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: binary auto-response interleaved with DO sends (active)") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("bin-autoresp-interleaved")));
+  auto req = kj::heapArray<kj::byte>({0x01, 0x02});
+  auto resp = kj::heapArray<kj::byte>({0x03, 0x04});
+  auto hm = makeTestHm(fixture, req.asPtr(), resp.asPtr());
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  sendFromDo(fixture, *request, *hm, "before"_kj);
+  end1->send(req.asPtr()).wait(fixture.getWaitScope());
+  sendFromDo(fixture, *request, *hm, "after"_kj);
+
+  bool sawBefore = false, sawPong = false, sawAfter = false;
+  for (int i = 0; i < 3; ++i) {
+    auto msg = end1->receive().wait(fixture.getWaitScope());
+    KJ_SWITCH_ONEOF(msg) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        if (text == "before"_kj)
+          sawBefore = true;
+        else if (text == "after"_kj)
+          sawAfter = true;
+        else
+          KJ_FAIL_ASSERT("unexpected text message", text);
+      }
+      KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+        KJ_ASSERT(data.size() == 2 && data[0] == 0x03 && data[1] == 0x04);
+        sawPong = true;
+      }
+      KJ_CASE_ONEOF_DEFAULT {
+        KJ_FAIL_ASSERT("unexpected message type");
+      }
+    }
+  }
+  KJ_ASSERT(sawBefore && sawPong && sawAfter);
+
+  KJ_ASSERT(stats.customEventCalls == 0, "auto-response should not dispatch to worker",
+      stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: getWebSocketAutoResponse round-trips binary data") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("bin-autoresp-roundtrip")));
+  auto req = kj::heapArray<kj::byte>({0xde, 0xad});
+  auto resp = kj::heapArray<kj::byte>({0xbe, 0xef});
+  auto hm = makeTestHm(fixture, req.asPtr(), resp.asPtr());
+  auto request = fixture.newIncomingRequest();
+
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto maybePair = hm->getWebSocketAutoResponse(env.js);
+    auto pair = KJ_ASSERT_NONNULL(kj::mv(maybePair));
+    auto gotReq = pair->getRequest();
+    auto gotResp = pair->getResponse();
+
+    KJ_ASSERT(gotReq.is<kj::ArrayPtr<const kj::byte>>());
+    auto& reqBytes = gotReq.get<kj::ArrayPtr<const kj::byte>>();
+    KJ_ASSERT(reqBytes.size() == 2 && reqBytes[0] == 0xde && reqBytes[1] == 0xad);
+
+    KJ_ASSERT(gotResp.is<kj::ArrayPtr<const kj::byte>>());
+    auto& respBytes = gotResp.get<kj::ArrayPtr<const kj::byte>>();
+    KJ_ASSERT(respBytes.size() == 2 && respBytes[0] == 0xbe && respBytes[1] == 0xef);
+  });
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: getWebSocketAutoResponse round-trips text data") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("text-autoresp-roundtrip")));
+  auto hm = makeTestHm(fixture, "hello"_kj, "world"_kj);
+  auto request = fixture.newIncomingRequest();
+
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto maybePair = hm->getWebSocketAutoResponse(env.js);
+    auto pair = KJ_ASSERT_NONNULL(kj::mv(maybePair));
+    auto gotReq = pair->getRequest();
+    auto gotResp = pair->getResponse();
+
+    KJ_ASSERT(gotReq.is<kj::StringPtr>());
+    KJ_ASSERT(gotReq.get<kj::StringPtr>() == "hello"_kj);
+
+    KJ_ASSERT(gotResp.is<kj::StringPtr>());
+    KJ_ASSERT(gotResp.get<kj::StringPtr>() == "world"_kj);
+  });
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("HibernationManager: clear auto-response with kj::none after binary set") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("bin-autoresp-clear")));
+  auto req = kj::heapArray<kj::byte>({0x01, 0x02});
+  auto resp = kj::heapArray<kj::byte>({0x03, 0x04});
+  auto hm = makeTestHm(fixture, req.asPtr(), resp.asPtr());
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  hm->setWebSocketAutoResponse(kj::none, kj::none);
+
+  end1->send(req.asPtr()).wait(fixture.getWaitScope());
+
+  fixture.pollEventLoop();
+  KJ_ASSERT(stats.customEventCalls >= 1, "after clearing, binary frame should be dispatched",
+      stats.customEventCalls);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST(
+    "HibernationManager: in-flight binary auto-response orphans BlockedSend during hibernation") {
+  KJ_EXPECT_LOG(ERROR, "another message send is already in progress");
+
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("ew-10817-bin-autoresp")));
+  auto req = kj::heapArray<kj::byte>({0x01, 0x02});
+  auto resp = kj::heapArray<kj::byte>({0x03, 0x04});
+  auto hm = makeTestHm(fixture, req.asPtr(), resp.asPtr());
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  end1->send(req.asPtr()).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto websockets = hm->getWebSockets(js, kj::none);
+    KJ_ASSERT(websockets.size() == 1);
+    websockets[0]->close(js, 1001, jsg::USVString(kj::str("stale")));
+  });
+
+  fixture.pollEventLoop();
+  end1->receive().wait(fixture.getWaitScope());
+}
+
+KJ_TEST(
+    "HibernationManager: in-flight binary auto-response orphans BlockedSend across actor eviction") {
+  KJ_EXPECT_LOG(ERROR, "another message send is already in progress");
+
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("ew-10817-cross-bin-autoresp")));
+  auto req = kj::heapArray<kj::byte>({0x01, 0x02});
+  auto resp = kj::heapArray<kj::byte>({0x03, 0x04});
+  auto hm = makeTestHm(fixture, req.asPtr(), resp.asPtr());
+
+  auto request1 = fixture.newIncomingRequest();
+  auto end1 KJ_UNUSED = acceptNewWebSocket(fixture, *request1, *hm);
+
+  end1->send(req.asPtr()).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+  request1 = nullptr;
+  fixture.resetActor();
+
+  auto request2 = fixture.newIncomingRequest();
+  fixture.enterContext(*request2, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto websockets = hm->getWebSockets(js, kj::none);
+    KJ_ASSERT(websockets.size() == 1);
+    websockets[0]->close(js, 1001, jsg::USVString(kj::str("post-evict")));
+  });
+  fixture.pollEventLoop();
+
+  end1->receive().wait(fixture.getWaitScope());
 }
 
 }  // namespace

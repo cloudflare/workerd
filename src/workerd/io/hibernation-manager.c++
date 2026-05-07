@@ -189,25 +189,40 @@ kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
 }
 
 void HibernationManagerImpl::setWebSocketAutoResponse(
-    kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) {
+    kj::Maybe<kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>> request,
+    kj::Maybe<kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>>> response) {
   KJ_IF_SOME(req, request) {
     // If we have a request, we must also have a response. If response is kj::none, we'll throw.
-    autoResponsePair->request = kj::str(req);
-    autoResponsePair->response = kj::str(KJ_REQUIRE_NONNULL(response));
+    auto resp = KJ_REQUIRE_NONNULL(response);
+    KJ_SWITCH_ONEOF(req) {
+      KJ_CASE_ONEOF(text, kj::StringPtr) {
+        autoResponsePair->pair = AutoRequestResponsePair::TextPair{
+          kj::str(text), kj::str(KJ_ASSERT_NONNULL(resp.tryGet<kj::StringPtr>()))};
+      }
+      KJ_CASE_ONEOF(bytes, kj::ArrayPtr<const kj::byte>) {
+        autoResponsePair->pair = AutoRequestResponsePair::BinaryPair{kj::heapArray(bytes),
+          kj::heapArray(KJ_ASSERT_NONNULL(resp.tryGet<kj::ArrayPtr<const kj::byte>>()))};
+      }
+    }
     return;
   }
-  // If we don't have a request, we must unset both request and response.
-  autoResponsePair->request = kj::none;
-  autoResponsePair->response = kj::none;
+  autoResponsePair->pair = kj::none;
 }
 
 kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::
     getWebSocketAutoResponse(jsg::Lock& js) {
-  KJ_IF_SOME(req, autoResponsePair->request) {
-    // When getting the currently set auto-response pair, if we have a request we must have a response
-    // set. If not, we'll throw.
-    return api::WebSocketRequestResponsePair::constructor(
-        js, kj::str(req), kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response)));
+  KJ_IF_SOME(pair, autoResponsePair->pair) {
+    KJ_SWITCH_ONEOF(pair) {
+      KJ_CASE_ONEOF(textPair, AutoRequestResponsePair::TextPair) {
+        return api::WebSocketRequestResponsePair::constructor(
+            js, kj::str(textPair.request), kj::str(textPair.response));
+      }
+      KJ_CASE_ONEOF(binPair, AutoRequestResponsePair::BinaryPair) {
+        return api::WebSocketRequestResponsePair::constructor(
+            js, kj::heapArray(binPair.request.asPtr()), kj::heapArray(binPair.response.asPtr()));
+      }
+    }
+    KJ_UNREACHABLE;
   }
   return kj::none;
 }
@@ -293,55 +308,67 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
 
     auto skip = false;
 
-    // If we have a request != kj::none, we can compare it the received message. This also implies
-    // that we have a response set in autoResponsePair.
-    KJ_IF_SOME(req, autoResponsePair->request) {
-      KJ_SWITCH_ONEOF(message) {
-        KJ_CASE_ONEOF(text, kj::String) {
-          if (text == req) {
-            // If the received message matches the one set for auto-response, we must
-            // short-circuit readLoop, store the current timestamp and and automatically respond
-            // with the expected response.
-            TimerChannel& timerChannel = KJ_REQUIRE_NONNULL(timer);
-            // This should count as a new IO event, hence we should call syncTime
-            // otherwise the autoResponseTimestamp wouldn't be accurate.
-            timerChannel.syncTime();
-            // We should have set the timerChannel previously in the hibernation manager.
-            // If we haven't, we aren't able to get the current time.
-            hib.autoResponseTimestamp = timerChannel.now();
-            // We'll store the current timestamp in the HibernatableWebSocket to assure it gets
-            // stored even if the WebSocket is currently hibernating. In that scenario, the timestamp
-            // value will be loaded into the WebSocket during unhibernation.
-            KJ_SWITCH_ONEOF(hib.activeOrPackage) {
-              KJ_CASE_ONEOF(apiWs, jsg::Ref<api::WebSocket>) {
-                // If the actor is not hibernated/If the WebSocket is active, we need to update
-                // autoResponseTimestamp on the active websocket.
-                apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, kj::READY_NOW);
-                // Since we had a request set, we must have and response that's sent back using the
-                // same websocket here. The sending of response is managed in web-socket to avoid
-                // possible racing problems with regular websocket messages.
-                co_await apiWs->sendAutoResponse(
-                    kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response).asArray()), ws);
-              }
-              KJ_CASE_ONEOF(package, api::WebSocket::HibernationPackage) {
-                if (!package.closedOutgoingConnection) {
-                  // We need to store the autoResponsePromise because we may instantiate an api::websocket
-                  // If we do that, we have to provide it with the promise to avoid races. This can
-                  // happen if we have a websocket hibernating, that unhibernates and sends a
-                  // message while ws.send() for auto-response is also sending.
-                  auto p = ws.send(KJ_REQUIRE_NONNULL(autoResponsePair->response).asArray()).fork();
-                  hib.autoResponsePromise = p.addBranch();
-                  co_await p;
-                  hib.autoResponsePromise = kj::READY_NOW;
-                }
-              }
-            }
-            // If we've sent an auto response message, we should not unhibernate or deliver the
-            // received message to the actor
-            skip = true;
+    KJ_IF_SOME(pair, autoResponsePair->pair) {
+      bool matched = false;
+      KJ_SWITCH_ONEOF(pair) {
+        KJ_CASE_ONEOF(textPair, AutoRequestResponsePair::TextPair) {
+          KJ_IF_SOME(text, message.tryGet<kj::String>()) {
+            matched = (text == textPair.request);
           }
         }
-        KJ_CASE_ONEOF_DEFAULT {}
+        KJ_CASE_ONEOF(binPair, AutoRequestResponsePair::BinaryPair) {
+          KJ_IF_SOME(data, message.tryGet<kj::Array<kj::byte>>()) {
+            matched = (data == binPair.request);
+          }
+        }
+      }
+
+      if (matched) {
+        // Short-circuit readLoop: store the current timestamp and automatically respond
+        // with the expected response instead of dispatching to the actor.
+        TimerChannel& timerChannel = KJ_REQUIRE_NONNULL(timer);
+        // Count as a new IO event so autoResponseTimestamp is accurate.
+        timerChannel.syncTime();
+        // Store the timestamp on the HibernatableWebSocket so it survives hibernation.
+        // During unhibernation, this value is loaded into the new api::WebSocket.
+        hib.autoResponseTimestamp = timerChannel.now();
+
+        KJ_SWITCH_ONEOF(hib.activeOrPackage) {
+          KJ_CASE_ONEOF(apiWs, jsg::Ref<api::WebSocket>) {
+            apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, kj::READY_NOW);
+            // Response sending is managed in web-socket to avoid racing with regular messages.
+            KJ_SWITCH_ONEOF(pair) {
+              KJ_CASE_ONEOF(t, AutoRequestResponsePair::TextPair) {
+                co_await apiWs->sendAutoResponse(kj::str(t.response), ws);
+              }
+              KJ_CASE_ONEOF(b, AutoRequestResponsePair::BinaryPair) {
+                co_await apiWs->sendAutoResponse(kj::heapArray(b.response.asPtr()), ws);
+              }
+            }
+          }
+          KJ_CASE_ONEOF(package, api::WebSocket::HibernationPackage) {
+            if (!package.closedOutgoingConnection) {
+              // Store the autoResponsePromise so that if the WebSocket unhibernates mid-send,
+              // the new api::WebSocket can await it to avoid send races.
+              auto p = [&]() -> kj::ForkedPromise<void> {
+                KJ_SWITCH_ONEOF(pair) {
+                  KJ_CASE_ONEOF(t, AutoRequestResponsePair::TextPair) {
+                    return ws.send(t.response.asArray()).fork();
+                  }
+                  KJ_CASE_ONEOF(b, AutoRequestResponsePair::BinaryPair) {
+                    return ws.send(b.response.asPtr()).fork();
+                  }
+                }
+                KJ_UNREACHABLE;
+              }();
+              hib.autoResponsePromise = p.addBranch();
+              co_await p;
+              hib.autoResponsePromise = kj::READY_NOW;
+            }
+          }
+        }
+        // Do not unhibernate or deliver the message to the actor.
+        skip = true;
       }
     }
 

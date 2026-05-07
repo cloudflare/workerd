@@ -537,20 +537,38 @@ class ActorState: public jsg::Object {
 
 class WebSocketRequestResponsePair: public jsg::Object {
  public:
-  WebSocketRequestResponsePair(kj::String request, kj::String response)
+  WebSocketRequestResponsePair(kj::OneOf<kj::String, kj::Array<kj::byte>> request,
+      kj::OneOf<kj::String, kj::Array<kj::byte>> response)
       : request(kj::mv(request)),
         response(kj::mv(response)) {};
 
-  static jsg::Ref<WebSocketRequestResponsePair> constructor(
-      jsg::Lock& js, kj::String request, kj::String response) {
+  static jsg::Ref<WebSocketRequestResponsePair> constructor(jsg::Lock& js,
+      kj::OneOf<kj::String, kj::Array<kj::byte>> request,
+      kj::OneOf<kj::String, kj::Array<kj::byte>> response) {
     return js.alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
   };
 
-  kj::StringPtr getRequest() {
-    return request.asPtr();
+  kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>> getRequest() {
+    KJ_SWITCH_ONEOF(request) {
+      KJ_CASE_ONEOF(s, kj::String) {
+        return kj::StringPtr(s);
+      }
+      KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {
+        return kj::ArrayPtr<const kj::byte>(b);
+      }
+    }
+    KJ_UNREACHABLE;
   }
-  kj::StringPtr getResponse() {
-    return response.asPtr();
+  kj::OneOf<kj::StringPtr, kj::ArrayPtr<const kj::byte>> getResponse() {
+    KJ_SWITCH_ONEOF(response) {
+      KJ_CASE_ONEOF(s, kj::String) {
+        return kj::StringPtr(s);
+      }
+      KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {
+        return kj::ArrayPtr<const kj::byte>(b);
+      }
+    }
+    KJ_UNREACHABLE;
   }
 
   JSG_RESOURCE_TYPE(WebSocketRequestResponsePair) {
@@ -559,13 +577,25 @@ class WebSocketRequestResponsePair: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("request", request);
-    tracker.trackField("response", response);
+    auto track = [&](const char* name, const MessageData& data) {
+      KJ_SWITCH_ONEOF(data) {
+        KJ_CASE_ONEOF(s, kj::String) {
+          tracker.trackField(name, s);
+        }
+        KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {
+          tracker.trackField(name, b);
+        }
+      }
+    };
+    track("request", request);
+    track("response", response);
   }
 
  private:
-  kj::String request;
-  kj::String response;
+  using MessageData = kj::OneOf<kj::String, kj::Array<kj::byte>>;
+
+  MessageData request;
+  MessageData response;
 };
 
 // The type passed as the first parameter to durable object class's constructor.
