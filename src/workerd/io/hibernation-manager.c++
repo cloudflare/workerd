@@ -326,7 +326,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
               // the new api::WebSocket can await it to avoid send races.
               auto p = pair.response.sendVia(ws).fork();
               hib.autoResponsePromise = p.addBranch();
-              co_await p.addBranch();
+              co_await p;
               hib.autoResponsePromise = kj::READY_NOW;
             }
           }

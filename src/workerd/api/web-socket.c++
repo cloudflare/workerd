@@ -872,7 +872,7 @@ kj::Promise<void> WebSocket::sendAutoResponse(WebSocketDataMessage message, kj::
     } else {
       autoResponseStatus.ongoingAutoResponse.emplace(kj::heap(p.addBranch()));
     }
-    co_await p.addBranch();
+    co_await p;
     autoResponseStatus.ongoingAutoResponse = kj::none;
   }
 }
