@@ -870,6 +870,7 @@ kj::Promise<void> WebSocket::sendAutoResponse(WebSocketDataMessage message, kj::
     KJ_IF_SOME(context, IoContext::tryCurrent()) {
       autoResponseStatus.ongoingAutoResponse.emplace(context.addObject(kj::heap(p.addBranch())));
     } else {
+      // Called outside an IoContext (e.g. from the hibernation manager's readLoop).
       autoResponseStatus.ongoingAutoResponse.emplace(kj::heap(p.addBranch()));
     }
     co_await p;
