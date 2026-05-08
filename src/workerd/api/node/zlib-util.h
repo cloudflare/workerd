@@ -431,10 +431,10 @@ class ZlibUtil final: public jsg::Object {
     template <bool async>
     void write(jsg::Lock& js,
         int flush,
-        jsg::Optional<kj::Array<kj::byte>> input,
+        jsg::Optional<jsg::JsBufferSource> input,
         uint32_t inputOffset,
         uint32_t inputLength,
-        kj::Array<kj::byte> output,
+        jsg::JsBufferSource output,
         uint32_t outputOffset,
         uint32_t outputLength);
     void reset(jsg::Lock& js);
