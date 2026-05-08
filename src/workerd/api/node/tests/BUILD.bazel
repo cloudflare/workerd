@@ -540,6 +540,12 @@ wd_test(
     ],
 )
 
+wd_test(
+    src = "http-client-path-ssrf-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-client-path-ssrf-test.js"],
+)
+
 js_binary(
     name = "http-server-nodejs-server",
     entry_point = "http-server-nodejs-server.js",

@@ -47,6 +47,11 @@ import type { Socket } from 'node:net';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 
+// Matches paths that would override the URL authority when passed to
+// `new URL(path, base)`: double separators (//  /\  \/  \\) or a scheme
+// (colon before the first separator).
+const AUTHORITY_OVERRIDE_REGEX = /^(?:[/\\]{2}|[^/\\]*:)/;
+
 type WriteCallback = (err?: Error) => void;
 
 function validateHost(host: unknown, name: string): string {
@@ -115,6 +120,22 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (options.path) {
       if (INVALID_PATH_REGEX.test(options.path)) {
         throw new ERR_UNESCAPED_CHARACTERS('Request path');
+      }
+      // Reject paths that would override the URL authority when passed to
+      // `new URL(path, base)`.  Two cases:
+      //
+      // 1. Network-path references and backslash variants — the WHATWG URL
+      //    parser treats \ as / for special schemes, so any pair of / and \
+      //    at the start (//  /\  \/  \\) introduces an authority.
+      //
+      // 2. Absolute-form URLs — a scheme (e.g. "http:") before the first
+      //    separator causes the parser to ignore the base entirely.
+      if (AUTHORITY_OVERRIDE_REGEX.test(options.path)) {
+        throw new ERR_INVALID_ARG_VALUE(
+          'options.path',
+          options.path,
+          'must be a path-only request target'
+        );
       }
     }
 
@@ -358,6 +379,18 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     url.port = this.port;
 
     if (this.path.length > 0 && this.path !== '/') {
+      // Defense-in-depth: re-validate in case this.path was mutated after
+      // construction (the field is public).
+      if (AUTHORITY_OVERRIDE_REGEX.test(this.path)) {
+        this.destroy(
+          new ERR_INVALID_ARG_VALUE(
+            'options.path',
+            this.path,
+            'must be a path-only request target'
+          )
+        );
+        return;
+      }
       // We pass `path` as the first argument since it can contain search and hash components.
       // Therefore, running the pathname setter will not work.
       // Since this is an extremely costly operation, we only do it if necessary.
