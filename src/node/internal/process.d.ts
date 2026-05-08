@@ -9,6 +9,7 @@ export function getCwd(): string;
 export function setCwd(path: string): void;
 export const versions: Record<string, string>;
 export const platform: string;
+export function shouldThrowOnNotImplementedTlsOption(): boolean;
 
 declare global {
   const Cloudflare: {

@@ -501,6 +501,12 @@ wd_test(
 )
 
 wd_test(
+    src = "tls-check-server-identity-test.wd-test",
+    args = ["--experimental"],
+    data = ["tls-check-server-identity-test.js"],
+)
+
+wd_test(
     src = "streams-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["streams-nodejs-test.js"],

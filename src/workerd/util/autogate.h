@@ -50,6 +50,9 @@ enum class AutogateKey {
   UPDATED_AUTO_ALLOCATE_CHUNK_SIZE,
   // Call abortIsolate() when a Python worker encounters a fatal error.
   PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR,
+  // When enabled, throw ERR_OPTION_NOT_IMPLEMENTED for unsupported TLS options
+  // (e.g. checkServerIdentity) instead of logging a warning and continuing.
+  THROW_ON_NOT_IMPLEMENTED_TLS_OPTIONS,
   NumOfKeys  // Reserved for iteration.
 };
 
