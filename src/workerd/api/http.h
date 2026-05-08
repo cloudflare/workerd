@@ -263,10 +263,14 @@ class Fetcher: public JsRpcClientProvider {
   // URL that has no protocol or host.
   //
   // See pipeline.capnp or request-context.h for an explanation of `isInHouse`.
-  explicit Fetcher(uint channel, RequiresHostAndProtocol requiresHost, bool isInHouse = false)
+  explicit Fetcher(uint channel,
+      RequiresHostAndProtocol requiresHost,
+      bool isInHouse = false,
+      kj::Maybe<uint16_t> connectionStringOverridePort = kj::none)
       : channelOrClientFactory(channel),
         requiresHost(requiresHost),
-        isInHouse(isInHouse) {}
+        isInHouse(isInHouse),
+        port(connectionStringOverridePort) {}
 
   // Create a Fetcher bound to an IoChannelFactory::SubrequestChannel object rather than a numeric
   // channel. This Fetcher will inherently be bound to the current I/O context.
@@ -440,6 +444,12 @@ class Fetcher: public JsRpcClientProvider {
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
+  void setPort(uint16_t port);
+  jsg::Optional<uint16_t> getPort() const {
+    return port;
+  }
+  jsg::Optional<kj::StringPtr> getHost(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
     // conflicts with JS RPC methods (implemented via the wildcard property). Ideally, we do not
@@ -450,6 +460,9 @@ class Fetcher: public JsRpcClientProvider {
 
     JSG_METHOD(fetch);
     JSG_METHOD(connect);
+
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(host, getHost);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(port, getPort);
 
     if (flags.getServiceBindingExtraHandlers()) {
       JSG_METHOD(queue);
@@ -527,6 +540,12 @@ class Fetcher: public JsRpcClientProvider {
       channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
+
+  // used for optional connection string override. port being non-none indicates that an override
+  // has been requested.
+  bool registeredConnectOverride = false;
+  jsg::Optional<kj::String> randomHost;
+  jsg::Optional<uint16_t> port = kj::none;
 };
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter
