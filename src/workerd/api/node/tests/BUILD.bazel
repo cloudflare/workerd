@@ -536,6 +536,7 @@ wd_test(
         "REQUEST_ARGUMENTS_PORT",
         "HELLO_WORLD_SERVER_PORT",
         "GZIP_SERVER_PORT",
+        "HOST_ECHO_SERVER_PORT",
     ],
 )
 
