@@ -147,6 +147,18 @@ jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js
   }
   return kj::none;
 }
+
+kj::String ExecutionContext::mapVirtualHost(
+    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port) {
+  // Set up override, or return existing magic hostname if override already exists. Overrides
+  // created using mapVirtualHost() should never use the legacy hyperdrive hostname, so the only way
+  // for that hostname to be used is if an override was already registered earlier using
+  // ExtendedFetcher.
+  fetcher->registerOverride(js, IsHyperdrive::NO, port);
+  return kj::str(KJ_ASSERT_NONNULL(fetcher->getHostInternal()), ":",
+      KJ_ASSERT_NONNULL(fetcher->getPortInternal()));
+}
+
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   KJ_IF_SOME(r, reason) {
     IoContext::current().abort(js.exceptionToKj(kj::mv(r)));

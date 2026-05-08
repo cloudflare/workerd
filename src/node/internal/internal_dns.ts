@@ -56,7 +56,10 @@ let defaultDnsOrder: DnsOrder = 'verbatim';
 // override. Gate on the suffix so ordinary lookups stay entirely in JS rather than crossing into
 // C++ on every resolution.
 function getMagicHostOverride(hostname: string): string | undefined {
-  if (!hostname.endsWith('.hyperdrive.local')) {
+  if (
+    !hostname.endsWith('.hyperdrive.local') &&
+    !hostname.endsWith('.workers.alt')
+  ) {
     return undefined;
   }
   return inner.getCallerDnsOverride(hostname);

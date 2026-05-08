@@ -371,6 +371,10 @@ class ExecutionContext: public jsg::Object {
   // Called by the runtime to provide Cloudflare Access authentication context.
   jsg::Optional<jsg::Ref<AccessContext>> getAccess(jsg::Lock& js);
 
+  // Maps a virtual host to the given fetcher on the specified port. This is a no-op if an override
+  // has already been installed. Returns the string <host:port> for the override.
+  kj::String mapVirtualHost(jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port);
+
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
@@ -386,6 +390,9 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
     JSG_LAZY_INSTANCE_PROPERTY(access, getAccess);
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(mapVirtualHost);
+    }
 
     // ctx.tracing - user tracing API. Always available; the Tracing object is stateless
     // and enterSpan() is a no-op when called outside a traced request.
