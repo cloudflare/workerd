@@ -2175,3 +2175,57 @@ export let eOrderTest = {
     assert.deepEqual(results, [1, 2, 3, 4, 5, 6]);
   },
 };
+
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-297:
+// Unbounded JsRpcProperty parent chain causes native stack overflow
+// (SIGSEGV) on destruction. Building a deep chain of pipelined
+// property accesses must be rejected once the depth exceeds
+// MAX_PROPERTY_DEPTH (5120).
+export let stubDepthLimitTest = {
+  async test() {
+    // Create a local RPC stub wrapping a plain object.
+    let stub = new RpcStub({});
+
+    // Build a chain of pipelined property accesses. Before the fix,
+    // this would create an unbounded linked list of native
+    // JsRpcProperty objects whose recursive destruction overflows
+    // the native stack. After the fix, getProperty() throws a
+    // TypeError once depth >= 5120.
+    let p = stub;
+    let threw = false;
+    let depthReached = 0;
+    try {
+      for (let i = 0; i < 10000; i++) {
+        p = p.x;
+        depthReached = i + 1;
+      }
+    } catch (e) {
+      threw = true;
+      assert.ok(
+        e instanceof TypeError,
+        `Expected TypeError, got ${e.constructor.name}: ${e.message}`
+      );
+      assert.ok(
+        e.message.includes('too deep'),
+        `Expected error message about "too deep", got: ${e.message}`
+      );
+    }
+
+    assert.ok(
+      threw,
+      'Expected TypeError to be thrown at depth limit, ' +
+        `but reached depth ${depthReached} without error`
+    );
+    // The depth limit is 5120, so we should have reached at least 5120
+    // before the throw.
+    assert.ok(
+      depthReached >= 5120,
+      `Expected to reach at least depth 5120, only reached ${depthReached}`
+    );
+    // And we should NOT have reached 10000 (the full loop).
+    assert.ok(
+      depthReached < 10000,
+      'Should not have reached depth 10000 without error'
+    );
+  },
+};
