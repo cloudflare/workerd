@@ -518,6 +518,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-byob-close-reentry-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byob-close-reentry-test.js"],
+)
+
+wd_test(
     src = "pipe-streams-test.wd-test",
     args = ["--experimental"],
     data = ["pipe-streams-test.js"],
