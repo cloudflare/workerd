@@ -17,19 +17,20 @@ pub mod error;
 pub mod exception;
 pub mod ffi;
 pub mod kill_switch;
+pub mod ok;
 
 use std::pin::Pin;
 use std::time::SystemTime;
 
 use cxx::KjError;
 pub use kj::http::ConnectResponse;
+pub use kj::http::ConnectSettings;
 pub use kj::http::HeaderId;
-pub use kj::http::HttpConnectSettings;
-pub use kj::http::HttpHeaders;
-pub use kj::http::HttpHeadersRef;
-pub use kj::http::HttpMethod;
-pub use kj::http::HttpService;
-pub use kj::http::HttpServiceResponse;
+pub use kj::http::Headers;
+pub use kj::http::HeadersRef;
+pub use kj::http::Method;
+pub use kj::http::Service;
+pub use kj::http::ServiceResponse;
 pub use kj::io::AsyncInputStream;
 pub use kj::io::AsyncIoStream;
 use outcome_capnp::EventOutcome;
@@ -42,7 +43,7 @@ pub type Result<T> = std::result::Result<T, KjError>;
 /// An interface representing the services made available by a worker/pipeline to handle a request.
 /// Corresponds to `workerd::WorkerInterface`
 #[async_trait::async_trait(?Send)]
-pub trait Interface: kj::http::HttpService {
+pub trait Interface: kj::http::Service {
     /// Hints that this worker will likely be invoked in the near future, so should be warmed up now.
     /// This method should also call `prewarm()` on any subsequent pipeline stages that are expected
     /// to be invoked.
@@ -122,4 +123,42 @@ pub struct AlarmResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomEventResult {
     pub outcome: EventOutcome,
+}
+
+#[cfg(test)]
+mod tests {
+    use kj::http::HeaderId;
+
+    #[expect(dead_code, reason = "HeaderOverrideProxy exists as compilation test.")]
+    struct HeaderOverrideProxy(Box<dyn crate::Interface>);
+
+    #[async_trait::async_trait(?Send)]
+    impl kj::http::Service for HeaderOverrideProxy {
+        async fn request<'a>(
+            &'a mut self,
+            method: kj::http::Method,
+            url: &'a [u8],
+            headers: kj::http::HeadersRef<'a>,
+            request_body: std::pin::Pin<&'a mut kj::io::AsyncInputStream>,
+            response: kj::http::ServiceResponse<'a>,
+        ) -> kj::Result<()> {
+            let mut headers = headers.clone_shallow();
+            headers.set(HeaderId::HOST, "example.com");
+            self.0
+                .request(method, url, headers.as_ref(), request_body, response)
+                .await?;
+            Ok(())
+        }
+
+        async fn connect<'a>(
+            &'a mut self,
+            _host: &'a [u8],
+            _headers: kj::http::HeadersRef<'a>,
+            _connection: std::pin::Pin<&'a mut kj::io::AsyncIoStream>,
+            _response: kj::http::ConnectResponse<'a>,
+            _settings: kj::http::ConnectSettings<'a>,
+        ) -> kj::Result<()> {
+            todo!()
+        }
+    }
 }

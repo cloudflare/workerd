@@ -13,6 +13,9 @@ static_assert(alignof(kj::rust::HttpConnectSettings) == alignof(uint64_t),
     "HttpConnectSettings alignment mismatch");
 
 namespace kj::rust {
+
+// This stays out-of-line because HttpConnectSettings is defined in the generated cxx bridge
+// header, and ffi.h cannot include that header without creating an include cycle.
 kj::Promise<void> connect(HttpService& service,
     ::rust::Slice<const kj::byte> host,
     const HttpHeaders& headers,

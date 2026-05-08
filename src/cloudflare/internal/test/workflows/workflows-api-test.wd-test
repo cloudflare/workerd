@@ -18,6 +18,10 @@ const unitTests :Workerd.Config = (
               service = "workflows-mock"
             )],
           )
+        ),
+        (
+          name = "mock",
+          service = "workflows-mock"
         )
         ],
       )
