@@ -229,6 +229,13 @@ bool ZlibContext::initializeZlib() {
   if (initialized) {
     return false;
   }
+
+  // zlib's manual states: "The application must initialize zalloc, zfree and opaque before calling
+  // the init function."
+  stream.zalloc = CompressionAllocator::AllocForZlib;
+  stream.zfree = CompressionAllocator::FreeForZlib;
+  stream.opaque = &allocator;
+
   switch (mode) {
     case ZlibMode::DEFLATE:
     case ZlibMode::GZIP:
@@ -662,7 +669,6 @@ void ZlibUtil::ZlibStream::initialize(jsg::Lock& js,
     jsg::Function<void()> writeCallback,
     jsg::Optional<kj::Array<kj::byte>> dictionary) {
   initializeStream(js, writeState, kj::mv(writeCallback));
-  allocator.configure(context()->getStream());
   context()->initialize(level, windowBits, memLevel, strategy, kj::mv(dictionary));
 }
 
@@ -703,9 +709,12 @@ void BrotliContext::getAfterWriteResult(uint32_t* _availIn, uint32_t* _availOut)
   *_availOut = availOut;
 }
 
-BrotliEncoderContext::BrotliEncoderContext(ZlibMode _mode): BrotliContext(_mode) {
-  auto instance = BrotliEncoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
-  state = kj::disposeWith<BrotliEncoderDestroyInstance>(instance);
+BrotliEncoderContext::BrotliEncoderContext(CompressionAllocator& allocator, ZlibMode _mode)
+    : BrotliContext(allocator, _mode) {
+  // NOTE: Ignores any returned errors.
+  // TODO(soon): It's possible that initialization doesn't need to happen until `initialize` is
+  //   called elsewhere. I'm keeping it like this to avoid changing the existing behaviour.
+  auto _ = initialize();
 }
 
 void BrotliEncoderContext::work() {
@@ -720,13 +729,9 @@ void BrotliEncoderContext::work() {
   streamEnd = lastResult && BrotliEncoderIsFinished(state.get());
 }
 
-kj::Maybe<CompressionError> BrotliEncoderContext::initialize(
-    brotli_alloc_func init_alloc_func, brotli_free_func init_free_func, void* init_opaque_func) {
-  alloc_brotli = init_alloc_func;
-  free_brotli = init_free_func;
-  alloc_opaque_brotli = init_opaque_func;
-
-  auto instance = BrotliEncoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
+kj::Maybe<CompressionError> BrotliEncoderContext::initialize() {
+  auto instance = BrotliEncoderCreateInstance(
+      CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &allocator);
   state = kj::disposeWith<BrotliEncoderDestroyInstance>(kj::mv(instance));
 
   if (state.get() == nullptr) {
@@ -738,7 +743,7 @@ kj::Maybe<CompressionError> BrotliEncoderContext::initialize(
 }
 
 kj::Maybe<CompressionError> BrotliEncoderContext::resetStream() {
-  return initialize(alloc_brotli, free_brotli, alloc_opaque_brotli);
+  return initialize();
 }
 
 kj::Maybe<CompressionError> BrotliEncoderContext::setParams(int key, uint32_t value) {
@@ -761,18 +766,17 @@ bool BrotliEncoderContext::isStreamEnd() const {
   return streamEnd;
 }
 
-BrotliDecoderContext::BrotliDecoderContext(ZlibMode _mode): BrotliContext(_mode) {
-  auto instance = BrotliDecoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
-  state = kj::disposeWith<BrotliDecoderDestroyInstance>(instance);
+BrotliDecoderContext::BrotliDecoderContext(CompressionAllocator& allocator, ZlibMode _mode)
+    : BrotliContext(allocator, _mode) {
+  // NOTE: Ignores any returned errors.
+  // TODO(soon): It's possible that initialization doesn't need to happen until `initialize` is
+  //   called elsewhere. I'm keeping it like this to avoid changing the existing behaviour.
+  auto _ = initialize();
 }
 
-kj::Maybe<CompressionError> BrotliDecoderContext::initialize(
-    brotli_alloc_func init_alloc_func, brotli_free_func init_free_func, void* init_opaque_func) {
-  alloc_brotli = init_alloc_func;
-  free_brotli = init_free_func;
-  alloc_opaque_brotli = init_opaque_func;
-
-  auto instance = BrotliDecoderCreateInstance(alloc_brotli, free_brotli, alloc_opaque_brotli);
+kj::Maybe<CompressionError> BrotliDecoderContext::initialize() {
+  auto instance = BrotliDecoderCreateInstance(
+      CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &allocator);
   state = kj::disposeWith<BrotliDecoderDestroyInstance>(kj::mv(instance));
 
   if (state.get() == nullptr) {
@@ -798,7 +802,7 @@ void BrotliDecoderContext::work() {
 }
 
 kj::Maybe<CompressionError> BrotliDecoderContext::resetStream() {
-  return initialize(alloc_brotli, free_brotli, alloc_opaque_brotli);
+  return initialize();
 }
 
 kj::Maybe<CompressionError> BrotliDecoderContext::setParams(int key, uint32_t value) {
@@ -1081,8 +1085,7 @@ bool ZlibUtil::BrotliCompressionStream<CompressionContext>::initialize(jsg::Lock
     jsg::JsArrayBufferView writeResult,
     jsg::Function<void()> writeCallback) {
   this->initializeStream(js, writeResult, kj::mv(writeCallback));
-  auto maybeError = this->context()->initialize(
-      CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &this->allocator);
+  auto maybeError = this->context()->initialize();
 
   KJ_IF_SOME(err, maybeError) {
     this->emitError(js, kj::mv(err));
@@ -1137,8 +1140,7 @@ kj::Array<kj::byte> ZlibUtil::zlibSync(
   // Any use of zlib APIs constitutes an implicit dependency on Allocator which must
   // remain alive until the zlib stream is destroyed
   CompressionAllocator allocator(js.getExternalMemoryTarget());
-  ZlibContext ctx(static_cast<ZlibMode>(mode));
-  allocator.configure(ctx.getStream());
+  ZlibContext ctx(allocator, static_cast<ZlibMode>(mode));
 
   auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
@@ -1193,7 +1195,7 @@ kj::Array<kj::byte> ZlibUtil::brotliSync(
   // Any use of brotli APIs constitutes an implicit dependency on Allocator which must
   // remain alive until the brotli state is destroyed
   CompressionAllocator allocator(js.getExternalMemoryTarget());
-  Context ctx(Context::Mode);
+  Context ctx(allocator, Context::Mode);
 
   auto chunkSize = opts.chunkSize.orDefault(ZLIB_PERFORMANT_CHUNK_SIZE);
   auto maxOutputLength = opts.maxOutputLength.orDefault(Z_MAX_CHUNK);
@@ -1207,9 +1209,7 @@ kj::Array<kj::byte> ZlibUtil::brotliSync(
           Z_MAX_CHUNK, ". Received ", maxOutputLength));
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
-  KJ_IF_SOME(err,
-      ctx.initialize(
-          CompressionAllocator::AllocForBrotli, CompressionAllocator::FreeForZlib, &allocator)) {
+  KJ_IF_SOME(err, ctx.initialize()) {
     JSG_FAIL_REQUIRE(Error, err.message);
   }
 

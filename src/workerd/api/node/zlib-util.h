@@ -96,8 +96,9 @@ struct CompressionError {
 
 class ZlibContext final {
  public:
-  explicit ZlibContext(ZlibMode _mode): mode(_mode) {}
-  ZlibContext() = default;
+  explicit ZlibContext(CompressionAllocator& allocator, ZlibMode _mode)
+      : allocator(allocator),
+        mode(_mode) {}
   ~ZlibContext() noexcept(false);
 
   KJ_DISALLOW_COPY_AND_MOVE(ZlibContext);
@@ -139,11 +140,6 @@ class ZlibContext final {
   };
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> getError() const;
-  void setAllocationFunctions(alloc_func alloc, free_func free, void* opaque) {
-    stream.zalloc = alloc;
-    stream.zfree = free;
-    stream.opaque = opaque;
-  }
 
   // Equivalent to Node.js' `DoThreadPoolWork` function.
   // Ref: https://github.com/nodejs/node/blob/9edf4a0856681a7665bd9dcf2ca7cac252784b98/src/node_zlib.cc#L760
@@ -212,6 +208,7 @@ class ZlibContext final {
   };
 
   bool initialized = false;
+  CompressionAllocator& allocator;
   ZlibMode mode = ZlibMode::NONE;
   int flush = Z_NO_FLUSH;
   int windowBits = 0;
@@ -232,7 +229,9 @@ using CompressionStreamErrorHandler = jsg::Function<void(int, kj::StringPtr, kj:
 
 class BrotliContext {
  public:
-  explicit BrotliContext(ZlibMode _mode): mode(_mode) {}
+  explicit BrotliContext(CompressionAllocator& allocator, ZlibMode _mode)
+      : allocator(allocator),
+        mode(_mode) {}
   KJ_DISALLOW_COPY(BrotliContext);
   void setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
   void setInputBuffer(kj::ArrayPtr<const kj::byte> input);
@@ -261,32 +260,25 @@ class BrotliContext {
   };
 
  protected:
+  CompressionAllocator& allocator;
   ZlibMode mode;
   const uint8_t* nextIn = nullptr;
   uint8_t* nextOut = nullptr;
   size_t availIn = 0;
   size_t availOut = 0;
   BrotliEncoderOperation flush = BROTLI_OPERATION_PROCESS;
-
-  // TODO(addaleax): These should not need to be stored here.
-  // This is currently only done this way to make implementing ResetStream()
-  // easier.
-  brotli_alloc_func alloc_brotli = nullptr;
-  brotli_free_func free_brotli = nullptr;
-  void* alloc_opaque_brotli = nullptr;
 };
 
 class BrotliEncoderContext final: public BrotliContext {
  public:
   static const ZlibMode Mode = ZlibMode::BROTLI_ENCODE;
-  explicit BrotliEncoderContext(ZlibMode _mode);
+  explicit BrotliEncoderContext(CompressionAllocator& allocator, ZlibMode _mode);
 
   KJ_DISALLOW_COPY_AND_MOVE(BrotliEncoderContext);
 
   // Equivalent to Node.js' `DoThreadPoolWork` implementation.
   void work();
-  kj::Maybe<CompressionError> initialize(
-      brotli_alloc_func init_alloc_func, brotli_free_func init_free_func, void* init_opaque_func);
+  kj::Maybe<CompressionError> initialize();
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, uint32_t value);
   kj::Maybe<CompressionError> getError() const;
@@ -301,14 +293,13 @@ class BrotliEncoderContext final: public BrotliContext {
 class BrotliDecoderContext final: public BrotliContext {
  public:
   static const ZlibMode Mode = ZlibMode::BROTLI_DECODE;
-  explicit BrotliDecoderContext(ZlibMode _mode);
+  explicit BrotliDecoderContext(CompressionAllocator& allocator, ZlibMode _mode);
 
   KJ_DISALLOW_COPY_AND_MOVE(BrotliDecoderContext);
 
   // Equivalent to Node.js' `DoThreadPoolWork` implementation.
   void work();
-  kj::Maybe<CompressionError> initialize(
-      brotli_alloc_func init_alloc_func, brotli_free_func init_free_func, void* init_opaque_func);
+  kj::Maybe<CompressionError> initialize();
   kj::Maybe<CompressionError> resetStream();
   kj::Maybe<CompressionError> setParams(int key, uint32_t value);
   kj::Maybe<CompressionError> getError() const;
@@ -362,6 +353,8 @@ class ZstdEncoderContext final: public ZstdContext {
  public:
   static const ZlibMode Mode = ZlibMode::ZSTD_ENCODE;
   explicit ZstdEncoderContext(ZlibMode _mode);
+  explicit ZstdEncoderContext(CompressionAllocator& _allocator, ZlibMode _mode)
+      : ZstdEncoderContext(_mode) {}
   KJ_DISALLOW_COPY_AND_MOVE(ZstdEncoderContext);
 
   void work();
@@ -381,6 +374,8 @@ class ZstdDecoderContext final: public ZstdContext {
  public:
   static const ZlibMode Mode = ZlibMode::ZSTD_DECODE;
   explicit ZstdDecoderContext(ZlibMode _mode);
+  explicit ZstdDecoderContext(CompressionAllocator& _allocator, ZlibMode _mode)
+      : ZstdDecoderContext(_mode) {}
   KJ_DISALLOW_COPY_AND_MOVE(ZstdDecoderContext);
 
   void work();
@@ -409,7 +404,7 @@ class ZlibUtil final: public jsg::Object {
     explicit CompressionStream(
         ZlibMode _mode, kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
         : allocator(kj::mv(externalMemoryTarget)),
-          context_(_mode) {}
+          context_(allocator, _mode) {}
     // TODO(soon): Find a way to add noexcept(false) to this destructor.
     ~CompressionStream();
     KJ_DISALLOW_COPY_AND_MOVE(CompressionStream);
