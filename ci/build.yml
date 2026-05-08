@@ -1,0 +1,57 @@
+variables:
+  GIT_DEPTH: 1000
+  FLAVOR: trixie
+
+stages: [build]
+
+.cfsetup-input-template: &cfsetup-input-template
+  stage: "build"
+  runner: vm-linux-x86-8cpu-16gb
+  runOnMR: true
+  # we sync branches from github, do not run build on them
+  runOnBranches: 'gitlab'
+  env:
+    - FLAVOR
+    - GCP_CREDS
+
+
+.job_template: &job-template
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.cfdata.org
+  secrets:
+    GCP_CREDS:
+      # pre-existing _dev secret for edgeworker build
+      vault: gitlab/cloudflare/ew/edgeworker/_dev/gcp_creds/data@kv
+      file: false
+
+include:
+  - component: $CI_SERVER_FQDN/cloudflare/ci/cfsetup/build@~latest
+    inputs:
+      <<: *cfsetup-input-template
+      jobPrefix: "linux-x64"
+      CFSETUP_TARGET: "ci-bazel-x64"
+
+  - component: $CI_SERVER_FQDN/cloudflare/ci/cfsetup/build@~latest
+    inputs:
+      <<: *cfsetup-input-template
+      jobPrefix: "linux-x64-lint"
+      CFSETUP_TARGET: "ci-bazel-x64-lint"
+
+  - component: $CI_SERVER_FQDN/cloudflare/ci/ai/opencode@mschwarzl/APPSEC-2912
+    inputs:
+      stage: build
+      runOnMR: true
+      runOnBranches: false
+      USE_COORDINATOR: true
+      OPENCODE_MODEL: "cloudflare-ai-gateway/anthropic/claude-opus-4-7"
+
+linux-x64-build:
+  <<: *job-template
+
+linux-x64-lint-build:
+  <<: *job-template
+
+opencode-review:
+  image: docker-registry.cfdata.org/branches/ci/ai/opencode-reviewer/mschwarzl/appsec-2912:392-9648062@sha256:18c838ff972e62facd24e4f25ea7b1fe5b701718d7d28aae5f3c0d09a5c4d5a8
+  allow_failure: true
