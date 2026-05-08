@@ -923,6 +923,12 @@ wd_test(
 )
 
 wd_test(
+    src = "identity-transform-stream-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["identity-transform-stream-uaf-test.js"],
+)
+
+wd_test(
     src = "response-used-body-test.wd-test",
     args = ["--experimental"],
     data = ["response-used-body-test.js"],
