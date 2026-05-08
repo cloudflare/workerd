@@ -28,7 +28,7 @@ class NeuterableInputStream: public kj::AsyncInputStream, public kj::Refcounted 
   virtual void neuter(kj::Exception ex) = 0;
 };
 
-class NeuterableIoStream: public kj::AsyncIoStream {
+class NeuterableIoStream: public kj::AsyncIoStream, public kj::Refcounted {
  public:
   virtual void neuter(kj::Exception ex) = 0;
 };
@@ -44,6 +44,6 @@ class EndableAsyncOutputStream: public kj::AsyncOutputStream {
 };
 
 kj::Own<NeuterableInputStream> newNeuterableInputStream(kj::AsyncInputStream&);
-kj::Own<NeuterableIoStream> newNeuterableIoStream(kj::AsyncIoStream&);
+kj::Rc<NeuterableIoStream> newNeuterableIoStream(kj::AsyncIoStream&);
 
 }  // namespace workerd

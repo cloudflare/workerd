@@ -166,8 +166,14 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // Has a connect handler!
     response.accept(200, "OK", headers);
 
-    // Using neuterable stream to manage lifetime of stream promises
+    // Using neuterable stream to manage lifetime of stream promises. We MUST neuter this when the
+    // promise returned to the caller resolves because `connection` is owned by the caller and will
+    // be destroyed when that happens, while the JS Socket can outlive us via ctx.waitUntil().
     auto ownConnection = newNeuterableIoStream(connection);
+    auto deferredNeuter = kj::defer([ref = ownConnection.addRef()]() mutable {
+      ref->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    });
+    KJ_ON_SCOPE_FAILURE(ownConnection->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
 
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
@@ -180,15 +186,15 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
     // side.
     jsg::Ref<Socket> jsSocket =
-        setupSocket(js, kj::mv(ownConnection), kj::none /* remoteAddress */, kj::mv(host), kj::none,
-            kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
+        setupSocket(js, ownConnection.addRef().toOwn(), kj::none /* remoteAddress */, kj::mv(host),
+            kj::none, kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
-    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span));
+    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
                       "Did you remember to export a connect() function?");
