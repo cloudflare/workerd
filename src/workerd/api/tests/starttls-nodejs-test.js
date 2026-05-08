@@ -4,7 +4,7 @@
 
 import { connect } from 'cloudflare:sockets';
 import { ok, strict as assert } from 'node:assert';
-import { connect as tlsConnect } from 'node:tls';
+import { connect as tlsConnect, TLSSocket } from 'node:tls';
 import { connect as netConnect } from 'node:net';
 
 export const checkPortsSetCorrectly = {
@@ -14,6 +14,146 @@ export const checkPortsSetCorrectly = {
       assert.strictEqual(typeof env[key], 'string');
       ok(env[key].length > 0);
     }
+  },
+};
+
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-35: tls.connect() must propagate
+// options.servername to TLSSocket.servername and pass it as expectedServerHostname
+// to the native Socket.startTls() call. Before the fix, servername was silently
+// dropped, causing TLS certificate identity checks to use the transport host
+// instead of the caller-specified server identity.
+export const regressionServernamePassthrough = {
+  async test(ctrl, env, ctx) {
+    const opts = {
+      servername: 'localhost',
+      port: env.STARTTLS_CA_PORT,
+      rejectUnauthorized: true,
+    };
+
+    const socket = netConnect(opts.port);
+
+    await new Promise((resolve, reject) => {
+      socket.once('data', (data) => {
+        const greeting = data.toString().trim();
+        if (greeting !== 'HELLO') {
+          reject(new Error('Expected HELLO greeting'));
+          return;
+        }
+
+        socket.write('HELLO_BACK\n');
+
+        socket.once('data', (data) => {
+          const signal = data.toString().trim();
+          if (signal !== 'START_TLS') {
+            reject(new Error('Expected START_TLS signal'));
+            return;
+          }
+
+          // Upgrade to TLS with explicit servername
+          const tlsSocket = tlsConnect(
+            {
+              ...opts,
+              socket: socket,
+            },
+            function () {
+              // After the fix, TLSSocket.servername must reflect the
+              // caller-supplied value. Before the fix it was always null.
+              assert.strictEqual(
+                this.servername,
+                'localhost',
+                'TLSSocket.servername must be set to the caller-supplied servername'
+              );
+
+              this.write('ping\n');
+              this.once('data', (data) => {
+                assert.strictEqual(data.toString().trim(), 'pong');
+                this.end();
+                resolve();
+              });
+            }
+          );
+
+          tlsSocket.on('error', reject);
+        });
+      });
+
+      socket.on('error', reject);
+    });
+  },
+};
+
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-35: setServername() must
+// actually store the value so it is used during the TLS upgrade.  We construct
+// a TLSSocket *without* a servername, call setServername('localhost') before
+// the handshake, then trigger _start().  The server cert is issued for
+// "localhost", so the handshake succeeds only if setServername() actually
+// propagated the value to startTls({ expectedServerHostname }).
+export const regressionSetServernameStoresValue = {
+  async test(ctrl, env, ctx) {
+    const socket = netConnect(env.STARTTLS_CA_PORT);
+
+    await new Promise((resolve, reject) => {
+      socket.once('data', (data) => {
+        const greeting = data.toString().trim();
+        if (greeting !== 'HELLO') {
+          reject(new Error('Expected HELLO greeting'));
+          return;
+        }
+
+        socket.write('HELLO_BACK\n');
+
+        socket.once('data', (data) => {
+          const signal = data.toString().trim();
+          if (signal !== 'START_TLS') {
+            reject(new Error('Expected START_TLS signal'));
+            return;
+          }
+
+          // Create a TLSSocket with no servername — deliberately omitted so
+          // that the only way the correct SNI reaches startTls() is through
+          // our setServername() call below.
+          const tlsSocket = new TLSSocket(socket, {
+            rejectUnauthorized: true,
+          });
+
+          // This is the line under test: if setServername were a no-op the
+          // handshake would either send no SNI or the wrong one, and the
+          // server's certificate check for "localhost" would fail.
+          tlsSocket.setServername('localhost');
+
+          tlsSocket.on('secure', function () {
+            try {
+              assert.strictEqual(
+                tlsSocket.servername,
+                'localhost',
+                'servername must reflect the value set via setServername()'
+              );
+
+              tlsSocket.write('ping\n');
+              tlsSocket.once('data', (data) => {
+                try {
+                  assert.strictEqual(data.toString().trim(), 'pong');
+                  tlsSocket.end();
+                  resolve();
+                } catch (e) {
+                  reject(e);
+                }
+              });
+            } catch (e) {
+              reject(e);
+            }
+          });
+
+          tlsSocket.on('error', reject);
+
+          // Now kick off the TLS handshake — _start() will read
+          // tlsSocket.servername that we set above.
+          tlsSocket._start();
+        });
+      });
+
+      socket.on('error', reject);
+    });
   },
 };
 
