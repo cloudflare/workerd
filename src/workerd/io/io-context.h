@@ -218,13 +218,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return KJ_REQUIRE_NONNULL(currentLock);
   }
 
-  // Like getCurrentLock() but returns kj::none instead of asserting when no lock is held.
-  // Use when a code path may legitimately run outside an active jsg::Lock (e.g. capnp
-  // dispatch contexts that re-enter from the network without going through Worker::run()).
-  kj::Maybe<Worker::Lock&> tryGetCurrentLock() {
-    return currentLock;
-  }
-
   kj::Maybe<Worker::Actor&> getActor() {
     return actor;
   }

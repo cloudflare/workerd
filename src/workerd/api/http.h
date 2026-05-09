@@ -333,16 +333,12 @@ class Fetcher: public JsRpcClientProvider {
         requiresHost(requiresHost),
         isInHouse(isInHouse) {}
 
-  // Returns an `WorkerInterface` that is only valid for the lifetime of the current
-  // `IoContext`. Creates a tracing span named `operationName` at the dispatch site.
+  // Returns a `WorkerInterface` that is only valid for the lifetime of the current
+  // `IoContext`. For subrequest-channel variants, a tracing span named `operationName`
+  // is created at the dispatch site. OutgoingFactory variants emit their own outer
+  // span (e.g. durable_object_subrequest), so `operationName` is ignored in that case.
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
-
-  // Like getClient() but doesn't create a span at the dispatch site -- for callers
-  // that emit their own user span downstream (e.g. the RPC dispatch path, where
-  // JsRpcSessionCustomEvent owns the jsRpcSession span). The caller's current user
-  // span is still forwarded as metadata.userSpanParent so trigger context propagates.
-  kj::Own<WorkerInterface> getClient(IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::None);
 
   // Result of getClient call that includes optional trace context
   struct ClientWithTracing {
@@ -350,8 +346,11 @@ class Fetcher: public JsRpcClientProvider {
     kj::Maybe<TraceContext> traceContext;
   };
 
-  // Get client and optionally create trace context, all in one call
-  ClientWithTracing getClientWithTracing(
+  // Get client and optionally create trace context, all in one call. The returned
+  // ClientWithTracing carries the dispatch-site span; the caller is expected to
+  // attach it to whatever holds the client alive, otherwise the span is dropped
+  // immediately.
+  [[nodiscard]] ClientWithTracing getClientWithTracing(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
   // Get a SubrequestChannel representing this Fetcher.
@@ -526,10 +525,9 @@ class Fetcher: public JsRpcClientProvider {
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
  private:
-  // Shared body of the two getClient() overloads. The TraceContext is built lazily
-  // because OutgoingFactory variants emit their own outer span and don't want a
-  // dispatch-site span synthesized on top.
-  ClientWithTracing buildClient(IoContext& ioContext,
+  // Shared body of getClient() and getClientWithTracing(). The TraceContext is
+  // built lazily because OutgoingFactory variants emit their own outer span.
+  [[nodiscard]] ClientWithTracing buildClient(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::FunctionParam<TraceContext()> makeTraceContext);
 

@@ -170,7 +170,7 @@ export function findSpanByName(state, name, filterFn = () => true) {
  * @param {Array} expectedSpans - The expected spans to compare against
  * @param {Object} options - Options for the test
  * @param {Function} options.mapFn - Map function to transform spans before comparison (default: x => x)
- * @param {Function} options.filterFn - Filter function for spans (default: filters out jsRpcSession and jsRpcCall, which are emitted by every RPC dispatch and unrelated to the per-binding instrumentation under test)
+ * @param {Function} options.filterFn - Filter function for spans (default: filters out jsRpcSession and jsRpcCall)
  * @param {string} options.testName - Name for the test (default: 'instrumentation')
  * @param {boolean} options.logReceived - Log received spans for debugging (default: false)
  *

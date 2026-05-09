@@ -469,39 +469,19 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
     return js.tryCatch([&]() -> JsRpcPromiseAndPipeline {
       auto& ioContext = IoContext::current();
 
-      // Per-call client-side dispatch span. Wraps the RPC call lifetime: stub
-      // resolution, the customEvent task, and the wire round-trip up to when the
-      // response settles. The span is captured by the awaitIo callback below and
-      // closes when that callback runs or is dropped (cancellation paths close the
-      // span without an outcome -- matches existing SpanBuilder semantics).
-      //
-      // We push it onto the async-context frame so synchronous descendants (notably
-      // getClientForOneCall -> getClient -> buildClient -> startRequest) pick it up
-      // via getCurrentUserTraceSpan() and forward it as metadata.userSpanParent --
-      // that is what makes the callee's onset parent under this span. The push is
-      // guarded because callImpl is reachable from paths that don't hold a
-      // jsg::Lock (capnp dispatch / network re-entry); without a lock there is no
-      // async-context frame to push onto, but the span itself still records.
+      // Per-call client-side dispatch span, captured into the awaitIo callback below
+      // so it stays open until the response settles. We push it as the current user
+      // span while resolving the stub, so that getClientForOneCall's jsRpcSession
+      // span (and the userSpanParent forwarded across the wire) become its children.
       auto jsRpcCallSpan =
           ioContext.getCurrentUserTraceSpan().newChild("jsRpcCall"_kjc, ioContext.now());
 
-      // Resolve the stub under a StorageScope that publishes jsRpcCallSpan as the
-      // current user span -- this is what gets captured by getClient -> buildClient
-      // -> startRequest as metadata.userSpanParent and ultimately makes the callee's
-      // onset parent under this span. The scope only needs to cover the synchronous
-      // resolution; once `client` is built, the metadata is already attached.
       // `path` is filled in with the chain of property names leading to the method.
       kj::Vector<kj::StringPtr> path;
-      auto resolveClient = [&] { return parent.getClientForOneCall(js, path); };
       auto client = [&] {
-        KJ_IF_SOME(lock, ioContext.tryGetCurrentLock()) {
-          auto userTraceScope = ioContext.makeUserAsyncTraceScope(lock, SpanParent(jsRpcCallSpan));
-          return resolveClient();
-        }
-        // No lock held (capnp dispatch / network re-entry path) -- no async-context
-        // frame to push onto. The span still records; we just lose the parent
-        // forwarding for this dispatch.
-        return resolveClient();
+        auto userTraceScope = ioContext.makeUserAsyncTraceScope(
+            ioContext.getCurrentLock(), SpanParent(jsRpcCallSpan));
+        return parent.getClientForOneCall(js, path);
       }();
 
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
@@ -1121,6 +1101,11 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
     }
 
+    // Server-side counterpart to the jsRpcCall span emitted client-side in
+    // callImpl(). Attached to the dispatch promise below so it stays open through
+    // JS invocation and result serialization.
+    auto jsRpcCallSpan = ctx.makeUserTraceSpan("jsRpcCall"_kjc);
+
     maybeSetJsRpcInfo(ctx, methodNameForTrace);
 
     auto targetInfo = getTargetInfo(lock, ctx);
@@ -1265,42 +1250,46 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
     };
 
-    switch (op.which()) {
-      case rpc::JsRpcTarget::CallParams::Operation::CALL_WITH_ARGS: {
-        // Note that using isFunctionForRpc(js, propHandle) here would be incorrect, since that
-        // decides whether it is a function *that can be serialized as a stub*. JsRpcProperty
-        // is (at present) considered non-serializable in itself, but when traversing the
-        // pipeline path, we may have descended into a stub and its properties, thus we could
-        // actually be invoking a JsRpcProperty here. As long as it is in fact callable, we will
-        // allow it.
-        JSG_REQUIRE(propHandle->IsFunction(), TypeError,
-            kj::str("\"", methodNameForTrace, "\" is not a function."));
-        auto fn = propHandle.As<v8::Function>();
+    auto dispatch = [&]() -> kj::Promise<void> {
+      switch (op.which()) {
+        case rpc::JsRpcTarget::CallParams::Operation::CALL_WITH_ARGS: {
+          // Note that using isFunctionForRpc(js, propHandle) here would be incorrect, since that
+          // decides whether it is a function *that can be serialized as a stub*. JsRpcProperty
+          // is (at present) considered non-serializable in itself, but when traversing the
+          // pipeline path, we may have descended into a stub and its properties, thus we could
+          // actually be invoking a JsRpcProperty here. As long as it is in fact callable, we will
+          // allow it.
+          JSG_REQUIRE(propHandle->IsFunction(), TypeError,
+              kj::str("\"", methodNameForTrace, "\" is not a function."));
+          auto fn = propHandle.As<v8::Function>();
 
-        kj::Maybe<rpc::JsValue::Reader> args;
-        if (op.hasCallWithArgs()) {
-          args = op.getCallWithArgs();
+          kj::Maybe<rpc::JsValue::Reader> args;
+          if (op.hasCallWithArgs()) {
+            args = op.getCallWithArgs();
+          }
+
+          InvocationResult invocationResult;
+          KJ_IF_SOME(envCtx, targetInfo.envCtx) {
+            invocationResult = invokeFnInsertingEnvCtx(
+                js, methodNameForTrace, fn, thisArg, args, envCtx.env, envCtx.ctx);
+          } else {
+            invocationResult = invokeFn(js, fn, thisArg, args);
+          }
+
+          // We have a function, so let's call it and serialize the result for RPC.
+          // If the function returns a promise we will wait for the promise to finish so we can
+          // serialize the result.
+          return handleResult(kj::mv(invocationResult));
         }
 
-        InvocationResult invocationResult;
-        KJ_IF_SOME(envCtx, targetInfo.envCtx) {
-          invocationResult = invokeFnInsertingEnvCtx(
-              js, methodNameForTrace, fn, thisArg, args, envCtx.env, envCtx.ctx);
-        } else {
-          invocationResult = invokeFn(js, fn, thisArg, args);
-        }
-
-        // We have a function, so let's call it and serialize the result for RPC.
-        // If the function returns a promise we will wait for the promise to finish so we can
-        // serialize the result.
-        return handleResult(kj::mv(invocationResult));
+        case rpc::JsRpcTarget::CallParams::Operation::GET_PROPERTY:
+          return handleResult({.returnValue = propHandle});
       }
 
-      case rpc::JsRpcTarget::CallParams::Operation::GET_PROPERTY:
-        return handleResult({.returnValue = propHandle});
-    }
+      KJ_FAIL_ASSERT("unknown JsRpcTarget::CallParams::Operation", (uint)op.which());
+    };
 
-    KJ_FAIL_ASSERT("unknown JsRpcTarget::CallParams::Operation", (uint)op.which());
+    return dispatch().attach(kj::mv(jsRpcCallSpan));
   }
 
   struct GetPropResult {
@@ -2203,13 +2192,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  // Server-side jsRpcSession spans wrap the membrane lifetime, from delivered()
-  // through to all caps being dropped. The user span is parented to the caller's
-  // enclosing user span via USER_SPAN_CONTEXT_PROPAGATION -- the
-  // metadata.userSpanParent set on the client side flows here as the IoContext's
-  // current user span.
+  // No explicit server-side `jsRpcSession` user span: the onset event for this
+  // invocation already has `info.type == "jsrpc"` and its lifetime is exactly the
+  // session lifetime (delivered() to outcome), so emitting a span here would be
+  // redundant. Tail consumers should treat a jsrpc-typed onset as the server-side
+  // counterpart to the client-side jsRpcSession span.
   auto jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
-  auto jsRpcSessionSpan = ioctx.getCurrentUserTraceSpan().newChild("jsRpcSession"_kjc, ioctx.now());
 
   EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
       kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
@@ -2248,21 +2236,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
-  // Client-side jsRpcSession spans, fired only for cross-process dispatch. In-process
-  // service bindings reach the callee via WorkerEntrypoint::customEvent ->
-  // event->run() and never enter sendRpc(), so no client-side span is emitted for
-  // those. The spans wrap the wire round-trip, from sending the jsRpcSessionRequest
-  // until the session completes (membrane drained). Guarded by IoContext::hasCurrent()
-  // because capnp dispatch can run sendRpc() without an IoContext in scope; in that
-  // case the spans stay unobserved.
-  SpanBuilder jsRpcSessionInternalSpan(nullptr);
-  SpanBuilder jsRpcSessionSpan(nullptr);
-  if (IoContext::hasCurrent()) {
-    auto& ioctx = IoContext::current();
-    jsRpcSessionInternalSpan = ioctx.makeTraceSpan("jsRpcSession"_kjc);
-    jsRpcSessionSpan = ioctx.getCurrentUserTraceSpan().newChild("jsRpcSession"_kjc, ioctx.now());
-  }
-
   // We arrange to revoke all capabilities in this session as soon as `sendRpc()` completes or is
   // canceled. Normally, the server side doesn't return if any capabilities still exist, so this
   // only makes a difference in the case that some sort of an error occurred. We don't strictly

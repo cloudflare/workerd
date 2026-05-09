@@ -1306,11 +1306,9 @@ class TraceContext {
     return SpanParent(span);
   }
 
-  // Returns the user-span parent to forward to the callee as metadata.userSpanParent.
-  // If we own a `userSpan`, that's the parent; otherwise we fall back to the
-  // IoContext's current user span so dispatch sites that don't emit their own user
-  // span still propagate correctly.
-  SpanParent getUserSpanParent();
+  SpanParent getUserSpanParent() {
+    return SpanParent(userSpan);
+  }
 
  private:
   SpanBuilder span;

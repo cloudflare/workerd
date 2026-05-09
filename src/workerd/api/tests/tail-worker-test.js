@@ -174,15 +174,17 @@ const E = {
   wsClose:
     '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"DurableObjectExample","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"close","code":1000,"wasClean":true}}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
-  // jsrpc
+  // jsrpc -- the jsrpc-typed onset on the server already represents the session
+  // (delivered() to outcome), so no separate jsRpcSession user span is emitted
+  // server-side. Each method dispatch gets a jsRpcCall span.
   myActorJsrpc:
-    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"MyActor","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"log","level":"log","message":["baz"]}{"type":"attributes","info":[{"name":"jsrpc.method","value":"functionProperty"}]}{"type":"return"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"MyActor","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"log","level":"log","message":["baz"]}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"jsrpc.method","value":"functionProperty"}]}{"type":"spanClose","outcome":"ok"}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   jsrpcNonFunction:
-    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"jsrpc.method","value":"nonFunctionProperty"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["foo"]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"jsrpc.method","value":"nonFunctionProperty"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["foo"]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   jsrpcGetCounter:
-    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"jsrpc.method","value":"getCounter"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["getCounter called"]}{"type":"return"}{"type":"log","level":"log","message":["increment called on transient"]}{"type":"log","level":"log","message":["getValue called on transient"]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"jsrpc.method","value":"getCounter"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["getCounter called"]}{"type":"spanClose","outcome":"ok"}{"type":"return"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000002"}{"type":"log","level":"log","message":["increment called on transient"]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000003"}{"type":"log","level":"log","message":["getValue called on transient"]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   jsrpcDoSubrequest:
-    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000001"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000002"}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000003"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000004"}{"type":"spanClose","outcome":"ok"}{"type":"attributes","info":[{"name":"objectId","value":"af6dd8b6678e07bac992dae1bbbb3f385af19ebae7e5ea8c66d6341b246d3328"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000005"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000006"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000001"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000002"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000003"}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000004"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000005"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000006"}{"type":"spanClose","outcome":"ok"}{"type":"attributes","info":[{"name":"objectId","value":"af6dd8b6678e07bac992dae1bbbb3f385af19ebae7e5ea8c66d6341b246d3328"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000007"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcCall","spanId":"0000000000000008"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
   // cacheMode
   cacheMode:
@@ -301,15 +303,11 @@ const expectedWithPropagation = [
   n(E.localAddressViaServiceBinding),
   n(E.connectTarget),
 
-  // jsrpc DO subrequest test: caller gets a jsRpcCall span per RPC dispatch
-  // (from callImpl), each of which forwards as metadata.userSpanParent. Each callee
-  // invocation parents under its jsRpcCall; durable_object_subrequest is
-  // nested under the jsRpcCall for the MyActor DO call. The mis-link of
-  // nonFunctionProperty under getCounter is a workerd-standalone test-infra artifact
-  // -- both callees' server-side jsRpcSession spans land on sequential id
-  // 0000000000000001 within the same trace, and buildTree resolves
-  // nonFunctionProperty's parentSpanId to whichever invocation re-indexes that id
-  // first. Real production span IDs are random 64-bit; no collision occurs there.
+  // jsrpc DO subrequest test. The exact nesting is a workerd-standalone artifact:
+  // sibling callee invocations re-use sequential span IDs starting at
+  // 0000000000000001, so buildTree's spanId-based parent lookup mis-links them
+  // under each other rather than as siblings of the caller. Production span IDs
+  // are random 64-bit and don't collide.
   n(E.jsrpcDoSubrequest, [
     n(E.myActorJsrpc),
     n(E.jsrpcGetCounter, [n(E.jsrpcNonFunction)]),

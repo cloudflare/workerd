@@ -29,8 +29,12 @@ export const test = {
       durable_object_storage_get: 18,
       durable_object_storage_transaction: 8,
       durable_object_subrequest: 47,
-      jsRpcCall: 35,
-      jsRpcSession: 35,
+      // 35 RPC method invocations × 2 (one client-side and one server-side jsRpcCall
+      // span per call). No client-side jsRpcSession spans because all calls in this
+      // test are to Durable Objects, where the OutgoingFactory branch emits
+      // durable_object_subrequest as the dispatch-site span instead. The server side
+      // doesn't emit a jsRpcSession span -- the jsrpc-typed onset is its equivalent.
+      jsRpcCall: 70,
       durable_object_storage_deleteAll: 1,
       createStringTable: 4,
       runActorFunc: 4,
