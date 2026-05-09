@@ -4,6 +4,14 @@
 
 import * as assert from 'node:assert';
 
+async function getLastRestartBody(env, id) {
+  const res = await env.mock.fetch('http://placeholder/last-restart', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  });
+  return (await res.json()).result;
+}
+
 export const tests = {
   async test(_, env) {
     {
@@ -36,5 +44,38 @@ export const tests = {
       assert.deepStrictEqual(instances[0].id, 'foo');
       assert.deepStrictEqual(instances[1].id, 'bar');
     }
+  },
+
+  async testRestartNoOptions(_, env) {
+    const instance = await env.workflow.get('restart-basic');
+    await instance.restart();
+
+    const body = await getLastRestartBody(env, 'restart-basic');
+    assert.deepStrictEqual(body.id, 'restart-basic');
+    assert.strictEqual(body.from, undefined);
+  },
+
+  async testRestartFromStepNameOnly(_, env) {
+    const instance = await env.workflow.get('restart-step');
+    await instance.restart({ from: { name: 'fetch data' } });
+
+    const body = await getLastRestartBody(env, 'restart-step');
+    assert.deepStrictEqual(body.id, 'restart-step');
+    assert.deepStrictEqual(body.from, { name: 'fetch data' });
+  },
+
+  async testRestartFromStepAllOptions(_, env) {
+    const instance = await env.workflow.get('restart-full');
+    await instance.restart({
+      from: { name: 'process item', count: 3, type: 'do' },
+    });
+
+    const body = await getLastRestartBody(env, 'restart-full');
+    assert.deepStrictEqual(body.id, 'restart-full');
+    assert.deepStrictEqual(body.from, {
+      name: 'process item',
+      count: 3,
+      type: 'do',
+    });
   },
 };

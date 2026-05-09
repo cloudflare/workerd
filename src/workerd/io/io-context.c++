@@ -269,10 +269,11 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
   KJ_IF_SOME(workerTracer, workerTracer) {
     if (util::Autogate::isEnabled(util::AutogateKey::USER_SPAN_CONTEXT_PROPAGATION)) {
-      auto traceId = getInvocationSpanContext().getTraceId();
-      rootUserTraceSpan = workerTracer->makeUserRequestSpan(kj::mv(traceId));
+      auto& invCtx = getInvocationSpanContext();
+      rootUserTraceSpan =
+          workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
     } else {
-      rootUserTraceSpan = workerTracer->makeUserRequestSpan(tracing::TraceId(nullptr));
+      rootUserTraceSpan = workerTracer->makeUserRequestSpan(tracing::TraceId(nullptr), kj::none);
     }
   }
 

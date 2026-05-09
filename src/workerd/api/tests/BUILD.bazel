@@ -40,8 +40,10 @@ wd_test(
         "connect-handler-test-proxy.js",
     ],
     # Test uses TCP sockets for ports 8081-8083 and may fail when running concurrently with other
-    # tests that do so.
-    tags = ["exclusive"],
+    # tests that do so. Use the "socket" resource to model this behavior – this prevents other tests
+    # with this tag from running at the same time, but still allows for running at the same time as
+    # tests without the tag.
+    tags = ["resources:socket:1"],
 )
 
 wd_test(
@@ -71,7 +73,7 @@ wd_test(
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
-    tags = ["exclusive"],
+    tags = ["resources:socket:1"],
 )
 
 # Test to validate timing semantics for JSRPC streaming responses.
@@ -414,7 +416,7 @@ wd_test(
     src = "js-rpc-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-test.js"],
-    tags = ["exclusive"],
+    tags = ["resources:socket:1"],
 )
 
 wd_test(
@@ -671,7 +673,7 @@ wd_test(
         "--no-verbose",
     ],
     data = ["js-rpc-test.js"],
-    tags = ["exclusive"],
+    tags = ["resources:socket:1"],
 )
 
 wd_test(

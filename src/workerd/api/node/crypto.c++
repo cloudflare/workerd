@@ -690,16 +690,15 @@ bool passAuthTagToOpenSSL(ncrypto::CipherCtxPointer& ctx, kj::ArrayPtr<const kj:
 }
 }  // namespace
 
-CryptoImpl::CipherHandle::CipherHandle(jsg::Lock& js,
-    CipherMode mode,
+CryptoImpl::CipherHandle::CipherHandle(CipherMode mode,
     ncrypto::CipherCtxPointer ctx,
     jsg::Ref<CryptoKey> key,
-    jsg::JsBufferSource iv,
+    kj::Array<kj::byte> iv,
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo)
     : mode(mode),
       ctx(kj::mv(ctx)),
       key(kj::mv(key)),
-      iv(iv.addRef(js)),
+      iv(kj::mv(iv)),
       maybeAuthInfo(kj::mv(maybeAuthInfo)) {}
 
 jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::construct(jsg::Lock& js,
@@ -751,8 +750,12 @@ jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::construct(jsg::Lock
   JSG_REQUIRE(ctx.init(ncrypto::Cipher(), encrypt, keyData.begin(), iv.asArrayPtr().begin()), Error,
       "Failed to initialize cipher/cipher context");
 
+  // Copy the IV into C++-owned memory so that later modifications to the JS buffer
+  // cannot affect the cipher. This matches Node.js, which copies the IV into OpenSSL
+  // at init time.
+  auto ivCopy = kj::heapArray<kj::byte>(iv.asArrayPtr());
   return js.alloc<CipherHandle>(
-      js, mode, kj::mv(ctx), kj::mv(key), kj::mv(iv), kj::mv(maybeAuthInfo));
+      mode, kj::mv(ctx), kj::mv(key), kj::mv(ivCopy), kj::mv(maybeAuthInfo));
 }
 
 jsg::JsUint8Array CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
@@ -772,9 +775,7 @@ jsg::JsUint8Array CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::JsBufferS
   if (mode == CipherMode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
     authTagPassed = true;
     auto& tagRef = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
-    auto tag = tagRef.getHandle(js);
-    JSG_REQUIRE(
-        passAuthTagToOpenSSL(ctx, tag.asArrayPtr().asConst()), Error, "Failed to set auth tag");
+    JSG_REQUIRE(passAuthTagToOpenSSL(ctx, tagRef.asPtr()), Error, "Failed to set auth tag");
   }
 
   const int block_size = ctx.getBlockSize();
@@ -826,9 +827,7 @@ jsg::JsUint8Array CryptoImpl::CipherHandle::final(jsg::Lock& js) {
   if (mode == CipherMode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
     authTagPassed = true;
     auto& tagRef = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
-    auto tag = tagRef.getHandle(js);
-    JSG_REQUIRE(
-        passAuthTagToOpenSSL(ctx, tag.asArrayPtr().asConst()), Error, "Failed to set auth tag");
+    JSG_REQUIRE(passAuthTagToOpenSSL(ctx, tagRef.asPtr()), Error, "Failed to set auth tag");
   }
 
   if (ctx.getNid() == NID_chacha20_poly1305 && mode == CipherMode::DECIPHER) {
@@ -862,9 +861,9 @@ jsg::JsUint8Array CryptoImpl::CipherHandle::final(jsg::Lock& js) {
       if (info.auth_tag_len == kNoAuthTagLength) {
         info.auth_tag_len = 16;
       }
-      auto tag = jsg::JsUint8Array::create(js, info.auth_tag_len);
-      ok = ctx.getAeadTag(info.auth_tag_len, tag.asArrayPtr().begin());
-      maybeAuthTag = jsg::JsBufferSource(tag).addRef(js);
+      auto tag = kj::heapArray<kj::byte>(info.auth_tag_len);
+      ok = ctx.getAeadTag(info.auth_tag_len, tag.begin());
+      maybeAuthTag = kj::mv(tag);
     }
   }
 
@@ -898,9 +897,7 @@ void CryptoImpl::CipherHandle::setAAD(
     if (mode == CipherMode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
       authTagPassed = true;
       auto& tagRef = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
-      auto tag = tagRef.getHandle(js);
-      JSG_REQUIRE(
-          passAuthTagToOpenSSL(ctx, tag.asArrayPtr().asConst()), Error, "Failed to set auth tag");
+      JSG_REQUIRE(passAuthTagToOpenSSL(ctx, tagRef.asPtr()), Error, "Failed to set auth tag");
     }
 
     ncrypto::Buffer<const unsigned char> buffer{
@@ -950,9 +947,8 @@ void CryptoImpl::CipherHandle::setAuthTag(jsg::Lock& js, jsg::JsBufferSource aut
 
   info.auth_tag_len = authTag.size();
 
-  // We defensively copy the auth tag here to prevent modification.
-  auto tagCopy = jsg::JsUint8Array::create(js, authTag.asArrayPtr());
-  maybeAuthTag = jsg::JsBufferSource(static_cast<v8::Local<v8::Value>>(tagCopy)).addRef(js);
+  // Copy the auth tag so that later modifications to the JS buffer cannot affect the cipher.
+  maybeAuthTag = kj::heapArray<kj::byte>(authTag.asArrayPtr());
 }
 
 jsg::JsUint8Array CryptoImpl::CipherHandle::getAuthTag(jsg::Lock& js) {
@@ -960,9 +956,9 @@ jsg::JsUint8Array CryptoImpl::CipherHandle::getAuthTag(jsg::Lock& js) {
   JSG_REQUIRE(mode == CipherMode::CIPHER, Error, "Getting the auth tag is only support for cipher");
 
   KJ_IF_SOME(ref, maybeAuthTag) {
-    KJ_DEFER(maybeAuthTag = kj::none);
-    auto tag = ref.getHandle(js);
-    return jsg::JsUint8Array::create(js, tag.asArrayPtr());
+    auto result = jsg::JsUint8Array::create(js, ref.asPtr());
+    maybeAuthTag = kj::none;
+    return result;
   }
 
   return jsg::JsUint8Array::create(js, 0);
@@ -1017,18 +1013,17 @@ CryptoImpl::AeadHandle::AuthenticatedInfo initAuthenticated(ncrypto::Aead& aead,
 }
 }  // namespace
 
-CryptoImpl::AeadHandle::AeadHandle(jsg::Lock& js,
-    CipherMode mode,
+CryptoImpl::AeadHandle::AeadHandle(CipherMode mode,
     ncrypto::Aead aead,
     ncrypto::AeadCtxPointer ctx,
     jsg::Ref<CryptoKey> key,
-    jsg::JsBufferSource iv,
+    kj::Array<kj::byte> iv,
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo)
     : mode(mode),
       aead(aead),
       ctx(kj::mv(ctx)),
       key(kj::mv(key)),
-      iv(iv.addRef(js)),
+      iv(kj::mv(iv)),
       maybeAuthInfo(kj::mv(maybeAuthInfo)) {}
 
 jsg::Ref<CryptoImpl::AeadHandle> CryptoImpl::AeadHandle::construct(jsg::Lock& js,
@@ -1066,8 +1061,13 @@ jsg::Ref<CryptoImpl::AeadHandle> CryptoImpl::AeadHandle::construct(jsg::Lock& js
   maybeAuthInfo = initAuthenticated(
       aead, ctx, encrypt, algorithm, iv.size(), maybeAuthTagLength.orDefault(kNoAuthTagLength));
 
+  // Copy the IV into C++-owned memory so that later modifications to the JS buffer
+  // cannot affect the cipher. The EVP_AEAD API requires the IV at encrypt/decrypt time
+  // (not init time), so we store it. This matches Node.js behavior where the IV is
+  // consumed at creation time.
+  auto ivCopy = kj::heapArray<kj::byte>(iv.asArrayPtr());
   return js.alloc<AeadHandle>(
-      js, mode, aead, kj::mv(ctx), kj::mv(key), kj::mv(iv), kj::mv(maybeAuthInfo));
+      mode, aead, kj::mv(ctx), kj::mv(key), kj::mv(ivCopy), kj::mv(maybeAuthInfo));
 }
 
 jsg::JsUint8Array CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
@@ -1096,14 +1096,11 @@ jsg::JsUint8Array CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::JsBufferSou
   auto buf = jsg::JsUint8Array::create(js, data.size());
 
   ncrypto::Buffer<unsigned char> outBuf = {.data = buf.asArrayPtr().begin(), .len = data.size()};
-  auto ivHandle = iv.getHandle(js);
-  ncrypto::Buffer<const unsigned char> ivBuf = {
-    .data = ivHandle.asArrayPtr().begin(), .len = ivHandle.size()};
+  ncrypto::Buffer<const unsigned char> ivBuf = {.data = iv.begin(), .len = iv.size()};
   ncrypto::Buffer<const unsigned char> aadBuf;
 
   KJ_IF_SOME(aadRef, maybeAad) {
-    auto aad = aadRef.getHandle(js);
-    aadBuf = {.data = aad.asArrayPtr().begin(), .len = aad.size()};
+    aadBuf = {.data = aadRef.begin(), .len = aadRef.size()};
   }
 
   bool r;
@@ -1117,18 +1114,16 @@ jsg::JsUint8Array CryptoImpl::AeadHandle::update(jsg::Lock& js, jsg::JsBufferSou
       info.auth_tag_len = 16;
     }
 
-    auto tag = jsg::JsUint8Array::create(js, info.auth_tag_len);
+    auto tag = kj::heapArray<kj::byte>(info.auth_tag_len);
 
-    ncrypto::Buffer<unsigned char> tagBuf = {
-      .data = tag.asArrayPtr().begin(), .len = info.auth_tag_len};
+    ncrypto::Buffer<unsigned char> tagBuf = {.data = tag.begin(), .len = info.auth_tag_len};
 
     r = ctx.encrypt(buffer, outBuf, tagBuf, ivBuf, aadBuf);
-    maybeAuthTag = jsg::JsBufferSource(tag).addRef(js);
+    maybeAuthTag = kj::mv(tag);
   } else {
-    auto tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided").getHandle(js);
+    auto& tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
 
-    ncrypto::Buffer<const unsigned char> tagBuf = {
-      .data = tag.asArrayPtr().begin(), .len = tag.size()};
+    ncrypto::Buffer<const unsigned char> tagBuf = {.data = tag.begin(), .len = tag.size()};
 
     r = ctx.decrypt(buffer, outBuf, tagBuf, ivBuf, aadBuf);
     ERR_print_errors_fp(stderr);
@@ -1177,9 +1172,8 @@ void CryptoImpl::AeadHandle::setAAD(
     }
   }
 
-  // Defensively copy the AAD data.
-  auto aadCopy = jsg::JsUint8Array::create(js, aad.asArrayPtr());
-  maybeAad = jsg::JsBufferSource(static_cast<v8::Local<v8::Value>>(aadCopy)).addRef(js);
+  // Copy the AAD data so that later modifications to the JS buffer cannot affect the cipher.
+  maybeAad = kj::heapArray<kj::byte>(aad.asArrayPtr());
 }
 
 void CryptoImpl::AeadHandle::setAutoPadding(jsg::Lock&, bool) {
@@ -1212,9 +1206,8 @@ void CryptoImpl::AeadHandle::setAuthTag(jsg::Lock& js, jsg::JsBufferSource authT
 
   info.auth_tag_len = authTag.size();
 
-  // We defensively copy the auth tag here to prevent modification.
-  auto tagCopy = jsg::JsUint8Array::create(js, authTag.asArrayPtr());
-  maybeAuthTag = jsg::JsBufferSource(static_cast<v8::Local<v8::Value>>(tagCopy)).addRef(js);
+  // Copy the auth tag so that later modifications to the JS buffer cannot affect the cipher.
+  maybeAuthTag = kj::heapArray<kj::byte>(authTag.asArrayPtr());
 }
 
 jsg::JsUint8Array CryptoImpl::AeadHandle::getAuthTag(jsg::Lock& js) {
@@ -1222,9 +1215,9 @@ jsg::JsUint8Array CryptoImpl::AeadHandle::getAuthTag(jsg::Lock& js) {
   JSG_REQUIRE(mode == CipherMode::CIPHER, Error, "Getting the auth tag is only support for cipher");
 
   KJ_IF_SOME(ref, maybeAuthTag) {
-    KJ_DEFER(maybeAuthTag = kj::none);
-    auto tag = ref.getHandle(js);
-    return jsg::JsUint8Array::create(js, tag.asArrayPtr());
+    auto result = jsg::JsUint8Array::create(js, ref.asPtr());
+    maybeAuthTag = kj::none;
+    return result;
   }
 
   return jsg::JsUint8Array::create(js, 0);

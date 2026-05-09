@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joyee Cheung <joyee@igalia.com>
+Date: Mon, 6 Apr 2026 18:15:41 +0200
+Subject: Fix non-conforming braced-init-list in value_or()
+
+value_or() is a function template that deduces its argument type.
+Passing a braced-init-list {} causes deduction to fail in GCC
+because {} has no type:
+
+  wasm-shuffle-reducer.cc:576: error: no matching member function
+  for call to 'value_or'
+  note: candidate template ignored: couldn't infer template argument
+
+Clang only accepted it by chance. Replace {} with uint8_t{0} to make
+the type explicit.
+
+Refs: https://eel.is/c++draft/temp.deduct.call
+Refs: https://github.com/nodejs/node/pull/62572
+Change-Id: I589617c78fbc1a65a3475957f846ffb87364ff28
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/7726131
+Reviewed-by: Matthias Liedtke <mliedtke@chromium.org>
+Commit-Queue: Joyee Cheung <joyee@igalia.com>
+Cr-Commit-Position: refs/heads/main@{#106357}
+
+diff --git a/src/compiler/turboshaft/wasm-shuffle-reducer.cc b/src/compiler/turboshaft/wasm-shuffle-reducer.cc
+index 192af4738276fbc0400eb8d087d6292e8b2df2d1..0f8275fedede955baa6bbe4cdd2da0b1e3245fc4 100644
+--- a/src/compiler/turboshaft/wasm-shuffle-reducer.cc
++++ b/src/compiler/turboshaft/wasm-shuffle-reducer.cc
+@@ -573,7 +573,7 @@ void WasmShuffleAnalyzer::TryReduceFromMSB(OpIndex input,
+     uint8_t index = shuffle.shuffle[i];
+     if (index >= lower_limit && index <= upper_limit) {
+       max = std::max(static_cast<uint8_t>(index % kSimd128Size),
+-                     max.value_or({}));
++                     max.value_or(uint8_t{0}));
+     }
+   }
+   if (max) {

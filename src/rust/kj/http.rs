@@ -6,7 +6,7 @@ use kj_rs::KjOwn;
 use static_assertions::assert_eq_align;
 use static_assertions::assert_eq_size;
 
-use crate::OwnOrRef;
+use crate::OwnOrMut;
 use crate::Result;
 use crate::io::AsyncInputStream;
 use crate::io::AsyncIoStream;
@@ -95,7 +95,9 @@ pub mod ffi {
 
     unsafe extern "C++" {
         type BuiltinIndicesEnum;
+        type HttpHeaderTable;
         type HttpHeaders;
+        fn new_http_headers(table: &HttpHeaderTable) -> KjOwn<HttpHeaders>;
         fn clone_shallow(this_: &HttpHeaders) -> KjOwn<HttpHeaders>;
         fn set_header(this_: Pin<&mut HttpHeaders>, id: BuiltinIndicesEnum, value: &str);
         unsafe fn get_header<'a>(
@@ -121,11 +123,35 @@ pub mod ffi {
     }
 
     unsafe extern "C++" {
-        type AsyncInputStream = crate::io::AsyncInputStream;
-        type AsyncIoStream = crate::io::AsyncIoStream;
+        type AsyncInputStream = crate::io::ffi::AsyncInputStream;
+        type AsyncIoStream = crate::io::ffi::AsyncIoStream;
+        type AsyncOutputStream = crate::io::ffi::AsyncOutputStream;
         type ConnectResponse;
         type HttpServiceResponse;
         type HttpService;
+
+        fn response_send(
+            this_: Pin<&mut HttpServiceResponse>,
+            status_code: u32,
+            status_text: &str,
+            headers: &HttpHeaders,
+            expected_body_size: KjMaybe<u64>,
+        ) -> Result<KjOwn<AsyncOutputStream>>;
+
+        fn connect_response_accept(
+            this_: Pin<&mut ConnectResponse>,
+            status_code: u32,
+            status_text: &str,
+            headers: &HttpHeaders,
+        ) -> Result<()>;
+
+        fn connect_response_reject(
+            this_: Pin<&mut ConnectResponse>,
+            status_code: u32,
+            status_text: &str,
+            headers: &HttpHeaders,
+            expected_body_size: KjMaybe<u64>,
+        ) -> Result<KjOwn<AsyncOutputStream>>;
 
         /// Corresponds to `kj::HttpService::request`.
         async fn request(
@@ -178,30 +204,32 @@ assert_eq_size!(ffi::HttpConnectSettings, [u8; 16]);
 assert_eq_align!(ffi::HttpConnectSettings, u64);
 
 pub type HeaderId = ffi::BuiltinIndicesEnum;
-pub type CustomHttpHeader = ffi::HttpHeaderId;
+pub type HeaderTable = ffi::HttpHeaderTable;
+pub type CustomHeader = ffi::HttpHeaderId;
+
 // TODO(tewaro) soon: replace by enum HeaderId
 
 /// Non-owning reference to a `kj::HttpHeaderId`.
 ///
-/// `CustomHttpHeader` is an opaque CXX type representing `HttpHeaderId` and can only be passed by
+/// `CustomHeader` is an opaque CXX type representing `HttpHeaderId` and can only be passed by
 /// reference across the FFI boundary. This wrapper makes the borrow lifetime explicit and provides
 /// a safe Rust handle.
 ///
 /// `repr(transparent)` guarantees the same layout as `&ffi::HttpHeaderId` (i.e. a single
 /// pointer), which allows safe reinterpretation of `&[*const HttpHeaderId]` slices received
-/// from C++ into `&[CustomHttpHeaderId]` via [`CustomHttpHeaderId::from_ptr_slice`].
+/// from C++ into `&[CustomHeaderId]` via [`CustomHeaderId::from_ptr_slice`].
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct CustomHttpHeaderId<'a>(&'a CustomHttpHeader);
+pub struct CustomHeaderId<'a>(&'a CustomHeader);
 
-impl<'a> From<&'a CustomHttpHeader> for CustomHttpHeaderId<'a> {
-    fn from(value: &'a CustomHttpHeader) -> Self {
-        CustomHttpHeaderId(value)
+impl<'a> From<&'a CustomHeader> for CustomHeaderId<'a> {
+    fn from(value: &'a CustomHeader) -> Self {
+        CustomHeaderId(value)
     }
 }
 
-impl<'a> CustomHttpHeaderId<'a> {
-    /// Reinterpret a slice of `*const CustomHttpHeader` pointers (as received from C++ via CXX) into
+impl<'a> CustomHeaderId<'a> {
+    /// Reinterpret a slice of `*const CustomHeader` pointers (as received from C++ via CXX) into
     /// a slice of `HttpHeader`.
     ///
     /// This is the canonical way to receive a `kj::ArrayPtr<const kj::HttpHeaderId>` from C++:
@@ -209,19 +237,20 @@ impl<'a> CustomHttpHeaderId<'a> {
     /// Rust side calls this function to get a safe `&[HttpHeaderIdRef]`.
     ///
     /// # Safety
-    /// `CustomHttpHeaderId` is `#[repr(transparent)]` over `&CustomHttpHeader`, which has
+    /// `CustomHeaderId` is `#[repr(transparent)]` over `&CustomHeader`, which has
     /// the same layout as `*const kj::HttpHeaderId`. The caller guarantees all pointers are valid.
-    pub unsafe fn from_ptr_slice(ptrs: &'a [*const CustomHttpHeader]) -> &'a [Self] {
-        let ptr = std::ptr::from_ref::<[*const CustomHttpHeader]>(ptrs) as *const [Self];
-        // SAFETY: CustomHttpHeaderId is #[repr(transparent)] over &CustomHttpHeader; caller guarantees all pointers are valid.
+    pub unsafe fn from_ptr_slice(ptrs: &'a [*const CustomHeader]) -> &'a [Self] {
+        let ptr = std::ptr::from_ref::<[*const CustomHeader]>(ptrs) as *const [Self];
+        // SAFETY: CustomHeaderId is #[repr(transparent)] over &CustomHeader; caller guarantees all pointers are valid.
         unsafe { &*ptr }
     }
 }
 
 /// Non-owning constant reference to `kj::HttpHeaders`
-pub struct HttpHeadersRef<'a>(&'a ffi::HttpHeaders);
+#[derive(Clone, Copy)]
+pub struct HeadersRef<'a>(&'a ffi::HttpHeaders);
 
-impl HttpHeadersRef<'_> {
+impl HeadersRef<'_> {
     pub fn get(&self, id: HeaderId) -> Option<&[u8]> {
         // SAFETY: self.0 is a valid HttpHeaders reference and id is a valid builtin header enum.
         unsafe { ffi::get_header(self.0, id).into() }
@@ -229,23 +258,23 @@ impl HttpHeadersRef<'_> {
 
     /// Look up a header by its `kj::HttpHeaderId`. This works for both builtin headers and custom
     /// headers registered via `HttpHeaderTable::Builder::add()`.
-    pub fn get_by_id(&self, id: CustomHttpHeaderId<'_>) -> Option<&[u8]> {
+    pub fn get_by_id(&self, id: CustomHeaderId<'_>) -> Option<&[u8]> {
         // SAFETY: self.0 is a valid HttpHeaders reference and id.0 is a valid HttpHeaderId.
         unsafe { ffi::get_header_by_id(self.0, id.0).into() }
     }
 
     #[must_use]
-    pub fn clone_shallow(&self) -> HttpHeaders<'_> {
-        HttpHeaders {
+    pub fn clone_shallow(&self) -> Headers<'_> {
+        Headers {
             own: ffi::clone_shallow(self.0),
             _marker: PhantomData,
         }
     }
 }
 
-impl<'a> From<&'a ffi::HttpHeaders> for HttpHeadersRef<'a> {
+impl<'a> From<&'a ffi::HttpHeaders> for HeadersRef<'a> {
     fn from(value: &'a ffi::HttpHeaders) -> Self {
-        HttpHeadersRef(value)
+        HeadersRef(value)
     }
 }
 
@@ -253,36 +282,129 @@ impl<'a> From<&'a ffi::HttpHeaders> for HttpHeadersRef<'a> {
 ///
 /// Notice, that despite the fact that headers are fully owned, because of a `shallowClone`
 /// method, data might not be owned: hence the lifetime parameter.
-pub struct HttpHeaders<'a> {
+pub struct Headers<'a> {
     own: KjOwn<ffi::HttpHeaders>,
     _marker: PhantomData<&'a ffi::HttpHeaders>,
 }
 
-impl<'a> HttpHeaders<'a> {
+impl<'a> Headers<'a> {
+    #[must_use]
+    pub fn new(table: &'a HeaderTable) -> Self {
+        Self {
+            own: ffi::new_http_headers(table),
+            _marker: PhantomData,
+        }
+    }
+
     pub fn set(&mut self, id: HeaderId, value: &str) {
         ffi::set_header(self.own.as_mut(), id, value);
     }
 
-    pub fn as_ref(&'a self) -> HttpHeadersRef<'a> {
-        HttpHeadersRef(self.own.as_ref())
+    pub fn as_ref(&'a self) -> HeadersRef<'a> {
+        HeadersRef(self.own.as_ref())
     }
 }
 
-pub type HttpMethod = ffi::HttpMethod;
-pub type HttpServiceResponse = ffi::HttpServiceResponse;
-pub type ConnectResponse = ffi::ConnectResponse;
-pub type HttpConnectSettings<'a> = ffi::HttpConnectSettings<'a>;
+impl<'a, 'b> From<&'b Headers<'a>> for HeadersRef<'b> {
+    fn from(value: &'b Headers<'a>) -> Self {
+        value.as_ref()
+    }
+}
+
+pub type Method = ffi::HttpMethod;
+pub type ConnectSettings<'a> = ffi::HttpConnectSettings<'a>;
+
+/// Non-owning mutable reference to `kj::HttpService::Response`.
+pub struct ServiceResponse<'a>(Pin<&'a mut ffi::HttpServiceResponse>);
+
+impl<'a> ServiceResponse<'a> {
+    /// Send response metadata and obtain the writable response body stream.
+    pub fn send<'h>(
+        self,
+        status_code: u32,
+        status_text: &str,
+        headers: impl Into<HeadersRef<'h>>,
+        expected_body_size: Option<u64>,
+    ) -> Result<crate::io::AsyncOutputStream<'a>> {
+        Ok(ffi::response_send(
+            self.0,
+            status_code,
+            status_text,
+            headers.into().0,
+            expected_body_size.into(),
+        )?
+        .into())
+    }
+
+    pub(crate) fn into_ffi(self) -> Pin<&'a mut ffi::HttpServiceResponse> {
+        self.0
+    }
+}
+
+impl<'a> From<Pin<&'a mut ffi::HttpServiceResponse>> for ServiceResponse<'a> {
+    fn from(value: Pin<&'a mut ffi::HttpServiceResponse>) -> Self {
+        Self(value)
+    }
+}
+
+/// Non-owning mutable reference to `kj::HttpService::ConnectResponse`.
+pub struct ConnectResponse<'a>(Pin<&'a mut ffi::ConnectResponse>);
+
+impl<'a> ConnectResponse<'a> {
+    /// Accept the CONNECT request without a response body.
+    pub fn accept<'h>(
+        self,
+        status_code: u32,
+        status_text: &str,
+        headers: impl Into<HeadersRef<'h>>,
+    ) -> Result<()> {
+        Ok(ffi::connect_response_accept(
+            self.0,
+            status_code,
+            status_text,
+            headers.into().0,
+        )?)
+    }
+
+    /// Reject the CONNECT request and obtain the writable rejection body stream.
+    pub fn reject<'h>(
+        self,
+        status_code: u32,
+        status_text: &str,
+        headers: impl Into<HeadersRef<'h>>,
+        expected_body_size: Option<u64>,
+    ) -> Result<crate::io::AsyncOutputStream<'a>> {
+        Ok(ffi::connect_response_reject(
+            self.0,
+            status_code,
+            status_text,
+            headers.into().0,
+            expected_body_size.into(),
+        )?
+        .into())
+    }
+
+    pub(crate) fn into_ffi(self) -> Pin<&'a mut ffi::ConnectResponse> {
+        self.0
+    }
+}
+
+impl<'a> From<Pin<&'a mut ffi::ConnectResponse>> for ConnectResponse<'a> {
+    fn from(value: Pin<&'a mut ffi::ConnectResponse>) -> Self {
+        Self(value)
+    }
+}
 
 #[async_trait::async_trait(?Send)]
-pub trait HttpService {
+pub trait Service {
     /// Make an HTTP request.
     async fn request<'a>(
         &'a mut self,
-        method: HttpMethod,
+        method: Method,
         url: &'a [u8],
-        headers: HttpHeadersRef<'a>,
+        headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
-        response: Pin<&'a mut HttpServiceResponse>,
+        response: ServiceResponse<'a>,
     ) -> Result<()>;
 
     /// Make a CONNECT request
@@ -295,10 +417,10 @@ pub trait HttpService {
     async fn connect<'a>(
         &'a mut self,
         host: &'a [u8],
-        headers: HttpHeadersRef<'a>,
+        headers: HeadersRef<'a>,
         connection: Pin<&'a mut AsyncIoStream>,
-        response: Pin<&'a mut ConnectResponse>,
-        settings: HttpConnectSettings<'a>,
+        response: ConnectResponse<'a>,
+        settings: ConnectSettings<'a>,
     ) -> Result<()>;
 
     /// Convert `self` into the structure suitable for passing to C++ through FFI layer
@@ -311,64 +433,78 @@ pub trait HttpService {
     }
 }
 
-pub struct CxxHttpService<'a>(OwnOrRef<'a, ffi::HttpService>);
+pub struct CxxService<'a>(OwnOrMut<'a, ffi::HttpService>);
 
 #[async_trait::async_trait(?Send)]
-impl HttpService for CxxHttpService<'_> {
+impl Service for CxxService<'_> {
     async fn request<'a>(
         &'a mut self,
-        method: HttpMethod,
+        method: Method,
         url: &'a [u8],
-        headers: HttpHeadersRef<'a>,
+        headers: HeadersRef<'a>,
         request_body: Pin<&'a mut AsyncInputStream>,
-        response: Pin<&'a mut HttpServiceResponse>,
+        response: ServiceResponse<'a>,
     ) -> Result<()> {
-        // SAFETY: self.0 is a valid owned-or-borrowed HttpService.
-        let service = unsafe { self.0.as_mut() };
-        ffi::request(service, method, url, headers.0, request_body, response).await?;
+        let service = self.0.as_mut();
+        ffi::request(
+            service,
+            method,
+            url,
+            headers.0,
+            request_body,
+            response.into_ffi(),
+        )
+        .await?;
         Ok(())
     }
 
     fn connect<'a, 'b>(
         &'a mut self,
         host: &'a [u8],
-        headers: HttpHeadersRef<'a>,
+        headers: HeadersRef<'a>,
         connection: Pin<&'a mut AsyncIoStream>,
-        response: Pin<&'a mut ConnectResponse>,
-        settings: HttpConnectSettings<'a>,
+        response: ConnectResponse<'a>,
+        settings: ConnectSettings<'a>,
     ) -> ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<()>> + 'b>>
     where
         'a: 'b,
         Self: 'b,
     {
-        // SAFETY: self.0 is a valid owned-or-borrowed HttpService.
-        let service = unsafe { self.0.as_mut() };
+        let service = self.0.as_mut();
         Box::pin(
-            ffi::connect(service, host, headers.0, connection, response, settings)
-                .map_err(Into::into),
+            ffi::connect(
+                service,
+                host,
+                headers.0,
+                connection,
+                response.into_ffi(),
+                settings,
+            )
+            .map_err(Into::into),
         )
     }
 }
 
-impl From<KjOwn<ffi::HttpService>> for CxxHttpService<'_> {
+impl From<KjOwn<ffi::HttpService>> for CxxService<'_> {
     fn from(value: KjOwn<ffi::HttpService>) -> Self {
-        CxxHttpService(value.into())
+        CxxService(value.into())
     }
 }
 
-pub struct DynHttpService(Box<dyn HttpService>);
+pub struct DynHttpService(Box<dyn Service>);
 
 impl DynHttpService {
     async fn request<'a>(
         &'a mut self,
-        method: HttpMethod,
+        method: Method,
         url: &'a [u8],
         headers: &'a ffi::HttpHeaders,
         request_body: Pin<&'a mut AsyncInputStream>,
-        response: Pin<&'a mut HttpServiceResponse>,
+        response: Pin<&'a mut ffi::HttpServiceResponse>,
     ) -> Result<()> {
+        let response = ServiceResponse::from(response);
         self.0
-            .request(method, url, HttpHeadersRef(headers), request_body, response)
+            .request(method, url, HeadersRef(headers), request_body, response)
             .await?;
         Ok(())
     }
@@ -378,15 +514,12 @@ impl DynHttpService {
         host: &'a [u8],
         headers: &'a ffi::HttpHeaders,
         connection: Pin<&'a mut AsyncIoStream>,
-        response: Pin<&'a mut ConnectResponse>,
-        settings: HttpConnectSettings<'a>,
+        response: Pin<&'a mut ffi::ConnectResponse>,
+        settings: ConnectSettings<'a>,
     ) -> impl Future<Output = Result<()>> {
-        self.0.connect(
-            host,
-            HttpHeadersRef(headers),
-            connection,
-            response,
-            settings,
-        )
+        let headers = HeadersRef(headers);
+        let response = ConnectResponse::from(response);
+        self.0
+            .connect(host, headers, connection, response, settings)
     }
 }

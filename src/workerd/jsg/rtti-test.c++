@@ -367,6 +367,29 @@ struct TestTypeScriptStruct {
   JSG_STRUCT_TS_OVERRIDE(RenamedStructThing { structThing: 42 });
 };
 
+struct TestTypeScriptStdioResourceType: public jsg::Object {
+  int getThing() {
+    return 42;
+  }
+
+  JSG_RESOURCE_TYPE(TestTypeScriptStdioResourceType) {
+    JSG_READONLY_INSTANCE_PROPERTY(thing, getThing);
+
+    JSG_TS_ROOT();
+    JSG_TS_DEFINE(interface Define { stdin: 0; stdout: 1; stderr: 2 });
+    JSG_TS_OVERRIDE({ stdin: 0; stdout: 1; stderr: 2 });
+  };
+};
+
+struct TestTypeScriptStdioStruct {
+  int structThing;
+  JSG_STRUCT(structThing);
+
+  JSG_STRUCT_TS_ROOT();
+  JSG_STRUCT_TS_DEFINE(interface StructDefine { stdin: 0; stdout: 1; stderr: 2 });
+  JSG_STRUCT_TS_OVERRIDE(Renamed { stdin: 0; stdout: 1; stderr: 2 });
+};
+
 KJ_TEST("typescript macros") {
   KJ_EXPECT(tStructure<TestTypeScriptResourceType>() ==
       "(name = \"TestTypeScriptResourceType\", members = ["
@@ -385,6 +408,29 @@ KJ_TEST("typescript macros") {
       "tsRoot = true, "
       "tsOverride = \"RenamedStructThing { structThing: 42 }\", "
       "tsDefine = \"interface StructDefine {}\", "
+      "disposable = false, asyncDisposable = false)");
+}
+
+KJ_TEST("typescript macros with stdio identifiers") {
+  // `<stdio.h>` on Darwin defines `stdin`/`stdout`/`stderr` as macros. The TS override and define
+  // macros must capture the user's source verbatim so these tokens are not expanded.
+  KJ_EXPECT(tStructure<TestTypeScriptStdioResourceType>() ==
+      "(name = \"TestTypeScriptStdioResourceType\", members = ["
+      "(property = (name = \"thing\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = false, getterFastApiCompatible = true, setterFastApiCompatible = false))], "
+      "iterable = false, asyncIterable = false, "
+      "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestTypeScriptStdioResourceType\", "
+      "tsRoot = true, "
+      "tsOverride = \"{ stdin: 0; stdout: 1; stderr: 2 }\", "
+      "tsDefine = \"interface Define { stdin: 0; stdout: 1; stderr: 2 }\", "
+      "disposable = false, asyncDisposable = false)");
+  KJ_EXPECT(tStructure<TestTypeScriptStdioStruct>() ==
+      "(name = \"TestTypeScriptStdioStruct\", members = ["
+      "(property = (name = \"structThing\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false))], "
+      "iterable = false, asyncIterable = false, "
+      "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestTypeScriptStdioStruct\", "
+      "tsRoot = true, "
+      "tsOverride = \"Renamed { stdin: 0; stdout: 1; stderr: 2 }\", "
+      "tsDefine = \"interface StructDefine { stdin: 0; stdout: 1; stderr: 2 }\", "
       "disposable = false, asyncDisposable = false)");
 }
 

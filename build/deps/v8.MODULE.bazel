@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "14.7.173.16"
+VERSION = "14.8.180"
 
-INTEGRITY = "sha256-mMBT2NXNxqnrsmoMsgkNPI9x96lbz/cqeGq8Jc6WPj4="
+INTEGRITY = "sha256-VQdRoKnkJKBl0GAChhM2Gk+X5HOnZqh8A3PhTtRXoBs="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -58,8 +58,8 @@ PATCHES = [
     "0033-Return-false-on-Object.hasOwnProperty-with-intercept.patch",
     "0034-Remove-V8-MODULE.bazel-llvm-toolchain-and-libcxx-rep.patch",
     "0035-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch",
-    "0036-Fix-macOS-specific-compilation-issue.patch",
-    "0037-Delete-copy-constructor-of-PropertyDeduplicator-to-f.patch",
+    "0036-Fix-non-conforming-braced-init-list-in-value_or.patch",
+    "0037-Fix-non-portable-std-atomic_flag-construction-in-run.patch",
 ]
 
 http_archive(

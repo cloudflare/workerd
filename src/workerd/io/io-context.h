@@ -917,7 +917,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
     tracing::SpanId sid = getCurrentUserTraceSpan().getSpanId();
     if (sid != tracing::SpanId::nullId) {
-      return tracing::InvocationSpanContext(base.getTraceId(), base.getInvocationId(), sid);
+      return tracing::InvocationSpanContext(
+          base.getTraceId(), base.getInvocationId(), sid, base.getTraceFlags());
     }
     return base.clone();
   }

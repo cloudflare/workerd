@@ -373,6 +373,244 @@ export const test_cipher_info4 = {
   },
 };
 
+// Verify that modifying a buffer after passing it to a cipher API does not
+// affect the cipher output. Buffer data (IV, AAD, auth tag) is copied into
+// C++-owned memory at the API boundary, matching Node.js behavior. These tests
+// compare output against a reference encryption performed with unmodified buffers.
+
+// Helper: encrypt with chacha20-poly1305 (AEAD path) and return {ciphertext, tag}.
+function chachaEncrypt(key, iv, plaintext, aad) {
+  const cipher = createCipheriv('chacha20-poly1305', key, iv);
+  if (aad) cipher.setAAD(aad);
+  const ct = cipher.update(plaintext);
+  cipher.final();
+  return { ciphertext: ct, tag: cipher.getAuthTag() };
+}
+
+// Helper: encrypt with aes-256-gcm (CipherHandle path) and return {ciphertext, tag}.
+function gcmEncrypt(key, iv, plaintext) {
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ct = cipher.update(plaintext);
+  cipher.final();
+  return { ciphertext: ct, tag: cipher.getAuthTag() };
+}
+
+export const modifiedIvChaCha20 = {
+  test() {
+    // ChaCha20-Poly1305 uses the AEAD (EVP_AEAD) path.
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(12, 0x42);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    // Reference encryption with plain buffers.
+    const ref = chachaEncrypt(key, plainIv, plaintext);
+
+    // Modify IV buffer after cipher creation -- must not affect output.
+    const ivBuffer = new ArrayBuffer(12, { maxByteLength: 16 });
+    new Uint8Array(ivBuffer).fill(0x42);
+    const cipher = createCipheriv(
+      'chacha20-poly1305',
+      key,
+      new Uint8Array(ivBuffer)
+    );
+    ivBuffer.resize(0);
+    const ct = cipher.update(plaintext);
+    cipher.final();
+
+    deepStrictEqual(ct, ref.ciphertext);
+    deepStrictEqual(cipher.getAuthTag(), ref.tag);
+  },
+};
+
+export const modifiedIvAesGcm = {
+  test() {
+    // AES-256-GCM uses the CipherHandle (EVP_CIPHER) path.
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(16, 0x42);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const ref = gcmEncrypt(key, plainIv, plaintext);
+
+    const ivBuffer = new ArrayBuffer(16, { maxByteLength: 32 });
+    new Uint8Array(ivBuffer).fill(0x42);
+    const cipher = createCipheriv('aes-256-gcm', key, new Uint8Array(ivBuffer));
+    ivBuffer.resize(0);
+    const ct = cipher.update(plaintext);
+    cipher.final();
+
+    deepStrictEqual(ct, ref.ciphertext);
+    deepStrictEqual(cipher.getAuthTag(), ref.tag);
+  },
+};
+
+export const modifiedIvGrowChaCha20 = {
+  test() {
+    // Growing the IV buffer after cipher creation must not change the output.
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(12, 0x42);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const ref = chachaEncrypt(key, plainIv, plaintext);
+
+    const ivBuffer = new ArrayBuffer(12, { maxByteLength: 32 });
+    new Uint8Array(ivBuffer).fill(0x42);
+    const cipher = createCipheriv(
+      'chacha20-poly1305',
+      key,
+      new Uint8Array(ivBuffer)
+    );
+    ivBuffer.resize(32); // grow past original IV length
+    const ct = cipher.update(plaintext);
+    cipher.final();
+
+    deepStrictEqual(ct, ref.ciphertext);
+    deepStrictEqual(cipher.getAuthTag(), ref.tag);
+  },
+};
+
+export const modifiedAadChaCha20 = {
+  test() {
+    // Modifying AAD buffer after setAAD must not change the cipher output.
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(12, 0x42);
+    const plainAad = Buffer.alloc(16, 0xaa);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const ref = chachaEncrypt(key, plainIv, plaintext, plainAad);
+
+    const aadBuffer = new ArrayBuffer(16, { maxByteLength: 32 });
+    new Uint8Array(aadBuffer).fill(0xaa);
+    const cipher = createCipheriv('chacha20-poly1305', key, plainIv);
+    cipher.setAAD(new Uint8Array(aadBuffer));
+    aadBuffer.resize(0);
+    const ct = cipher.update(plaintext);
+    cipher.final();
+
+    deepStrictEqual(ct, ref.ciphertext);
+    deepStrictEqual(cipher.getAuthTag(), ref.tag);
+  },
+};
+
+export const modifiedAuthTagDecrypt = {
+  test() {
+    // Modifying auth tag buffer after setAuthTag must still allow correct decryption.
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(12, 0x42);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const { ciphertext, tag } = chachaEncrypt(key, plainIv, plaintext);
+
+    // Copy tag into a buffer, then modify it after setAuthTag.
+    const tagBuffer = new ArrayBuffer(tag.length, { maxByteLength: 32 });
+    new Uint8Array(tagBuffer).set(tag);
+
+    const decipher = createDecipheriv('chacha20-poly1305', key, plainIv);
+    decipher.setAuthTag(new Uint8Array(tagBuffer));
+    tagBuffer.resize(0);
+
+    const pt = decipher.update(ciphertext);
+    decipher.final();
+    deepStrictEqual(pt, plaintext);
+  },
+};
+
+export const transferredIvChaCha20 = {
+  test() {
+    // Transferring IV buffer after cipher creation must not affect output.
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(12, 0x42);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const ref = chachaEncrypt(key, plainIv, plaintext);
+
+    const ivBuffer = new ArrayBuffer(12);
+    new Uint8Array(ivBuffer).fill(0x42);
+    const cipher = createCipheriv(
+      'chacha20-poly1305',
+      key,
+      new Uint8Array(ivBuffer)
+    );
+    structuredClone(ivBuffer, { transfer: [ivBuffer] });
+    const ct = cipher.update(plaintext);
+    cipher.final();
+
+    deepStrictEqual(ct, ref.ciphertext);
+    deepStrictEqual(cipher.getAuthTag(), ref.tag);
+  },
+};
+
+export const transferredIvAesGcm = {
+  test() {
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(16, 0x42);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const ref = gcmEncrypt(key, plainIv, plaintext);
+
+    const ivBuffer = new ArrayBuffer(16);
+    new Uint8Array(ivBuffer).fill(0x42);
+    const cipher = createCipheriv('aes-256-gcm', key, new Uint8Array(ivBuffer));
+    structuredClone(ivBuffer, { transfer: [ivBuffer] });
+    const ct = cipher.update(plaintext);
+    cipher.final();
+
+    deepStrictEqual(ct, ref.ciphertext);
+    deepStrictEqual(cipher.getAuthTag(), ref.tag);
+  },
+};
+
+export const transferredAadChaCha20 = {
+  test() {
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(12, 0x42);
+    const plainAad = Buffer.alloc(16, 0xaa);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const ref = chachaEncrypt(key, plainIv, plaintext, plainAad);
+
+    const aadBuffer = new ArrayBuffer(16);
+    new Uint8Array(aadBuffer).fill(0xaa);
+    const cipher = createCipheriv('chacha20-poly1305', key, plainIv);
+    cipher.setAAD(new Uint8Array(aadBuffer));
+    structuredClone(aadBuffer, { transfer: [aadBuffer] });
+    const ct = cipher.update(plaintext);
+    cipher.final();
+
+    deepStrictEqual(ct, ref.ciphertext);
+    deepStrictEqual(cipher.getAuthTag(), ref.tag);
+  },
+};
+
+export const transferredAuthTagDecrypt = {
+  test() {
+    const plainKey = Buffer.alloc(32, 0x01);
+    const plainIv = Buffer.alloc(12, 0x42);
+    const key = createSecretKey(plainKey);
+    const plaintext = Buffer.from('hello world');
+
+    const { ciphertext, tag } = chachaEncrypt(key, plainIv, plaintext);
+
+    const tagBuffer = new ArrayBuffer(tag.length);
+    new Uint8Array(tagBuffer).set(tag);
+
+    const decipher = createDecipheriv('chacha20-poly1305', key, plainIv);
+    decipher.setAuthTag(new Uint8Array(tagBuffer));
+    structuredClone(tagBuffer, { transfer: [tagBuffer] });
+
+    const pt = decipher.update(ciphertext);
+    decipher.final();
+    deepStrictEqual(pt, plaintext);
+  },
+};
+
 export const testUnimplemented = {
   async test() {
     strictEqual(typeof Cipher, 'function');
