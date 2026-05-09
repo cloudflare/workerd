@@ -249,6 +249,12 @@ wd_test(
 )
 
 wd_test(
+    src = "zlib-invalid-mode-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-invalid-mode-test.js"],
+)
+
+wd_test(
     src = "module-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["module-nodejs-test.js"],
