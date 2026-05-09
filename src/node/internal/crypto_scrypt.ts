@@ -166,6 +166,23 @@ function checkScryptMemory(
   }
 }
 
+// The native cryptoImpl.getScrypt throws a generic Error('Scrypt failed') with
+// no .code on invalid scrypt params; rewrap that exact error to carry Node's
+// standard ERR_CRYPTO_INVALID_SCRYPT_PARAMS code. Any other error (including
+// errors that already have a code, or errors with a different message) is
+// returned unchanged so unrelated failures and the already-coded error from
+// checkScryptMemory aren't suppressed.
+function normaliseScryptError(err: unknown): Error {
+  if (
+    err instanceof Error &&
+    err.message === 'Scrypt failed' &&
+    (err as { code?: unknown }).code === undefined
+  ) {
+    return new ERR_CRYPTO_INVALID_SCRYPT_PARAMS();
+  }
+  return err as Error;
+}
+
 type Callback = (err: Error | null, derivedKey?: Buffer) => void;
 type OptionsOrCallback = ScryptOptions | Callback;
 
@@ -198,8 +215,8 @@ export function scrypt(
     try {
       checkScryptMemory(N, r, p, maxmem);
       res(cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen));
-    } catch {
-      rej(new ERR_CRYPTO_INVALID_SCRYPT_PARAMS());
+    } catch (err) {
+      rej(normaliseScryptError(err));
     }
   }).then(
     (val: ArrayBuffer) => {
@@ -233,7 +250,7 @@ export function scryptSync(
     return Buffer.from(
       cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen)
     );
-  } catch {
-    throw new ERR_CRYPTO_INVALID_SCRYPT_PARAMS();
+  } catch (err) {
+    throw normaliseScryptError(err);
   }
 }
