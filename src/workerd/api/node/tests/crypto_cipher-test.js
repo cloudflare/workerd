@@ -611,6 +611,35 @@ export const transferredAuthTagDecrypt = {
   },
 };
 
+// Regression: AUTOVULN-CLOUDFLARE-WORKERD-76
+// publicEncrypt/privateDecrypt with non-OAEP padding + oaepLabel must
+// throw without leaking the label buffer.
+export const oaepLabelWithNonOaepPaddingThrows = {
+  test(_, env) {
+    const pub = createPublicKey(env['rsa_public.pem']);
+    pub.padding = 1; // RSA_PKCS1_PADDING (not OAEP=4)
+    pub.oaepLabel = Buffer.alloc(1024);
+    pub.encoding = 'utf8';
+
+    for (let i = 0; i < 5; i++) {
+      throws(() => publicEncrypt(pub, Buffer.from('test')), {
+        message: /Failed to set the OAEP label/,
+      });
+    }
+
+    const pvt = createPrivateKey(env['rsa_private.pem']);
+    pvt.padding = 1; // RSA_PKCS1_PADDING (not OAEP=4)
+    pvt.oaepLabel = Buffer.alloc(1024);
+    pvt.encoding = 'utf8';
+
+    for (let i = 0; i < 5; i++) {
+      throws(() => privateDecrypt(pvt, Buffer.from('test')), {
+        message: /Failed to set the OAEP label/,
+      });
+    }
+  },
+};
+
 export const testUnimplemented = {
   async test() {
     strictEqual(typeof Cipher, 'function');

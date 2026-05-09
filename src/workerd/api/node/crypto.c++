@@ -1278,14 +1278,17 @@ jsg::JsUint8Array Cipher(jsg::Lock& js,
 
   KJ_IF_SOME(labelRef, options.oaepLabel) {
     auto label = labelRef.getHandle(js);
-    // The ctx takes ownership of the data buffer so we have to copy.
+    // EVP_PKEY_CTX_set0_rsa_oaep_label takes ownership of the buffer only on
+    // success (return 1). Keep RAII ownership until the call succeeds so the
+    // DataPointer destructor frees the buffer on the error path (e.g. when
+    // padding is not RSA_PKCS1_OAEP_PADDING).
     auto data = ncrypto::DataPointer::Alloc(label.size());
     kj::ArrayPtr<kj::byte> dataPtr(data.get<kj::byte>(), data.size());
     dataPtr.copyFrom(label.asArrayPtr());
-    auto released = data.release();
-    JSG_REQUIRE(EVP_PKEY_CTX_set0_rsa_oaep_label(
-                    ctx.get(), static_cast<uint8_t*>(released.data), released.len) == 1,
+    JSG_REQUIRE(EVP_PKEY_CTX_set0_rsa_oaep_label(ctx.get(), data.get<uint8_t>(), data.size()) == 1,
         Error, "Failed to set the OAEP label");
+    // Ownership has been transferred to ctx; prevent double-free.
+    data.release();
   }
 
   size_t len;
