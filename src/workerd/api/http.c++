@@ -2118,6 +2118,10 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethodInternal(jsg::Lock& js, 
   return js.alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
+kj::LiteralStringConst Fetcher::getRpcTargetKind() {
+  return "fetcher"_kjc;
+}
+
 rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto& ioContext = IoContext::current();

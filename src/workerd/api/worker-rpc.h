@@ -203,6 +203,11 @@ class JsRpcClientProvider: public jsg::Object {
   // the root object will be appended to `path`.
   virtual rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
+
+  // Short identifier for the root provider type, used as a tracing tag value
+  // (jsrpc.target_kind) on per-call spans. Walks through JsRpcProperty to the
+  // underlying root provider.
+  virtual kj::LiteralStringConst getRpcTargetKind() = 0;
 };
 
 class JsRpcProperty;
@@ -236,6 +241,10 @@ class JsRpcPromise: public JsRpcClientProvider {
 
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  kj::LiteralStringConst getRpcTargetKind() override {
+    return "promise"_kjc;
+  }
 
   // Expect that the call is itself going to return a function... and call that.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -316,6 +325,12 @@ class JsRpcProperty: public JsRpcClientProvider {
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
+  // Forward to parent: a property chain dispatches to the root's target, and
+  // the property path itself is captured separately by jsrpc.method.
+  kj::LiteralStringConst getRpcTargetKind() override {
+    return parent->getRpcTargetKind();
+  }
+
   // Call the property as a method.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
 
@@ -393,6 +408,10 @@ class JsRpcStub: public JsRpcClientProvider {
 
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  kj::LiteralStringConst getRpcTargetKind() override {
+    return "stub"_kjc;
+  }
 
   jsg::Ref<JsRpcStub> dup(jsg::Lock& js);
   void dispose();

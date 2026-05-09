@@ -484,6 +484,22 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         return parent.getClientForOneCall(js, path);
       }();
 
+      jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, parent.getRpcTargetKind());
+      jsRpcCallSpan.setTag(
+          "jsrpc.operation"_kjc, maybeArgs == kj::none ? "getProperty"_kjc : "call"_kjc);
+      // Method name: path joined with `.`, with `name` appended if present.
+      // Special-case: empty path and no name means we're invoking the stub itself as a function.
+      if (path.empty() && name == kj::none) {
+        jsRpcCallSpan.setTag("jsrpc.method"_kjc, "(this)"_kjc);
+      } else {
+        kj::Vector<kj::StringPtr> fullPath(path.size() + 1);
+        fullPath.addAll(path);
+        KJ_IF_SOME(n, name) {
+          fullPath.add(n);
+        }
+        jsRpcCallSpan.setTag("jsrpc.method"_kjc, kj::strArray(fullPath, "."));
+      }
+
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
         // Replace the client with a promise client that will delay the call until the output gate
         // is open.
@@ -1074,6 +1090,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // Returns true if the given name cannot be used as a method on this type.
   virtual bool isReservedName(kj::StringPtr name) = 0;
 
+  // Short identifier for the target type, used as a tracing tag value
+  // (jsrpc.target_kind) on per-call spans.
+  virtual kj::LiteralStringConst getTargetKind() = 0;
+
   kj::Promise<void> callImpl(Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
     jsg::Lock& js = lock;
     auto params = callContext.getParams();
@@ -1105,6 +1125,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     // callImpl(). Attached to the dispatch promise below so it stays open through
     // JS invocation and result serialization.
     auto jsRpcCallSpan = ctx.makeUserTraceSpan("jsRpcCall"_kjc);
+    jsRpcCallSpan.setTag("jsrpc.method"_kjc, methodNameForTrace.asPtr());
+    jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
+    jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
+        params.getOperation().isGetProperty() ? "getProperty"_kjc : "call"_kjc);
 
     maybeSetJsRpcInfo(ctx, methodNameForTrace);
 
@@ -1663,6 +1687,10 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
     return false;
   }
 
+  kj::LiteralStringConst getTargetKind() override {
+    return "transient"_kjc;
+  }
+
   void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {}
 };
 
@@ -2111,6 +2139,10 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       return true;
     }
     return false;
+  }
+
+  kj::LiteralStringConst getTargetKind() override {
+    return "entrypoint"_kjc;
   }
 
   void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {

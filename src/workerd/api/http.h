@@ -445,6 +445,8 @@ class Fetcher: public JsRpcClientProvider {
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
+  kj::LiteralStringConst getRpcTargetKind() override;
+
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
     // conflicts with JS RPC methods (implemented via the wildcard property). Ideally, we do not
