@@ -569,14 +569,14 @@ export function validateReadArgs(
       length = buffer.byteLength - offset,
       position = null,
     } = offsetOrOptions;
-    actualOffset = offset;
+    actualOffset += offset;
     actualLength = length;
     actualPosition = position;
   }
   // Handle the case where the third argument is a number (offset)
   else if (typeof offsetOrOptions === 'number') {
-    actualOffset = offsetOrOptions;
-    actualLength = length ?? buffer.byteLength - actualOffset;
+    actualOffset += offsetOrOptions;
+    actualLength = length ?? (buffer.byteLength - offsetOrOptions);
     actualPosition = position;
   } else {
     throw new ERR_INVALID_ARG_TYPE(
@@ -590,8 +590,9 @@ export function validateReadArgs(
   validateUint32(actualLength, 'length');
   validatePosition(actualPosition, 'position');
 
-  // The actualOffset plus actualLength must not exceed the buffer's byte length.
-  if (actualOffset + actualLength > buffer.byteLength) {
+  // The actualOffset plus actualLength must not exceed the backing buffer's byte length.
+  const backingBufferLength = buffer.buffer.byteLength;
+  if (actualOffset + actualLength > backingBufferLength) {
     throw new ERR_INVALID_ARG_VALUE('offset', actualOffset, 'out of bounds');
   }
 
