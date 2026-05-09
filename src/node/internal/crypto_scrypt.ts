@@ -39,7 +39,10 @@ import { kMaxLength } from 'node-internal:internal_buffer';
 
 import { getArrayBufferOrView } from 'node-internal:crypto_util';
 
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+import {
+  ERR_CRYPTO_INVALID_SCRYPT_PARAMS,
+  ERR_INVALID_ARG_VALUE,
+} from 'node-internal:internal_errors';
 
 export interface ValidatedScryptOptions {
   password: ArrayLike;
@@ -145,6 +148,24 @@ function validateParameters(
   };
 }
 
+// OpenSSL's EVP_PBE_scrypt enforces 128 * r * (N + p + 2) <= maxmem; BoringSSL
+// does not, so mirror the check here to match Node.js behaviour. Run alongside
+// the native call (sync inside scryptSync, inside the Promise body for scrypt)
+// so the failure surfaces the same way Node's C++ ScryptJob errors do, rather
+// than as a synchronous throw from the validator. Uses BigInt because
+// validateUint32 allows values up to 2**32 - 1, whose product would overflow a
+// JS Number's safe integer range.
+function checkScryptMemory(
+  N: number,
+  r: number,
+  p: number,
+  maxmem: number
+): void {
+  if (128n * BigInt(r) * (BigInt(N) + BigInt(p) + 2n) > BigInt(maxmem)) {
+    throw new ERR_CRYPTO_INVALID_SCRYPT_PARAMS();
+  }
+}
+
 type Callback = (err: Error | null, derivedKey?: Buffer) => void;
 type OptionsOrCallback = ScryptOptions | Callback;
 
@@ -175,9 +196,10 @@ export function scrypt(
 
   new Promise<ArrayBuffer>((res, rej) => {
     try {
+      checkScryptMemory(N, r, p, maxmem);
       res(cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen));
-    } catch (err) {
-      rej(err as Error);
+    } catch {
+      rej(new ERR_CRYPTO_INVALID_SCRYPT_PARAMS());
     }
   }).then(
     (val: ArrayBuffer) => {
@@ -206,7 +228,12 @@ export function scryptSync(
     options
   ));
 
-  return Buffer.from(
-    cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen)
-  );
+  try {
+    checkScryptMemory(N, r, p, maxmem);
+    return Buffer.from(
+      cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen)
+    );
+  } catch {
+    throw new ERR_CRYPTO_INVALID_SCRYPT_PARAMS();
+  }
 }
