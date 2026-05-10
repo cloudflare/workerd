@@ -288,7 +288,13 @@ class Fetcher: public JsRpcClientProvider {
   //   is almost the same thing.
   class OutgoingFactory {
    public:
-    virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
+    struct Result {
+      kj::Own<WorkerInterface> client;
+      // Borrowed parents of the dispatch-site span (e.g. durable_object_subrequest),
+      // valid for the lifetime of `client`. kj::none if no span was created.
+      kj::Maybe<TraceContextParent> spanParents;
+    };
+    virtual Result newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
 
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
     // Fetcher is being passed to another isolate.
@@ -306,7 +312,7 @@ class Fetcher: public JsRpcClientProvider {
   // IoContext::getSubrequestNoChecks() internally.
   class CrossContextOutgoingFactory {
    public:
-    virtual kj::Own<WorkerInterface> newSingleUseClient(
+    virtual OutgoingFactory::Result newSingleUseClient(
         IoContext& context, kj::Maybe<kj::String> cfStr) = 0;
 
     virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& context) {
@@ -521,10 +527,13 @@ class Fetcher: public JsRpcClientProvider {
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
  private:
-  // The TraceContext is built lazily because OutgoingFactory variants emit their own outer span.
-  [[nodiscard]] ClientWithTracing buildClient(IoContext& ioContext,
-      kj::Maybe<kj::String> cfStr,
-      kj::FunctionParam<TraceContext()> makeTraceContext);
+  [[nodiscard]] ClientWithTracing buildClient(
+      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+
+  // Wraps an OutgoingFactory result with an inner span nested under the factory's
+  // outer dispatch span (or under the request root if there is none).
+  [[nodiscard]] static ClientWithTracing wrapWithInnerSpan(
+      OutgoingFactory::Result result, kj::ConstString operationName);
 
   kj::OneOf<uint,
       IoOwn<IoChannelFactory::SubrequestChannel>,

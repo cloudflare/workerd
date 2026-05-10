@@ -2420,21 +2420,29 @@ kj::Own<WorkerInterface> Fetcher::getClient(
 
 Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
-  return buildClient(ioContext, kj::mv(cfStr),
-      [&] { return ioContext.makeUserTraceSpan(kj::mv(operationName)); });
+  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
 }
 
-Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
-    kj::Maybe<kj::String> cfStr,
-    kj::FunctionParam<TraceContext()> makeTraceContext) {
+Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
+    OutgoingFactory::Result result, kj::ConstString operationName) {
+  KJ_IF_SOME(parents, result.spanParents) {
+    TraceContext inner(parents.internalSpan.newChild(operationName.clone()),
+        parents.userSpan.newChild(kj::mv(operationName)));
+    return ClientWithTracing{kj::mv(result.client), kj::mv(inner)};
+  }
+  return ClientWithTracing{kj::mv(result.client), kj::none};
+}
+
+Fetcher::ClientWithTracing Fetcher::buildClient(
+    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
-      auto traceContext = makeTraceContext();
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      auto traceContext = makeTraceContext();
+      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
         return channel->startRequest({.cfBlobJson = kj::mv(cfStr),
@@ -2448,17 +2456,15 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
-      // Outgoing factories are responsible for routing through getSubrequestNoChecks() (or
-      // getSubrequest()) internally if they create HTTP connections, to ensure external memory
-      // adjustment and other subrequest accounting are applied.
-      auto client = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
-      return ClientWithTracing{kj::mv(client), kj::none};
+      // The factory creates its own outer dispatch span (e.g. durable_object_subrequest)
+      // and exposes it as `result.spanParents`. Nest our inner span under it so the trace
+      // tree shows `outerSpan -> operationName`.
+      auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
     }
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
-      // Same as OutgoingFactory above -- the factory is responsible for routing through
-      // getSubrequestNoChecks() internally.
-      auto client = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
-      return ClientWithTracing{kj::mv(client), kj::none};
+      auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
     }
   }
   KJ_UNREACHABLE;
