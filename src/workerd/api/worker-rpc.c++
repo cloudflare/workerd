@@ -1105,8 +1105,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // Returns true if the given name cannot be used as a method on this type.
   virtual bool isReservedName(kj::StringPtr name) = 0;
 
-  // Short identifier for the target type, used as a tracing tag value
-  // (jsrpc.target_kind) on per-call spans.
+  // Tracing tag value for jsrpc.target_kind on the server-side per-call span
+  // (see JsRpcClientProvider::getRpcTargetKind for the client-side equivalent).
   virtual kj::LiteralStringConst getTargetKind() = 0;
 
   kj::Promise<void> callImpl(Worker::Lock& lock, IoContext& ctx, CallContext callContext) {

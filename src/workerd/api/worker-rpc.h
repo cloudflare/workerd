@@ -225,7 +225,8 @@ class JsRpcClientProvider: public jsg::Object {
   // the root object will be appended to `path`.
   virtual ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
 
-  // Tracing tag value for jsrpc.target_kind on per-call spans.
+  // Tracing tag value for jsrpc.target_kind on the client-side per-call span
+  // (see JsRpcTargetBase::getTargetKind for the server-side equivalent).
   virtual kj::LiteralStringConst getRpcTargetKind() = 0;
 };
 
