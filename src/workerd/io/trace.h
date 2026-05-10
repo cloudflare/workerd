@@ -1286,6 +1286,13 @@ inline SpanBuilder SpanBuilder::newChild(
       kj::mv(operationName), startTime);
 }
 
+// Pair of span parents (internal + user) used to express "open new spans nested
+// under these". Doesn't own SpanBuilders, unlike TraceContext.
+struct TraceContextParent {
+  SpanParent internalSpan;
+  SpanParent userSpan;
+};
+
 // TraceContext to keep track of user tracing/existing tracing better
 class TraceContext {
  public:
@@ -1308,6 +1315,10 @@ class TraceContext {
 
   SpanParent getUserSpanParent() {
     return SpanParent(userSpan);
+  }
+
+  TraceContextParent getSpanParents() {
+    return {.internalSpan = SpanParent(span), .userSpan = SpanParent(userSpan)};
   }
 
  private:

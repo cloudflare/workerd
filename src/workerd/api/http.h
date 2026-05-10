@@ -334,9 +334,7 @@ class Fetcher: public JsRpcClientProvider {
         isInHouse(isInHouse) {}
 
   // Returns a `WorkerInterface` that is only valid for the lifetime of the current
-  // `IoContext`. For subrequest-channel variants, a tracing span named `operationName`
-  // is created at the dispatch site. OutgoingFactory variants emit their own outer
-  // span (e.g. durable_object_subrequest), so `operationName` is ignored in that case.
+  // `IoContext`.
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
@@ -346,10 +344,7 @@ class Fetcher: public JsRpcClientProvider {
     kj::Maybe<TraceContext> traceContext;
   };
 
-  // Get client and optionally create trace context, all in one call. The returned
-  // ClientWithTracing carries the dispatch-site span; the caller is expected to
-  // attach it to whatever holds the client alive, otherwise the span is dropped
-  // immediately.
+  // Get client and optionally create trace context, all in one call.
   [[nodiscard]] ClientWithTracing getClientWithTracing(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
@@ -442,8 +437,7 @@ class Fetcher: public JsRpcClientProvider {
     return getRpcMethod(js, kj::mv(name));
   }
 
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
   kj::LiteralStringConst getRpcTargetKind() override;
 
@@ -527,8 +521,7 @@ class Fetcher: public JsRpcClientProvider {
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
  private:
-  // Shared body of getClient() and getClientWithTracing(). The TraceContext is
-  // built lazily because OutgoingFactory variants emit their own outer span.
+  // The TraceContext is built lazily because OutgoingFactory variants emit their own outer span.
   [[nodiscard]] ClientWithTracing buildClient(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::FunctionParam<TraceContext()> makeTraceContext);

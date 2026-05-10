@@ -2122,12 +2122,15 @@ kj::LiteralStringConst Fetcher::getRpcTargetKind() {
   return "fetcher"_kjc;
 }
 
-rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
+JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto& ioContext = IoContext::current();
-  // The "jsRpcSession" span lives as long as the WorkerInterface, which we attach
-  // to the customEvent task below, so it covers the whole session.
-  auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
+  // The "jsRpcSession" trace context is attached to the customEvent task below so
+  // it covers the whole session.
+  auto clientWithTracing = getClientWithTracing(ioContext, kj::none, "jsRpcSession"_kjc);
+  kj::Maybe<TraceContextParent> callSpanParents =
+      clientWithTracing.traceContext.map([](TraceContext& tc) { return tc.getSpanParents(); });
+  auto worker = kj::mv(clientWithTracing.client);
   auto event = kj::heap<api::JsRpcSessionCustomEvent>(
       JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
 
@@ -2138,12 +2141,14 @@ rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
   // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
   // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
   // caught elsewhere.
-  ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker)).then([](auto&&) {
-  }, [](kj::Exception&&) {}));
+  ioContext.addTask(
+      worker->customEvent(kj::mv(event))
+          .attach(kj::mv(worker), kj::mv(clientWithTracing.traceContext))
+          .then([](auto&&) {}, [](kj::Exception&&) {}));
 
   // (Don't extend `path` because we're the root.)
 
-  return result;
+  return {.client = kj::mv(result), .callSpanParents = kj::mv(callSpanParents)};
 }
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -2445,8 +2450,7 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
       // Outgoing factories are responsible for routing through getSubrequestNoChecks() (or
       // getSubrequest()) internally if they create HTTP connections, to ensure external memory
-      // adjustment and other subrequest accounting are applied. They emit their own outer span
-      // (e.g. durable_object_subrequest), so we skip makeTraceContext() to avoid duplication.
+      // adjustment and other subrequest accounting are applied.
       auto client = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
       return ClientWithTracing{kj::mv(client), kj::none};
     }
