@@ -502,7 +502,7 @@ KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
         maybeDateStr = annotation.getValue().getText();
       } else if (annotation.getId() == IMPLIED_BY_AFTER_DATE_ANNOTATION_ID) {
         auto value = annotation.getValue();
-        auto s = value.getStruct().getAs<workerd::ImpliedByAfterDate>();
+        auto s = value.getStruct().as<workerd::ImpliedByAfterDate>();
         maybeDateStr = s.getDate();
       }
 
