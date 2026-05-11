@@ -12,6 +12,7 @@
 #include <kj/debug.h>
 #include <kj/time.h>
 
+#include <atomic>
 #include <cstdlib>
 
 namespace workerd {
@@ -147,7 +148,14 @@ uint64_t getRandom64Bit(const kj::Maybe<kj::EntropySource&>& entropySource) {
 
 TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
   if (isPredictableModeForTest()) {
-    return TraceId(staticSpanId, staticSpanId);
+    // Produce deterministic but distinct IDs per call so that traceIds of
+    // independent (untriggered) invocations don't collide -- collisions confuse
+    // test fixtures that key spans by traceId or invocationId. Triggered
+    // invocations still inherit their caller's traceId via newForInvocation, so
+    // the propagation chain is preserved.
+    static std::atomic<uint64_t> counter{0};
+    uint64_t n = counter.fetch_add(1, std::memory_order_relaxed);
+    return TraceId(staticSpanId ^ n, staticSpanId ^ n);
   }
 
   return TraceId(getRandom64Bit(entropySource), getRandom64Bit(entropySource));
