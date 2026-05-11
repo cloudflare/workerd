@@ -1712,8 +1712,9 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
 class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
-  SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer)
-      : weakTracer(kj::mv(weakTracer)) {}
+  SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer, kj::EntropySource& entropySource)
+      : weakTracer(kj::mv(weakTracer)),
+        entropySource(entropySource) {}
   void submitSpanClose(
       tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) override {
     weakTracer->runIfAlive([&](BaseTracer& tracer) {
@@ -1742,13 +1743,17 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
   }
 
   tracing::SpanId makeSpanId() override {
-    return tracing::SpanId(nextSpanId++);
+    if (isPredictableModeForTest()) {
+      return tracing::SpanId(nextSpanId++);
+    }
+    return tracing::SpanId::fromEntropy(entropySource);
   }
   KJ_DISALLOW_COPY_AND_MOVE(SequentialSpanSubmitter);
 
  private:
   uint64_t nextSpanId = 1;
   kj::Own<BaseTracer::WeakRef> weakTracer;
+  kj::EntropySource& entropySource;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
@@ -2211,9 +2216,11 @@ class Server::WorkerService final: public Service,
 
     KJ_IF_SOME(w, workerTracer) {
       w->setMakeUserRequestSpanFunc(
-          [&w = *w](tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
+          [&w = *w, &entropySource = threadContext.getEntropySource()](
+              tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
         return SpanParent(kj::refcounted<UserSpanObserver>(
-            kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef()), kj::mv(traceId), traceFlags));
+            kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef(), entropySource), kj::mv(traceId),
+            traceFlags));
       });
     }
     kj::Own<RequestObserver> observer =
