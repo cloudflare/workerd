@@ -14744,6 +14744,9 @@ export declare namespace TailStream {
     //  1. This is an Onset event
     //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
     readonly spanId?: string;
+    // W3C trace flags from an upstream traceparent. Absent when no upstream
+    // sampling decision was made.
+    readonly traceFlags?: number;
   }
   interface TailEvent<Event extends EventType> {
     // invocation id of the currently invoked worker stage.
