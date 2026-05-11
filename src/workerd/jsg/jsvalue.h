@@ -975,26 +975,39 @@ inline JsString Lock::str() {
 }
 
 inline JsString Lock::str(kj::ArrayPtr<const char16_t> str) {
+  // The V8 string creation APIs take int for the length parameter. Guard against
+  // size_t values that would overflow int and be misinterpreted (negative values
+  // cause V8 to fall back to strlen, leading to heap-buffer-overflow reads).
+  JSG_REQUIRE(
+      str.size() <= v8::String::kMaxLength, RangeError, "String is too long for a V8 string");
   return JsString(check(v8::String::NewFromTwoByte(v8Isolate,
       reinterpret_cast<const uint16_t*>(str.begin()), v8::NewStringType::kNormal, str.size())));
 }
 
 inline JsString Lock::str(kj::ArrayPtr<const uint16_t> str) {
+  JSG_REQUIRE(
+      str.size() <= v8::String::kMaxLength, RangeError, "String is too long for a V8 string");
   return JsString(check(
       v8::String::NewFromTwoByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
 }
 
 inline JsString Lock::str(kj::ArrayPtr<const char> str) {
+  JSG_REQUIRE(
+      str.size() <= v8::String::kMaxLength, RangeError, "String is too long for a V8 string");
   return JsString(check(
       v8::String::NewFromUtf8(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
 }
 
 inline JsString Lock::str(kj::ArrayPtr<const kj::byte> str) {
+  JSG_REQUIRE(
+      str.size() <= v8::String::kMaxLength, RangeError, "String is too long for a V8 string");
   return JsString(check(
       v8::String::NewFromOneByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
 }
 
 inline JsString Lock::strIntern(kj::StringPtr str) {
+  JSG_REQUIRE(
+      str.size() <= v8::String::kMaxLength, RangeError, "String is too long for a V8 string");
   return JsString(check(v8::String::NewFromUtf8(
       v8Isolate, str.begin(), v8::NewStringType::kInternalized, str.size())));
 }
