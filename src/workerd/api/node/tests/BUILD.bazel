@@ -230,9 +230,9 @@ wd_test(
 )
 
 wd_test(
-    src = "zlib-leak-nodejs-test.wd-test",
+    src = "gc-tracing-nodejs-test.wd-test",
     args = ["--experimental"],
-    data = ["zlib-leak-nodejs-test.js"],
+    data = ["gc-tracing-nodejs-test.js"],
 )
 
 wd_test(

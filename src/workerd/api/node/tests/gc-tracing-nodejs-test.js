@@ -11,17 +11,6 @@ import {
   createInflate,
 } from 'node:zlib';
 
-// Regression test for a memory leak that affected the slow path of the sync
-// zlib convenience methods (i.e. `{ info: true }`). Each call constructed a
-// JSG-bound CompressionStream wrapper that held a `jsg::Function` writeCallback
-// capturing the JS handle, forming an uncollectable JS<->C++ cycle. The fix
-// adds visitForGc() to CompressionStream so V8 can trace through the C++->JS
-// edge and collect the cycle.
-//
-// We verify the fix by holding WeakRefs to the engines returned by `info: true`
-// and asserting they are reclaimed after a GC. Without visitForGc tracing the
-// cycle is immortal and the WeakRefs would still resolve.
-
 const COMPRESSED_DEFLATE = deflateSync(new Uint8Array(1024));
 
 async function awaitGc() {
@@ -54,7 +43,7 @@ async function expectAllCollected(refs, label) {
   for (const ref of refs) {
     if (ref.deref() !== undefined) alive++;
   }
-  // Allow at most a single straggler — V8's conservative stack scanner
+  // Allow at most a single straggler. V8's conservative stack scanner
   // can keep the most recently allocated object rooted via a stale
   // register/spill slot for one extra cycle. The leak we are testing
   // for is uncollectable cycles, which would leave all of them alive.
@@ -63,6 +52,17 @@ async function expectAllCollected(refs, label) {
     `expected ${label} engines to be collected, ${alive} of ${refs.length} still alive`
   );
 }
+
+// Regression tests for a memory leak that affected the slow path of the sync
+// zlib convenience methods (i.e. `{ info: true }`). Each call constructed a
+// JSG-bound CompressionStream wrapper that held a `jsg::Function` writeCallback
+// capturing the JS handle, forming an uncollectable JS<->C++ cycle. The fix
+// adds visitForGc() to CompressionStream so V8 can trace through the C++->JS
+// edge and collect the cycle.
+//
+// We verify the fix by holding WeakRefs to the engines returned by `info: true`
+// and asserting they are reclaimed after a GC. Without visitForGc tracing the
+// cycle is immortal and the WeakRefs would still resolve.
 
 export const inflateSyncInfoCollects = {
   async test() {

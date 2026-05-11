@@ -3,10 +3,10 @@ using Workerd = import "/workerd/workerd.capnp";
 const unitTests :Workerd.Config = (
   v8Flags = ["--expose-gc"],
   services = [
-    ( name = "zlib-leak-nodejs-test",
+    ( name = "gc-tracing-nodejs-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "zlib-leak-nodejs-test.js")
+          (name = "worker", esModule = embed "gc-tracing-nodejs-test.js")
         ],
         compatibilityFlags = ["experimental", "nodejs_compat", "nodejs_compat_v2", "nodejs_zlib", "enable_weak_ref"],
       )
