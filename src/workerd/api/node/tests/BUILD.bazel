@@ -16,6 +16,13 @@ wd_test(
 )
 
 wd_test(
+    size = "enormous",
+    src = "buffer-base64-large-test.wd-test",
+    args = ["--experimental"],
+    data = ["buffer-base64-large-test.js"],
+)
+
+wd_test(
     src = "cluster-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["cluster-nodejs-test.js"],

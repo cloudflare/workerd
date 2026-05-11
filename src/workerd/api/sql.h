@@ -12,7 +12,16 @@
 
 namespace workerd::api {
 
-class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
+class SqlStorageRegulator: public SqliteDatabase::Regulator {
+ public:
+  bool isAllowedName(kj::StringPtr name) const override;
+  bool isAllowedTrigger(kj::StringPtr name) const override;
+  void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override;
+  bool allowTransactions() const override;
+  bool shouldAddQueryStats() const override;
+};
+
+class SqlStorage final: public jsg::Object {
  public:
   SqlStorage(jsg::Ref<DurableObjectStorage> storage);
   ~SqlStorage();
@@ -68,11 +77,7 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
     visitor.visit(storage);
   }
 
-  bool isAllowedName(kj::StringPtr name) const override;
-  bool isAllowedTrigger(kj::StringPtr name) const override;
-  void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override;
-  bool allowTransactions() const override;
-  bool shouldAddQueryStats() const override;
+  static constexpr SqlStorageRegulator regulator;
 
   SqliteDatabase& getDb(jsg::Lock& js) {
     return storage->getSqliteDb(js);
@@ -99,7 +104,7 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
         kj::String kjQuery)
         : query(js.v8Isolate, jsQuery),
           statementSize(kjQuery.size()),
-          statement(db.prepareMulti(sqlStorage, kj::mv(kjQuery))) {}
+          statement(db.prepareMulti(regulator, kj::mv(kjQuery))) {}
   };
 
   class StatementCacheCallbacks {
@@ -250,7 +255,7 @@ class SqlStorage::Cursor final: public jsg::Object {
     SqliteDatabase::Query query;
 
     State(SqliteDatabase& db,
-        SqliteDatabase::Regulator& regulator,
+        SqliteDatabase::StaticRegulator regulator,
         kj::StringPtr sqlCode,
         kj::Array<BindingValue> bindings);
 
