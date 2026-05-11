@@ -13,6 +13,7 @@ def wd_test(
         generate_all_autogates_variant = True,
         generate_all_compat_flags_variant = True,
         generate_gc_stress_variant = True,
+        predictable = True,
         compat_date = "",
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
@@ -28,6 +29,7 @@ def wd_test(
      generate_all_autogates_variant: If True (default), generate @all-autogates variants.
      generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
      generate_gc_stress_variant: If True (default), generate @gc-stress variant.
+     predictable: If True (default), pass `--predictable` to workerd.
      compat_date: If specified, use this compat date for the default variant instead of 2000-01-01.
         Does not affect the @all-compat-flags variant which always uses 2999-12-31.
 
@@ -87,6 +89,7 @@ def wd_test(
     base_args = [
         "$(location //src/workerd/server:workerd_cross)",
         "test",
+    ] + (["--predictable"] if predictable else []) + [
         "$(location {})".format(src),
     ] + args
 
