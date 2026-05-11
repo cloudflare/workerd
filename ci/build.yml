@@ -35,6 +35,12 @@ include:
   - component: $CI_SERVER_FQDN/cloudflare/ci/cfsetup/build@~latest
     inputs:
       <<: *cfsetup-input-template
+      jobPrefix: "linux-x64-asan"
+      CFSETUP_TARGET: "ci-bazel-x64-asan"
+
+  - component: $CI_SERVER_FQDN/cloudflare/ci/cfsetup/build@~latest
+    inputs:
+      <<: *cfsetup-input-template
       jobPrefix: "linux-x64-lint"
       CFSETUP_TARGET: "ci-bazel-x64-lint"
 
@@ -47,6 +53,9 @@ include:
       OPENCODE_MODEL: "cloudflare-ai-gateway/anthropic/claude-opus-4-7"
 
 linux-x64-build:
+  <<: *job-template
+
+linux-x64-asan-build:
   <<: *job-template
 
 linux-x64-lint-build:
