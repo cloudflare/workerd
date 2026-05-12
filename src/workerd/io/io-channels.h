@@ -167,26 +167,15 @@ class IoChannelFactory {
     STORAGE,
   };
 
-  // Object representing somehere where generic workers subrequests can be sent. Multiple requests
-  // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
-  // created.
-  class SubrequestChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
+  // Base class for all channel types that can be tokenized, e.g. SubrequestChannel,
+  // ActorClassChannel.
+  class TokenizableChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
    public:
-    // Start a new request to this target.
-    //
-    // Note that not all `metadata` properties make sense here, but it didn't seem worth defining
-    // a new struct type. `cfBlobJson` and `parentSpan` make sense, but `featureFlagsForFl` and
-    // `dynamicDispatchTarget` do not.
-    //
-    // Note that the caller is expected to keep the SubrequestChannel alive until it is done with
-    // the returned WorkerInterface.
-    virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
-
     kj::Own<CapTableEntry> clone() override final {
       return kj::addRef(*this);
     }
 
-    // Throws a JSG error if a Fetcher backed by this channel should not be serialized and passed
+    // Throws a JSG error if an object backed by this channel should not be serialized and passed
     // to other workers. The default implementation throws a generic error, but subclasses may
     // specialize with better errror messages -- or override to just return in order to permit the
     // serialization.
@@ -195,10 +184,13 @@ class IoChannelFactory {
     // in production, would be difficult or impossible to serialize. In particular,
     // dynamically-loaded workers cannot be serialized because the system does not know how to
     // reconstruct a dynamically-loaded worker from scratch.
+    //
+    // TODO(cleanup): Maybe we can remove this by having everyone call getToken() as a way to check
+    //   transferrability, even in cases where we don't necessarily use the token?
     virtual void requireAllowsTransfer() = 0;
 
-    // Get a token representing this SubrequestChannel which can be converted back into a
-    // SubrequestChannel using subrequestChannelFromToken(). This is a convenience wrapper around
+    // Get a token representing this TokenizableChannel which can be converted back into a
+    // channel object using `IoChannelFactory::*FromToken()`. This is a convenience wrapper around
     // getTokenMaybeSync() for callers that don't care about the synchronous optimization.
     kj::Promise<kj::Array<byte>> getToken(ChannelTokenUsage usage);
 
@@ -209,9 +201,12 @@ class IoChannelFactory {
     virtual kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
         ChannelTokenUsage usage) = 0;
 
-    // If this SubrequestChannel is just a wrapper around a promise for some later
-    // SubrequestChannel, return the inner channel -- synchronously if the promise has resolved
+    // If this TokenizableChannel is just a wrapper around a promise for some later
+    // TokenizableChannel, return the inner channel -- synchronously if the promise has resolved
     // already, otherwise asynchronously.
+    //
+    // The resolved channel is *always* the same kind (e.g. SubrequestChannel) as this one, so can
+    // be safely downcast without a runtime check.
     //
     // Note that the various `IoChannelFactory` methods that take `props` or `env` objects all
     // automatically resolve all channel objects *before* passing off to the underlying
@@ -220,10 +215,26 @@ class IoChannelFactory {
     // in every use case would be painful, so it is taken care of in this layer.
     //
     // Default implementation returns self.
-    virtual kj::OneOf<kj::Own<SubrequestChannel>, kj::Promise<kj::Own<SubrequestChannel>>>
+    virtual kj::OneOf<kj::Own<TokenizableChannel>, kj::Promise<kj::Own<TokenizableChannel>>>
     getResolved() {
       return kj::addRef(*this);
     }
+  };
+
+  // Object representing somehere where generic workers subrequests can be sent. Multiple requests
+  // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
+  // created.
+  class SubrequestChannel: public TokenizableChannel {
+   public:
+    // Start a new request to this target.
+    //
+    // Note that not all `metadata` properties make sense here, but it didn't seem worth defining
+    // a new struct type. `cfBlobJson` and `parentSpan` make sense, but `featureFlagsForFl` and
+    // `dynamicDispatchTarget` do not.
+    //
+    // Note that the caller is expected to keep the SubrequestChannel alive until it is done with
+    // the returned WorkerInterface.
+    virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -275,22 +286,8 @@ class IoChannelFactory {
   // ActorClassChannel is a reference to an actor class in another worker. This class acts as a
   // token which can be passed into other interfaces that might use the actor class, particularly
   // Worker::Actor::FacetManager.
-  class ActorClassChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
+  class ActorClassChannel: public TokenizableChannel {
    public:
-    kj::Own<CapTableEntry> clone() override final {
-      return kj::addRef(*this);
-    }
-
-    // Same as the corresponding methods on SubrequestChannel.
-    virtual void requireAllowsTransfer() = 0;
-    kj::Promise<kj::Array<byte>> getToken(ChannelTokenUsage usage);
-    virtual kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-        ChannelTokenUsage usage) = 0;
-    virtual kj::OneOf<kj::Own<ActorClassChannel>, kj::Promise<kj::Own<ActorClassChannel>>>
-    getResolved() {
-      return kj::addRef(*this);
-    }
-
     // This class has no functional methods, since it serves as a token to be passed to other
     // interfaces (namely the facets API).
   };
