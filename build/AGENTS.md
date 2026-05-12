@@ -39,12 +39,18 @@ etc., plus `kj::Maybe`/`Array`/`Vector`/`OneOf` and `jsg::Optional` wrappers
 thereof) are missing from `visitForGc()`.
 
 - Run via `just clang-tidy <target>` (e.g., `just clang-tidy //src/workerd/api/...`).
+- Plugin sources live in `tools/clang-tidy/jsg-lint.c++` and are built as a
+  `cc_shared_library` target `//tools/clang-tidy:jsg-lint`. The source is
+  also exported via `exports_files` so downstream projects can rebuild
+  against their own clang/LLVM headers.
 - The clang-tidy binary itself is published to `cloudflare/workerd-tools`
   releases (see `deps/build_deps.jsonc`, entries `clang_tidy_*`); the matching
-  `*_dev.tar.xz` archives provide the clang/LLVM headers needed to build the
-  plugin out-of-tree. Available for Linux amd64/arm64 and macOS arm64.
-- Wrapper script `build/tools/clang_tidy/clang_tidy_wrapper.sh` conditionally
-  loads the plugin via `-load`.
+  `*_dev.tar.xz` archive provides the clang/LLVM headers needed to build the
+  plugin out-of-tree. Available for Linux amd64/arm64 and macOS arm64; a
+  single archive (linux-amd64) serves all platforms since the AST-matching
+  plugin doesn't depend on the arch-specific config macros that vary.
+- Wrapper script `build/tools/clang_tidy/clang_tidy_wrapper.sh` loads the
+  plugin via `--load=`.
 - Suppress an intentional non-visit with `// NOLINT(jsg-visit-for-gc)` plus a
   comment explaining why the field is safe to skip (see `src/workerd/api/streams/queue.h`
   for `ByteQueue::Entry::store` and `src/workerd/api/node/diagnostics-channel.h`

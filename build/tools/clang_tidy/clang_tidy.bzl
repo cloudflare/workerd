@@ -101,8 +101,7 @@ def _clang_tidy_aspect_impl(target, ctx):
         ctx.attr._clang_tidy_plugin.files,
     ]
 
-    plugin_files = ctx.attr._clang_tidy_plugin.files.to_list()
-    plugin_path = plugin_files[0].path if plugin_files else ""
+    plugin_path = ctx.attr._clang_tidy_plugin.files.to_list()[0].path
 
     outs = []
     for src in srcs:
@@ -201,7 +200,7 @@ clang_tidy_aspect = aspect(
             allow_single_file = True,
         ),
         "_clang_tidy_plugin": attr.label(
-            default = Label("//build/tools/clang_tidy/plugin:JsgLint.so"),
+            default = Label("//tools/clang-tidy:jsg-lint"),
             allow_single_file = True,
         ),
         "_clang_tidy_compiler_flags": attr.string_list(

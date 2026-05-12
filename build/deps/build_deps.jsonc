@@ -142,30 +142,17 @@
       "freeze_version": "clang-tidy-22.1.5"
     },
     {
-      "name": "clang_tidy_dev_linux_amd64",
+      // Clang/LLVM headers needed to build the workerd jsg-lint clang-tidy
+      // plugin out-of-tree. The clang-tidy plugin is just AST matching, so
+      // the only platform-specific bits (arch-name macros in
+      // build/include/llvm/Config/*.def and llvm-config.h) are irrelevant
+      // here. One archive serves all platforms.
+      "name": "clang_tidy_dev_headers",
       "type": "github_release",
       "owner": "cloudflare",
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-linux-amd64-clang-tidy-dev\\.tar\\.xz$",
-      "build_file": "@workerd//build/tools/clang_tidy/plugin:BUILD.headers",
-      "freeze_version": "clang-tidy-22.1.5"
-    },
-    {
-      "name": "clang_tidy_dev_linux_arm64",
-      "type": "github_release",
-      "owner": "cloudflare",
-      "repo": "workerd-tools",
-      "file_regex": "llvm-.*-linux-arm64-clang-tidy-dev\\.tar\\.xz$",
-      "build_file": "@workerd//build/tools/clang_tidy/plugin:BUILD.headers",
-      "freeze_version": "clang-tidy-22.1.5"
-    },
-    {
-      "name": "clang_tidy_dev_darwin_arm64",
-      "type": "github_release",
-      "owner": "cloudflare",
-      "repo": "workerd-tools",
-      "file_regex": "llvm-.*-darwin-arm64-clang-tidy-dev\\.tar\\.xz$",
-      "build_file": "@workerd//build/tools/clang_tidy/plugin:BUILD.headers",
+      "build_file": "@workerd//tools/clang-tidy:BUILD.headers",
       "freeze_version": "clang-tidy-22.1.5"
     }
   ]

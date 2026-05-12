@@ -34,38 +34,16 @@ http.file(
 )
 use_repo(http, "clang_tidy_darwin_arm64")
 
-# clang_tidy_dev_darwin_arm64
+# clang_tidy_dev_headers
 http.archive(
-    name = "clang_tidy_dev_darwin_arm64",
-    build_file = "@workerd//build/tools/clang_tidy/plugin:BUILD.headers",
-    sha256 = "4218217e2db4603ab10442676e2879c2fde2466caf98683b5da50cc730e3eef3",
-    strip_prefix = "llvm-22.1.5-darwin-arm64-clang-tidy-dev",
-    type = "tar.xz",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-darwin-arm64-clang-tidy-dev.tar.xz",
-)
-use_repo(http, "clang_tidy_dev_darwin_arm64")
-
-# clang_tidy_dev_linux_amd64
-http.archive(
-    name = "clang_tidy_dev_linux_amd64",
-    build_file = "@workerd//build/tools/clang_tidy/plugin:BUILD.headers",
+    name = "clang_tidy_dev_headers",
+    build_file = "@workerd//tools/clang-tidy:BUILD.headers",
     sha256 = "8c8f3e5abd3e48d2570bdbba9de6a6aa96f01c489ad4ccddeb0449b3a857d706",
     strip_prefix = "llvm-22.1.5-linux-amd64-clang-tidy-dev",
     type = "tar.xz",
     url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-linux-amd64-clang-tidy-dev.tar.xz",
 )
-use_repo(http, "clang_tidy_dev_linux_amd64")
-
-# clang_tidy_dev_linux_arm64
-http.archive(
-    name = "clang_tidy_dev_linux_arm64",
-    build_file = "@workerd//build/tools/clang_tidy/plugin:BUILD.headers",
-    sha256 = "b070c9e85ea01a867d52db2e155d69e23746c4ab9e549f30c69826b7b27dbd7d",
-    strip_prefix = "llvm-22.1.5-linux-arm64-clang-tidy-dev",
-    type = "tar.xz",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-linux-arm64-clang-tidy-dev.tar.xz",
-)
-use_repo(http, "clang_tidy_dev_linux_arm64")
+use_repo(http, "clang_tidy_dev_headers")
 
 # clang_tidy_linux_amd64
 http.file(

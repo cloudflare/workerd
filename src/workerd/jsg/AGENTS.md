@@ -98,7 +98,7 @@ These rules MUST be followed when writing or modifying JSG code:
     `jsg-visit-for-gc` clang-tidy diagnostic with a `// NOLINT(jsg-visit-for-gc)`
     comment and a brief explanation of *why* it's safe to skip.
 
-The `jsg-visit-for-gc` clang-tidy check (see `build/tools/clang_tidy/plugin/`)
+The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:jsg-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.
 
