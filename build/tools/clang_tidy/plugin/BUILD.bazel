@@ -15,6 +15,13 @@ the plugin's vtable references.
 
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 
+# Exported so downstream consumers can compile against their own clang-tidy headers.
+filegroup(
+    name = "JsgLint_srcs",
+    srcs = ["JsgLint.cpp"],
+    visibility = ["//visibility:public"],
+)
+
 cc_binary(
     name = "JsgLint.so",
     srcs = ["JsgLint.cpp"],
