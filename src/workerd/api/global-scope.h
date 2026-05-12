@@ -377,6 +377,7 @@ class ExecutionContext: public jsg::Object {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> version;
 
   void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(exports);
     visitor.visit(props);
     visitor.visit(version);
   }
@@ -1079,6 +1080,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
   kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
   kj::HashMap<kj::String, ConnectFn> connectOverrides;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(processValue, bufferValue, defaultFetcher);
+  }
 
   // Global properties such as scheduler, crypto, caches, self, and origin should
   // be monkeypatchable / mutable at the global scope.

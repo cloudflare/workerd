@@ -363,6 +363,10 @@ class CryptoImpl final: public jsg::Object {
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo;
     bool authTagPassed = false;
     bool pendingAuthFailed = false;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(key);
+    }
   };
 
   /*
@@ -442,6 +446,10 @@ class CryptoImpl final: public jsg::Object {
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo;
     kj::Maybe<kj::Array<kj::byte>> maybeAad;
     bool updated = false;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(key);
+    }
   };
 
   kj::OneOf<jsg::Ref<CipherHandle>, jsg::Ref<AeadHandle>> newHandle(jsg::Lock& js,

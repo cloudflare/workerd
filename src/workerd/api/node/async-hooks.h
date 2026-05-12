@@ -108,6 +108,10 @@ class AsyncLocalStorage final: public jsg::Object {
   kj::Own<jsg::AsyncContextFrame::StorageKey> key;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> defaultValue;
   kj::Maybe<kj::String> name;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(defaultValue);
+  }
 };
 
 // Note: The AsyncResource class is provided for Node.js backwards compatibility.

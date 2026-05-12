@@ -20,6 +20,10 @@ class CommonJsModuleObject final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(path, getPath);
   }
 
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(exports);
+  }
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
@@ -55,6 +59,10 @@ class CommonJsModuleContext final: public jsg::Object {
   }
 
   jsg::Ref<CommonJsModuleObject> module;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(module, exports);
+  }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 

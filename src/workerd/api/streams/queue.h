@@ -1006,7 +1006,13 @@ class ByteQueue final {
     }
 
    private:
-    jsg::JsRef<jsg::JsBufferSource> store;
+    // visitForGc intentionally does not visit `store`: ByteQueue::Entry is
+    // owned via kj::Rc<Entry> (C++ refcount), so the JsBufferSource cannot
+    // be part of a JS→C++→JS reference cycle and the strong v8::Global
+    // inside JsRef suffices to keep it alive. See ConsumerImpl::visitForGc
+    // for the chosen memory model and the empty Entry::visitForGc body in
+    // queue.c++.
+    jsg::JsRef<jsg::JsBufferSource> store;  // NOLINT(jsg-visit-for-gc)
   };
 
   struct QueueEntry {

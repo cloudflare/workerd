@@ -349,6 +349,11 @@ class R2Bucket: public jsg::Object {
     jsg::Optional<Range> range;
     kj::String storageClass;
     jsg::Optional<kj::String> ssecKeyMd5;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(checksums);
+    }
+
     friend class R2Bucket;
   };
 
@@ -415,6 +420,10 @@ class R2Bucket: public jsg::Object {
 
    private:
     jsg::Ref<ReadableStream> body;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(body);
+    }
   };
 
   struct ListResult {

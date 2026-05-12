@@ -338,6 +338,10 @@ class SqlStorage::Statement final: public jsg::Object {
   jsg::Ref<SqlStorage> sqlStorage;
   jsg::V8Ref<v8::String> query;
 
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(sqlStorage, query);
+  }
+
   friend class Cursor;
 };
 
