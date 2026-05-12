@@ -103,6 +103,7 @@ wd_cc_library(
         "resource.h",
         "ser.h",
         "setup.h",
+        "unwrap-args.h",
         "util.h",
         "v8-platform-wrapper.h",
         "web-idl.h",
