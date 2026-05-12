@@ -7,6 +7,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/web-socket.h>
+#include <workerd/io/trace.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/exception.h>
@@ -129,6 +130,10 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
     // True once we have dispatched the close event.
     // This prevents us from dispatching it if we have already done so.
     bool hasDispatchedClose = false;
+
+    // Trace context captured at acceptWebSocket() time, restored when the DO is woken up
+    // so that hibernation events are linked to the original trace.
+    kj::Maybe<tracing::SpanContext> userSpanContext;
 
     // Stores the last received autoResponseRequest timestamp.
     kj::Maybe<kj::Date> autoResponseTimestamp;
