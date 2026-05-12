@@ -230,6 +230,12 @@ wd_test(
 )
 
 wd_test(
+    src = "gc-tracing-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["gc-tracing-nodejs-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "zlib-zstd-nodejs-test.wd-test",
     args = ["--experimental"],
