@@ -1,0 +1,6 @@
+genrule(
+    name = "fork_remote_cache_probe",
+    outs = ["fork_remote_cache_probe.txt"],
+    cmd = "printf 'fork-remote-cache-probe\n' > $@",
+    cmd_bat = "@echo fork-remote-cache-probe> $@",
+)
