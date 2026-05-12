@@ -15,6 +15,15 @@
 
 namespace workerd::api {
 
+namespace {
+
+// This number was arbitrarily chosen, but is meant to account for the cost of holding open outbound
+// actor connections, which do have a real cost and should be accounted for to encourage GC if they
+// accumulate.
+constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL = 32768;
+
+}
+
 kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
   auto& context = IoContext::current();
@@ -27,6 +36,11 @@ kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
     if (actorChannel == kj::none) {
       actorChannel =
           context.getColoLocalActorChannel(channelId, actorId, tracing.getInternalSpanParent());
+
+      // As in GlobalActorOutgoingFactory, account for external memory used by the open connection.
+      jsg::Lock& js = context.getCurrentLock();
+      channelMemoryAdjustment =
+          js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
     }
 
     return KJ_REQUIRE_NONNULL(actorChannel)
@@ -60,6 +74,14 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
               enableReplicaRouting, routingMode, tracing.getInternalSpanParent(), kj::mv(version));
         }
       }
+
+      // The ActorChannelImpl we just created holds a Cap'n Proto Pipeline::Client representing an
+      // open connection to the target DO's routing supervisor. Register external memory to pressure
+      // V8 into collecting this factory's owning stub promptly when it becomes unreachable,
+      // preventing connection/FD accumulation from stubs that are created and discarded in a loop.
+      jsg::Lock& js = context.getCurrentLock();
+      channelMemoryAdjustment =
+          js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
     }
 
     return KJ_REQUIRE_NONNULL(actorChannel)
