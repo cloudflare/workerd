@@ -59,12 +59,16 @@ native_binary(
 
 native_binary(
     name = "clang-tidy",
+    # Only the platforms below are published in the cloudflare/workerd-tools
+    # release (see build/deps/build_deps.jsonc, "clang_tidy_*"). Windows is
+    # omitted because no Windows asset is published there. The target is also
+    # tagged "manual" so it is never built as part of `//...`; selecting an
+    # unsupported platform produces a clear select() error.
     src = select(
         {
             "@bazel_tools//src/conditions:linux_x86_64": "@clang_tidy_linux_amd64//file:downloaded",
             "@bazel_tools//src/conditions:linux_aarch64": "@clang_tidy_linux_arm64//file:downloaded",
             "@bazel_tools//src/conditions:darwin_arm64": "@clang_tidy_darwin_arm64//file:downloaded",
-            "@bazel_tools//src/conditions:windows_x64": "@clang_tidy_windows_amd64//file:downloaded",
         },
     ),
     out = "clang_tidy",

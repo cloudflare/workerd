@@ -234,6 +234,10 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 
 - `JSG_RESOURCE_TYPE` for reference types, `JSG_STRUCT` for value types
 - `js.alloc<T>()` for resource allocation
+- The `jsg-visit-for-gc` clang-tidy check (in `build/tools/clang_tidy/plugin/`)
+  validates that GC-visitable fields are traced in `visitForGc()`. Run via
+  `just clang-tidy <target>`. Suppress intentional non-visits with
+  `// NOLINT(jsg-visit-for-gc)` + a justifying comment.
 
 ### Feature Management
 

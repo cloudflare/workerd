@@ -20,6 +20,7 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 | `wd_capnp_library.bzl`                     | Cap'n Proto schema compilation                                                                    |
 | `wd_rust_crate.bzl` / `wd_rust_binary.bzl` | Rust build rules                                                                                  |
 | `lint_test.bzl`                            | ESLint integration                                                                                |
+| `tools/clang_tidy/plugin/JsgLint.cpp`      | Custom clang-tidy plugin; ships the `jsg-visit-for-gc` check for GC-root validation               |
 
 **Conventions:**
 
@@ -27,6 +28,27 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 - Test tags: `off-by-default`, `requires-container-engine`, `no-asan`, `no-coverage`
 - Variant generation controllable per-test via `generate_*_variant` booleans
 - `BUILD.*` files: overlay build files for third-party deps (sqlite3, zlib, simdutf, pyodide, wpt)
+
+## CLANG-TIDY PLUGIN
+
+`tools/clang_tidy/plugin/` builds a shared-object clang-tidy plugin (`JsgLint`)
+that adds workerd-specific static checks. Currently ships `jsg-visit-for-gc`,
+which flags JSG resource types whose visitable fields (`jsg::Ref`, `jsg::JsRef`,
+`jsg::V8Ref`, `jsg::Function`, `jsg::Promise`, `jsg::BufferSource`, `jsg::Value`,
+etc., plus `kj::Maybe`/`Array`/`Vector`/`OneOf` and `jsg::Optional` wrappers
+thereof) are missing from `visitForGc()`.
+
+- Run via `just clang-tidy <target>` (e.g., `just clang-tidy //src/workerd/api/...`).
+- The clang-tidy binary itself is published to `cloudflare/workerd-tools`
+  releases (see `deps/build_deps.jsonc`, entries `clang_tidy_*`); the matching
+  `*_dev.tar.xz` archives provide the clang/LLVM headers needed to build the
+  plugin out-of-tree. Available for Linux amd64/arm64 and macOS arm64.
+- Wrapper script `build/tools/clang_tidy/clang_tidy_wrapper.sh` conditionally
+  loads the plugin via `-load`.
+- Suppress an intentional non-visit with `// NOLINT(jsg-visit-for-gc)` plus a
+  comment explaining why the field is safe to skip (see `src/workerd/api/streams/queue.h`
+  for `ByteQueue::Entry::store` and `src/workerd/api/node/diagnostics-channel.h`
+  for `Channel::name`).
 
 ## DEPENDENCY MANAGEMENT
 

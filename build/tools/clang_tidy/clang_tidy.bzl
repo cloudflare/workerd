@@ -98,7 +98,11 @@ def _clang_tidy_aspect_impl(target, ctx):
         ctx.attr._clang_tidy_executable.files,
         ctx.attr._clang_tidy_wrapper.files,
         ctx.attr._clang_tidy_config.files,
+        ctx.attr._clang_tidy_plugin.files,
     ]
+
+    plugin_files = ctx.attr._clang_tidy_plugin.files.to_list()
+    plugin_path = plugin_files[0].path if plugin_files else ""
 
     outs = []
     for src in srcs:
@@ -112,6 +116,7 @@ def _clang_tidy_aspect_impl(target, ctx):
         # these are consumed by clang_tidy_wrapper,sh
         args.add(ctx.attr._clang_tidy_executable.files_to_run.executable)
         args.add(out)
+        args.add(plugin_path)
 
         # clang-tidy arguments
         # do not print statistics
@@ -193,6 +198,10 @@ clang_tidy_aspect = aspect(
         ),
         "_clang_tidy_config": attr.label(
             default = Label("//:clang_tidy_config"),
+            allow_single_file = True,
+        ),
+        "_clang_tidy_plugin": attr.label(
+            default = Label("//build/tools/clang_tidy/plugin:JsgLint.so"),
             allow_single_file = True,
         ),
         "_clang_tidy_compiler_flags": attr.string_list(

@@ -1,0 +1,52 @@
+"""Workerd JsgLint clang-tidy plugin.
+
+Provides workerd-specific checks (currently the `workerd-visit-for-gc`
+check that validates JSG resource types correctly visit their GC roots).
+
+Loaded into clang-tidy via --load=. The plugin inherits from clang-tidy's
+ClangTidyCheck base class, with symbols resolved at dlopen() time against
+the running clang-tidy binary.
+
+The clang-tidy binary must be built with LLVM_ENABLE_PLUGINS=ON,
+CLANG_PLUGIN_SUPPORT=ON, and LLVM_ENABLE_RTTI=ON so that it (1) exports
+its symbols for dynamic resolution and (2) emits typeinfo records that
+the plugin's vtable references.
+"""
+
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
+cc_binary(
+    name = "JsgLint.so",
+    srcs = ["JsgLint.cpp"],
+    copts = [
+        # Match the workerd-tools clang-tidy build (RTTI on, libstdc++).
+        "-frtti",
+        "-fno-exceptions",
+        "-stdlib=libstdc++",
+        # Silence warnings from third-party headers that we have no control over.
+        "-Wno-unused-parameter",
+    ],
+    linkopts = select({
+        "@platforms//os:macos": [
+            "-undefined",
+            "dynamic_lookup",
+        ],
+        "//conditions:default": [
+            "-stdlib=libstdc++",
+        ],
+    }),
+    linkshared = True,
+    tags = ["manual"],
+    visibility = ["//build/tools/clang_tidy:__subpackages__"],
+    deps = select({
+        "@bazel_tools//src/conditions:linux_x86_64": [
+            "@clang_tidy_dev_linux_amd64//:clang_tidy_dev_headers",
+        ],
+        "@bazel_tools//src/conditions:linux_aarch64": [
+            "@clang_tidy_dev_linux_arm64//:clang_tidy_dev_headers",
+        ],
+        "@bazel_tools//src/conditions:darwin_arm64": [
+            "@clang_tidy_dev_darwin_arm64//:clang_tidy_dev_headers",
+        ],
+    }),
+)

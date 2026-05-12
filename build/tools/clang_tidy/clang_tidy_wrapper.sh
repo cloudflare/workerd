@@ -9,8 +9,18 @@ shift
 OUTPUT=$1
 shift
 
+# Path to workerd-tidy plugin shared library. Empty if no plugin is wired up.
+CLANG_TIDY_PLUGIN=$1
+shift
+
 PWD=$(pwd)/
 ESCAPED_PWD=$(sed 's/[\*\.&/]/\\&/g' <<< "$PWD")
+
+# Build the optional --load=<plugin> argument.
+PLUGIN_ARGS=()
+if [[ -n "${CLANG_TIDY_PLUGIN}" ]]; then
+  PLUGIN_ARGS+=("--load=${CLANG_TIDY_PLUGIN}")
+fi
 
 # Interestingly clang-tidy prints real errors to stdout, but system message like
 # `4 warnings generated` when they are filtered out, to stderr.
@@ -18,7 +28,7 @@ ESCAPED_PWD=$(sed 's/[\*\.&/]/\\&/g' <<< "$PWD")
 CLANG_TIDY_STDERR=$(mktemp)
 
 set +e
-"${CLANG_TIDY_BIN}" "$@" 2>"$CLANG_TIDY_STDERR" | \
+"${CLANG_TIDY_BIN}" "${PLUGIN_ARGS[@]}" "$@" 2>"$CLANG_TIDY_STDERR" | \
   # clang-tidy insists on printing absolute file paths, chop current dir off
   sed "s/$ESCAPED_PWD//g"
 CLANG_TIDY_EXIT_CODE=$?
