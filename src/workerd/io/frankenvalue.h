@@ -178,7 +178,7 @@ class Frankenvalue {
   kj::Vector<kj::Own<CapTableEntry>> capTable;
 
   Frankenvalue cloneImpl() const;
-  void fromCapnpImpl(rpc::Frankenvalue::Reader reader, uint& capTablePos);
+  void fromCapnpImpl(rpc::Frankenvalue::Reader reader, size_t& capCount, size_t capTableTotal);
   void toCapnpImpl(rpc::Frankenvalue::Builder builder, uint capTableSize);
   jsg::JsValue toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTableEntry>> capTable);
 };

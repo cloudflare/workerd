@@ -106,16 +106,17 @@ Frankenvalue Frankenvalue::fromCapnp(
     rpc::Frankenvalue::Reader reader, kj::Vector<kj::Own<CapTableEntry>> capTable) {
   Frankenvalue result;
 
-  uint capCount = 0;
-  result.fromCapnpImpl(reader, capCount);
+  size_t capCount = 0;
+  result.fromCapnpImpl(reader, capCount, capTable.size());
 
-  KJ_REQUIRE(capTable.size() == capCount);
+  KJ_REQUIRE(capTable.size() == capCount, "Frankenvalue capTable size doesn't match contents");
   result.capTable = kj::mv(capTable);
 
   return result;
 }
 
-void Frankenvalue::fromCapnpImpl(rpc::Frankenvalue::Reader reader, uint& capCount) {
+void Frankenvalue::fromCapnpImpl(
+    rpc::Frankenvalue::Reader reader, size_t& capCount, size_t capTableTotal) {
   switch (reader.which()) {
     case rpc::Frankenvalue::EMPTY_OBJECT:
       this->value = EmptyObject();
@@ -128,7 +129,9 @@ void Frankenvalue::fromCapnpImpl(rpc::Frankenvalue::Reader reader, uint& capCoun
       break;
   }
 
-  capCount += reader.getCapTableSize();
+  uint32_t nodeCaps = reader.getCapTableSize();
+  KJ_REQUIRE(nodeCaps <= capTableTotal - capCount, "Frankenvalue capTableSize exceeds capTable");
+  capCount += nodeCaps;
 
   auto properties = reader.getProperties();
   if (properties.size() > 0) {
@@ -137,10 +140,10 @@ void Frankenvalue::fromCapnpImpl(rpc::Frankenvalue::Reader reader, uint& capCoun
     for (auto property: properties) {
       Property result{
         .name = kj::str(property.getName()),
-        .capTableOffset = capCount,
+        .capTableOffset = static_cast<uint>(capCount),
       };
-      result.value.fromCapnpImpl(property, capCount);
-      result.capTableSize = capCount - result.capTableOffset;
+      result.value.fromCapnpImpl(property, capCount, capTableTotal);
+      result.capTableSize = static_cast<uint>(capCount - result.capTableOffset);
       this->properties.add(kj::mv(result));
     }
   }
