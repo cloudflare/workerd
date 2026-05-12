@@ -537,6 +537,11 @@ void ZlibUtil::CompressionStream<CompressionContext>::close() {
   }
   closed = true;
   JSG_ASSERT(initialized, Error, "Closing before initialized"_kj);
+  // Drop JS-heap refs eagerly so callers that explicitly close don't have to
+  // wait for the cycle collector. visitForGc handles the unclosed case.
+  writeCallback = kj::none;
+  writeResult = kj::none;
+  errorHandler = kj::none;
   // Context is closed on the destructor of the CompressionContext.
 }
 
