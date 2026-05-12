@@ -176,7 +176,7 @@ jsg::JsValue deserialize(
   if (type == IncomingQueueMessage::ContentType::TEXT) {
     return js.str(body);
   } else if (type == IncomingQueueMessage::ContentType::BYTES) {
-    return jsg::JsValue(js.bytes(kj::mv(body)).getHandle(js));
+    return jsg::JsUint8Array::create(js, body);
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
     return jsg::JsValue::fromJson(js, body.asChars());
   } else if (type == IncomingQueueMessage::ContentType::V8) {
@@ -196,8 +196,7 @@ jsg::JsValue deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
   if (type == IncomingQueueMessage::ContentType::TEXT) {
     return js.str(message.getData().asChars());
   } else if (type == IncomingQueueMessage::ContentType::BYTES) {
-    kj::Array<kj::byte> bytes = kj::heapArray(message.getData().asBytes());
-    return jsg::JsValue(js.bytes(kj::mv(bytes)).getHandle(js));
+    return jsg::JsUint8Array::create(js, message.getData().asBytes());
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
     return jsg::JsValue::fromJson(js, message.getData().asChars());
   } else if (type == IncomingQueueMessage::ContentType::V8) {

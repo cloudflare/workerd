@@ -114,9 +114,10 @@ KJ_TEST("Adapter shutdown with no reads") {
     adapter->shutdown(env.js);  // second call is no-op
 
     // Read after shutdown should be resolved immediate
+    auto u8 = jsg::JsUint8Array::create(env.js, 10);
     auto read = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, 10)),
+          .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
         });
     KJ_ASSERT(read.getState(env.js) ==
             jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult>::State::FULFILLED,
@@ -144,9 +145,10 @@ KJ_TEST("Adapter cancel with no reads") {
 
     adapter->cancel(env.js, env.js.error("boom"));
 
+    auto u8 = jsg::JsUint8Array::create(env.js, 10);
     auto read = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, 10)),
+          .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
         });
     KJ_ASSERT(read.getState(env.js) ==
             jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult>::State::REJECTED,
@@ -200,25 +202,21 @@ KJ_TEST("Adapter with single read (ArrayBuffer)") {
     KJ_ASSERT(
         adapter->isCanceled() == kj::none, "Adapter should not be canceled upon construction");
 
-    const size_t bufferSize = 10;
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, bufferSize);
+    auto u8 = jsg::JsUint8Array::create(env.js, 10);
 
     return env.context
         .awaitJs(env.js,
             adapter
                 ->read(env.js,
                     ReadableStreamSourceJsAdapter::ReadOptions{
-                      .buffer = jsg::BufferSource(env.js, kj::mv(backing)),
+                      .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
                       .minBytes = 5,
                     })
                 .then(env.js, [](jsg::Lock& js, auto result) {
-      KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 10, "Read buffer should be full size");
-      KJ_ASSERT(result.buffer.asArrayPtr() == "aaaaaaaaaa"_kjb);
-
-      // BufferSource should be an ArrayBuffer
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsArrayBuffer());
+      KJ_ASSERT(!result.done, "Stream should not be done yet");
+      KJ_ASSERT(handle.asArrayPtr().size() == 10, "Read buffer should be full size");
+      KJ_ASSERT(handle.asArrayPtr() == "aaaaaaaaaa"_kjb);
     })).attach(kj::mv(adapter));
   });
 }
@@ -236,25 +234,22 @@ KJ_TEST("Adapter with single read (Uint8Array)") {
     KJ_ASSERT(
         adapter->isCanceled() == kj::none, "Adapter should not be canceled upon construction");
 
-    const size_t bufferSize = 10;
-    auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize);
+    auto u8 = jsg::JsUint8Array::create(env.js, 10);
 
     return env.context
         .awaitJs(env.js,
             adapter
                 ->read(env.js,
                     ReadableStreamSourceJsAdapter::ReadOptions{
-                      .buffer = jsg::BufferSource(env.js, kj::mv(backing)),
+                      .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
                       .minBytes = 5,
                     })
                 .then(env.js, [](jsg::Lock& js, auto result) {
-      KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 10, "Read buffer should be full size");
-      KJ_ASSERT(result.buffer.asArrayPtr() == "aaaaaaaaaa"_kjb);
-
-      // BufferSource should be an ArrayBuffer
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsUint8Array());
+      KJ_ASSERT(!result.done, "Stream should not be done yet");
+      KJ_ASSERT(handle.asArrayPtr().size() == 10, "Read buffer should be full size");
+      KJ_ASSERT(handle.asArrayPtr() == "aaaaaaaaaa"_kjb);
+      KJ_ASSERT(handle.isUint8Array());
     })).attach(kj::mv(adapter));
   });
 }
@@ -272,25 +267,24 @@ KJ_TEST("Adapter with single read (Int32Array)") {
     KJ_ASSERT(
         adapter->isCanceled() == kj::none, "Adapter should not be canceled upon construction");
 
-    const size_t bufferSize = 16;
-    auto backing = jsg::BackingStore::alloc<v8::Int32Array>(env.js, bufferSize);
+    auto ab = jsg::JsArrayBuffer::create(env.js, 16);
+    auto i32 = v8::Int32Array::New(ab, 0, 4);
+    auto i32View = jsg::JsArrayBufferView(i32);
 
     return env.context
         .awaitJs(env.js,
             adapter
                 ->read(env.js,
                     ReadableStreamSourceJsAdapter::ReadOptions{
-                      .buffer = jsg::BufferSource(env.js, kj::mv(backing)),
+                      .buffer = i32View.addRef(env.js),
                       .minBytes = 5,
                     })
                 .then(env.js, [](jsg::Lock& js, auto result) {
-      KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 16, "Read buffer should be full size");
-      KJ_ASSERT(result.buffer.asArrayPtr() == "aaaaaaaaaaaaaaaa"_kjb);
-
-      // BufferSource should be an ArrayBuffer
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsInt32Array());
+      KJ_ASSERT(!result.done, "Stream should not be done yet");
+      KJ_ASSERT(handle.asArrayPtr().size() == 16, "Read buffer should be full size");
+      KJ_ASSERT(handle.asArrayPtr() == "aaaaaaaaaaaaaaaa"_kjb);
+      KJ_ASSERT(handle.isInt32Array());
     })).attach(kj::mv(adapter));
   });
 }
@@ -308,24 +302,21 @@ KJ_TEST("Adapter with single large read (ArrayBuffer)") {
     KJ_ASSERT(
         adapter->isCanceled() == kj::none, "Adapter should not be canceled upon construction");
 
-    const size_t bufferSize = 16 * 1024;
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, bufferSize);
+    auto u8 = jsg::JsUint8Array::create(env.js, 16 * 1024);
 
     return env.context
         .awaitJs(env.js,
             adapter
                 ->read(env.js,
                     ReadableStreamSourceJsAdapter::ReadOptions{
-                      .buffer = jsg::BufferSource(env.js, kj::mv(backing)),
+                      .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
                       .minBytes = 5,
                     })
                 .then(env.js, [](jsg::Lock& js, auto result) {
-      KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 16 * 1024, "Read buffer should be full size");
-
-      // BufferSource should be an ArrayBuffer
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsArrayBuffer());
+      KJ_ASSERT(!result.done, "Stream should not be done yet");
+      KJ_ASSERT(handle.asArrayPtr().size() == 16 * 1024, "Read buffer should be full size");
+      KJ_ASSERT(handle.isUint8Array());
     })).attach(kj::mv(adapter));
   });
 }
@@ -343,24 +334,21 @@ KJ_TEST("Adapter with single small read (ArrayBuffer)") {
     KJ_ASSERT(
         adapter->isCanceled() == kj::none, "Adapter should not be canceled upon construction");
 
-    const size_t bufferSize = 1;
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, bufferSize);
+    auto u8 = jsg::JsUint8Array::create(env.js, 1);
 
     return env.context
         .awaitJs(env.js,
             adapter
                 ->read(env.js,
                     ReadableStreamSourceJsAdapter::ReadOptions{
-                      .buffer = jsg::BufferSource(env.js, kj::mv(backing)),
+                      .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
                       .minBytes = 5,
                     })
                 .then(env.js, [](jsg::Lock& js, auto result) {
-      KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 1, "Read buffer should be full size");
-
-      // BufferSource should be an ArrayBuffer
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsArrayBuffer());
+      KJ_ASSERT(!result.done, "Stream should not be done yet");
+      KJ_ASSERT(handle.asArrayPtr().size() == 1, "Read buffer should be full size");
+      KJ_ASSERT(handle.isUint8Array());
     })).attach(kj::mv(adapter));
   });
 }
@@ -378,23 +366,20 @@ KJ_TEST("Adapter with minimal reads (Uint8Array)") {
     KJ_ASSERT(
         adapter->isCanceled() == kj::none, "Adapter should not be canceled upon construction");
 
-    const size_t bufferSize = 10;
-    auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize);
+    auto u8 = jsg::JsUint8Array::create(env.js, 10);
 
     auto promise = adapter
                        ->read(env.js,
                            ReadableStreamSourceJsAdapter::ReadOptions{
-                             .buffer = jsg::BufferSource(env.js, kj::mv(backing)),
+                             .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
                              .minBytes = 3,
                            })
                        .then(env.js, [](jsg::Lock& js, auto result) {
-      KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 3, "Read buffer should be three bytes");
-      KJ_ASSERT(result.buffer.asArrayPtr() == "aaa"_kjb);
-
-      // BufferSource should be an ArrayBuffer
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsUint8Array());
+      KJ_ASSERT(!result.done, "Stream should not be done yet");
+      KJ_ASSERT(handle.asArrayPtr().size() == 3, "Read buffer should be three bytes");
+      KJ_ASSERT(handle.asArrayPtr() == "aaa"_kjb);
+      KJ_ASSERT(handle.isUint8Array());
     });
 
     return env.context.awaitJs(env.js, kj::mv(promise)).attach(kj::mv(adapter));
@@ -414,23 +399,22 @@ KJ_TEST("Adapter with minimal reads (Uint32Array)") {
     KJ_ASSERT(
         adapter->isCanceled() == kj::none, "Adapter should not be canceled upon construction");
 
-    const size_t bufferSize = 16;
-    auto backing = jsg::BackingStore::alloc<v8::Uint32Array>(env.js, bufferSize);
+    auto ab = jsg::JsArrayBuffer::create(env.js, 16);
+    auto u32 = v8::Uint32Array::New(ab, 0, 4);
+    auto u32View = jsg::JsArrayBufferView(u32);
 
     auto promise = adapter
                        ->read(env.js,
                            ReadableStreamSourceJsAdapter::ReadOptions{
-                             .buffer = jsg::BufferSource(env.js, kj::mv(backing)),
+                             .buffer = u32View.addRef(env.js),
                              .minBytes = 3,  // Impl with round up to 4
                            })
                        .then(env.js, [](jsg::Lock& js, auto result) {
-      KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 4, "Read buffer should be four bytes");
-      KJ_ASSERT(result.buffer.asArrayPtr() == "aaaa"_kjb);
-
-      // BufferSource should be an ArrayBuffer
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsUint32Array());
+      KJ_ASSERT(!result.done, "Stream should not be done yet");
+      KJ_ASSERT(handle.asArrayPtr().size() == 4, "Read buffer should be four bytes");
+      KJ_ASSERT(handle.asArrayPtr() == "aaaa"_kjb);
+      KJ_ASSERT(handle.isUint32Array());
     });
 
     return env.context.awaitJs(env.js, kj::mv(promise)).attach(kj::mv(adapter));
@@ -450,23 +434,22 @@ KJ_TEST("Adapter with over large min reads (Uint32Array)") {
     KJ_ASSERT(
         adapter->isCanceled() == kj::none, "Adapter should not be canceled upon construction");
 
-    const size_t bufferSize = 16;
-    auto backing = jsg::BackingStore::alloc<v8::Uint32Array>(env.js, bufferSize);
+    auto ab = jsg::JsArrayBuffer::create(env.js, 16);
+    auto u32 = v8::Uint32Array::New(ab, 0, 4);
+    auto u32View = jsg::JsArrayBufferView(u32);
 
     auto promise = adapter
                        ->read(env.js,
                            ReadableStreamSourceJsAdapter::ReadOptions{
-                             .buffer = jsg::BufferSource(env.js, kj::mv(backing)),
+                             .buffer = u32View.addRef(env.js),
                              .minBytes = 24,  // Impl with round up to 4
                            })
                        .then(env.js, [](jsg::Lock& js, auto result) {
-      KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 16, "Read buffer should be four bytes");
-      KJ_ASSERT(result.buffer.asArrayPtr() == "aaaaaaaaaaaaaaaa"_kjb);
-
-      // BufferSource should be an ArrayBuffer
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsUint32Array());
+      KJ_ASSERT(!result.done, "Stream should not be done yet");
+      KJ_ASSERT(handle.asArrayPtr().size() == 16, "Read buffer should be four bytes");
+      KJ_ASSERT(handle.asArrayPtr() == "aaaaaaaaaaaaaaaa"_kjb);
+      KJ_ASSERT(handle.isUint32Array());
     });
 
     return env.context.awaitJs(env.js, kj::mv(promise)).attach(kj::mv(adapter));
@@ -484,19 +467,18 @@ KJ_TEST("Adapter with over large min reads (Uint32Array)") {
     KJ_ASSERT(
         adapter->isCanceled() == kj::none, "Adapter should not be canceled upon construction");
 
-    const size_t bufferSize = 1;
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, bufferSize);
+    auto u8 = jsg::JsUint8Array::create(env.js, 1);
 
     auto promise = adapter
                        ->read(env.js,
                            ReadableStreamSourceJsAdapter::ReadOptions{
-                             .buffer = jsg::BufferSource(env.js, kj::mv(backing)),
+                             .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
                            })
                        .then(env.js, [](jsg::Lock& js, auto result) {
-      KJ_ASSERT(result.done, "Stream should be done");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 0, "Read buffer should be 0 bytes");
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsArrayBuffer());
+      KJ_ASSERT(result.done, "Stream should be done");
+      KJ_ASSERT(handle.asArrayPtr().size() == 0, "Read buffer should be 0 bytes");
+      KJ_ASSERT(handle.isUint8Array());
     });
 
     return env.context.awaitJs(env.js, kj::mv(promise)).attach(kj::mv(adapter));
@@ -518,20 +500,21 @@ KJ_TEST("Adapter with multiple reads (Uint8Array)") {
 
     const size_t bufferSize = 10;
 
+    auto u81 = jsg::JsUint8Array::create(env.js, bufferSize);
+    auto u82 = jsg::JsUint8Array::create(env.js, bufferSize);
+    auto u83 = jsg::JsUint8Array::create(env.js, bufferSize);
+
     auto read1 = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(
-              env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize)),
+          .buffer = jsg::JsArrayBufferView(u81).addRef(env.js),
         });
     auto read2 = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(
-              env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize)),
+          .buffer = jsg::JsArrayBufferView(u82).addRef(env.js),
         });
     auto read3 = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(
-              env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize)),
+          .buffer = jsg::JsArrayBufferView(u83).addRef(env.js),
         });
 
     return env.context
@@ -539,20 +522,23 @@ KJ_TEST("Adapter with multiple reads (Uint8Array)") {
             read1
                 .then(env.js,
                     [read2 = kj::mv(read2)](jsg::Lock& js, auto result) mutable {
+      auto handle = result.buffer.getHandle(js);
       KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 10, "Read buffer should be full size");
-      KJ_ASSERT(result.buffer.asArrayPtr() == "aaaaaaaaaa"_kjb);
+      KJ_ASSERT(handle.asArrayPtr().size() == 10, "Read buffer should be full size");
+      KJ_ASSERT(handle.asArrayPtr() == "aaaaaaaaaa"_kjb);
       return kj::mv(read2);
     })
                 .then(env.js, [read3 = kj::mv(read3)](jsg::Lock& js, auto result) mutable {
+      auto handle = result.buffer.getHandle(js);
       KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 10, "Read buffer should be full size");
-      KJ_ASSERT(result.buffer.asArrayPtr() == "aaaaaaaaaa"_kjb);
+      KJ_ASSERT(handle.asArrayPtr().size() == 10, "Read buffer should be full size");
+      KJ_ASSERT(handle.asArrayPtr() == "aaaaaaaaaa"_kjb);
       return kj::mv(read3);
     }).then(env.js, [](jsg::Lock& js, auto result) mutable {
+      auto handle = result.buffer.getHandle(js);
       KJ_ASSERT(!result.done, "Stream should not be done yet");
-      KJ_ASSERT(result.buffer.asArrayPtr().size() == 10, "Read buffer should be full size");
-      KJ_ASSERT(result.buffer.asArrayPtr() == "aaaaaaaaaa"_kjb);
+      KJ_ASSERT(handle.asArrayPtr().size() == 10, "Read buffer should be full size");
+      KJ_ASSERT(handle.asArrayPtr() == "aaaaaaaaaa"_kjb);
       return js.resolvedPromise();
     })).attach(kj::mv(adapter));
   });
@@ -573,20 +559,21 @@ KJ_TEST("Adapter with multiple reads shutdown") {
 
     const size_t bufferSize = 10;
 
+    auto u81 = jsg::JsUint8Array::create(env.js, bufferSize);
+    auto u82 = jsg::JsUint8Array::create(env.js, bufferSize);
+    auto u83 = jsg::JsUint8Array::create(env.js, bufferSize);
+
     auto read1 = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(
-              env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize)),
+          .buffer = jsg::JsArrayBufferView(u81).addRef(env.js),
         });
     auto read2 = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(
-              env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize)),
+          .buffer = jsg::JsArrayBufferView(u82).addRef(env.js),
         });
     auto read3 = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(
-              env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize)),
+          .buffer = jsg::JsArrayBufferView(u83).addRef(env.js),
         });
 
     adapter->shutdown(env.js);
@@ -634,20 +621,21 @@ KJ_TEST("Adapter with multiple reads cancel") {
 
     const size_t bufferSize = 10;
 
+    auto u81 = jsg::JsUint8Array::create(env.js, bufferSize);
+    auto u82 = jsg::JsUint8Array::create(env.js, bufferSize);
+    auto u83 = jsg::JsUint8Array::create(env.js, bufferSize);
+
     auto read1 = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(
-              env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize)),
+          .buffer = jsg::JsArrayBufferView(u81).addRef(env.js),
         });
     auto read2 = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(
-              env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize)),
+          .buffer = jsg::JsArrayBufferView(u82).addRef(env.js),
         });
     auto read3 = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(
-              env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, bufferSize)),
+          .buffer = jsg::JsArrayBufferView(u83).addRef(env.js),
         });
 
     adapter->cancel(env.js, env.js.error("boom"));
@@ -699,9 +687,11 @@ KJ_TEST("Adapter close after read") {
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
         env.js, env.context, newReadableSource(kj::mv(fake)));
 
+    auto u8 = jsg::JsUint8Array::create(env.js, 10);
+
     auto read = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, 10)),
+          .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
         });
 
     auto closePromise = adapter->close(env.js);
@@ -731,9 +721,11 @@ KJ_TEST("Adapter close") {
     auto closePromise = adapter->close(env.js);
 
     // reads after close should be resoved immediately.
+    auto u8 = jsg::JsUint8Array::create(env.js, 10);
+
     auto read = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = jsg::BufferSource(env.js, jsg::BackingStore::alloc<v8::Uint8Array>(env.js, 10)),
+          .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
         });
     KJ_ASSERT(read.getState(env.js) ==
             jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult>::State::FULFILLED,
@@ -784,22 +776,22 @@ KJ_TEST("After read BackingStore maintains identity") {
     std::unique_ptr<v8::BackingStore> backing =
         v8::ArrayBuffer::NewBackingStore(env.js.v8Isolate, 10);
     auto* backingPtr = backing.get();
-    v8::Local<v8::ArrayBuffer> originalArrayBuffer =
-        v8::ArrayBuffer::New(env.js.v8Isolate, kj::mv(backing));
-    jsg::BufferSource source(env.js, originalArrayBuffer);
+    auto ab = jsg::JsArrayBuffer::create(env.js, kj::mv(backing));
+    auto u8 = jsg::JsUint8Array::create(env.js, ab);
 
     return env.context
         .awaitJs(env.js,
             adapter
                 ->read(env.js,
                     ReadableStreamSourceJsAdapter::ReadOptions{
-                      .buffer = jsg::BufferSource(env.js, originalArrayBuffer),
+                      .buffer = jsg::JsArrayBufferView(u8).addRef(env.js),
                       .minBytes = 5,
                     })
                 .then(env.js, [backingPtr](jsg::Lock& js, auto result) {
       auto handle = result.buffer.getHandle(js);
-      KJ_ASSERT(handle->IsArrayBuffer());
-      auto backing = handle.template As<v8::ArrayBuffer>()->GetBackingStore();
+      KJ_ASSERT(handle.isUint8Array());
+      v8::Local<v8::ArrayBuffer> buf = handle.getBuffer();
+      auto backing = buf->GetBackingStore();
       KJ_ASSERT(backing.get() == backingPtr);
       return js.resolvedPromise();
     })).attach(kj::mv(adapter));
@@ -838,10 +830,10 @@ KJ_TEST("Read all bytes") {
 
     return env.context
         .awaitJs(env.js,
-            adapter->readAllBytes(env.js).then(
-                env.js, [&adapter = *adapter](jsg::Lock& js, jsg::BufferSource result) {
+            adapter->readAllBytes(env.js).then(env.js,
+                [&adapter = *adapter](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> result) {
       // With exponential growth strategy: 1024 + 2048 + 4096 + 8192 = 15360
-      KJ_ASSERT(result.size() == 15360);
+      KJ_ASSERT(result.getHandle(js).size() == 15360);
       KJ_ASSERT(adapter.isClosed(), "Adapter should be closed after readAllText()");
     })).attach(kj::mv(adapter));
   });
@@ -926,31 +918,31 @@ KJ_TEST("tee successful") {
     KJ_ASSERT(!branch2->isClosed(), "Branch2 should not be closed after tee");
     KJ_ASSERT(branch2->isCanceled() == kj::none, "Branch2 should not be canceled after tee");
 
-    auto backing1 = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 11);
-    auto buffer1 = jsg::BufferSource(env.js, kj::mv(backing1));
+    auto u81 = jsg::JsUint8Array::create(env.js, 11);
+    auto u82 = jsg::JsUint8Array::create(env.js, 11);
     auto read1 = branch1->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = kj::mv(buffer1),
+          .buffer = jsg::JsArrayBufferView(u81).addRef(env.js),
         });
-    auto backing2 = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 11);
-    auto buffer2 = jsg::BufferSource(env.js, kj::mv(backing2));
     auto read2 = branch2->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
-          .buffer = kj::mv(buffer2),
+          .buffer = jsg::JsArrayBufferView(u82).addRef(env.js),
         });
 
     return env.context
         .awaitJs(env.js,
             kj::mv(read1)
                 .then(env.js, [read2 = kj::mv(read2)](jsg::Lock& js, auto result1) mutable {
+      auto handle = result1.buffer.getHandle(js);
       KJ_ASSERT(!result1.done, "Stream should not be done yet");
-      KJ_ASSERT(result1.buffer.asArrayPtr().size() == 11);
-      KJ_ASSERT(result1.buffer.asArrayPtr() == "hello world"_kjb);
+      KJ_ASSERT(handle.asArrayPtr().size() == 11);
+      KJ_ASSERT(handle.asArrayPtr() == "hello world"_kjb);
       return kj::mv(read2);
     }).then(env.js, [](jsg::Lock& js, auto result2) {
+      auto handle = result2.buffer.getHandle(js);
       KJ_ASSERT(!result2.done, "Stream should not be done yet");
-      KJ_ASSERT(result2.buffer.asArrayPtr().size() == 11);
-      KJ_ASSERT(result2.buffer.asArrayPtr() == "hello world"_kjb);
+      KJ_ASSERT(handle.asArrayPtr().size() == 11);
+      KJ_ASSERT(handle.asArrayPtr() == "hello world"_kjb);
       return js.resolvedPromise();
     })).attach(kj::mv(branch1), kj::mv(branch2));
   });
@@ -974,10 +966,9 @@ jsg::Ref<ReadableStream> createFiniteBytesReadableStream(
         KJ_ASSERT_NONNULL(controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>()));
     auto& counter = *count;
     if (counter++ < 10) {
-      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
-      jsg::BufferSource buffer(js, kj::mv(backing));
-      buffer.asArrayPtr().fill(96 + counter);  // fill with 'a'...'j'
-      c->enqueue(js, buffer.getHandle(js));
+      auto ab = jsg::JsArrayBuffer::create(js, chunkSize);
+      ab.asArrayPtr().fill(96 + counter);  // fill with 'a'...'j'
+      c->enqueue(js, ab);
     }
     if (counter == 10) {
       c->close(js);
@@ -1001,9 +992,7 @@ jsg::Ref<ReadableStream> createFiniteByobReadableStream(jsg::Lock& js, size_t ch
         KJ_ASSERT_NONNULL(controller.template tryGet<jsg::Ref<ReadableByteStreamController>>()));
     static int count = 0;
     if (count++ < 10) {
-      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
-      jsg::BufferSource buffer(js, kj::mv(backing));
-      c->enqueue(js, kj::mv(buffer));
+      c->enqueue(js, jsg::JsArrayBuffer::create(js, chunkSize));
     }
     if (count == 10) {
       c->close(js);
@@ -1587,10 +1576,9 @@ KJ_TEST("KjAdapter MinReadPolicy IMMEDIATE behavior") {
           controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
       if (counter < 8) {
         // Return 256 bytes per chunk, 8 chunks total (2048 bytes)
-        auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 256);
-        jsg::BufferSource buffer(js, kj::mv(backing));
-        buffer.asArrayPtr().fill(97 + counter);  // 'a', 'b', 'c', etc.
-        c->enqueue(js, buffer.getHandle(js));
+        auto ab = jsg::JsArrayBuffer::create(js, 256);
+        ab.asArrayPtr().fill(97 + counter);  // 'a', 'b', 'c', etc.
+        c->enqueue(js, ab);
         counter++;
       } else {
         c->close(js);
@@ -1643,10 +1631,9 @@ KJ_TEST("KjAdapter MinReadPolicy OPPORTUNISTIC behavior") {
 
       if (counter < 8) {
         // Return 256 bytes per chunk, 8 chunks total (2048 bytes)
-        auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 256);
-        jsg::BufferSource buffer(js, kj::mv(backing));
-        buffer.asArrayPtr().fill(97 + counter);  // 'a', 'b', 'c', etc.
-        c->enqueue(js, buffer.getHandle(js));
+        auto ab = jsg::JsArrayBuffer::create(js, 256);
+        ab.asArrayPtr().fill(97 + counter);  // 'a', 'b', 'c', etc.
+        c->enqueue(js, ab);
         counter++;
       } else {
         c->close(js);
