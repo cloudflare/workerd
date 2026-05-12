@@ -1076,8 +1076,8 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
               auto blob = js.alloc<Blob>(js, jsg::JsBufferSource(ab), kj::str());
               dispatchEventImpl(js, js.alloc<MessageEvent>(js, kj::str("message"), kj::mv(blob)));
             } else {
-              auto ab = js.arrayBuffer(kj::mv(data)).getHandle(js);
-              dispatchEventImpl(js, js.alloc<MessageEvent>(js, jsg::JsValue(ab)));
+              auto ab = js.arrayBuffer(data);
+              dispatchEventImpl(js, js.alloc<MessageEvent>(js, ab));
             }
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
