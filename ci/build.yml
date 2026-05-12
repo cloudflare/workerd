@@ -76,7 +76,7 @@ include:
             os.environ["CI_MERGE_REQUEST_IID"],
             os.environ["CI_COMMIT_SHA"],
             os.environ["CI_COMMIT_SHA"],
-            "1",
+            os.environ["CI_JOB_ID"],
             os.environ["CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"],
             os.environ["CI_URL"],
             os.environ["CI_CLIENT_ID"],
