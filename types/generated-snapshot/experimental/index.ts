@@ -14371,6 +14371,7 @@ export declare namespace CloudflareWorkersModule {
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
   export type WorkflowRetentionDuration = WorkflowSleepDuration;
   export type WorkflowBackoff = "constant" | "linear" | "exponential";
+  export type WorkflowStepSensitivity = "output";
   export type WorkflowStepConfig = {
     retries?: {
       limit: number;
@@ -14378,6 +14379,7 @@ export declare namespace CloudflareWorkersModule {
       backoff?: WorkflowBackoff;
     };
     timeout?: WorkflowTimeoutDuration | number;
+    sensitive?: WorkflowStepSensitivity;
   };
   export type WorkflowEvent<T> = {
     payload: Readonly<T>;
@@ -14388,6 +14390,7 @@ export declare namespace CloudflareWorkersModule {
     payload: Readonly<T>;
     timestamp: Date;
     type: string;
+    sensitive?: WorkflowStepSensitivity;
   };
   export type WorkflowStepContext = {
     step: {
