@@ -2,6 +2,18 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
+# Headers needed to compile a clang-tidy plugin out-of-tree against the
+# clang-tidy binary published by cloudflare/workerd-tools. JsgLint.cpp
+# uses the C++ API directly but transitively pulls in llvm-c headers
+# (e.g. llvm-c/DataTypes.h via llvm/Support/DataTypes.h), so the C-API
+# directories are kept. clang-tools-extra is narrowed to the top-level
+# clang-tidy plugin headers (ClangTidyCheck.h, ClangTidyModule.h); the
+# ~400 files under per-check subdirectories are not needed.
+#
+# `build/` holds tablegen-generated `.inc` files (Attrs.inc,
+# DiagnosticGroups.inc, OMP.inc, etc.) and the Config headers
+# (llvm/Config/llvm-config.h, abi-breaking.h) that are transitively
+# included by every LLVM Support header, so it is not optional.
 cc_library(
     name = "clang_tidy_dev_headers",
     hdrs = glob(
@@ -20,7 +32,7 @@ cc_library(
             "build/tools/clang/include/**/*.h",
             "build/tools/clang/include/**/*.def",
             "build/tools/clang/include/**/*.inc",
-            "clang-tools-extra/clang-tidy/**/*.h",
+            "clang-tools-extra/clang-tidy/*.h",
         ],
         allow_empty = True,
     ),
@@ -31,12 +43,4 @@ cc_library(
         "clang/include",
         "llvm/include",
     ],
-)
-
-# Prototype: local-built clang-tidy that supports plugins. Once workerd-tools
-# ships a release with plugin support enabled, this filegroup goes away and
-# the regular @clang_tidy_linux_amd64//file:downloaded is used instead.
-filegroup(
-    name = "clang_tidy_dev_binary",
-    srcs = ["build/bin/clang-tidy"],
 )
