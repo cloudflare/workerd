@@ -1105,6 +1105,10 @@ class SpanParent {
   // Returns the observer's spanId, or SpanId::nullId if there is none.
   tracing::SpanId getSpanId();
 
+  // Create a SpanParent from a pre-serialized SpanContext. The resulting SpanParent
+  // carries identity for toSpanContext() but does not record spans.
+  static SpanParent fromSpanContext(tracing::SpanContext context);
+
  private:
   kj::Maybe<kj::Own<SpanObserver>> observer;
 };
@@ -1254,6 +1258,26 @@ class SpanObserver: public kj::Refcounted {
   }
 };
 
+// A non-recording SpanObserver that carries a pre-serialized SpanContext for propagation.
+// Used to create a SpanParent from stored identity when no live observer exists
+// (e.g. rehydrating trace context after hibernation).
+class NonRecordingSpanObserver final: public SpanObserver {
+ public:
+  explicit NonRecordingSpanObserver(tracing::SpanContext context): context(kj::mv(context)) {}
+
+  kj::Own<SpanObserver> newChild() override {
+    return {};
+  }
+  void onOpen(kj::ConstString, kj::Date) override {}
+  void onClose(kj::Date, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
+  kj::Maybe<tracing::SpanContext> toSpanContext() override {
+    return tracing::SpanContext::clone(context);
+  }
+
+ private:
+  tracing::SpanContext context;
+};
+
 inline kj::Maybe<tracing::SpanContext> SpanParent::toSpanContext() {
   KJ_IF_SOME(obs, observer) {
     return obs->toSpanContext();
@@ -1266,6 +1290,10 @@ inline tracing::SpanId SpanParent::getSpanId() {
     return obs->getSpanId();
   }
   return tracing::SpanId::nullId;
+}
+
+inline SpanParent SpanParent::fromSpanContext(tracing::SpanContext context) {
+  return SpanParent(kj::refcounted<NonRecordingSpanObserver>(kj::mv(context)));
 }
 
 inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}
