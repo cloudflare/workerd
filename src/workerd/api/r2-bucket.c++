@@ -378,6 +378,8 @@ void initGetOptions(TraceContext& traceContext, jsg::Lock& js, Builder& builder,
   KJ_IF_SOME(range, o.range) {
     KJ_SWITCH_ONEOF(range) {
       KJ_CASE_ONEOF(r, R2Bucket::Range) {
+        JSG_REQUIRE(r.offset != kj::none || r.length != kj::none || r.suffix != kj::none,
+            TypeError, "Range must specify at least one of offset, length, or suffix.");
         auto rangeBuilder = builder.initRange();
         KJ_IF_SOME(offset, r.offset) {
           JSG_REQUIRE(offset >= 0, RangeError, "Invalid range. Starting offset (", offset,
