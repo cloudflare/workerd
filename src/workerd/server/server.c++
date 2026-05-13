@@ -4174,11 +4174,12 @@ struct Server::WorkerDef {
   kj::Maybe<kj::Function<void()>> abortIsolateCallback;
 };
 
-class Server::WorkerLoaderNamespace: public kj::Refcounted {
+class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet::ErrorHandler {
  public:
   WorkerLoaderNamespace(Server& server, kj::String namespaceName)
       : server(server),
-        namespaceName(kj::mv(namespaceName)) {}
+        namespaceName(kj::mv(namespaceName)),
+        startupTasks(*this) {}
 
   void unlink() {
     for (auto& isolate: isolates) {
@@ -4209,8 +4210,21 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           .toOwn();
     } else {
       auto isolateName = kj::str(namespaceName, ":dynamic:", randomUUID(server.entropySource));
-      return kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::none, kj::mv(fetchSource))
-          .toOwn();
+      auto stub =
+          kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::none, kj::mv(fetchSource));
+      // Unnamed workers have no entry in the isolates map, so the JS-side
+      // IoOwn would be the sole owner. Retain an extra ref so that GC of the
+      // JS handle during the getCode re-entry callback cannot destroy the
+      // object while its start() coroutine is still running. The extra ref
+      // is held in a task on the namespace (NOT on the WorkerStubImpl itself)
+      // so that when the task completes and drops the ref, the destruction
+      // does not re-enter a firing Event. The named-load path is safe because
+      // the isolates map already holds an additional kj::Rc.
+      auto selfRef = stub.addRef();
+      startupTasks.add(
+          stub->whenStartupDone().then([prevent = kj::mv(selfRef)]() { /* prevent dropped here */ },
+              [](kj::Exception&&) { /* startup failed; prevent dropped here */ }));
+      return kj::mv(stub).toOwn();
     }
   }
 
@@ -4225,6 +4239,16 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
 
   class WorkerStubImpl;
   kj::HashMap<kj::String, kj::Rc<WorkerStubImpl>> isolates;
+
+  // Holds tasks that keep unnamed WorkerStubImpl instances alive while their
+  // start() coroutines are running. See the unnamed branch of loadIsolate().
+  kj::TaskSet startupTasks;
+
+  void taskFailed(kj::Exception&& exception) override {
+    // Startup failures are already handled by the WorkerStubImpl's
+    // startupTask (callers get the exception when they await the stub).
+    // Nothing to do here.
+  }
 
   class NullGlobalOutboundChannel: public IoChannelFactory::SubrequestChannel {
    public:
@@ -4256,6 +4280,12 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource)
         : onAborted(kj::mv(onAborted)),
           startupTask(start(server, kj::mv(isolateName), kj::mv(fetchSource)).fork()) {}
+
+    // Returns a branch of the startup task promise. Used by the namespace to
+    // hold an extra reference to unnamed stubs until startup completes.
+    kj::Promise<void> whenStartupDone() {
+      return startupTask.addBranch();
+    }
 
     ~WorkerStubImpl() {
       unlink();
