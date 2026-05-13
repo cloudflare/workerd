@@ -30,7 +30,8 @@ kj::Maybe<kj::String> getCurrentActorId() {
 
 }  // namespace
 
-kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value) {
+kj::Array<kj::byte> serializeV8Value(
+    jsg::Lock& js, kj::ArrayPtr<const char> key, const jsg::JsValue& value) {
   jsg::Serializer serializer(js,
       jsg::Serializer::Options{
         .version = 15,

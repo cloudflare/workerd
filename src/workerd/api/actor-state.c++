@@ -495,7 +495,7 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
 jsg::Promise<void> DurableObjectStorageOperations::putOne(
     jsg::Lock& js, kj::String key, jsg::JsValue value, const PutOptions& options) {
 
-  kj::Array<byte> buffer = serializeV8Value(js, value);
+  kj::Array<byte> buffer = serializeV8Value(js, key, value);
 
   auto units = billingUnits(key.size() + buffer.size());
 
@@ -598,7 +598,7 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     // deleting an undefined field is confusing, throwing could break otherwise working code, and
     // a stray undefined here or there is probably closer to what the user desires.
 
-    kj::Array<byte> buffer = serializeV8Value(js, field.value);
+    kj::Array<byte> buffer = serializeV8Value(js, field.name, field.value);
 
     units += billingUnits(field.name.size() + buffer.size());
 

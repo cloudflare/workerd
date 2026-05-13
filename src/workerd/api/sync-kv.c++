@@ -109,7 +109,7 @@ void SyncKvStorage::put(jsg::Lock& js, kj::String key, jsg::JsValue value) {
   traceContext.setTag("cloudflare.durable_object.kv.query.keys"_kjc, key.asPtr());
   traceContext.setTag("cloudflare.durable_object.kv.query.keys.count"_kjc, static_cast<int64_t>(1));
 
-  sqliteKv.put(key, serializeV8Value(js, value));
+  sqliteKv.put(key, serializeV8Value(js, key, value));
 }
 
 kj::OneOf<bool, int> SyncKvStorage::delete_(jsg::Lock& js, kj::String key) {
