@@ -1369,6 +1369,13 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
   // We should also only be here if the consumer is closing.
   KJ_ASSERT(consumer.isClosing());
 
+  // request->resolve(js) below can synchronously run user JavaScript via V8's
+  // promise resolution thenable check (Get(resolution, "then")). A malicious
+  // Object.prototype.then getter can call reader.cancel(), which frees the
+  // ConsumerImpl that owns `state` while this frame still holds raw references.
+  // Hold a weak ref so we can detect that and bail out.
+  auto weak = consumer.selfRef.addRef();
+
   const auto consume = [&] {
     // Consume will copy as much of the remaining data in the buffer as possible
     // to the next pending read. If the remaining data can fit into the remaining
@@ -1394,6 +1401,8 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
           auto request = kj::mv(state.readRequests.front());
           state.readRequests.pop_front();
           request->resolve(js);
+          // resolve(js) may have freed the consumer via re-entrant JS.
+          // Return true; caller must check liveness before touching consumer.
           return true;
         }
         KJ_CASE_ONEOF(entry, QueueEntry) {
@@ -1447,6 +1456,10 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
               state.readRequests.pop_front();
               request->resolve(js);
 
+              // resolve(js) may have freed the consumer via re-entrant JS.
+              // Check liveness before accessing state.
+              if (!weak->isValid()) return true;
+
               if (state.queueTotalSize == 0) {
                 // If the queueTotalSize is zero at this point, the next item in the queue
                 // must be a close and we can return true. All of the data has been consumed.
@@ -1481,6 +1494,8 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
           auto request = kj::mv(state.readRequests.front());
           state.readRequests.pop_front();
           request->resolve(js);
+          // resolve(js) may have freed the consumer via re-entrant JS.
+          // Return false; caller must check liveness before continuing.
           return false;
         }
       }
@@ -1490,20 +1505,28 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
   };
 
   // We can only consume here if there are pending reads!
-  while (!state.readRequests.empty()) {
+  while (weak->isValid() && !state.readRequests.empty()) {
     // We ignore the read request atLeast here since we are closing. Our goal is to
     // consume as much of the data as possible.
 
     if (consume()) {
       // If consume returns true, we reached the end and have no more data to
       // consume. That's a good thing! It means we can go ahead and close down.
+      // consume() may also return true when the consumer was freed by re-entrant
+      // JS — caller must check liveness.
       return true;
     }
+
+    // consume() may have freed the consumer via re-entrant JS.
+    if (!weak->isValid()) return true;
 
     // If consume() returns false, there is still data left to consume in the queue.
     // We will loop around and try again so long as there are still read requests
     // pending.
   }
+
+  // The consumer may have been freed during the loop above.
+  if (!weak->isValid()) return true;
 
   // At this point, we shouldn't have any read requests and there should be data
   // left in the queue. We have to keep waiting for more reads to consume the

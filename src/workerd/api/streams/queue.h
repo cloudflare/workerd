@@ -682,7 +682,17 @@ class ConsumerImpl final {
       } else {
         // Otherwise, if isClosing() is true...
         if (isClosing()) {
+          // handleMaybeClose calls request->resolve(js) which can synchronously
+          // run user JavaScript via V8's promise resolution thenable check
+          // (Get(resolution, "then")). A malicious Object.prototype.then getter
+          // can call reader.cancel(), which frees *this (the ConsumerImpl) while
+          // handleMaybeClose / this frame still hold raw Ready& / ConsumerImpl&
+          // references. We must take a selfRef before calling handleMaybeClose
+          // and check liveness after it returns.
+          auto weak = selfRef.addRef();
           if (!empty() && !Self::handleMaybeClose(js, ready, *this, queue)) {
+            // handleMaybeClose may have freed *this via re-entrant JS.
+            if (!weak->isValid()) return;
             // If the queue is not empty, we'll have the implementation see
             // if it can drain the remaining data into pending reads. If handleMaybeClose
             // returns false, then it could not and we can't yet close. If it returns true,
@@ -691,13 +701,16 @@ class ConsumerImpl final {
             return;
           }
 
+          // handleMaybeClose may have freed *this via re-entrant JS during
+          // request->resolve(js). Re-check before touching any members.
+          if (!weak->isValid()) return;
+
           KJ_ASSERT(empty());
           KJ_REQUIRE(ready.buffer.size() == 1);  // The close should be the only item remaining.
 
           // Extract pending reads and resolve them as done. Same GC safety concern
           // as the error path above — see detailed comment there.
           auto pendingReads = extractPendingReads(ready);
-          auto weak = selfRef.addRef();
           for (auto& request: pendingReads) {
             request->resolveAsDone(js);
           }
