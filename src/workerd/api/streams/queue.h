@@ -42,7 +42,7 @@ namespace workerd::api {
 //    entries are freed. The underlying data is freed once the last
 //    reference is released.
 //
-//  - Every consumer has a remaining buffer size, which is the sum of the sizes
+//  - Every consumer has an remaining buffer size, which is the sum of the sizes
 //    of all entries remaining to be consumed in its internal buffer.
 //
 //  - A queue has a total queue size, which is the remaining buffer size of the
@@ -194,14 +194,14 @@ class QueueImpl final {
   // which will, in turn, reset their internal buffers and reject
   // all pending consume promises.
   // If we are already closed or errored, do nothing here.
-  void error(jsg::Lock& js, jsg::JsValue reason) {
+  void error(jsg::Lock& js, jsg::Value reason) {
     if (state.isActive()) {
 #ifdef KJ_DEBUG
       isClosingOrErroring = true;
       KJ_DEFER(isClosingOrErroring = false);
 #endif
-      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.error(js, reason); });
-      state.template transitionTo<Errored>(reason.addRef(js));
+      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.error(js, reason.addRef(js)); });
+      state.template transitionTo<Errored>(kj::mv(reason));
     }
   }
 
@@ -274,7 +274,7 @@ class QueueImpl final {
   };
   struct Errored {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
-    jsg::JsRef<jsg::JsValue> reason;
+    jsg::Value reason;
   };
 
   struct Ready final: public State {
@@ -337,7 +337,7 @@ class ConsumerImpl final {
  public:
   struct StateListener {
     virtual void onConsumerClose(jsg::Lock& js) = 0;
-    virtual void onConsumerError(jsg::Lock& js, jsg::JsValue reason) = 0;
+    virtual void onConsumerError(jsg::Lock& js, jsg::Value reason) = 0;
     // Called when the consumer has a pending read and needs data.
     // Returns true if the pull algorithm completed synchronously (meaning
     // more pumping might yield additional synchronous data), false if the
@@ -400,7 +400,7 @@ class ConsumerImpl final {
     queue = kj::none;
   }
 
-  void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue>) {
+  void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
     // Already closed or errored - nothing to do.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       for (auto& request: ready.readRequests) {
@@ -428,11 +428,11 @@ class ConsumerImpl final {
     return size() == 0;
   }
 
-  void error(jsg::Lock& js, jsg::JsValue reason) {
+  void error(jsg::Lock& js, jsg::Value reason) {
     // If we are already closed or errored, then we do nothing here.
     // The new error doesn't matter.
     if (state.isActive()) {
-      maybeDrainAndSetState(js, reason);
+      maybeDrainAndSetState(js, kj::mv(reason));
     }
   }
 
@@ -444,7 +444,7 @@ class ConsumerImpl final {
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       // If the consumer is already closing or the entry is empty, do nothing.
       // Also skip if queue is none (consumer cloned from closed stream).
-      if (isClosing() || entry->getSize(js) == 0 || queue == kj::none) {
+      if (isClosing() || entry->getSize() == 0 || queue == kj::none) {
         return;
       }
 
@@ -458,12 +458,13 @@ class ConsumerImpl final {
       return request.resolveAsDone(js);
     }
     KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
-      return request.reject(js, errored.reason.getHandle(js));
+      return request.reject(js, errored.reason);
     }
     auto& ready = state.requireActiveUnsafe();
     // Mutual exclusion with draining reads.
     if (ready.hasPendingDrainingRead) {
-      auto error = js.typeError("Cannot call read while there is a pending draining read"_kj);
+      auto error = jsg::Value(
+          js.v8Isolate, js.typeError("Cannot call read while there is a pending draining read"_kj));
       return request.reject(js, error);
     }
     // handleRead may trigger the pull callback (via onConsumerWantsData), which
@@ -579,7 +580,7 @@ class ConsumerImpl final {
   };
   struct Errored {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
-    jsg::JsRef<jsg::JsValue> reason;
+    jsg::Value reason;
   };
   struct Ready {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "ready"_kj;
@@ -642,7 +643,7 @@ class ConsumerImpl final {
     return result;
   }
 
-  void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeReason = kj::none) {
+  void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = kj::none) {
     // If the state is already errored or closed then there is nothing to drain.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       UpdateBackpressureScope scope(*this);
@@ -673,7 +674,7 @@ class ConsumerImpl final {
         weak->runIfAlive([&](ConsumerImpl& self) {
           self.state.template transitionTo<Errored>(reason.addRef(js));
           KJ_IF_SOME(listener, self.stateListener) {
-            listener.onConsumerError(js, reason);
+            listener.onConsumerError(js, kj::mv(reason));
             // After this point, we should not assume that this consumer can
             // be safely used at all. It's most likely the stateListener has
             // released it.
@@ -749,8 +750,8 @@ class ValueQueue final {
     jsg::Promise<ReadResult>::Resolver resolver;
 
     void resolveAsDone(jsg::Lock& js);
-    void resolve(jsg::Lock& js, jsg::JsValue value);
-    void reject(jsg::Lock& js, jsg::JsValue value);
+    void resolve(jsg::Lock& js, jsg::Value value);
+    void reject(jsg::Lock& js, jsg::Value& value);
 
     JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
@@ -761,12 +762,12 @@ class ValueQueue final {
   // calculated by the size algorithm function provided in the stream constructor.
   class Entry: public kj::Refcounted {
    public:
-    explicit Entry(jsg::Lock&, jsg::JsValue value, size_t size);
+    explicit Entry(jsg::Value value, size_t size);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
-    jsg::JsValue getValue(jsg::Lock& js);
+    jsg::Value getValue(jsg::Lock& js);
 
-    size_t getSize(jsg::Lock& js) const;
+    size_t getSize() const;
 
     void visitForGc(jsg::GcVisitor& visitor);
 
@@ -777,7 +778,7 @@ class ValueQueue final {
     }
 
    private:
-    jsg::JsRef<jsg::JsValue> value;
+    jsg::Value value;
     size_t size;
   };
 
@@ -786,8 +787,7 @@ class ValueQueue final {
     QueueEntry clone(jsg::Lock& js);
 
     JSG_MEMORY_INFO(ValueQueue::QueueEntry) {
-      // TODO(soon): Add support for kj::Rc types in memory tracker
-      //tracker.trackFieldWithSize("entry", entry->getSize());
+      tracker.trackFieldWithSize("entry", entry->getSize());
     }
   };
 
@@ -802,13 +802,13 @@ class ValueQueue final {
     Consumer& operator=(Consumer&&) = delete;
     Consumer& operator=(Consumer&) = delete;
 
-    void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
+    void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
 
     void close(jsg::Lock& js);
 
     bool empty();
 
-    void error(jsg::Lock& js, jsg::JsValue reason);
+    void error(jsg::Lock& js, jsg::Value reason);
 
     void read(jsg::Lock& js, ReadRequest request);
 
@@ -852,7 +852,7 @@ class ValueQueue final {
 
   ssize_t desiredSize() const;
 
-  void error(jsg::Lock& js, jsg::JsValue reason);
+  void error(jsg::Lock& js, jsg::Value reason);
 
   void maybeUpdateBackpressure();
 
@@ -864,7 +864,7 @@ class ValueQueue final {
 
   bool wantsRead() const;
 
-  bool hasPartiallyFulfilledRead(jsg::Lock& js);
+  bool hasPartiallyFulfilledRead();
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -909,7 +909,7 @@ class ByteQueue final {
     kj::Maybe<ByobRequest&> byobReadRequest;
 
     struct PullInto {
-      jsg::JsRef<jsg::JsArrayBufferView> store;
+      jsg::BufferSource store;
       size_t filled = 0;
       size_t atLeast = 1;
       Type type = Type::DEFAULT;
@@ -925,7 +925,7 @@ class ByteQueue final {
     ~ReadRequest() noexcept(false);
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js);
-    void reject(jsg::Lock& js, jsg::JsValue value);
+    void reject(jsg::Lock& js, jsg::Value& value);
 
     kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, QueueImpl& queue);
 
@@ -958,7 +958,7 @@ class ByteQueue final {
 
     bool respond(jsg::Lock& js, size_t amount);
 
-    bool respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view);
+    bool respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
 
     // Disconnects this ByobRequest instance from the associated ByteQueue::ReadRequest.
     // The term "invalidate" is adopted from the streams spec for handling BYOB requests.
@@ -968,17 +968,17 @@ class ByteQueue final {
       return request == kj::none;
     }
 
-    bool isPartiallyFulfilled(jsg::Lock& js);
+    bool isPartiallyFulfilled();
 
     size_t getAtLeast() const;
 
-    kj::Maybe<jsg::JsUint8Array> getView(jsg::Lock& js);
+    v8::Local<v8::Uint8Array> getView(jsg::Lock& js);
 
     // Returns the byte length of the original underlying ArrayBuffer.
     size_t getOriginalBufferByteLength(jsg::Lock& js) const;
 
     // Returns the byte offset of the original view plus bytes filled.
-    size_t getOriginalByteOffsetPlusBytesFilled(jsg::Lock& js) const;
+    size_t getOriginalByteOffsetPlusBytesFilled() const;
 
     JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
 
@@ -1000,15 +1000,15 @@ class ByteQueue final {
     }
   };
 
-  // A byte queue entry consists of a JsBufferSource containing a non-zero-length
+  // A byte queue entry consists of a jsg::BufferSource containing a non-zero-length
   // sequence of bytes. The size is determined by the number of bytes in the entry.
   class Entry: public kj::Refcounted {
    public:
-    explicit Entry(jsg::Lock& js, jsg::JsBufferSource store);
+    explicit Entry(jsg::BufferSource store);
 
-    kj::ArrayPtr<kj::byte> toArrayPtr(jsg::Lock& js);
+    kj::ArrayPtr<kj::byte> toArrayPtr();
 
-    size_t getSize(jsg::Lock& js) const;
+    size_t getSize() const;
 
     void visitForGc(jsg::GcVisitor& visitor);
 
@@ -1019,13 +1019,7 @@ class ByteQueue final {
     }
 
    private:
-    // visitForGc intentionally does not visit `store`: ByteQueue::Entry is
-    // owned via kj::Rc<Entry> (C++ refcount), so the JsBufferSource cannot
-    // be part of a JS→C++→JS reference cycle and the strong v8::Global
-    // inside JsRef suffices to keep it alive. See ConsumerImpl::visitForGc
-    // for the chosen memory model and the empty Entry::visitForGc body in
-    // queue.c++.
-    jsg::JsRef<jsg::JsBufferSource> store;  // NOLINT(jsg-visit-for-gc)
+    jsg::BufferSource store;
   };
 
   struct QueueEntry {
@@ -1035,8 +1029,7 @@ class ByteQueue final {
     QueueEntry clone(jsg::Lock& js);
 
     JSG_MEMORY_INFO(ByteQueue::QueueEntry) {
-      // TODO(soon): Add support for kj::Rc<T> types to memory tracker
-      //tracker.trackFieldWithSize("entry", entry->getSize());
+      tracker.trackFieldWithSize("entry", entry->getSize());
     }
   };
 
@@ -1051,13 +1044,13 @@ class ByteQueue final {
     Consumer& operator=(Consumer&&) = delete;
     Consumer& operator=(Consumer&) = delete;
 
-    void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
+    void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
 
     void close(jsg::Lock& js);
 
     bool empty() const;
 
-    void error(jsg::Lock& js, jsg::JsValue reason);
+    void error(jsg::Lock& js, jsg::Value reason);
 
     void read(jsg::Lock& js, ReadRequest request);
 
@@ -1097,7 +1090,7 @@ class ByteQueue final {
 
   ssize_t desiredSize() const;
 
-  void error(jsg::Lock& js, jsg::JsValue reason);
+  void error(jsg::Lock& js, jsg::Value reason);
 
   void maybeUpdateBackpressure();
 
@@ -1109,7 +1102,7 @@ class ByteQueue final {
 
   bool wantsRead() const;
 
-  bool hasPartiallyFulfilledRead(jsg::Lock& js);
+  bool hasPartiallyFulfilledRead();
 
   // nextPendingByobReadRequest will be used to support the ReadableStreamBYOBRequest interface
   // that is part of ReadableByteStreamController. When user code calls the `controller.byobRequest`

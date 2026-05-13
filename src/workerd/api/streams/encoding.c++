@@ -42,9 +42,9 @@ struct Holder: public kj::Refcounted {
 jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
   auto state = kj::rc<Holder>();
 
-  auto transform = [holder = state.addRef()](jsg::Lock& js, jsg::JsValue chunk,
+  auto transform = [holder = state.addRef()](jsg::Lock& js, v8::Local<v8::Value> chunk,
                        jsg::Ref<TransformStreamDefaultController> controller) mutable {
-    v8::Local<v8::String> str = chunk.toJsString(js);
+    auto str = jsg::check(chunk->ToString(js.v8Context()));
     size_t length = str->Length();
     if (length == 0) return js.resolvedPromise();
 
@@ -75,13 +75,15 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
     auto utf8Length = result.count;
     KJ_DASSERT(utf8Length > 0 && utf8Length >= end);
 
-    auto dest = jsg::JsArrayBuffer::create(js, utf8Length);
-    [[maybe_unused]] auto written = simdutf::convert_utf16_to_utf8(
-        slice.begin(), slice.size(), dest.asArrayPtr().asChars().begin());
+    auto backingStore = js.allocBackingStore(utf8Length, jsg::Lock::AllocOption::UNINITIALIZED);
+    auto dest = kj::ArrayPtr<char>(static_cast<char*>(backingStore->Data()), utf8Length);
+    [[maybe_unused]] auto written =
+        simdutf::convert_utf16_to_utf8(slice.begin(), slice.size(), dest.begin());
     KJ_DASSERT(written == utf8Length, "simdutf should write exactly utf8Length bytes");
 
-    auto u8 = jsg::JsUint8Array::create(js, dest);
-    controller->enqueue(js, u8);
+    auto array = v8::Uint8Array::New(
+        v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore)), 0, utf8Length);
+    controller->enqueue(js, jsg::JsUint8Array(array));
     return js.resolvedPromise();
   };
 
@@ -89,9 +91,9 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
                    jsg::Lock& js, jsg::Ref<TransformStreamDefaultController> controller) mutable {
     // If stream ends with orphaned high surrogate, emit replacement character
     if (holder->pending != kj::none) {
-      auto u8 = jsg::JsUint8Array::create(js, 3);
-      u8.asArrayPtr().copyFrom(REPLACEMENT_UTF8);
-      controller->enqueue(js, u8);
+      auto backingStore = js.allocBackingStore(3, jsg::Lock::AllocOption::UNINITIALIZED);
+      memcpy(backingStore->Data(), REPLACEMENT_UTF8, 3);
+      controller->enqueue(js, jsg::JsUint8Array::create(js, kj::mv(backingStore), 0, 3));
     }
     return js.resolvedPromise();
   };
@@ -142,25 +144,23 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     readableStrategy = StreamQueuingStrategy{};
   }
   auto transformer = TransformStream::constructor(js,
-      Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>(
-                      JSG_VISITABLE_LAMBDA((decoder = decoder.addRef()), (decoder),
-                          (jsg::Lock& js, auto chunk, auto controller) {
-                            JSG_REQUIRE(chunk.isArrayBuffer() || chunk.isSharedArrayBuffer() ||
-                                    chunk.isArrayBufferView(),
-                                TypeError,
-                                "This TransformStream is being used as a byte stream, "
-                                "but received a value that is not a BufferSource.");
-                            jsg::JsBufferSource source(chunk);
-                            auto decoded = JSG_REQUIRE_NONNULL(
-                                decoder->decodePtr(js, source.asArrayPtr(), false), TypeError,
-                                "Failed to decode input.");
-                            // Only enqueue if there's actual output - don't emit empty chunks
-                            // for incomplete multi-byte sequences
-                            if (decoded.length(js) > 0) {
-                            controller->enqueue(js, decoded);
-                            }
-                            return js.resolvedPromise();
-                          })),
+      Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>( JSG_VISITABLE_LAMBDA(
+                      (decoder = decoder.addRef()), (decoder),
+                      (jsg::Lock& js, auto chunk, auto controller) {
+                        JSG_REQUIRE(chunk->IsArrayBuffer() || chunk->IsArrayBufferView(), TypeError,
+                            "This TransformStream is being used as a byte stream, "
+                            "but received a value that is not a BufferSource.");
+                        jsg::BufferSource source(js, chunk);
+                        auto decoded =
+                            JSG_REQUIRE_NONNULL(decoder->decodePtr(js, source.asArrayPtr(), false),
+                                TypeError, "Failed to decode input.");
+                        // Only enqueue if there's actual output - don't emit empty chunks
+                        // for incomplete multi-byte sequences
+                        if (decoded.length(js) > 0) {
+                        controller->enqueue(js, decoded);
+                        }
+                        return js.resolvedPromise();
+                      })),
         .flush = jsg::Function<Transformer::FlushAlgorithm>(
             JSG_VISITABLE_LAMBDA((decoder = decoder.addRef()), (decoder),
                 (jsg::Lock& js, auto controller) {
