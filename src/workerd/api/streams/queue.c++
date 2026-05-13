@@ -1094,7 +1094,7 @@ void ByteQueue::handlePush(jsg::Lock& js,
     // is enough data.
 
     if (amountAvailable < pending.pullInto.atLeast) {
-      return bufferData(0);
+      return bufferData(entryOffset);
     }
 
     // There might be at least some data in the buffer. If there is, it should

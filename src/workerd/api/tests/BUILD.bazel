@@ -592,6 +592,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-byob-concurrent-readatleast-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byob-concurrent-readatleast-test.js"],
+)
+
+wd_test(
     src = "streams-tee-edge-cases-test.wd-test",
     args = ["--experimental"],
     data = ["streams-tee-edge-cases-test.js"],
