@@ -449,7 +449,7 @@ class ConsumerImpl final {
       }
 
       UpdateBackpressureScope scope(*this);
-      Self::handlePush(js, ready, queue, kj::mv(entry));
+      Self::handlePush(js, ready, *this, queue, kj::mv(entry));
     }
   }
 
@@ -875,8 +875,11 @@ class ValueQueue final {
  private:
   QueueImpl impl;
 
-  static void handlePush(
-      jsg::Lock& js, ConsumerImpl::Ready& state, kj::Maybe<QueueImpl&> queue, kj::Rc<Entry> entry);
+  static void handlePush(jsg::Lock& js,
+      ConsumerImpl::Ready& state,
+      ConsumerImpl& consumer,
+      kj::Maybe<QueueImpl&> queue,
+      kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
@@ -1127,8 +1130,11 @@ class ByteQueue final {
  private:
   QueueImpl impl;
 
-  static void handlePush(
-      jsg::Lock& js, ConsumerImpl::Ready& state, kj::Maybe<QueueImpl&> queue, kj::Rc<Entry> entry);
+  static void handlePush(jsg::Lock& js,
+      ConsumerImpl::Ready& state,
+      ConsumerImpl& consumer,
+      kj::Maybe<QueueImpl&> queue,
+      kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
