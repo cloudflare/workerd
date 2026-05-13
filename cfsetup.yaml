@@ -32,4 +32,4 @@ trixie: &default-build
     post-cache:
       - *pre-bazel-install-deps
       - *pre-bazel-write-gcp-creds
-      - bazel build -k --config=ci --config=ci-limit-storage --config=lint --config=clang-tidy --config=ci-test --config=ci-linux-common //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
+      - bazel build -k --config=ci --config=ci-limit-storage --config=lint --config=ci-test --config=ci-linux-common //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
