@@ -905,6 +905,12 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-write-http-metadata-validation-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-write-http-metadata-validation-test.js"],
+)
+
+wd_test(
     src = "identity-transform-stream-state-machine-test.wd-test",
     args = ["--experimental"],
     data = ["identity-transform-stream-state-machine-test.js"],
