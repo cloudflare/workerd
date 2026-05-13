@@ -9,6 +9,12 @@ wd_test(
 )
 
 wd_test(
+    src = "urlpattern-regex-search-oob-test.wd-test",
+    args = ["--experimental"],
+    data = ["urlpattern-regex-search-oob-test.js"],
+)
+
+wd_test(
     src = "messageport-postmessage-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["messageport-postmessage-uaf-test.js"],

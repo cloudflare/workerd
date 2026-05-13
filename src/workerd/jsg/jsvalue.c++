@@ -425,13 +425,17 @@ bool JsString::containsOnlyOneByte() const {
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
   auto result = check(inner->Exec(js.v8Context(), input));
-  if (result->IsNullOrUndefined()) return kj::none;
+  // v8::RegExp::Exec dispatches to the current RegExp.prototype.exec, which
+  // user code can override to return anything. Reject non-Array results so a
+  // monkey-patched exec cannot feed arbitrary objects into native code.
+  if (result->IsNullOrUndefined() || !result->IsArray()) return kj::none;
   return JsArray(result.As<v8::Array>());
 }
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, kj::StringPtr input) const {
   auto result = check(inner->Exec(js.v8Context(), js.str(input)));
-  if (result->IsNull()) return kj::none;
+  // Same hardening as above: reject non-null, non-Array results.
+  if (result->IsNullOrUndefined() || !result->IsArray()) return kj::none;
   return JsArray(result.As<v8::Array>());
 }
 
