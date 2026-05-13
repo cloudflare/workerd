@@ -623,7 +623,7 @@ void Headers::setUnguarded(jsg::Lock& js, kj::String name, kj::String value) {
 
 void Headers::setCommon(capnp::CommonHeaderName idx, kj::String value) {
   kj::uint index = static_cast<kj::uint>(idx);
-  KJ_DASSERT(index <= Headers::MAX_COMMON_HEADER_ID);
+  value = normalizeHeaderValue(getCommonHeaderName(index), kj::mv(value));
   KJ_IF_SOME(existing, commonHeaders[index]) {
     existing->values.resize(1);
     existing->values[0] = kj::mv(value);
