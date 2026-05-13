@@ -1019,7 +1019,11 @@ class ByteQueue final {
     }
 
    private:
-    jsg::BufferSource store;
+    // Intentionally not visited by visitForGc: Entry is not reachable from JS;
+    // it is owned via kj::Rc<Entry> (C++ refcount), so the BufferSource cannot be
+    // part of a JS→C++→JS reference cycle and a strong v8::Global suffices
+    // to keep it alive. See queue.c++:562 for the empty visitForGc body.
+    jsg::BufferSource store;  // NOLINT(jsg-visit-for-gc)
   };
 
   struct QueueEntry {
