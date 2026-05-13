@@ -20,7 +20,7 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 | `wd_capnp_library.bzl`                     | Cap'n Proto schema compilation                                                                    |
 | `wd_rust_crate.bzl` / `wd_rust_binary.bzl` | Rust build rules                                                                                  |
 | `lint_test.bzl`                            | ESLint integration                                                                                |
-| `tools/clang_tidy/plugin/JsgLint.cpp`      | Custom clang-tidy plugin; ships the `jsg-visit-for-gc` check for GC-root validation               |
+| `//tools/clang-tidy:jsg-lint`              | Custom clang-tidy plugin (source: `tools/clang-tidy/jsg-lint.c++`); ships the `jsg-visit-for-gc` check for GC-root validation |
 
 **Conventions:**
 
@@ -31,7 +31,7 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 
 ## CLANG-TIDY PLUGIN
 
-`tools/clang_tidy/plugin/` builds a shared-object clang-tidy plugin (`JsgLint`)
+`//tools/clang-tidy:jsg-lint` builds a shared-object clang-tidy plugin
 that adds workerd-specific static checks. Currently ships `jsg-visit-for-gc`,
 which flags JSG resource types whose visitable fields (`jsg::Ref`, `jsg::JsRef`,
 `jsg::V8Ref`, `jsg::Function`, `jsg::Promise`, `jsg::BufferSource`, `jsg::Value`,
