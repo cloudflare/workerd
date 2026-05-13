@@ -69,6 +69,10 @@ export function randomBytes(
   }
 }
 
+// Web Crypto getRandomValues() per-call quota, per the spec and enforced in
+// src/workerd/api/crypto/crypto.c++ (Crypto::getRandomValues).
+const kWebCryptoMaxRandomBytes = 65536;
+
 export function randomFillSync(
   buffer: NodeJS.ArrayBufferView,
   offset?: number,
@@ -102,10 +106,6 @@ export function randomFillSync(
   }
   return view;
 }
-
-// Web Crypto getRandomValues() per-call quota, per the spec and enforced in
-// src/workerd/api/crypto/crypto.c++ (Crypto::getRandomValues).
-const kWebCryptoMaxRandomBytes = 65536;
 
 export type RandomFillCallback = (
   err: Error | null,

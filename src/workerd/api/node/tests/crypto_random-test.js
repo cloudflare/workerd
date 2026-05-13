@@ -446,6 +446,10 @@ export const randomBytesAboveWebCryptoQuotaTest = {
     const { randomBytes, randomFill, randomFillSync } =
       await import('node:crypto');
 
+    // Exact 64 KiB boundary — single full chunk, off-by-one guard.
+    const bufBoundary = randomBytes(65536);
+    strictEqual(bufBoundary.length, 65536);
+
     // Just past the 64 KiB boundary — the original bug repro.
     const buf1 = randomBytes(65537);
     strictEqual(buf1.length, 65537);
@@ -472,6 +476,16 @@ export const randomBytesAboveWebCryptoQuotaTest = {
     ok(
       buf3.subarray(100, 65600).some((b) => b !== 0),
       'filled range should not be all-zero'
+    );
+
+    // ArrayBuffer input — exercises the isAnyArrayBuffer branch in
+    // randomFillSync (the input is internally wrapped with Buffer.from()).
+    const ab = new ArrayBuffer(70000);
+    const filled = randomFillSync(ab);
+    strictEqual(filled.length, 70000);
+    ok(
+      filled.some((b) => b !== 0),
+      'ArrayBuffer should be filled with non-zero bytes'
     );
 
     // Async path.
