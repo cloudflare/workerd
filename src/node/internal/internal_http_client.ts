@@ -353,8 +353,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       return;
     }
 
-    const host = this.getHeader('host') ?? this.host;
-    let url = new URL(`http://${host}`);
+    let url = new URL(`http://${this.host}`);
     url.protocol = this.protocol;
     url.port = this.port;
 
