@@ -838,6 +838,12 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-unnamed-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-unnamed-gc-test.js"],
+)
+
+wd_test(
     src = "leak-fetch-test.wd-test",
     args = ["--experimental"],
     data = ["leak-fetch-test.js"],
