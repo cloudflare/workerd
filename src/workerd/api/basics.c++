@@ -1020,6 +1020,7 @@ void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReas
 }
 
 void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(maybeListenerCallback);
   for (auto& entry: typeMap) {
     for (auto& handler: entry.value.handlers) {
       KJ_SWITCH_ONEOF(handler->handler) {

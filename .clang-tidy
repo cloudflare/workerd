@@ -61,7 +61,8 @@ Checks: >
   -readability-redundant-smartptr-get,
   readability-reference-to-constructed-temporary,
   readability-static-accessed-through-instance,
-  readability-use-concise-preprocessor-directives
+  readability-use-concise-preprocessor-directives,
+  jsg-visit-for-gc
 
 # TODO: Fix and enable
 # bugprone-derived-method-shadowing-base-method

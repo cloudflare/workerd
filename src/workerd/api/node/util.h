@@ -113,6 +113,10 @@ class MIMEType final: public jsg::Object {
  private:
   workerd::MimeType inner;
   jsg::Ref<MIMEParams> params;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(params);
+  }
 };
 
 #define JS_UTIL_IS_TYPES(V)                                                                        \

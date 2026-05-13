@@ -357,6 +357,10 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
   // Set if this is a replica Durable Object.
   kj::Maybe<jsg::Ref<DurableObject>> maybePrimary;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(maybePrimary);
+  }
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {
@@ -533,6 +537,10 @@ class ActorState: public jsg::Object {
   Worker::Actor::Id id;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> transient;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(transient, persistent);
+  }
 };
 
 class WebSocketRequestResponsePair: public jsg::Object {
@@ -772,6 +780,10 @@ class DurableObjectState: public jsg::Object {
   kj::Maybe<jsg::Ref<Container>> container;
   kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager;
   kj::Maybe<ActorVersion> version;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(exports, props, storage, container);
+  }
 
   // Limits for Hibernatable WebSocket tags.
 

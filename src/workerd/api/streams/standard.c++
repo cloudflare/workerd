@@ -3285,6 +3285,11 @@ class AllReader {
 
   void visitForGc(jsg::GcVisitor& visitor) {
     state.visitForGc(visitor);
+    for (auto& part: parts) {
+      KJ_IF_SOME(buf, part.tryGet<jsg::JsRef<jsg::JsBufferSource>>()) {
+        visitor.visit(buf);
+      }
+    }
   }
 
  private:

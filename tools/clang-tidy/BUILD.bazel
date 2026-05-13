@@ -1,0 +1,65 @@
+"""Workerd JSG clang-tidy plugin.
+
+`jsg-lint` is a clang-tidy module providing workerd-specific static checks
+(currently the `jsg-visit-for-gc` check that validates JSG resource types
+correctly visit their GC roots).
+
+The plugin is loaded into clang-tidy via `--load=<path>`. Symbols defined
+in the host clang-tidy binary (ClangTidyCheck vtable, ClangTidyModuleRegistry,
+etc.) are resolved at dlopen() time. This requires the host clang-tidy to
+have been built with LLVM_ENABLE_PLUGINS=ON, CLANG_PLUGIN_SUPPORT=ON, and
+LLVM_ENABLE_RTTI=ON; the binary published by cloudflare/workerd-tools
+(version >= clang-tidy-22.1.5) meets all three.
+
+The source file is exported via `exports_files` so downstream projects can
+rebuild the plugin against their own clang/LLVM headers (e.g. linking
+against a system libclang rather than the workerd-tools dev archive).
+"""
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+
+exports_files(["jsg-lint.c++"])
+
+cc_library(
+    name = "jsg-lint-static",
+    srcs = ["jsg-lint.c++"],
+    copts = select({
+        # workerd-tools clang-tidy links against libstdc++ on Linux; the
+        # plugin must match. macOS uses libc++ (Apple default).
+        "@platforms//os:linux": ["-stdlib=libstdc++"],
+        "//conditions:default": [],
+    }),
+    tags = ["manual"],
+    # No clang-tidy is published by workerd-tools for Windows.
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["@clang_tidy_dev_headers"],
+)
+
+cc_shared_library(
+    name = "jsg-lint",
+    tags = ["manual"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    user_link_flags = select({
+        # On macOS, a host-loaded plugin must defer resolution of clang-tidy
+        # symbols (ClangTidyCheck vtable etc.) to dlopen() time. ld64 still
+        # supports -undefined dynamic_lookup for this case.
+        "@platforms//os:macos": [
+            "-undefined",
+            "dynamic_lookup",
+        ],
+        "//conditions:default": [
+            "-stdlib=libstdc++",
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [":jsg-lint-static"],
+)

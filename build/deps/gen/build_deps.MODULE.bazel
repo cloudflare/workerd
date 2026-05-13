@@ -11,10 +11,10 @@ bazel_dep(name = "abseil-cpp", version = "20260107.1")
 bazel_dep(name = "apple_support", version = "2.5.4")
 
 # aspect_rules_esbuild
-bazel_dep(name = "aspect_rules_esbuild", version = "0.25.1")
+bazel_dep(name = "aspect_rules_esbuild", version = "0.26.0")
 
 # aspect_rules_js
-bazel_dep(name = "aspect_rules_js", version = "3.0.3")
+bazel_dep(name = "aspect_rules_js", version = "3.1.1")
 
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.8.9")
@@ -29,17 +29,28 @@ bazel_dep(name = "bazel_skylib", version = "1.9.0")
 http.file(
     name = "clang_tidy_darwin_arm64",
     executable = True,
-    sha256 = "65599ed9056d5da503cd4a0b179276d0676d959eb3a6b19c1720fe4ac697891a",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.1/llvm-22.1.1-darwin-arm64-clang-tidy",
+    sha256 = "c499cb9cbcb3af9e7bce2da5d42fe3bfa957928620c73a435f5918e00cf08d6a",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-darwin-arm64-clang-tidy",
 )
 use_repo(http, "clang_tidy_darwin_arm64")
+
+# clang_tidy_dev_headers
+http.archive(
+    name = "clang_tidy_dev_headers",
+    build_file = "@workerd//tools/clang-tidy:BUILD.headers",
+    sha256 = "8c8f3e5abd3e48d2570bdbba9de6a6aa96f01c489ad4ccddeb0449b3a857d706",
+    strip_prefix = "llvm-22.1.5-linux-amd64-clang-tidy-dev",
+    type = "tar.xz",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-linux-amd64-clang-tidy-dev.tar.xz",
+)
+use_repo(http, "clang_tidy_dev_headers")
 
 # clang_tidy_linux_amd64
 http.file(
     name = "clang_tidy_linux_amd64",
     executable = True,
-    sha256 = "52b56c8f46a80dbbde9334f3de0da45744e65757b1ab467e513d5d8cd1d0b771",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.1/llvm-22.1.1-linux-amd64-clang-tidy",
+    sha256 = "ef023eeeafba064d4f182ce130b306202a21f23632ad4253687ed10b7df493da",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-linux-amd64-clang-tidy",
 )
 use_repo(http, "clang_tidy_linux_amd64")
 
@@ -47,8 +58,8 @@ use_repo(http, "clang_tidy_linux_amd64")
 http.file(
     name = "clang_tidy_linux_arm64",
     executable = True,
-    sha256 = "1ac2e03fee590aaf920861e83be27e8936cd9a5476a90f43bf88c8e6eb424be6",
-    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.1/llvm-22.1.1-linux-arm64-clang-tidy",
+    sha256 = "59a52ec78d370141667022fe33dd12b17568f3c1a466641c5df52790a570556d",
+    url = "https://github.com/cloudflare/workerd-tools/releases/download/clang-tidy-22.1.5/llvm-22.1.5-linux-arm64-clang-tidy",
 )
 use_repo(http, "clang_tidy_linux_arm64")
 
@@ -68,7 +79,7 @@ bazel_dep(name = "rules_nodejs", version = "6.7.4")
 bazel_dep(name = "rules_oci", version = "2.3.0")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "2.0.0")
+bazel_dep(name = "rules_python", version = "2.0.1")
 
 # rules_rust
 bazel_dep(name = "rules_rust", version = "0.70.0")
