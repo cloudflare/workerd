@@ -39,7 +39,7 @@ uint32_t billingUnits(size_t bytes, BillAtLeastOne billAtLeastOne = BillAtLeastO
 }
 
 jsg::JsValue deserializeMaybeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::Maybe<kj::ArrayPtr<const kj::byte>> buf) {
+    jsg::Lock& js, kj::StringPtr key, kj::Maybe<kj::ArrayPtr<const kj::byte>> buf) {
   KJ_IF_SOME(b, buf) {
     return deserializeV8Value(js, key, b);
   } else {

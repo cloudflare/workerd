@@ -8,10 +8,8 @@
 
 namespace workerd {
 
-kj::Array<kj::byte> serializeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, const jsg::JsValue& value);
+kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, kj::StringPtr key, const jsg::JsValue& value);
 
-jsg::JsValue deserializeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf);
+jsg::JsValue deserializeV8Value(jsg::Lock& js, kj::StringPtr key, kj::ArrayPtr<const kj::byte> buf);
 
 }  // namespace workerd

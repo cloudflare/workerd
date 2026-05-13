@@ -30,8 +30,7 @@ kj::Maybe<kj::String> getCurrentActorId() {
 
 }  // namespace
 
-kj::Array<kj::byte> serializeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, const jsg::JsValue& value) {
+kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, kj::StringPtr key, const jsg::JsValue& value) {
   jsg::Serializer serializer(js,
       jsg::Serializer::Options{
         .version = 15,
@@ -43,7 +42,7 @@ kj::Array<kj::byte> serializeV8Value(
 }
 
 jsg::JsValue deserializeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf) {
+    jsg::Lock& js, kj::StringPtr key, kj::ArrayPtr<const kj::byte> buf) {
 
   KJ_ASSERT(buf.size() > 0, "unexpectedly empty value buffer", key);
   try {
