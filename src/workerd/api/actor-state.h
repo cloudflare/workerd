@@ -30,11 +30,6 @@ class DurableObjectClass;
 class LoopbackDurableObjectNamespace;
 class LoopbackColoLocalActorNamespace;
 
-kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value);
-
-jsg::JsValue deserializeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf);
-
 // Common implementation of DurableObjectStorage and DurableObjectTransaction. This class is
 // designed to be used as a mixin.
 class DurableObjectStorageOperations {

@@ -4,8 +4,7 @@
 
 #include "sync-kv.h"
 
-#include "actor-state.h"
-
+#include <workerd/io/stored-value.h>
 #include <workerd/util/sqlite-kv.h>
 
 namespace workerd::api {
