@@ -1422,8 +1422,10 @@ jsg::Promise<jsg::Value> R2Bucket::GetResult::json(jsg::Lock& js) {
 
 jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
   // Copy-pasted from http.c++
-  return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::BufferSource buffer) {
+  return arrayBuffer(js).then(js, [this, self = JSG_THIS](jsg::Lock& js, jsg::BufferSource buffer) {
     // httpMetadata can't be null because GetResult always populates it.
+    // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
+    // the promise continuation is pending. Without it, the bare `this` pointer dangles.
     kj::String contentType =
         mapCopyString(KJ_REQUIRE_NONNULL(httpMetadata).contentType).orDefault(nullptr);
     return js.alloc<Blob>(js, buffer.getJsHandle(js), kj::mv(contentType));

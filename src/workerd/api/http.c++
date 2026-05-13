@@ -331,7 +331,9 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
-  return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::BufferSource buffer) {
+  // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
+  // the promise continuation is pending. Without it, the bare `this` pointer dangles.
+  return arrayBuffer(js).then(js, [this, self = JSG_THIS](jsg::Lock& js, jsg::BufferSource buffer) {
     kj::String contentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
                                  .map([](auto&& b) -> kj::String {
       return kj::mv(b);
