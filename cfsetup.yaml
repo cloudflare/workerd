@@ -13,10 +13,8 @@ trixie: &default-build
     tmpfs_tmp: true
     post-cache:
       - &pre-bazel-install-deps sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --update clang-19 lld-19 libc++-19-dev libc++abi-19-dev python3 tcl8.6 build-essential libclang-rt-19-dev
-      - &pre-bazel-link-clang sudo ln -sf /usr/bin/clang-19 /usr/bin/clang
-      - &pre-bazel-link-clangxx sudo ln -sf /usr/bin/clang++-19 /usr/bin/clang++
       - &pre-bazel-write-gcp-creds python3 -c 'import os; p="/tmp/bazel_cache_gcp_creds.json"; fd=os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.write(fd, os.environ["GCP_CREDS"].encode()); os.close(fd)'
-      - bazel test -k --config=ci --config=ci-limit-storage //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
+      - bazel test -k --config=ci --config=ci-limit-storage --config=ci-linux-common --config=ci-test //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
 
   ci-bazel-x64-asan:
     nosubmodule: true
@@ -24,10 +22,8 @@ trixie: &default-build
     tmpfs_tmp: true
     post-cache:
       - *pre-bazel-install-deps
-      - *pre-bazel-link-clang
-      - *pre-bazel-link-clangxx
       - *pre-bazel-write-gcp-creds
-      - bazel test -k --config=ci --config=ci-limit-storage --config=ci-linux-asan //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
+      - bazel test -k --config=ci --config=ci-test --config=ci-linux-asan //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
 
   ci-bazel-x64-lint:
     nosubmodule: true
@@ -35,7 +31,5 @@ trixie: &default-build
     tmpfs_tmp: true
     post-cache:
       - *pre-bazel-install-deps
-      - *pre-bazel-link-clang
-      - *pre-bazel-link-clangxx
       - *pre-bazel-write-gcp-creds
-      - bazel build -k --config=ci --config=ci-limit-storage --config=lint //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
+      - bazel build -k --config=ci --config=ci-limit-storage --config=lint --config=ci-test --config=ci-linux-common //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
