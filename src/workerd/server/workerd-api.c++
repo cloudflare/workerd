@@ -724,8 +724,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
         v8::Local<v8::Value> arg = env.As<v8::Value>();
         value = jsg::check(v8::Function::Cast(*fn)->Call(context, context->Global(), 1, &arg));
       } else {
-        KJ_LOG(
-            ERROR, "wrapped binding module can't be resolved (internal modules only)", moduleName);
+        KJ_FAIL_REQUIRE(
+            "wrapped binding module can't be resolved (internal modules only)", moduleName);
       }
     }
     KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
