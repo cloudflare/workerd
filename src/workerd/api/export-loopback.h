@@ -182,6 +182,10 @@ class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
 
  private:
   jsg::Ref<LoopbackDurableObjectClass> loopbackClass;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(loopbackClass);
+  }
 };
 
 // Like LoopbackDurableObjectNamespace, but for colo-local (ephemeral) actor namespaces.
@@ -209,6 +213,10 @@ class LoopbackColoLocalActorNamespace: public ColoLocalActorNamespace {
 
  private:
   jsg::Ref<LoopbackDurableObjectClass> loopbackClass;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(loopbackClass);
+  }
 };
 
 #define EW_EXPORT_LOOPBACK_ISOLATE_TYPES                                                           \

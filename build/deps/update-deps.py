@@ -339,6 +339,8 @@ def gen_github_release(repo):
     type = "tgz"
     if url.endswith(".zip"):
         type = "zip"
+    elif url.endswith(".tar.xz") or url.endswith(".txz"):
+        type = "tar.xz"
     elif url.endswith(".xz"):
         type = "xz"
     elif url.endswith(".tar.bz2"):

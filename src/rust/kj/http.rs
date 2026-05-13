@@ -12,7 +12,6 @@ use crate::io::AsyncInputStream;
 use crate::io::AsyncIoStream;
 
 #[cxx::bridge(namespace = "kj::rust")]
-#[expect(clippy::missing_panics_doc)]
 #[expect(clippy::missing_safety_doc)]
 pub mod ffi {
     unsafe extern "C++" {
