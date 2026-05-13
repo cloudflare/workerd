@@ -1,4 +1,5 @@
 # enable clang tidy checks with default configuration
+build:lint --config=clang-tidy
 build:clang-tidy --aspects //build/tools/clang_tidy:clang_tidy.bzl%clang_tidy_aspect --output_groups=+clang_tidy_checks
 build:clang-tidy-only --aspects //build/tools/clang_tidy:clang_tidy.bzl%clang_tidy_aspect --output_groups=clang_tidy_checks
 
