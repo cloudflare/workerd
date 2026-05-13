@@ -6,7 +6,7 @@ stages: [build]
 
 .cfsetup-input-template: &cfsetup-input-template
   stage: "build"
-  runner: vm-linux-x86-8cpu-16gb
+  runner: vm-linux-x86-16cpu-32gb
   runOnMR: true
   # we sync branches from github, do not run build on them
   runOnBranches: 'gitlab'
