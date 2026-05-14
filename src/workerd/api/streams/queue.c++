@@ -383,8 +383,11 @@ size_t ValueQueue::size() const {
   return impl.size();
 }
 
-void ValueQueue::handlePush(
-    jsg::Lock& js, ConsumerImpl::Ready& state, kj::Maybe<QueueImpl&> queue, kj::Rc<Entry> entry) {
+void ValueQueue::handlePush(jsg::Lock& js,
+    ConsumerImpl::Ready& state,
+    ConsumerImpl& consumer,
+    kj::Maybe<QueueImpl&> queue,
+    kj::Rc<Entry> entry) {
   // If there are no pending reads, just add the entry to the buffer and return, adjusting
   // the size of the queue in the process.
   if (state.readRequests.empty()) {
@@ -915,10 +918,16 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // It is possible that the request was partially filled already.
   req.pullInto.filled -= unaligned;
 
+  // resolveRead calls request->resolve(js) which can synchronously run user
+  // JavaScript via V8's promise resolution thenable check (Get(resolution, "then")).
+  // A malicious Object.prototype.then getter can call controller.error() or
+  // reader.cancel(), which may destroy the ConsumerImpl. We hold a weak ref
+  // to detect this before accessing consumer again.
+  auto weak = consumer.selfRef.addRef();
   // Fulfill this request!
   consumer.resolveRead(js, req);
 
-  if (unaligned > 0) {
+  if (unaligned > 0 && weak->isValid() && consumer.state.isActive()) {
     auto start = sourcePtr.slice(amount - unaligned);
 
     KJ_IF_SOME(store, jsg::BufferSource::tryAllocUnsafe(js, unaligned)) {
@@ -1044,6 +1053,7 @@ size_t ByteQueue::size() const {
 
 void ByteQueue::handlePush(jsg::Lock& js,
     ConsumerImpl::Ready& state,
+    ConsumerImpl& consumer,
     kj::Maybe<QueueImpl&> queue,
     kj::Rc<Entry> newEntry) {
   const auto bufferData = [&](size_t offset) {
@@ -1067,6 +1077,13 @@ void ByteQueue::handlePush(jsg::Lock& js,
   auto entrySize = newEntry->getSize();
   auto amountAvailable = state.queueTotalSize + entrySize;
   size_t entryOffset = 0;
+
+  // request->resolve(js) below can synchronously run user JavaScript via V8's
+  // promise resolution thenable check (Get(resolution, "then")). A malicious
+  // Object.prototype.then getter can call controller.error(), which transitions
+  // the ConsumerImpl from Ready to Errored, freeing the Ready storage that
+  // `state` references. We hold a weak ref to detect this and bail out.
+  auto weak = consumer.selfRef.addRef();
 
   while (!state.readRequests.empty() && amountAvailable > 0) {
     auto& pending = *state.readRequests.front();
@@ -1173,6 +1190,16 @@ void ByteQueue::handlePush(jsg::Lock& js,
     auto request = kj::mv(state.readRequests.front());
     state.readRequests.pop_front();
     request->resolve(js);
+
+    // resolve(js) can synchronously run user JavaScript via V8's promise resolution
+    // thenable check. A malicious Object.prototype.then getter can call
+    // controller.error() or reader.cancel(), which destroys the ConsumerImpl and
+    // frees the Ready storage that `state` references. We must check liveness
+    // before continuing the loop.
+    if (!weak->isValid()) return;
+    // Also verify the consumer is still in the Ready state — the re-entrant JS
+    // may have transitioned it to Errored/Closed without fully destroying it.
+    if (!consumer.state.isActive()) return;
   }
 
   // If the entry was consumed completely by the pending read, then we're done!
