@@ -572,7 +572,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
         KJ_SWITCH_ONEOF(v) {
           KJ_CASE_ONEOF(v, jsg::Ref<ReadableStream>) {
             (*v).cancel(js,
-                js.error(
+                js.v8Error(
                     "Stream cancelled because the associated put operation encountered an error."));
           }
           KJ_CASE_ONEOF_DEFAULT {}
@@ -1367,7 +1367,7 @@ void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
   }
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> R2Bucket::GetResult::arrayBuffer(jsg::Lock& js) {
+jsg::Promise<jsg::BufferSource> R2Bucket::GetResult::arrayBuffer(jsg::Lock& js) {
   return js.evalNow([&] {
     JSG_REQUIRE(!body->isDisturbed(), TypeError,
         "Body has already been used. "
@@ -1378,7 +1378,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> R2Bucket::GetResult::arrayBuffer(js
   });
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> R2Bucket::GetResult::bytes(jsg::Lock& js) {
+jsg::Promise<jsg::BufferSource> R2Bucket::GetResult::bytes(jsg::Lock& js) {
   return js.evalNow([&] {
     JSG_REQUIRE(!body->isDisturbed(), TypeError,
         "Body has already been used. "
@@ -1387,9 +1387,8 @@ jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> R2Bucket::GetResult::bytes(jsg::Lock
     auto& context = IoContext::current();
     return body->getController()
         .readAllBytes(js, context.getLimitEnforcer().getBufferingLimit())
-        .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> data) {
-      jsg::JsUint8Array u8 = data.getHandle(js);
-      return u8.addRef(js);
+        .then(js, [](jsg::Lock& js, jsg::BufferSource data) {
+      return data.getTypedView<v8::Uint8Array>(js);
     });
   });
 }
@@ -1423,11 +1422,11 @@ jsg::Promise<jsg::Value> R2Bucket::GetResult::json(jsg::Lock& js) {
 
 jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
   // Copy-pasted from http.c++
-  return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
+  return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::BufferSource buffer) {
     // httpMetadata can't be null because GetResult always populates it.
     kj::String contentType =
         mapCopyString(KJ_REQUIRE_NONNULL(httpMetadata).contentType).orDefault(nullptr);
-    return js.alloc<Blob>(js, buffer.getHandle(js), kj::mv(contentType));
+    return js.alloc<Blob>(js, buffer.getJsHandle(js), kj::mv(contentType));
   });
 }
 

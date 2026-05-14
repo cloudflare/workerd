@@ -1984,7 +1984,10 @@ Module::EvaluateCallback Module::newDataModuleHandler(kj::ArrayPtr<const kj::byt
   return [data](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver&) -> bool {
     JSG_TRY(js) {
-      return ns.setDefault(js, jsg::JsArrayBuffer::create(js, data));
+      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, data.size());
+      backing.asArrayPtr().copyFrom(data);
+      auto buffer = jsg::BufferSource(js, kj::mv(backing));
+      return ns.setDefault(js, JsValue(buffer.getHandle(js)));
     }
     JSG_CATCH(exception) {
       js.v8Isolate->ThrowException(exception.getHandle(js));

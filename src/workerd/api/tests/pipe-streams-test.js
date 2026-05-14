@@ -10,7 +10,7 @@ export const pipeThroughJsToInternal = {
   async test() {
     const enc = new TextEncoder();
     const dec = new TextDecoder();
-    const chunks = [enc.encode('hello'), enc.encode('there'), '!', 1];
+    const chunks = [enc.encode('hello'), enc.encode('there'), 'hello'];
     const rs = new ReadableStream({
       pull(c) {
         c.enqueue(chunks.shift());
@@ -26,13 +26,12 @@ export const pipeThroughJsToInternal = {
         output.push(dec.decode(chunk));
       }
     }
-    // The 1 number at the end of chunks will cause an error to be thrown.
-    await rejects(consumeStream(), {
+    // The 'hello' string at the end of chunks will cause an error to be thrown.
+    await rejects(consumeStream, {
       message: 'This WritableStream only supports writing byte types.',
     });
 
-    // But we should have received the valid chunks before the error.
-    deepStrictEqual(output, ['hello', 'there', '!']);
+    deepStrictEqual(output, ['hello', 'there']);
   },
 };
 
