@@ -375,7 +375,9 @@ export function createSecretKey(
     key = Buffer.from(new Uint8Array(key));
   } else if (isArrayBufferView(key)) {
     // We want the key to be a copy of the original buffer, not a view.
-    key = Buffer.from(key as Buffer);
+    key = Buffer.from(
+      new Uint8Array(key.buffer, key.byteOffset, key.byteLength)
+    );
   }
 
   // Node.js requires that the key data be less than 2 ** 32 - 1,
