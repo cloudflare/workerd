@@ -520,6 +520,9 @@ void EventSource::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   }
   tracker.trackField("abortController", abortController);
   tracker.trackField("lastEventId", lastEventId);
+  tracker.trackField("onopen", onopenValue);
+  tracker.trackField("onmessage", onmessageValue);
+  tracker.trackField("onerror", onerrorValue);
 }
 
 }  // namespace workerd::api
