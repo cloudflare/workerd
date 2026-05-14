@@ -657,50 +657,15 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_transaction"_kjc);
 
-  struct TxnResult {
-    jsg::JsRef<jsg::JsValue> value;
-    bool isError;
-  };
-
   return context.attachSpans(js,
       context
           .blockConcurrencyWhile(js,
               [callback = kj::mv(callback), &cache = *cache](
-                  jsg::Lock& js, IoContext& context) mutable -> jsg::Promise<TxnResult> {
-    // Note that the call to `startTransaction()` is when the SQLite-backed implementation will
-    // actually invoke `BEGIN TRANSACTION`, so it's important that we're inside the
-    // blockConcurrencyWhile block before that point so we don't accidentally catch some other
-    // asynchronous event in our transaction.
-    //
-    // For the ActorCache-based implementation, it doesn't matter when we call `startTransaction()`
-    // as the method merely allocates an object and returns it with no side effects.
-    auto txn = js.alloc<DurableObjectTransaction>(context.addObject(cache.startTransaction()));
-
-    return js.resolvedPromise(txn.addRef())
-        .then(js, kj::mv(callback))
-        .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) mutable {
-      // In correct usage, `context` should not have changed here, particularly because we're in
-      // a critical section so it should have been impossible for any other context to receive
-      // control. However, depending on all that is a bit precarious. jsg::Promise::then() itself
-      // does NOT guarantee it runs in the same context (the application could have returned a
-      // custom Promise and then resolved in from some other context). So let's be safe and grab
-      // IoContext::current() again here, rather than capture it in the lambda.
-      auto& context = IoContext::current();
-      return context.awaitIoWithInputLock(js, txn->maybeCommit(),
-          [value = kj::mv(value)](jsg::Lock&) mutable { return TxnResult{kj::mv(value), false}; });
-    }, [txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
-      // The transaction callback threw an exception. We don't actually want to reset the object,
-      // we only want to roll back the transaction and propagate the exception. So, we carefully
-      // pack the exception away into a value.
-      txn->maybeRollback();
-      return js.resolvedPromise(TxnResult{
-        // TODO(cleanup): Simplify this once exception is passed using jsg::JsRef instead
-        // of jsg::V8Ref
-        jsg::JsValue(exception.getHandle(js)).addRef(js), true});
-    });
+                  jsg::Lock& js, IoContext& context) mutable -> jsg::Promise<AsyncTxnResult> {
+    return asyncTransactionImpl(js, context, cache, kj::mv(callback));
   })
           .then(js,
-              [](jsg::Lock& js, TxnResult result) -> jsg::JsRef<jsg::JsValue> {
+              [](jsg::Lock& js, AsyncTxnResult result) -> jsg::JsRef<jsg::JsValue> {
     if (result.isError) {
       js.throwException(result.value.getHandle(js));
     } else {
@@ -708,6 +673,43 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
     }
   }),
       kj::mv(traceContext));
+}
+
+jsg::Promise<DurableObjectStorage::AsyncTxnResult> DurableObjectStorage::asyncTransactionImpl(
+    jsg::Lock& js, IoContext& context, ActorCacheInterface& cache, AsyncTxnCallback callback) {
+  // Note that the call to `startTransaction()` is when the SQLite-backed implementation will
+  // actually invoke `BEGIN TRANSACTION`, so it's important that we're inside the
+  // blockConcurrencyWhile block before that point so we don't accidentally catch some other
+  // asynchronous event in our transaction.
+  //
+  // For the ActorCache-based implementation, it doesn't matter when we call `startTransaction()`
+  // as the method merely allocates an object and returns it with no side effects.
+  auto txn = js.alloc<DurableObjectTransaction>(context.addObject(cache.startTransaction()));
+
+  return js.resolvedPromise(txn.addRef())
+      .then(js, kj::mv(callback))
+      .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) mutable {
+    // In correct usage, `context` should not have changed here, particularly because we're in
+    // a critical section so it should have been impossible for any other context to receive
+    // control. However, depending on all that is a bit precarious. jsg::Promise::then() itself
+    // does NOT guarantee it runs in the same context (the application could have returned a
+    // custom Promise and then resolved in from some other context). So let's be safe and grab
+    // IoContext::current() again here, rather than capture it in the lambda.
+    auto& context = IoContext::current();
+    return context.awaitIoWithInputLock(
+        js, txn->maybeCommit(), [value = kj::mv(value)](jsg::Lock&) mutable {
+      return AsyncTxnResult{kj::mv(value), false};
+    });
+  }, [txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
+    // The transaction callback threw an exception. We don't actually want to reset the object,
+    // we only want to roll back the transaction and propagate the exception. So, we carefully
+    // pack the exception away into a value.
+    txn->maybeRollback();
+    return js.resolvedPromise(AsyncTxnResult{
+      // TODO(cleanup): Simplify this once exception is passed using jsg::JsRef instead
+      // of jsg::V8Ref
+      jsg::JsValue(exception.getHandle(js)).addRef(js), true});
+  });
 }
 
 jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
