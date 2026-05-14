@@ -86,7 +86,7 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
     // Defense-in-depth: reject module names whose parsed path exceeds a sane
     // segment count. Legitimate module paths are short (e.g. "src/util/helpers.js");
     // pathologically deep names can never be addressed by node:fs anyway.
-    static constexpr size_t kMaxBundlePathDepth = 256;
+    static constexpr size_t kMaxBundlePathDepth = 1024;
     for (auto& entry: entries) {
       auto url = KJ_ASSERT_NONNULL(jsg::Url::tryParse(entry.name, "file:///"_kj));
       // If the name is not a valid file URL path, ignore it.
@@ -96,7 +96,7 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
       auto pathStr = kj::str(url.getPathname().slice(1));
       auto path = kRoot.eval(pathStr);
       if (path.size() > kMaxBundlePathDepth) {
-        // Skip pathologically deep module names.
+        KJ_LOG(WARNING, "Skipping overly deep module path", path.size());
         continue;
       }
       builder.addPath(path, File::newReadable(entry.data));

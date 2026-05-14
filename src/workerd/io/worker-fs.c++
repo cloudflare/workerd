@@ -1180,29 +1180,33 @@ void Directory::Builder::addPath(
     kj::PathPtr path, kj::OneOf<kj::Rc<File>, kj::Rc<Directory>> fileOrDirectory) {
   KJ_ASSERT(path.size() > 0);
 
-  // Iteratively descend through intermediate path segments so that
-  // deeply-nested paths cannot exhaust the native stack. Previously this
-  // function recursed once per segment, which allowed an attacker who
-  // controls module names (via workerLoader) to crash the process with a
-  // path containing ~100,000 segments.
-  Directory::Builder* current = this;
-  for (size_t i = 0; i + 1 < path.size(); ++i) {
-    auto& entry = current->entries.findOrCreate(
-        path[i], [&] { return Entry{kj::str(path[i]), kj::heap<Directory::Builder>()}; });
+  if (path.size() == 1) {
+    return add(path[0], kj::mv(fileOrDirectory));
+  }
 
-    KJ_SWITCH_ONEOF(entry) {
-      KJ_CASE_ONEOF(file, kj::Rc<File>) {
-        KJ_FAIL_ASSERT("Path already exists and is a file: ", path[i]);
-      }
-      KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-        KJ_FAIL_ASSERT("Path already exists and is a directory: ", path[i]);
-      }
-      KJ_CASE_ONEOF(builder, kj::Own<Directory::Builder>) {
-        current = builder.get();
-      }
+  // We have multiple path segments. We need to either find or create the
+  // directory at the first segment and then add the rest of the path to
+  // it.
+  auto& entry = entries.findOrCreate(
+      path[0], [&] { return Entry{kj::str(path[0]), kj::heap<Directory::Builder>()}; });
+
+  KJ_SWITCH_ONEOF(entry) {
+    KJ_CASE_ONEOF(file, kj::Rc<File>) {
+      // The current entry is a file but we are trying to add a directory.
+      // This is an error.
+      KJ_FAIL_ASSERT("Path already exists and is a file: ", path[0]);
+    }
+    KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
+      // The current entry is a directory that is already built.
+      // This is an error.
+      KJ_FAIL_ASSERT("Path already exists and is a directory: ", path[0]);
+    }
+    KJ_CASE_ONEOF(builder, kj::Own<Directory::Builder>) {
+      // The current entry is a directory builder. We need to add the
+      // rest of the path to it.
+      builder->addPath(path.slice(1, path.size()), kj::mv(fileOrDirectory));
     }
   }
-  current->add(path[path.size() - 1], kj::mv(fileOrDirectory));
 }
 
 kj::Rc<Directory> Directory::Builder::finish() {

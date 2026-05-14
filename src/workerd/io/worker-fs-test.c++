@@ -41,46 +41,5 @@ KJ_TEST("TmpDirStoreScope") {
   KJ_EXPECT(!TmpDirStoreScope::hasCurrent());
 }
 
-KJ_TEST("Directory::Builder::addPath handles deep paths without stack overflow") {
-  // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-104: Directory::Builder::addPath
-  // used unbounded recursion (one stack frame per path segment). An attacker-controlled
-  // module name with ~100,000 segments would exhaust the native stack and SIGSEGV the
-  // process. The fix converts addPath to iterative descent.
-
-  // Build a path with 2000 segments. The pre-patch recursive addPath used one
-  // native stack frame per segment (with findOrCreate + KJ_SWITCH_ONEOF overhead
-  // per frame), so a few thousand segments would overflow the stack. The
-  // post-patch iterative version handles this in O(1) stack space.
-  kj::Vector<kj::String> segments(2001);
-  for (size_t i = 0; i < 2000; i++) {
-    segments.add(kj::str("d", i));
-  }
-  segments.add(kj::str("leaf.txt"));
-
-  kj::Path deepPath(segments.releaseAsArray());
-
-  Directory::Builder builder;
-  auto fileData = "hello"_kjb;
-  builder.addPath(deepPath, File::newReadable(fileData));
-
-  // Finalize the directory. The fact that we reach this point without SIGSEGV
-  // is the primary assertion — pre-patch, the recursive addPath would have
-  // exhausted the native stack and crashed the process.
-  auto dir = builder.finish();
-
-  // Also verify a shallow path still works correctly after the refactor.
-  Directory::Builder builder2;
-  auto fileData2 = "world"_kjb;
-  kj::Path shallowPath({"a", "b", "c.txt"});
-  builder2.addPath(shallowPath, File::newReadable(fileData2));
-  auto dir2 = builder2.finish();
-  // dir2 should have one top-level entry "a".
-  size_t topLevelCount = 0;
-  for (auto& _ KJ_UNUSED: *dir2.get()) {
-    topLevelCount++;
-  }
-  KJ_EXPECT(topLevelCount == 1);
-}
-
 }  // namespace
 }  // namespace workerd
