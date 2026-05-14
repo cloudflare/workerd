@@ -1,5 +1,9 @@
 #pragma once
 
+#include <v8-inspector.h>
+
+#include <kj/array.h>
+
 namespace kj {
 class String;
 class StringPtr;
@@ -16,7 +20,18 @@ class Lock;
 class JsValue;
 class JsMessage;
 
-v8_inspector::StringView toInspectorStringView(kj::StringPtr text);
+struct StringViewWithScratch {
+  StringViewWithScratch(kj::Array<char16_t> scratch, v8_inspector::StringView stringView)
+      : scratch(kj::mv(scratch)),
+        stringView(kj::mv(stringView)) {}
+
+  kj::Array<char16_t> scratch;
+  v8_inspector::StringView stringView;
+};
+
+// Converts the given text pointer to a StringView, backed either by the memory of the string
+// itself or a scratch buffer, if conversion was needed to handle non-ascii content.
+StringViewWithScratch toInspectorStringView(kj::StringPtr text);
 
 // Inform the inspector of a problem not associated with any particular exception object.
 //
