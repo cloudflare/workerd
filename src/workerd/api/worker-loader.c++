@@ -223,6 +223,12 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           } else KJ_IF_SOME(text, module.text) {
             return Worker::Script::TextModule{.body = text};
           } else KJ_IF_SOME(data, module.data) {
+            // The kj::Array<const byte> produced by jsg::asBytes() points into a V8
+            // BackingStore. If the user passed a *resizable* ArrayBuffer they can call
+            // resize(0) (or transfer/detach) after load() returns but before the child
+            // isolate is compiled asynchronously, leaving us with a (ptr,len) into
+            // PROT_NONE pages. Copy now so the bytes survive until compileDataGlobal().
+            data = kj::heapArray<const kj::byte>(data.asPtr());
             return Worker::Script::DataModule{.body = data};
           } else KJ_IF_SOME(json, module.json) {
             kj::StringPtr serialized =
@@ -234,6 +240,8 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           } else KJ_IF_SOME(py, module.py) {
             return Worker::Script::PythonModule{.body = py};
           } else KJ_IF_SOME(wasm, module.wasm) {
+            // Same as `data` above: copy out of the V8 BackingStore before going async.
+            wasm = kj::heapArray<const kj::byte>(wasm.asPtr());
             return Worker::Script::WasmModule{.body = wasm};
           } else {
             KJ_UNREACHABLE;
