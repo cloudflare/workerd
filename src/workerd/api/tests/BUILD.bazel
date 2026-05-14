@@ -64,6 +64,14 @@ wd_test(
     tags = ["resources:socket:1"],
 )
 
+# Regression test for AUTOVULN-CLOUDFLARE-WORKERD-334: connect() handler must neuter the
+# NeuterableIoStream when the handler promise resolves, preventing use-after-free.
+wd_test(
+    src = "connect-neuter-test.wd-test",
+    args = ["--experimental"],
+    data = ["connect-neuter-test.js"],
+)
+
 wd_test(
     src = "actor-alarms-test.wd-test",
     args = ["--experimental"],
