@@ -22,7 +22,7 @@ public:
 
   void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise);
 
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
 
   void detach();
 
@@ -105,7 +105,7 @@ public:
       jsg::Lock& js, jsg::Ref<ReadableStream> stream);
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
   jsg::Promise<ReadResult> read(jsg::Lock& js);
   void releaseLock(jsg::Lock& js);
 
@@ -156,14 +156,14 @@ public:
       jsg::Ref<ReadableStream> stream);
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
   struct ReadableStreamBYOBReaderReadOptions {
     jsg::Optional<int> min;
     JSG_STRUCT(min);
   };
 
-  jsg::Promise<ReadResult> read(jsg::Lock& js, jsg::JsArrayBufferView byobBuffer,
+  jsg::Promise<ReadResult> read(jsg::Lock& js, v8::Local<v8::ArrayBufferView> byobBuffer,
       jsg::Optional<ReadableStreamBYOBReaderReadOptions> options = kj::none);
 
   // Non-standard extension so that reads can specify a minimum number of elements to read. It's a
@@ -175,7 +175,7 @@ public:
   // TODO(soon): Like fetch() and Cache.match(), readAtLeast() returns a promise for a V8 object.
   jsg::Promise<ReadResult> readAtLeast(jsg::Lock& js,
                                         int minElements,
-                                        jsg::JsArrayBufferView byobBuffer);
+                                        v8::Local<v8::ArrayBufferView> byobBuffer);
 
   void releaseLock(jsg::Lock& js);
 
@@ -238,7 +238,7 @@ class DrainingReader: public ReadableStreamController::Reader {
   jsg::Promise<DrainingReadResult> read(jsg::Lock& js, size_t maxRead = kj::maxValue);
 
   // Cancels the stream.
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
 
   // Releases the lock on the stream.
   void releaseLock(jsg::Lock& js);
@@ -312,7 +312,7 @@ public:
   // results. `reason` will be passed to the underlying source's cancel algorithm -- if this
   // readable stream is one side of a transform stream, then its cancel algorithm causes the
   // transform's writable side to become errored with `reason`.
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
   using Reader = kj::OneOf<jsg::Ref<ReadableStreamDefaultReader>,
                            jsg::Ref<ReadableStreamBYOBReader>>;
@@ -492,7 +492,7 @@ struct QueuingStrategyInit {
 };
 
 using QueuingStrategySizeFunction =
-    jsg::Optional<uint32_t>(jsg::Optional<jsg::JsValue>);
+    jsg::Optional<uint32_t>(jsg::Optional<v8::Local<v8::Value>>);
 
 // Utility class defined by the streams spec that uses byteLength to calculate
 // backpressure changes.
@@ -519,7 +519,7 @@ public:
   }
 
 private:
-  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<jsg::JsValue>);
+  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>>);
 
   QueuingStrategyInit init;
 };
@@ -549,7 +549,7 @@ public:
   }
 
 private:
-  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<jsg::JsValue>) {
+  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>>) {
     return 1;
   }
 

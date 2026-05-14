@@ -81,7 +81,7 @@ KJ_TEST("The BundleDirectoryDelegate works") {
     auto readText = file->readAllText(env.js).get<jsg::JsString>();
     KJ_EXPECT(readText == env.js.str("this is a commonjs module"_kj));
 
-    auto readBytes = file->readAllBytes(env.js).get<jsg::JsUint8Array>();
+    auto readBytes = file->readAllBytes(env.js).get<jsg::BufferSource>();
     KJ_EXPECT(readBytes.asArrayPtr() == "this is a commonjs module"_kjb);
 
     // Reading five bytes from offset 20 should return "odule".
