@@ -211,8 +211,11 @@ struct QueueResponse {
 };
 
 // Internal-only representation used to accumulate the results of a queue event.
+// Independently refcounted so that JSG wrappers (QueueEvent, QueueMessage) can keep it
+// alive via IoOwn even after the per-request QueueCustomEvent is destroyed — critical for
+// Durable Objects where the IoContext outlives individual queue dispatches.
 
-struct QueueEventResult {
+struct QueueEventResult: public kj::Refcounted {
   struct RetryOptions {
     jsg::Optional<int> delaySeconds;
   };
@@ -233,8 +236,8 @@ struct QueueRetryOptions {
 
 class QueueMessage final: public jsg::Object {
  public:
-  QueueMessage(jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result);
-  QueueMessage(jsg::Lock& js, IncomingQueueMessage message, IoPtr<QueueEventResult> result);
+  QueueMessage(jsg::Lock& js, rpc::QueueMessage::Reader message, IoOwn<QueueEventResult> result);
+  QueueMessage(jsg::Lock& js, IncomingQueueMessage message, IoOwn<QueueEventResult> result);
 
   kj::StringPtr getId() {
     return id;
@@ -268,7 +271,7 @@ class QueueMessage final: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("id", id);
     tracker.trackField("body", body);
-    tracker.trackFieldWithSize("IoPtr<QueueEventResult>", sizeof(IoPtr<QueueEventResult>));
+    tracker.trackFieldWithSize("IoOwn<QueueEventResult>", sizeof(IoOwn<QueueEventResult>));
   }
 
  private:
@@ -276,7 +279,7 @@ class QueueMessage final: public jsg::Object {
   kj::Date timestamp;
   jsg::JsRef<jsg::JsValue> body;
   uint16_t attempts;
-  IoPtr<QueueEventResult> result;
+  IoOwn<QueueEventResult> result;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(body);
@@ -295,8 +298,8 @@ class QueueEvent final: public ExtendableEvent {
 
   explicit QueueEvent(jsg::Lock& js,
       rpc::EventDispatcher::QueueParams::Reader params,
-      IoPtr<QueueEventResult> result);
-  explicit QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> result);
+      IoOwn<QueueEventResult> result);
+  explicit QueueEvent(jsg::Lock& js, Params params, IoOwn<QueueEventResult> result);
 
   static jsg::Ref<QueueEvent> constructor(kj::String type) = delete;
 
@@ -337,7 +340,7 @@ class QueueEvent final: public ExtendableEvent {
     }
     tracker.trackField("queueName", queueName);
     tracker.trackFieldWithSize("metadata", sizeof(MessageBatchMetadata));
-    tracker.trackFieldWithSize("IoPtr<QueueEventResult>", sizeof(IoPtr<QueueEventResult>));
+    tracker.trackFieldWithSize("IoOwn<QueueEventResult>", sizeof(IoOwn<QueueEventResult>));
   }
 
   struct Incomplete {};
@@ -361,7 +364,7 @@ class QueueEvent final: public ExtendableEvent {
   kj::Array<jsg::Ref<QueueMessage>> messages;
   kj::String queueName;
   MessageBatchMetadata metadata;
-  IoPtr<QueueEventResult> result;
+  IoOwn<QueueEventResult> result;
   CompletionStatus completionStatus = Incomplete{};
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -452,10 +455,10 @@ class QueueCustomEvent final: public WorkerInterface::CustomEvent, public kj::Re
   tracing::EventInfo getEventInfo() const override;
 
   QueueRetryBatch getRetryBatch() const {
-    return {.retry = result.retryBatch.retry, .delaySeconds = result.retryBatch.delaySeconds};
+    return {.retry = result->retryBatch.retry, .delaySeconds = result->retryBatch.delaySeconds};
   }
   bool getAckAll() const {
-    return result.ackAll;
+    return result->ackAll;
   }
   kj::Array<QueueRetryMessage> getRetryMessages() const;
   kj::Array<kj::String> getExplicitAcks() const;
@@ -466,7 +469,7 @@ class QueueCustomEvent final: public WorkerInterface::CustomEvent, public kj::Re
 
  private:
   kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params;
-  QueueEventResult result;
+  kj::Own<QueueEventResult> result = kj::refcounted<QueueEventResult>();
 };
 
 #define EW_QUEUE_ISOLATE_TYPES                                                                     \

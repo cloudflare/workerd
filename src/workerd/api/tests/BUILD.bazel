@@ -194,6 +194,12 @@ wd_test(
 )
 
 wd_test(
+    src = "queue-do-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-do-uaf-test.js"],
+)
+
+wd_test(
     src = "queue-metrics-test.wd-test",
     args = ["--experimental"],
     data = ["queue-metrics-test.js"],

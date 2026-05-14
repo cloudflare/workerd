@@ -1,0 +1,21 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "queue-do-uaf-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "queue-do-uaf-test.js" )
+        ],
+        durableObjectNamespaces = [
+          ( className = "TestDO", uniqueKey = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          ( name = "ns", durableObjectNamespace = "TestDO" ),
+        ],
+        compatibilityFlags = ["service_binding_extra_handlers", "queue_consumer_no_wait_for_wait_until", "nodejs_compat"],
+      )
+    ),
+  ],
+);
