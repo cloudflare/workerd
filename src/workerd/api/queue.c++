@@ -412,22 +412,22 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatch(jsg::Lock& j
 }
 
 QueueMessage::QueueMessage(
-    jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result)
+    jsg::Lock& js, rpc::QueueMessage::Reader message, IoOwn<QueueEventResult> result)
     : id(kj::str(message.getId())),
       timestamp(message.getTimestampNs() * kj::NANOSECONDS + kj::UNIX_EPOCH),
       body(deserialize(js, message).addRef(js)),
       attempts(message.getAttempts()),
-      result(result) {}
+      result(kj::mv(result)) {}
 // Note that we must make deep copies of all data here since the incoming Reader may be
 // deallocated while JS's GC wrappers still exist.
 
 QueueMessage::QueueMessage(
-    jsg::Lock& js, IncomingQueueMessage message, IoPtr<QueueEventResult> result)
+    jsg::Lock& js, IncomingQueueMessage message, IoOwn<QueueEventResult> result)
     : id(kj::mv(message.id)),
       timestamp(message.timestamp),
       body(deserialize(js, kj::mv(message.body), message.contentType).addRef(js)),
       attempts(message.attempts),
-      result(result) {}
+      result(kj::mv(result)) {}
 
 jsg::JsValue QueueMessage::getBody(jsg::Lock& js) {
   return body.getHandle(js);
@@ -482,16 +482,20 @@ void QueueMessage::ack() {
 }
 
 QueueEvent::QueueEvent(
-    jsg::Lock& js, rpc::EventDispatcher::QueueParams::Reader params, IoPtr<QueueEventResult> result)
+    jsg::Lock& js, rpc::EventDispatcher::QueueParams::Reader params, IoOwn<QueueEventResult> result)
     : ExtendableEvent("queue"),
       queueName(kj::heapString(params.getQueueName())),
-      result(result) {
+      result(kj::mv(result)) {
   // Note that we must make deep copies of all data here since the incoming Reader may be
   // deallocated while JS's GC wrappers still exist.
   auto incoming = params.getMessages();
+  auto& context = IoContext::current();
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(incoming.size());
   for (auto i: kj::indices(incoming)) {
-    messagesBuilder.add(js.alloc<QueueMessage>(js, incoming[i], result));
+    // Each QueueMessage gets its own owning IoOwn<QueueEventResult> via addRef so that
+    // QueueEventResult outlives all JS wrappers even if QueueCustomEvent is freed first.
+    auto msgResult = context.addObject(kj::addRef(*this->result));
+    messagesBuilder.add(js.alloc<QueueMessage>(js, incoming[i], kj::mv(msgResult)));
   }
   messages = messagesBuilder.finish();
 
@@ -512,16 +516,20 @@ QueueEvent::QueueEvent(
   };
 }
 
-QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> result)
+QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoOwn<QueueEventResult> result)
     : ExtendableEvent("queue"),
       queueName(kj::mv(params.queueName)),
       metadata(kj::mv(params.metadata)),
-      result(result) {
+      result(kj::mv(result)) {
   clearEpochSentinel(metadata.metrics.oldestMessageTimestamp);
 
+  auto& context = IoContext::current();
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(params.messages.size());
   for (auto i: kj::indices(params.messages)) {
-    messagesBuilder.add(js.alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
+    // Each QueueMessage gets its own owning IoOwn<QueueEventResult> via addRef.
+    auto msgResult = context.addObject(kj::addRef(*this->result));
+    auto msg = kj::mv(params.messages[i]);
+    messagesBuilder.add(js.alloc<QueueMessage>(js, kj::mv(msg), kj::mv(msgResult)));
   }
   messages = messagesBuilder.finish();
 }
@@ -563,7 +571,7 @@ struct StartQueueEventResponse {
 StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     IoContext& context,
     kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params,
-    IoPtr<QueueEventResult> result,
+    IoOwn<QueueEventResult> result,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler,
     const jsg::TypeHandler<QueueExportedHandler>& handlerHandler) {
@@ -571,10 +579,10 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
   jsg::Ref<QueueEvent> event(nullptr);
   KJ_SWITCH_ONEOF(params) {
     KJ_CASE_ONEOF(p, rpc::EventDispatcher::QueueParams::Reader) {
-      event = js.alloc<QueueEvent>(js, p, result);
+      event = js.alloc<QueueEvent>(js, p, kj::mv(result));
     }
     KJ_CASE_ONEOF(p, QueueEvent::Params) {
-      event = js.alloc<QueueEvent>(js, kj::mv(p), result);
+      event = js.alloc<QueueEvent>(js, kj::mv(p), kj::mv(result));
     }
   }
 
@@ -670,8 +678,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
+    // Pass an owning IoOwn<QueueEventResult> (via addRef) so that QueueEventResult stays
+    // alive as long as the JSG QueueEvent/QueueMessage wrappers exist, even after
+    // QueueCustomEvent is destroyed. This prevents a use-after-free under Durable Objects
+    // where the IoContext outlives individual queue dispatches.
     auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),
-        context.addObject(result), lock,
+        context.addObject(kj::addRef(*result)), lock,
         lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch),
         typeHandler);
@@ -796,20 +808,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
 
   return req.send().then([this](auto resp) {
     auto respResult = resp.getResult();
-    this->result.ackAll = respResult.getAckAll();
+    this->result->ackAll = respResult.getAckAll();
     auto retryBatch = respResult.getRetryBatch();
-    this->result.retryBatch.retry = retryBatch.getRetry();
+    this->result->retryBatch.retry = retryBatch.getRetry();
     if (retryBatch.isDelaySeconds()) {
-      this->result.retryBatch.delaySeconds = retryBatch.getDelaySeconds();
+      this->result->retryBatch.delaySeconds = retryBatch.getDelaySeconds();
     }
 
-    this->result.explicitAcks.clear();
+    this->result->explicitAcks.clear();
     for (const auto& msgId: respResult.getExplicitAcks()) {
-      this->result.explicitAcks.insert(kj::heapString(msgId));
+      this->result->explicitAcks.insert(kj::heapString(msgId));
     }
-    this->result.retries.clear();
+    this->result->retries.clear();
     for (const auto& retry: respResult.getRetryMessages()) {
-      auto& entry = this->result.retries.upsert(kj::heapString(retry.getMsgId()), {});
+      auto& entry = this->result->retries.upsert(kj::heapString(retry.getMsgId()), {});
       if (retry.isDelaySeconds()) {
         entry.value.delaySeconds = retry.getDelaySeconds();
       }
@@ -822,8 +834,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
 }
 
 kj::Array<QueueRetryMessage> QueueCustomEvent::getRetryMessages() const {
-  auto retryMsgs = kj::heapArrayBuilder<QueueRetryMessage>(result.retries.size());
-  for (const auto& entry: result.retries) {
+  auto retryMsgs = kj::heapArrayBuilder<QueueRetryMessage>(result->retries.size());
+  for (const auto& entry: result->retries) {
     retryMsgs.add(QueueRetryMessage{
       .msgId = kj::heapString(entry.key), .delaySeconds = entry.value.delaySeconds});
   }
@@ -831,8 +843,8 @@ kj::Array<QueueRetryMessage> QueueCustomEvent::getRetryMessages() const {
 }
 
 kj::Array<kj::String> QueueCustomEvent::getExplicitAcks() const {
-  auto ackArray = kj::heapArrayBuilder<kj::String>(result.explicitAcks.size());
-  for (const auto& msgId: result.explicitAcks) {
+  auto ackArray = kj::heapArrayBuilder<kj::String>(result->explicitAcks.size());
+  for (const auto& msgId: result->explicitAcks) {
     ackArray.add(kj::heapString(msgId));
   }
   return ackArray.finish();
