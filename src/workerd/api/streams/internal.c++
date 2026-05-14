@@ -16,6 +16,8 @@
 
 #include <kj/vector.h>
 
+#include <cstdlib>
+
 namespace workerd::api {
 
 namespace {
