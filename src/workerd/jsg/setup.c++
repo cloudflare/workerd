@@ -573,7 +573,6 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
   // code locations, which we use when reporting stack traces during crashes.
 
   IsolateBase* self = static_cast<IsolateBase*>(event->isolate->GetData(SET_DATA_ISOLATE_BASE));
-  auto& codeMap = self->codeMap;
 
   // Pointer comparison between pointers not from the same array is UB so we'd better operate on
   // uintptr_t instead.
@@ -585,12 +584,23 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
     kj::Vector<CodeBlockInfo::PositionMapping> mapping;
   };
 
+  // NOTE: `codeMap` is intentionally NOT protected by a mutex, even though
+  // V8 14.9+ can in principle deliver these events from background
+  // compilation threads (concurrent sparkplug, maglev, turbofan, etc.).
+  // See the comment on `IsolateBase::codeMap` in `setup.h` for the full
+  // rationale: `getJsStackTrace()` reads this map from a signal handler,
+  // and acquiring a mutex from a signal handler is not async-signal-safe.
+  // Embedders that enable concurrent V8 JIT compilation must accept the
+  // race or provide a different stack-tracing implementation.
+  auto& codeMap = self->codeMap;
+  using CodeMapEntry = kj::TreeMap<uintptr_t, CodeBlockInfo>::Entry;
+
   switch (event->type) {
     case v8::JitCodeEvent::CODE_ADDED: {
       // Usually CODE_ADDED comes after CODE_END_LINE_INFO_RECORDING, but sometimes it doesn't,
       // particularly in the case of Wasm where it appears no line info is provided.
       auto& info = codeMap.findOrCreate(
-          startAddr, [&]() { return decltype(self->codeMap)::Entry{startAddr, CodeBlockInfo()}; });
+          startAddr, [&]() { return CodeMapEntry{startAddr, CodeBlockInfo()}; });
       info.size = event->code_len;
       info.name = kj::str(kj::arrayPtr(event->name.str, event->name.len));
       info.type = event->code_type;
@@ -660,7 +670,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       // Sometimes CODE_END_LINE_INFO_RECORDING comes after CODE_ADDED, in particular with
       // modules.
       auto& info = codeMap.findOrCreate(
-          startAddr, [&]() { return decltype(self->codeMap)::Entry{startAddr, CodeBlockInfo()}; });
+          startAddr, [&]() { return CodeMapEntry{startAddr, CodeBlockInfo()}; });
 
       UserData* data = static_cast<UserData*>(event->user_data);
       info.mapping = data->mapping.releaseAsArray();
@@ -775,6 +785,10 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   }
   appendText("js: (", vmState, ")");
 
+  // Read `codeMap` without locking: this function runs from a signal handler
+  // and acquiring a mutex from a signal handler is not async-signal-safe. See
+  // the comment on `IsolateBase::codeMap` in `setup.h` for the implications
+  // when V8 is configured with concurrent JIT compilation.
   auto& codeMap = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))->codeMap;
 
   for (auto i: kj::zeroTo(sampleInfo.frames_count)) {

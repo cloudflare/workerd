@@ -452,6 +452,38 @@ class IsolateBase {
   };
 
   // Maps instructions to source code locations.
+  //
+  // WARNING: This map is read by `getJsStackTrace()` from a signal handler,
+  // so this field is deliberately NOT protected by a mutex. Two consequences:
+  //
+  // 1. If V8 is configured to compile JS on background threads, V8 may
+  //    invoke `jitCodeEvent()` (which mutates `codeMap`) concurrently with
+  //    a `getJsStackTrace()` read on another thread — a data race that can
+  //    crash the process during stack walking.
+  //
+  // 2. We can't fix (1) by adding a mutex here, because `getJsStackTrace()`
+  //    runs inside a signal handler and POSIX disallows acquiring a mutex
+  //    from a signal handler (it is not async-signal-safe and may deadlock
+  //    if the signal interrupted a thread already holding the same mutex).
+  //
+  // Callers who configure V8 with any of the following flags MUST account
+  // for this themselves:
+  //   --concurrent_recompilation
+  //   --concurrent_sparkplug
+  //   --maglev_build_code_on_background
+  //   --maglev_deopt_data_on_background
+  //   --lazy_compile_dispatcher
+  //   --parallel_compile_tasks_for_eager_toplevel
+  //   --parallel_compile_tasks_for_lazy
+  //   --stress_concurrent_inlining
+  //
+  // Our internal embedder disables all of the above, so `jitCodeEvent`
+  // only ever fires on the main thread and the race cannot occur in that
+  // configuration.
+  //
+  // Wasm tier-up compilation runs concurrently but emits its own
+  // JitCodeEvents and does not race with JS stack traces in practice
+  // because Wasm code does not appear in JS stack traces.
   kj::TreeMap<uintptr_t, CodeBlockInfo> codeMap;
 
   explicit IsolateBase(V8System& system,
