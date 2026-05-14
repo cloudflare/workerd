@@ -1936,6 +1936,16 @@ export const generate_key_pair_arg_validation = {
   },
 };
 
+export const generate_rsa_key_pair_modulus_cap = {
+  test() {
+    throws(() => generateKeyPairSync('rsa', { modulusLength: 16385 }), {
+      name: 'RangeError',
+    });
+    const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    strictEqual(publicKey.asymmetricKeyDetails.modulusLength, 2048);
+  },
+};
+
 export const generate_rsa_key_pair = {
   test() {
     const { publicKey, privateKey } = generateKeyPairSync('rsa', {

@@ -595,6 +595,11 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
 CryptoKeyPair CryptoImpl::generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
+  // Matches the WebCrypto validateRsaParams bound. Consider lowering both to 8192.
+  static constexpr uint32_t kMaxRsaModulusLength = 16384;
+  JSG_REQUIRE(options.modulusLength <= kMaxRsaModulusLength, RangeError,
+      "RSA modulusLength exceeds maximum (", kMaxRsaModulusLength, ")");
+
   auto ctx = ncrypto::EVPKeyCtxPointer::NewFromID(
       options.type == "rsa-pss" ? EVP_PKEY_RSA_PSS : EVP_PKEY_RSA);
 
