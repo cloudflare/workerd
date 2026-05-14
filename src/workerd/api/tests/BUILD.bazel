@@ -15,6 +15,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-byte-handlePush-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byte-handlePush-uaf-test.js"],
+)
+
+wd_test(
     src = "structuredclone-error-serialize-test.wd-test",
     args = ["--experimental"],
     data = ["structuredclone-error-serialize-test.js"],
