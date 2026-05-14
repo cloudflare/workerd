@@ -151,11 +151,6 @@ kj::String normalizeType(kj::String type) {
 
 Blob::Blob(kj::String type): ownData(Empty{}), data(nullptr), type(kj::mv(type)) {}
 
-Blob::Blob(kj::Array<byte> data, kj::String type)
-    : ownData(kj::mv(data)),
-      data(ownData.get<kj::Array<kj::byte>>()),
-      type(kj::mv(type)) {}
-
 Blob::Blob(jsg::Lock& js, jsg::JsBufferSource data, kj::String type)
     : ownData(data.addRef(js)),
       data(data.asArrayPtr()),
@@ -260,9 +255,6 @@ jsg::Ref<Blob> Blob::slice(jsg::Lock& js,
     KJ_CASE_ONEOF(_, jsg::JsRef<jsg::JsBufferSource>) {
       return js.alloc<Blob>(JSG_THIS, slicedData, kj::mv(normalizedType));
     }
-    KJ_CASE_ONEOF(_, kj::Array<kj::byte>) {
-      return js.alloc<Blob>(JSG_THIS, slicedData, kj::mv(normalizedType));
-    }
   }
   KJ_UNREACHABLE;
 }
@@ -296,11 +288,6 @@ jsg::Ref<ReadableStream> Blob::stream(jsg::Lock& js) {
 
 File::File(kj::String name, kj::String type, double lastModified)
     : Blob(kj::mv(type)),
-      name(kj::mv(name)),
-      lastModified(lastModified) {}
-
-File::File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified)
-    : Blob(kj::mv(data), kj::mv(type)),
       name(kj::mv(name)),
       lastModified(lastModified) {}
 

@@ -210,8 +210,7 @@ struct Server::GlobalContext {
             server.entropySource,
             headerTableBuilder,
             httpOverCapnpFactory,
-            byteStreamFactory,
-            false /* isFiddle -- TODO(beta): support */),
+            byteStreamFactory),
         headerTable(headerTableBuilder.getFutureTable()) {}
 };
 
@@ -1713,8 +1712,9 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
 class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
-  SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer)
-      : weakTracer(kj::mv(weakTracer)) {}
+  SequentialSpanSubmitter(kj::Own<BaseTracer::WeakRef> weakTracer, kj::EntropySource& entropySource)
+      : weakTracer(kj::mv(weakTracer)),
+        entropySource(entropySource) {}
   void submitSpanClose(
       tracing::SpanId spanId, kj::Date startTime, kj::Date endTime, Span::TagMap&& tags) override {
     weakTracer->runIfAlive([&](BaseTracer& tracer) {
@@ -1743,13 +1743,17 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
   }
 
   tracing::SpanId makeSpanId() override {
-    return tracing::SpanId(nextSpanId++);
+    if (isPredictableModeForTest()) {
+      return tracing::SpanId(nextSpanId++);
+    }
+    return tracing::SpanId::fromEntropy(entropySource);
   }
   KJ_DISALLOW_COPY_AND_MOVE(SequentialSpanSubmitter);
 
  private:
   uint64_t nextSpanId = 1;
   kj::Own<BaseTracer::WeakRef> weakTracer;
+  kj::EntropySource& entropySource;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
@@ -2211,9 +2215,12 @@ class Server::WorkerService final: public Service,
     }
 
     KJ_IF_SOME(w, workerTracer) {
-      w->setMakeUserRequestSpanFunc([&w = *w](tracing::TraceId traceId) {
+      w->setMakeUserRequestSpanFunc(
+          [&w = *w, &entropySource = threadContext.getEntropySource()](
+              tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
         return SpanParent(kj::refcounted<UserSpanObserver>(
-            kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef()), kj::mv(traceId)));
+            kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef(), entropySource), kj::mv(traceId),
+            traceFlags));
       });
     }
     kj::Own<RequestObserver> observer =
@@ -2222,8 +2229,8 @@ class Server::WorkerService final: public Service,
     kj::Maybe<tracing::InvocationSpanContext> triggerContext;
     KJ_IF_SOME(ctx, metadata.userSpanParent.toSpanContext()) {
       KJ_IF_SOME(spanId, ctx.getSpanId()) {
-        triggerContext =
-            tracing::InvocationSpanContext(ctx.getTraceId(), tracing::TraceId::nullId, spanId);
+        triggerContext = tracing::InvocationSpanContext(
+            ctx.getTraceId(), tracing::TraceId::nullId, spanId, ctx.getTraceFlags());
       }
     }
 
@@ -4306,7 +4313,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           return kj::heap<IoChannelCapTableEntry>(
               IoChannelCapTableEntry::SUBREQUEST, channelNumber);
         } else if (auto channel = dynamic_cast<ActorClass*>(entry.get())) {
-          uint channelNumber = subrequestChannels.size();
+          uint channelNumber = actorClassChannels.size();
           actorClassChannels.add(FutureActorClassChannel{
             .designator = kj::addRef(*channel),
             .errorContext = kj::str("Worker's env"),
@@ -5277,17 +5284,7 @@ class Server::WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
     }
 
     kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
-      auto customEvent = kj::heap<api::JsRpcSessionCustomEvent>(
-          api::JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE);
-
-      auto cap = customEvent->getCap();
-      capnp::PipelineBuilder<JsRpcSessionResults> pipelineBuilder;
-      pipelineBuilder.setTopLevel(cap);
-      context.setPipeline(pipelineBuilder.build());
-      context.getResults().setTopLevel(kj::mv(cap));
-
-      auto worker = getWorker();
-      return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
+      return api::JsRpcSessionCustomEvent::receiveRpc(context, getWorker());
     }
 
     kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {

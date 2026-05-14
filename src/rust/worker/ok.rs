@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::time::SystemTime;
 
 use cxx::KjError;
+use cxx::KjExceptionType;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
 use kj::http::HeadersRef;
@@ -28,26 +29,19 @@ pub mod bridge {
             clippy::unnecessary_box_returns,
             reason = "c++ expects heap-allocation"
         )]
-        fn new_error_worker(message: &str) -> Box<Wrapper>;
+        fn new_ok_worker() -> Box<Wrapper>;
     }
 }
 
-/// Worker that returns errors for all methods.
-pub struct Worker {
-    message: String,
-}
+/// Test worker replying 200 "OK".
+pub struct Worker;
 
 impl Worker {
-    pub fn new(message: String) -> Self {
-        Self { message }
-    }
-
-    fn error(&self, file: &str, line: u32) -> KjError {
+    fn not_implemented(name: &str) -> KjError {
         KjError::new(
-            cxx::KjExceptionType::Failed,
-            format!("jsg.Error: {}", self.message),
+            KjExceptionType::Unimplemented,
+            format!("{name} not implemented"),
         )
-        .with_location(file.to_owned(), line)
     }
 }
 
@@ -57,11 +51,14 @@ impl kj::http::Service for Worker {
         &'a mut self,
         _method: Method,
         _url: &'a [u8],
-        _headers: HeadersRef<'a>,
+        headers: HeadersRef<'a>,
         _request_body: Pin<&'a mut AsyncInputStream>,
-        _response: ServiceResponse<'a>,
+        response: ServiceResponse<'a>,
     ) -> crate::Result<()> {
-        Err(self.error(file!(), line!()))
+        let headers = headers.clone_shallow();
+        let mut body = response.send(200, "OK", &headers, Some(2_u64))?;
+        body.write(b"OK").await?;
+        Ok(())
     }
 
     async fn connect<'a>(
@@ -72,7 +69,7 @@ impl kj::http::Service for Worker {
         _response: ConnectResponse<'a>,
         _settings: ConnectSettings<'a>,
     ) -> crate::Result<()> {
-        Err(self.error(file!(), line!()))
+        Err(Self::not_implemented("connect"))
     }
 }
 
@@ -83,7 +80,7 @@ impl Interface for Worker {
         _scheduled_time: &SystemTime,
         _cron: &str,
     ) -> crate::Result<ScheduledResult> {
-        Err(self.error(file!(), line!()))
+        Err(Self::not_implemented("run_scheduled"))
     }
 
     async fn run_alarm(
@@ -91,17 +88,17 @@ impl Interface for Worker {
         _scheduled_time: &SystemTime,
         _retry_count: u32,
     ) -> crate::Result<AlarmResult> {
-        Err(self.error(file!(), line!()))
+        Err(Self::not_implemented("run_alarm"))
     }
 
     async fn custom_event(
         &mut self,
         _event: Pin<&mut crate::CustomEvent>,
     ) -> crate::Result<crate::CustomEventResult> {
-        Err(self.error(file!(), line!()))
+        Err(Self::not_implemented("custom_event"))
     }
 }
 
-pub fn new_error_worker(message: &str) -> Box<Wrapper> {
-    Worker::new(message.to_owned()).into_ffi()
+pub fn new_ok_worker() -> Box<Wrapper> {
+    Worker.into_ffi()
 }

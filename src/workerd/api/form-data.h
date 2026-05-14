@@ -13,11 +13,6 @@ namespace workerd::api {
 
 // Implements the FormData interface as prescribed by:
 // https://xhr.spec.whatwg.org/#interface-formdata
-//
-// NOTE: This class is actually reused by some internal code implementing the fiddle service, for
-//   lack of any other C++ form data parser implementation. In that usage, there is no isolate.
-//   It uses `parse()` and `getData()`. This relies on the ability to construct `File` objects
-//   without an isolate.
 class FormData: public jsg::Object {
 private:
   using EntryType = kj::OneOf<jsg::Ref<File>, kj::String>;
@@ -54,11 +49,6 @@ public:
     kj::Maybe<kj::String> type;
     kj::OneOf<kj::Array<kj::byte>, kj::String> value;
   };
-
-  // Provided for cases where parsing FormData outside of any direct JS
-  // API usage (such as in fiddle internally).
-  static kj::Array<EntryWithoutLock> parseWithoutLock(kj::ArrayPtr<const char> rawText,
-                                                      kj::StringPtr contentType);
 
   // Parse `rawText`, storing the results in this FormData object. `contentType` must be either
   // multipart/form-data or application/x-www-form-urlencoded.

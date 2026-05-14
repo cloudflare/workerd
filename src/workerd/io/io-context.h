@@ -289,7 +289,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Promise<T> lockOutputWhile(kj::Promise<T> promise);
 
   bool isInspectorEnabled();
-  bool isFiddle();
 
   // Returns true if there is something listening for warnings — the Chrome DevTools inspector,
   // a streaming tail worker tracer, or --verbose stderr logging. Use this to guard expensive
@@ -918,7 +917,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
     tracing::SpanId sid = getCurrentUserTraceSpan().getSpanId();
     if (sid != tracing::SpanId::nullId) {
-      return tracing::InvocationSpanContext(base.getTraceId(), base.getInvocationId(), sid);
+      return tracing::InvocationSpanContext(
+          base.getTraceId(), base.getInvocationId(), sid, base.getTraceFlags());
     }
     return base.clone();
   }

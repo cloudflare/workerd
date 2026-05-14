@@ -12,7 +12,19 @@
 
 #define JSG_STRING_LITERAL_(...) #__VA_ARGS__
 #define JSG_STRING_LITERAL(...) JSG_STRING_LITERAL_(__VA_ARGS__)
-// JSG_STRING_LITERAL(foo, bar) expands to the string literal: "foo, bar"
+// JSG_STRING_LITERAL(foo, bar) expands to the string literal: "foo, bar".
+//
+// This is the standard two-step "stringify after macro expansion" idiom: arguments are
+// macro-expanded first, then stringified. Useful when callers pass identifiers that are themselves
+// macros and you want to capture the expanded value (e.g. `JSG_STRING_LITERAL(__LINE__)` ->
+// `"123"`).
+//
+// Do NOT use this to stringify user-supplied source-code blocks -- the implicit expansion will
+// silently corrupt identifiers that happen to collide with platform header macros. On Darwin, for
+// example, `<stdio.h>` defines `stdin`/`stdout`/`stderr` as `__stdinp`/`__stdoutp`/`__stderrp`, so
+// `JSG_STRING_LITERAL({ stdin: 1 })` produces `"{ __stdinp: 1 }"` rather than the literal text.
+// For source-code blocks, stringify directly with `#__VA_ARGS__` at the outermost macro that
+// captures the user's tokens (see `JSG_TS_OVERRIDE` in jsg.h for an example).
 
 #define JSG_EXPAND(...) __VA_ARGS__
 // Identity macro. Often useful in macro hacking.

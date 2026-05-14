@@ -1102,7 +1102,7 @@ interface CustomEventCustomEventInit {
  */
 declare class Blob {
   constructor(
-    type?: ((ArrayBuffer | ArrayBufferView) | string | Blob)[],
+    bits?: ((ArrayBuffer | ArrayBufferView) | string | Blob)[],
     options?: BlobOptions,
   );
   /**
@@ -13691,28 +13691,16 @@ declare namespace CloudflareWorkersModule {
     attempt: number;
     config: WorkflowStepConfig;
   };
-  export interface RollbackContext<T> {
-    error: Error;
-    output: NonNullable<T> | undefined;
-    stepName: string;
-  }
-  export interface StepPromise<T> extends Promise<T> {
-    rollback(fn: (ctx: RollbackContext<T>) => Promise<void>): StepPromise<T>;
-    rollback(
-      config: WorkflowStepConfig,
-      fn: (ctx: RollbackContext<T>) => Promise<void>,
-    ): StepPromise<T>;
-  }
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
-    ): StepPromise<T>;
+    ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
-    ): StepPromise<T>;
+    ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
     waitForEvent<T extends Rpc.Serializable<T>>(
@@ -13721,7 +13709,7 @@ declare namespace CloudflareWorkersModule {
         type: string;
         timeout?: WorkflowTimeoutDuration | number;
       },
-    ): StepPromise<WorkflowStepEvent<T>>;
+    ): Promise<WorkflowStepEvent<T>>;
   }
   export type WorkflowInstanceStatus =
     | "queued"
@@ -14795,6 +14783,9 @@ declare namespace TailStream {
     //  1. This is an Onset event
     //  2. We are not inheriting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
     readonly spanId?: string;
+    // W3C trace flags from an upstream traceparent. Absent when no upstream
+    // sampling decision was made.
+    readonly traceFlags?: number;
   }
   interface TailEvent<Event extends EventType> {
     // invocation id of the currently invoked worker stage.
@@ -15223,6 +15214,27 @@ interface WorkflowError {
   code?: number;
   message: string;
 }
+interface WorkflowInstanceRestartOptions {
+  /**
+   * Restart from a specific step. If omitted, the instance restarts from the beginning.
+   * The step must exist in the instance's execution history.
+   */
+  from?: {
+    /**
+     * The step name as defined in your workflow code.
+     */
+    name: string;
+    /**
+     * 1-indexed occurrence of this step name. Use when the same step name appears multiple times (e.g. in a loop).
+     * @default 1
+     */
+    count?: number;
+    /**
+     * Step type filter. Use when different step types share the same name.
+     */
+    type?: "do" | "sleep" | "waitForEvent";
+  };
+}
 declare abstract class WorkflowInstance {
   public id: string;
   /**
@@ -15238,9 +15250,11 @@ declare abstract class WorkflowInstance {
    */
   public terminate(): Promise<void>;
   /**
-   * Restart the instance.
+   * Restart the instance. Optionally restart from a specific step, preserving
+   * cached results for all steps before it.
+   * @param options Options for the restart, including an optional step to restart from.
    */
-  public restart(): Promise<void>;
+  public restart(options?: WorkflowInstanceRestartOptions): Promise<void>;
   /**
    * Returns the current status of the instance.
    */

@@ -67,8 +67,9 @@ class InstanceImpl implements WorkflowInstance {
     });
   }
 
-  async restart(): Promise<void> {
+  async restart(options?: WorkflowInstanceRestartOptions): Promise<void> {
     await callFetcher(this.fetcher, '/restart', {
+      ...options,
       id: this.id,
     });
   }

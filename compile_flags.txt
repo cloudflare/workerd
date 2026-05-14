@@ -76,6 +76,7 @@
 -isystembazel-bin/src/rust/worker/_virtual_includes/error.rs@cxx
 -isystembazel-bin/src/rust/worker/_virtual_includes/ffi.rs@cxx
 -isystembazel-bin/src/rust/worker/_virtual_includes/kill_switch.rs@cxx
+-isystembazel-bin/src/rust/worker/_virtual_includes/ok.rs@cxx
 -D_FORTIFY_SOURCE=1
 -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 -D_LIBCPP_NO_ABI_TAG

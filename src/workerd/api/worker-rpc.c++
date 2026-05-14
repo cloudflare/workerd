@@ -1852,7 +1852,7 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       // If no dup() method was present, then what?
       //
       // The pedantic argument would say: we need to throw an exception. But that would lead to a
-      // pretty poor development experience as people would have to fiddle with adding dup()
+      // pretty poor development experience as people would have to mess with adding dup()
       // methods to all their RpcTargets.
       //
       // Another argument might say: we should just use the RpcTarget but never call the disposer
@@ -2179,8 +2179,18 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
 
   try {
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-    capFulfiller->fulfill(capnp::membrane(
-        revcableTarget.getClient(), kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
+
+    kj::Own<capnp::MembranePolicy> topMembrane;
+    if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_SESSION_HANDLE)) {
+      // When using the session handle approach, we don't need the convoluted
+      // `ServerTopLevelMembrane` because the the top-level `JsRpcTarget` is not unnaturally held
+      // open, so it can be treated the same as any other capability in the session.
+      topMembrane = kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller));
+    } else {
+      topMembrane = kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller));
+    }
+
+    capFulfiller->fulfill(capnp::membrane(revcableTarget.getClient(), kj::mv(topMembrane)));
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
@@ -2237,8 +2247,24 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
 
   this->capFulfiller->fulfill(kj::mv(cap));
 
+  auto session = sent.getSession();
+
+  // We don't need to await the call itself as `session.whenResolved()` will already propagate any
+  // errors from it. So we can drop the call promise now.
+  //
+  // Note that it would NOT work to use `req.sendForPipeline()` above, since pipelined capabilities
+  // cannot resolve until the call returns, but `sendForPipeline()` explicitly inhibits the return
+  // message.
+  { auto drop = kj::mv(sent); }
+
   try {
-    co_await sent.ignoreResult().exclusiveJoin(kj::mv(completionPaf.promise));
+    // Wait for `session` to resolve to a null capability.
+    //
+    // Note that this works even if the server is using the "old approach" where it doesn't return
+    // a `session` at all, because in that case the return itself represents the end of the
+    // session, and the response contains a null pointer for `session`, so this does the expected
+    // thing: resolves `session` to null.
+    co_await session.whenResolved().exclusiveJoin(kj::mv(completionPaf.promise));
   } catch (...) {
     auto e = kj::getCaughtExceptionAsKj();
     if (revokePaf.fulfiller->isWaiting()) {
@@ -2248,6 +2274,39 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
   }
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+}
+
+kj::Promise<void> JsRpcSessionCustomEvent::receiveRpc(JsRpcSessionContext context,
+    WorkerInterface& worker,
+    kj::Own<void> ownWorker,
+    kj::Maybe<kj::String> wrapperModule) {
+  // Client wants to start a JS RPC session, we'll dispatch to the WorkerEntrypoint
+  // here and read the capability off the event itself.
+  auto customEvent =
+      kj::heap<api::JsRpcSessionCustomEvent>(WORKER_RPC_EVENT_TYPE, kj::mv(wrapperModule));
+
+  auto cap = customEvent->getCap();
+
+  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_SESSION_HANDLE)) {
+    auto promise = worker.customEvent(kj::mv(customEvent));
+
+    auto results = context.getResults(capnp::MessageSize{4, 2});
+    results.setTopLevel(kj::mv(cap));
+
+    // Set the returned session capability to resolve to a null capability when the event is
+    // complete. This also neatly arranges that if the session is dropped early, the
+    // `customEvent()` promise is canceled, thus canceling the session.
+    results.setSession(promise.then([ownWorker = kj::mv(ownWorker)](auto outcome) {
+      return rpc::JsRpcSession::Client(nullptr);
+    }));
+  } else {
+    capnp::PipelineBuilder<rpc::EventDispatcher::JsRpcSessionResults> pipelineBuilder;
+    pipelineBuilder.setTopLevel(cap);
+    context.setPipeline(pipelineBuilder.build());
+    context.getResults().setTopLevel(kj::mv(cap));
+
+    co_await worker.customEvent(kj::mv(customEvent));
+  }
 }
 
 };  // namespace workerd::api

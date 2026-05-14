@@ -18,14 +18,6 @@ namespace workerd::api {
 
 namespace {
 
-// TODO(someday): Implement Cache API in preview.
-constexpr auto CACHE_API_PREVIEW_WARNING =
-    "The Service Workers Cache API is currently unimplemented in the Cloudflare Workers Preview. "
-    "Cache API operations which would function normally in production will not throw any errors, "
-    "but will have no effect. Notably, Cache.match() will always return undefined, and "
-    "Cache.delete() will always return false. When you deploy your script to production, its "
-    "caching behavior will function as expected."_kj;
-
 #define LOG_CACHE_ERROR_ONCE(TEXT, RESPONSE)
 // TODO(someday): Fix Cache API bugs. We logged them for two years as a reminder, but... they
 //   never got fixed. The logging is making it hard to see other problems. So we're ending it.
@@ -75,7 +67,6 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
     Request::Info requestOrUrl,
     jsg::Optional<CacheQueryOptions> options,
     CompatibilityFlags::Reader flags) {
-  // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
   TraceContext traceContext = context.makeUserTraceSpan("cache_match"_kjc);
 
@@ -83,11 +74,6 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
     KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
       traceContext.setTag("cache.request.ignore_method"_kjc, ignoreMethod);
     }
-  }
-
-  if (context.isFiddle()) {
-    context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
-    return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
   }
 
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
@@ -356,15 +342,6 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       traceContext.setTag("cache.request.payload.size"_kjc, static_cast<int64_t>(length));
     }
 
-    // TODO(someday): Implement Cache API in preview. This bail-out lives all the way down here,
-    //   after all KJ_REQUIRE checks and the start of response serialization, so that Cache.put()
-    //   fulfills its contract, even in the preview. This prevents buggy code from working in the
-    //   preview, but failing in production.
-    if (context.isFiddle()) {
-      context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
-      return js.resolvedPromise();
-    }
-
     // Wait for output locks and cache put quota, trying to avoid returning to the KJ event loop
     // in the common case where no waits are needed.
     // TODO(later): With Cache streams no longer having a size limit enforced by the runtime,
@@ -550,7 +527,6 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
     Request::Info requestOrUrl,
     jsg::Optional<CacheQueryOptions> options,
     CompatibilityFlags::Reader flags) {
-  // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
   TraceContext traceContext = context.makeUserTraceSpan("cache_delete"_kjc);
 
@@ -558,11 +534,6 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
     KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
       traceContext.setTag("cache.request.ignore_method"_kjc, ignoreMethod);
     }
-  }
-
-  if (context.isFiddle()) {
-    context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
-    return js.resolvedPromise(false);
   }
 
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
@@ -647,17 +618,6 @@ jsg::Promise<jsg::Ref<Cache>> CacheStorage::open(jsg::Lock& js, kj::String cache
   static constexpr auto MAX_CACHE_NAME_LENGTH = 1024;
   JSG_REQUIRE(cacheName.size() < MAX_CACHE_NAME_LENGTH, TypeError,
       "Cache name is too long.");  // Mah spoon is toooo big.
-
-  // TODO(someday): Implement Cache API in preview.
-
-  // It is possible here that open() will be called in the global scope in fiddle
-  // mode in which case the warning will not be emitted. But that's OK? The warning
-  // is not critical by any stretch.
-  KJ_IF_SOME(context, IoContext::tryCurrent()) {
-    if (context.isFiddle()) {
-      context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
-    }
-  }
 
   return js.resolvedPromise(js.alloc<Cache>(kj::mv(cacheName)));
 }

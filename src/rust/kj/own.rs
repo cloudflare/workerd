@@ -1,3 +1,14 @@
+//! Helpers for Rust wrappers around C++ objects passed through the CXX bridge.
+//!
+//! Most Rust-visible wrappers in this crate hold one of two shapes:
+//! - [`OwnOrRef`] when the underlying C++ API can hand Rust any of `kj::Own<T>`, `const T&`, or
+//!   `T&`
+//! - [`OwnOrMut`] when the underlying C++ API only ever hands Rust `kj::Own<T>` or `T&`
+//!
+//! Pick the narrowest holder that matches the FFI surface you are wrapping. In particular, use
+//! [`OwnOrMut`] for mutable-only wrappers so the type system does not represent an impossible shared
+//! borrow state.
+
 use std::ops::Deref;
 use std::pin::Pin;
 
@@ -5,40 +16,42 @@ use kj_rs::KjOwn;
 
 /// Wrapper for C++ objects.
 ///
-/// C++ objects are either passed by references or are owned by rust using `kj::Own`.
-/// `OwnOrRef` gets uniform access to all cases.
+/// `OwnOrRef` represents the three ways a C++ object can be handed to Rust through this crate's
+/// wrappers: owned as `kj::Own<T>`, borrowed as `const T&`, or borrowed as `T&`.
 ///
-/// Instances of this class are not expected to be exposed to the user directly, but as a building
-/// block for ffi wrappers.
+/// Use this type when the wrapped FFI surface genuinely accepts shared borrows. If the wrapper only
+/// needs owned-or-mutable access, use [`OwnOrMut`] instead.
 ///
-/// Usage Guidelines:
+/// Instances of this type are not usually exposed directly. Instead, wrapper structs store an
+/// `OwnOrRef<T>` internally and expose an API matching the capabilities of the underlying C++
+/// object.
 ///
-/// To achieve maximum compatibility with Rust's type system, C++ objects should be represented
-/// on the Rust side as some `struct Wrapper(OwnOrRef<T>)` with inaccessible tuple value.
+/// Typical mapping from C++ to a Rust wrapper:
 ///
-/// C++ can pass an object to Rust three ways:
+/// - `kj::Own<T>` becomes an owned wrapper value
+/// - `const T&` becomes `&Wrapper`
+/// - `T&` becomes `&mut Wrapper`
 ///
-/// - as `kj::Own<T>` - these should be represented as `Wrapper` objects passed by-value on Rust
-///   side: `kj::Own<Foo> createFoo()` on C++ should be translated to `createFoo() -> FooWrapper`
-///   on Rust.
-///
-/// - as `const T&` - these should be represented as non-mutable `&Wrapper` references on Rust
-///   side: `bar(const Foo& foo)` on C++ side should be translated to `bar(foo: &FooWrapper)` on
-///   Rust.
-///
-/// - as `T&` - these should be represented as mutable `&Wrapper` references on Rust side:
-///   `bar(T& foo)` on C++ side should be translated to `bar(foo: &mut FooWrapper)` on Rust.
-///
-/// When passing object from rust to C++ do similarly:
-///
-/// - if C++ side accepts `kj::Own<T>` - accept `Wrapper` objects by-value
-///
-/// - if C++ side accepts `const T&` - accept `&Wrapper` references
-///
-/// - if C++ side accepts `T&` - accept `&mut Wrapper` references
+/// The same wrapper can then expose shared methods through `AsRef` / `Deref`, and mutable methods
+/// through `as_mut()` when the caller knows the value is not in the `Ref` state.
 pub enum OwnOrRef<'a, T> {
     Own(KjOwn<T>),
     Ref(&'a T),
+    MutRef(Pin<&'a mut T>),
+}
+
+/// Wrapper for C++ objects that are always owned or mutably borrowed.
+///
+/// `OwnOrMut` represents the two ways a mutable C++ object can be handed to Rust through this
+/// crate's wrappers: owned as `kj::Own<T>` or borrowed as `T&`.
+///
+/// Use this type when the wrapped FFI surface does not allow `const T&`. That keeps the wrapper's
+/// internal state aligned with reality and allows safe mutable access through `as_mut()`.
+///
+/// Instances of this type are not usually exposed directly. Instead, wrapper structs store an
+/// `OwnOrMut<T>` internally and expose methods that operate on the underlying mutable C++ object.
+pub enum OwnOrMut<'a, T> {
+    Own(KjOwn<T>),
     MutRef(Pin<&'a mut T>),
 }
 
@@ -69,7 +82,34 @@ impl<T> OwnOrRef<'_, T> {
     }
 }
 
+impl<T> AsRef<T> for OwnOrMut<'_, T> {
+    fn as_ref(&self) -> &T {
+        match self {
+            OwnOrMut::Own(own) => own.as_ref(),
+            OwnOrMut::MutRef(ref_) => ref_,
+        }
+    }
+}
+
+impl<T> OwnOrMut<'_, T> {
+    /// Obtain a mutable reference to the underlying object.
+    pub fn as_mut(&mut self) -> Pin<&mut T> {
+        match self {
+            OwnOrMut::Own(own) => own.as_mut(),
+            OwnOrMut::MutRef(ref_) => ref_.as_mut(),
+        }
+    }
+}
+
 impl<T> Deref for OwnOrRef<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_ref()
+    }
+}
+
+impl<T> Deref for OwnOrMut<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -90,6 +130,18 @@ impl<T> From<KjOwn<T>> for OwnOrRef<'_, T> {
 }
 
 impl<'a, T> From<Pin<&'a mut T>> for OwnOrRef<'a, T> {
+    fn from(value: Pin<&'a mut T>) -> Self {
+        Self::MutRef(value)
+    }
+}
+
+impl<T> From<KjOwn<T>> for OwnOrMut<'_, T> {
+    fn from(value: KjOwn<T>) -> Self {
+        Self::Own(value)
+    }
+}
+
+impl<'a, T> From<Pin<&'a mut T>> for OwnOrMut<'a, T> {
     fn from(value: Pin<&'a mut T>) -> Self {
         Self::MutRef(value)
     }

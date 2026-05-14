@@ -1403,7 +1403,7 @@ jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
     auto& context = IoContext::current();
     // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
     // search-and-replace across your whole site and you forgot that it'll apply to images too.
-    // When running in the fiddle, let's warn the developer if they do this.
+    // When running in the inspector, let's warn the developer if they do this.
     if (context.isInspectorEnabled()) {
       // httpMetadata can't be null because GetResult always populates it.
       KJ_IF_SOME(type, KJ_REQUIRE_NONNULL(httpMetadata).contentType) {

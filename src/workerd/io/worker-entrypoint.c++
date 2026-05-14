@@ -380,7 +380,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   })
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() catch", PERFETTO_FLOW_FROM_POINTER(this));
-    // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
+    // Log JS exceptions to the JS console, if inspector is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
@@ -605,7 +605,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     }
   })
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
-    // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
+    // Log JS exceptions to the JS console, if inspector is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());

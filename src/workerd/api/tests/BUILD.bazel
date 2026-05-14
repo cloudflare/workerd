@@ -40,8 +40,10 @@ wd_test(
         "connect-handler-test-proxy.js",
     ],
     # Test uses TCP sockets for ports 8081-8083 and may fail when running concurrently with other
-    # tests that do so.
-    tags = ["exclusive"],
+    # tests that do so. Use the "socket" resource to model this behavior – this prevents other tests
+    # with this tag from running at the same time, but still allows for running at the same time as
+    # tests without the tag.
+    tags = ["resources:socket:1"],
 )
 
 wd_test(
@@ -71,7 +73,7 @@ wd_test(
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
-    tags = ["exclusive"],
+    tags = ["resources:socket:1"],
 )
 
 # Test to validate timing semantics for JSRPC streaming responses.
@@ -414,7 +416,7 @@ wd_test(
     src = "js-rpc-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-test.js"],
-    tags = ["exclusive"],
+    tags = ["resources:socket:1"],
 )
 
 wd_test(
@@ -493,6 +495,14 @@ wd_test(
     src = "streams-consumer-reentry-gc-test.wd-test",
     args = ["--experimental"],
     data = ["streams-consumer-reentry-gc-test.js"],
+    # This test exercises a SIGSEGV regression (EDGEWORKER-RUNTIME-H40) by
+    # forcing reentrant controller.error() during the ReadableStream close
+    # drain. Predictable mode triggers an extra GC pass after every worker
+    # entrypoint in KJ_DEBUG builds (see maybeAddGcPassForTest), which
+    # surfaces a separate latent GC-traceability issue in the stream's
+    # state machine. Opt out of predictable mode here so this test only
+    # covers the regression it was written for.
+    predictable = False,
 )
 
 wd_test(
@@ -671,7 +681,7 @@ wd_test(
         "--no-verbose",
     ],
     data = ["js-rpc-test.js"],
-    tags = ["exclusive"],
+    tags = ["resources:socket:1"],
 )
 
 wd_test(

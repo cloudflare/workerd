@@ -89,10 +89,12 @@ KJ_TEST("InvocationSpanContext") {
   FakeEntropySource fakeEntropySource;
   auto sc = InvocationSpanContext::newForInvocation(kj::none, fakeEntropySource);
 
-  // We can create an InvocationSpanContext...
-  static constexpr auto kCheck = TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
-  KJ_EXPECT(sc.getTraceId() == kCheck);
-  KJ_EXPECT(sc.getInvocationId() == kCheck);
+  // In predictable mode, TraceId::fromEntropy returns deterministic but
+  // call-distinct values (process-wide counter), so the traceId and invocationId
+  // of independent invocations differ from each other and across tests. Capture
+  // the IDs and assert the propagation chain rather than specific constants.
+  auto initialTraceId = sc.getTraceId();
+  auto initialInvocationId = sc.getInvocationId();
   KJ_EXPECT(sc.getSpanId() == SpanId(1));
 
   // And serialize that to a capnp struct...
@@ -102,8 +104,8 @@ KJ_TEST("InvocationSpanContext") {
 
   // Then back again...
   auto sc2 = KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(root.asReader()));
-  KJ_EXPECT(sc2.getTraceId() == kCheck);
-  KJ_EXPECT(sc2.getInvocationId() == kCheck);
+  KJ_EXPECT(sc2.getTraceId() == initialTraceId);
+  KJ_EXPECT(sc2.getInvocationId() == initialInvocationId);
   KJ_EXPECT(sc2.getSpanId() == SpanId(1));
   KJ_EXPECT(sc2.isTrigger());
 
@@ -116,21 +118,82 @@ KJ_TEST("InvocationSpanContext") {
         "expected !isTrigger(); unable to create child spans on this context"_kj);
   }
 
+  // Children inherit both the traceId and invocationId of their parent.
   auto sc3 = sc.newChild();
-  KJ_EXPECT(sc3.getTraceId() == kCheck);
-  KJ_EXPECT(sc3.getInvocationId() == kCheck);
+  KJ_EXPECT(sc3.getTraceId() == initialTraceId);
+  KJ_EXPECT(sc3.getInvocationId() == initialInvocationId);
   KJ_EXPECT(sc3.getSpanId() == SpanId(2));
 
+  // Trigger-context propagation: traceId is inherited from sc2, but the
+  // invocationId is freshly generated for the new invocation.
   auto sc4 = InvocationSpanContext::newForInvocation(sc2, fakeEntropySource);
-  KJ_EXPECT(sc4.getTraceId() == kCheck);
-  KJ_EXPECT(sc4.getInvocationId() == kCheck);
+  KJ_EXPECT(sc4.getTraceId() == initialTraceId);
+  KJ_EXPECT(sc4.getInvocationId() != initialInvocationId);
   KJ_EXPECT(sc4.getSpanId() == SpanId(3));
 
   auto& sc5 = KJ_ASSERT_NONNULL(sc4.getParent());
-  KJ_EXPECT(sc5.getTraceId() == kCheck);
-  KJ_EXPECT(sc5.getInvocationId() == kCheck);
+  KJ_EXPECT(sc5.getTraceId() == initialTraceId);
+  KJ_EXPECT(sc5.getInvocationId() == initialInvocationId);
   KJ_EXPECT(sc5.getSpanId() == SpanId(1));
   KJ_EXPECT(sc5.isTrigger());
+}
+
+KJ_TEST("InvocationSpanContext propagates traceFlags from trigger") {
+  setPredictableModeForTest();
+  FakeEntropySource fakeEntropySource;
+
+  // Trigger with traceFlags set — propagates to new invocation
+  auto trigger = InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), TraceFlags(0x01));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(trigger.getTraceFlags()) == TraceFlags(0x01));
+
+  auto sc = InvocationSpanContext::newForInvocation(trigger, fakeEntropySource);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sc.getTraceFlags()) == TraceFlags(0x01));
+
+  // No trigger — traceFlags is absent
+  auto sc2 = InvocationSpanContext::newForInvocation(kj::none, fakeEntropySource);
+  KJ_EXPECT(sc2.getTraceFlags() == kj::none);
+
+  // newChild() propagates traceFlags
+  auto child = sc.newChild();
+  KJ_EXPECT(KJ_ASSERT_NONNULL(child.getTraceFlags()) == TraceFlags(0x01));
+
+  auto child2 = sc2.newChild();
+  KJ_EXPECT(child2.getTraceFlags() == kj::none);
+}
+
+KJ_TEST("InvocationSpanContext traceFlags capnp round-trip and newChild propagation") {
+  setPredictableModeForTest();
+  FakeEntropySource fakeEntropySource;
+
+  // traceFlags=0x01 (sampled) survives round-trip and propagates through newChild
+  auto sampled = InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), TraceFlags(0x01));
+  capnp::MallocMessageBuilder b1;
+  sampled.toCapnp(b1.initRoot<rpc::InvocationSpanContext>());
+  auto rt1 =
+      KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(b1.getRoot<rpc::InvocationSpanContext>()));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(rt1.getTraceFlags()) == TraceFlags(0x01));
+  auto child1 = InvocationSpanContext::newForInvocation(rt1, fakeEntropySource);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(child1.newChild().getTraceFlags()) == TraceFlags(0x01));
+
+  // traceFlags=0x00 (unsampled) is distinct from absent
+  auto unsampled = InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), TraceFlags(0x00));
+  capnp::MallocMessageBuilder b2;
+  unsampled.toCapnp(b2.initRoot<rpc::InvocationSpanContext>());
+  auto rt2 =
+      KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(b2.getRoot<rpc::InvocationSpanContext>()));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(rt2.getTraceFlags()) == TraceFlags(0x00));
+  auto child2 = InvocationSpanContext::newForInvocation(rt2, fakeEntropySource);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(child2.newChild().getTraceFlags()) == TraceFlags(0x00));
+
+  // traceFlags absent stays absent
+  auto absent = InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), kj::none);
+  capnp::MallocMessageBuilder b3;
+  absent.toCapnp(b3.initRoot<rpc::InvocationSpanContext>());
+  auto rt3 =
+      KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(b3.getRoot<rpc::InvocationSpanContext>()));
+  KJ_EXPECT(rt3.getTraceFlags() == kj::none);
+  auto child3 = InvocationSpanContext::newForInvocation(rt3, fakeEntropySource);
+  KJ_EXPECT(child3.newChild().getTraceFlags() == kj::none);
 }
 
 KJ_TEST("SpanContext") {
@@ -139,20 +202,42 @@ KJ_TEST("SpanContext") {
   auto sc =
       SpanContext(TraceId::fromEntropy(fakeEntropySource), SpanId::fromEntropy(fakeEntropySource));
 
-  // We can create a SpanContext...
-  static constexpr auto kCheck = TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
-  KJ_EXPECT(sc.getTraceId() == kCheck);
+  // In predictable mode, TraceId::fromEntropy returns deterministic but
+  // call-distinct values; capture the IDs and verify capnp round-trip.
+  auto initialTraceId = sc.getTraceId();
   KJ_EXPECT(sc.getSpanId() == SpanId(1));
+  KJ_EXPECT(sc.getTraceFlags() == kj::none);
 
-  // And serialize that to a capnp struct...
   capnp::MallocMessageBuilder builder;
   auto root = builder.initRoot<rpc::SpanContext>();
   sc.toCapnp(root);
 
-  // Then back again...
   auto sc2 = SpanContext::fromCapnp(root.asReader());
-  KJ_EXPECT(sc2.getTraceId() == kCheck);
+  KJ_EXPECT(sc2.getTraceId() == initialTraceId);
   KJ_EXPECT(sc2.getSpanId() == SpanId(1));
+  KJ_EXPECT(sc2.getTraceFlags() == kj::none);
+}
+
+KJ_TEST("SpanContext traceFlags preserved through capnp when set, absent when unset") {
+  auto sc = SpanContext(TraceId(1, 2), SpanId(3), TraceFlags(0x01));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sc.getTraceFlags()) == TraceFlags(0x01));
+
+  capnp::MallocMessageBuilder builder;
+  auto root = builder.initRoot<rpc::SpanContext>();
+  sc.toCapnp(root);
+
+  auto sc2 = SpanContext::fromCapnp(root.asReader());
+  KJ_EXPECT(sc2.getTraceId() == TraceId(1, 2));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sc2.getSpanId()) == SpanId(3));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sc2.getTraceFlags()) == TraceFlags(0x01));
+
+  auto sc3 = SpanContext(TraceId(4, 5), SpanId(6));
+  capnp::MallocMessageBuilder builder2;
+  auto root2 = builder2.initRoot<rpc::SpanContext>();
+  sc3.toCapnp(root2);
+
+  auto sc4 = SpanContext::fromCapnp(root2.asReader());
+  KJ_EXPECT(sc4.getTraceFlags() == kj::none);
 }
 
 KJ_TEST("Read/Write FetchEventInfo works") {
@@ -629,6 +714,7 @@ KJ_TEST("SpanContext::tryFromTraceparent valid") {
       "00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-01"_kj));
   KJ_EXPECT(result.getTraceId() == TraceId(0x9900aabbccddeeff, 0x1122334455667788));
   KJ_EXPECT(KJ_ASSERT_NONNULL(result.getSpanId()) == SpanId(0xa1b2c3d4e5f60718));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(result.getTraceFlags()) == 0x01);
 }
 
 KJ_TEST("SpanContext::tryFromTraceparent sampled with extra flags") {
@@ -636,6 +722,7 @@ KJ_TEST("SpanContext::tryFromTraceparent sampled with extra flags") {
       "00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-03"_kj));
   KJ_EXPECT(result.getTraceId() == TraceId(0x9900aabbccddeeff, 0x1122334455667788));
   KJ_EXPECT(KJ_ASSERT_NONNULL(result.getSpanId()) == SpanId(0xa1b2c3d4e5f60718));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(result.getTraceFlags()) == 0x03);
 }
 
 KJ_TEST("SpanContext::tryFromTraceparent rejects invalid inputs") {
@@ -694,8 +781,11 @@ KJ_TEST("SpanContext::tryFromTraceparent rejects invalid inputs") {
                 "00-11223344556677889900aabbccddeeff-0000000000000000-01"_kj) == kj::none);
 
   // Unsampled
-  KJ_EXPECT(SpanContext::tryFromTraceparent(
-                "00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-00"_kj) == kj::none);
+  auto unsampled = KJ_ASSERT_NONNULL(SpanContext::tryFromTraceparent(
+      "00-11223344556677889900aabbccddeeff-a1b2c3d4e5f60718-00"_kj));
+  KJ_EXPECT(unsampled.getTraceId() == TraceId(0x9900aabbccddeeff, 0x1122334455667788));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(unsampled.getSpanId()) == SpanId(0xa1b2c3d4e5f60718));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(unsampled.getTraceFlags()) == 0x00);
 }
 
 }  // namespace
