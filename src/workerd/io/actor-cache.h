@@ -209,7 +209,11 @@ class ActorCacheInterface: public ActorCacheOps {
     virtual kj::Promise<void> rollback() = 0;
   };
 
-  virtual kj::Own<Transaction> startTransaction() = 0;
+  // Start an explicit async transaction.
+  //
+  // If this returns a Promise instead of a transaction, then we can't start a transaction right
+  // now. The caller must await the promise first, then try again.
+  virtual kj::OneOf<kj::Own<Transaction>, kj::Promise<void>> startTransaction() = 0;
 
   // We split these up so client code that doesn't need the count doesn't have to
   // wait for it just to account for backpressure
@@ -383,7 +387,7 @@ class ActorCache final: public ActorCacheInterface {
       kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) override;
   // See ActorCacheOps.
 
-  kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
+  kj::OneOf<kj::Own<Transaction>, kj::Promise<void>> startTransaction() override;
   DeleteAllResults deleteAll(
       WriteOptions options, SpanParent traceSpan, DeleteAllOptions deleteAllOptions = {}) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;

@@ -111,15 +111,21 @@ bool ActorSqlite::ImplicitTxn::isSomeWriteConfirmed() const {
   return someWriteConfirmed;
 }
 
+kj::Promise<void> ActorSqlite::ImplicitTxn::waitForCompletion() {
+  KJ_IF_SOME(c, completionPaf) {
+    return c.promise.addBranch();
+  } else {
+    return completionPaf.emplace().promise.addBranch();
+  }
+}
+
 ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(actorSqlite) {
   KJ_SWITCH_ONEOF(actorSqlite.currentTxn) {
     KJ_CASE_ONEOF(_, NoTxn) {}
     KJ_CASE_ONEOF(implicit, ImplicitTxn*) {
-      // An implicit transaction is open, commit it now because it would be weird if writes
-      // performed before the explicit transaction started were postponed until the transaction
-      // completes. Note that this isn't violating any atomicity guarantees because the transaction
-      // API is async, and atomicity is only guaranteed over synchronous code.
-      implicit->commit();
+      // ActorSqlite::startTransaction() should have handled this case before constructing
+      // ExplicitTxn.
+      KJ_FAIL_REQUIRE("can't create ExplicitTxn while ImplicitTxn is open");
     }
     KJ_CASE_ONEOF(exp, ExplicitTxn*) {
       KJ_REQUIRE(!exp->hasChild,
@@ -777,10 +783,15 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
   return kj::none;
 }
 
-kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
+kj::OneOf<kj::Own<ActorCacheInterface::Transaction>, kj::Promise<void>> ActorSqlite::
+    startTransaction() {
   requireNotBroken();
 
-  return kj::refcounted<ExplicitTxn>(*this);
+  KJ_IF_SOME(itxn, currentTxn.tryGet<ImplicitTxn*>()) {
+    return itxn->waitForCompletion();
+  } else {
+    return kj::Own<ActorCacheInterface::Transaction>(kj::refcounted<ExplicitTxn>(*this));
+  }
 }
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(

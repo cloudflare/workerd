@@ -91,7 +91,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
       kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) override;
   // See ActorCacheOps.
 
-  kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
+  kj::OneOf<kj::Own<ActorCacheInterface::Transaction>, kj::Promise<void>> startTransaction()
+      override;
   DeleteAllResults deleteAll(
       WriteOptions options, SpanParent traceSpan, DeleteAllOptions deleteAllOptions = {}) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
@@ -143,6 +144,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     void setSomeWriteConfirmed(bool someWriteConfirmed);
     bool isSomeWriteConfirmed() const;
 
+    kj::Promise<void> waitForCompletion();
+
    private:
     ActorSqlite& parent;
 
@@ -150,6 +153,21 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
     // True if any of the writes in this commit are confirmed writes.
     bool someWriteConfirmed = false;
+
+    struct CompletionPaf {
+      kj::Own<kj::PromiseFulfiller<void>> fulfiller;
+      kj::ForkedPromise<void> promise;
+
+      CompletionPaf(kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
+          : fulfiller(kj::mv(paf.fulfiller)),
+            promise(paf.promise.fork()) {}
+      ~CompletionPaf() noexcept(false) {
+        fulfiller->fulfill();
+      }
+    };
+
+    // Initialized if waitForCompletion() is ever called.
+    kj::Maybe<CompletionPaf> completionPaf;
   };
 
   class ExplicitTxn: public ActorCacheInterface::Transaction, public kj::Refcounted {

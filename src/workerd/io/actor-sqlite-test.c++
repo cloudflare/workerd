@@ -165,9 +165,13 @@ struct ActorSqliteTest final {
       kj::Array<ActorCache::KeyValuePair> pairs, ActorCache::WriteOptions options = {}) {
     return actor.put(kj::mv(pairs), options, nullptr);
   }
+  auto startTransaction() {
+    return KJ_ASSERT_NONNULL(
+        actor.startTransaction().tryGet<kj::Own<ActorCacheInterface::Transaction>>());
+  }
   auto putMultipleExplicitTxn(
       kj::Array<ActorCache::KeyValuePair> pairs, ActorCache::WriteOptions options = {}) {
-    auto txn = actor.startTransaction();
+    auto txn = startTransaction();
     txn->put(kj::mv(pairs), options, nullptr);
     return txn->commit();
   }
@@ -457,7 +461,7 @@ KJ_TEST("alarm scheduling starts synchronously before explicit local db commit")
   };
 
   {
-    auto txn = test.actor.startTransaction();
+    auto txn = test.startTransaction();
     txn->setAlarm(oneMs, {}, nullptr);
 
     KJ_ASSERT(!startedScheduleRun);
@@ -486,10 +490,10 @@ KJ_TEST("alarm scheduling does not start synchronously before nested explicit lo
   };
 
   {
-    auto txn1 = test.actor.startTransaction();
+    auto txn1 = test.startTransaction();
 
     {
-      auto txn2 = test.actor.startTransaction();
+      auto txn2 = test.startTransaction();
       txn2->setAlarm(oneMs, {}, nullptr);
 
       txn2->commit();
@@ -1741,7 +1745,7 @@ KJ_TEST("rolling back transaction leaves alarm in expected state") {
   KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
 
   {
-    auto txn = test.actor.startTransaction();
+    auto txn = test.startTransaction();
     KJ_ASSERT(expectSync(txn->getAlarm({})) == twoMs);
     txn->setAlarm(oneMs, {}, nullptr);
     KJ_ASSERT(expectSync(txn->getAlarm({})) == oneMs);
@@ -1764,7 +1768,7 @@ KJ_TEST("rolling back transaction leaves deferred alarm deletion in expected sta
     auto armResult = test.actor.armAlarmHandler(twoMs, nullptr, testCurrentTime);
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
 
-    auto txn = test.actor.startTransaction();
+    auto txn = test.startTransaction();
     KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
     test.setAlarm(oneMs);
     KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
@@ -1797,7 +1801,7 @@ KJ_TEST("committing transaction leaves deferred alarm deletion in expected state
     auto armResult = test.actor.armAlarmHandler(twoMs, nullptr, testCurrentTime);
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
 
-    auto txn = test.actor.startTransaction();
+    auto txn = test.startTransaction();
     KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
     test.setAlarm(oneMs);
     KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
@@ -1828,11 +1832,11 @@ KJ_TEST("rolling back nested transaction leaves deferred alarm deletion in expec
     auto armResult = test.actor.armAlarmHandler(twoMs, nullptr, testCurrentTime);
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
 
-    auto txn1 = test.actor.startTransaction();
+    auto txn1 = test.startTransaction();
     KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
     {
       // Rolling back nested transaction change leaves deferred deletion in place.
-      auto txn2 = test.actor.startTransaction();
+      auto txn2 = test.startTransaction();
       KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
       test.setAlarm(oneMs);
       KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
@@ -1842,7 +1846,7 @@ KJ_TEST("rolling back nested transaction leaves deferred alarm deletion in expec
     KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
     {
       // Committing nested transaction changes parent transaction state to dirty.
-      auto txn3 = test.actor.startTransaction();
+      auto txn3 = test.startTransaction();
       KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
       test.setAlarm(oneMs);
       KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
@@ -1852,7 +1856,7 @@ KJ_TEST("rolling back nested transaction leaves deferred alarm deletion in expec
     KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
     {
       // Nested transaction of dirty transaction is dirty, rollback has no effect.
-      auto txn4 = test.actor.startTransaction();
+      auto txn4 = test.startTransaction();
       KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
       txn4->rollback().wait(test.ws);
       KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
@@ -2576,7 +2580,7 @@ KJ_TEST("sync() throws after critical error in explicit transaction") {
   KJ_DEFER(sqlite3_hard_heap_limit64(heapLimit););
 
   // Start an explicit transaction
-  auto txn = test.actor.startTransaction();
+  auto txn = test.startTransaction();
 
   // Do a write within the transaction
   txn->put(kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {}, nullptr);
@@ -2620,7 +2624,7 @@ KJ_TEST("allowUnconfirmed put in explicit transaction does not block output gate
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start an explicit transaction
-  auto txn = test.actor.startTransaction();
+  auto txn = test.startTransaction();
 
   // Do an unconfirmed put within the transaction
   txn->put(
@@ -2652,7 +2656,7 @@ KJ_TEST("confirmed put in explicit transaction blocks output gate on commit") {
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start an explicit transaction
-  auto txn = test.actor.startTransaction();
+  auto txn = test.startTransaction();
 
   // Do a confirmed put (default behavior)
   txn->put(kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {.allowUnconfirmed = false},
@@ -2684,7 +2688,7 @@ KJ_TEST("mixed confirmed and unconfirmed puts in explicit transaction use output
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start an explicit transaction
-  auto txn = test.actor.startTransaction();
+  auto txn = test.startTransaction();
 
   // Do an unconfirmed put followed by a confirmed put
   txn->put(
@@ -2723,7 +2727,7 @@ KJ_TEST("allowUnconfirmed delete in explicit transaction does not block output g
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start an explicit transaction
-  auto txn = test.actor.startTransaction();
+  auto txn = test.startTransaction();
 
   // Perform an unconfirmed delete
   expectSync(txn->delete_(kj::str("foo"), {.allowUnconfirmed = true}, nullptr));
@@ -2754,7 +2758,7 @@ KJ_TEST("allowUnconfirmed putMultiple in explicit transaction does not block out
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start an explicit transaction
-  auto txn = test.actor.startTransaction();
+  auto txn = test.startTransaction();
 
   // Do an unconfirmed putMultiple
   auto pairs = kj::heapArrayBuilder<ActorCacheOps::KeyValuePair>(2);
@@ -2794,7 +2798,7 @@ KJ_TEST("allowUnconfirmed deleteMultiple in explicit transaction does not block 
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start an explicit transaction
-  auto txn = test.actor.startTransaction();
+  auto txn = test.startTransaction();
 
   // Perform an unconfirmed deleteMultiple
   auto keys = kj::heapArrayBuilder<ActorCacheOps::Key>(2);
@@ -2829,7 +2833,7 @@ KJ_TEST("allowUnconfirmed setAlarm in explicit transaction does not block output
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start an explicit transaction
-  auto txn = test.actor.startTransaction();
+  auto txn = test.startTransaction();
 
   // Set an alarm with allowUnconfirmed
   txn->setAlarm(oneMs, {.allowUnconfirmed = true}, nullptr);
@@ -2861,7 +2865,7 @@ KJ_TEST("nested transaction: unconfirmed child commit does not block output gate
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start a parent transaction
-  auto parentTxn = test.actor.startTransaction();
+  auto parentTxn = test.startTransaction();
 
   // Do an unconfirmed put in the parent
   parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
@@ -2869,7 +2873,7 @@ KJ_TEST("nested transaction: unconfirmed child commit does not block output gate
 
   {
     // Start a nested child transaction
-    auto childTxn = test.actor.startTransaction();
+    auto childTxn = test.startTransaction();
 
     // Do an unconfirmed put in the child
     childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
@@ -2909,13 +2913,13 @@ KJ_TEST("nested transaction: confirmed child propagates to parent commit") {
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start a parent transaction with unconfirmed write
-  auto parentTxn = test.actor.startTransaction();
+  auto parentTxn = test.startTransaction();
   parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
       {.allowUnconfirmed = true}, nullptr);
 
   {
     // Start a nested child transaction
-    auto childTxn = test.actor.startTransaction();
+    auto childTxn = test.startTransaction();
 
     // Do a confirmed put in the child
     childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
@@ -2955,13 +2959,13 @@ KJ_TEST("nested transaction: confirmed parent with unconfirmed child blocks outp
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start a parent transaction with confirmed write
-  auto parentTxn = test.actor.startTransaction();
+  auto parentTxn = test.startTransaction();
   parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
       {.allowUnconfirmed = false}, nullptr);
 
   {
     // Start a nested child transaction
-    auto childTxn = test.actor.startTransaction();
+    auto childTxn = test.startTransaction();
 
     // Do an unconfirmed put in the child
     childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
@@ -3001,19 +3005,19 @@ KJ_TEST("nested transaction: deeply nested confirmed write propagates to root") 
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start a parent transaction with unconfirmed write
-  auto txn1 = test.actor.startTransaction();
+  auto txn1 = test.startTransaction();
   txn1->put(kj::str("level1"), kj::heapArray(kj::str("data").asBytes()), {.allowUnconfirmed = true},
       nullptr);
 
   {
     // Start a second level nested transaction with unconfirmed write
-    auto txn2 = test.actor.startTransaction();
+    auto txn2 = test.startTransaction();
     txn2->put(kj::str("level2"), kj::heapArray(kj::str("data").asBytes()),
         {.allowUnconfirmed = true}, nullptr);
 
     {
       // Start a third level nested transaction with confirmed write
-      auto txn3 = test.actor.startTransaction();
+      auto txn3 = test.startTransaction();
       txn3->put(kj::str("level3"), kj::heapArray(kj::str("data").asBytes()),
           {.allowUnconfirmed = false}, nullptr);
 
@@ -3057,13 +3061,13 @@ KJ_TEST("nested transaction: rollback resets someWriteConfirmed flag") {
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start a parent transaction with unconfirmed write
-  auto parentTxn = test.actor.startTransaction();
+  auto parentTxn = test.startTransaction();
   parentTxn->put(kj::str("parent"), kj::heapArray(kj::str("data").asBytes()),
       {.allowUnconfirmed = true}, nullptr);
 
   {
     // Start a nested child transaction
-    auto childTxn = test.actor.startTransaction();
+    auto childTxn = test.startTransaction();
 
     // Do a confirmed put in the child
     childTxn->put(kj::str("child"), kj::heapArray(kj::str("data").asBytes()),
@@ -3105,7 +3109,7 @@ KJ_TEST("explicit transaction: commit failure breaks output gate even for unconf
   KJ_ASSERT(test.gate.wait(nullptr).poll(test.ws));
 
   // Start an explicit transaction
-  auto txn = test.actor.startTransaction();
+  auto txn = test.startTransaction();
 
   // Do an unconfirmed put
   txn->put(

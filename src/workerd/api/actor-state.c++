@@ -684,7 +684,21 @@ jsg::Promise<DurableObjectStorage::AsyncTxnResult> DurableObjectStorage::asyncTr
   //
   // For the ActorCache-based implementation, it doesn't matter when we call `startTransaction()`
   // as the method merely allocates an object and returns it with no side effects.
-  auto txn = js.alloc<DurableObjectTransaction>(context.addObject(cache.startTransaction()));
+  kj::Own<ActorCacheInterface::Transaction> rawTxn;
+  KJ_SWITCH_ONEOF(cache.startTransaction()) {
+    KJ_CASE_ONEOF(t, kj::Own<ActorCacheInterface::Transaction>) {
+      rawTxn = kj::mv(t);
+    }
+    KJ_CASE_ONEOF(promise, kj::Promise<void>) {
+      // Whoops, we can't start the transaction yet. Wait and try again.
+      return context.awaitIoWithInputLock(js, kj::mv(promise),
+          [&context, &cache, callback = kj::mv(callback)](jsg::Lock& js) mutable {
+        return asyncTransactionImpl(js, context, cache, kj::mv(callback));
+      });
+    }
+  }
+
+  auto txn = js.alloc<DurableObjectTransaction>(context.addObject(kj::mv(rawTxn)));
 
   return js.resolvedPromise(txn.addRef())
       .then(js, kj::mv(callback))
