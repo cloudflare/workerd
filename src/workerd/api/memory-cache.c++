@@ -212,7 +212,10 @@ void SharedMemoryCache::evictNextWhileLocked(
   KJ_REQUIRE(data.cache.size() > 0);
 
   // Create eviction span - only called from IO context
-  auto evictionSpan = IoContext::current().makeTraceSpan("memory_cache_eviction"_kjc);
+  SpanBuilder evictionSpan = nullptr;
+  KJ_IF_SOME(ctx, IoContext::tryCurrent()) {
+    evictionSpan = ctx.makeTraceSpan("memory_cache_eviction"_kjc);
+  }
 
   // If there is an entry that has expired already, evict that one.
   MemoryCacheEntry& maybeExpired = *data.cache.ordered<3>().begin();
