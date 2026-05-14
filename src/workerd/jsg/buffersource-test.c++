@@ -72,12 +72,50 @@ struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
     return true;
   }
 
+  // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-17: verify that the const
+  // overload of BackingStore::asArrayPtr<T>() correctly handles byteOffset as
+  // bytes (not elements) for multi-byte T.
+  bool testConstAsArrayPtrByteOffset(jsg::Lock& js, jsg::BufferSource buf) {
+    // Write known bytes into the buffer: 12 bytes total.
+    // We expect the caller to pass a Uint8Array view with byteOffset=4 and
+    // byteLength=8 over a 12-byte ArrayBuffer.
+    auto bytes = buf.asArrayPtr();
+    KJ_ASSERT(bytes.size() == 8);
+    bytes[0] = 0x01;
+    bytes[1] = 0x02;
+    bytes[2] = 0x03;
+    bytes[3] = 0x04;
+    bytes[4] = 0x05;
+    bytes[5] = 0x06;
+    bytes[6] = 0x07;
+    bytes[7] = 0x08;
+
+    // Now obtain a const reference and call asArrayPtr<uint32_t>() on it.
+    // The view has byteOffset=4 (from the underlying ArrayBuffer) and
+    // byteLength=8. The const overload must add byteOffset as bytes, not
+    // as uint32_t elements, so we should get 2 uint32_t elements starting
+    // at the view's data (not 4*sizeof(uint32_t)=16 bytes into the
+    // backing store).
+    const auto& constBuf = buf;
+    auto constPtr = constBuf.asArrayPtr<uint32_t>();
+    KJ_ASSERT(constPtr.size() == 2);
+    KJ_ASSERT(constPtr.asBytes() == bytes.asConst());
+
+    // Also verify the non-const overload produces the same result.
+    auto mutablePtr = buf.asArrayPtr<uint32_t>();
+    KJ_ASSERT(mutablePtr.size() == 2);
+    KJ_ASSERT(mutablePtr.asBytes() == constPtr.asBytes());
+
+    return true;
+  }
+
   JSG_RESOURCE_TYPE(BufferSourceContext) {
     JSG_METHOD(takeBufferSource);
     JSG_METHOD(takeUint8Array);
     JSG_METHOD(makeBufferSource);
     JSG_METHOD(makeArrayBuffer);
     JSG_METHOD(doTest);
+    JSG_METHOD(testConstAsArrayPtrByteOffset);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(BufferSourceIsolate, BufferSourceContext);
@@ -119,6 +157,24 @@ KJ_TEST("BufferSource works") {
       "boolean", "true");
 
   e.expectEval("const buf = new Uint8Array(12); doTest(buf.subarray(4))", "boolean", "true");
+}
+
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-17:
+// The const overload of BackingStore::asArrayPtr<T>() must treat byteOffset as
+// a byte count, not an element count. Before the fix, for multi-byte T with a
+// nonzero byteOffset the const overload advanced by byteOffset * sizeof(T) bytes
+// instead of byteOffset bytes, producing an out-of-bounds pointer.
+KJ_TEST("BackingStore const asArrayPtr handles byteOffset correctly") {
+  Evaluator<BufferSourceContext, BufferSourceIsolate> e(v8System);
+
+  // Create a Uint8Array view at byteOffset=4 over a 12-byte ArrayBuffer.
+  // The view has byteLength=8. testConstAsArrayPtrByteOffset() will call
+  // the const overload of asArrayPtr<uint32_t>() and verify the pointer
+  // arithmetic is correct.
+  e.expectEval("const ab = new ArrayBuffer(12);"
+               "const view = new Uint8Array(ab, 4, 8);"
+               "testConstAsArrayPtrByteOffset(view)",
+      "boolean", "true");
 }
 
 }  // namespace
