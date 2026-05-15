@@ -31,6 +31,9 @@ jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
     kj::Maybe<kj::ArrayPtr<kj::byte>> rem_buf) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
+  JSG_REQUIRE(size <= kMaxPrimeBits, RangeError, "generatePrime size exceeds maximum (",
+      kMaxPrimeBits, " bits)");
+
   // Use mapping to have kj::Own work with optional buffer
   static const auto toBignum =
       [](kj::Maybe<kj::ArrayPtr<kj::byte>>& maybeBignum) -> ncrypto::BignumPointer {
@@ -46,8 +49,6 @@ jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
 
   auto add = toBignum(add_buf);
   auto rem = toBignum(rem_buf);
-  JSG_REQUIRE(size <= kMaxPrimeBits, RangeError, "generatePrime size exceeds maximum (",
-      kMaxPrimeBits, " bits)");
 
   // The JS interface already ensures that the (positive) size fits into an int.
   int bits = static_cast<int>(size);
