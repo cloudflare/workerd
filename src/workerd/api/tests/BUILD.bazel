@@ -3,6 +3,12 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    src = "stdio-writesync-reentry-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["stdio-writesync-reentry-uaf-test.js"],
+)
+
+wd_test(
     src = "messageport-postmessage-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["messageport-postmessage-uaf-test.js"],
