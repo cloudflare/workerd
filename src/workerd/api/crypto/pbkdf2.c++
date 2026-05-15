@@ -66,7 +66,7 @@ class Pbkdf2Key final: public CryptoKey::Impl {
     checkPbkdfLimits(js, iterations);
     auto derivedLengthBytes = length / 8;
     JSG_REQUIRE(ncrypto::checkHkdfLength(hashType, derivedLengthBytes), DOMOperationError,
-        "PBKDF2 derived key length exceeds maximum for this hash.");
+        "Pbkdf2 failed: derived key length exceeds maximum for this hash");
 
     return JSG_REQUIRE_NONNULL(pbkdf2(js, derivedLengthBytes, iterations, hashType, keyData, salt),
         Error, "PBKDF2 deriveBits failed.");
