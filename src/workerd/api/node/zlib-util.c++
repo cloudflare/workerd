@@ -164,7 +164,12 @@ void ZlibContext::initialize(int _level,
   }
 
   KJ_IF_SOME(dict, _dictionary) {
-    dictionary = kj::mv(dict);
+    // Deep-copy the dictionary bytes into runtime-owned storage. The incoming
+    // kj::Array<kj::byte> from jsg::asBytes() is a non-owning view into the
+    // V8 BackingStore; if the JS-side ArrayBuffer is resizable, the caller can
+    // shrink it to 0 before the deferred setDictionary() runs, leaving the
+    // stored pointer dangling into PROT_NONE pages (SIGSEGV).
+    dictionary = dict.clone();
   }
 }
 
