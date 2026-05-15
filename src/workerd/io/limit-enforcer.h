@@ -94,7 +94,12 @@ class IsolateLimitEnforcer: public kj::Refcounted {
     return kj::none;
   }
 
-  virtual kj::Maybe<uint64_t> checkScryptCost(jsg::Lock& js, uint64_t cost) const {
+  virtual kj::Maybe<uint64_t> checkScryptCost(
+      jsg::Lock& js, uint32_t N, uint32_t r, uint32_t p) const {
+    // Saturate to avoid overflow in the product.
+    if (N > DEFAULT_MAX_SCRYPT_COST || r > DEFAULT_MAX_SCRYPT_COST || p > DEFAULT_MAX_SCRYPT_COST)
+      return DEFAULT_MAX_SCRYPT_COST;
+    uint64_t cost = static_cast<uint64_t>(N) * r * p;
     if (cost > DEFAULT_MAX_SCRYPT_COST) return DEFAULT_MAX_SCRYPT_COST;
     return kj::none;
   }
