@@ -89,10 +89,12 @@ KJ_TEST("InvocationSpanContext") {
   FakeEntropySource fakeEntropySource;
   auto sc = InvocationSpanContext::newForInvocation(kj::none, fakeEntropySource);
 
-  // We can create an InvocationSpanContext...
-  static constexpr auto kCheck = TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
-  KJ_EXPECT(sc.getTraceId() == kCheck);
-  KJ_EXPECT(sc.getInvocationId() == kCheck);
+  // In predictable mode, TraceId::fromEntropy returns deterministic but
+  // call-distinct values (process-wide counter), so the traceId and invocationId
+  // of independent invocations differ from each other and across tests. Capture
+  // the IDs and assert the propagation chain rather than specific constants.
+  auto initialTraceId = sc.getTraceId();
+  auto initialInvocationId = sc.getInvocationId();
   KJ_EXPECT(sc.getSpanId() == SpanId(1));
 
   // And serialize that to a capnp struct...
@@ -102,8 +104,8 @@ KJ_TEST("InvocationSpanContext") {
 
   // Then back again...
   auto sc2 = KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(root.asReader()));
-  KJ_EXPECT(sc2.getTraceId() == kCheck);
-  KJ_EXPECT(sc2.getInvocationId() == kCheck);
+  KJ_EXPECT(sc2.getTraceId() == initialTraceId);
+  KJ_EXPECT(sc2.getInvocationId() == initialInvocationId);
   KJ_EXPECT(sc2.getSpanId() == SpanId(1));
   KJ_EXPECT(sc2.isTrigger());
 
@@ -116,19 +118,22 @@ KJ_TEST("InvocationSpanContext") {
         "expected !isTrigger(); unable to create child spans on this context"_kj);
   }
 
+  // Children inherit both the traceId and invocationId of their parent.
   auto sc3 = sc.newChild();
-  KJ_EXPECT(sc3.getTraceId() == kCheck);
-  KJ_EXPECT(sc3.getInvocationId() == kCheck);
+  KJ_EXPECT(sc3.getTraceId() == initialTraceId);
+  KJ_EXPECT(sc3.getInvocationId() == initialInvocationId);
   KJ_EXPECT(sc3.getSpanId() == SpanId(2));
 
+  // Trigger-context propagation: traceId is inherited from sc2, but the
+  // invocationId is freshly generated for the new invocation.
   auto sc4 = InvocationSpanContext::newForInvocation(sc2, fakeEntropySource);
-  KJ_EXPECT(sc4.getTraceId() == kCheck);
-  KJ_EXPECT(sc4.getInvocationId() == kCheck);
+  KJ_EXPECT(sc4.getTraceId() == initialTraceId);
+  KJ_EXPECT(sc4.getInvocationId() != initialInvocationId);
   KJ_EXPECT(sc4.getSpanId() == SpanId(3));
 
   auto& sc5 = KJ_ASSERT_NONNULL(sc4.getParent());
-  KJ_EXPECT(sc5.getTraceId() == kCheck);
-  KJ_EXPECT(sc5.getInvocationId() == kCheck);
+  KJ_EXPECT(sc5.getTraceId() == initialTraceId);
+  KJ_EXPECT(sc5.getInvocationId() == initialInvocationId);
   KJ_EXPECT(sc5.getSpanId() == SpanId(1));
   KJ_EXPECT(sc5.isTrigger());
 }
@@ -197,8 +202,9 @@ KJ_TEST("SpanContext") {
   auto sc =
       SpanContext(TraceId::fromEntropy(fakeEntropySource), SpanId::fromEntropy(fakeEntropySource));
 
-  static constexpr auto kCheck = TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
-  KJ_EXPECT(sc.getTraceId() == kCheck);
+  // In predictable mode, TraceId::fromEntropy returns deterministic but
+  // call-distinct values; capture the IDs and verify capnp round-trip.
+  auto initialTraceId = sc.getTraceId();
   KJ_EXPECT(sc.getSpanId() == SpanId(1));
   KJ_EXPECT(sc.getTraceFlags() == kj::none);
 
@@ -207,7 +213,7 @@ KJ_TEST("SpanContext") {
   sc.toCapnp(root);
 
   auto sc2 = SpanContext::fromCapnp(root.asReader());
-  KJ_EXPECT(sc2.getTraceId() == kCheck);
+  KJ_EXPECT(sc2.getTraceId() == initialTraceId);
   KJ_EXPECT(sc2.getSpanId() == SpanId(1));
   KJ_EXPECT(sc2.getTraceFlags() == kj::none);
 }

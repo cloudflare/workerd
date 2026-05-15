@@ -183,7 +183,7 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
         isExperimental = true;
       } else if (annotation.getId() == IMPLIED_BY_AFTER_DATE_ANNOTATION_ID) {
         auto value = annotation.getValue();
-        auto s = value.getStruct().getAs<workerd::ImpliedByAfterDate>();
+        auto s = value.getStruct().as<workerd::ImpliedByAfterDate>();
         auto parsedDate = KJ_ASSERT_NONNULL(CompatDate::parse(s.getDate()));
         // This flag will be marked as enabled if the flag identified by
         // s.getName() is enabled, but only on or after the specified date.

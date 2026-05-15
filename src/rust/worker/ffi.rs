@@ -4,7 +4,7 @@
 
 use std::pin::Pin;
 
-use kj::http::HttpConnectSettings;
+use kj::http::ConnectSettings;
 use kj_rs::KjDate;
 
 use crate::CustomEvent;
@@ -65,7 +65,7 @@ pub mod bridge {
 
     #[namespace = "kj::rust"]
     extern "C++" {
-        type HttpConnectSettings<'a> = kj::http::HttpConnectSettings<'a>;
+        type HttpConnectSettings<'a> = kj::http::ConnectSettings<'a>;
     }
 
     extern "Rust" {
@@ -139,6 +139,7 @@ impl Wrapper {
         request_body: Pin<&'a mut bridge::AsyncInputStream>,
         response: Pin<&'a mut bridge::HttpServiceResponse>,
     ) -> Result<()> {
+        let response = crate::ServiceResponse::from(response);
         self.worker
             .request(method, url, headers.into(), request_body, response)
             .await?;
@@ -151,8 +152,9 @@ impl Wrapper {
         headers: &'a bridge::HttpHeaders,
         connection: Pin<&'a mut bridge::AsyncIoStream>,
         response: Pin<&'a mut bridge::ConnectResponse>,
-        settings: HttpConnectSettings<'a>,
+        settings: ConnectSettings<'a>,
     ) -> Result<()> {
+        let response = crate::ConnectResponse::from(response);
         self.worker
             .connect(host, headers.into(), connection, response, settings)
             .await?;

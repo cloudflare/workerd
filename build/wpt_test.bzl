@@ -88,6 +88,10 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         sidecar = "@wpt//:entrypoint" if start_server else None,
         compat_date = compat_date,
         generate_all_compat_flags_variant = False,  # Already using future date where possible.
+        # Predictable mode enables V8's --expose-gc, which can trigger additional JIT events
+        # that produce INFO log lines on stdout. Those lines land after the JSON report/stats
+        # blobs emitted by the WPT harness and break tools/cross/wpt_logs.py parsing.
+        predictable = False,
         data = data,
         **kwargs
     )
