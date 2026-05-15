@@ -424,6 +424,9 @@ class ZeroOnFree {
 // Check that the requested number of iterations for a key-derivation function
 // is acceptable. If the requested iterations is not acceptable, a JS error will
 // be thrown. Otherwise the method will return normally.
+// Largest standard DH group (modp18) is 8192 bits.
+constexpr uint32_t kMaxPrimeBits = 8192;
+
 void checkPbkdfLimits(jsg::Lock& js, size_t iterations);
 void checkScryptLimits(jsg::Lock& js, uint32_t N, uint32_t r, uint32_t p);
 

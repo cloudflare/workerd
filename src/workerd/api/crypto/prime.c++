@@ -12,9 +12,6 @@
 namespace workerd::api {
 namespace {
 
-// Largest standard DH group (modp18) is 8192 bits.
-constexpr uint32_t kMaxPrimeBits = 8192;
-
 bool checkLimitEnforcer(int, int) {
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
     return ioContext.getLimitEnforcer().getLimitsExceeded() == kj::none;

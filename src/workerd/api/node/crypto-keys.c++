@@ -11,6 +11,7 @@
 #include <ncrypto.h>
 #include <openssl/crypto.h>
 
+#include <climits>
 #include <map>
 
 // TODO(soon): This implements most of node:crypto key import, export, and
@@ -808,6 +809,8 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions opti
     }
     KJ_CASE_ONEOF(prime, jsg::JsRef<jsg::JsBufferSource>) {
       auto primePtr = prime.getHandle(js).asArrayPtr();
+      JSG_REQUIRE(
+          primePtr.size() <= kMaxPrimeBits / CHAR_BIT, RangeError, "DH prime exceeds maximum size");
       ncrypto::BignumPointer bn(primePtr.begin(), primePtr.size());
 
       auto bn_g = ncrypto::BignumPointer::New();

@@ -1946,6 +1946,15 @@ export const generate_rsa_key_pair_modulus_cap = {
   },
 };
 
+export const generate_dh_key_pair_prime_size_cap = {
+  test() {
+    // 1025 bytes > kMaxPrimeBits / 8 (1024 bytes)
+    throws(() => generateKeyPairSync('dh', { prime: Buffer.alloc(1025) }), {
+      name: 'RangeError',
+    });
+  },
+};
+
 export const generate_rsa_key_pair = {
   test() {
     const { publicKey, privateKey } = generateKeyPairSync('rsa', {
