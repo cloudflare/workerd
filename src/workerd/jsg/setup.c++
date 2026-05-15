@@ -73,7 +73,8 @@ static kj::Own<v8::Platform> userPlatform(v8::Platform& platform) {
   return kj::Own<v8::Platform>(&platform, kj::NullDisposer::instance);
 }
 
-V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags) {
+V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags,
+    JitCodeEventTracking jitCodeEventTracking) {
   auto platform = defaultPlatform(0);
   auto defaultPlatformPtr = platform.get();
   init(kj::mv(platform), flags, [defaultPlatformPtr](v8::Isolate* isolate) {
@@ -81,36 +82,41 @@ V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags) {
         defaultPlatformPtr, isolate, v8::platform::MessageLoopBehavior::kDoNotWait);
   }, [defaultPlatformPtr](v8::Isolate* isolate) {
     v8::platform::NotifyIsolateShutdown(defaultPlatformPtr, isolate);
-  });
+  }, jitCodeEventTracking);
 }
 
 V8System::V8System(v8::Platform& platformParam,
     kj::ArrayPtr<const kj::StringPtr> flags,
-    v8::Platform* defaultPlatformPtr) {
+    v8::Platform* defaultPlatformPtr,
+    JitCodeEventTracking jitCodeEventTracking) {
   KJ_REQUIRE_NONNULL(defaultPlatformPtr);
   init(userPlatform(platformParam), flags, [defaultPlatformPtr](v8::Isolate* isolate) {
     return v8::platform::PumpMessageLoop(
         defaultPlatformPtr, isolate, v8::platform::MessageLoopBehavior::kDoNotWait);
   }, [defaultPlatformPtr](v8::Isolate* isolate) {
     v8::platform::NotifyIsolateShutdown(defaultPlatformPtr, isolate);
-  });
+  }, jitCodeEventTracking);
 }
 
 V8System::V8System(v8::Platform& platformParam,
     kj::ArrayPtr<const kj::StringPtr> flags,
     PumpMsgLoopType pumpMsgLoopFn,
-    ShutdownIsolateType shutdownIsolateFn) {
-  init(userPlatform(platformParam), flags, kj::mv(pumpMsgLoopFn), kj::mv(shutdownIsolateFn));
+    ShutdownIsolateType shutdownIsolateFn,
+    JitCodeEventTracking jitCodeEventTracking) {
+  init(userPlatform(platformParam), flags, kj::mv(pumpMsgLoopFn), kj::mv(shutdownIsolateFn),
+      jitCodeEventTracking);
 }
 
 void V8System::init(kj::Own<v8::Platform> platformParam,
     kj::ArrayPtr<const kj::StringPtr> flags,
     PumpMsgLoopType pumpMsgLoopFn,
-    ShutdownIsolateType shutdownIsolateFn) {
+    ShutdownIsolateType shutdownIsolateFn,
+    JitCodeEventTracking jitCodeEventTrackingParam) {
   platformInner = kj::mv(platformParam);
   platformWrapper = kj::heap<V8PlatformWrapper>(*platformInner);
   pumpMsgLoop = kj::mv(pumpMsgLoopFn);
   shutdownIsolate = kj::mv(shutdownIsolateFn);
+  jitCodeEventTracking = jitCodeEventTrackingParam;
 
 #if V8_HAS_STACK_START_MARKER
   v8::StackStartMarker::EnableForProcess();
@@ -407,7 +413,9 @@ IsolateBase::IsolateBase(V8System& system,
     // attacks.
     ptr->SetAllowAtomicsWait(false);
 
-    ptr->SetJitCodeEventHandler(v8::kJitCodeEventDefault, &jitCodeEvent);
+    if (system.jitCodeEventTracking) {
+      ptr->SetJitCodeEventHandler(v8::kJitCodeEventDefault, &jitCodeEvent);
+    }
 
     // V8 10.5 introduced this API which is used to resolve the promise returned by
     // WebAssembly.compile(). For some reason, the default implementation of the callback does not

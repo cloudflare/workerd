@@ -12,6 +12,7 @@
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
+#include <workerd/util/strong-bool.h>
 
 #include <v8-profiler.h>
 
@@ -25,6 +26,13 @@ namespace workerd::jsg {
 
 class Deserializer;
 class Serializer;
+
+// Whether to register a JIT code event handler on each isolate created through a V8System,
+// to build a mapping from compiled code addresses to JavaScript source locations. This
+// mapping is consumed by `jsg::getJsStackTrace()` to produce signal-handler-safe stack
+// traces during crash reporting. Adds overhead (V8 invokes a callback on every JIT code
+// event), so it is opt-in.
+WD_STRONG_BOOL(JitCodeEventTracking);
 
 // Construct a default V8 platform, with the given background thread pool size.
 //
@@ -51,18 +59,21 @@ class V8System {
   //   auto v8System = V8System(*v8Platform, flags);
   // (Optional) `flags` is a list of command-line flags to pass to V8, like "--expose-gc" or
   // "--single_threaded_gc". An exception will be thrown if any flags are not recognized.
-  explicit V8System(kj::ArrayPtr<const kj::StringPtr> flags = nullptr);
+  explicit V8System(kj::ArrayPtr<const kj::StringPtr> flags = nullptr,
+      JitCodeEventTracking jitCodeEventTracking = JitCodeEventTracking::NO);
 
   // Use a possibly-custom v8::Platform wrapper over default v8::Platform, and apply flags.
   explicit V8System(v8::Platform& platform,
       kj::ArrayPtr<const kj::StringPtr> flags,
-      v8::Platform* defaultPlatformPtr);
+      v8::Platform* defaultPlatformPtr,
+      JitCodeEventTracking jitCodeEventTracking = JitCodeEventTracking::NO);
 
   // Use a possibly-custom v8::Platform implementation with custom task queue, and apply flags.
   explicit V8System(v8::Platform& platform,
       kj::ArrayPtr<const kj::StringPtr> flags,
       PumpMsgLoopType,
-      ShutdownIsolateType);
+      ShutdownIsolateType,
+      JitCodeEventTracking jitCodeEventTracking = JitCodeEventTracking::NO);
 
   ~V8System() noexcept(false);
 
@@ -74,12 +85,14 @@ class V8System {
   kj::Own<V8PlatformWrapper> platformWrapper;
   PumpMsgLoopType pumpMsgLoop;
   ShutdownIsolateType shutdownIsolate;
+  JitCodeEventTracking jitCodeEventTracking = JitCodeEventTracking::NO;
   friend class IsolateBase;
 
   void init(kj::Own<v8::Platform>,
       kj::ArrayPtr<const kj::StringPtr>,
       PumpMsgLoopType,
-      ShutdownIsolateType);
+      ShutdownIsolateType,
+      JitCodeEventTracking);
 };
 
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
