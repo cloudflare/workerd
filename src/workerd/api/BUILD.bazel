@@ -528,6 +528,7 @@ wd_cc_library(
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
+        "crypto/prime-test.c++",
     ]
 ]
 
