@@ -7,6 +7,8 @@
 
 #include <ncrypto.h>
 
+#include <climits>
+
 namespace workerd::api {
 namespace {
 
