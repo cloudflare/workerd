@@ -458,7 +458,13 @@ jsg::Ref<ZlibUtil::CompressionStream<CompressionContext>> ZlibUtil::CompressionS
 
 template <typename CompressionContext>
 ZlibUtil::CompressionStream<CompressionContext>::~CompressionStream() {
-  JSG_ASSERT(!writing, Error, "Writing to compression stream"_kj);
+  // This destructor runs from cppgc's noexcept finalizer (~CppgcShim); it
+  // MUST NOT throw. A throwing assertion here crosses the noexcept boundary
+  // and triggers std::terminate(), killing the entire workerd process.
+  if (writing) {
+    KJ_LOG(ERROR, "CompressionStream destroyed while writing=true; state machine bug");
+    return;  // Skip close() — the stream state is inconsistent.
+  }
   close();
 }
 
@@ -485,6 +491,12 @@ void ZlibUtil::CompressionStream<CompressionContext>::writeStream(
   JSG_REQUIRE(!pending_close, Error, "Pending close"_kj);
 
   writing = true;
+  // Ensure `writing` is reset on any exception path so that the destructor's
+  // check never fires due to a stuck flag. Without this, a throwing backend
+  // (e.g. KJ_UNREACHABLE in initializeZlib()) leaves `writing` permanently
+  // true, and the destructor's assertion crosses the noexcept ~CppgcShim()
+  // boundary during V8 GC, triggering std::terminate().
+  KJ_ON_SCOPE_FAILURE({ writing = false; });
 
   context()->setBuffers(input, output);
   context()->setFlush(flush);
@@ -541,7 +553,14 @@ void ZlibUtil::CompressionStream<CompressionContext>::close() {
     return;
   }
   closed = true;
-  JSG_ASSERT(initialized, Error, "Closing before initialized"_kj);
+  // Guard against closing an uninitialized stream. This can happen when the
+  // destructor calls close() on a handle that was constructed but never had
+  // initialize() called (e.g. via _handle.constructor). Using a non-throwing
+  // early return instead of JSG_ASSERT avoids a fatal throw from the noexcept
+  // cppgc destructor chain.
+  if (!initialized) {
+    return;
+  }
   // Drop JS-heap refs eagerly so callers that explicitly close don't have to
   // wait for the cycle collector. visitForGc handles the unclosed case.
   writeCallback = kj::none;
@@ -622,7 +641,12 @@ void ZlibUtil::CompressionStream<CompressionContext>::reset(jsg::Lock& js) {
 
 jsg::Ref<ZlibUtil::ZlibStream> ZlibUtil::ZlibStream::constructor(
     jsg::Lock& js, ZlibModeValue mode) {
-  return js.alloc<ZlibStream>(static_cast<ZlibMode>(mode), js.getExternalMemoryTarget());
+  auto m = static_cast<ZlibMode>(mode);
+  JSG_REQUIRE(m == ZlibMode::DEFLATE || m == ZlibMode::INFLATE || m == ZlibMode::GZIP ||
+          m == ZlibMode::GUNZIP || m == ZlibMode::DEFLATERAW || m == ZlibMode::INFLATERAW ||
+          m == ZlibMode::UNZIP,
+      TypeError, "Invalid zlib mode"_kj);
+  return js.alloc<ZlibStream>(m, js.getExternalMemoryTarget());
 }
 
 void ZlibUtil::ZlibStream::initialize(jsg::Lock& js,
