@@ -344,12 +344,6 @@ wd_test(
 )
 
 wd_test(
-    src = "resizable-arraybuffer-toctou-test.wd-test",
-    args = ["--experimental"],
-    data = ["resizable-arraybuffer-toctou-test.js"],
-)
-
-wd_test(
     src = "crypto-impl-asymmetric-test.wd-test",
     args = ["--experimental"],
     data = ["crypto-impl-asymmetric-test.js"],
