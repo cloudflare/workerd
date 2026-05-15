@@ -661,22 +661,32 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer) {
   kj::ArrayPtr bytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
   if (bytes == nullptr) {
     return getEmptyArray();
-  } else {
-    return bytes.attach(kj::mv(backing));
   }
+  if (arrayBuffer->IsResizableByUserJavaScript()) {
+    // A resizable ArrayBuffer can be shrunk in-place by user JS (e.g. from a
+    // getter invoked while unwrapping a later argument), which decommits the
+    // tail pages to PROT_NONE while we still hold the old {ptr,len}. Copy now
+    // so the returned kj::Array stays valid regardless of later resize().
+    return kj::heapArray(bytes);
+  }
+  return bytes.attach(kj::mv(backing));
 }
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
-  auto backing = arrayBufferView->Buffer()->GetBackingStore();
-  kj::ArrayPtr buffer(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
+  auto buffer = arrayBufferView->Buffer();
+  auto backing = buffer->GetBackingStore();
+  kj::ArrayPtr bufBytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
   auto sliceStart = arrayBufferView->ByteOffset();
   auto sliceEnd = sliceStart + arrayBufferView->ByteLength();
-  KJ_ASSERT(buffer.size() >= sliceEnd);
-  auto bytes = buffer.slice(sliceStart, sliceEnd);
+  KJ_ASSERT(bufBytes.size() >= sliceEnd);
+  auto bytes = bufBytes.slice(sliceStart, sliceEnd);
   if (bytes == nullptr) {
     return getEmptyArray();
-  } else {
-    return bytes.attach(kj::mv(backing));
   }
+  if (buffer->IsResizableByUserJavaScript()) {
+    // Same as above: resizable backing stores can be shrunk, decommitting pages.
+    return kj::heapArray(bytes);
+  }
+  return bytes.attach(kj::mv(backing));
 }
 
 // TODO(soon): If the returned kj::Array<kj::byte> is used outside of the isolate lock,
