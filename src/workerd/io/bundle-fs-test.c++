@@ -195,5 +195,76 @@ KJ_TEST("Guarding against deep non-circular symlink chains works") {
   });
 }
 
+KJ_TEST("Module names exceeding max bundle path depth are skipped") {
+  // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-104: an attacker-controlled
+  // module name with deeply nested path segments (e.g. "a/".repeat(100000) + "x.txt")
+  // could cause stack exhaustion via recursive directory building.
+  TestFixture fixture;
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    kj::Vector<WorkerSource::Module> modules(3);
+
+    // A normal module that should be included.
+    modules.add(WorkerSource::Module{
+      .name = "ok/module.js"_kj,
+      .content = WorkerSource::EsModule{.body = "export default 1;"_kj},
+    });
+
+    kj::Vector<char> atLimit;
+    for (size_t i = 0; i < 255; i++) {
+      atLimit.addAll(kj::StringPtr("d/"));
+    }
+    atLimit.addAll(kj::StringPtr("leaf.txt"));
+    atLimit.add('\0');
+    kj::StringPtr atLimitName(atLimit.begin(), atLimit.size() - 1);
+    modules.add(WorkerSource::Module{
+      .name = atLimitName,
+      .content = WorkerSource::EsModule{.body = "export default 2;"_kj},
+    });
+
+    kj::Vector<char> overLimit;
+    for (size_t i = 0; i < 2000; i++) {
+      overLimit.addAll(kj::StringPtr("x/"));
+    }
+    overLimit.addAll(kj::StringPtr("leaf.txt"));
+    overLimit.add('\0');
+    kj::StringPtr overLimitName(overLimit.begin(), overLimit.size() - 1);
+    modules.add(WorkerSource::Module{
+      .name = overLimitName,
+      .content = WorkerSource::EsModule{.body = "export default 3;"_kj},
+    });
+
+    auto config = WorkerSource(WorkerSource::ModulesSource{
+      .mainModule = "ok/module.js"_kj,
+      .modules = modules.releaseAsArray(),
+    });
+    auto dir = getBundleDirectory(config);
+
+    // The normal module should be accessible.
+    KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"ok", "module.js"})));
+
+    // The 256-segment module should be accessible — build the lookup path.
+    kj::Vector<kj::String> atLimitSegments;
+    for (size_t i = 0; i < 255; i++) {
+      atLimitSegments.add(kj::str("d"));
+    }
+    atLimitSegments.add(kj::str("leaf.txt"));
+    kj::Path atLimitPath(atLimitSegments.releaseAsArray());
+    KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, atLimitPath));
+
+    // The too deep module should have been skipped entirely. Verify that
+    // it is not reachable. We just need to check that the leaf doesn't exist —
+    // if the module was skipped, looking up any part of the deep path will
+    // return none.
+    kj::Vector<kj::String> overLimitSegments;
+    for (size_t i = 0; i < 2000; i++) {
+      overLimitSegments.add(kj::str("x"));
+    }
+    overLimitSegments.add(kj::str("leaf.txt"));
+    kj::Path overLimitPath(overLimitSegments.releaseAsArray());
+    KJ_EXPECT(dir->tryOpen(env.js, overLimitPath) == kj::none);
+  });
+}
+
 }  // namespace
 }  // namespace workerd
