@@ -254,6 +254,15 @@ void checkPbkdfLimits(jsg::Lock& js, size_t iterations) {
   }
 }
 
+void checkScryptLimits(jsg::Lock& js, uint32_t N, uint32_t r, uint32_t p) {
+  uint64_t cost = static_cast<uint64_t>(N) * r * p;
+  auto& limits = Worker::Isolate::from(js).getLimitEnforcer();
+  KJ_IF_SOME(max, limits.checkScryptCost(js, cost)) {
+    JSG_FAIL_REQUIRE(RangeError,
+        kj::str("Scrypt failed: cost (N*r*p = ", cost, ") exceeds maximum (", max, ")."));
+  }
+}
+
 kj::Maybe<kj::Own<BIGNUM>> toBignum(kj::ArrayPtr<const kj::byte> data) {
   BIGNUM* result = BN_bin2bn(data.begin(), data.size(), nullptr);
   if (result == nullptr) return kj::none;

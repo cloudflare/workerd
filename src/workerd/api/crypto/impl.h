@@ -425,6 +425,7 @@ class ZeroOnFree {
 // is acceptable. If the requested iterations is not acceptable, a JS error will
 // be thrown. Otherwise the method will return normally.
 void checkPbkdfLimits(jsg::Lock& js, size_t iterations);
+void checkScryptLimits(jsg::Lock& js, uint32_t N, uint32_t r, uint32_t p);
 
 // Either succeeds with exactly |length| bytes of cryptographically
 // strong pseudo-random data, or fails. This function may block.

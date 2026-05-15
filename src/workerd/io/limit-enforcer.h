@@ -27,6 +27,7 @@ class Lock;
 }  // namespace jsg
 
 static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 100'000;
+static constexpr uint64_t DEFAULT_MAX_SCRYPT_COST = 1u << 20;
 
 // Interface for an object that enforces resource limits on an Isolate level.
 //
@@ -90,6 +91,11 @@ class IsolateLimitEnforcer: public kj::Refcounted {
     // TODO(maybe): We might consider emitting a warning if the number of iterations is
     // too low to be safe.
     if (iterations > DEFAULT_MAX_PBKDF2_ITERATIONS) return DEFAULT_MAX_PBKDF2_ITERATIONS;
+    return kj::none;
+  }
+
+  virtual kj::Maybe<uint64_t> checkScryptCost(jsg::Lock& js, uint64_t cost) const {
+    if (cost > DEFAULT_MAX_SCRYPT_COST) return DEFAULT_MAX_SCRYPT_COST;
     return kj::none;
   }
 

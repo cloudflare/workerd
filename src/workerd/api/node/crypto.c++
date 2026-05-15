@@ -82,6 +82,7 @@ jsg::JsArrayBuffer CryptoImpl::getScrypt(jsg::Lock& js,
     uint32_t keylen) {
   JSG_REQUIRE(password.size() <= INT32_MAX, RangeError, "Scrypt failed: password is too large");
   JSG_REQUIRE(salt.size() <= INT32_MAX, RangeError, "Scrypt failed: salt is too large");
+  checkScryptLimits(js, N, r, p);
 
   return JSG_REQUIRE_NONNULL(
       api::scrypt(js, keylen, N, r, p, maxmem, password, salt), Error, "Scrypt failed");
