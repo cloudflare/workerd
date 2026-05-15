@@ -67,6 +67,8 @@ jsg::JsArrayBuffer CryptoImpl::getPbkdf(jsg::Lock& js,
   // Note: The user could DoS us by selecting a very high iteration count. As with the Web Crypto
   // API, intentionally limit the maximum iteration count.
   checkPbkdfLimits(js, num_iterations);
+  JSG_REQUIRE(ncrypto::checkHkdfLength(digest, keylen), RangeError,
+      "Pbkdf2 failed: derived key length exceeds maximum for this hash");
 
   return JSG_REQUIRE_NONNULL(
       api::pbkdf2(js, keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
