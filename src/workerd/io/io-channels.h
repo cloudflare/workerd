@@ -480,4 +480,20 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
   uint channel;
 };
 
+// Construct a channel based on a promise for a future channel. These channels' `getResolved()`
+// methods will resolve to the underlying channel. `BaseChannelType` must be either
+// `SubrequestChannel` or `ActorClassChannel`.
+template <typename BaseChannelType>
+kj::Own<BaseChannelType> newPromisedChannel(kj::Promise<kj::Own<BaseChannelType>> promise);
+
+template <>
+kj::Own<IoChannelFactory::SubrequestChannel> newPromisedChannel<
+    IoChannelFactory::SubrequestChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>> promise);
+
+template <>
+kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
+    IoChannelFactory::ActorClassChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>> promise);
+
 }  // namespace workerd

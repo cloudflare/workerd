@@ -340,4 +340,18 @@ kj::Own<Frankenvalue::CapTableEntry> IoChannelCapTableEntry::threadSafeClone() c
   return kj::heap<IoChannelCapTableEntry>(type, channel);
 }
 
+template <>
+kj::Own<IoChannelFactory::SubrequestChannel> newPromisedChannel<
+    IoChannelFactory::SubrequestChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>> promise) {
+  return kj::refcounted<PromisedSubrequestChannel>(kj::mv(promise));
+}
+
+template <>
+kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
+    IoChannelFactory::ActorClassChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>> promise) {
+  return kj::refcounted<PromisedActorClassChannel>(kj::mv(promise));
+}
+
 }  // namespace workerd
