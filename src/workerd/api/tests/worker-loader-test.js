@@ -355,6 +355,32 @@ export let tails = {
   },
 };
 
+// A simple Durable Object that maintains a counter, used to test passing DO stubs
+// into dynamic workers.
+export class StubCounter extends DurableObject {
+  async increment(amount) {
+    let value = (await this.ctx.storage.get('count')) || 0;
+    value += amount;
+    await this.ctx.storage.put('count', value);
+    return value;
+  }
+}
+
+// A Durable Object that receives tail events via its tail() handler.
+// The test retrieves the received event via wait().
+export class TailReceiver extends DurableObject {
+  #promiseAndResolvers = Promise.withResolvers();
+
+  tail(event) {
+    // HACK: Currently, tail events are not serializable over RPC. :(
+    this.#promiseAndResolvers.resolve(JSON.parse(JSON.stringify(event)));
+  }
+
+  wait() {
+    return this.#promiseAndResolvers.promise;
+  }
+}
+
 export class GreeterFacet extends DurableObject {
   async greet(name) {
     return `${this.ctx.props.greeting}, ${name}?`;
@@ -1192,5 +1218,147 @@ export let abortIsolateDynamicAnonymous = {
         return err.message.startsWith('internal error; reference =');
       }
     );
+  },
+};
+
+// =============================================================================
+// Tests for passing Durable Object stubs into dynamic workers.
+
+// Test passing a DO stub as an RPC parameter into a dynamic worker.
+export let doStubViaRpcParam = {
+  async test(ctrl, env, ctx) {
+    let target = ctx.exports.StubCounter.get(
+      ctx.exports.StubCounter.idFromName('rpcParam')
+    );
+
+    let worker = env.loader.get('doStubViaRpcParam', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        compatibilityFlags: ['experimental'],
+        allowExperimental: true,
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            import { WorkerEntrypoint } from "cloudflare:workers";
+            export default class extends WorkerEntrypoint {
+              callStub(stub, amount) {
+                return stub.increment(amount);
+              }
+            }
+          `,
+        },
+      };
+    });
+
+    let result = await worker.getEntrypoint().callStub(target, 5);
+    assert.strictEqual(result, 5);
+
+    // Verify the original stub still sees the updated state.
+    let direct = await target.increment(3);
+    assert.strictEqual(direct, 8);
+  },
+};
+
+// Test passing a DO stub via props into a dynamic worker.
+export let doStubViaProps = {
+  async test(ctrl, env, ctx) {
+    let target = ctx.exports.StubCounter.get(
+      ctx.exports.StubCounter.idFromName('props')
+    );
+
+    let worker = env.loader.get('doStubViaProps', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        compatibilityFlags: ['experimental'],
+        allowExperimental: true,
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            import { WorkerEntrypoint } from "cloudflare:workers";
+            export default class extends WorkerEntrypoint {
+              async run() {
+                return await this.ctx.props.counter.increment(10);
+              }
+            }
+          `,
+        },
+      };
+    });
+
+    let result = await worker
+      .getEntrypoint(undefined, {
+        props: { counter: target },
+      })
+      .run();
+    assert.strictEqual(result, 10);
+  },
+};
+
+// Test passing a DO stub via env into a dynamic worker.
+export let doStubViaEnv = {
+  async test(ctrl, env, ctx) {
+    let target = ctx.exports.StubCounter.get(
+      ctx.exports.StubCounter.idFromName('env')
+    );
+
+    let worker = env.loader.get('doStubViaEnv', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        compatibilityFlags: ['experimental'],
+        allowExperimental: true,
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            import { WorkerEntrypoint } from "cloudflare:workers";
+            export default class extends WorkerEntrypoint {
+              async run() {
+                return await this.env.counter.increment(7);
+              }
+            }
+          `,
+        },
+        env: {
+          counter: target,
+        },
+      };
+    });
+
+    let result = await worker.getEntrypoint().run();
+    assert.strictEqual(result, 7);
+  },
+};
+
+// Test using a DO stub as a tail worker of a dynamic worker.
+export let doStubAsTail = {
+  async test(ctrl, env, ctx) {
+    let tailReceiver = ctx.exports.TailReceiver.get(
+      ctx.exports.TailReceiver.idFromName('tail')
+    );
+
+    let worker = env.loader.get('doStubAsTail', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        compatibilityFlags: ['experimental'],
+        allowExperimental: true,
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            export default {
+              fetch(req, env, ctx) {
+                console.log("hello from tailed worker");
+                return new Response("OK");
+              },
+            }
+          `,
+        },
+        tails: [tailReceiver],
+      };
+    });
+
+    let resp = await worker.getEntrypoint().fetch('https://example.com');
+    assert.strictEqual(await resp.text(), 'OK');
+
+    let event = await tailReceiver.wait();
+    assert.strictEqual(event[0].logs[0].message[0], 'hello from tailed worker');
   },
 };

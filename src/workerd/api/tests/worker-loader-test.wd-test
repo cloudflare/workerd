@@ -18,6 +18,8 @@ const unitTests :Workerd.Config = (
           (className = "FacetTestActor", uniqueKey = "FacetTestActor"),
           (className = "FacetUafTestActor", uniqueKey = "FacetUafTestActor"),
           (className = "RendezvousActor", uniqueKey = "RendezvousActor"),
+          (className = "StubCounter", uniqueKey = "StubCounter"),
+          (className = "TailReceiver", uniqueKey = "TailReceiver"),
         ],
         durableObjectStorage = (inMemory = void),
         globalOutbound = (name = "worker-loader-test", entrypoint = "defaultOutbound"),
