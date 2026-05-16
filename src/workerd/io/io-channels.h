@@ -249,19 +249,9 @@ class IoChannelFactory {
   virtual kj::Own<SubrequestChannel> getSubrequestChannelResolved(
       uint channel, kj::Maybe<Frankenvalue> props, kj::Maybe<VersionRequest> versionRequest) = 0;
 
-  // Stub for a remote actor. Allows sending requests to the actor.
-  class ActorChannel: public SubrequestChannel {
-   public:
-    // At present there are no methods beyond what `SubrequestChannel` defines. However, it's
-    // easy to imagine that actor stubs may have more functionality than just sending requests
-    // someday, so we keep this as a separate type.
-
-    // These just throw an exception saying actors aren't serializable.
-    // TODO(cleanup): Delete once all implementations implement these.
-    void requireAllowsTransfer() override;
-    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-        ChannelTokenUsage usage) override;
-  };
+  // ActorChannel used to be its own type, but no longer is.
+  // TODO(cleanup): Update all references.
+  using ActorChannel = SubrequestChannel;
 
   // Get an actor stub from the given namespace for the actor with the given ID.
   //

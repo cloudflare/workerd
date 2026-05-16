@@ -276,19 +276,6 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromTok
       [this, usage](kj::Array<byte> token) { return actorClassFromToken(usage, token.asPtr()); }));
 }
 
-void IoChannelFactory::ActorChannel::requireAllowsTransfer() {
-  JSG_FAIL_REQUIRE(DOMDataCloneError,
-      "Durable Object stubs cannot (yet) be transferred between Workers. This will change in "
-      "a future version.");
-}
-
-kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> IoChannelFactory::ActorChannel::
-    getTokenMaybeSync(ChannelTokenUsage usage) {
-  JSG_FAIL_REQUIRE(DOMDataCloneError,
-      "Durable Object stubs cannot (yet) be transferred between Workers. This will change in "
-      "a future version.");
-}
-
 kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
   kj::Vector<kj::Promise<void>> promises;
 
