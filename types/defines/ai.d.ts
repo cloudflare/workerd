@@ -4867,7 +4867,7 @@ export interface Ai_Cf_Ai4Bharat_Indictrans2_En_Indic_1B_Input {
    */
   text: string | string[];
   /**
-   * Target langauge to translate to
+   * Target language to translate to
    */
   target_language:
     | "asm_Beng"
