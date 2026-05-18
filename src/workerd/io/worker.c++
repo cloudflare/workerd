@@ -653,8 +653,8 @@ struct Worker::Isolate::Impl {
     void setupContext(v8::Local<v8::Context> context) {
       // The V8Inspector implements the `console` object.
       KJ_IF_SOME(i, impl.inspector) {
-        i.get()->contextCreated(
-            v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
+        i.get()->contextCreated(v8_inspector::V8ContextInfo(
+            context, 1, jsg::toInspectorStringView("Worker").stringView));
       }
       Worker::setupContext(*lock, context, loggingOptions);
     }
@@ -1439,8 +1439,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         // (For modules, the context was already registered by `setupContext()`, above.
         KJ_IF_SOME(i, isolate->impl->inspector) {
           if (!modular) {
-            i.get()->contextCreated(
-                v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Compiler")));
+            i.get()->contextCreated(v8_inspector::V8ContextInfo(
+                context, 1, jsg::toInspectorStringView("Compiler").stringView));
           }
         } else {
         }  // Here to squash a compiler warning
@@ -3022,7 +3022,7 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
     ExceptionOrDuration limitErrorOrTime = 0 * kj::NANOSECONDS;
     {
       auto limitScope = isolate.getLimitEnforcer().enterInspectorJs(*lock, limitErrorOrTime);
-      session.dispatchProtocolMessage(jsg::toInspectorStringView(message));
+      session.dispatchProtocolMessage(jsg::toInspectorStringView(message).stringView);
     }
 
     // Run microtasks in case the user made an async call.
