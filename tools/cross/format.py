@@ -289,11 +289,23 @@ def main() -> None:
     # the pre-commit hook) skip the rebuild to avoid bazel startup latency on
     # every commit.
     verify_version = options.subcommand != "git"
-    for name in needed_formatters:
-        if name in ("clang-format", "buildifier", "ruff", "rustfmt"):
-            _ensure_bazel_tool(name, verify_version=verify_version)
-    if "prettier" in needed_formatters and verify_version:
-        subprocess.run(["bazel", "build", "//:node_modules/prettier"])
+    if verify_version:
+        # Batch all targets into a single bazel build to avoid repeated JVM
+        # startup overhead.
+        targets = []
+        for name in needed_formatters:
+            if name in ("clang-format", "buildifier", "ruff", "rustfmt"):
+                targets.append(f"@workerd//build/deps/formatters:{name}@rule")
+            elif name == "prettier":
+                targets.append("//:node_modules/prettier")
+        if targets:
+            result = subprocess.run(["bazel", "build", *targets])
+            if result.returncode != 0:
+                raise RuntimeError("Failed to download formatter tools")
+    else:
+        for name in needed_formatters:
+            if name in ("clang-format", "buildifier", "ruff", "rustfmt"):
+                _ensure_bazel_tool(name)
 
     all_ok = True
 
