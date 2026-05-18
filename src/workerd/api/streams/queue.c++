@@ -167,7 +167,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   }
 
   // Check if already closed or errored.
-  if (impl.state.template is<ConsumerImpl::Closed>()) {
+  if (impl.state.is<ConsumerImpl::Closed>()) {
     return js.resolvedPromise(DrainingReadResult{.chunks = nullptr, .done = true});
   }
   KJ_IF_SOME(errored, impl.state.tryGetErrorUnsafe()) {
@@ -310,14 +310,18 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   ReadRequest request{.resolver = kj::mv(prp.resolver)};
   ready.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
 
+  // The call to listener.onConsumerWantsData might trigger user javascript
+  // to run, which could find a way of invalidating impl... let's grab the
+  // reference we need from it now.
+  auto ref = impl.selfRef.addRef();
+
   KJ_IF_SOME(listener, impl.stateListener) {
     listener.onConsumerWantsData(js);
   }
 
   // Transform the ReadResult promise to DrainingReadResult.
   return prp.promise.then(js,
-      [this, ref = impl.selfRef.addRef()](
-          jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
+      [this, ref = ref.addRef()](jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
     JSG_REQUIRE(
         ref->isValid(), TypeError, "The ReadableStream was canceled during a draining read"_kj);
 
@@ -343,9 +347,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       .chunks = chunks.releaseAsArray(),
       .done = false,
     };
-  },
-      [ref = impl.selfRef.addRef()](
-          jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
+  }, [ref = ref.addRef()](jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
     ref->runIfAlive([&](auto& impl) {
       KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
         ready.hasPendingDrainingRead = false;
@@ -408,6 +410,9 @@ void ValueQueue::handlePush(jsg::Lock& js,
   KJ_REQUIRE(state.buffer.empty() && state.queueTotalSize == 0);
   auto request = kj::mv(state.readRequests.front());
   state.readRequests.pop_front();
+
+  // Note that the request->resolve() may trigger user JavaScript that could close or error
+  // the queue or consumer, etc.
   request->resolve(js, entry->getValue(js));
 }
 
@@ -446,8 +451,8 @@ void ValueQueue::handleRead(jsg::Lock& js,
       KJ_CASE_ONEOF(entry, QueueEntry) {
         auto freed = kj::mv(entry);
         state.buffer.pop_front();
-        request.resolve(js, freed.entry->getValue(js));
         state.queueTotalSize -= freed.entry->getSize(js);
+        request.resolve(js, freed.entry->getValue(js));
         return;
       }
     }
@@ -664,7 +669,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
   }
 
   // Check if already closed or errored.
-  if (impl.state.template is<ConsumerImpl::Closed>()) {
+  if (impl.state.is<ConsumerImpl::Closed>()) {
     return js.resolvedPromise(DrainingReadResult{.chunks = nullptr, .done = true});
   }
   KJ_IF_SOME(errored, impl.state.tryGetErrorUnsafe()) {
@@ -799,14 +804,15 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
     ReadRequest request(kj::mv(prp.resolver), kj::mv(pullInto));
     ready.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
 
+    auto ref = impl.selfRef.addRef();
+
     KJ_IF_SOME(listener, impl.stateListener) {
       listener.onConsumerWantsData(js);
     }
 
     // Transform the ReadResult promise to DrainingReadResult.
     return prp.promise.then(js,
-        [this, ref = impl.selfRef.addRef()](
-            jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
+        [this, ref = ref.addRef()](jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
       JSG_REQUIRE(
           ref->isValid(), TypeError, "The ReadableStream was canceled during a draining read"_kj);
 
@@ -832,9 +838,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
         .chunks = chunks.releaseAsArray(),
         .done = false,
       };
-    },
-        [ref = impl.selfRef.addRef()](
-            jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
+    }, [ref = ref.addRef()](jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
       ref->runIfAlive([&](auto& impl) {
         KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
           ready.hasPendingDrainingRead = false;
@@ -868,12 +872,19 @@ void ByteQueue::ByobRequest::invalidate() {
   KJ_IF_SOME(req, request) {
     req.byobReadRequest = kj::none;
     request = kj::none;
+    consumer = kj::none;
+    queue = kj::none;
   }
 }
 
 bool ByteQueue::ByobRequest::isPartiallyFulfilled(jsg::Lock& js) {
   if (isInvalidated()) return false;
   auto handle = getRequest().pullInto.store.getHandle(js);
+  // Note: pullInto.filled records how many bytes have been written into the BYOB buffer.
+  // This is a historical count and remains valid even if the underlying buffer was
+  // subsequently detached or resized smaller. The element size is intrinsic to the
+  // view type and is also unaffected. If the buffer has been mangled, that will be
+  // caught by validation checks in respond() or getView() when actually accessed.
   return getRequest().pullInto.filled > 0 && handle.getElementSize() > 1;
 }
 
@@ -891,6 +902,10 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // Here, invalidated is a fancy word for the promise having been resolved or
   // rejected already.
   auto& req = KJ_REQUIRE_NONNULL(request, "the pending byob read request was already invalidated");
+  auto& con = KJ_REQUIRE_NONNULL(
+      consumer, "the consumer for the pending byob read request was already invalidated");
+  auto& qu = KJ_REQUIRE_NONNULL(
+      queue, "the queue for the pending byob read request was already invalidated");
 
   auto handle = req.pullInto.store.getHandle(js);
 
@@ -918,11 +933,11 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // A malicious Object.prototype.then getter can call controller.error() or
   // reader.cancel(), which may destroy the ConsumerImpl. We hold a weak ref
   // to detect this before accessing consumer again.
-  auto weak = consumer.selfRef.addRef();
+  auto weak = con.selfRef.addRef();
 
   // Greater than one because if the element size is one, this consumer is the only one
   // and we don't need to worry about copying data for other consumers.
-  if (queue.getConsumerCount() > 1) {
+  if (qu.getConsumerCount() > 1) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
     KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, amount)) {
@@ -934,12 +949,12 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
       entry->toArrayPtr(js).first(amount).copyFrom(start.first(amount));
 
       // Push the entry into the other consumers, skipping this one.
-      queue.push(js, kj::mv(entry), consumer);
+      qu.push(js, kj::mv(entry), consumer);
 
       // The call to queue.push could trigger user javascript to run that could close
       // or error the stream. We have to check if the weak ref is still valid and if
       // the consumer is still in the active state.
-      if (!weak->isValid() || !consumer.state.isActive()) {
+      if (!weak->isValid() || !con.state.isActive()) {
         // Returning true causes the caller to invalidate the request.
         return true;
       }
@@ -994,15 +1009,15 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   }
 
   // Fulfill this request!
-  consumer.resolveRead(js, req);
+  con.resolveRead(js, req);
 
   // The consumer being errored/closed during resolution of the promise is not an
   // error in *this* respond. It's a side-effect of running user code, and we have
   // already fulfilled our obligation for this respond by resolving the read request.
   // We just won't be able to push the excess bytes into the queue
-  if (weak->isValid() && consumer.state.isActive()) {
+  if (weak->isValid() && con.state.isActive()) {
     KJ_IF_SOME(excess, maybeExcess) {
-      consumer.push(js, kj::mv(excess));
+      con.push(js, kj::mv(excess));
     }
   }
 
@@ -1016,35 +1031,87 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
 
 bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view) {
   // The idea here is that rather than filling the view that the controller was given,
-  // it chose to create its own view and fill that, likely over the same ArrayBuffer.
+  // it chose to create its own view and fill that, supposedly over the same ArrayBuffer
+  // backing store.
   // What we do here is perform some basic validations on what we were given, and if
   // those pass, we'll replace the backing store held in the req.pullInto with the one
   // given, then continue on issuing the respond as normal.
   auto& req = KJ_REQUIRE_NONNULL(request, "the pending byob read request was already invalidated");
-  auto amount = view.size();
+  JSG_REQUIRE(view.isDetachable(), TypeError, "Unable to use non-detachable ArrayBuffer.");
 
   auto handle = req.pullInto.store.getHandle(js);
-  JSG_REQUIRE(view.isDetachable(), TypeError, "Unable to use non-detachable ArrayBuffer.");
-  JSG_REQUIRE(handle.getOffset() + req.pullInto.filled == view.getOffset(), RangeError,
-      "The given view has an invalid byte offset.");
-  JSG_REQUIRE(handle.size() == view.underlyingArrayBufferSize(js), RangeError,
-      "The underlying ArrayBuffer is not the correct length.");
-  JSG_REQUIRE(req.pullInto.filled + amount <= handle.size(), RangeError,
-      "The view is not the correct length.");
+
+  // Per the spec, the underlying memory region for the new view is expected to be the
+  // same as the view returned by getView(), we're not going to be quite that strict here
+  // but there are a number of checks we are required to perform. What we do require is
+  // that view must at least have the same shape... meaning same byte offset and same or
+  // smaller byte length compared to the original view.
+  // There's a possibility that the underlying array buffer backing handle has been
+  // detached or resized since. Specifically, let's verify that the expectedOffset
+  // plus expectedLength does not exceed the current bounds of the buffer.
+
+  size_t expectedOffset = handle.getOffset() + req.pullInto.filled;
+
+  // First check, the expectedOffset cannot
+  JSG_REQUIRE(expectedOffset <= handle.size(), RangeError,
+      "The given view has an invalid byte offset that is out of bounds of the original buffer.");
+
+  // Second check, the handle.size() must be greater than or equal to the req.pullInto.filled
+  JSG_REQUIRE(handle.size() >= req.pullInto.filled, RangeError,
+      "The view provided to respondWithNewView has an invalid byte length that is smaller than "
+      "the amount of data already filled for this request.");
+
+  size_t expectedLength = handle.size() - req.pullInto.filled;
+
+  // Third check, the expectedLength + expectedOffset cannot exceed the buffer size.
+  JSG_REQUIRE(expectedOffset + expectedLength <= handle.getBuffer().size(), RangeError,
+      "The given view has an invalid byte offset and length that exceed the bounds of the "
+      "original buffer.");
+
+  // Fourth check, the new vie must have the same byte offset as the expectedOffset.
+  JSG_REQUIRE(
+      expectedOffset == view.getOffset(), RangeError, "The given view has an invalid byte offset.");
+
+  // Fifth check, the new view length must be less than or equal to the expectedLength.
+  JSG_REQUIRE(view.size() <= expectedLength, RangeError,
+      "The given view has an invalid byte length that is too large for the remaining space "
+      "in the original buffer.");
+
+  // Sixth check, the new views underlying buffer size must be same size as the original view's
+  // underlying buffer size.
+  JSG_REQUIRE(view.underlyingArrayBufferSize(js) == handle.getBuffer().size(), RangeError,
+      "The underlying ArrayBuffer for the given view must be the same as the original buffer.");
+
+  auto amount = view.size();
+  auto viewOffset = view.getOffset();
+  auto underlyingSize = view.underlyingArrayBufferSize(js);
 
   // Transfer (detach) the input buffer per the WHATWG Streams spec's
   // ReadableByteStreamControllerRespondWithNewView step that calls TransferArrayBuffer
   // on the view's underlying buffer. After this, JS cannot continue to use the input view.
+
   auto taken = view.detachAndTake(js);
+
+  // Sanity check that the taken view has the same size and offset as the original.
+  KJ_ASSERT(amount == taken.size());
+  KJ_ASSERT(viewOffset == taken.getOffset());
+  KJ_ASSERT(underlyingSize == taken.underlyingArrayBufferSize(js));
+
+  // Because we're sure that the taken buffer has the same underlying shape as the original,
+  // we can just swap in the taken buffer as the new store for the request.
   KJ_IF_SOME(takenView, jsg::JsValue(taken).tryCast<jsg::JsArrayBufferView>()) {
     req.pullInto.store = takenView.addRef(js);
   } else {
     // Input was a (now-detached) ArrayBuffer; wrap the transferred buffer in a Uint8Array
-    // so req.pullInto.store remains a view, as the descriptor expects.
+    // so req.pullInto.store remains a view, as the descriptor expects. This is technically
+    // not strictly per the spec, which requires the controller to pass in a view, but we
+    // go ahead and accept ArrayBuffer/SharedArrayBuffer for convenience.
     jsg::JsArrayBufferView asView = static_cast<jsg::JsUint8Array>(taken);
     req.pullInto.store = asView.addRef(js);
   }
 
+  // Now that the view has been swapped, we can just call respond as normal to complete the
+  // response flow.
   return respond(js, amount);
 }
 
@@ -1057,8 +1124,16 @@ size_t ByteQueue::ByobRequest::getAtLeast() const {
 
 kj::Maybe<jsg::JsUint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
   KJ_IF_SOME(req, request) {
-    jsg::JsUint8Array handle = req.pullInto.store.getHandle(js).clone(js);
-    return handle.slice(js, req.pullInto.filled, handle.size() - req.pullInto.filled);
+    auto currentHandle = req.pullInto.store.getHandle(js);
+    JSG_REQUIRE(currentHandle.size() >= req.pullInto.filled, RangeError,
+        "The BYOB read buffer was detached or resized smaller than the amount of data "
+        "already written into it.");
+
+    size_t offset = req.pullInto.filled;
+    size_t length = currentHandle.size() - offset;
+
+    jsg::JsUint8Array handle = currentHandle.clone(js);
+    return handle.slice(js, offset, length);
   }
   return kj::none;
 }
@@ -1074,6 +1149,9 @@ size_t ByteQueue::ByobRequest::getOriginalBufferByteLength(jsg::Lock& js) const 
 size_t ByteQueue::ByobRequest::getOriginalByteOffsetPlusBytesFilled(jsg::Lock& js) const {
   KJ_IF_SOME(req, request) {
     auto handle = req.pullInto.store.getHandle(js);
+    JSG_REQUIRE(handle.size() >= req.pullInto.filled, RangeError,
+        "The BYOB read buffer was detached or resized smaller than the amount of data "
+        "already written into it.");
     return handle.getOffset() + req.pullInto.filled;
   }
   return 0;
@@ -1140,7 +1218,9 @@ void ByteQueue::handlePush(jsg::Lock& js,
     kj::Maybe<QueueImpl&> queue,
     kj::Rc<Entry> newEntry) {
   const auto bufferData = [&](size_t offset) {
-    state.queueTotalSize += newEntry->getSize(js) - offset;
+    size_t entrySize = newEntry->getSize(js);
+    KJ_ASSERT(offset < entrySize);
+    state.queueTotalSize += entrySize - offset;
     state.buffer.emplace_back(QueueEntry{
       .entry = kj::mv(newEntry),
       .offset = offset,
@@ -1425,13 +1505,13 @@ void ByteQueue::handleRead(jsg::Lock& js,
     // Now, we can resolve the read promise. Since we consumed data from the
     // buffer, we also want to make sure to notify the queue so it can update
     // backpressure signaling.
-    request.resolve(js);
+    return request.resolve(js);
   } else if (state.queueTotalSize == 0 && consumer.isClosing()) {
     // Otherwise, if size() is zero and isClosing() is true, we should have already
     // drained but let's take care of that now. Specifically, in this case there's
     // no data in the queue and close() has already been called, so there won't be
     // any more data coming.
-    request.resolveAsDone(js);
+    return request.resolveAsDone(js);
   } else {
     // Otherwise, push the read request into the pending readRequests. It will be
     // resolved either as soon as there is data available or the consumer closes
@@ -1748,11 +1828,9 @@ kj::Maybe<kj::Own<ByteQueue::ByobRequest>> ByteQueue::nextPendingByobReadRequest
 
 bool ByteQueue::hasPartiallyFulfilledRead(jsg::Lock& js) {
   KJ_IF_SOME(state, impl.getState()) {
-    if (!state.pendingByobReadRequests.empty()) {
-      auto& pending = state.pendingByobReadRequests.front();
-      if (pending->isPartiallyFulfilled(js)) {
-        return true;
-      }
+    for (auto& pending: state.pendingByobReadRequests) {
+      if (pending->isInvalidated()) continue;
+      return pending->isPartiallyFulfilled(js);
     }
   }
   return false;

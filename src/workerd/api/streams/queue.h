@@ -222,6 +222,7 @@ class QueueImpl final {
   // If the entry type is byteOriented and has not been fully consumed by pending consume
   // operations, then any left over data will be pushed into the consumer's buffer.
   // Asserts if the queue is closed or errored.
+  // May trigger user JavaScript.
   void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
     state.requireActiveUnsafe("The queue is closed or errored.");
 
@@ -258,10 +259,7 @@ class QueueImpl final {
   // Specific queue implementations may provide additional state that is attached
   // to the Ready struct.
   kj::Maybe<State&> getState() KJ_LIFETIMEBOUND {
-    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      return ready;
-    }
-    return kj::none;
+    return state.tryGetActiveUnsafe();
   }
 
   inline kj::StringPtr jsgGetMemoryName() const;
@@ -403,10 +401,15 @@ class ConsumerImpl final {
   void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue>) {
     // Already closed or errored - nothing to do.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      for (auto& request: ready.readRequests) {
+      // Extract all pending reads before resolving any of them, because
+      // resolveAsDone(js) can trigger user JS that may destroy the Ready state.
+      auto requests = kj::mv(ready.readRequests);
+      state.template transitionTo<Closed>();
+      for (auto& request: requests) {
         request->resolveAsDone(js);
       }
-      state.template transitionTo<Closed>();
+      // Careful! the state transition and user javascript could have caused
+      // this consumerimpl to be destroyed. The caller needs to check after!
     }
   }
 
@@ -441,13 +444,10 @@ class ConsumerImpl final {
     // This can happen during iteration over consumers in QueueImpl::push() when
     // resolving a read request on one consumer triggers JavaScript code that
     // closes or errors another consumer in the same queue.
+    if (isClosing() || entry->getSize(js) == 0 || queue == kj::none) {
+      return;
+    }
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      // If the consumer is already closing or the entry is empty, do nothing.
-      // Also skip if queue is none (consumer cloned from closed stream).
-      if (isClosing() || entry->getSize(js) == 0 || queue == kj::none) {
-        return;
-      }
-
       UpdateBackpressureScope scope(*this);
       Self::handlePush(js, ready, *this, queue, kj::mv(entry));
     }
@@ -463,8 +463,8 @@ class ConsumerImpl final {
     auto& ready = state.requireActiveUnsafe();
     // Mutual exclusion with draining reads.
     if (ready.hasPendingDrainingRead) {
-      auto error = js.typeError("Cannot call read while there is a pending draining read"_kj);
-      return request.reject(js, error);
+      return request.reject(
+          js, js.typeError("Cannot call read while there is a pending draining read"_kj));
     }
     // handleRead may trigger the pull callback (via onConsumerWantsData), which
     // may synchronously call reader.cancel(). Cancel can destroy this ConsumerImpl
@@ -497,6 +497,8 @@ class ConsumerImpl final {
     // Pop the request before resolving to ensure the request is fully owned locally.
     auto request = kj::mv(ready.readRequests.front());
     ready.readRequests.pop_front();
+
+    // Note that request->resolve(js) can trigger user JS that may destroy this consumerimpl.
     request->resolve(js);
   }
 
@@ -507,6 +509,8 @@ class ConsumerImpl final {
     // Pop the request before resolving to ensure the request is fully owned locally.
     auto request = kj::mv(ready.readRequests.front());
     ready.readRequests.pop_front();
+
+    // Note that request->resolveAsDone(js) can trigger user JS that may destroy this consumerimpl.
     request->resolveAsDone(js);
   }
 
@@ -545,10 +549,12 @@ class ConsumerImpl final {
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
     // Already closed or errored - nothing to do.
     state.whenActive([&](Ready& ready) {
-      for (auto& request: ready.readRequests) {
+      // The calls to request->resolver.reject(js, reason) can trigger user JS that may destroy
+      // the Ready state, so extract the pending reads to local ownership before iterating.
+      auto requests = extractPendingReads(ready);
+      for (auto& request: requests) {
         request->resolver.reject(js, reason);
       }
-      ready.readRequests.clear();
     });
   }
 
@@ -634,6 +640,7 @@ class ConsumerImpl final {
       result.add(kj::mv(ready.readRequests.front()));
       ready.readRequests.pop_front();
     }
+    KJ_ASSERT(ready.readRequests.empty());
     return result;
   }
 
@@ -743,8 +750,13 @@ class ValueQueue final {
   struct ReadRequest {
     jsg::Promise<ReadResult>::Resolver resolver;
 
+    // Resolve the read request as done. May trigger user JavaScript.
     void resolveAsDone(jsg::Lock& js);
+
+    // Resolve the read request with the given value. May trigger user JavaScript.
     void resolve(jsg::Lock& js, jsg::JsValue value);
+
+    // Reject the read request with the given reason. May trigger user JavaScript.
     void reject(jsg::Lock& js, jsg::JsValue value);
 
     JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
@@ -1005,8 +1017,8 @@ class ByteQueue final {
 
    private:
     kj::Maybe<ReadRequest&> request;
-    ConsumerImpl& consumer;
-    QueueImpl& queue;
+    kj::Maybe<ConsumerImpl&> consumer;
+    kj::Maybe<QueueImpl&> queue;
   };
 
   struct State {
