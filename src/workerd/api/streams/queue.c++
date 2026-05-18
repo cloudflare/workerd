@@ -863,10 +863,13 @@ bool ByteQueue::ByobRequest::isPartiallyFulfilled(jsg::Lock& js) {
 
 bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // So what happens here? The read request has been fulfilled directly by writing
-  // into the storage buffer of the request. Unfortunately, this will only resolve
+  // into the storage buffer of the request. Unfortunately, this would only resolve
   // the data for the one consumer from which the request was received. We have to
   // copy the data into a refcounted ByteQueue::Entry that is pushed into the other
   // known consumers.
+
+  // The amount must be > 0, checked by the caller.
+  KJ_ASSERT(amount > 0);
 
   // First, we check to make sure that the request hasn't been invalidated already.
   // Here, invalidated is a fancy word for the promise having been resolved or
@@ -874,12 +877,35 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   auto& req = KJ_REQUIRE_NONNULL(request, "the pending byob read request was already invalidated");
 
   auto handle = req.pullInto.store.getHandle(js);
+
   // The amount cannot be more than the total space in the request store.
   JSG_REQUIRE(req.pullInto.filled + amount <= handle.size(), RangeError,
       kj::str("Too many bytes [", amount, "] in response to a BYOB read request."));
 
+  // It should not really be possible that the request store was resized to be smaller
+  // than the amount it has already been filled with, but let's check just in case.
+  JSG_REQUIRE(req.pullInto.filled <= handle.size(), RangeError,
+      "The destination buffer for the BYOB read request was resized to be smaller than "
+      "the amount of data already written into it.");
+
+  // If the buffer happens to have been resized to 0, then that's an error also, because
+  // we can't respond with any data.
+  JSG_REQUIRE(handle.size() > 0, RangeError,
+      "The destination buffer for the BYOB read request was resized to zero, so it cannot be used to respond to the request.");
+
+  // Warning... do do not sourcePtr after anything that could run user code without
+  // first checking that the underlying request buffer is still valid.
   auto sourcePtr = handle.asArrayPtr();
 
+  // resolveRead calls request->resolve(js) which can synchronously run user
+  // JavaScript via V8's promise resolution thenable check (Get(resolution, "then")).
+  // A malicious Object.prototype.then getter can call controller.error() or
+  // reader.cancel(), which may destroy the ConsumerImpl. We hold a weak ref
+  // to detect this before accessing consumer again.
+  auto weak = consumer.selfRef.addRef();
+
+  // Greater than one because if the element size is one, this consumer is the only one
+  // and we don't need to worry about copying data for other consumers.
   if (queue.getConsumerCount() > 1) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
@@ -891,17 +917,29 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
       // Safely copy the data over into the entry.
       entry->toArrayPtr(js).first(amount).copyFrom(start.first(amount));
 
-      // Push the entry into the other consumers.
+      // Push the entry into the other consumers, skipping this one.
       queue.push(js, kj::mv(entry), consumer);
+
+      // The call to queue.push could trigger user javascript to run that could close
+      // or error the stream. We have to check if the weak ref is still valid and if
+      // the consumer is still in the active state.
+      if (!weak->isValid() || !consumer.state.isActive()) {
+        // Returning true causes the caller to invalidate the request.
+        return true;
+      }
+
+      // Since the queue.push may have triggered user code, there's a possibility that the buffer
+      // could have been detached or resized. We need to check again to ensure that the buffer is
+      // still a valid size and that the filled + amount are still within bounds.
+      JSG_REQUIRE(handle.size() >= req.pullInto.filled + amount, RangeError,
+          "The BYOB read buffer was detached or resized during a respond operation. Do not detach "
+          "or resize buffers that are actively being used for BYOB reads.");
+
     } else {
       js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
     }
   }
 
-  // For this consumer, if the number of bytes provided in the response does not
-  // align with the element size of the read into buffer, we need to shave off
-  // those extra bytes and push them into the consumers queue so they can be picked
-  // up by the next read.
   req.pullInto.filled += amount;
 
   if (amount < req.pullInto.atLeast) {
@@ -919,30 +957,43 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // There is no need to adjust the pullInto.atLeast here because we are resolving
   // the read immediately.
 
+  // For this consumer, if the number of bytes provided in the response does not
+  // align with the element size of the read into buffer, we need to shave off
+  // those extra bytes and push them into the consumers queue so they can be picked
+  // up by the next read.
   auto unaligned = req.pullInto.filled % handle.getElementSize();
   // It is possible that the request was partially filled already.
   req.pullInto.filled -= unaligned;
 
-  // resolveRead calls request->resolve(js) which can synchronously run user
-  // JavaScript via V8's promise resolution thenable check (Get(resolution, "then")).
-  // A malicious Object.prototype.then getter can call controller.error() or
-  // reader.cancel(), which may destroy the ConsumerImpl. We hold a weak ref
-  // to detect this before accessing consumer again.
-  auto weak = consumer.selfRef.addRef();
-  // Fulfill this request!
-  consumer.resolveRead(js, req);
-
-  if (unaligned > 0 && weak->isValid() && consumer.state.isActive()) {
+  kj::Maybe<kj::Rc<Entry>> maybeExcess;
+  if (unaligned) {
     auto start = sourcePtr.slice(amount - unaligned);
-
     KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, unaligned)) {
       auto excess = kj::rc<Entry>(js, jsg::JsBufferSource(store));
       excess->toArrayPtr(js).first(unaligned).copyFrom(start.first(unaligned));
-      consumer.push(js, kj::mv(excess));
+      maybeExcess = kj::mv(excess);
     } else {
       js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
     }
   }
+
+  // Fulfill this request!
+  consumer.resolveRead(js, req);
+
+  // The consumer being errored/closed during resolution of the promise is not an
+  // error in *this* respond. It's a side-effect of running user code, and we have
+  // already fulfilled our obligation for this respond by resolving the read request.
+  // We just won't be able to push the excess bytes into the queue
+  if (weak->isValid() && consumer.state.isActive()) {
+    KJ_IF_SOME(excess, maybeExcess) {
+      consumer.push(js, kj::mv(excess));
+    }
+  }
+
+  // Warning: both the consumer.resolveRead() and the excess push can cause user-code
+  // to run that can cause the stream to transition to closed or errored state. Do
+  // not access any state without checking weak->isValid() and consumer.state.isActive()
+  // first.
 
   return true;
 }
