@@ -67,6 +67,8 @@ jsg::JsArrayBuffer CryptoImpl::getPbkdf(jsg::Lock& js,
   // Note: The user could DoS us by selecting a very high iteration count. As with the Web Crypto
   // API, intentionally limit the maximum iteration count.
   checkPbkdfLimits(js, num_iterations);
+  JSG_REQUIRE(ncrypto::checkHkdfLength(digest, keylen), RangeError,
+      "Pbkdf2 failed: derived key length exceeds maximum for this hash");
 
   return JSG_REQUIRE_NONNULL(
       api::pbkdf2(js, keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
@@ -82,6 +84,7 @@ jsg::JsArrayBuffer CryptoImpl::getScrypt(jsg::Lock& js,
     uint32_t keylen) {
   JSG_REQUIRE(password.size() <= INT32_MAX, RangeError, "Scrypt failed: password is too large");
   JSG_REQUIRE(salt.size() <= INT32_MAX, RangeError, "Scrypt failed: salt is too large");
+  checkScryptLimits(js, N, r, p);
 
   return JSG_REQUIRE_NONNULL(
       api::scrypt(js, keylen, N, r, p, maxmem, password, salt), Error, "Scrypt failed");

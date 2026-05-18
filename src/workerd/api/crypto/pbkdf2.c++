@@ -64,9 +64,12 @@ class Pbkdf2Key final: public CryptoKey::Impl {
     // check for v8::Isolate::IsExecutionTerminating() in the loop, but for now a hard cap seems
     // wisest.
     checkPbkdfLimits(js, iterations);
+    auto derivedLengthBytes = length / 8;
+    JSG_REQUIRE(ncrypto::checkHkdfLength(hashType, derivedLengthBytes), DOMOperationError,
+        "Pbkdf2 failed: derived key length exceeds maximum for this hash");
 
-    return JSG_REQUIRE_NONNULL(pbkdf2(js, length / 8, iterations, hashType, keyData, salt), Error,
-        "PBKDF2 deriveBits failed.");
+    return JSG_REQUIRE_NONNULL(pbkdf2(js, derivedLengthBytes, iterations, hashType, keyData, salt),
+        Error, "PBKDF2 deriveBits failed.");
   }
 
   // TODO(bug): Possibly by mistake, PBKDF2 was historically not on the allow list of

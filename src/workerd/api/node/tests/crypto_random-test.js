@@ -461,3 +461,10 @@ export const getRandomValuesIllegalInvocation = {
     strictEqual(crypto.getRandomValues(new Uint8Array(6)).length, 6);
   },
 };
+
+export const generate_prime_size_cap = {
+  test() {
+    throws(() => generatePrimeSync(8193), { name: 'RangeError' });
+    ok(generatePrimeSync(512).byteLength > 0);
+  },
+};

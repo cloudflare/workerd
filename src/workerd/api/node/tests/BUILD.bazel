@@ -138,6 +138,12 @@ wd_test(
 )
 
 wd_test(
+    src = "crypto_scrypt-limits-test.wd-test",
+    args = ["--experimental"],
+    data = ["crypto_scrypt-limits-test.js"],
+)
+
+wd_test(
     src = "crypto_spkac-test.wd-test",
     args = ["--experimental"],
     data = ["crypto_spkac-test.js"],
