@@ -101,7 +101,11 @@ export const testRejectsMetadataNetworkPath = {
 // configured host without authority override.
 export const testBackslashPathsCannotOverrideAuthority = {
   test() {
-    const backslashPaths = ['\\\\evil.test/x', '\\/evil.test/x', '/\\evil.test/x'];
+    const backslashPaths = [
+      '\\\\evil.test/x',
+      '\\/evil.test/x',
+      '/\\evil.test/x',
+    ];
     for (const path of backslashPaths) {
       // If the parser normalises \ to /, our check rejects it (throws).
       // If it doesn't normalise, the path is safe. Either way, verify
@@ -129,7 +133,7 @@ export const testBackslashPathsCannotOverrideAuthority = {
         if (resolved.host !== 'api.example.test') {
           throw new Error(
             `Backslash path "${path}" was allowed but URL parser resolved ` +
-            `host to "${resolved.host}" — authority override!`
+              `host to "${resolved.host}" — authority override!`
           );
         }
       }
