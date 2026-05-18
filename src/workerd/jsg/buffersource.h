@@ -495,8 +495,4 @@ class BufferSourceWrapper {
   }
 };
 
-inline BufferSource Lock::arrayBuffer(kj::Array<kj::byte> data) {
-  return BufferSource(*this, BackingStore::from<v8::ArrayBuffer>(*this, kj::mv(data)));
-}
-
 }  // namespace workerd::jsg

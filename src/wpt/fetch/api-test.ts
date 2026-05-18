@@ -836,7 +836,16 @@ export default {
       'Check response returned by static method redirect(), status = 308',
     ],
   },
-  'response/response-stream-bad-chunk.any.js': {},
+  'response/response-stream-bad-chunk.any.js': {
+    comment: 'Our impl is slightly more permissive in accepting strings',
+    expectedFailures: [
+      'ReadableStream with non-Uint8Array chunk passed to Response.arrayBuffer() causes TypeError',
+      'ReadableStream with non-Uint8Array chunk passed to Response.blob() causes TypeError',
+      'ReadableStream with non-Uint8Array chunk passed to Response.bytes() causes TypeError',
+      'ReadableStream with non-Uint8Array chunk passed to Response.json() causes TypeError',
+      'ReadableStream with non-Uint8Array chunk passed to Response.text() causes TypeError',
+    ],
+  },
   'response/response-stream-disturbed-1.any.js': {},
   'response/response-stream-disturbed-2.any.js': {},
   'response/response-stream-disturbed-3.any.js': {},
