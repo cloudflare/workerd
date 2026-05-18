@@ -16771,7 +16771,11 @@ interface DispatchNamespace {
    * @param args Arguments to Worker script.
    * @param options Options for Dynamic Dispatch invocation.
    * @returns A Fetcher object that allows you to send requests to the Worker script.
-   * @throws If the Worker script does not exist in this dispatch namespace, an error will be thrown.
+   *
+   * Note: `get` does not validate that the named Worker script exists in the
+   * dispatch namespace. It always returns a Fetcher; if the script is missing,
+   * the resulting "Worker not found" error is surfaced when `fetch()` is
+   * invoked on the returned Fetcher.
    */
   get(
     name: string,
