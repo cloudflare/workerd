@@ -13758,15 +13758,29 @@ declare namespace CloudflareWorkersModule {
     attempt: number;
     config: WorkflowStepConfig;
   };
+  export type WorkflowRollbackContext<T = unknown> = {
+    error: Error;
+    output: T;
+    stepName: string;
+  };
+  export type WorkflowRollbackHandler<T = unknown> = (
+    ctx: WorkflowRollbackContext<T>,
+  ) => Promise<void>;
+  export type WorkflowStepRollbackOptions<T = unknown> = {
+    rollback?: WorkflowRollbackHandler<T>;
+    rollbackConfig?: WorkflowStepConfig;
+  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions,
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
