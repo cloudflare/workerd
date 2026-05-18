@@ -548,14 +548,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         // no need to drop the isolate lock and take it again every time some data is read/written.
         // That's a larger refactor, though.
         auto& ioContext = IoContext::current();
+        auto isByob = maybeByobOptions != kj::none;
         return ioContext.awaitIoLegacy(js, kj::mv(promise))
-            .then(js, ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
-                  (this, ref = addRef(),
-                   view = view.addRef(js),
-                   dest = kj::mv(dest),
-                   isByob = maybeByobOptions != kj::none),
-                  (ref, view),
-                  (jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
+            .then(js,
+                ioContext.addFunctor(
+                    [this, ref = addRef(), view = view.addRef(js), dest = kj::mv(dest), isByob](
+                        jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
           readPending = false;
           KJ_ASSERT(amount <= dest.size());
           auto handle = view.getHandle(js);
@@ -565,7 +563,8 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             }
             KJ_IF_SOME(o, owner) {
               o.signalEof(js);
-            } else {}
+            } else {
+            }
             if (isByob && FeatureFlags::get(js).getInternalStreamByobReturn()) {
               return js.resolvedPromise(ReadResult{
                 .value = jsg::JsValue(handle.slice(js, 0, 0)).addRef(js),
@@ -621,18 +620,16 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             .value = jsg::JsValue(handle.slice(js, 0, amount)).addRef(js),
             .done = false,
           });
-        })),
-                ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
-                  (this, ref = addRef()),
-                  (ref),
-                  (jsg::Lock& js, jsg::Value reason) -> jsg::Promise<ReadResult> {
-        readPending = false;
-        auto handle = jsg::JsValue(reason.getHandle(js));
-        if (!state.is<StreamStates::Errored>()) {
-          doError(js, handle);
-        }
-        return js.rejectedPromise<ReadResult>(handle);
-      })));
+        }),
+                ioContext.addFunctor([this, ref = addRef()](jsg::Lock& js,
+                                         jsg::Value reason) -> jsg::Promise<ReadResult> {
+          readPending = false;
+          auto handle = jsg::JsValue(reason.getHandle(js));
+          if (!state.is<StreamStates::Errored>()) {
+            doError(js, handle);
+          }
+          return js.rejectedPromise<ReadResult>(handle);
+        }));
 
       } else {
         return js.rejectedPromise<ReadResult>(
@@ -706,10 +703,9 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
 
       auto& ioContext = IoContext::current();
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
-          .then(js, ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
-                (this, ref = addRef(), store = kj::mv(store)),
-                (ref),
-                (jsg::Lock& js, size_t amount) mutable -> jsg::Promise<DrainingReadResult> {
+          .then(js,
+              ioContext.addFunctor([this, ref = addRef(), store = kj::mv(store)](jsg::Lock& js,
+                                       size_t amount) mutable -> jsg::Promise<DrainingReadResult> {
         readPending = false;
         KJ_ASSERT(amount <= store.size());
         if (amount == 0) {
@@ -718,24 +714,23 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
           }
           KJ_IF_SOME(o, owner) {
             o.signalEof(js);
-          } else {}
+          } else {
+          }
           return js.resolvedPromise(DrainingReadResult{.done = true});
         }
         // Return a slice so the script can see how many bytes were read.
         return js.resolvedPromise(DrainingReadResult{
           .chunks = kj::arr(store.slice(0, amount).attach(kj::mv(store))), .done = false});
-      })),
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
-                  (this, ref = addRef()),
-                  (ref),
-                  (jsg::Lock& js, jsg::Value reason) -> jsg::Promise<DrainingReadResult> {
+      }),
+              ioContext.addFunctor([this, ref = addRef()](jsg::Lock& js,
+                                       jsg::Value reason) -> jsg::Promise<DrainingReadResult> {
         readPending = false;
         auto handle = jsg::JsValue(reason.getHandle(js));
         if (!state.is<StreamStates::Errored>()) {
           doError(js, handle);
         }
         return js.rejectedPromise<DrainingReadResult>(handle);
-      })));
+      }));
     }
   }
   KJ_UNREACHABLE;

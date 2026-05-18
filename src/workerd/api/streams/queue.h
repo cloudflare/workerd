@@ -553,11 +553,6 @@ class ConsumerImpl final {
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    // Technically we shouldn't really have to GC visit the stored error here but there
-    // should not be any harm in doing so.
-    KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
-      visitor.visit(errored.reason);
-    }
     // There's no reason to GC visit the promise resolver or buffer in Ready state and it is
     // potentially problematic if we do. Since the read requests are queued, if we
     // GC visit it once, remove it from the queue, and GC happens to kick in before
@@ -755,6 +750,12 @@ class ValueQueue final {
     JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
     }
+
+    // Note that we intentionally do not trace the resolver here. The ReadRequest is held by
+    // a kj::Own. The ownership of the own is passed around, not the actual ReadRequest. If we
+    // traced the resolved, it would become weak and could be collected by GC while there are
+    // still live references to the kj::On that holds it. By not tracing it, we ensure the resolver
+    // remains a strong root for GC purposes as long as there are any references to it.
   };
 
   // A value queue entry consists of an arbitrary JavaScript value and a size that is
@@ -768,7 +769,15 @@ class ValueQueue final {
 
     size_t getSize(jsg::Lock& js) const;
 
-    void visitForGc(jsg::GcVisitor& visitor);
+    void visitForGc(jsg::GcVisitor& visitor) {
+      // We intentionally do not trace value here so that the value remains a strong
+      // root for GC purposes. The Entry is a refcounted object whose ownership is
+      // determined by whatever references to it exist. It's possible for the entry
+      // to be passed around across boundaries where GC can occur. If the entry is traced,
+      // the jsg::JsRef becomes weak, meaning the Entry must continue to be held by
+      // something that can trace it or the gc may conclude that the value is unreachable
+      // and collect it, even if there are still live references to the Entry itself.
+    }
 
     kj::Rc<Entry> clone(jsg::Lock& js);
 
@@ -866,7 +875,9 @@ class ValueQueue final {
 
   bool hasPartiallyFulfilledRead(jsg::Lock& js);
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) {
+    // Intentially non-op
+  }
 
   inline kj::StringPtr jsgGetMemoryName() const;
   inline size_t jsgGetMemorySelfSize() const;
@@ -936,6 +947,13 @@ class ByteQueue final {
       tracker.trackField("resolver", resolver);
       tracker.trackField("pullInto", pullInto);
     }
+
+    // Note that we intentionally do not trace the resolver or pull-into store here.
+    // The ReadRequest is held by a kj::Own. The ownership of the own is passed around, not
+    // the actual ReadRequest. If we traced the resolved, it would become weak and could be
+    // collected by GC while there are still live references to the kj::On that holds it. By
+    // not tracing it, we ensure the resolver remains a strong root for GC purposes as long as
+    // there are any references to it.
   };
 
   // The ByobRequest is essentially a handle to the ByteQueue::ReadRequest that can be given to a
@@ -1013,7 +1031,15 @@ class ByteQueue final {
 
     size_t getSize(jsg::Lock& js) const;
 
-    void visitForGc(jsg::GcVisitor& visitor);
+    void visitForGc(jsg::GcVisitor& visitor) {
+      // We intentionally do not trace store here so that the value remains a strong
+      // root for GC purposes. The Entry is a refcounted object whose ownership is
+      // determined by whatever references to it exist. It's possible for the entry
+      // to be passed around across boundaries where GC can occur. If the entry is traced,
+      // the jsg::JsRef becomes weak, meaning the Entry must continue to be held by
+      // something that can trace it or the gc may conclude that the value is unreachable
+      // and collect it, even if there are still live references to the Entry itself.
+    }
 
     kj::Rc<Entry> clone(jsg::Lock& js);
 
@@ -1022,12 +1048,6 @@ class ByteQueue final {
     }
 
    private:
-    // visitForGc intentionally does not visit `store`: ByteQueue::Entry is
-    // owned via kj::Rc<Entry> (C++ refcount), so the JsBufferSource cannot
-    // be part of a JS→C++→JS reference cycle and the strong v8::Global
-    // inside JsRef suffices to keep it alive. See ConsumerImpl::visitForGc
-    // for the chosen memory model and the empty Entry::visitForGc body in
-    // queue.c++.
     jsg::JsRef<jsg::JsBufferSource> store;  // NOLINT(jsg-visit-for-gc)
   };
 
@@ -1124,7 +1144,9 @@ class ByteQueue final {
   // will be disconnected as appropriate.
   kj::Maybe<kj::Own<ByobRequest>> nextPendingByobReadRequest();
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) {
+    // Intentially non-op.
+  }
 
   inline kj::StringPtr jsgGetMemoryName() const;
   inline size_t jsgGetMemorySelfSize() const;

@@ -51,10 +51,6 @@ size_t ValueQueue::Entry::getSize(jsg::Lock&) const {
   return size;
 }
 
-void ValueQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(value);
-}
-
 #pragma endregion ValueQueue::Entry
 
 #pragma region ValueQueue::QueueEntry
@@ -485,8 +481,6 @@ bool ValueQueue::hasPartiallyFulfilledRead(jsg::Lock&) {
   return false;
 }
 
-void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {}
-
 #pragma endregion ValueQueue
 
 // ======================================================================================
@@ -572,8 +566,6 @@ size_t ByteQueue::Entry::getSize(jsg::Lock& js) const {
 kj::Rc<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
   return addRefToThis();
 }
-
-void ByteQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma endregion ByteQueue::Entry
 
@@ -1596,8 +1588,6 @@ bool ByteQueue::wantsRead() const {
 size_t ByteQueue::getConsumerCount() {
   return impl.getConsumerCount();
 }
-
-void ByteQueue::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma endregion ByteQueue
 
