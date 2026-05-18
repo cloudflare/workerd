@@ -261,6 +261,12 @@ wd_test(
 )
 
 wd_test(
+    src = "zlib-resizable-buffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-resizable-buffer-test.js"],
+)
+
+wd_test(
     src = "module-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["module-nodejs-test.js"],
