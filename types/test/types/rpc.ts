@@ -9,6 +9,7 @@ import {
   RpcTarget,
   WorkerEntrypoint,
 } from 'cloudflare:workers';
+import type {WorkflowStep} from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
 
 // Check `cache` export from `cloudflare:workers` has the expected type.
@@ -794,3 +795,29 @@ export default <ExportedHandler<Env>>{
     return new Response();
   },
 };
+
+declare const workflowStep: WorkflowStep;
+
+expectTypeOf(
+  workflowStep.do('step with rollback', async () => 'ok', {
+    rollback: async (ctx) => {
+      expectTypeOf(ctx.error).toEqualTypeOf<Error>();
+      expectTypeOf(ctx.output).toEqualTypeOf<unknown>();
+      expectTypeOf(ctx.stepName).toEqualTypeOf<string>();
+    },
+  })
+).toMatchTypeOf<Promise<string>>();
+
+workflowStep.do(
+  'configured rollback',
+  {retries: {limit: 0, delay: 0}},
+  async () => 'ok',
+  {
+    rollback: async (ctx) => {
+      expectTypeOf(ctx.output).toEqualTypeOf<unknown>();
+    },
+    rollbackConfig: {retries: {limit: 0, delay: 0}},
+  }
+);
+
+workflowStep.do('empty rollback options', async () => 'ok', {});
