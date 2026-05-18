@@ -14399,7 +14399,7 @@ export declare namespace CloudflareWorkersModule {
   };
   export type WorkflowRollbackContext<T = unknown> = {
     error: Error;
-    output: T;
+    output: T | undefined;
     stepName: string;
   };
   export type WorkflowRollbackHandler<T = unknown> = (

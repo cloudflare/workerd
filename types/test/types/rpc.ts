@@ -802,7 +802,7 @@ expectTypeOf(
   workflowStep.do('step with rollback', async (): Promise<string> => 'ok', {
     rollback: async (ctx) => {
       expectTypeOf(ctx.error).toEqualTypeOf<Error>();
-      expectTypeOf(ctx.output).toEqualTypeOf<string>();
+      expectTypeOf(ctx.output).toEqualTypeOf<string | undefined>();
       expectTypeOf(ctx.stepName).toEqualTypeOf<string>();
     },
   })
@@ -814,7 +814,7 @@ workflowStep.do(
   async (): Promise<string> => 'ok',
   {
     rollback: async (ctx) => {
-      expectTypeOf(ctx.output).toEqualTypeOf<string>();
+      expectTypeOf(ctx.output).toEqualTypeOf<string | undefined>();
     },
     rollbackConfig: {retries: {limit: 0, delay: 0}},
   }
