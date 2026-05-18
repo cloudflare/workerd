@@ -799,10 +799,10 @@ export default <ExportedHandler<Env>>{
 declare const workflowStep: WorkflowStep;
 
 expectTypeOf(
-  workflowStep.do('step with rollback', async () => 'ok', {
+  workflowStep.do('step with rollback', async (): Promise<string> => 'ok', {
     rollback: async (ctx) => {
       expectTypeOf(ctx.error).toEqualTypeOf<Error>();
-      expectTypeOf(ctx.output).toEqualTypeOf<unknown>();
+      expectTypeOf(ctx.output).toEqualTypeOf<string>();
       expectTypeOf(ctx.stepName).toEqualTypeOf<string>();
     },
   })
@@ -811,10 +811,10 @@ expectTypeOf(
 workflowStep.do(
   'configured rollback',
   {retries: {limit: 0, delay: 0}},
-  async () => 'ok',
+  async (): Promise<string> => 'ok',
   {
     rollback: async (ctx) => {
-      expectTypeOf(ctx.output).toEqualTypeOf<unknown>();
+      expectTypeOf(ctx.output).toEqualTypeOf<string>();
     },
     rollbackConfig: {retries: {limit: 0, delay: 0}},
   }
