@@ -7,10 +7,10 @@ use std::time::SystemTime;
 
 use cxx::KjError;
 use kj::http::ConnectResponse;
-use kj::http::HttpConnectSettings;
-use kj::http::HttpHeadersRef;
-use kj::http::HttpMethod;
-use kj::http::HttpServiceResponse;
+use kj::http::ConnectSettings;
+use kj::http::HeadersRef;
+use kj::http::Method;
+use kj::http::ServiceResponse;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use outcome_capnp::EventOutcome;
@@ -52,14 +52,14 @@ impl Worker {
 }
 
 #[async_trait::async_trait(?Send)]
-impl kj::http::HttpService for Worker {
+impl kj::http::Service for Worker {
     async fn request<'a>(
         &'a mut self,
-        _method: HttpMethod,
+        _method: Method,
         _url: &'a [u8],
-        _headers: HttpHeadersRef<'a>,
+        _headers: HeadersRef<'a>,
         _request_body: Pin<&'a mut AsyncInputStream>,
-        _response: Pin<&'a mut HttpServiceResponse>,
+        _response: ServiceResponse<'a>,
     ) -> Result<()> {
         Self::error(file!(), line!())
     }
@@ -67,10 +67,10 @@ impl kj::http::HttpService for Worker {
     async fn connect<'a>(
         &'a mut self,
         _host: &'a [u8],
-        _headers: HttpHeadersRef<'a>,
+        _headers: HeadersRef<'a>,
         _connection: Pin<&'a mut AsyncIoStream>,
-        _response: Pin<&'a mut ConnectResponse>,
-        _settings: HttpConnectSettings<'a>,
+        _response: ConnectResponse<'a>,
+        _settings: ConnectSettings<'a>,
     ) -> Result<()> {
         Self::error(file!(), line!())
     }

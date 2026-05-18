@@ -7,6 +7,8 @@ import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 
 export const IS_WORKERD = MetadataReader.isWorkerd();
 export const IS_TRACING = MetadataReader.isTracing();
+export const SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR =
+  MetadataReader.shouldAbortIsolateOnFatalError();
 
 // Snapshots
 export const SHOULD_SNAPSHOT_TO_DISK = MetadataReader.shouldSnapshotToDisk();
@@ -63,6 +65,7 @@ export const EXTERNAL_SDK = !!COMPATIBILITY_FLAGS.enable_python_external_sdk;
 export const LEGACY_GLOBAL_HANDLERS = !NO_GLOBAL_HANDLERS;
 export const LEGACY_VENDOR_PATH = !FORCE_NEW_VENDOR_PATH;
 export const CHECK_RNG_STATE = !!COMPATIBILITY_FLAGS.python_check_rng_state;
+export const PROCESS_PTH_FILES = !!COMPATIBILITY_FLAGS.python_process_pth_files;
 
 export const setCpuLimitNearlyExceededCallback =
   MetadataReader.setCpuLimitNearlyExceededCallback.bind(MetadataReader);

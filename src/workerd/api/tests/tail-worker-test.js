@@ -193,6 +193,8 @@ const E = {
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"connectHandler","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"connect","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   connectHandlerProxy:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"connectHandlerProxy","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"connect","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+  localAddressViaServiceBinding:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"localAddressViaServiceBinding","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"connect","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
   connectTarget:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"connect"}}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
@@ -250,6 +252,7 @@ const expectedFlat = [
   n(E.cacheMode),
   n(E.connectHandler),
   n(E.connectHandlerProxy),
+  n(E.localAddressViaServiceBinding),
   n(E.jsrpcGetCounter),
   n(E.jsrpcNonFunction),
   n(E.connectTarget),
@@ -291,9 +294,11 @@ const expectedWithPropagation = [
   // cacheMode: standalone
   n(E.cacheMode),
 
-  // connect: handler and proxy are separate top-level tests, target is independent
+  // connect: handler, proxy, and service-binding test are separate top-level tests, target is
+  // independent
   n(E.connectHandler),
   n(E.connectHandlerProxy),
+  n(E.localAddressViaServiceBinding),
   n(E.connectTarget),
 
   // jsrpc DO subrequest test: caller has children (MyService + MyActor DO calls)

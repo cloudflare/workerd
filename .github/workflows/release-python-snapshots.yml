@@ -23,7 +23,7 @@ jobs:
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
-      GOOGLESOURCE_COOKE: ${{ secrets.GOOGLESOURCE_COOKIE }}
+      GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
 
   build:
     needs: [build-linux]

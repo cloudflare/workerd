@@ -7,6 +7,10 @@ test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-e
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
 build --test_size_filters=-enormous
+# Don't run tests that set up TCP sockets in parallel since they may try to use the same ports. This
+# is less restrictive than marking such tests as "exclusive" since we can still run unrelated tests
+# at the same time.
+test --local_resources=socket=1
 
 # use lower test timeouts: https://bazel.build/reference/test-encyclopedia#role-test-runner
 # corresponds to small,medium,large,enormous tests (medium is default)

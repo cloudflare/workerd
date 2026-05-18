@@ -323,11 +323,10 @@ class CryptoImpl final: public jsg::Object {
       unsigned int max_message_size = INT_MAX;
     };
 
-    CipherHandle(jsg::Lock& js,
-        CipherMode mode,
+    CipherHandle(CipherMode mode,
         ncrypto::CipherCtxPointer ctx,
         jsg::Ref<CryptoKey> key,
-        jsg::JsBufferSource iv,
+        kj::Array<kj::byte> iv,
         kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
 
     static jsg::Ref<CipherHandle> construct(jsg::Lock& js,
@@ -359,8 +358,8 @@ class CryptoImpl final: public jsg::Object {
     CipherMode mode;
     ncrypto::CipherCtxPointer ctx;
     jsg::Ref<CryptoKey> key;
-    jsg::JsRef<jsg::JsBufferSource> iv;
-    kj::Maybe<jsg::JsRef<jsg::JsBufferSource>> maybeAuthTag;
+    kj::Array<kj::byte> iv;
+    kj::Maybe<kj::Array<kj::byte>> maybeAuthTag;
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo;
     bool authTagPassed = false;
     bool pendingAuthFailed = false;
@@ -401,12 +400,11 @@ class CryptoImpl final: public jsg::Object {
       unsigned int max_message_size = INT_MAX;
     };
 
-    AeadHandle(jsg::Lock& js,
-        CipherMode mode,
+    AeadHandle(CipherMode mode,
         ncrypto::Aead aead,
         ncrypto::AeadCtxPointer ctx,
         jsg::Ref<CryptoKey> key,
-        jsg::JsBufferSource iv,
+        kj::Array<kj::byte> iv,
         kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
 
     static jsg::Ref<AeadHandle> construct(jsg::Lock& js,
@@ -439,10 +437,10 @@ class CryptoImpl final: public jsg::Object {
     ncrypto::Aead aead;
     ncrypto::AeadCtxPointer ctx;
     jsg::Ref<CryptoKey> key;
-    jsg::JsRef<jsg::JsBufferSource> iv;
-    kj::Maybe<jsg::JsRef<jsg::JsBufferSource>> maybeAuthTag;
+    kj::Array<kj::byte> iv;
+    kj::Maybe<kj::Array<kj::byte>> maybeAuthTag;
     kj::Maybe<AuthenticatedInfo> maybeAuthInfo;
-    kj::Maybe<jsg::JsRef<jsg::JsBufferSource>> maybeAad;
+    kj::Maybe<kj::Array<kj::byte>> maybeAad;
     bool updated = false;
   };
 

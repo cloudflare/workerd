@@ -38,6 +38,27 @@ export const connectHandlerProxy = {
   },
 };
 
+// Exercises the service-binding path: fetcher.connect("host:port") -> WorkerEntrypoint::connect on
+// the target worker. Unlike the TCP listener path (which presents the listener's bound address as
+// the authority), the service-binding path forwards the caller's authority string verbatim, so we
+// can assert strict equality between what the client passed and what the server observes as
+// socket.opened.localAddress.
+export const localAddressViaServiceBinding = {
+  async test(ctrl, env) {
+    const AUTHORITY = 'example.com:1234';
+    const socket = env.TARGET.connect(AUTHORITY);
+    await socket.opened;
+    const dec = new TextDecoder();
+    let result = '';
+    for await (const chunk of socket.readable) {
+      result += dec.decode(chunk, { stream: true });
+    }
+    result += dec.decode();
+    strictEqual(result, `OK:${AUTHORITY}`);
+    await socket.closed;
+  },
+};
+
 export default {
   async connect(socket) {
     const enc = new TextEncoder();

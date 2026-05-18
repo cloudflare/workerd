@@ -90,6 +90,7 @@ export class D1MockDO {
       meta: {
         duration: Math.random() * 0.01,
         served_by: 'd1-mock',
+        served_by_colo: 'DFW',
         changes: num_changes,
         last_row_id: last_row_id_after,
         changed_db,

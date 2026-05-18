@@ -148,13 +148,15 @@ declare namespace Rpc {
   export type Provider<
     T extends object,
     Reserved extends string = never,
-  > = MaybeCallableProvider<T> &
-    Pick<
-      {
-        [K in keyof T]: MethodOrProperty<T[K]>;
-      },
-      Exclude<keyof T, Reserved | symbol | keyof StubBase<never>>
-    >;
+  > = MaybeCallableProvider<T> & Pick<
+    {
+      [K in keyof T]: MethodOrProperty<T[K]>;
+    },
+    Exclude<
+      keyof T,
+      Reserved | symbol | keyof StubBase<never>
+    >
+  >
 }
 
 /**
@@ -239,26 +241,27 @@ declare namespace Cloudflare {
 
   // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
   // present.
-  type GlobalProp<K extends string, Default> = K extends keyof GlobalProps
-    ? GlobalProps[K]
-    : Default;
+  type GlobalProp<K extends string, Default> =
+      K extends keyof GlobalProps ? GlobalProps[K] : Default;
 
   // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
   // `mainModule` property.
-  type MainModule = GlobalProp<'mainModule', {}>;
+  type MainModule = GlobalProp<"mainModule", {}>;
 
   // The type of ctx.exports, which contains loopback bindings for all top-level exports.
   type Exports = {
-    [K in keyof MainModule]: LoopbackForExport<MainModule[K]> &
-      // If the export is listed in `durableNamespaces`, then it is also a
-      // DurableObjectNamespace.
-      (K extends GlobalProp<'durableNamespaces', never>
-        ? MainModule[K] extends new (...args: any[]) => infer DoInstance
-          ? DoInstance extends Rpc.DurableObjectBranded
-            ? DurableObjectNamespace<DoInstance>
-            : DurableObjectNamespace<undefined>
-          : DurableObjectNamespace<undefined>
-        : {});
+    [K in keyof MainModule]:
+        & LoopbackForExport<MainModule[K]>
+
+        // If the export is listed in `durableNamespaces`, then it is also a
+        // DurableObjectNamespace.
+        & (K extends GlobalProp<"durableNamespaces", never>
+            ?  MainModule[K] extends new (...args: any[]) => infer DoInstance
+                ? DoInstance extends Rpc.DurableObjectBranded
+                    ? DurableObjectNamespace<DoInstance>
+                    : DurableObjectNamespace<undefined>
+                : DurableObjectNamespace<undefined>
+            : {});
   };
 }
 
@@ -274,8 +277,10 @@ declare namespace CloudflareWorkersModule {
 
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
 
-  export abstract class WorkerEntrypoint<Env = Cloudflare.Env, Props = {}>
-    implements Rpc.WorkerEntrypointBranded
+  export abstract class WorkerEntrypoint<
+    Env = Cloudflare.Env,
+    Props = {},
+  > implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
@@ -289,17 +294,15 @@ declare namespace CloudflareWorkersModule {
     queue?(batch: MessageBatch): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     tail?(events: TraceItem[]): void | Promise<void>;
-    tailStream?(
-      event: TailStream.TailEvent<TailStream.Onset>
-    ):
-      | TailStream.TailEventHandlerType
-      | Promise<TailStream.TailEventHandlerType>;
+    tailStream?(event: TailStream.TailEvent<TailStream.Onset>): TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
     test?(controller: TestController): void | Promise<void>;
     trace?(traces: TraceItem[]): void | Promise<void>;
   }
 
-  export abstract class DurableObject<Env = Cloudflare.Env, Props = {}>
-    implements Rpc.DurableObjectBranded
+  export abstract class DurableObject<
+    Env = Cloudflare.Env,
+    Props = {},
+  > implements Rpc.DurableObjectBranded
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 
@@ -374,30 +377,16 @@ declare namespace CloudflareWorkersModule {
     config: WorkflowStepConfig;
   };
 
-  export interface RollbackContext<T> {
-    error: Error;
-    output: NonNullable<T> | undefined;
-    stepName: string;
-  }
-
-  export interface StepPromise<T> extends Promise<T> {
-    rollback(fn: (ctx: RollbackContext<T>) => Promise<void>): StepPromise<T>;
-    rollback(
-      config: WorkflowStepConfig,
-      fn: (ctx: RollbackContext<T>) => Promise<void>
-    ): StepPromise<T>;
-  }
-
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
       callback: (ctx: WorkflowStepContext) => Promise<T>
-    ): StepPromise<T>;
+    ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
       callback: (ctx: WorkflowStepContext) => Promise<T>
-    ): StepPromise<T>;
+    ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
     waitForEvent<T extends Rpc.Serializable<T>>(
@@ -406,7 +395,7 @@ declare namespace CloudflareWorkersModule {
         type: string;
         timeout?: WorkflowTimeoutDuration | number;
       }
-    ): StepPromise<WorkflowStepEvent<T>>;
+    ): Promise<WorkflowStepEvent<T>>;
   }
 
   export type WorkflowInstanceStatus =
@@ -423,8 +412,7 @@ declare namespace CloudflareWorkersModule {
   export abstract class WorkflowEntrypoint<
     Env = unknown,
     T extends Rpc.Serializable<T> | unknown = unknown,
-  >
-    implements Rpc.WorkflowEntrypointBranded
+  > implements Rpc.WorkflowEntrypointBranded
   {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
 
@@ -442,7 +430,10 @@ declare namespace CloudflareWorkersModule {
   export function waitUntil(promise: Promise<unknown>): void;
 
   export function withEnv(newEnv: unknown, fn: () => unknown): unknown;
-  export function withExports(newExports: unknown, fn: () => unknown): unknown;
+  export function withExports(
+    newExports: unknown,
+    fn: () => unknown
+  ): unknown;
   export function withEnvAndExports(
     newEnv: unknown,
     newExports: unknown,

@@ -159,5 +159,17 @@ profile path:
     echo "No valid perf.data file found for {{path}}"; \
   fi
 
+# Run the @gc-stress test variants to detect GC-related bugs (premature collection,
+# missing visitForGc, etc). Debug builds only. These variants are tagged off-by-default
+# so they won't run in normal `just test` invocations.
+# e.g. just test-gc-stress //src/workerd/api/tests:all
+test-gc-stress *args="//src/...":
+  bazel test $(bazel query 'attr(tags, gc-stress, kind("_wd_test rule", {{args}}))' 2>/dev/null) --test_tag_filters=gc-stress
+
+# Like test-gc-stress but with AddressSanitizer to detect use-after-free.
+# Leak detection is disabled to avoid masking more serious issues.
+test-gc-stress-asan *args="//src/...":
+  bazel test $(bazel query 'attr(tags, gc-stress, kind("_wd_test rule", {{args}}))' 2>/dev/null) --config=asan --test_tag_filters=gc-stress,-no-asan --test_timeout=300 --test_env=ASAN_OPTIONS=detect_leaks=0
+
 watch *args="build":
   watchexec -rc -w src -w build just {{args}}

@@ -43,14 +43,16 @@ export function deserializeJsModule(
   obj: SerializedJsModule,
   jsModules: JsModules
 ): unknown {
-  return (
-    obj.accessorList.reduce((x: JsModules, y: string): JsModules => {
+  const { accessorList, moduleName } = obj;
+  const result =
+    accessorList.reduce((x: JsModules, y: string): JsModules => {
       if (y === getPrototypeOfKey) {
         return Reflect.getPrototypeOf(x) as JsModules;
       }
       return x[y]!;
-    }, jsModules[obj.moduleName]!) ?? null
-  );
+    }, jsModules[moduleName]!) ?? null;
+  // Support stacked snapshots
+  return createImportProxy(moduleName, result, accessorList);
 }
 
 // This tracks the information needed to "serialize" attributes of js modules. We need the name and
@@ -59,11 +61,11 @@ export function deserializeJsModule(
 //
 // If the receiver of a function call is an import proxy, this can cause the call to crash, so we
 // unwrap the receiver using the getObject symbol.
-export function createImportProxy(
+export function createImportProxy<T>(
   name: string,
-  mod: any,
+  mod: T,
   accessorList: (string | symbol)[] = []
-): any {
+): T {
   if (!IS_CREATING_SNAPSHOT) {
     return mod;
   }
@@ -110,5 +112,5 @@ export function createImportProxy(
         getPrototypeOfKey,
       ]);
     },
-  });
+  }) as T;
 }

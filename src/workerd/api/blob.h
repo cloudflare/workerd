@@ -87,25 +87,15 @@ class Blob: public jsg::Object {
       KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
         tracker.trackField("ownData", data);
       }
-      KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
-        tracker.trackField("ownData", data);
-      }
     }
     tracker.trackField("type", type);
   }
 
  private:
-  Blob(kj::Array<byte> data, kj::String type);
-
   // Sentinel type for the case where the Blob is just ... empty.
   struct Empty {};
 
-  // Using a jsg::JsRef<jsg::JsBufferSource> to store the ownData allows the associated isolate
-  // to track the external data allocation correctly.
-  // The Variation that uses kj::Array<kj::byte> only is used only in very
-  // specific cases (i.e. the internal fiddle service) where we parse FormData
-  // outside of the isolate lock.
-  kj::OneOf<Empty, jsg::JsRef<jsg::JsBufferSource>, kj::Array<kj::byte>, jsg::Ref<Blob>> ownData;
+  kj::OneOf<Empty, jsg::JsRef<jsg::JsBufferSource>, jsg::Ref<Blob>> ownData;
   kj::ArrayPtr<const byte> data;
   kj::String type;
 
@@ -118,7 +108,6 @@ class Blob: public jsg::Object {
       KJ_CASE_ONEOF(b, jsg::Ref<Blob>) {
         visitor.visit(b);
       }
-      KJ_CASE_ONEOF(b, kj::Array<kj::byte>) {}
     }
   }
 
@@ -131,10 +120,6 @@ class File: public Blob {
  public:
   // Creates a zero-length File
   File(kj::String name, kj::String type, double lastModified);
-  // This constructor variation is used when a File is created outside of the isolate
-  // lock. This is currently only the case when parsing FormData outside of running
-  // JavaScript (such as in the internal fiddle service).
-  File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified);
   File(jsg::Lock& js,
       jsg::JsBufferSource data,
       kj::String name,

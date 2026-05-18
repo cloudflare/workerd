@@ -28,7 +28,6 @@
 #include <workerd/api/performance.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/pyodide/requirements.h>
-#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
@@ -876,7 +875,6 @@ const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
 // namespace {
 // static constexpr auto PYTHON_TAR_READER = "export default { }"_kj;
 
-// static const auto bootrapSpecifier = "internal:setup-emscripten"_url;
 // static const auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
 // static const auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
 // static const auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
@@ -938,15 +936,6 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
 
     //   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, PYODIDE_BUNDLE);
     //   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, bundle);
-
-    //   pyodideBundleBuilder.addSynthetic(bootrapSpecifier,
-    //       jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::SetupEmscripten,
-    //           JsgWorkerdIsolate_TypeWrapper>(
-    //           [bundle = capnp::clone(bundle)](
-    //               jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::SetupEmscripten> {
-    //     auto emscriptenRuntime = api::pyodide::EmscriptenRuntime::initialize(js, true, *bundle);
-    //     return js.alloc<api::pyodide::SetupEmscripten>(kj::mv(emscriptenRuntime));
-    //   }));
 
     //   pyodideBundleBuilder.addEsm(tarReaderSpecifier, PYTHON_TAR_READER);
 

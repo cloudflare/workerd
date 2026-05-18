@@ -80,6 +80,7 @@ namespace {
   V(SPANCLOSE, "spanClose")                                                                        \
   V(SPANCONTEXT, "spanContext")                                                                    \
   V(SPANID, "spanId")                                                                              \
+  V(TRACEFLAGS, "traceFlags")                                                                      \
   V(SPANOPEN, "spanOpen")                                                                          \
   V(STACK, "stack")                                                                                \
   V(STATUSCODE, "statusCode")                                                                      \
@@ -549,6 +550,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
   sCObj.set(js, TRACEID_STR, js.str(event.spanContext.getTraceId().toGoString()));
   KJ_IF_SOME(spanId, event.spanContext.getSpanId()) {
     sCObj.set(js, SPANID_STR, js.str(spanId.toGoString()));
+  }
+  KJ_IF_SOME(flags, event.spanContext.getTraceFlags()) {
+    sCObj.set(js, TRACEFLAGS_STR, js.num(flags));
   }
   obj.set(js, SPANCONTEXT_STR, kj::mv(sCObj));
 
@@ -1251,7 +1255,7 @@ void TailStreamWriter::report(const InvocationSpanContext& context,
   // chance (see SpanId::fromEntropy()), so this should be safe.
   TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
       context.getSpanId() == SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()), timestamp,
-      sequence++, kj::mv(event));
+      sequence++, kj::mv(event), context.getTraceFlags());
 
   KJ_SWITCH_ONEOF(inner) {
     KJ_CASE_ONEOF(closed, Closed) {

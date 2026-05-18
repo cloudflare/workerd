@@ -2289,8 +2289,18 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   }
 
   co_await ensureEgressListenerStarted();
-  containerSidecarStarted.store(false, std::memory_order_release);
   co_await ensureSidecarStarted();
+
+  // Refresh the sidecar's egress configuration on every start(). This is required because:
+  //   - `internetEnabled` may have changed since the sidecar was originally created.
+  //   - The DNS allow-list may have changed (egress mappings added/removed between starts).
+  // The sidecar applies this synchronously and atomically (proxy-everything's PUT /egress
+  // updates an atomic.Pointer before the response). On the cold path, ensureSidecarStarted()
+  // has already pushed an initial config; this second push is a single fast PUT and is
+  // idempotent.
+  KJ_IF_SOME(ingressHostPort, sidecarIngressHostPort) {
+    co_await updateSidecarEgressConfig(ingressHostPort, egressListenerPort);
+  }
 
   caCertInjected.store(false, std::memory_order_release);
   co_await createContainer(effectiveImage, entrypoint, environment, restoreMounts.asPtr(), params);
@@ -2337,9 +2347,16 @@ kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
   co_await ready;
   KJ_DEFER(done->fulfill());
 
-  this->sidecarIngressHostPort = kj::none;
+  // Tear down the app container; the sidecar is kept warm so a subsequent start() can
+  // reuse it (creating a fresh sidecar — and waiting for its iptables / network namespace
+  // setup — costs 4–8 seconds under Docker daemon contention; reusing the warm sidecar
+  // skips that cost entirely). The sidecar's egress configuration is refreshed on the
+  // next start() via updateSidecarEgressConfig.
+  //
+  // The sidecar will be cleaned up when the ContainerClient is destroyed (cleanupCallback
+  // in the destructor), or on the next start() if state is inconsistent (e.g. workerd
+  // restart left an orphaned sidecar; status() recovery handles that case).
   co_await destroyContainer();
-  co_await destroySidecarContainer();
 }
 
 kj::Promise<void> ContainerClient::signal(SignalContext context) {

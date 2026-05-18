@@ -171,8 +171,8 @@ void WorkerTracer::addSpanOpen(tracing::SpanId spanId,
     parentSpanId = topLevelContext.getSpanId();
   }
   size_t spanNameSize = operationName.size();
-  auto spanOpenContext = tracing::InvocationSpanContext(
-      topLevelContext.getTraceId(), topLevelContext.getInvocationId(), parentSpanId);
+  auto spanOpenContext = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), parentSpanId, topLevelContext.getTraceFlags());
   tailStreamWriter->report(
       spanOpenContext, tracing::SpanOpen(spanId, kj::mv(operationName)), startTime, spanNameSize);
 }
@@ -208,8 +208,8 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
   // Compose Attributes and SpanClose, which are available at span completion time and transmitted
   // together.
   auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-  auto spanComponentContext = tracing::InvocationSpanContext(
-      topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
+  auto spanComponentContext = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), span.spanId, topLevelContext.getTraceFlags());
 
   if (span.tags.size() && spanTagsSize <= MAX_TRACE_BYTES) {
     tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
@@ -372,7 +372,7 @@ void WorkerTracer::setEventInfoInternal(
     // as its parent span ID, except for recursive SpanOpens (which have the parent span instead)
     // and Attribute/SpanClose events (which have the spanId opened in the corresponding SpanOpen).
     auto onsetContext = tracing::InvocationSpanContext(
-        context.getTraceId(), context.getInvocationId(), parentSpanId);
+        context.getTraceId(), context.getInvocationId(), parentSpanId, context.getTraceFlags());
 
     // Not applying size accounting for Onset since it is sent separately
     writer->report(onsetContext,
@@ -524,9 +524,10 @@ void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value)
   attributes.add(tracing::Attribute{kj::mv(key), kj::mv(value)});
 }
 
-SpanParent BaseTracer::makeUserRequestSpan(tracing::TraceId traceId) {
+SpanParent BaseTracer::makeUserRequestSpan(
+    tracing::TraceId traceId, kj::Maybe<tracing::TraceFlags> traceFlags) {
   KJ_IF_SOME(func, makeUserRequestSpanFunc) {
-    return func(kj::mv(traceId));
+    return func(kj::mv(traceId), traceFlags);
   } else {
     return SpanParent(nullptr);
   }
@@ -556,19 +557,19 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
 }
 
 kj::Own<SpanObserver> UserSpanObserver::newChild() {
-  return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId);
+  return kj::refcounted<UserSpanObserver>(kj::addRef(*submitter), spanId, traceId, traceFlags);
 }
 
 kj::Own<SpanObserver> UserSpanObserver::newChildFromUserCode() {
   return kj::refcounted<UserSpanObserver>(
-      kj::addRef(*submitter), spanId, traceId, /*fromUserCode=*/true);
+      kj::addRef(*submitter), spanId, traceId, traceFlags, /*fromUserCode=*/true);
 }
 
 kj::Maybe<tracing::SpanContext> UserSpanObserver::toSpanContext() {
   if (traceId == nullptr) {
     return kj::none;
   }
-  return tracing::SpanContext(traceId, spanId);
+  return tracing::SpanContext(traceId, spanId, traceFlags);
 }
 
 void UserSpanObserver::onClose(

@@ -50,7 +50,6 @@ class CacheContext;
 class ExecutionContext;
 namespace pyodide {
 struct ArtifactBundler_State;
-struct EmscriptenRuntime;
 KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api

@@ -1,10 +1,12 @@
 import { dirname, join } from 'node:path';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'url';
 
 const pyodideRootDir = dirname(
   dirname(dirname(fileURLToPath(import.meta.url)))
 );
+
+const pyodideVersion = '%PYODIDE_VERSION%';
 
 let resolvePlugin = {
   name: 'pyodide-internal',
@@ -14,15 +16,13 @@ let resolvePlugin = {
       let rest = args.path.split(':')[1];
       let path;
       if (rest.startsWith('generated')) {
-        // I couldn't figure out how to pass down the version, so instead we'll look through the
-        // directories in `pyodideRootDir` and find one that starts with a 0. This will work until
-        // Pyodide has a 1.0 release.
-        const dir = readdirSync(pyodideRootDir).filter((x) =>
-          x.startsWith('0')
-        )[0];
-        path = join(pyodideRootDir, dir, rest);
+        path = join(pyodideRootDir, pyodideVersion, rest);
         if (!existsSync(path)) {
-          path += '.js';
+          if (existsSync(path + '.js')) {
+            path += '.js';
+          } else {
+            path += '.mjs';
+          }
         }
       } else {
         path = join(pyodideRootDir, 'internal', rest);

@@ -118,9 +118,16 @@ const HEADER_SIZE = 4 * 4;
 const LOADED_SNAPSHOT_META: LoadedSnapshotMeta | undefined = decodeSnapshot(
   MEMORY_SNAPSHOT_READER
 );
-const JS_MODULES: Record<string, any> = await importJsModulesFromSnapshot(
-  LOADED_SNAPSHOT_META?.jsModuleNames
-);
+let JS_MODULES: Record<string, any>;
+
+export async function fillSnapshotJsModules(
+  doAnImport: (mod: string) => Promise<any>
+): Promise<void> {
+  JS_MODULES = await importJsModulesFromSnapshot(
+    doAnImport,
+    LOADED_SNAPSHOT_META?.jsModuleNames
+  );
+}
 const CREATED_SNAPSHOT_META: Required<DsoLoadInfo> = {
   soMemoryBases: {},
   soTableBases: {},
@@ -572,15 +579,22 @@ ${describeValue(obj)}
 }
 
 async function importJsModulesFromSnapshot(
+  doAnImport: (mod: string) => Promise<any>,
   jsModuleNames: ReadonlyArray<string> | undefined
 ): Promise<Record<string, any>> {
   if (jsModuleNames === undefined) {
     return {};
   }
+  async function doImport(x: string): Promise<any> {
+    if (x === 'global this') {
+      return globalThis;
+    }
+    return await doAnImport(x);
+  }
   return Object.fromEntries(
     await Promise.all(
       jsModuleNames.map(
-        async (x): Promise<[string, any]> => [x, await import(x)]
+        async (x): Promise<[string, any]> => [x, await doImport(x)]
       )
     )
   );
@@ -927,7 +941,9 @@ export function finalizeBootstrap(
   customSerializedObjects: CustomSerializedObjects
 ): void {
   Module.API.config._makeSnapshot =
-    IS_CREATING_SNAPSHOT && Module.API.version !== PyodideVersion.V0_26_0a2;
+    IS_CREATING_SNAPSHOT &&
+    Module.API.version !== PyodideVersion.V0_26_0a2 &&
+    Module.API.version !== PyodideVersion.V0_28_2;
   enterJaegerSpan('finalize_bootstrap', () => {
     Module.API.finalizeBootstrap(
       LOADED_SNAPSHOT_META?.hiwire,

@@ -32,13 +32,11 @@ ThreadContext::ThreadContext(kj::Timer& timer,
     kj::EntropySource& entropySource,
     HeaderIdBundle headerIds,
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-    capnp::ByteStreamFactory& byteStreamFactory,
-    bool fiddle)
+    capnp::ByteStreamFactory& byteStreamFactory)
     : timer(timer),
       entropySource(entropySource),
       headerIds(headerIds),
       httpOverCapnpFactory(httpOverCapnpFactory),
-      byteStreamFactory(byteStreamFactory),
-      fiddle(fiddle) {}
+      byteStreamFactory(byteStreamFactory) {}
 
 }  // namespace workerd

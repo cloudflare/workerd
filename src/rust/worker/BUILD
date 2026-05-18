@@ -15,11 +15,15 @@ wd_rust_crate(
         "kill_switch.rs": [
             ":ffi.rs@cxx",
         ],
+        "ok.rs": [
+            ":ffi.rs@cxx",
+        ],
     },
     cxx_bridge_srcs = [
         "error.rs",
         "ffi.rs",
         "kill_switch.rs",
+        "ok.rs",
     ],
     proc_macro_deps = [
         "@crates_vendor//:async-trait",
@@ -49,6 +53,7 @@ kj_test(
     deps = [
         ":worker",
         "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-http",
         "@workerd//src/workerd/io",
         "@workerd//src/workerd/io:frankenvalue",
     ],

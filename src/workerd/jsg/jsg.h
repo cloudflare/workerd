@@ -592,9 +592,14 @@ using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
 // This macro accepts a single override parameter containing a partial TypeScript statement definition.
 // Varargs are accepted so that overrides can contain `,` outside of balanced brackets. See the
 // `## TypeScript` section of the JSG README.md for many more details and examples.
+//
+// The varargs are stringified directly with `#__VA_ARGS__` to capture the user's source verbatim;
+// see the comment on `JSG_STRING_LITERAL` in macro-meta.h for why a forwarding helper would be
+// wrong here. The other `JSG_*_TS_OVERRIDE` and `JSG_*_TS_DEFINE` macros below follow the same
+// pattern for the same reason.
 #define JSG_TS_OVERRIDE(...)                                                                       \
   do {                                                                                             \
-    static const char OVERRIDE[] = JSG_STRING_LITERAL(__VA_ARGS__);                                \
+    static const char OVERRIDE[] = #__VA_ARGS__;                                                   \
     registry.template registerTypeScriptOverride<OVERRIDE>();                                      \
   } while (false)
 
@@ -605,7 +610,7 @@ using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
 // README.md for more details.
 #define JSG_TS_DEFINE(...)                                                                         \
   do {                                                                                             \
-    static const char DEFINE[] = JSG_STRING_LITERAL(__VA_ARGS__);                                  \
+    static const char DEFINE[] = #__VA_ARGS__;                                                     \
     registry.template registerTypeScriptDefine<DEFINE>();                                          \
   } while (false)
 
@@ -627,8 +632,7 @@ using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
 // declaration, inside the same `struct` definition. See the `## TypeScript` section of the JSG README.md
 // for many more details and examples.
 #define JSG_STRUCT_TS_OVERRIDE(...)                                                                \
-  static constexpr char _JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY[] =                            \
-      JSG_STRING_LITERAL(__VA_ARGS__)
+  static constexpr char _JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY[] = #__VA_ARGS__
 
 // Like JSG_STRUCT_TS_OVERRIDE, however it enables dynamic selection of TS_OVERRIDE.
 // Should be placed adjacent to the JSG_STRUCT declaration, inside the same struct definition.
@@ -641,8 +645,7 @@ using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
 // declaration, inside the same `struct` definition. See the `## TypeScript`section of the JSG README.md
 // for more details.
 #define JSG_STRUCT_TS_DEFINE(...)                                                                  \
-  static constexpr char _JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY[] =                              \
-      JSG_STRING_LITERAL(__VA_ARGS__)
+  static constexpr char _JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY[] = #__VA_ARGS__
 
 // Adds a group of javascript modules to the module registry when context is instantiated.
 // bundle is of a Bundle type from workerd/jsg/modules.capnp.
@@ -2405,12 +2408,6 @@ class Lock {
     return from(v8::Isolate::GetCurrent());
   }
 
-  // Signals that execution should be terminated immediately, including during C++ iterator
-  // callbacks where V8's own TerminateExecution() interrupt would not be checked.
-  // Also calls V8's TerminateExecution(). See IsolateBase::requestTermination().
-  void requestTermination();
-  bool isTerminationRequested() const;
-
   // RAII construct that reports amount of external memory to be manually attributed to
   // the isolate. When the returned ExtrernalMemoryAdjuster is dropped, the amount will
   // be subtracted from the isolate's external memory accounting. If the adjuster is
@@ -2433,7 +2430,10 @@ class Lock {
   }
   template <typename T>
   kj::String serializeJson(V8Ref<T>&& value) {
-    return serializeJson(value.getHandle(*this));
+    // Callers expect the rvalue-reference to be consumed, and to ensure
+    // that, explicitly move it into a local variable
+    auto moved = kj::mv(value);
+    return serializeJson(moved.getHandle(*this));
   }
 
   void recursivelyFreeze(Value& value);

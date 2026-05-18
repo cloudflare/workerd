@@ -2,6 +2,8 @@
 // It goes into `pyodide.js` not `pyodide.asm.js`. We don't use `pyodide.js` so we have to reproduce
 // it here.
 
+import { wasmInstantiate } from 'pyodide-internal:pool/builtin_wrappers';
+
 // Per https://github.com/tc39/proposal-arraybuffer-base64/issues/51#issuecomment-3010378969, we
 // should be able to replace `decodeBase64()` with `Uint8Array.fromBase64()` once we update to a v8
 // released after September 2nd.
@@ -44,7 +46,7 @@ const sentinelWasm = decodeBase64(
 );
 
 export async function getSentinelImport() {
-  const module: WebAssembly.Module = new WebAssembly.Module(sentinelWasm);
-  const instance = await WebAssembly.instantiate(module);
+  const imports = {};
+  const { instance } = await wasmInstantiate(sentinelWasm, imports);
   return instance.exports;
 }

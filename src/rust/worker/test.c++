@@ -8,11 +8,13 @@
 #include <workerd/rust/worker/bridge.h>
 #include <workerd/rust/worker/error.rs.h>
 #include <workerd/rust/worker/kill_switch.rs.h>
+#include <workerd/rust/worker/ok.rs.h>
 #include <workerd/util/exception.h>
 
 #include <kj-rs/kj-rs.h>
 
 #include <kj/async.h>
+#include <kj/compat/http.h>
 #include <kj/test.h>
 
 using namespace workerd::rust::worker;
@@ -21,61 +23,21 @@ using namespace kj_rs;
 namespace workerd {
 namespace {
 
-// Reusable mock response implementations
-class TestResponse: public kj::HttpService::Response {
- public:
-  kj::Own<kj::AsyncOutputStream> send(uint statusCode,
-      kj::StringPtr statusText,
-      const kj::HttpHeaders& headers,
-      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-    KJ_UNIMPLEMENTED("Response not implemented in test");
-  }
-
-  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
-    KJ_UNIMPLEMENTED("WebSocket not implemented in test");
-  }
-};
-
-class TestConnectResponse: public kj::HttpService::ConnectResponse {
- public:
-  void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
-    KJ_UNIMPLEMENTED("Connect response not implemented in test");
-  }
-  kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
-      kj::StringPtr statusText,
-      const kj::HttpHeaders& headers,
-      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-    KJ_UNIMPLEMENTED("Connect reject not implemented in test");
-  }
-};
+kj::Own<kj::HttpClient> newClient(::rust::Box<RustWorkerInterface::Impl> impl) {
+  auto worker = kj::from<Rust>(kj::mv(impl));
+  return kj::newHttpClient(*worker).attach(kj::mv(worker));
+}
 
 KJ_TEST("kill_switch worker") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_kill_switch_worker());
-
-  // Set up HTTP request parameters
-  kj::HttpMethod method = kj::HttpMethod::GET;
-  kj::StringPtr url = "/";
+  auto client = newClient(new_kill_switch_worker());
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
-
-  // Create empty request body stream
-  auto pipeBody = kj::newOneWayPipe();
-  pipeBody.out = nullptr;  // Close write end to signal empty body
-  kj::AsyncInputStream& requestBody = *pipeBody.in;
-
-  // Use the extracted response mock
-  TestResponse response;
-
-  kj::Maybe<kj::Exception> exception;
-
-  try {
-    worker->request(method, url, headers, requestBody, response).wait(waitScope);
-  } catch (...) {
-    exception = kj::getCaughtExceptionAsKj();
-  }
+  auto exception = kj::runCatchingExceptions([&]() {
+    client->request(kj::HttpMethod::GET, "http://test/"_kj, headers).response.wait(waitScope);
+  });
 
   auto& e = KJ_ASSERT_NONNULL(exception);
   KJ_ASSERT(e.getType() == kj::Exception::Type::OVERLOADED);
@@ -83,32 +45,32 @@ KJ_TEST("kill_switch worker") {
   KJ_ASSERT(e.getDetail(SCRIPT_KILLED_DETAIL_ID) != kj::none);
 }
 
+KJ_TEST("ok worker request") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto client = newClient(new_ok_worker());
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+
+  auto response =
+      client->request(kj::HttpMethod::GET, "http://test/"_kj, headers).response.wait(waitScope);
+
+  KJ_ASSERT(response.statusCode == 200);
+  KJ_ASSERT(response.statusText == "OK");
+  KJ_ASSERT(response.body->readAllText().wait(waitScope) == "OK");
+}
+
 KJ_TEST("kill_switch worker connect") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_kill_switch_worker());
-
-  // Set up connect parameters
-  kj::StringPtr host = "example.com";
+  auto client = newClient(new_kill_switch_worker());
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
-
-  // Create mock connection and response
-  auto pipe = kj::newTwoWayPipe();
-  kj::AsyncIoStream& connection = *pipe.ends[0];
-
-  // Use the extracted connect response mock
-  TestConnectResponse tunnel;
-  kj::HttpConnectSettings settings;
-
-  kj::Maybe<kj::Exception> exception;
-
-  try {
-    worker->connect(host, headers, connection, tunnel, settings).wait(waitScope);
-  } catch (...) {
-    exception = kj::getCaughtExceptionAsKj();
-  }
+  auto exception = kj::runCatchingExceptions([&]() {
+    client->connect("example.com"_kj, headers, kj::HttpConnectSettings{}).status.wait(waitScope);
+  });
 
   auto& e = KJ_ASSERT_NONNULL(exception);
   KJ_ASSERT(e.getType() == kj::Exception::Type::OVERLOADED);
@@ -222,29 +184,12 @@ KJ_TEST("error worker request") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_error_worker("Test error message"));
-
-  // Set up HTTP request parameters
-  kj::HttpMethod method = kj::HttpMethod::GET;
-  kj::StringPtr url = "/test";
+  auto client = newClient(new_error_worker("Test error message"));
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
-
-  // Create empty request body stream
-  auto pipeBody = kj::newOneWayPipe();
-  pipeBody.out = nullptr;  // Close write end to signal empty body
-  kj::AsyncInputStream& requestBody = *pipeBody.in;
-
-  // Use the extracted response mock
-  TestResponse response;
-
-  kj::Maybe<kj::Exception> exception;
-
-  try {
-    worker->request(method, url, headers, requestBody, response).wait(waitScope);
-  } catch (...) {
-    exception = kj::getCaughtExceptionAsKj();
-  }
+  auto exception = kj::runCatchingExceptions([&]() {
+    client->request(kj::HttpMethod::GET, "http://test/test"_kj, headers).response.wait(waitScope);
+  });
 
   auto& e = KJ_ASSERT_NONNULL(exception);
   KJ_ASSERT(e.getType() == kj::Exception::Type::FAILED);
@@ -255,28 +200,12 @@ KJ_TEST("error worker connect") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto worker = kj::from<Rust>(new_error_worker("Connection failed"));
-
-  // Set up connect parameters
-  kj::StringPtr host = "example.com";
+  auto client = newClient(new_error_worker("Connection failed"));
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
-
-  // Create mock connection and response
-  auto pipe = kj::newTwoWayPipe();
-  kj::AsyncIoStream& connection = *pipe.ends[0];
-
-  // Use the extracted connect response mock
-  TestConnectResponse tunnel;
-  kj::HttpConnectSettings settings;
-
-  kj::Maybe<kj::Exception> exception;
-
-  try {
-    worker->connect(host, headers, connection, tunnel, settings).wait(waitScope);
-  } catch (...) {
-    exception = kj::getCaughtExceptionAsKj();
-  }
+  auto exception = kj::runCatchingExceptions([&]() {
+    client->connect("example.com"_kj, headers, kj::HttpConnectSettings{}).status.wait(waitScope);
+  });
 
   auto& e = KJ_ASSERT_NONNULL(exception);
   KJ_ASSERT(e.getType() == kj::Exception::Type::FAILED);

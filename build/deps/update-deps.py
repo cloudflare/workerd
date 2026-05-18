@@ -214,7 +214,7 @@ def repo_attributes(repo):
 
 
 def format_bazel_dep_with_override(repo, override_type, override_attrs):
-    """Format bazel_dep + archive_override/git_override."""
+    """Format bazel_dep + override."""
     name = repo["name"]
 
     # bazel_dep attributes
@@ -495,6 +495,22 @@ def gen_bazel_dep(repo):
     else:
         print(latest_version, end="")
         version = latest_version
+
+    if "patches" in repo:
+        return BAZEL_DEP_OVERRIDE_TEMPLATE.format(
+            name=name,
+            bazel_dep_attrs=format_attr_list(
+                dict(name=name, version=version), single_line=True
+            ),
+            override_type="single_version_override",
+            override_attrs=format_attr_list(
+                {
+                    "module_name": name,
+                    "patch_strip": 1,
+                    "patches": repo["patches"],
+                }
+            ),
+        )
 
     return BAZEL_DEP_TEMPLATE.format(
         name=name,

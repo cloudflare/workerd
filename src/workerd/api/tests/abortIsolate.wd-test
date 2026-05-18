@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "abortIsolate-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "abortIsolate.js"),
+        ],
+        compatibilityFlags = ["experimental"],
+        bindings = [
+          (
+            name = "topLevelAbort",
+            json = "%topLevelAbort"
+          ),
+        ],
+      )
+    ),
+  ],
+);

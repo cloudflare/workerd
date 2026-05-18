@@ -6,6 +6,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/io/features.h>
 
 namespace workerd::api {
 
@@ -66,6 +67,18 @@ jsg::Optional<jsg::Ref<CacheContext>> EntrypointsModule::getCtxCache(jsg::Lock& 
     return Worker::Isolate::from(js).getApi().getCtxCacheProperty(js);
   }
   return kj::none;
+}
+
+void EntrypointsModule::abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> reason) {
+  auto& r = reason.orDefault(nullptr);
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
+    context.abortIsolate(r);
+  }
+  js.terminateExecutionNow();
+}
+
+bool EntrypointsModule::getIsExperimental(jsg::Lock& js) {
+  return FeatureFlags::get(js).getWorkerdExperimental();
 }
 
 }  // namespace workerd::api

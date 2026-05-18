@@ -690,7 +690,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
     //   event types should report failure if a waitUntil() throws?
     metrics.reportFailure(e);
 
-    // Log JS exceptions (from the initial sendTraces() call) to the JS console, if fiddle is
+    // Log JS exceptions (from the initial sendTraces() call) to the JS console, if inspector is
     // attached. This also has the effect of logging internal errors to syslog. (Note that
     // exceptions that occur asynchronously while waiting for the context to drain will be
     // logged elsewhere.)

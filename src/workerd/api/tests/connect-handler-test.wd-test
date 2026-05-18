@@ -8,6 +8,19 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "connect-handler-test.js"),
         ],
         compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        bindings = [
+          (name = "TARGET", service = (
+            name = "connect-handler-test-local-address-endpoint",
+            entrypoint = "LocalAddressEndpoint")),
+        ],
+      )
+    ),
+    ( name = "connect-handler-test-local-address-endpoint",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
       )
     ),
     ( name = "connect-handler-test-proxy",

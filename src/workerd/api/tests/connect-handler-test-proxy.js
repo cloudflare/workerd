@@ -23,3 +23,16 @@ export class ConnectEndpoint extends WorkerEntrypoint {
     await writer.close();
   }
 }
+
+// Reached via a service binding from connect-handler-test.js. Awaits socket.opened and echoes back
+// the observed localAddress, which on the service-binding path is the verbatim authority string
+// the caller passed to fetcher.connect(...). The client test asserts strict equality.
+export class LocalAddressEndpoint extends WorkerEntrypoint {
+  async connect(socket) {
+    const { localAddress } = await socket.opened;
+    const enc = new TextEncoder();
+    const writer = socket.writable.getWriter();
+    await writer.write(enc.encode(`OK:${localAddress}`));
+    await writer.close();
+  }
+}

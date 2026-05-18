@@ -224,6 +224,9 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           } else KJ_IF_SOME(json, module.json) {
             kj::StringPtr serialized =
                 module.serializedJson.emplace(js.serializeJson(kj::mv(json)));
+            // We moved out of `json`, making it an empty V8Ref, explicitly
+            // clear out the field as we don't intend to re-use this
+            module.json = kj::none;
             return Worker::Script::JsonModule{.body = serialized};
           } else KJ_IF_SOME(py, module.py) {
             return Worker::Script::PythonModule{.body = py};

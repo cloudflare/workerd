@@ -5,10 +5,10 @@
 
 #include "requirements.h"
 
-#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/strings.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
@@ -416,6 +416,10 @@ kj::Array<kj::StringPtr> PyodideMetadataReader::getBaselineSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
 }
 
+bool PyodideMetadataReader::shouldAbortIsolateOnFatalError() {
+  return util::Autogate::isEnabled(util::AutogateKey::PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR);
+}
+
 jsg::JsObject PyodideMetadataReader::getCompatibilityFlags(jsg::Lock& js) {
   auto flags = FeatureFlags::get(js);
   auto obj = js.objNoProto();
@@ -588,14 +592,6 @@ void DiskCache::putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> d
   } else {
     return;
   }
-}
-
-jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
-  return emscriptenRuntime.emscriptenRuntime.getHandle(js);
-}
-
-void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(emscriptenRuntime.emscriptenRuntime);
 }
 
 }  // namespace workerd::api::pyodide

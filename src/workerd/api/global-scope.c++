@@ -179,8 +179,9 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // We set isDefaultFetchPort to false here – sockets.c++ sets it for ports 443 and 8080 to
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
     // side.
-    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::mv(ownConnection), kj::none, kj::none,
-        kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
+    jsg::Ref<Socket> jsSocket =
+        setupSocket(js, kj::mv(ownConnection), kj::none /* remoteAddress */, kj::mv(host), kj::none,
+            kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::none, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));

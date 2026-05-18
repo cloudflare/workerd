@@ -7,6 +7,8 @@
 #include "jsg.h"
 #include "setup.h"
 
+#include <workerd/util/thread-scopes.h>
+
 #include <cppgc/allocation.h>
 #include <cppgc/garbage-collected.h>
 #include <v8-cppgc.h>
@@ -178,19 +180,22 @@ void HeapTracer::addToFreelist(JSGWrappable::CppgcShim& shim) {
 }
 
 JSGWrappable::CppgcShim* HeapTracer::allocateShim(JSGWrappable& wrappable) {
-  KJ_IF_SOME(shim, freelistedShims) {
-    freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
-    KJ_IF_SOME(next, freelistedShims) {
-      next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
+  // Under gc-stress, skip freelist reuse so each shim has a unique address in logs.
+  if (!isGcStressModeForTest()) {
+    KJ_IF_SOME(shim, freelistedShims) {
+      freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
+      KJ_IF_SOME(next, freelistedShims) {
+        next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
+      }
+      shim.state = JSGWrappable::CppgcShim::Active{kj::addRef(wrappable)};
+      KJ_DASSERT(wrappable.cppgcShim == kj::none);
+      wrappable.cppgcShim = shim;
+      return &shim;
     }
-    shim.state = JSGWrappable::CppgcShim::Active{kj::addRef(wrappable)};
-    KJ_DASSERT(wrappable.cppgcShim == kj::none);
-    wrappable.cppgcShim = shim;
-    return &shim;
-  } else {
-    auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
-    return cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, wrappable);
   }
+  auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
+  auto* shim = cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, wrappable);
+  return shim;
 }
 
 void HeapTracer::clearFreelistedShims() {

@@ -937,6 +937,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     },
             "Enable predictable mode. This makes workerd behave more deterministically by using "
             "pre-set values instead of random data or timestamps to facilitate testing.")
+        .addOption({"gc-stress"},
+            [this]() {
+      gcStress = true;
+      return true;
+    },
+            "Force a full V8 GC at each awaitIo continuation. "
+            "Detects KJ async objects on the JS heap without IoOwn wrapping. Very slow.")
         .addOption({"all-autogates"},
             [this]() {
       allAutogates = true;
@@ -1476,6 +1483,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     if (predictable) {
       setPredictableModeForTest();
     }
+    if (gcStress) {
+      setGcStressModeForTest();
+    }
     if (allAutogates) {
       util::Autogate::initAllAutogates();
     }
@@ -1551,6 +1561,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool configOnly = false;
   bool noVerbose = false;
   bool predictable = false;
+  bool gcStress = false;
   bool allAutogates = false;
   kj::Maybe<kj::String> testCompatDate;
   kj::Maybe<FileWatcher> watcher;

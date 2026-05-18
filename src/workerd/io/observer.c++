@@ -2,6 +2,8 @@
 
 #include "worker-interface.h"
 
+#include <workerd/util/exception.h>
+
 #include <kj/common.h>
 #include <kj/debug.h>
 #include <kj/map.h>
@@ -47,4 +49,24 @@ kj::Maybe<FeatureObserver&> FeatureObserver::get() {
   }
   return kj::none;
 }
+
+EventOutcome RequestObserver::outcomeFromException(const kj::Exception& e, FailureSource source) {
+  if (e.getDetail(MEMORY_LIMIT_DETAIL_ID) != kj::none) {
+    return EventOutcome::EXCEEDED_MEMORY;
+  } else if (e.getDetail(CPU_LIMIT_DETAIL_ID) != kj::none) {
+    return EventOutcome::EXCEEDED_CPU;
+  } else if (e.getDetail(SCRIPT_KILLED_DETAIL_ID) != kj::none) {
+    return EventOutcome::KILL_SWITCH;
+  } else if (source == RequestObserver::FailureSource::DEFERRED_PROXY &&
+      e.getType() == kj::Exception::Type::DISCONNECTED) {
+    return EventOutcome::RESPONSE_STREAM_DISCONNECTED;
+  } else if (e.getType() == kj::Exception::Type::OVERLOADED) {
+    // We use exception details to describe some overloaded exceptions more accurately, if no such
+    // detail is present report internalError.
+    return EventOutcome::INTERNAL_ERROR;
+  } else {
+    return EventOutcome::EXCEPTION;
+  }
+}
+
 };  // namespace workerd

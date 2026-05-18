@@ -285,6 +285,11 @@ class IoChannelFactory {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
 
+  // In workerd, the handler aborts the process (unless used on a dynamic
+  // worker). In the edge runtime it will condemn and terminate the current
+  // isolate.
+  virtual void abortIsolate(kj::StringPtr reason) = 0;
+
   // Use a dynamic Worker loader binding to obtain an Worker by name. If name is null, or if the named Worker doesn't already exist, the callback will be called to fetch the source code from which the Worker should be created.
   virtual kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
       kj::Maybe<kj::String> name,
