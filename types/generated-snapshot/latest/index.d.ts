@@ -12717,11 +12717,11 @@ interface SendEmail {
   send(message: EmailMessage): Promise<EmailSendResult>;
   send(builder: {
     from: string | EmailAddress;
-    to: string | string[];
+    to: string | EmailAddress | (string | EmailAddress)[];
     subject: string;
     replyTo?: string | EmailAddress;
-    cc?: string | string[];
-    bcc?: string | string[];
+    cc?: string | EmailAddress | (string | EmailAddress)[];
+    bcc?: string | EmailAddress | (string | EmailAddress)[];
     headers?: Record<string, string>;
     text?: string;
     html?: string;
