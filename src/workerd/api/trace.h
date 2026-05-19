@@ -178,16 +178,36 @@ class TraceItem final: public jsg::Object {
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_IF_SOME(info, eventInfo) {
       KJ_SWITCH_ONEOF(info) {
-        KJ_CASE_ONEOF(fetch, jsg::Ref<FetchEventInfo>) { visitor.visit(fetch); }
-        KJ_CASE_ONEOF(rpc, jsg::Ref<JsRpcEventInfo>) { visitor.visit(rpc); }
-        KJ_CASE_ONEOF(conn, jsg::Ref<ConnectEventInfo>) { visitor.visit(conn); }
-        KJ_CASE_ONEOF(sched, jsg::Ref<ScheduledEventInfo>) { visitor.visit(sched); }
-        KJ_CASE_ONEOF(alarm, jsg::Ref<AlarmEventInfo>) { visitor.visit(alarm); }
-        KJ_CASE_ONEOF(queue, jsg::Ref<QueueEventInfo>) { visitor.visit(queue); }
-        KJ_CASE_ONEOF(email, jsg::Ref<EmailEventInfo>) { visitor.visit(email); }
-        KJ_CASE_ONEOF(tail, jsg::Ref<TailEventInfo>) { visitor.visit(tail); }
-        KJ_CASE_ONEOF(custom, jsg::Ref<CustomEventInfo>) { visitor.visit(custom); }
-        KJ_CASE_ONEOF(ws, jsg::Ref<HibernatableWebSocketEventInfo>) { visitor.visit(ws); }
+        KJ_CASE_ONEOF(fetch, jsg::Ref<FetchEventInfo>) {
+          visitor.visit(fetch);
+        }
+        KJ_CASE_ONEOF(rpc, jsg::Ref<JsRpcEventInfo>) {
+          visitor.visit(rpc);
+        }
+        KJ_CASE_ONEOF(conn, jsg::Ref<ConnectEventInfo>) {
+          visitor.visit(conn);
+        }
+        KJ_CASE_ONEOF(sched, jsg::Ref<ScheduledEventInfo>) {
+          visitor.visit(sched);
+        }
+        KJ_CASE_ONEOF(alarm, jsg::Ref<AlarmEventInfo>) {
+          visitor.visit(alarm);
+        }
+        KJ_CASE_ONEOF(queue, jsg::Ref<QueueEventInfo>) {
+          visitor.visit(queue);
+        }
+        KJ_CASE_ONEOF(email, jsg::Ref<EmailEventInfo>) {
+          visitor.visit(email);
+        }
+        KJ_CASE_ONEOF(tail, jsg::Ref<TailEventInfo>) {
+          visitor.visit(tail);
+        }
+        KJ_CASE_ONEOF(custom, jsg::Ref<CustomEventInfo>) {
+          visitor.visit(custom);
+        }
+        KJ_CASE_ONEOF(ws, jsg::Ref<HibernatableWebSocketEventInfo>) {
+          visitor.visit(ws);
+        }
       }
     }
     visitor.visitAll(logs);
@@ -493,9 +513,15 @@ class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
 
   void visitForGc(jsg::GcVisitor& visitor) {
     KJ_SWITCH_ONEOF(eventType) {
-      KJ_CASE_ONEOF(msg, jsg::Ref<Message>) { visitor.visit(msg); }
-      KJ_CASE_ONEOF(close, jsg::Ref<Close>) { visitor.visit(close); }
-      KJ_CASE_ONEOF(err, jsg::Ref<Error>) { visitor.visit(err); }
+      KJ_CASE_ONEOF(msg, jsg::Ref<Message>) {
+        visitor.visit(msg);
+      }
+      KJ_CASE_ONEOF(close, jsg::Ref<Close>) {
+        visitor.visit(close);
+      }
+      KJ_CASE_ONEOF(err, jsg::Ref<Error>) {
+        visitor.visit(err);
+      }
     }
   }
 };

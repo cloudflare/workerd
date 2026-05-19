@@ -22,7 +22,7 @@ namespace {
 // accumulate.
 constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL = 32768;
 
-}
+}  // namespace
 
 kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
