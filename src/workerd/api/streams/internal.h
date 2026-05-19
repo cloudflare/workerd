@@ -388,6 +388,10 @@ class WritableStreamInternalController: public WritableStreamController {
       // True when the Pipe is being destroyed
       bool aborted = false;
 
+      // True when the source pipe lock has already been released.
+      // Checked by drain() to avoid accessing the dangling source reference.
+      bool sourceReleased = false;
+
       State(WritableStreamInternalController& parent,
           ReadableStreamController::PipeController& source,
           kj::Maybe<jsg::Promise<void>::Resolver> promise,
