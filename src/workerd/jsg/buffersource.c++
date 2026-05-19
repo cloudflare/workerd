@@ -68,7 +68,9 @@ BackingStore::BackingStore(std::shared_ptr<v8::BackingStore> backingStore,
       ctor(ctor),
       integerType(integerType) {
   KJ_REQUIRE(this->backingStore != nullptr);
-  KJ_REQUIRE(this->byteLength <= this->backingStore->ByteLength());
+  auto backingStoreByteLength = this->backingStore->ByteLength();
+  KJ_REQUIRE(this->byteOffset <= backingStoreByteLength);
+  KJ_REQUIRE(this->byteLength <= backingStoreByteLength - this->byteOffset);
   KJ_REQUIRE(this->byteLength % this->elementSize == 0,
       kj::str("byteLength must be a multiple of ", this->elementSize, "."));
 }
