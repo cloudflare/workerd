@@ -2704,8 +2704,20 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
 
   const auto doCancel = [&](auto& consumer) {
     auto reason = maybeReason.orDefault([&] { return js.undefined(); });
-    KJ_DEFER(doClose(js));
-    return consumer->cancel(js, reason);
+    // Wrap in beginOperation/endOperation so that if the user's cancel callback
+    // calls stream.tee(), tee()'s deferTransitionTo<Closed> is deferred instead
+    // of applying immediately (which would destroy the ValueReadable/ByteReadable
+    // whose cancel() is on the stack). endOperation() applies the pending state
+    // after cancel() returns safely.
+    state.beginOperation();
+    auto promise = consumer->cancel(js, reason);
+    // If tee() deferred a Closed transition, endOperation() applies it now —
+    // which is equivalent to doClose(). If no transition was deferred, we call
+    // doClose() ourselves. Either way the stream ends up Closed.
+    if (!state.endOperation()) {
+      doClose(js);
+    }
+    return kj::mv(promise);
   };
 
   // Check for pending state first (deferred close/error during a read operation)
