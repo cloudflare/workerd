@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 import { strictEqual } from 'node:assert';
 
 // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-261.
@@ -24,6 +28,7 @@ export const pipeAbortSignalPreventAbortNoUAF = {
 
     const cs = new CompressionStream('gzip');
 
+    let rejected = false;
     await rs
       .pipeTo(cs.writable, { signal: ac.signal, preventAbort: true })
       .then(
@@ -31,10 +36,12 @@ export const pipeAbortSignalPreventAbortNoUAF = {
           throw new Error('should have rejected');
         },
         (e) => {
+          rejected = true;
           strictEqual(e.message, 'boom');
         }
       );
 
+    strictEqual(rejected, true, 'pipeTo should have rejected');
     strictEqual(
       cancelCalled,
       true,

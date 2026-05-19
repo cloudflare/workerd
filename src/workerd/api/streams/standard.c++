@@ -3041,7 +3041,13 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       };
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
-      KJ_DEFER(state.transitionTo<StreamStates::Closed>());
+      // Use deferTransitionTo instead of transitionTo so that if tee() is called
+      // re-entrantly from a pull() callback during a read (which is wrapped in
+      // deferControllerStateChange / beginOperation), the state transition is
+      // deferred until endOperation() — preventing destruction of the active
+      // ValueReadable while onConsumerWantsData() is still on the stack.
+      // When no operation is in progress, deferTransitionTo applies immediately.
+      KJ_DEFER((void)state.deferTransitionTo<StreamStates::Closed>());
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
       return Tee{
@@ -3050,7 +3056,8 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
       };
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      KJ_DEFER(state.transitionTo<StreamStates::Closed>());
+      // Same rationale as the ValueReadable case above.
+      KJ_DEFER((void)state.deferTransitionTo<StreamStates::Closed>());
       // We create two additional streams that clone this stream's consumer state,
       // then close this stream's consumer.
       return Tee{
