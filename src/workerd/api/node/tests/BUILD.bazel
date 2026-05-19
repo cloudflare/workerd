@@ -267,6 +267,12 @@ wd_test(
 )
 
 wd_test(
+    src = "zlib-allocator-mismatch-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-allocator-mismatch-test.js"],
+)
+
+wd_test(
     src = "module-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["module-nodejs-test.js"],

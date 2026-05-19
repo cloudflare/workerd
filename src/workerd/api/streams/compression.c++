@@ -17,12 +17,6 @@ CompressionAllocator::CompressionAllocator(
     kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
     : externalMemoryTarget(kj::mv(externalMemoryTarget)) {}
 
-void CompressionAllocator::configure(z_stream* stream) {
-  stream->zalloc = AllocForZlib;
-  stream->zfree = FreeForZlib;
-  stream->opaque = this;
-}
-
 void* CompressionAllocator::AllocForZlib(void* data, uInt items, uInt size) {
   size_t real_size =
       nbytes::MultiplyWithOverflowCheck(static_cast<size_t>(items), static_cast<size_t>(size));
@@ -78,7 +72,10 @@ class Context {
 
   {
     // Configure allocator before any stream operations.
-    allocator.configure(&ctx);
+    ctx.zalloc = CompressionAllocator::AllocForZlib;
+    ctx.zfree = CompressionAllocator::FreeForZlib;
+    ctx.opaque = &allocator;
+
     int result = Z_OK;
     switch (mode) {
       case Mode::COMPRESS:
