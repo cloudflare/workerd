@@ -895,6 +895,13 @@ class WriterLocked {
     }
   }
 
+  void setResolvedReady(jsg::Lock& js, jsg::Promise<void> readyPromise) {
+    KJ_IF_SOME(w, writer) {
+      readyFulfiller = kj::none;
+      w.replaceReadyPromise(js, kj::mv(readyPromise));
+    }
+  }
+
   void clear() {
     writer = kj::none;
     closedFulfiller = kj::none;

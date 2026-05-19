@@ -141,7 +141,8 @@ class ReadableLockImpl {
   //   ReaderLocked -> Unlocked (releaseReader() called)
   //   PipeLocked -> Unlocked (release() or onClose/onError called)
   //   Locked -> (remains until stream is done)
-  using LockState = StateMachine<Locked, PipeLocked, ReaderLocked, Unlocked>;
+  using LockState =
+      StateMachine<PendingStates<Unlocked>, Locked, PipeLocked, ReaderLocked, Unlocked>;
   LockState state = LockState::template create<Unlocked>();
   friend Controller;
 };
@@ -210,7 +211,8 @@ class WritableLockImpl {
   //   Unlocked -> PipeLocked (pipeLock() called)
   //   WriterLocked -> Unlocked (releaseWriter() called)
   //   PipeLocked -> Unlocked (releasePipeLock() called)
-  using LockState = StateMachine<Unlocked, Locked, WriterLocked, PipeLocked>;
+  using LockState =
+      StateMachine<PendingStates<Unlocked>, Unlocked, Locked, WriterLocked, PipeLocked>;
   LockState state = LockState::template create<Unlocked>();
 
   inline kj::Maybe<PipeLocked&> tryGetPipe() {
@@ -262,9 +264,12 @@ void ReadableLockImpl<Controller>::releaseReader(
     Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) {
   KJ_IF_SOME(locked, state.template tryGetUnsafe<ReaderLocked>()) {
     KJ_ASSERT(&locked.getReader() == &reader);
-
     KJ_IF_SOME(js, maybeJs) {
       auto reason = js.typeError("This ReadableStream reader has been released."_kj);
+      // Begin an operation so that any re-entrant releaseReader (triggered by
+      // cancelPendingReads rejection handlers) defers its transition to Unlocked
+      // rather than destroying the ReaderLocked state out from under us.
+      state.beginOperation();
       KJ_SWITCH_ONEOF(self.state) {
         KJ_CASE_ONEOF(initial, typename Controller::Initial) {}
         KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
@@ -277,20 +282,13 @@ void ReadableLockImpl<Controller>::releaseReader(
         }
       }
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
-    }
-
-    // Keep the locked.clear() after the isolate and hasPendingReadRequests check above.
-    // Clearing will release the references and we don't want to do that if the
-    // hasPendingReadRequests check fails.
-    locked.clear();
-
-    // When maybeJs is nullptr, that means releaseReader was called when the reader is
-    // being deconstructed and not as the result of explicitly calling releaseLock and
-    // we do not have an isolate lock. In that case, we don't want to change the lock
-    // state itself. Moving the lock above will free the lock state while keeping the
-    // ReadableStream marked as locked.
-    if (maybeJs != kj::none) {
-      state.template transitionTo<Unlocked>();
+      locked.clear();
+      (void)state.template deferTransitionTo<Unlocked>();
+      // endOperation applies the deferred Unlocked transition (or any
+      // re-entrant one that was already deferred).
+      (void)state.endOperation();
+    } else {
+      locked.clear();
     }
   }
 }
@@ -383,11 +381,15 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
 
   if (self.state.template is<StreamStates::Closed>()) {
-    maybeResolvePromise(js, lock.getClosedFulfiller());
-    maybeResolvePromise(js, lock.getReadyFulfiller());
+    auto closedFulfiller = kj::mv(lock.getClosedFulfiller());
+    auto readyFulfiller = kj::mv(lock.getReadyFulfiller());
+    maybeResolvePromise(js, closedFulfiller);
+    maybeResolvePromise(js, readyFulfiller);
   } else KJ_IF_SOME(errored, self.state.template tryGetUnsafe<StreamStates::Errored>()) {
-    maybeRejectPromise<void>(js, lock.getClosedFulfiller(), errored.getHandle(js));
-    maybeRejectPromise<void>(js, lock.getReadyFulfiller(), errored.getHandle(js));
+    auto closedFulfiller = kj::mv(lock.getClosedFulfiller());
+    auto readyFulfiller = kj::mv(lock.getReadyFulfiller());
+    maybeRejectPromise<void>(js, closedFulfiller, errored.getHandle(js));
+    maybeRejectPromise<void>(js, readyFulfiller, errored.getHandle(js));
   } else {
     if (FeatureFlags::get(js).getWritableStreamSpecCompliantWriter()) {
       // Per spec (SetUpWritableStreamDefaultWriter step 4), the ready promise
@@ -417,6 +419,10 @@ void WritableLockImpl<Controller>::releaseWriter(
   KJ_IF_SOME(locked, state.template tryGetUnsafe<WriterLocked>()) {
     KJ_ASSERT(&locked.getWriter() == &writer);
     KJ_IF_SOME(js, maybeJs) {
+      // cancelPendingWrites and promise rejections can trigger user JS which
+      // could re-entrantly call releaseWriter. beginOperation defers the
+      // Unlocked transition so that locked remains valid throughout.
+      state.beginOperation();
       KJ_SWITCH_ONEOF(self.state) {
         KJ_CASE_ONEOF(initial, typename Controller::Initial) {}
         KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
@@ -426,36 +432,21 @@ void WritableLockImpl<Controller>::releaseWriter(
               js, js.typeError("This WritableStream writer has been released."_kjc));
         }
       }
-
-      // Per spec (WritableStreamDefaultWriterRelease), both the ready and closed
-      // promises must be rejected when the writer is released.
+      // Note that cancelPendingWrites can trigger user JavaScript to run, which can
+      // trigger a state transition. Hoever, we're using "state.beginOperation" above
+      // to defer the transition until the state.endOperation call below.
       auto releaseReason = js.typeError("This WritableStream writer has been released."_kjc);
       if (FeatureFlags::get(js).getWritableStreamSpecCompliantWriter()) {
-        if (locked.getReadyFulfiller() != kj::none) {
-          maybeRejectPromise<void>(js, locked.getReadyFulfiller(), releaseReason);
-        } else {
-          // The ready fulfiller was already consumed (promise was resolved).
-          // Per spec (WritableStreamDefaultWriterEnsureReadyPromiseRejected),
-          // we must replace it with a new rejected promise.
-          auto prp = js.newPromiseAndResolver<void>();
-          prp.promise.markAsHandled(js);
-          prp.resolver.reject(js, releaseReason);
-          locked.setReadyFulfiller(js, prp);
-        }
+        self.maybeRejectReadyPromise(js, releaseReason);
       } else {
         maybeRejectPromise<void>(js, locked.getReadyFulfiller(), releaseReason);
       }
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(), releaseReason);
-    }
-    locked.clear();
-
-    // When maybeJs is nullptr, that means releaseWriter was called when the writer is
-    // being deconstructed and not as the result of explicitly calling releaseLock and
-    // we do not have an isolate lock. In that case, we don't want to change the lock
-    // state itself. Moving the lock above will free the lock state while keeping the
-    // WritableStream marked as locked.
-    if (maybeJs != kj::none) {
-      state.template transitionTo<Unlocked>();
+      locked.clear();
+      (void)state.template deferTransitionTo<Unlocked>();
+      (void)state.endOperation();
+    } else {
+      locked.clear();
     }
   }
 }
@@ -520,9 +511,11 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
         source.release(js);
       }
       if (!flags.preventAbort) {
+        auto pipeThrough = flags.pipeThrough;
         return self.abort(js, reason)
-            .then(js, [this, reason = reason.addRef(js), ref = self.addRef()](jsg::Lock& js) {
-          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), flags.pipeThrough);
+            .then(
+                js, [pipeThrough, reason = reason.addRef(js), ref = self.addRef()](jsg::Lock& js) {
+          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
         });
       }
       return rejectedMaybeHandledPromise<void>(js, reason, flags.pipeThrough);
@@ -672,7 +665,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
   // methods, as well as the methods can trigger JavaScript errors to be thrown
   // synchronously in some cases. We want to make sure non-fatal errors cause the
   // stream to error and only fatal cases bubble up.
-  return js.tryCatch([&] {
+  JSG_TRY(js) {
     controller.state.beginOperation();
     auto result = readCallback();
     endOperation = false;
@@ -695,7 +688,8 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     }
 
     return kj::mv(result);
-  }, [&](jsg::Value exception) -> jsg::Promise<ReadResult> {
+  }
+  JSG_CATCH(exception) {
     if (endOperation) {
       // Clear any pending state since we're erroring
       controller.state.clearPendingState();
@@ -704,7 +698,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     auto handle = jsg::JsValue(exception.getHandle(js));
     controller.doError(js, handle);
     return js.rejectedPromise<ReadResult>(handle);
-  });
+  };
 }
 
 // The ReadableStreamJsController provides the implementation of custom
@@ -1044,8 +1038,9 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
     doError(js, jsg::JsValue(reason.getHandle(js)));
   };
 
-  maybeRunAlgorithm(js, algorithms.start, kj::mv(onSuccess), kj::mv(onFailure), kj::mv(self));
+  auto start = kj::mv(algorithms.start);
   algorithms.start = kj::none;
+  maybeRunAlgorithm(js, start, kj::mv(onSuccess), kj::mv(onFailure), kj::mv(self));
 }
 
 template <typename Self>
@@ -1553,6 +1548,11 @@ void WritableImpl<Self>::finishInFlightClose(
   KJ_IF_SOME(reason, maybeReason) {
     maybeRejectPromise<void>(js, inFlightClose, reason);
 
+    // maybeRejectPromise can trigger user JS (see comment at line 1558).
+    if (state.isTerminal()) {
+      return;
+    }
+
     KJ_IF_SOME(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
       pendingAbort->fail(js, reason);
     }
@@ -1561,6 +1561,14 @@ void WritableImpl<Self>::finishInFlightClose(
   }
 
   maybeResolvePromise(js, inFlightClose);
+
+  // maybeResolvePromise can trigger user JS that re-entrantly calls abort()
+  // which may run finishErroring and transition state to Errored (terminal).
+  // If that happens, finishErroring already processed the pending abort
+  // and called doError/doClose. Nothing left for us to do.
+  if (state.isTerminal()) {
+    return;
+  }
 
   if (state.template is<StreamStates::Erroring>()) {
     KJ_IF_SOME(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
@@ -1577,17 +1585,17 @@ void WritableImpl<Self>::finishInFlightClose(
 template <typename Self>
 void WritableImpl<Self>::finishInFlightWrite(
     jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<jsg::JsValue> maybeReason) {
-  auto& write = KJ_ASSERT_NONNULL(inFlightWrite);
+  auto write = kj::mv(KJ_ASSERT_NONNULL(inFlightWrite));
+  inFlightWrite = kj::none;
 
   KJ_IF_SOME(reason, maybeReason) {
     write.resolver.reject(js, reason);
-    inFlightWrite = kj::none;
+    if (state.isTerminal()) return;
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
     return dealWithRejection(js, kj::mv(self), reason);
   }
 
   write.resolver.resolve(js);
-  inFlightWrite = kj::none;
 }
 
 template <typename Self>
@@ -1761,10 +1769,9 @@ bool WritableImpl<Self>::isWritable() const {
 
 template <typename Self>
 void WritableImpl<Self>::cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason) {
-  for (auto& write: writeRequests) {
-    write.resolver.reject(js, reason);
+  while (!writeRequests.empty()) {
+    dequeueWriteRequest().resolver.reject(js, reason);
   }
-  writeRequests.clear();
 }
 
 // ======================================================================================
@@ -1893,6 +1900,11 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
       // will resolve the pending read and we need to know if we should defer destruction.
       bool hasPendingDrainingRead = s.consumer->hasPendingDrainingRead();
       s.consumer->cancel(js, maybeReason);
+      // consumer->cancel can trigger user JS that re-entrantly calls cancel(),
+      // which may destroy state. Re-check before accessing s.controller.
+      if (state == kj::none) {
+        return js.resolvedPromise();
+      }
       auto promise = s.controller->cancel(js, kj::mv(maybeReason));
       // If we're currently in a read (sync or draining), we need to wait for that to
       // finish before dropping our state. For draining reads, the promise callbacks
@@ -2149,6 +2161,11 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
       // will resolve the pending read and we need to know if we should defer destruction.
       bool hasPendingDrainingRead = s.consumer->hasPendingDrainingRead();
       s.consumer->cancel(js, maybeReason);
+      // consumer->cancel can trigger user JS that re-entrantly calls cancel(),
+      // which may destroy state.
+      if (state == kj::none) {
+        return js.resolvedPromise();
+      }
       auto promise = s.controller->cancel(js, kj::mv(maybeReason));
       // If we're currently in a read (sync or draining), we need to wait for that to
       // finish before dropping our state. For sync reads, consumer->read() is still on
@@ -2300,10 +2317,13 @@ void ReadableStreamDefaultController::enqueue(jsg::Lock& js, jsg::Optional<jsg::
   size_t size = 1;
   bool errored = false;
   KJ_IF_SOME(sizeFunc, impl.algorithms.size) {
-    js.tryCatch([&] { size = sizeFunc(js, value); }, [&](jsg::Value exception) {
+    JSG_TRY(js) {
+      size = sizeFunc(js, value);
+    }
+    JSG_CATCH(exception) {
       impl.doError(js, jsg::JsValue(exception.getHandle(js)));
       errored = true;
-    });
+    };
   }
 
   // Re-check canCloseOrEnqueue: the size callback may have errored us without
@@ -2427,10 +2447,19 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
           // The response did not fulfill the minimum requirements of the read.
           // We do not want to invalidate the read request and we need to update the
           // view so that on the next read the view will be properly adjusted.
-          impl.updateView(js);
+          // There's a possibility the impl.readRequest->response can call user JavaScript,
+          // let's revalidate access to the the controller before calling updateView.
+          KJ_IF_SOME(i, maybeImpl) {
+            i.updateView(js);
+          }
         }
       }
-      controller.pull(js);
+      // There's a possibility the impl.readRequest->response can call user JavsScript,
+      // let's revalidate access to the the controller before calling pull.
+      KJ_IF_SOME(i, maybeImpl) {
+        i.controller->runIfAlive(
+            [&](ReadableByteStreamController& controller) { controller.pull(js); });
+      }
       if (shouldInvalidate) {
         invalidate(js);
       }
@@ -2487,11 +2516,16 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferS
           // The response did not fulfill the minimum requirements of the read.
           // We do not want to invalidate the read request and we need to update the
           // view so that on the next read the view will be properly adjusted.
-          impl.updateView(js);
+          KJ_IF_SOME(i, maybeImpl) {
+            i.updateView(js);
+          }
         }
       }
 
-      controller.pull(js);
+      KJ_IF_SOME(i, maybeImpl) {
+        i.controller->runIfAlive(
+            [&](ReadableByteStreamController& controller) { controller.pull(js); });
+      }
       if (shouldInvalidate) {
         invalidate(js);
       }
@@ -2879,25 +2913,23 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
   // state change only fires after the promise resolves/rejects and the Consumer's
   // this-capturing callbacks have already run.
   auto wrapDrainingRead =
-      [this](jsg::Lock& js,
-          jsg::Promise<DrainingReadResult> promise) -> jsg::Promise<DrainingReadResult> {
-    return promise.then(js, [this](jsg::Lock& js, DrainingReadResult result) {
+      [this, ref = addRef()](jsg::Lock& js,
+          jsg::Promise<DrainingReadResult> promise) mutable -> jsg::Promise<DrainingReadResult> {
+    return promise.then(js, [this, ref = ref.addRef()](jsg::Lock& js, DrainingReadResult result) {
       if (state.endOperation()) {
         // A pending state was applied. Call the appropriate callback.
         if (state.template is<StreamStates::Closed>()) {
           lock.onClose(js);
         } else if (state.template is<StreamStates::Errored>()) {
           KJ_IF_SOME(err, state.template tryGetUnsafe<StreamStates::Errored>()) {
-            lock.onError(js, err.getHandle(js));
-            // The error was applied during this operation — the data we collected
-            // may be invalid. Discard it and propagate the error rather than
-            // silently returning possibly-corrupt data.
-            js.throwException(err.addRef(js));
+            auto error = err.addRef(js);  // capture before onError runs user JS
+            lock.onError(js, error.getHandle(js));
+            js.throwException(kj::mv(error));
           }
         }
       }
       return kj::mv(result);
-    }, [this](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
+    }, [this, ref = ref.addRef()](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
       state.clearPendingState();
       (void)state.endOperation();
       js.throwException(kj::mv(exception));
@@ -3998,8 +4030,12 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
 
   state.transitionTo<StreamStates::Closed>();
   KJ_IF_SOME(locked, lock.state.tryGetUnsafe<WriterLocked>()) {
-    maybeResolvePromise(js, locked.getClosedFulfiller());
-    maybeResolvePromise(js, locked.getReadyFulfiller());
+    // Callig maybeResolvePromise below can trigger user JavaScript to run, which could cause
+    // the locked reference to be invalidated. Grab what we need up front.
+    auto closedFulfiller = kj::mv(locked.getClosedFulfiller());
+    auto readyFulfiller = kj::mv(locked.getReadyFulfiller());
+    maybeResolvePromise(js, closedFulfiller);
+    maybeResolvePromise(js, readyFulfiller);
   } else {
     (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
   }
@@ -4016,8 +4052,10 @@ void WritableStreamJsController::doError(jsg::Lock& js, jsg::JsValue reason) {
 
   state.transitionTo<StreamStates::Errored>(reason.addRef(js));
   KJ_IF_SOME(locked, lock.state.tryGetUnsafe<WriterLocked>()) {
-    maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
-    maybeResolvePromise(js, locked.getReadyFulfiller());
+    auto closedFulfiller = kj::mv(locked.getClosedFulfiller());
+    auto readyFulfiller = kj::mv(locked.getReadyFulfiller());
+    maybeRejectPromise<void>(js, closedFulfiller, reason);
+    maybeResolvePromise(js, readyFulfiller);
   } else KJ_IF_SOME(pipeLocked, lock.state.tryGetUnsafe<WritableLockImpl::PipeLocked>()) {
     // When the writable side of a pipe errors, we need to release the source stream.
     // The pipeLoop may be waiting on a read from the source that will never complete,
@@ -4121,8 +4159,10 @@ void WritableStreamJsController::maybeRejectReadyPromise(jsg::Lock& js, jsg::JsV
     } else {
       auto prp = js.newPromiseAndResolver<void>();
       prp.promise.markAsHandled(js);
+      writerLock.setResolvedReady(js, kj::mv(prp.promise));
+      // Note that the call to resolver.reject may trigger user JavaScript to run, which could
+      // cause the locked state to be invalidated.
       prp.resolver.reject(js, reason);
-      writerLock.setReadyFulfiller(js, prp);
     }
   }
 }
@@ -4140,6 +4180,7 @@ void WritableStreamJsController::releaseWriter(Writer& writer, kj::Maybe<jsg::Lo
 kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamJsController::removeSink(jsg::Lock& js) {
   return kj::none;
 }
+
 void WritableStreamJsController::detach(jsg::Lock& js) {
   KJ_UNIMPLEMENTED("WritableStreamJsController::detach is not implemented");
 }
@@ -4395,11 +4436,14 @@ void TransformStreamDefaultController::enqueue(jsg::Lock& js, jsg::JsValue chunk
 
   JSG_REQUIRE(readableController.canCloseOrEnqueue(), TypeError,
       "The readable side of this TransformStream is no longer readable.");
-  js.tryCatch([&] { readableController.enqueue(js, chunk); }, [&](jsg::Value exception) {
+  JSG_TRY(js) {
+    readableController.enqueue(js, chunk);
+  }
+  JSG_CATCH(exception) {
     auto handle = jsg::JsValue(exception.getHandle(js));
     errorWritableAndUnblockWrite(js, handle);
     js.throwException(handle);
-  });
+  };
 
   // If the controller was errored during the enqueue (e.g. by the size callback
   // calling error()), skip the backpressure update — the stream is already torn down.
