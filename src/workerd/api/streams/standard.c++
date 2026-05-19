@@ -2440,8 +2440,12 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
       bool shouldInvalidate = false;
       if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
         // While this particular request may be invalidated, there are still
-        // other branches we can push the data to. Let's do so.
-        auto entry = kj::rc<ByteQueue::Entry>(js, jsg::JsBufferSource(handle.detachAndTake(js)));
+        // other branches we can push the data to. Forward only the first
+        // bytesWritten bytes — not the entire view — to avoid fabricating
+        // trailing zeros on the surviving branch.
+        auto taken = handle.detachAndTake(js);
+        auto sliced = taken.slice(js, 0, bytesWritten);
+        auto entry = kj::rc<ByteQueue::Entry>(js, jsg::JsBufferSource(sliced));
         controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
         JSG_REQUIRE(bytesWritten > 0, TypeError,
