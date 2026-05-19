@@ -216,15 +216,36 @@ class ReadableImpl {
     Algorithms& operator=(Algorithms&& other) = default;
 
     void clear() {
+      if (inUse > 0) {
+        pendingClear = true;
+        return;
+      }
       start = kj::none;
       pull = kj::none;
       cancel = kj::none;
       size = kj::none;
     }
 
+    // RAII guard: prevents clear() from freeing algorithms while one is executing.
+    // Re-entrant JS during algorithm invocation can trigger clear() via error/cancel
+    // paths, which would free the jsg::Function (and its captured closure) mid-execution.
+    struct InUseGuard {
+      Algorithms& algorithms;
+      InUseGuard(Algorithms& a): algorithms(a) {
+        ++algorithms.inUse;
+      }
+      ~InUseGuard() {
+        if (--algorithms.inUse == 0 && algorithms.pendingClear) algorithms.clear();
+      }
+      KJ_DISALLOW_COPY_AND_MOVE(InUseGuard);
+    };
+
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(start, pull, cancel, size);
     }
+
+    uint32_t inUse = 0;
+    bool pendingClear = false;
   };
 
   using Queue = Self::QueueType;
@@ -361,22 +382,44 @@ class WritableImpl {
 
     Algorithms() {};
     ~Algorithms() {
-      // Clear all algorithm references to break circular references
+      // Clear all algorithm references to break circular references.
+      // Force clear even if inUse — we're being destroyed.
+      inUse = 0;
+      pendingClear = false;
       clear();
     }
     Algorithms(Algorithms&& other) = default;
     Algorithms& operator=(Algorithms&& other) = default;
 
     void clear() {
+      if (inUse > 0) {
+        pendingClear = true;
+        return;
+      }
       abort = kj::none;
       close = kj::none;
       size = kj::none;
       write = kj::none;
     }
 
+    // RAII guard: prevents clear() from freeing algorithms while one is executing.
+    struct InUseGuard {
+      Algorithms& algorithms;
+      InUseGuard(Algorithms& a): algorithms(a) {
+        ++algorithms.inUse;
+      }
+      ~InUseGuard() {
+        if (--algorithms.inUse == 0 && algorithms.pendingClear) algorithms.clear();
+      }
+      KJ_DISALLOW_COPY_AND_MOVE(InUseGuard);
+    };
+
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(write, close, abort, size);
     }
+
+    uint32_t inUse = 0;
+    bool pendingClear = false;
   };
 
   struct Writable {
@@ -771,14 +814,33 @@ class TransformStreamDefaultController: public jsg::Object {
     Algorithms& operator=(Algorithms&& other) = default;
 
     inline void clear() {
+      if (inUse > 0) {
+        pendingClear = true;
+        return;
+      }
       transform = kj::none;
       flush = kj::none;
       cancel = kj::none;
     }
 
+    // RAII guard: prevents clear() from freeing algorithms while one is executing.
+    struct InUseGuard {
+      Algorithms& algorithms;
+      InUseGuard(Algorithms& a): algorithms(a) {
+        ++algorithms.inUse;
+      }
+      ~InUseGuard() {
+        if (--algorithms.inUse == 0 && algorithms.pendingClear) algorithms.clear();
+      }
+      KJ_DISALLOW_COPY_AND_MOVE(InUseGuard);
+    };
+
     inline void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(transform, flush, cancel, maybeFinish);
     }
+
+    uint32_t inUse = 0;
+    bool pendingClear = false;
   };
 
   void errorWritableAndUnblockWrite(jsg::Lock& js, jsg::JsValue reason);

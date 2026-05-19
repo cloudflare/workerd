@@ -1128,6 +1128,7 @@ void ReadableImpl<Self>::doCancel(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsVal
     }
   };
 
+  typename Algorithms::InUseGuard guard(algorithms);
   maybeRunAlgorithm(js, algorithms.cancel, kj::mv(onSuccess), kj::mv(onFailure), reason);
 }
 
@@ -1224,6 +1225,7 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
     doError(js, jsg::JsValue(reason.getHandle(js)));
   };
 
+  typename Algorithms::InUseGuard guard(algorithms);
   maybeRunAlgorithm(js, algorithms.pull, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
 
@@ -1256,6 +1258,7 @@ void ReadableImpl<Self>::forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
     doError(js, jsg::JsValue(reason.getHandle(js)));
   };
 
+  typename Algorithms::InUseGuard guard(algorithms);
   maybeRunAlgorithm(js, algorithms.pull, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
 
@@ -1368,6 +1371,7 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
       // The original maybeRunAlgorithm would call the onSuccess continuation
       // synchronously if algorithms.close is not specified. maybeRunAlgorithmAsync
       // always defers to a microtask.
+      typename Algorithms::InUseGuard guard(algorithms);
       if (FeatureFlags::get(js).getPedanticWpt()) {
         maybeRunAlgorithmAsync(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
       } else {
@@ -1415,6 +1419,7 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   // there's no user-provided write handler. This ensures that backpressure changes
   // from the write don't resolve the ready promise synchronously, preserving correct
   // microtask ordering (e.g., ready rejects before closed on releaseLock).
+  typename Algorithms::InUseGuard guard(algorithms);
   if (FeatureFlags::get(js).getPedanticWpt()) {
     maybeRunAlgorithmAsync(js, algorithms.write, kj::mv(onSuccess), kj::mv(onFailure),
         value.getHandle(js), self.addRef());
@@ -1538,6 +1543,7 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
       rejectCloseAndClosedPromiseIfNeeded(js);
     };
 
+    typename Algorithms::InUseGuard guard(algorithms);
     maybeRunAlgorithm(js, algorithms.abort, kj::mv(onSuccess), kj::mv(onFailure), reason);
     return;
   }
@@ -4567,6 +4573,7 @@ jsg::Promise<void> TransformStreamDefaultController::abort(jsg::Lock& js, jsg::J
     }
   }
 
+  Algorithms::InUseGuard guard(algorithms);
   return algorithms.maybeFinish
       .emplace(maybeRunAlgorithm(js, algorithms.cancel,
           [this, ref = JSG_THIS, reason = reason.addRef(js)](jsg::Lock& js) -> jsg::Promise<void> {
@@ -4642,6 +4649,7 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
     return js.rejectedPromise<void>(handle);
   };
 
+  Algorithms::InUseGuard guard(algorithms);
   if (flags.getPedanticWpt()) {
     return algorithms.maybeFinish
         .emplace(
@@ -4679,6 +4687,7 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
     algorithms.finishStarted = true;
   }
 
+  Algorithms::InUseGuard guard(algorithms);
   return algorithms.maybeFinish
       .emplace(maybeRunAlgorithm(js, algorithms.cancel,
           [this, ref = JSG_THIS, reason = reason.addRef(js)](
@@ -4708,6 +4717,10 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
 jsg::Promise<void> TransformStreamDefaultController::performTransform(
     jsg::Lock& js, jsg::JsValue chunk) {
   if (algorithms.transform != kj::none) {
+    // Guard prevents algorithms.clear() from freeing the transform function
+    // while it's executing. Re-entrant JS (e.g., toString() on the chunk)
+    // can trigger cancel → errorWritableAndUnblockWrite → algorithms.clear().
+    Algorithms::InUseGuard guard(algorithms);
     return maybeRunAlgorithm(js, algorithms.transform, [](jsg::Lock& js) -> jsg::Promise<void> {
       return js.resolvedPromise();
     }, [ref = JSG_THIS](jsg::Lock& js, jsg::Value reason) mutable -> jsg::Promise<void> {
