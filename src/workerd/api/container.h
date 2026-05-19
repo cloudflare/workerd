@@ -297,6 +297,20 @@ class Container: public jsg::Object {
 
   class TcpPortWorkerInterface;
   class TcpPortOutgoingFactory;
+
+  // These helpers are static since they will leave the IoContext on the first co_await, so we
+  // don't want them trying to access `rpcClient` via the `IoOwn`.
+  static kj::Promise<void> interceptOutboundHttpImpl(rpc::Container::Client rpcClient,
+      kj::String addr,
+      kj::Own<IoChannelFactory::SubrequestChannel> channel);
+  static kj::Promise<void> interceptAllOutboundHttpImpl(
+      rpc::Container::Client rpcClient, kj::Own<IoChannelFactory::SubrequestChannel> channel);
+  static kj::Promise<void> interceptOutboundHttpsImpl(rpc::Container::Client rpcClient,
+      kj::String addr,
+      kj::Own<IoChannelFactory::SubrequestChannel> channel);
+  static kj::Promise<void> interceptOutboundTcpImpl(rpc::Container::Client rpcClient,
+      kj::String addr,
+      kj::Own<IoChannelFactory::SubrequestChannel> channel);
 };
 
 #define EW_CONTAINER_ISOLATE_TYPES                                                                 \
