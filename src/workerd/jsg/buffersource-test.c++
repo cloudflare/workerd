@@ -11,6 +11,10 @@ namespace {
 
 V8System v8System;
 
+v8::Local<v8::Value> unusedBufferSourceConstructor(Lock& js, BackingStore&) {
+  return v8::Undefined(js.v8Isolate);
+}
+
 struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
   BufferSource takeBufferSource(BufferSource buf) {
     auto ptr = buf.asArrayPtr();
@@ -175,6 +179,24 @@ KJ_TEST("BackingStore const asArrayPtr handles byteOffset correctly") {
                "const view = new Uint8Array(ab, 4, 8);"
                "testConstAsArrayPtrByteOffset(view)",
       "boolean", "true");
+}
+
+KJ_TEST("BackingStore rejects byteOffset outside backing store") {
+  Evaluator<BufferSourceContext, BufferSourceIsolate> e(v8System);
+
+  e.run([](Lock& js) {
+    KJ_EXPECT_THROW(FAILED,
+        BackingStore(js.allocBackingStore(8), 0, 9, 1, unusedBufferSourceConstructor, true));
+  });
+}
+
+KJ_TEST("BackingStore rejects byteLength extending outside backing store") {
+  Evaluator<BufferSourceContext, BufferSourceIsolate> e(v8System);
+
+  e.run([](Lock& js) {
+    KJ_EXPECT_THROW(FAILED,
+        BackingStore(js.allocBackingStore(8), 2, 7, 1, unusedBufferSourceConstructor, true));
+  });
 }
 
 }  // namespace
