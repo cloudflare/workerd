@@ -700,6 +700,12 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-99-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-99-test.js"],
+)
+
+wd_test(
     src = "streams-r2-patterns-test.wd-test",
     args = ["--experimental"],
     data = ["streams-r2-patterns-test.js"],
