@@ -326,9 +326,14 @@ void ReadableLockImpl<Controller>::onClose(jsg::Lock& js) {
       // point is not recoverable. Log and move on.
       LOG_NOSENTRY(ERROR, "Error resolving ReadableStream reader closed promise");
     };
-  } else {
-    (void)state.template transitionFromTo<PipeLocked, Unlocked>();
   }
+  // When PipeLocked, do NOT transition to Unlocked here. The pipe loop holds
+  // a raw PipeController& reference (Pipe::State::source in internal.c++) to
+  // the PipeLocked variant. Destroying it while the pipe is mid-iteration
+  // creates a dangling reference — the attacker can then call rs.getReader()
+  // to overwrite the freed OneOf storage and hijack a virtual call.
+  // The pipe loop will detect the close via source.isClosed() on the next
+  // iteration and call source.release() to properly transition to Unlocked.
 }
 
 template <typename Controller>
@@ -343,9 +348,10 @@ void ReadableLockImpl<Controller>::onError(jsg::Lock& js, jsg::JsValue reason) {
       // point is not recoverable. Log and move on.
       LOG_NOSENTRY(ERROR, "Error rejecting ReadableStream reader closed promise");
     }
-  } else {
-    (void)state.template transitionFromTo<PipeLocked, Unlocked>();
   }
+  // Same rationale as onClose — do not destroy PipeLocked while a pipe loop
+  // may hold a raw reference to it. The pipe loop detects errors via
+  // source.tryGetErrored() and releases properly.
 }
 
 template <typename Controller>

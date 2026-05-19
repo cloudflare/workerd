@@ -622,6 +622,12 @@ wd_test(
 )
 
 wd_test(
+    src = "autovuln-176-test.wd-test",
+    args = ["--experimental"],
+    data = ["autovuln-176-test.js"],
+)
+
+wd_test(
     src = "streams-r2-patterns-test.wd-test",
     args = ["--experimental"],
     data = ["streams-r2-patterns-test.js"],
