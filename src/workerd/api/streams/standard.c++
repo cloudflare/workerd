@@ -198,6 +198,11 @@ class WritableLockImpl {
     };
     Flags flags{};
 
+    // True when the source pipe lock has already been released.
+    // Checked by doError() to avoid accessing the dangling source reference
+    // after checkSignal() has already released it.
+    bool sourceReleased = false;
+
     JSG_MEMORY_INFO(PipeLocked) {
       tracker.trackField("readableStreamRef", readableStreamRef);
       tracker.trackField("signal", maybeSignal);
@@ -516,6 +521,7 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
       } else {
         source.release(js);
       }
+      sourceReleased = true;
       if (!flags.preventAbort) {
         auto pipeThrough = flags.pipeThrough;
         return self.abort(js, reason)
@@ -4095,10 +4101,14 @@ void WritableStreamJsController::doError(jsg::Lock& js, jsg::JsValue reason) {
     // When the writable side of a pipe errors, we need to release the source stream.
     // The pipeLoop may be waiting on a read from the source that will never complete,
     // so we need to proactively release the source here.
-    if (!pipeLocked.flags.preventCancel) {
-      pipeLocked.source.release(js, reason);
-    } else {
-      pipeLocked.source.release(js);
+    // But if checkSignal() already released the source, the PipeController& is dangling
+    // and we must not access it.
+    if (!pipeLocked.sourceReleased) {
+      if (!pipeLocked.flags.preventCancel) {
+        pipeLocked.source.release(js, reason);
+      } else {
+        pipeLocked.source.release(js);
+      }
     }
     lock.state.transitionTo<Unlocked>();
   }
