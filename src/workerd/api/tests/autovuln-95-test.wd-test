@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "autovuln-95-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "autovuln-95-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+      )
+    ),
+  ],
+);
