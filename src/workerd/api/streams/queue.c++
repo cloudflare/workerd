@@ -959,6 +959,15 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
         return true;
       }
 
+      // queue.push() can also trigger user JS (via thenable check during promise
+      // resolution) that calls readerA.releaseLock() → cancelPendingReads(),
+      // which frees the ReadRequest that `req` aliases. ~ReadRequest calls
+      // invalidate() which sets this->request = kj::none. Check before
+      // accessing req again.
+      if (request == kj::none) {
+        return true;
+      }
+
       // Since the queue.push may have triggered user code, there's a possibility that the buffer
       // could have been detached or resized. We need to check again to ensure that the buffer is
       // still a valid size and that the filled + amount are still within bounds.
