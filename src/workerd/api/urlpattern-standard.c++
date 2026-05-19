@@ -43,17 +43,27 @@ std::optional<std::vector<std::optional<std::string>>> URLPattern::URLPatternReg
   // We need to create a null-terminated copy.
   auto str = kj::str(kj::arrayPtr(input.data(), input.size()));
   KJ_IF_SOME(matches, pattern.getHandle(js)(js, str)) {
-    std::vector<std::optional<std::string>> results(matches.size() - 1);
+    // Snapshot the array length exactly once. matches.size() calls
+    // v8::Array::Length() which reads live JS state — a monkey-patched
+    // RegExp.prototype.exec can return an array whose length grows
+    // mid-iteration (via accessor getters on indexed properties).
+    // Re-reading the length in the loop condition while using operator[]
+    // with the pre-allocated size would write past the vector's backing
+    // store (heap buffer overflow). Fix: snapshot once, use reserve +
+    // emplace_back so we never index past what we allocated.
+    const uint32_t len = matches.size();
+    if (len == 0) return std::vector<std::optional<std::string>>{};
+    std::vector<std::optional<std::string>> results;
+    results.reserve(len - 1);
     // The first value is always the input of the exec() command. Therefore
     // we should avoid it while constructing the returning vector.
-    for (size_t i = 1; i < matches.size(); i++) {
-      auto value = matches.get(js, i);
+    for (uint32_t i = 1; i < len; i++) {
+      auto value = matches.get(js, i);  // may run user JS via getters
       if (value.isUndefined()) {
-        results[i - 1] = std::nullopt;
+        results.emplace_back(std::nullopt);
       } else {
-        KJ_DASSERT(value.isString());
         auto str = value.toString(js);
-        results[i - 1] = std::string(str.cStr(), str.size());
+        results.emplace_back(std::string(str.cStr(), str.size()));
       }
     }
     return kj::mv(results);
