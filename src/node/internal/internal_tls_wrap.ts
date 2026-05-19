@@ -235,7 +235,7 @@ export function TLSSocket(
   this._newSessionPending = false;
   this._controlReleased = false;
   this.secureConnecting = true;
-  this.servername = null;
+  this.servername = tlsOptions.servername ?? null;
   this.authorized = false;
   this[kRes] = null;
   this[kIsVerified] = false;
@@ -495,7 +495,11 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
 
   try {
     const { host, port, addressType } = this._handle.options;
-    const socket = this._handle.socket.startTls();
+    const tlsOpts =
+      this.servername != null
+        ? { expectedServerHostname: this.servername }
+        : undefined;
+    const socket = this._handle.socket.startTls(tlsOpts);
 
     this._handle = {
       socket: socket,
@@ -537,9 +541,7 @@ TLSSocket.prototype.setServername = function setServername(
   name: string
 ): void {
   validateString(name, 'name');
-  // Pipefitter currently does not provide us a way on the internal
-  // system and possibly KJ's TLS implementation doesn't provides a way,
-  // but it is something we will need sooner than later.
+  this.servername = name;
 };
 
 TLSSocket.prototype.setSession = function (_session: string | Buffer): void {
@@ -721,6 +723,14 @@ export function connect(...args: unknown[]): TLSSocket {
   });
 
   tlssock[kConnectOptions] = options;
+
+  // In Node.js, servername defaults to options.host when not explicitly set.
+  // Store it on the TLSSocket so _start() can pass it as expectedServerHostname
+  // to the native Socket.startTls() call for correct TLS certificate identity
+  // validation.
+  if (options.servername !== undefined) {
+    tlssock.servername = options.servername;
+  }
 
   if (cb) {
     tlssock.once('secureConnect', cb);
