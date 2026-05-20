@@ -3681,17 +3681,39 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
 
   bool writeFailed = false;
 
+  static const auto waiter = []<typename T>(kj::Promise<T> promise,
+                                 kj::Own<kj::PromiseFulfiller<T>> fulfiller) -> kj::Promise<void> {
+    KJ_TRY {
+      if constexpr (jsg::isVoid<T>()) {
+        co_await promise;
+        fulfiller->fulfill();
+      } else {
+        fulfiller->fulfill(co_await promise);
+      }
+    }
+    KJ_CATCH(exception) {
+      fulfiller->reject(kj::mv(exception));
+    }
+  };
+
   KJ_TRY {
     while (true) {
       // Perform a draining read to get all synchronously available data if possible
       // or fall back to a regular read if not.
-      DrainingReadResult result = co_await ioContext.run([&reader](jsg::Lock& js) mutable {
+      auto prp = kj::newPromiseAndFulfiller<DrainingReadResult>();
+      // We cannot co_await the ioContext.run directly. If it is canceled,
+      // we end up with a case where the promise destroys itself, causing
+      // an assertion.
+      auto promise = ioContext.run([&reader](jsg::Lock& js) mutable {
         auto& ioContext = IoContext::current();
         // Use a 256KB limit to allow periodic yielding to the event loop,
         // preventing a fast producer from monopolizing the thread.
         constexpr size_t kMaxReadPerCycle = 256 * 1024;
         return ioContext.awaitJs(js, reader->read(js, kMaxReadPerCycle));
       });
+      ioContext.addTask(waiter(kj::mv(promise), kj::mv(prp.fulfiller)));
+
+      DrainingReadResult result = co_await prp.promise;
 
       // Write all the chunks we received using vectored write for efficiency.
       if (result.chunks.size() > 0) {
@@ -3716,11 +3738,15 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       sink->abort(exception.clone());
     }
 
-    co_await ioContext.run([&reader, ex = exception.clone()](jsg::Lock& js) mutable {
+    auto promise = ioContext.run([&reader, ex = exception.clone()](jsg::Lock& js) mutable {
       auto& ioContext = IoContext::current();
       auto error = js.exceptionToJsValue(kj::mv(ex));
       return ioContext.awaitJs(js, reader->cancel(js, error.getHandle(js)));
     });
+    auto prp = kj::newPromiseAndFulfiller<void>();
+    ioContext.addTask(waiter(kj::mv(promise), kj::mv(prp.fulfiller)));
+    co_await prp.promise;
+
     kj::throwFatalException(kj::mv(exception));
   }
 }
