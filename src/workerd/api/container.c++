@@ -599,7 +599,11 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
 
   return IoContext::current()
       .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
-      .then(js, [this](jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
+      // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
+      // the promise continuation is pending. Without it, the bare `this` pointer dangles.
+      .then(js,
+          [this, self = JSG_THIS](
+              jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
     running = false;
     auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, destroyReason) {
@@ -613,7 +617,8 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       KJ_ASSERT_NONNULL(err.tryCast<jsg::JsObject>()).set(js, "exitCode", js.num(exitCode));
       js.throwException(err);
     }
-  }, [this](jsg::Lock& js, jsg::Value&& error) {
+  },
+          [this, self = JSG_THIS](jsg::Lock& js, jsg::Value&& error) {
     running = false;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
