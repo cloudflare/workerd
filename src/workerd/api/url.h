@@ -243,6 +243,7 @@ public:
 
 private:
   kj::Own<URL::RefcountedUrl> url;
+  kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
 
   static kj::Maybe<kj::Array<kj::String>> entryIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->url->query.size()) {

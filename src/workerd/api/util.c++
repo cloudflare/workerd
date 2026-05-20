@@ -33,16 +33,29 @@ kj::ArrayPtr<const char> split(kj::ArrayPtr<const char>& text, char c) {
 
 void parseQueryString(kj::Vector<kj::Url::QueryParam>& query,
     kj::ArrayPtr<const char> text,
+    jsg::ExternalMemoryAdjustment& externalMemoryAdjustment,
     bool skipLeadingQuestionMark) {
   if (skipLeadingQuestionMark && text.size() > 0 && text[0] == '?') {
     text = text.slice(1, text.size());
   }
 
+  size_t pendingBytes = 0;
   while (text.size() > 0) {
     auto value = split(text, '&');
     if (value.size() == 0) continue;
     auto name = split(value, '=');
-    query.add(kj::Url::QueryParam{kj::decodeWwwForm(name), kj::decodeWwwForm(value)});
+    auto decodedName = kj::decodeWwwForm(name);
+    auto decodedValue = kj::decodeWwwForm(value);
+    pendingBytes += decodedName.size() + decodedValue.size() + sizeof(kj::Url::QueryParam);
+    query.add(kj::Url::QueryParam{kj::mv(decodedName), kj::mv(decodedValue)});
+    if (pendingBytes >= 1024 * 1024) {
+      // Adjust memory every 1MB to avoid excessive memory usage
+      externalMemoryAdjustment.adjust(pendingBytes);
+      pendingBytes = 0;
+    }
+  }
+  if (pendingBytes > 0) {
+    externalMemoryAdjustment.adjust(pendingBytes);
   }
 }
 

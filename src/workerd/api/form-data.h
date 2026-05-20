@@ -188,6 +188,11 @@ public:
 private:
   kj::Vector<Entry> data;
 
+  // Tracks heap used by parsed URL-encoded entries so V8's per-isolate memory limit can
+  // account for it. Accumulated during parseQueryString() and retained for the lifetime
+  // of this FormData object.
+  kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
+
   static EntryType clone(jsg::Lock& js, EntryType& value);
 
   template <typename Type>
