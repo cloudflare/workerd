@@ -795,9 +795,29 @@ kj::Own<WritableStreamController> newWritableStreamInternalController(IoContext&
 
 struct Unlocked {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "unlocked"_kj;
+
+  // When PipeLocked (which inherits PipeController and has a vtable pointer
+  // at offset 0) is destroyed and replaced in-place by Unlocked in the lock
+  // state machine's OneOf storage, the stale vtable bytes normally survive
+  // because Unlocked has no data members. This makes type-confused virtual
+  // calls through a dangling PipeController& silently succeed rather than
+  // crash — defeating ASAN (no heap free) and making regression tests
+  // unreliable.
+  //
+  // Overwrite the first pointer-sized bytes of the union storage with an
+  // obviously invalid address so that any stale virtual call through a
+  // PipeController& pointing at this storage dereferences a bad vtable
+  // pointer and SIGSEGVs deterministically.
+  uintptr_t vtablePoison = 0xDEAD'BEEF'DEAD'BEEFull;
 };
 struct Locked {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "locked"_kj;
+
+  // Defense-in-depth: same vtable poison as Unlocked. No known code path
+  // transitions a vtable-bearing PipeLocked to Locked today, but if one
+  // were introduced, the ghost vtable bytes would survive in this empty
+  // struct's union storage just as they did in the original Unlocked.
+  uintptr_t vtablePoison = 0xDEAD'BEEF'DEAD'BEEFull;
 };
 
 // When a reader is locked to a ReadableStream, a ReaderLock instance

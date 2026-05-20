@@ -802,9 +802,12 @@ void ReadableStreamInternalController::doClose(jsg::Lock& js) {
   state.transitionTo<StreamStates::Closed>();
   KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
-  } else {
-    (void)readState.transitionFromTo<PipeLocked, Unlocked>();
   }
+  // Note: We intentionally do NOT transition PipeLocked → Unlocked here.
+  // The pipe loop detects the closed state via source.isClosed() on its
+  // next iteration and releases the lock itself via releaseSource().
+  // Prematurely destroying the PipeLocked variant would leave a dangling
+  // PipeController& reference in the writable controller's pipe state.
 }
 
 void ReadableStreamInternalController::doError(jsg::Lock& js, jsg::JsValue reason) {
@@ -814,9 +817,9 @@ void ReadableStreamInternalController::doError(jsg::Lock& js, jsg::JsValue reaso
   state.transitionTo<StreamStates::Errored>(reason.addRef(js));
   KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
-  } else {
-    (void)readState.transitionFromTo<PipeLocked, Unlocked>();
   }
+  // Note: We intentionally do NOT transition PipeLocked → Unlocked here.
+  // See the comment in doClose() for the full rationale.
 }
 
 ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& js) {
@@ -964,6 +967,25 @@ void ReadableStreamInternalController::releaseReader(
 void WritableStreamInternalController::Writable::abort(kj::Exception&& ex) {
   canceler.cancel(ex.clone());
   sink->abort(kj::mv(ex));
+}
+
+void WritableStreamInternalController::Pipe::State::releaseSource(
+    jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError) {
+  // Read the source into a local Maybe<&> (copying the pointer) so the
+  // method body can null state->source BEFORE the underlying
+  // PipeController::release() call. That way, no one — including ourselves
+  // through a stale `this->source` access — can use the freed reference
+  // after release; the field is observably kj::none on every code path
+  // following this call.
+  KJ_IF_SOME(s, source) {
+    auto& sourceRef = s;
+    source = kj::none;
+    KJ_IF_SOME(error, maybeError) {
+      sourceRef.release(js, error);
+    } else {
+      sourceRef.release(js);
+    }
+  }
 }
 
 WritableStreamInternalController::~WritableStreamInternalController() noexcept(false) {
@@ -1307,6 +1329,11 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   // will be unlocked as soon as the close completes.
   if (sourceLock.isClosed()) {
     sourceLock.release(js);
+    // Unlock writeState before close() — doClose() no longer transitions
+    // PipeLocked → Unlocked (vtable poison safety), and close() may run
+    // asynchronously so the writable must appear unlocked when the pipe
+    // promise resolves.
+    writeState.transitionTo<Unlocked>();
     if (!preventClose) {
       // The spec would have us check to see if `destination` is errored and, if so, return its
       // stored error. But if `destination` were errored, we would already have caught that case
@@ -1318,7 +1345,6 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
         return close(js);
       }
     }
-    writeState.transitionTo<Unlocked>();
     return js.resolvedPromise();
   }
 
@@ -1508,9 +1534,9 @@ void WritableStreamInternalController::doClose(jsg::Lock& js) {
     maybeResolvePromise(js, closedFullfiller);
     maybeResolvePromise(js, readyFulfiller);
     writeState.transitionTo<Locked>();
-  } else {
-    (void)writeState.transitionFromTo<PipeLocked, Unlocked>();
   }
+  // Note: We intentionally do NOT transition PipeLocked → Unlocked here.
+  // The pipe loop detects the closed state and releases the lock itself.
   PendingAbort::dequeue(maybePendingAbort);
 }
 
@@ -1526,6 +1552,9 @@ void WritableStreamInternalController::doError(jsg::Lock& js, jsg::JsValue reaso
     maybeResolvePromise(js, readyFulfiller);
     writeState.transitionTo<Locked>();
   } else {
+    // For PipeLocked: the pipe loop holds its source as Maybe<PipeController&>
+    // in Pipe::State, not in PipeLocked. Transitioning to Unlocked is safe
+    // because the pipe loop checks source == kj::none, not the writeState.
     (void)writeState.transitionFromTo<PipeLocked, Unlocked>();
   }
   PendingAbort::dequeue(maybePendingAbort);
@@ -1724,24 +1753,40 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       }
 
       // The readable side should *should* still be readable here but let's double check, just
-      // to be safe, both for closed state and errored states.
-      if (request->source().isClosed()) {
-        request->source().release(js);
-        // If the source is closed, the spec requires us to close the destination unless the
-        // preventClose option is true.
-        if (!request->preventClose() && !isClosedOrClosing()) {
-          doClose(js);
-        } else {
-          writeState.transitionTo<Unlocked>();
+      // to be safe, both for closed state and errored states. We just constructed the Pipe
+      // and haven't yet entered pipeLoop, so source is guaranteed non-null.
+      auto& sourceRef = KJ_ASSERT_NONNULL(request->source());
+      if (sourceRef.isClosed()) {
+        auto preventClose = request->preventClose();
+        // Resolve the pipe promise before pop_front destroys the Pipe event.
+        maybeResolvePromise(js, request->promise());
+        request->state->releaseSource(js);
+        // Pop the Pipe from the queue before calling close() — isPiping()
+        // checks the queue, and close() rejects if isPiping() is true.
+        queue.pop_front();
+        // Unlock writeState — doClose() no longer transitions PipeLocked →
+        // Unlocked (vtable poison safety), and the KJ pump path has no pipe
+        // loop iteration to do it.
+        writeState.transitionTo<Unlocked>();
+        // If the source is closed, the spec requires us to close the destination
+        // unless the preventClose option is true.
+        if (!preventClose && !isClosedOrClosing()) {
+          return close(js, true);
         }
         return js.resolvedPromise();
       }
 
-      KJ_IF_SOME(errored, request->source().tryGetErrored(js)) {
-        request->source().release(js);
+      KJ_IF_SOME(errored, sourceRef.tryGetErrored(js)) {
+        auto preventAbort = request->preventAbort();
+        // Reject the pipe promise before pop_front destroys the Pipe event.
+        maybeRejectPromise<void>(js, request->promise(), errored);
+        request->state->releaseSource(js);
+        // Pop the Pipe from the queue before further processing — the source
+        // has been released, so the Pipe entry is stale.
+        queue.pop_front();
         // If the source is errored, the spec requires us to error the destination unless the
         // preventAbort option is true.
-        if (!request->preventAbort()) {
+        if (!preventAbort) {
           auto ex = js.exceptionToKj(errored.addRef(js));
           writable->abort(kj::mv(ex));
           drain(js, errored);
@@ -1768,96 +1813,99 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
           auto& request = check.template operator()<Pipe>();
 
-          if (request.state->sourceReleased) {
-            // The JS pipe loop (pipeLoop) already released the source and handled
-            // dest cleanup. Just resolve/reject the pipe promise and pop the queue.
-            // We must not access request.source() here — the PipeLocked it points
-            // to was destroyed when pipeLoop released it.
-            // Extract what we need before queue.pop_front() destroys the request.
-            bool preventClose = request.preventClose();
-            KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
+          // Capture preventClose now so we can modify it locally if needed.
+          bool preventClose = request.preventClose();
+
+          // KJ_IF_SOME on request.source(): if pipeLoop already released the
+          // source (via Pipe::State::releaseSource()), source is now
+          // kj::none and we MUST NOT attempt a deref. Use the stashed
+          // capturedSourceError in that case.
+          KJ_IF_SOME(sourceRef, request.source()) {
+            KJ_IF_SOME(errored, sourceRef.tryGetErrored(js)) {
+              if (request.preventAbort()) preventClose = true;
+              // Even through we're not going to close the destination, we still want the
+              // pipe promise itself to be rejected in this case.
+              maybeRejectPromise<void>(js, request.promise(), errored);
+            } else KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
               maybeRejectPromise<void>(js, request.promise(), errored.getHandle(js));
             } else {
               maybeResolvePromise(js, request.promise());
             }
-            queue.pop_front();
 
-            if (!preventClose && !isClosedOrClosing()) {
-              return close(js, true);
-            }
-            writeState.transitionTo<Unlocked>();
-            return js.resolvedPromise();
-          }
-
-          // KJ pump path: source is still alive, do full cleanup.
-          //
-          // It's possible we got here because the source errored but preventAbort was set.
-          // In that case, we need to treat preventAbort the same as preventClose. Be
-          // sure to check this before calling sourceLock.close() or the error detail will
-          // be lost.
-          // Capture preventClose now so we can modify it locally if needed.
-          bool preventClose = request.preventClose();
-          KJ_IF_SOME(errored, request.source().tryGetErrored(js)) {
-            if (request.preventAbort()) preventClose = true;
-            // Even through we're not going to close the destination, we still want the
-            // pipe promise itself to be rejected in this case.
-            maybeRejectPromise<void>(js, request.promise(), errored);
-          } else KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
-            maybeRejectPromise<void>(js, request.promise(), errored.getHandle(js));
+            // Always transition the readable side to the closed state, because we read until EOF.
+            // Note that preventClose (below) means "don't close the writable side", i.e. don't
+            // call end().
+            sourceRef.close(js);
+            // Release the readable's pipe lock. doClose() no longer transitions
+            // PipeLocked → Unlocked (to prevent vtable-poison crashes from stale
+            // PipeController& refs held by the pipe loop). For the JS pipeLoop
+            // path, the loop detects isClosed() and releases on its next iteration.
+            // But the KJ tryPumpTo path has no loop — handlePromise is the terminal
+            // handler — so we must release explicitly here.
+            request.state->releaseSource(js);
           } else {
-            maybeResolvePromise(js, request.promise());
+            // pipeLoop already released the source; consult the stashed
+            // error value (if any) rather than dereferencing source.
+            KJ_IF_SOME(err, request.state->capturedSourceError) {
+              if (request.preventAbort()) preventClose = true;
+              maybeRejectPromise<void>(js, request.promise(), err.getHandle(js));
+            } else KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
+              maybeRejectPromise<void>(js, request.promise(), errored.getHandle(js));
+            } else {
+              maybeResolvePromise(js, request.promise());
+            }
           }
-
-          // Always transition the readable side to the closed state, because we read until EOF.
-          // Note that preventClose (below) means "don't close the writable side", i.e. don't
-          // call end().
-          request.source().close(js);
           queue.pop_front();
+          // Unlock writeState — doClose() no longer transitions PipeLocked →
+          // Unlocked (vtable poison safety). Must happen before close() so the
+          // writable appears unlocked after the pipe completes.
+          writeState.transitionTo<Unlocked>();
 
           if (!preventClose) {
             // Note: unlike a real Close request, it's not possible for us to have been aborted.
             return close(js, true);
-          } else {
-            writeState.transitionTo<Unlocked>();
           }
           return js.resolvedPromise();
         }),
             ioContext.addFunctor(
                 [this, check, preventAbort](jsg::Lock& js, jsg::Value reason) mutable {
-          // Under some conditions, the clean up has already happened.
+          // Under some conditions, the clean up has already happened — either
+          // because checkSignal popped the Pipe before rejecting, or because
+          // doAbort/drain ran externally between pipeLoop's rejection and
+          // this microtask. Mirror the success continuation's empty-queue
+          // guard to avoid the fatal check() assertion on an empty queue.
           if (queue.empty()) return js.resolvedPromise();
-
           auto handle = jsg::JsValue(reason.getHandle(js));
           auto& request = check.template operator()<Pipe>();
-          // Extract sourceReleased before queue.pop_front() destroys the request.
-          bool sourceAlreadyReleased = request.state->sourceReleased;
           maybeRejectPromise<void>(js, request.promise(), handle);
-          if (!sourceAlreadyReleased) {
-            // KJ pump path: source is still alive, propagate the error.
+          // KJ_IF_SOME on request.source(): if pipeLoop already released the
+          // source, skip — the underlying PipeController is gone.
+          KJ_IF_SOME(sourceRef, request.source()) {
             // TODO(conform): Remember all those checks we performed in ReadableStream::pipeTo()?
             // We're supposed to perform the same checks continually, e.g., errored writes should
             // cancel the readable side unless preventCancel is truthy... This would require
             // deeper integration with the implementation of pumpTo(). Oh well. One consequence
             // of this is that if there is an error on the writable side, we error the readable
             // side, rather than close (cancel) it, which is what the spec would have us do.
-            request.source().error(js, handle);
+            // TODO(now): Warn on the console about this.
+            sourceRef.error(js, handle);
+            // Release the readable's pipe lock — same rationale as the success
+            // path: the KJ tryPumpTo path has no loop iteration to detect the
+            // error and release.
+            request.state->releaseSource(js);
           }
           queue.pop_front();
           if (!preventAbort) {
+            // abort → drain → doError transitions writeState PipeLocked → Unlocked.
             return abort(js, handle);
           }
-          // When sourceAlreadyReleased is true, pipeLoop already handled writeState cleanup
-          // (e.g. transitionTo<Unlocked>). Don't error the writable — that would violate
-          // preventAbort semantics. When sourceAlreadyReleased is false (KJ pump path),
-          // doError is needed to transition the writable to its terminal state.
-          if (!sourceAlreadyReleased) {
-            doError(js, handle);
-          }
+          // preventAbort path: unlock writeState explicitly.
+          writeState.transitionTo<Unlocked>();
           return js.resolvedPromise();
         }));
       };
 
-      KJ_IF_SOME(promise, request->source().tryPumpTo(*writable->sink, !request->preventClose())) {
+      KJ_IF_SOME(promise, sourceRef.tryPumpTo(*writable->sink, !request->preventClose())) {
         return handlePromise(js,
             ioContext.awaitIo(js,
                 writable->canceler.wrap(
@@ -1926,30 +1974,36 @@ bool WritableStreamInternalController::Pipe::State::checkSignal(jsg::Lock& js) {
       // abort process might call parent.drain which will delete this,
       // move/copy everything we need after into temps.
       auto& parentRef = this->parent;
-      auto& sourceRef = this->source;
       auto preventCancelCopy = this->preventCancel;
       auto promiseCopy = kj::mv(this->promise);
-      // Release the source pipe lock BEFORE drain(). drain() iterates the queue and
-      // calls source().cancel() for Pipe entries, which chains through doCancel →
-      // doClose → readState.transitionFromTo<PipeLocked, Unlocked>(), destroying the
-      // PipeLocked that sourceRef points to. By releasing first, we avoid the UAF,
-      // and the sourceReleased flag tells drain() to skip the (now-dangling) source.
+
+      // Release source FIRST so the underlying PipeController is destroyed
+      // (and our `source` Maybe nulled out) before any later step can
+      // observe an inconsistent (queue says Pipe present, source is dead)
+      // state. The pop_front below may destroy `*this`, but the aliases
+      // and copies above keep us safe through the remainder of the method.
       if (!preventCancelCopy) {
-        sourceRef.release(js, reason);
+        releaseSource(js, reason);
       } else {
-        sourceRef.release(js);
+        releaseSource(js);
       }
-      sourceReleased = true;
+
       if (!preventAbort) {
         KJ_IF_SOME(writable, parent.state.tryGetUnsafe<IoOwn<Writable>>()) {
           auto ex = js.exceptionToKj(reason);
           writable->abort(kj::mv(ex));
           parentRef.drain(js, reason);
         } else {
+          // Writable is not in the Writable state. Pop the Pipe event so
+          // handlePromise's continuations see queue.empty() and bail out.
           parent.writeState.transitionTo<Unlocked>();
+          parentRef.queue.pop_front();
         }
       } else {
+        // preventAbort path: pop the Pipe event so handlePromise's success
+        // continuation sees queue.empty() and bails out.
         parent.writeState.transitionTo<Unlocked>();
+        parentRef.queue.pop_front();
       }
       maybeRejectPromise<void>(js, promiseCopy, reason);
       return true;
@@ -2002,7 +2056,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
 
   auto& ioContext = IoContext::current();
 
-  if (aborted) {
+  if (aborted || source == kj::none) {
     return js.resolvedPromise();
   }
 
@@ -2018,9 +2072,22 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
   // TODO(soon): These are the same checks made before we entered the loop. Try to
   // unify the code to reduce duplication.
 
+  // source is guaranteed non-null at this point — we checked above.
+  // Bind a local reference for ergonomic access through the checks below.
+  // After releaseSource() is called, this local reference becomes dangling
+  // and MUST NOT be used; each branch returns immediately after
+  // releaseSource() so this is enforced by control flow.
+  auto& source = KJ_ASSERT_NONNULL(this->source);
+
+  // Each branch below calls releaseSource(), which both destroys the
+  // source's PipeController AND nulls state->source. handlePromise's
+  // success/failure continuations check state->source via KJ_IF_SOME and
+  // skip the source-derefs they would otherwise have done. We also stash
+  // the captured source error so the success continuation can settle the
+  // pipe promise with the right reason.
   KJ_IF_SOME(errored, source.tryGetErrored(js)) {
-    source.release(js);
-    sourceReleased = true;
+    capturedSourceError = errored.addRef(js);
+    releaseSource(js);
     if (!preventAbort) {
       KJ_IF_SOME(writable, parent.state.tryGetUnsafe<IoOwn<Writable>>()) {
         auto ex = js.exceptionToKj(errored.addRef(js));
@@ -2039,18 +2106,15 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
     parent.writeState.transitionTo<Unlocked>();
     if (!preventCancel) {
       auto reason = errored.getHandle(js);
-      source.release(js, reason);
-      sourceReleased = true;
+      releaseSource(js, reason);
       return js.rejectedPromise<void>(reason);
     }
-    source.release(js);
-    sourceReleased = true;
+    releaseSource(js);
     return js.resolvedPromise();
   }
 
   if (source.isClosed()) {
-    source.release(js);
-    sourceReleased = true;
+    releaseSource(js);
     if (!preventClose) {
       KJ_ASSERT(!parent.state.is<StreamStates::Errored>());
       if (!parent.isClosedOrClosing()) {
@@ -2078,11 +2142,10 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
     parent.writeState.transitionTo<Unlocked>();
 
     if (!preventCancel) {
-      source.release(js, destClosed);
+      releaseSource(js, destClosed);
     } else {
-      source.release(js);
+      releaseSource(js);
     }
-    sourceReleased = true;
 
     return js.rejectedPromise<void>(destClosed);
   }
@@ -2103,7 +2166,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
         return state->write(js, handle)
             .then(js,
                 [state = kj::addRef(*state)](jsg::Lock& js) mutable -> jsg::Promise<void> {
-          if (state->aborted) {
+          if (state->aborted || state->source == kj::none) {
             return js.resolvedPromise();
           }
           // The signal will be checked again at the start of the next loop iteration.
@@ -2111,7 +2174,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
         },
                 [state = kj::addRef(*state)](
                     jsg::Lock& js, jsg::Value reason) mutable -> jsg::Promise<void> {
-          if (state->aborted) {
+          if (state->aborted || state->source == kj::none) {
             return js.resolvedPromise();
           }
           state->parent.doError(js, jsg::JsValue(reason.getHandle(js)));
@@ -2130,7 +2193,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
   }),
       ioContext.addFunctor(
           [state = kj::addRef(*this)](jsg::Lock& js, jsg::Value) mutable -> jsg::Promise<void> {
-    if (state->aborted) {
+    if (state->aborted || state->source == kj::none) {
       return js.resolvedPromise();
     }
     // The error will be processed and propagated in the next iteration.
@@ -2146,15 +2209,10 @@ void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason)
         maybeRejectPromise<void>(js, writeRequest->promise, reason);
       }
       KJ_CASE_ONEOF(pipeRequest, kj::Own<Pipe>) {
-        if (!pipeRequest->state->sourceReleased) {
-          // release() handles both cancel (if error provided) and readState unlock.
-          // When preventCancel is true, release(js) unlocks without canceling.
-          if (!pipeRequest->preventCancel()) {
-            pipeRequest->source().release(js, reason);
-          } else {
-            pipeRequest->source().release(js);
+        if (!pipeRequest->preventCancel()) {
+          KJ_IF_SOME(sourceRef, pipeRequest->source()) {
+            sourceRef.cancel(js, reason);
           }
-          pipeRequest->state->sourceReleased = true;
         }
         maybeRejectPromise<void>(js, pipeRequest->promise(), reason);
       }
@@ -2182,7 +2240,7 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
         visitor.visit(flush->promise);
       }
       KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
-        visitor.visit(pipe->maybeSignal(), pipe->promise());
+        visitor.visit(pipe->maybeSignal(), pipe->promise(), pipe->state->capturedSourceError);
       }
     }
   }

@@ -377,7 +377,15 @@ class WritableStreamInternalController: public WritableStreamController {
     // The `aborted` flag is set when the Pipe is destroyed.
     struct State: public kj::Refcounted {
       WritableStreamInternalController& parent;
-      ReadableStreamController::PipeController& source;
+
+      // The source's PipeController. Held as a Maybe<&> rather than a bare
+      // reference so that pipeLoop's various source.release() sites can null
+      // it out via releaseSource(), making any subsequent attempt to use
+      // `source` from downstream continuations a compile-time-required
+      // KJ_IF_SOME unwrap (and a clear no-op at runtime) rather than a
+      // dangling-pointer deref into freed PipeLocked storage.
+      kj::Maybe<ReadableStreamController::PipeController&> source;
+
       kj::Maybe<jsg::Promise<void>::Resolver> promise;
       kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
 
@@ -385,12 +393,16 @@ class WritableStreamInternalController: public WritableStreamController {
       bool preventClose;
       bool preventCancel;
 
-      // True when the Pipe is being destroyed
+      // True when the Pipe is being destroyed (set by ~Pipe()). Distinct from
+      // `source == kj::none`, which signals only that pipeLoop has released
+      // the source.
       bool aborted = false;
 
-      // True when the source pipe lock has already been released.
-      // Checked by drain() to avoid accessing the dangling source reference.
-      bool sourceReleased = false;
+      // When pipeLoop captures a source error before releasing `source`, the
+      // error is stashed here so handlePromise.success can still settle the
+      // pipe promise with the right reason without needing a (now-gone)
+      // source reference.
+      kj::Maybe<jsg::JsRef<jsg::JsValue>> capturedSourceError;
 
       State(WritableStreamInternalController& parent,
           ReadableStreamController::PipeController& source,
@@ -411,9 +423,15 @@ class WritableStreamInternalController: public WritableStreamController {
       jsg::Promise<void> pipeLoop(jsg::Lock& js);
       jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
 
+      // Wraps PipeController::release(): unconditionally clears `source`
+      // after the call so the post-release state is unrepresentable rather
+      // than dangling. Safe to call when `source` is already kj::none (no-op).
+      void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none);
+
       JSG_MEMORY_INFO(State) {
         tracker.trackField("resolver", promise);
         tracker.trackField("signal", maybeSignal);
+        tracker.trackField("capturedSourceError", capturedSourceError);
       }
     };
 
@@ -441,7 +459,7 @@ class WritableStreamInternalController: public WritableStreamController {
     WritableStreamInternalController& parent() {
       return state->parent;
     }
-    ReadableStreamController::PipeController& source() {
+    kj::Maybe<ReadableStreamController::PipeController&> source() {
       return state->source;
     }
     kj::Maybe<jsg::Promise<void>::Resolver>& promise() {

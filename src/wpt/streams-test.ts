@@ -41,7 +41,6 @@ export default {
       'a rejection from underlyingSource.cancel() should be returned by pipeTo()',
       'a rejection from underlyingSink.abort() should be preferred to one from underlyingSource.cancel()',
       'abort should do nothing after the readable is errored, even with pending writes',
-      'abort should do nothing after the writable is errored',
       'pipeTo on a teed readable byte stream should only be aborted when both branches are aborted',
       "(reason: 'null') underlyingSource.cancel() should called when abort, even with pending pull",
       "(reason: 'undefined') underlyingSource.cancel() should called when abort, even with pending pull",
