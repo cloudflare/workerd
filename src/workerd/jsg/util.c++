@@ -8,7 +8,6 @@
 #include "setup.h"
 
 #include <workerd/jsg/exception-metadata.capnp.h>
-#include <workerd/util/entropy.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -100,36 +99,6 @@ kj::String typeName(const std::type_info& type) {
 }
 
 namespace {
-
-// For internal errors, we generate an ID to include when rendering user-facing "internal error"
-// exceptions and writing internal exception logs, to make it easier to search for logs
-// corresponding to "internal error" exceptions reported by users.
-//
-// We'll use an ID of 24 base-32 encoded characters, just because its relatively simple to
-// generate from random bytes.  This should give us a value with 120 bits of uniqueness, which is
-// about as good as a UUID.
-//
-// (We're not using base-64 encoding to avoid issues with case insensitive search, as well as
-// ensuring that the id is easy to select and copy via double-clicking.)
-using InternalErrorId = kj::FixedArray<char, 24>;
-
-constexpr char BASE32_DIGITS[] = "0123456789abcdefghijklmnopqrstuv";
-
-InternalErrorId makeInternalErrorId() {
-  InternalErrorId id;
-  if (isPredictableModeForTest()) {
-    // In testing mode, use content that generates a "0123456789abcdefghijklm" ID:
-    for (auto i: kj::indices(id)) {
-      id[i] = i;
-    }
-  } else {
-    getEntropy(kj::asBytes(id));
-  }
-  for (auto i: kj::indices(id)) {
-    id[i] = BASE32_DIGITS[static_cast<unsigned char>(id[i]) % 32];
-  }
-  return id;
-}
 
 kj::String renderInternalError(InternalErrorId& internalErrorId) {
   return kj::str("internal error; reference = ", internalErrorId);

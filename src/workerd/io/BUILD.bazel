@@ -419,6 +419,7 @@ kj_test(
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
+        "//src/workerd/util:thread-scopes",
     ],
 )
 
