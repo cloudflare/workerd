@@ -1266,8 +1266,15 @@ kj::ArrayPtr<kj::byte> JsBufferSource::asArrayPtr() {
     if (buf->WasDetached()) [[unlikely]] {
       return nullptr;
     }
-    kj::byte* data = static_cast<kj::byte*>(buf->Data()) + view->ByteOffset();
-    return kj::ArrayPtr(data, view->ByteLength());
+    auto byteOffset = view->ByteOffset();
+    auto byteLength = view->ByteLength();
+    // Sandbox hardening: validate view's byte range against trusted backing store size.
+    auto bufSize = buf->ByteLength();
+    if (byteOffset + byteLength > bufSize) [[unlikely]] {
+      return nullptr;
+    }
+    kj::byte* data = static_cast<kj::byte*>(buf->Data()) + byteOffset;
+    return kj::ArrayPtr(data, byteLength);
   }
 }
 
@@ -1486,9 +1493,15 @@ kj::ArrayPtr<const kj::byte> JsUint8Array::asArrayPtr() const {
   if (buf->WasDetached()) [[unlikely]] {
     return nullptr;
   }
-  const kj::byte* data = static_cast<const kj::byte*>(buf->Data()) + inner->ByteOffset();
-  size_t length = inner->ByteLength();
-  return kj::ArrayPtr(data, length);
+  auto byteOffset = inner->ByteOffset();
+  auto byteLength = inner->ByteLength();
+  // Sandbox hardening: validate view's byte range against trusted backing store size.
+  auto bufSize = buf->ByteLength();
+  if (byteOffset + byteLength > bufSize) [[unlikely]] {
+    return nullptr;
+  }
+  const kj::byte* data = static_cast<const kj::byte*>(buf->Data()) + byteOffset;
+  return kj::ArrayPtr(data, byteLength);
 }
 
 size_t JsUint8Array::size() const {

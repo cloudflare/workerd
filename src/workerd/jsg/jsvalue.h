@@ -343,7 +343,16 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
       return nullptr;
     }
     auto byteLength = inner->ByteLength();
-    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + inner->ByteOffset());
+    auto byteOffset = inner->ByteOffset();
+    // Sandbox hardening: validate that the view's byte range falls within the
+    // backing store's trusted size. In-cage ByteOffset/ByteLength fields can be
+    // corrupted by a stage-2a attacker; buf->ByteLength() is the trusted
+    // out-of-cage value.
+    auto bufSize = buf->ByteLength();
+    if (byteOffset + byteLength > bufSize) [[unlikely]] {
+      return nullptr;
+    }
+    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + byteOffset);
     return kj::ArrayPtr(data, byteLength / sizeof(T));
   }
 
@@ -421,7 +430,16 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
       return nullptr;
     }
     auto byteLength = inner->ByteLength();
-    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + inner->ByteOffset());
+    auto byteOffset = inner->ByteOffset();
+    // Sandbox hardening: validate that the view's byte range falls within the
+    // backing store's trusted size. In-cage ByteOffset/ByteLength fields can be
+    // corrupted by a stage-2a attacker; buf->ByteLength() is the trusted
+    // out-of-cage value.
+    auto bufSize = buf->ByteLength();
+    if (byteOffset + byteLength > bufSize) [[unlikely]] {
+      return nullptr;
+    }
+    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + byteOffset);
     return kj::ArrayPtr(data, byteLength / sizeof(T));
   }
 
