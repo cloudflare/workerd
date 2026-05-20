@@ -1090,6 +1090,67 @@ export let regressionDeadIoContextGetCode = {
   },
 };
 
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-147: heap use-after-free of dynamically-loaded
+// WorkerService when a facet actor is torn down via monitorOnBroken(). The bug was that
+// `Server::WorkerService::startRequest` created a `WorkerEntrypoint` with the `LimitEnforcer`
+// being a `NullDisposer`-backed (i.e. not refcounted) `Own` instance to `WorkerService`.
+// When monitorOnBroken() dropped the `Actor` after the `ActorContainer` which owned the
+// `WorkerService`, it caused a UAF when dropping `limitEnforcer` in `~IoContext`
+export class FacetUafTestActor extends DurableObject {
+  async doTest() {
+    // Load an *anonymous* dynamic worker (name = null) so the WorkerStubImpl is NOT cached
+    // in WorkerLoaderNamespace::isolates. This means the only owners of the child WorkerService
+    // are the JS WorkerStub and any ActorClassImpl derived from it.
+    let worker = this.env.loader.get(null, () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'child.js',
+        modules: {
+          'child.js': `
+            import {DurableObject} from "cloudflare:workers";
+            export class ChildActor extends DurableObject {
+              ping() {
+                // Schedule a self-abort after a short delay. This will trigger
+                // monitorOnBroken() in the parent's facet container.
+                setTimeout(() => this.ctx.abort('self-destruct'), 50);
+                return "pong";
+              }
+            }
+          `,
+        },
+      };
+    });
+
+    let cls = worker.getDurableObjectClass('ChildActor');
+    let facet = this.ctx.facets.get('uaf-test', () => ({ class: cls }));
+
+    // Trigger the child actor to start and schedule its self-abort.
+    let result = await facet.ping();
+    assert.strictEqual(result, 'pong');
+
+    // Drop JS references to the worker stub and class so that the facet's
+    // ActorContainer::classAndId.actorClass becomes the last owner of the
+    // ActorClassImpl -> WorkerStubImpl -> child WorkerService chain.
+    worker = null;
+    cls = null;
+    facet = null;
+
+    // Wait for the child's setTimeout to fire and trigger ctx.abort().
+    // monitorOnBroken() will move the actor out, erase the facet, and then
+    // destroy the actor. Without the fix, this is where the UAF occurs.
+    gc();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+export let facetUafRegression = {
+  async test(ctrl, env, ctx) {
+    let id = ctx.exports.FacetUafTestActor.idFromName('uaf-test');
+    let stub = ctx.exports.FacetUafTestActor.get(id);
+    await stub.doTest();
+  },
+};
+
 // Test that abortIsolate() works correctly for anonymous dynamic workers.
 // Anonymous workers don't have a name and therefore aren't stored in the loader's map.
 export let abortIsolateDynamicAnonymous = {
