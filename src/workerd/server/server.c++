@@ -2280,9 +2280,10 @@ class Server::WorkerService final: public Service,
     }
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
-        kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
+        kj::mv(props), kj::mv(actor),
+        kj::attachRef(static_cast<LimitEnforcer&>(*this), kj::addRef(*this)),
         {},  // ioContextDependency
-        kj::Own<IoChannelFactory>(this, kj::NullDisposer::instance), kj::mv(observer),
+        kj::attachRef(static_cast<IoChannelFactory&>(*this), kj::addRef(*this)), kj::mv(observer),
         waitUntilTasks,
         true,                  // tunnelExceptions
         kj::mv(workerTracer),  // workerTracer

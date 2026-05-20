@@ -16,6 +16,7 @@ const unitTests :Workerd.Config = (
         ],
         durableObjectNamespaces = [
           (className = "FacetTestActor", uniqueKey = "FacetTestActor"),
+          (className = "FacetUafTestActor", uniqueKey = "FacetUafTestActor"),
           (className = "RendezvousActor", uniqueKey = "RendezvousActor"),
         ],
         durableObjectStorage = (inMemory = void),
