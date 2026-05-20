@@ -615,6 +615,17 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             amount = handle.size();
           }
 
+          // Sandbox hardening: validate that the view's byte range doesn't exceed the
+          // backing store's trusted size. With a corrupted in-cage byteOffset (via a
+          // stage-2a V8 sandbox escape primitive), asArrayPtr() would compute a pointer
+          // outside the backing allocation. This check ensures we don't write there.
+          auto viewOffset = handle.getOffset();
+          auto backingSize = handle.getBuffer().size();
+          if (viewOffset + amount > backingSize) {
+            return js.rejectedPromise<ReadResult>(
+                js.typeError("BYOB read destination view exceeds backing buffer bounds."_kj));
+          }
+
           handle.asArrayPtr().first(amount).copyFrom(dest.asPtr().first(amount));
           return js.resolvedPromise(ReadResult{
             .value = jsg::JsValue(handle.slice(js, 0, amount)).addRef(js),
