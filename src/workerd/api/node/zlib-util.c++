@@ -902,17 +902,16 @@ kj::Maybe<CompressionError> ZstdEncoderContext::getError() const {
         kj::str("ERR_ZSTD_COMPRESSION_FAILED"), -1);
   }
 
-  if (flush_ == ZSTD_e_end && lastResult != 0) {
-    // lastResult > 0 means more output is needed, which shouldn't happen at end
-    return CompressionError("Unexpected end of file"_kj, "Z_BUF_ERROR"_kj, Z_BUF_ERROR);
-  }
-
   return kj::none;
 }
 
 bool ZstdEncoderContext::isStreamEnd() const {
   // ZSTD_compressStream2 returns 0 when flush_ == ZSTD_e_end and the frame is fully flushed.
   return !ZSTD_isError(lastResult) && lastResult == 0;
+}
+
+bool ZstdEncoderContext::hasPendingOutput() const {
+  return flush_ == ZSTD_e_end && !ZSTD_isError(lastResult) && lastResult != 0;
 }
 
 ZstdDecoderContext::ZstdDecoderContext(ZlibMode _mode)
@@ -1088,7 +1087,7 @@ static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& resul
       JSG_REQUIRE(ctx.isStreamEnd(), RangeError, "Memory limit exceeded");
       break;
     }
-  } while (ctx.getAvailOut() == 0);
+  } while (ctx.getAvailOut() == 0 || ctx.hasPendingInput() || ctx.hasPendingOutput());
 
   return result.releaseAsArray();
 }
