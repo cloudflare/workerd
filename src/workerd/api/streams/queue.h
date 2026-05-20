@@ -989,7 +989,14 @@ class ByteQueue final {
       return KJ_ASSERT_NONNULL(request);
     }
 
-    bool respond(jsg::Lock& js, size_t amount);
+    // The optional preResolve callback is invoked after all validation passes
+    // but immediately before the read promise is resolved. This allows the
+    // caller (ReadableStreamBYOBRequest) to detach the JS-visible byobRequest
+    // view buffer, preventing re-entrant JS during promise resolution from
+    // resizing the shared backing store and decommitting pages.
+    bool respond(jsg::Lock& js,
+        size_t amount,
+        kj::Maybe<kj::Function<void(jsg::Lock&)>> preResolve = kj::none);
 
     bool respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view);
 

@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { ok, throws } from 'node:assert';
+import { ok } from 'node:assert';
 
 // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-96.
 // ConsumerImpl::maybeDrainAndSetState (close path) iterates
@@ -51,10 +51,9 @@ export const closeResolveAsDoneThenableErrorFreesConsumer = {
     });
 
     // close() → maybeDrainAndSetState → resolveAsDone → thenable → error.
-    // The re-entrant error transitions to terminal state, so close throws.
-    throws(() => ctrl.close(), {
-      message: /internal error/,
-    });
+    // close() triggers the thenable which calls ctrl.error(). The re-entrant
+    // error moves the state to terminal. close() silently returns.
+    ctrl.close();
     delete Object.prototype.then;
 
     ok(!armed, 'thenable getter should have fired');

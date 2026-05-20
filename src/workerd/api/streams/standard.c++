@@ -1160,6 +1160,17 @@ void ReadableImpl<Self>::close(jsg::Lock& js) {
 
   queue.close(js);
 
+  // queue.close(js) can trigger re-entrant JS (via thenable check during
+  // promise resolution of pending reads) that calls controller.error() or
+  // reader.cancel(), transitioning the state to a terminal state.
+  // We must NOT throw here — the re-entrant code ran inside V8's promise
+  // resolution machinery, and throwing a C++ exception through V8's internal
+  // frames is undefined behavior (V8 is not exception-safe). The stream is
+  // already in a terminal state, so silently return.
+  if (state.isTerminal()) {
+    return;
+  }
+
   state.template transitionTo<StreamStates::Closed>();
   doClose(js);
 }
@@ -1270,7 +1281,6 @@ void ReadableImpl<Self>::forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
 
 template <typename Self>
 void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
-  state.visitForGc(visitor);
   KJ_IF_SOME(pendingCancel, maybePendingCancel) {
     visitor.visit(pendingCancel.fulfiller, pendingCancel.promise);
   }
@@ -1772,7 +1782,6 @@ jsg::Promise<void> WritableImpl<Self>::write(
 
 template <typename Self>
 void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
-  state.visitForGc(visitor);
   visitor.visit(inFlightWrite, inFlightClose, closeRequest, algorithms, signal);
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     visitor.visit(*pendingAbort);
@@ -1945,17 +1954,37 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     // readable in doClose so it is not safe to access anything on this
     // after calling doClose.
     KJ_IF_SOME(s, state) {
+      // Protect against re-entrant destruction: if this callback fires
+      // during a queue operation (e.g., queue.close() resolving pending
+      // reads via thenable), the owner's doClose would immediately
+      // transition from Own<ByteReadable> to Closed, destroying this
+      // ByteReadable while the queue operation is still on the stack.
+      // beginOperation defers the transition until endOperation.
+      s.owner.state.beginOperation();
       s.owner.doClose(js);
+      if (s.owner.state.endOperation()) {
+        if (!js.v8Isolate->IsExecutionTerminating()) {
+          if (s.owner.state.template is<StreamStates::Closed>()) {
+            s.owner.lock.onClose(js);
+          }
+        }
+      }
     }
   }
 
   void onConsumerError(jsg::Lock& js, jsg::JsValue reason) override {
     // Called by the consumer when a state change to errored happens.
-    // We need to notify the owner. Note that the owner may drop this
-    // readable in doClose so it is not safe to access anything on this
-    // after calling doError.
+    // Same re-entrant destruction protection as onConsumerClose above.
     KJ_IF_SOME(s, state) {
+      s.owner.state.beginOperation();
       s.owner.doError(js, reason);
+      if (s.owner.state.endOperation()) {
+        if (!js.v8Isolate->IsExecutionTerminating()) {
+          KJ_IF_SOME(err, s.owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
+            s.owner.lock.onError(js, err.getHandle(js));
+          }
+        }
+      }
     }
   }
 
@@ -2204,17 +2233,35 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   void onConsumerClose(jsg::Lock& js) override {
     // Note that the owner may drop this readable in doClose so it
     // is not safe to access anything on this after calling doClose.
+    // Protect against re-entrant destruction: see ByteReadable comment.
     KJ_IF_SOME(s, state) {
+      s.owner.state.beginOperation();
       s.owner.doClose(js);
+      if (s.owner.state.endOperation()) {
+        if (!js.v8Isolate->IsExecutionTerminating()) {
+          if (s.owner.state.template is<StreamStates::Closed>()) {
+            s.owner.lock.onClose(js);
+          }
+        }
+      }
     }
   }
 
   void onConsumerError(jsg::Lock& js, jsg::JsValue reason) override {
     // Note that the owner may drop this readable in doClose so it
     // is not safe to access anything on this after calling doError.
+    // Same re-entrant destruction protection as onConsumerClose.
     KJ_IF_SOME(s, state) {
+      s.owner.state.beginOperation();
       s.owner.doError(js, reason);
-    };
+      if (s.owner.state.endOperation()) {
+        if (!js.v8Isolate->IsExecutionTerminating()) {
+          KJ_IF_SOME(err, s.owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
+            s.owner.lock.onError(js, err.getHandle(js));
+          }
+        }
+      }
+    }
   }
 
   // Called by the consumer when it has a queued pending read and needs
@@ -2462,7 +2509,15 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
       } else {
         JSG_REQUIRE(bytesWritten > 0, TypeError,
             "The bytesWritten must be more than zero while the stream is open.");
-        if (impl.readRequest->respond(js, bytesWritten)) {
+        if (impl.readRequest->respond(
+                js, bytesWritten, kj::Function<void(jsg::Lock&)>([&impl](jsg::Lock& js) {
+          // Detach the byobRequest view's buffer before the read promise
+          // is resolved. This prevents re-entrant JS (via a malicious
+          // Object.prototype.then getter) from resizing the shared backing
+          // store, which would decommit pages and SIGSEGV when V8 accesses
+          // the resolved view's data.
+          impl.view.getHandle(js).detachInPlace(js);
+        }))) {
           // The read request was fulfilled, we need to invalidate.
           shouldInvalidate = true;
         } else {

@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { ok, throws } from 'node:assert';
+import { ok } from 'node:assert';
 
 // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-198.
 // maybeDrainAndSetState holds raw Ready& / ConsumerImpl& while calling
@@ -40,10 +40,9 @@ export const cancelFromThenableFreesConsumerDuringClose = {
     });
 
     // close() → handleMaybeClose → resolve → thenable check → getter.
-    // The re-entrant cancel invalidates the stream state, so close throws.
-    throws(() => controller.close(), {
-      message: /internal error/,
-    });
+    // close() triggers the thenable which calls reader.cancel(). The re-entrant
+    // cancel moves the state to terminal. close() silently returns.
+    controller.close();
     delete Object.prototype.then;
 
     // If we got here without ASAN crash, the liveness guard worked.

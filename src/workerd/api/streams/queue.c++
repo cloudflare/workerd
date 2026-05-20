@@ -541,7 +541,6 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   auto handle = pullInto.store.getHandle(js).clone(js);
-  // We need to create a new handle over the same underlying data
   resolver.resolve(js,
       ReadResult{
         .value = jsg::JsValue(handle.slice(js, 0, pullInto.filled)).addRef(js),
@@ -888,7 +887,8 @@ bool ByteQueue::ByobRequest::isPartiallyFulfilled(jsg::Lock& js) {
   return getRequest().pullInto.filled > 0 && handle.getElementSize() > 1;
 }
 
-bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
+bool ByteQueue::ByobRequest::respond(
+    jsg::Lock& js, size_t amount, kj::Maybe<kj::Function<void(jsg::Lock&)>> preResolve) {
   // So what happens here? The read request has been fulfilled directly by writing
   // into the storage buffer of the request. Unfortunately, this would only resolve
   // the data for the one consumer from which the request was received. We have to
@@ -1015,6 +1015,15 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
     } else {
       js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
     }
+  }
+
+  // Per the WHATWG Streams spec, TransferArrayBuffer must happen before
+  // resolving the read promise. The preResolve callback detaches the
+  // JS-visible byobRequest view's buffer, preventing re-entrant JS during
+  // promise resolution (e.g., a malicious Object.prototype.then getter)
+  // from resizing the shared backing store and decommitting pages.
+  KJ_IF_SOME(fn, preResolve) {
+    fn(js);
   }
 
   // Fulfill this request!

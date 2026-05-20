@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { strictEqual, throws } from 'node:assert';
+import { strictEqual } from 'node:assert';
 
 // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-319.
 // When a BYOB read is partially filled and the controller is closed,
@@ -39,10 +39,7 @@ export const byobCloseReentrantErrorViaThenable = {
 
     let armed = false;
     let fired = 0;
-    // Record the error from the re-entrant ctrl.error() call. We can't
-    // use assert.throws inside the getter because an AssertionError would
-    // escape into V8's internal promise resolution and cause confusing
-    // side effects.
+    // Record the error from the re-entrant ctrl.error() call.
     Object.defineProperty(Object.prototype, 'then', {
       configurable: true,
       get() {
@@ -61,9 +58,10 @@ export const byobCloseReentrantErrorViaThenable = {
     armed = true;
     // close() → handleMaybeClose → request->resolve() → thenable check
     // → getter fires → re-entrant ctrl.error().
-    throws(() => ctrl.close(), {
-      message: /internal error/,
-    });
+    // close() triggers the thenable which calls ctrl.error(). The re-entrant
+    // error moves the state to terminal. close() silently returns — throwing
+    // would unwind through V8's promise resolution frames (UB).
+    ctrl.close();
     armed = false;
     delete Object.prototype.then;
 
