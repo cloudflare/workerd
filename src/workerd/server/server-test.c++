@@ -32,7 +32,8 @@ namespace {
   else                                                                                             \
     KJ_FAIL_EXPECT_AT(location, "failed: expected " #cond, _kjCondition, ##__VA_ARGS__)
 
-jsg::V8System v8System;
+jsg::V8System v8System({"--expose-gc"_kj});
+
 // This can only be created once per process, so we have to put it at the top level.
 
 const bool verboseLog = ([]() {
@@ -6398,6 +6399,7 @@ KJ_TEST("Server: workerdDebugPort WebSocket passthrough via WorkerEntrypoint") {
   wsConn.send(kj::str("\x81\x05", testMessage2));
   wsConn.recvWebSocket("echo:world");
 }
+
 // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-9: a wrapped binding whose moduleName
 // does not resolve to any internal module must produce a config error, not a fatal assertion.
 // Before the fix, this config would hit KJ_ASSERT(!value.IsEmpty()) in compileGlobals()
@@ -6436,6 +6438,106 @@ KJ_TEST("Server: wrapped binding with unresolvable module produces config error"
   KJ_EXPECT_LOG(ERROR, "jsgInternalError");
   test.expectErrors("service hello: Uncaught Error: internal error;"
                     " reference = 0123456789abcdefghijklmn\n"_kj);
+}
+
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-100: heap use-after-free in ActorContainer
+// when a facet is aborted while a request is pending on the async startup callback. The
+// constructor's .then([this]) continuation and the getActor() coroutine both hold references
+// to the ForkHub independently of the ActorContainer refcount. Without kj::addRef(*this) in
+// getActor()/startRequest(), aborting the facet + dropping JS references can free the
+// ActorContainer while the coroutine is still suspended, leading to a UAF when the startup
+// promise resolves. With the fix, the pending request rejects cleanly with the abort error.
+KJ_TEST("Server: DO facet abort during pending startup") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `
+                `let startupResolve;
+                `
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = ctx.exports.Parent.idFromName("test");
+                `    let actor = ctx.exports.Parent.get(id);
+                `    return await actor.fetch(request);
+                `  }
+                `}
+                `
+                `export class Parent extends DurableObject {
+                `  async fetch(request) {
+                `    // Create a facet with a startup callback that we control.
+                `    // The callback returns a promise that won't resolve until we say so.
+                `    let startupPromise = new Promise(resolve => { startupResolve = resolve; });
+                `
+                `    let facet = this.ctx.facets.get("child", async () => {
+                `      await startupPromise;
+                `      return { class: this.ctx.exports.Child };
+                `    });
+                `
+                `    // Send an RPC to the facet. This will suspend in getActor() waiting
+                `    // for the startup callback to resolve.
+                `    let rpcPromise = facet.ping().catch(err => "caught: " + err.message);
+                `
+                `    // Abort the facet while the RPC is pending. This drops one ref on the
+                `    // ActorContainer (from the parent's facets map).
+                `    this.ctx.facets.abort("child", new Error("aborted during startup"));
+                `    facet = null;
+                `    gc();
+                `    // Now resolve the startup callback. Without the fix, the .then([this])
+                `    // continuation would run on freed memory (UAF). With the fix, the
+                `    // coroutine holds a self-ref so the container stays alive, and
+                `    // requireNotBroken() after co_await rejects the request cleanly.
+                `    startupResolve();
+                `
+                `    let result = await rpcPromise;
+                `    return new Response(result);
+                `  }
+                `}
+                `
+                `export class Child extends DurableObject {
+                `  ping() { return "pong"; }
+                `}
+            )
+          ],
+          durableObjectNamespaces = [
+            ( className = "Parent",
+              uniqueKey = "parentkey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  TestServer test(config);
+  test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  // The response should contain the caught abort error message, proving the request
+  // was rejected cleanly rather than crashing with a UAF.
+  conn.recvHttp200("caught: aborted during startup");
 }
 
 }  // namespace

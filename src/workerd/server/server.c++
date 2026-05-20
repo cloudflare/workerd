@@ -2330,7 +2330,8 @@ class Server::WorkerService final: public Service,
                 kj::String idStr) mutable -> kj::Own<WorkerInterface> {
           Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
           auto actorContainer = this->getActorContainer(kj::mv(id));
-          return newPromisedWorkerInterface(actorContainer->startRequest({}));
+          return newPromisedWorkerInterface(
+              actorContainer->startRequest({}).attach(actorContainer->addRef()));
         };
 
         KJ_IF_SOME(as, this->actorStorage) {
@@ -2523,12 +2524,14 @@ class Server::WorkerService final: public Service,
         if (actor == kj::none) {
           KJ_IF_SOME(promise, classAndId.tryGet<kj::ForkedPromise<void>>()) {
             co_await promise;
+            requireNotBroken();
           }
 
           auto& [actorClass, id] = KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>());
 
           KJ_IF_SOME(promise, actorClass->whenReady()) {
             co_await promise;
+            requireNotBroken();
           }
 
           // A concurrent request could have started the actor, so check again.
@@ -2540,6 +2543,12 @@ class Server::WorkerService final: public Service,
         co_return KJ_ASSERT_NONNULL(actor)->addRef();
       }
 
+      // Callers should `attach` a self-ref to this promise as it can outlive `ActorContainer`
+      // The ForkBranch created by `co_await classAndId.tryGet<ForkedPromise<void>>()` keeps
+      // the `.then([this])` continuation set up in the constructor alive independently of the
+      // `ActorContainer` refcount. Without this self-ref, the `ActorContainer` can be freed
+      // (via ctx.facets.abort() + Fetcher GC) while the `getActor()` coroutine is suspended
+      // and the continuation would later run on a dangling `this`.
       kj::Promise<kj::Own<WorkerInterface>> startRequest(
           IoChannelFactory::SubrequestMetadata metadata) {
         auto actor = co_await getActor();
@@ -3186,7 +3195,8 @@ class Server::WorkerService final: public Service,
       Loopback(ActorContainer& actorContainer): actorContainer(actorContainer) {}
 
       kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
-        return newPromisedWorkerInterface(actorContainer.startRequest(kj::mv(metadata)));
+        return newPromisedWorkerInterface(
+            actorContainer.startRequest(kj::mv(metadata)).attach(actorContainer.addRef()));
       }
 
       kj::Own<Worker::Actor::Loopback> addRef() override {
@@ -3394,7 +3404,8 @@ class Server::WorkerService final: public Service,
     }
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-      return newPromisedWorkerInterface(actorContainer->startRequest(kj::mv(metadata)));
+      return newPromisedWorkerInterface(
+          actorContainer->startRequest(kj::mv(metadata)).attach(actorContainer->addRef()));
     }
 
    private:
