@@ -264,6 +264,18 @@ wd_test(
     ],
 )
 
+wd_test(
+    src = "sql-resizable-arraybuffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-resizable-arraybuffer-test.js"],
+)
+
+wd_test(
+    src = "kv-resizable-arraybuffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["kv-resizable-arraybuffer-test.js"],
+)
+
 # Tests for SQL_RESTRICT_RESERVED_NAMES autogate - only runs in @all-autogates variant
 wd_test(
     src = "sql-restrict-names-test.wd-test",
@@ -347,6 +359,18 @@ wd_test(
     src = "crypto-extras-test.wd-test",
     args = ["--experimental"],
     data = ["crypto-extras-test.js"],
+)
+
+wd_test(
+    src = "resizable-arraybuffer-toctou-test.wd-test",
+    args = ["--experimental"],
+    data = ["resizable-arraybuffer-toctou-test.js"],
+)
+
+wd_test(
+    src = "resizable-arraybuffer-aliasing-test.wd-test",
+    args = ["--experimental"],
+    data = ["resizable-arraybuffer-aliasing-test.js"],
 )
 
 wd_test(

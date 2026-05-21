@@ -249,6 +249,12 @@ wd_test(
 )
 
 wd_test(
+    src = "zlib-resizable-ab-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-resizable-ab-test.js"],
+)
+
+wd_test(
     src = "zlib-dictionary-resizable-test.wd-test",
     args = ["--experimental"],
     data = ["zlib-dictionary-resizable-test.js"],

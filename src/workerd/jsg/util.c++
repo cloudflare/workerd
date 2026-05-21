@@ -657,26 +657,49 @@ static kj::Array<kj::byte> getEmptyArray() {
 }
 
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer) {
+  if (arrayBuffer->IsResizableByUserJavaScript()) {
+    // For resizable ArrayBuffers, resize(0) decommits pages (PROT_NONE) even while the
+    // BackingStore shared_ptr is held. Deep-copy to prevent SIGSEGV if JS shrinks the
+    // buffer after we capture the pointer. We use arrayBuffer->ByteLength() (the live
+    // length) rather than backing->ByteLength() (which returns the max reservation size).
+    // Ref: AUTOVULN-CLOUDFLARE-WORKERD-73
+    auto byteLength = arrayBuffer->ByteLength();
+    if (byteLength == 0) {
+      return getEmptyArray();
+    }
+    kj::ArrayPtr bytes(static_cast<kj::byte*>(arrayBuffer->Data()), byteLength);
+    return kj::heapArray<kj::byte>(bytes);
+  }
   auto backing = arrayBuffer->GetBackingStore();
   kj::ArrayPtr bytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
   if (bytes == nullptr) {
     return getEmptyArray();
-  } else {
-    return bytes.attach(kj::mv(backing));
   }
+  return bytes.attach(kj::mv(backing));
 }
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
-  auto backing = arrayBufferView->Buffer()->GetBackingStore();
-  kj::ArrayPtr buffer(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
+  auto buffer = arrayBufferView->Buffer();
+  if (buffer->IsResizableByUserJavaScript()) {
+    // Deep-copy for resizable ArrayBuffers -- see comment above.
+    // CopyContents handles bounds checking internally for out-of-bounds views.
+    auto len = arrayBufferView->ByteLength();
+    if (len == 0) {
+      return getEmptyArray();
+    }
+    auto copy = kj::heapArray<kj::byte>(len);
+    arrayBufferView->CopyContents(copy.begin(), copy.size());
+    return copy;
+  }
+  auto backing = buffer->GetBackingStore();
+  kj::ArrayPtr bufferBytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
   auto sliceStart = arrayBufferView->ByteOffset();
   auto sliceEnd = sliceStart + arrayBufferView->ByteLength();
-  KJ_ASSERT(buffer.size() >= sliceEnd);
-  auto bytes = buffer.slice(sliceStart, sliceEnd);
+  KJ_ASSERT(bufferBytes.size() >= sliceEnd);
+  auto bytes = bufferBytes.slice(sliceStart, sliceEnd);
   if (bytes == nullptr) {
     return getEmptyArray();
-  } else {
-    return bytes.attach(kj::mv(backing));
   }
+  return bytes.attach(kj::mv(backing));
 }
 
 // TODO(soon): If the returned kj::Array<kj::byte> is used outside of the isolate lock,
