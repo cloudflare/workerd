@@ -422,5 +422,60 @@ KJ_TEST("isTunneledException") {
   }
 }
 
+// ========================================================================================
+// Regression test for asBytes() with resizable ArrayBuffers.
+// resize(0) decommits pages even while the BackingStore shared_ptr is held, so asBytes()
+// must deep-copy. Ref: AUTOVULN-CLOUDFLARE-WORKERD-73
+
+struct AsBytesResizableContext: public ContextGlobalObject {
+  // sumBytes(data, extra): sum all bytes in data, ignore extra.
+  // The extra parameter (kj::Maybe<uint32_t>) exists so that a hostile valueOf() on
+  // the second argument can resize the ArrayBuffer during argument unwrapping.
+  double sumBytes(kj::Array<kj::byte> data, kj::Maybe<uint32_t> extra) {
+    double sum = 0;
+    for (auto b: data) sum += b;
+    return sum;
+  }
+  JSG_RESOURCE_TYPE(AsBytesResizableContext) {
+    JSG_METHOD(sumBytes);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(AsBytesResizableIsolate, AsBytesResizableContext);
+
+KJ_TEST("asBytes copies data from resizable ArrayBuffer") {
+  Evaluator<AsBytesResizableContext, AsBytesResizableIsolate> e(v8System);
+
+  // Baseline: normal (non-resizable) buffer works.
+  e.expectEval("var buf = new ArrayBuffer(4);\n"
+               "var view = new Uint8Array(buf);\n"
+               "view[0] = 1; view[1] = 2; view[2] = 3; view[3] = 4;\n"
+               "sumBytes(view, 0);\n",
+      "number", "10");
+
+  // Resizable buffer, no hostile resize -- should work normally.
+  e.expectEval("var rab = new ArrayBuffer(4, { maxByteLength: 4 });\n"
+               "var u8 = new Uint8Array(rab);\n"
+               "u8[0] = 10; u8[1] = 20; u8[2] = 30; u8[3] = 40;\n"
+               "sumBytes(u8, 0);\n",
+      "number", "100");
+
+  // Resizable buffer with hostile valueOf that resizes to 0 during argument unwrap.
+  // The evaluation order of arguments is indeterminate, so we can't predict whether
+  // the data is captured before or after the resize. Either way, it must not crash.
+  // We pass a Uint8Array (exercises the ArrayBufferView overload).
+  e.expectEval("var rab2 = new ArrayBuffer(4, { maxByteLength: 4 });\n"
+               "var u8b = new Uint8Array(rab2);\n"
+               "u8b[0] = 10; u8b[1] = 20; u8b[2] = 30; u8b[3] = 40;\n"
+               "typeof sumBytes(u8b, { valueOf() { rab2.resize(0); return 0; } });\n",
+      "string", "number");
+
+  // Same, but pass the raw ArrayBuffer (exercises the ArrayBuffer overload).
+  e.expectEval("var rab3 = new ArrayBuffer(3, { maxByteLength: 3 });\n"
+               "var v3 = new Uint8Array(rab3);\n"
+               "v3[0] = 5; v3[1] = 15; v3[2] = 25;\n"
+               "typeof sumBytes(rab3, { valueOf() { rab3.resize(0); return 0; } });\n",
+      "string", "number");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test
