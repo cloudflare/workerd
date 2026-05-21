@@ -11515,6 +11515,7 @@ export interface AiModels {
   "@cf/moonshotai/kimi-k2.5": Base_Ai_Cf_Moonshotai_Kimi_K2_5;
   "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
+  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
 }
 export type AiOptions = {
   /**
