@@ -7,6 +7,7 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
+#include "kj/common.h"
 #include "util.h"
 #include "wrappable.h"
 
@@ -1236,6 +1237,10 @@ class Object: private Wrappable {
   friend class MemoryTracker;
 };
 
+// Forward declaration for weak reference types.
+template <typename T>
+class WeakRef;
+
 // Ref<T> is a reference to a resource type (a type with a JSG_RESOURCE_TYPE block) living on
 // the V8 heap.
 //
@@ -1345,6 +1350,12 @@ class Ref {
     inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
   }
 
+  // Obtain a weak reference to the referenced object. The weak reference does not keep the
+  // object alive and does not participate in GC tracing. It becomes invalid when the underlying
+  // Wrappable is destroyed (all Ref<T>s dropped and JS wrapper collected).
+  WeakRef<T> getWeakRef(Lock& js) &;
+  WeakRef<T> getWeakRef(Lock& js) && = delete;  // Don't weaken an expiring ref
+
  private:
   kj::Own<T> inner;
 
@@ -1376,6 +1387,8 @@ class Ref {
   template <typename>
   friend class ObjectWrapper;
   friend class GcVisitor;
+  template <typename>
+  friend class WeakRef;
 };
 
 template <MemoryRetainer T>
@@ -1399,6 +1412,140 @@ Ref<T> _jsgThis(T* obj) {
 }
 
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))
+
+// A non-owning weak reference to a resource type (a type with a JSG_RESOURCE_TYPE block).
+//
+// Unlike Ref<T>, a WeakRef<T> does NOT keep the referenced object alive and is NOT traced by
+// V8's GC. When the underlying Wrappable is destroyed (all Ref<T>s are dropped and the JS
+// wrapper is collected), the WeakRef automatically becomes invalid — no manual invalidation
+// is required.
+//
+// Use operator->() for convenient single-expression access that asserts liveness:
+//
+//     weakFoo->doSomething();  // throws kj::Exception if dead
+//
+// Use tryGet() or tryAddRef() when the target might legitimately be dead:
+//
+//     KJ_IF_SOME(strong, weakFoo.tryAddRef(js)) {
+//       strong->doSomething();
+//     }
+//
+// operator*() is deliberately omitted to discourage storing dangling references.
+//
+// Safe to drop outside of the isolate lock, but requires the isolate lock to
+// acquire more references.
+template <typename T>
+class WeakRef {
+ public:
+  WeakRef(decltype(nullptr)) {}
+
+  WeakRef(WeakRef&& other) noexcept: impl(kj::mv(other.impl)) {}
+  template <typename U>
+    requires(kj::canConvert<U&, T&>())
+  WeakRef(WeakRef<U>&& other) noexcept {
+    KJ_IF_SOME(o, kj::mv(other.impl)) {
+      impl = Impl{
+        .isolate = o.isolate,
+        .target = o.target,
+        .anchor = kj::mv(o.anchor),
+      };
+    }
+  }
+  KJ_DISALLOW_COPY(WeakRef);
+
+  WeakRef& operator=(WeakRef&& other) noexcept {
+    if (this != &other) {
+      auto otherImpl = kj::mv(other.impl);
+      destroy();
+      impl = kj::mv(otherImpl);
+    }
+    return *this;
+  }
+
+  template <typename U>
+    requires(kj::canConvert<U&, T&>())
+  WeakRef& operator=(WeakRef<U>&& other) noexcept {
+    auto otherImpl = kj::mv(other.impl);
+    destroy();
+    KJ_IF_SOME(o, otherImpl) {
+      impl = Impl{
+        .isolate = o.isolate,
+        .target = o.target,
+        .anchor = kj::mv(o.anchor),
+      };
+    }
+    return *this;
+  }
+
+  ~WeakRef() noexcept(false) {
+    destroy();
+  }
+
+  // Dereference. Asserts if the target has been destroyed.
+  // Safe for single-expression use: weakFoo->doSomething()
+  T* operator->() const KJ_LIFETIMEBOUND {
+    auto& i = KJ_ASSERT_NONNULL(impl, "attempt to access destroyed jsg::WeakRef target");
+    KJ_ASSERT(i.anchor->isAlive(), "attempt to access invalidated jsg::WeakRef target");
+    return &i.target;
+  }
+
+  // Deliberately omitted: operator*()
+  // This prevents: T& ref = *weakRef;  (dangling reference risk)
+
+  // Check if the referenced object is still alive.
+  bool isAlive() const {
+    KJ_IF_SOME(i, impl) {
+      return i.anchor->isAlive();
+    }
+    return false;
+  }
+
+  // Try to get a raw reference. Returns kj::none if the target has been destroyed.
+  // Use of tryGet is discouraged because it does return a raw reference that can
+  // dangle. Use it only for single-expression access, essentially as a non-asserting
+  // version of operator->().
+  kj::Maybe<T&> tryGet() const KJ_LIFETIMEBOUND {
+    KJ_IF_SOME(i, impl) {
+      if (i.anchor->isAlive()) {
+        return i.target;
+      }
+    }
+    return kj::none;
+  }
+
+  // Try to promote to a strong Ref<T>. Returns kj::none if the target has been destroyed.
+  kj::Maybe<Ref<T>> tryAddRef(Lock&) const {
+    return tryGet().map([](T& t) { return Ref<T>(kj::addRef(t)); });
+  }
+
+  // Create another weak ref to the same target.
+  WeakRef addRef(jsg::Lock& js) &;
+  WeakRef addRef(jsg::Lock& js) && = delete;  // Redundant, just move.
+
+ private:
+  struct Impl {
+    v8::Isolate* isolate;
+    T& target;
+    kj::Rc<WeakRefAnchor> anchor;
+  };
+
+  kj::Maybe<Impl> impl;
+
+  WeakRef(v8::Isolate* isolate, T& target, kj::Rc<WeakRefAnchor> anchor)
+      : impl(Impl{
+          .isolate = isolate,
+          .target = target,
+          .anchor = kj::mv(anchor),
+        }) {}
+
+  // Arranges to have the anchor always dropped under isolate lock
+  void destroy();
+
+  template <typename>
+  friend class WeakRef;
+  template <typename>
+  friend class Ref;
+};
 
 // Holds a value of type `T` and allows it to be passed to JavaScript multiple times, resulting
 // in exactly the same JavaScript object each time (will compare equal using `===`). You may
@@ -1850,6 +1997,10 @@ class GcVisitor {
       supportsVisit.visitForGc(*this);
     }
   }
+
+  // No visit() overload for WeakRef<T>.
+  // WeakRef is intentionally NOT GC-visitable — attempting to visit one is a compile error,
+  // which is the correct signal that weak references should not be traced.
 
   void visit() {}
 

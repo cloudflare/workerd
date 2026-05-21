@@ -174,10 +174,11 @@ class AsyncGenerator final {
   template <typename TypeWrapper>
   AsyncGenerator(Lock& js, JsObject object, TypeWrapper*)
       : maybeActive(Active(js, object, static_cast<TypeWrapper*>(nullptr))),
-        maybeSelfRef(kj::rc<WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this)) {}
+        maybeSelfRef(kj::rc<workerd::WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this)) {
+  }
   AsyncGenerator(AsyncGenerator&& other) noexcept
       : maybeActive(kj::mv(other.maybeActive)),
-        maybeSelfRef(kj::rc<WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this)) {
+        maybeSelfRef(kj::rc<workerd::WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this)) {
     // Invalidate the old WeakRef since it's being moved.
     KJ_IF_SOME(selfRef, other.maybeSelfRef) {
       selfRef->invalidate();
@@ -192,7 +193,7 @@ class AsyncGenerator final {
         selfRef->invalidate();
       }
       maybeActive = kj::mv(other.maybeActive);
-      maybeSelfRef = kj::rc<WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this);
+      maybeSelfRef = kj::rc<workerd::WeakRef<AsyncGenerator>>(kj::Badge<AsyncGenerator>{}, *this);
     }
     return *this;
   }
@@ -349,7 +350,7 @@ class AsyncGenerator final {
     }
   };
   kj::Maybe<Active> maybeActive;
-  kj::Maybe<kj::Rc<WeakRef<AsyncGenerator>>> maybeSelfRef;
+  kj::Maybe<kj::Rc<workerd::WeakRef<AsyncGenerator>>> maybeSelfRef;
 };
 
 template <typename T>

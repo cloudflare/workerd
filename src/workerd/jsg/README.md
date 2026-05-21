@@ -49,13 +49,14 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `jsg::AsyncGenerator<T>`      | `Symbol.asyncIterator`      | Async per-item iteration                                    |
 | `jsg::Dict<T>`                | `Object`                    | Record type; string keys, uniform value type                |
 | `kj::OneOf<T...>`             | Union                       | Web IDL validated at compile time                           |
-| `jsg::Function<Ret(Args...)>` | `Function`                  | Bidirectional: JS↔C++ callable                             |
+| `jsg::Function<Ret(Args...)>` | `Function`                  | Bidirectional: JS↔C++ callable                              |
 | `jsg::Promise<T>`             | `Promise`                   | Full `.then()`/`.catch_()` API                              |
 | `jsg::Name`                   | `string` or `Symbol`        | Property name wrapper                                       |
 | `jsg::BufferSource`           | `ArrayBuffer`/`TypedArray`  | Type-preserving; supports detach                            |
 | `jsg::V8Ref<T>`               | Any V8 type                 | Persistent strong reference                                 |
 | `jsg::Value`                  | Any                         | Alias for `V8Ref<v8::Value>`                                |
 | `jsg::Ref<T>`                 | Resource wrapper            | Strong ref to JSG Resource Type                             |
+| `jsg::WeakRef<T>`             | —                           | Non-owning weak ref to JSG Resource Type                    |
 | `jsg::HashableV8Ref<T>`       | Any V8 type                 | `V8Ref` + `hashCode()`                                      |
 | `jsg::MemoizedIdentity<T>`    | Any                         | Preserves JS object identity across round-trips             |
 | `jsg::Identified<T>`          | Any                         | Captures JS object identity + unwrapped value               |
@@ -214,6 +215,58 @@ All types that must be visited in `visitForGc()` if held as Resource Type member
 | `jsg::Generator<T>`         | Sync generator                   |
 | `jsg::AsyncGenerator<T>`    | Async generator                  |
 | `kj::Maybe<T>`              | When `T` is GC-visitable         |
+
+**Not GC-visitable** (compile error if visited):
+`jsg::WeakRef<T>`.
+This is intentionally weak and does NOT keep its target alive during GC.
+Attempting to `visitor.visit()` a weak ref field is a compile error — the correct
+signal that weak references should not be traced. Do not include them in `visitForGc()`.
+
+## Weak References
+
+`jsg::WeakRef<T>` provides a non-owning, automatically-invalidated reference
+to a JSG resource type. Unlike `workerd::WeakRef<T>` from `util/weak-refs.h`,
+it integrates with the JSG lifecycle and requires **no manual invalidation** —
+it becomes invalid automatically when the target is destroyed.
+
+### `jsg::WeakRef<T>` — Weak reference to a JSG Resource Type
+
+Created from any `jsg::Ref<T>` via `getWeakRef()`. Becomes invalid when the
+underlying `Wrappable` is destroyed (all `Ref<T>`s dropped and JS wrapper collected).
+The invalidation happens in `Wrappable::~Wrappable()`.
+
+```cpp
+jsg::Ref<Foo> strong = js.alloc<Foo>();
+jsg::WeakRef<Foo> weak = strong.getWeakRef(js);
+
+weak->doSomething();             // OK if alive; throws kj::Exception if dead
+KJ_ASSERT(weak.isAlive());          // true
+
+// Safe check-and-use:
+KJ_IF_SOME(ref, weak.tryGet()) {
+  ref.doSomething();
+}
+
+// Promote to strong reference:
+KJ_IF_SOME(ref, weak.tryAddRef(js)) {
+  // ref is a jsg::Ref<Foo> that keeps the object alive
+}
+```
+
+| Method          | Returns              | Behavior when dead             |
+| --------------- | -------------------- | ------------------------------ |
+| `operator->()`  | `T*`                 | Throws `kj::Exception`         |
+| `isAlive()`     | `bool`               | Returns `false`                |
+| `tryGet()`      | `kj::Maybe<T&>`      | Returns `kj::none`             |
+| `tryAddRef()`   | `kj::Maybe<Ref<T>>`  | Returns `kj::none`             |
+| `addRef()`      | `WeakRef<T>`         | Returns null-constructed copy  |
+
+**Not GC-traced** — attempting to visit in `visitForGc()` is a compile error.
+Does not hold V8 handles. Safe to drop outside the isolate lock.
+
+`operator*()` is deliberately omitted to prevent storing dangling references.
+
+Supports converting moves: `WeakRef<Derived>` → `WeakRef<Base>`.
 
 ## Error Type Catalog
 
@@ -403,6 +456,7 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
    new wrapper on next JS access
          |
 7. C++ destroyed →
+   WeakRef anchors invalidated;
    detachWrapper(); JS wrapper = empty shell
 ```
 

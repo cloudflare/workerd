@@ -1015,4 +1015,31 @@ class Isolate: public IsolateBase {
   bool hasExtraWrappers = false;
 };
 
+template <typename T>
+WeakRef<T> Ref<T>::getWeakRef(Lock& js) & {
+  return WeakRef<T>(js.v8Isolate, *inner.get(), inner->getOrCreateWeakRefAnchor());
+}
+
+template <typename T>
+WeakRef<T> WeakRef<T>::addRef(jsg::Lock& js) & {
+  KJ_IF_SOME(i, impl) {
+    return WeakRef(i.isolate, i.target, i.anchor.addRef());
+  }
+  return WeakRef(nullptr);
+}
+
+template <typename T>
+void WeakRef<T>::destroy() {
+  KJ_IF_SOME(i, impl) {
+    if (v8::Locker::IsLocked(i.isolate)) {
+      impl = kj::none;
+    } else {
+      auto& base = IsolateBase::from(i.isolate);
+      kj::Own<void> dropIt = kj::mv(i.anchor).toOwn();
+      base.destroyUnderLock(kj::mv(dropIt));
+      impl = kj::none;
+    }
+  }
+}
+
 }  // namespace workerd::jsg
