@@ -11411,7 +11411,7 @@ declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
-  inputs: ChatCompletionsInput;
+  inputs: ChatCompletionsBase;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 interface AiModels {
