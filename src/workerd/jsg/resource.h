@@ -17,6 +17,7 @@
 // JSG has very entrenched include cycles
 // NOLINTNEXTLINE(misc-header-include-cycle)
 #include <workerd/jsg/ser.h>
+#include <workerd/jsg/unwrap-args.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>
 
@@ -119,8 +120,10 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Args...), kj::_::Indexes<index
 
       auto& wrapper = TypeWrapper::from(isolate);
 
-      Ref<T> ptr = T::constructor(wrapper.template unwrap<Args>(js, context, args, indexes,
-          TypeErrorContext::constructorArgument(typeid(T), indexes))...);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
+          []<size_t i>() { return TypeErrorContext::constructorArgument(typeid(T), i); });
+
+      Ref<T> ptr = T::constructor(kj::mv(unwrapped).template take<indexes>()...);
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
@@ -145,9 +148,10 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Lock&, Args...), kj::_::Indexe
 
       auto& wrapper = TypeWrapper::from(isolate);
 
-      Ref<T> ptr = T::constructor(Lock::from(isolate),
-          wrapper.template unwrap<Args>(js, context, args, indexes,
-              TypeErrorContext::constructorArgument(typeid(T), indexes))...);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
+          []<size_t i>() { return TypeErrorContext::constructorArgument(typeid(T), i); });
+
+      Ref<T> ptr = T::constructor(js, kj::mv(unwrapped).template take<indexes>()...);
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
@@ -176,9 +180,10 @@ struct ConstructorCallback<TypeWrapper,
 
       auto& wrapper = TypeWrapper::from(isolate);
 
-      Ref<T> ptr = T::constructor(args,
-          wrapper.template unwrap<Args>(js, context, args, indexes,
-              TypeErrorContext::constructorArgument(typeid(T), indexes))...);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, js, context, args,
+          []<size_t i>() { return TypeErrorContext::constructorArgument(typeid(T), i); });
+
+      Ref<T> ptr = T::constructor(args, kj::mv(unwrapped).template take<indexes>()...);
       if constexpr (T::jsgHasReflection) {
         ptr->jsgInitReflection(wrapper);
       }
@@ -233,13 +238,13 @@ struct MethodCallback<TypeWrapper,
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
       auto& self = extractInternalPointer<T, isContext>(context, obj);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (self.*method)(wrapper.template unwrap<Args>(lock, context, args, indexes,
-            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (self.*method)(kj::mv(unwrapped).template take<indexes>()...);
       } else {
-        return wrapper.wrap(lock, context, obj,
-            (self.*method)(wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+        return wrapper.wrap(
+            lock, context, obj, (self.*method)(kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -259,6 +264,10 @@ struct MethodCallback<TypeWrapper,
     auto& wrapper = TypeWrapper::from(isolate);
 
     return liftKj<Ret>(isolate, [&]() {
+      // Pack expansion order is unspecified by [expr.call], but ordering
+      // is safe here: `unwrapFastApi` is invoked only with parameter types
+      // that pass `isFastApiCompatible` (FastApiPrimitive or v8::Local), and
+      // neither path fires JS-observable side effects.  See unwrap-args.h.
       return (self.*method)(wrapper.template unwrapFastApi<Args>(js, context, fastArgs,
           TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
@@ -293,15 +302,13 @@ struct MethodCallback<TypeWrapper,
       auto& wrapper = TypeWrapper::from(isolate);
       auto& self = extractInternalPointer<T, isContext>(context, obj);
       auto& lock = Lock::from(isolate);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (self.*method)(lock,
-            wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (self.*method)(lock, kj::mv(unwrapped).template take<indexes>()...);
       } else {
         return wrapper.wrap(lock, context, obj,
-            (self.*method)(lock,
-                wrapper.template unwrap<Args>(lock, context, args, indexes,
-                    TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+            (self.*method)(lock, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -321,6 +328,7 @@ struct MethodCallback<TypeWrapper,
     auto& wrapper = TypeWrapper::from(isolate);
 
     return liftKj<Ret>(isolate, [&]() {
+      // See note on fast-API ordering in the plain-method specialization above.
       return (self.*method)(lock,
           wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
               TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
@@ -354,15 +362,13 @@ struct MethodCallback<TypeWrapper,
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
       auto& self = extractInternalPointer<T, isContext>(context, obj);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (self.*method)(args,
-            wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (self.*method)(args, kj::mv(unwrapped).template take<indexes>()...);
       } else {
         return wrapper.wrap(lock, context, obj,
-            (self.*method)(args,
-                wrapper.template unwrap<Args>(lock, context, args, indexes,
-                    TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+            (self.*method)(args, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -428,13 +434,13 @@ struct StaticMethodCallback<TypeWrapper,
       auto context = isolate->GetCurrentContext();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (*method)(wrapper.template unwrap<Args>(lock, context, args, indexes,
-            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (*method)(kj::mv(unwrapped).template take<indexes>()...);
       } else {
-        return wrapper.wrap(lock, context, kj::none,
-            (*method)(wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+        return wrapper.wrap(
+            lock, context, kj::none, (*method)(kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -453,6 +459,7 @@ struct StaticMethodCallback<TypeWrapper,
     auto& wrapper = TypeWrapper::from(isolate);
 
     return liftKj<Ret>(isolate, [&]() {
+      // See note on fast-API ordering in MethodCallback above.
       return (*method)(wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
           TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
@@ -483,15 +490,13 @@ struct StaticMethodCallback<TypeWrapper,
       auto context = isolate->GetCurrentContext();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (*method)(lock,
-            wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (*method)(lock, kj::mv(unwrapped).template take<indexes>()...);
       } else {
         return wrapper.wrap(lock, context, kj::none,
-            (*method)(lock,
-                wrapper.template unwrap<Args>(lock, context, args, indexes,
-                    TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+            (*method)(lock, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
@@ -510,6 +515,7 @@ struct StaticMethodCallback<TypeWrapper,
     auto& wrapper = TypeWrapper::from(isolate);
 
     return liftKj<Ret>(isolate, [&]() {
+      // See note on fast-API ordering in MethodCallback above.
       return (*method)(lock,
           wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
               TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
@@ -539,15 +545,13 @@ struct StaticMethodCallback<TypeWrapper,
       auto context = isolate->GetCurrentContext();
       auto& lock = Lock::from(isolate);
       auto& wrapper = TypeWrapper::from(isolate);
+      auto unwrapped = _::unwrapArgs<Args...>(wrapper, lock, context, args,
+          []<size_t i>() { return TypeErrorContext::methodArgument(typeid(T), methodName, i); });
       if constexpr (isVoid<Ret>()) {
-        (*method)(args,
-            wrapper.template unwrap<Args>(lock, context, args, indexes,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+        (*method)(args, kj::mv(unwrapped).template take<indexes>()...);
       } else {
         return wrapper.wrap(lock, context, kj::none,
-            (*method)(args,
-                wrapper.template unwrap<Args>(lock, context, args, indexes,
-                    TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+            (*method)(args, kj::mv(unwrapped).template take<indexes>()...));
       }
     });
   }
