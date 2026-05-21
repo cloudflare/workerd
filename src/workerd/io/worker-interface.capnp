@@ -888,6 +888,18 @@ interface WorkerdDebugPort {
   # purposes.
   #
   # This interface is subject to change. It is intended for use by miniflare.
+  #
+  # This is also the same interface that workerd exports on its cluster port, which other workerd
+  # instances in the same cluster may connect to. See ClusterConfig in workerd.capnp for how to
+  # configure clustering. The cluster port is only intended to be used by other instances in the
+  # cluster, and does not implement a regular two-party RPC protocol. `ClusterRegistry` implements
+  # the `VatNetwork` intended to be used for this. Nobody else should try to connect to it.
+  #
+  # TODO(clustering): Once channel tokens have been extended to support actors, consider changing
+  #   the cluster interface with one that takes a channel token. This seems a bit cleaner and safer
+  #   than letting the client specify props and such directly.
+  # TODO(clustering): Automatically use encryption on non-localhost networks. We have an X25519
+  #   keypair for each node, no need for certs!
 
   getEntrypoint @0 (service :Text, entrypoint :Text, props :Frankenvalue)
               -> (entrypoint :WorkerdBootstrap);

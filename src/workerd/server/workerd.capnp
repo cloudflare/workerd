@@ -94,6 +94,9 @@ struct Config {
 
   logging @6 : LoggingOptions;
   # Console and Stdio logging configuration options.
+
+  cluster @7 :ClusterConfig;
+  # Set when the workerd instance should join a cluster.
 }
 
 struct LoggingOptions {
@@ -109,6 +112,72 @@ struct LoggingOptions {
 
   stderrPrefix @2 :Text;
   # Set a custom prefix for process.stderr. Defaults to "stderr: ".
+}
+
+struct ClusterConfig {
+  # workerd instances can work together in a cluster, in order to distribute work and Durable
+  # Objects among them.
+  #
+  # All instances must share a single filesystem where Durable Object data is stored. The
+  # filesystem can be NFSv4 or any filesystem that supports similar locking semantics with proper
+  # leases. It can also just be a local filesystem, when running multiple workerd instances on the
+  # same machine to utilize multiple cores.
+  #
+  # All instances in the cluster MUST have identical configuration. The idea is that all
+  # instances behave exactly the same and any instance could forward any request it receives to
+  # any other instance and it should produce the same result. For the purpose of rolling upgrades,
+  # instances may temporarily differ in ways that are backwards-compatible.
+  #
+  # Cluster mode is currently implemented only on Linux.
+
+  sharedDirectory @0 :Text;
+  # Name of a `DiskDirectory` service which represents storage shared by all instances in the
+  # cluster. If instances are on different machines (not just different processes on the same
+  # machine), this should point to a network filesystem that implements proper locking and leasing,
+  # like NFSv4.
+  #
+  # All `durableObjectStorage.localDisk` configurations in this config file must point at this same
+  # directory. (Each Durable Object namespace will create a subdirectory.)
+
+  registrySubdir @1 :Text = "workerd-registry";
+  # Subdirectory of `sharedDirectory` to put the actual registry files into. (This can be customized
+  # in case the default name conflicts with one of the Durable Object namespace `uniqueKey`s, which
+  # determine the directory names under which they are stored.)
+  #
+  # The registry is used to discover what workerd instances are available. Each workerd instance
+  # registers itself in the registry such that other instances can find it and send traffic to it.
+  #
+  # Specifically, each instance will create a file in this directory named after the instance's
+  # public key, which is randomly-generated when the instance starts up. The file contains the
+  # instance's network address, so that other instances can connect to it.
+
+  network @3 :Text;
+  # Each workerd instance in the cluster listens for connections from other instances over the
+  # network. The `network` field indicates which network to listen on.
+  #
+  # This can be either:
+  # * An IPv4 or IPv6 CIDR, which must match one of the machine's IP addresses.
+  # * The word "unix", to mean that the cluster is actually local to the machine and should
+  #   communicate via Unix-domain sockets.
+  #
+  # In the CIDR case, workerd enumerates all IP addresses of all network interfaces available to
+  # it, selects the first one that matches the CIDR, and opens an ephemeral port on that address.
+  # Note that this means the port workerd uses is not predictable. That's OK because workerd will
+  # then write a file to the registry containing its own address.
+  #
+  # In the "unix" case, the registry will be populated not by files, but by Unix-domain sockets.
+
+  key @2 :Text;
+  # Some secret value known only to members of the cluster. This is used to encrypt channel tokens,
+  # which are used when passing service stubs or Durable Object stubs over RPC.
+  #
+  # The secrecy of this key matters if you allow untrusted clients outside of the cluster to speak
+  # the low-level worker-interface.capnp protocol directly with workerd instances in the cluster.
+  # At present, this is only exposed via the `capnpConnectHost` and `workerdDebugPort` config
+  # settings. If you don't use either of those in production, then the secrecy of this key isn't
+  # very important.
+  #
+  # TODO(someday): Support some way to gradually roll out a rotated key.
 }
 
 # ========================================================================================
@@ -701,8 +770,6 @@ struct Worker {
     # This mode is intended for local testing purposes.
 
     localDisk @12 :Text;
-    # ** EXPERIMENTAL; SUBJECT TO BACKWARDS-INCOMPATIBLE CHANGE **
-    #
     # Durable Object data will be stored in a directory on local disk. This field is the name of
     # a service, which must be a DiskDirectory service. For each Durable Object class, a
     # subdirectory will be created using `uniqueKey` as the name. Within the directory, one or
@@ -710,10 +777,13 @@ struct Worker {
     # a number of different extensions depending on the storage mode. (Currently, the main storage
     # is a file with the extension `.sqlite`, and in certain situations extra files with the
     # extensions `.sqlite-wal`, and `.sqlite-shm` may also be present.)
+    #
+    # Note that if workerd has been given a `ClusterConfig` at the top level, then it is expected
+    # this disk directory is shared by the whole cluster (e.g. via NFSv4), and workerd will
+    # automatically ensure that each Durable Object is scheduled on a single machine. When using
+    # NFSv4, all Durable Object directories MUST be on the SAME VOLUME as the registry directory
+    # defined in `ClusterConfig`, so that lease loss affects all files and locks simultaneously.
   }
-
-  # TODO(someday): Support distributing objects across a cluster. At present, objects are always
-  #   local to one instance of the runtime.
 
   moduleFallback @13 :Text;
 
@@ -873,6 +943,12 @@ struct DiskDirectory {
   # is no acceptable format for these, regardless of what the client says it accepts).
   #
   # `HEAD` requests are properly optimized to perform a stat() without actually opening the file.
+  #
+  # If workerd has been given a `ClusterConfig` at the top level, it is important that any
+  # `DiskDirectory` is set up in such a way that a request that uses it can be served correctly
+  # from any instance in the cluster. For read-only directories, this just means they all have to
+  # contain the same data. For writable directories, you may want to use a shared filesystem like
+  # NFSv4.
 
   path @0 :Text;
   # The filesystem path of the directory. If not specified, then it must be specified on the
