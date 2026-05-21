@@ -272,7 +272,7 @@ class QueueImpl final {
   };
   struct Errored {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
-    jsg::JsRef<jsg::JsValue> reason;
+    jsg::JsRef<jsg::JsValue> reason;  // NOLINT(jsg-visit-for-gc)
   };
 
   struct Ready final: public State {
@@ -580,7 +580,7 @@ class ConsumerImpl final {
   };
   struct Errored {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
-    jsg::JsRef<jsg::JsValue> reason;
+    jsg::JsRef<jsg::JsValue> reason;  // NOLINT(jsg-visit-for-gc)
   };
   struct Ready {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "ready"_kj;
@@ -798,7 +798,7 @@ class ValueQueue final {
     }
 
    private:
-    jsg::JsRef<jsg::JsValue> value;
+    jsg::JsRef<jsg::JsValue> value;  // NOLINT(jsg-visit-for-gc)
     size_t size;
   };
 
@@ -935,7 +935,7 @@ class ByteQueue final {
     kj::Maybe<ByobRequest&> byobReadRequest;
 
     struct PullInto {
-      jsg::JsRef<jsg::JsArrayBufferView> store;
+      jsg::JsRef<jsg::JsArrayBufferView> store;  // NOLINT(jsg-visit-for-gc)
       size_t filled = 0;
       size_t atLeast = 1;
       Type type = Type::DEFAULT;

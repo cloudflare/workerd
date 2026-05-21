@@ -386,8 +386,8 @@ class WritableStreamInternalController: public WritableStreamController {
       // dangling-pointer deref into freed PipeLocked storage.
       kj::Maybe<ReadableStreamController::PipeController&> source;
 
-      kj::Maybe<jsg::Promise<void>::Resolver> promise;
-      kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+      kj::Maybe<jsg::Promise<void>::Resolver> promise;  // NOLINT(jsg-visit-for-gc)
+      kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;     // NOLINT(jsg-visit-for-gc)
 
       bool preventAbort;
       bool preventClose;
