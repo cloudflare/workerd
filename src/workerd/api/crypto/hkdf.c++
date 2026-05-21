@@ -121,10 +121,11 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHkdf(jsg::Lock& js,
       format, "\")");
 
   // NOTE: Checked in SubtleCrypto::importKey().
-  auto keyDataArray = kj::mv(keyData.get<kj::Array<kj::byte>>());
+  auto& source = keyData.get<jsg::JsRef<jsg::JsBufferSource>>();
+  auto handle = source.getHandle(js);
 
   auto keyAlgorithm = CryptoKey::KeyAlgorithm{normalizedName};
-  return kj::heap<HkdfKey>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages);
+  return kj::heap<HkdfKey>(handle.copy(), kj::mv(keyAlgorithm), extractable, usages);
 }
 
 }  // namespace workerd::api

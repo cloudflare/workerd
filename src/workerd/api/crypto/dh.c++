@@ -68,8 +68,8 @@ kj::Own<DH> initDhGroup(kj::StringPtr name) {
   return kj::mv(dh);
 }
 
-kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
-    kj::OneOf<kj::Array<kj::byte>, int>& generator) {
+kj::Own<DH> initDh(kj::OneOf<kj::ArrayPtr<kj::byte>, int>& sizeOrKey,
+    kj::OneOf<kj::ArrayPtr<kj::byte>, int>& generator) {
   KJ_SWITCH_ONEOF(sizeOrKey) {
     KJ_CASE_ONEOF(size, int) {
       KJ_SWITCH_ONEOF(generator) {
@@ -121,14 +121,14 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
               "DiffieHellman init failed: Invalid DH prime generated");
           return kj::mv(dh);
         }
-        KJ_CASE_ONEOF(gen, kj::Array<kj::byte>) {
+        KJ_CASE_ONEOF(gen, kj::ArrayPtr<kj::byte>) {
           // Node.js does not support generating Diffie-Hellman keys from an int prime
           // and byte-array generator. This could change in the future.
           JSG_FAIL_REQUIRE(Error, "DiffieHellman init failed: invalid parameters");
         }
       }
     }
-    KJ_CASE_ONEOF(key, kj::Array<kj::byte>) {
+    KJ_CASE_ONEOF(key, kj::ArrayPtr<kj::byte>) {
       // Operations on an "egregiously large" prime will throw with BoringSSL.
       JSG_REQUIRE(key.size() <= OPENSSL_DH_MAX_MODULUS_BITS / CHAR_BIT, RangeError,
           "DiffieHellman init failed: key is too large");
@@ -149,7 +149,7 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
             JSG_FAIL_REQUIRE(Error, "DiffieHellman init failed: could not set keys");
           }
         }
-        KJ_CASE_ONEOF(gen, kj::Array<kj::byte>) {
+        KJ_CASE_ONEOF(gen, kj::ArrayPtr<kj::byte>) {
           JSG_REQUIRE(gen.size() <= OPENSSL_DH_MAX_MODULUS_BITS / CHAR_BIT, RangeError,
               "DiffieHellman init failed: generator is too large");
           JSG_REQUIRE(gen.size() > 0, Error, "DiffieHellman init failed: invalid generator");
@@ -193,8 +193,8 @@ void zeroPadDiffieHellmanSecret(size_t remainder_size, unsigned char* data, size
 
 DiffieHellman::DiffieHellman(kj::StringPtr group): dh(initDhGroup(group)) {}
 
-DiffieHellman::DiffieHellman(
-    kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey, kj::OneOf<kj::Array<kj::byte>, int>& generator)
+DiffieHellman::DiffieHellman(kj::OneOf<kj::ArrayPtr<kj::byte>, int>& sizeOrKey,
+    kj::OneOf<kj::ArrayPtr<kj::byte>, int>& generator)
     : dh(initDh(sizeOrKey, generator)) {}
 
 kj::Maybe<int> DiffieHellman::check() {

@@ -628,7 +628,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       api::SubtleCrypto::ImportKeyData keyData;
       KJ_SWITCH_ONEOF(key.keyData) {
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
-          keyData = kj::heapArray(data.asPtr());
+          auto u8 = jsg::JsBufferSource(jsg::JsUint8Array::create(lock, data));
+          keyData = u8.addRef(lock);
         }
         KJ_CASE_ONEOF(json, Global::Json) {
           v8::Local<v8::String> str = lock.wrap(context, kj::mv(json.text));

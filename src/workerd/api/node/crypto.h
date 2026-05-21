@@ -22,16 +22,16 @@ class CryptoImpl final: public jsg::Object {
     DiffieHellmanHandle(DiffieHellman dh);
 
     static jsg::Ref<DiffieHellmanHandle> constructor(jsg::Lock& js,
-        kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
-        kj::OneOf<kj::Array<kj::byte>, int> generator);
+        kj::OneOf<jsg::JsBufferSource, int> sizeOrKey,
+        kj::OneOf<jsg::JsBufferSource, int> generator);
 
-    void setPrivateKey(kj::Array<kj::byte> key);
-    void setPublicKey(kj::Array<kj::byte> key);
+    void setPrivateKey(jsg::Lock& js, jsg::JsBufferSource key);
+    void setPublicKey(jsg::Lock& js, jsg::JsBufferSource key);
     jsg::JsUint8Array getPublicKey(jsg::Lock& js);
     jsg::JsUint8Array getPrivateKey(jsg::Lock& js);
     jsg::JsUint8Array getGenerator(jsg::Lock& js);
     jsg::JsUint8Array getPrime(jsg::Lock& js);
-    jsg::JsUint8Array computeSecret(jsg::Lock& js, kj::Array<kj::byte> key);
+    jsg::JsUint8Array computeSecret(jsg::Lock& js, jsg::JsBufferSource key);
     jsg::JsUint8Array generateKeys(jsg::Lock& js);
     int getVerifyError();
 
@@ -61,9 +61,9 @@ class CryptoImpl final: public jsg::Object {
   jsg::JsArrayBuffer randomPrime(jsg::Lock& js,
       uint32_t size,
       bool safe,
-      jsg::Optional<kj::Array<kj::byte>> add,
-      jsg::Optional<kj::Array<kj::byte>> rem);
-  bool checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks);
+      jsg::Optional<jsg::JsBufferSource> add,
+      jsg::Optional<jsg::JsBufferSource> rem);
+  bool checkPrimeSync(jsg::Lock& js, jsg::JsBufferSource bufferView, uint32_t num_checks);
 
   // Hash
   class HashHandle final: public jsg::Object {
@@ -73,10 +73,10 @@ class CryptoImpl final: public jsg::Object {
     static jsg::Ref<HashHandle> constructor(
         jsg::Lock& js, kj::String algorithm, kj::Maybe<uint32_t> xofLen);
     static jsg::JsUint8Array oneshot(
-        jsg::Lock&, kj::String algorithm, kj::Array<kj::byte> data, kj::Maybe<uint32_t> xofLen);
+        jsg::Lock&, kj::String algorithm, jsg::JsBufferSource data, kj::Maybe<uint32_t> xofLen);
 
     jsg::Ref<HashHandle> copy(jsg::Lock& js, kj::Maybe<uint32_t> xofLen);
-    int update(kj::Array<kj::byte> data);
+    int update(jsg::Lock& js, jsg::JsBufferSource data);
     jsg::JsUint8Array digest(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(HashHandle) {
@@ -95,7 +95,7 @@ class CryptoImpl final: public jsg::Object {
   // Hmac
   class HmacHandle final: public jsg::Object {
    public:
-    using KeyParam = kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>>;
+    using KeyParam = kj::OneOf<jsg::JsBufferSource, jsg::Ref<CryptoKey>>;
 
     HmacHandle(HmacContext ctx): ctx(kj::mv(ctx)) {};
 
@@ -104,9 +104,9 @@ class CryptoImpl final: public jsg::Object {
     // Efficiently implement one-shot HMAC that avoids multiple calls
     // across the C++/JS boundary.
     static jsg::JsUint8Array oneshot(
-        jsg::Lock& js, kj::String algorithm, KeyParam key, kj::Array<kj::byte> data);
+        jsg::Lock& js, kj::String algorithm, KeyParam key, jsg::JsBufferSource data);
 
-    int update(kj::Array<kj::byte> data);
+    int update(jsg::Lock& js, jsg::JsBufferSource data);
     jsg::JsUint8Array digest(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(HmacHandle) {
@@ -124,23 +124,23 @@ class CryptoImpl final: public jsg::Object {
   // Hkdf
   jsg::JsArrayBuffer getHkdf(jsg::Lock& js,
       kj::String hash,
-      kj::Array<const kj::byte> key,
-      kj::Array<const kj::byte> salt,
-      kj::Array<const kj::byte> info,
+      jsg::JsBufferSource key,
+      jsg::JsBufferSource salt,
+      jsg::JsBufferSource info,
       uint32_t length);
 
   // Pbkdf2
   jsg::JsArrayBuffer getPbkdf(jsg::Lock& js,
-      kj::Array<const kj::byte> password,
-      kj::Array<const kj::byte> salt,
+      jsg::JsBufferSource password,
+      jsg::JsBufferSource salt,
       uint32_t num_iterations,
       uint32_t keylen,
       kj::String name);
 
   // Scrypt
   jsg::JsArrayBuffer getScrypt(jsg::Lock& js,
-      kj::Array<const kj::byte> password,
-      kj::Array<const kj::byte> salt,
+      jsg::JsBufferSource password,
+      jsg::JsBufferSource salt,
       uint32_t N,
       uint32_t r,
       uint32_t p,
@@ -152,7 +152,7 @@ class CryptoImpl final: public jsg::Object {
     jsg::Optional<kj::String> type;
     jsg::Optional<kj::String> format;
     jsg::Optional<kj::String> cipher;
-    jsg::Optional<kj::Array<kj::byte>> passphrase;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> passphrase;
     JSG_STRUCT(type, format, cipher, passphrase);
   };
 
@@ -164,7 +164,7 @@ class CryptoImpl final: public jsg::Object {
     jsg::Optional<uint32_t> saltLength;
     jsg::Optional<uint32_t> divisorLength;
     jsg::Optional<kj::String> namedCurve;
-    jsg::Optional<kj::Array<kj::byte>> prime;
+    jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> prime;
     jsg::Optional<uint32_t> primeLength;
     jsg::Optional<uint32_t> generator;
     jsg::Optional<kj::String> groupName;
@@ -195,7 +195,7 @@ class CryptoImpl final: public jsg::Object {
     jsg::Optional<kj::String> type;
     jsg::Optional<jsg::JsRef<jsg::JsBufferSource>> passphrase;
     // The passphrase is only used for private keys. The format, type, and passphrase
-    // options are only used if the key is a kj::Array<kj::byte>.
+    // options are only used if the key is set.
     JSG_STRUCT(key, format, type, passphrase);
   };
 
@@ -506,9 +506,9 @@ class CryptoImpl final: public jsg::Object {
   kj::ArrayPtr<kj::StringPtr> getCiphers();
 
   // SPKAC
-  bool verifySpkac(kj::Array<const kj::byte> input);
-  kj::Maybe<jsg::JsUint8Array> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
-  kj::Maybe<jsg::JsUint8Array> exportChallenge(jsg::Lock& js, kj::Array<const kj::byte> input);
+  bool verifySpkac(jsg::Lock& js, jsg::JsBufferSource input);
+  kj::Maybe<jsg::JsUint8Array> exportPublicKey(jsg::Lock& js, jsg::JsBufferSource input);
+  kj::Maybe<jsg::JsUint8Array> exportChallenge(jsg::Lock& js, jsg::JsBufferSource input);
 
   // ECDH
   class ECDHHandle final: public jsg::Object {

@@ -788,8 +788,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(jsg::Lock& js,
 
   if (format == "raw") {
     // NOTE: Checked in SubtleCrypto::importKey().
-    keyDataArray = kj::mv(keyData.get<kj::Array<kj::byte>>());
-    switch (keyDataArray.size() * 8) {
+    auto& source = keyData.get<jsg::JsRef<jsg::JsBufferSource>>();
+    auto handle = source.getHandle(js);
+    switch (handle.size() * 8) {
       case 128:
       case 192:
       case 256:
@@ -797,8 +798,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(jsg::Lock& js,
       default:
         JSG_FAIL_REQUIRE(DOMDataError,
             "Imported AES key length must be 128, 192, or 256 bits but provided ",
-            keyDataArray.size() * 8, ".");
+            handle.size() * 8, ".");
     }
+    keyDataArray = handle.copy();
   } else if (format == "jwk") {
     auto aesMode = normalizedName.slice(4);
 
