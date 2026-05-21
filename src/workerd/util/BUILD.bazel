@@ -453,3 +453,16 @@ kj_test(
     src = "state-machine-test.c++",
     deps = [":state-machine"],
 )
+
+wd_cc_library(
+    name = "ofd-lock",
+    srcs = ["ofd-lock.c++"],
+    hdrs = ["ofd-lock.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+kj_test(
+    src = "ofd-lock-test.c++",
+    deps = [":ofd-lock"],
+)
