@@ -211,6 +211,9 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
 
   auto req = rpcClient->startRequest();
+  KJ_IF_SOME(spanContext, IoContext::current().getCurrentUserTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(req.initSpanContext());
+  }
   KJ_IF_SOME(entrypoint, options.entrypoint) {
     auto list = req.initEntrypoint(entrypoint.size());
     for (auto i: kj::indices(entrypoint)) {
@@ -462,6 +465,9 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
 
   auto params = req.initParams();
   params.setCombinedOutput(combinedOutput);
+  KJ_IF_SOME(spanContext, ioContext.getCurrentUserTraceSpan().toSpanContext()) {
+    spanContext.toCapnp(params.initSpanContext());
+  }
 
   // Some basic validation...
   KJ_IF_SOME(cwd, options.cwd) {
@@ -740,6 +746,9 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     // A lot of the following is copied from
     // capnp::HttpOverCapnpFactory::KjToCapnpHttpServiceAdapter::connect().
     auto req = port.connectRequest(capnp::MessageSize{4, 1});
+    KJ_IF_SOME(spanContext, IoContext::current().getCurrentUserTraceSpan().toSpanContext()) {
+      spanContext.toCapnp(req.initSpanContext());
+    }
     auto downPipe = kj::newOneWayPipe();
     req.setDown(byteStreamFactory.kjToCapnp(kj::mv(downPipe.out)));
     auto pipeline = req.send();
