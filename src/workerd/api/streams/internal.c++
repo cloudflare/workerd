@@ -1831,6 +1831,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         }),
             ioContext.addFunctor(
                 [this, check, preventAbort](jsg::Lock& js, jsg::Value reason) mutable {
+          // Under some conditions, the clean up has already happened.
+          if (queue.empty()) return js.resolvedPromise();
+
           auto handle = reason.getHandle(js);
           auto& request = check.template operator()<Pipe>();
           maybeRejectPromise<void>(js, request.promise(), handle);
