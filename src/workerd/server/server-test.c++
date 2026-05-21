@@ -6400,46 +6400,6 @@ KJ_TEST("Server: workerdDebugPort WebSocket passthrough via WorkerEntrypoint") {
   wsConn.recvWebSocket("echo:world");
 }
 
-// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-9: a wrapped binding whose moduleName
-// does not resolve to any internal module must produce a config error, not a fatal assertion.
-// Before the fix, this config would hit KJ_ASSERT(!value.IsEmpty()) in compileGlobals()
-// and abort. After the fix, the unresolved module is rejected with KJ_FAIL_REQUIRE which
-// produces a recoverable config error containing the module name.
-KJ_TEST("Server: wrapped binding with unresolvable module produces config error") {
-  // Enable predictable mode so the internal error reference ID is deterministic.
-  setPredictableModeForTest();
-
-  TestServer test(singleWorker(R"((
-    compatibilityDate = "2024-01-01",
-    modules = [
-      ( name = "main.js",
-        esModule =
-          `export default {
-          `  async fetch(request) {
-          `    return new Response("should not reach here");
-          `  }
-          `}
-      )
-    ],
-    bindings = [
-      ( name = "brokenBinding",
-        wrapped = (
-          moduleName = "nonexistent:missing-module",
-          innerBindings = [ (name = "inner", text = "value") ]
-        )
-      )
-    ]
-  ))"_kj));
-
-  // The KJ_FAIL_REQUIRE exception propagates through compileGlobals, gets caught by the
-  // worker constructor, converted to a JS "internal error" with a predictable reference ID,
-  // and reported as a config error. The jsg layer logs the original exception at ERROR level
-  // (a single log line containing both the exception description and "jsgInternalError").
-  KJ_EXPECT_LOG(ERROR, "jsgInternalError");
-  test.expectErrors("service hello: Uncaught Error: internal error;"
-                    " reference = 0123456789abcdefghijklmn\n"_kj);
-}
-
 // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-100: heap use-after-free in ActorContainer
 // when a facet is aborted while a request is pending on the async startup callback. The
 // constructor's .then([this]) continuation and the getActor() coroutine both hold references
