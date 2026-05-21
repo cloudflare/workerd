@@ -8,8 +8,8 @@ import {
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
+  type WorkflowStep,
 } from 'cloudflare:workers';
-import type {WorkflowStep} from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
 
 // Check `cache` export from `cloudflare:workers` has the expected type.
@@ -821,3 +821,15 @@ workflowStep.do(
 );
 
 workflowStep.do('empty rollback options', async () => 'ok', {});
+
+expectTypeOf(
+  workflowStep.do('no rollback 2-arg', async (): Promise<string> => 'ok')
+).toMatchTypeOf<Promise<string>>();
+
+expectTypeOf(
+  workflowStep.do(
+    'no rollback 3-arg',
+    {retries: {limit: 1, delay: 0}},
+    async (): Promise<string> => 'ok'
+  )
+).toMatchTypeOf<Promise<string>>();
