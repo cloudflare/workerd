@@ -266,6 +266,22 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "cluster-lock",
+    srcs = ["cluster-lock.c++"],
+    hdrs = ["cluster-lock.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cluster-registry",
+        ":cluster_capnp",
+        "//src/workerd/io:worker-interface_capnp",
+        "//src/workerd/util:ofd-lock",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
 wd_capnp_library(src = "docker-api.capnp")
 
 wd_capnp_library(src = "log-schema.capnp")
@@ -419,6 +435,18 @@ kj_test(
     src = "cluster-registry-test.c++",
     deps = [
         ":cluster-registry",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+kj_test(
+    src = "cluster-lock-test.c++",
+    deps = [
+        ":cluster-lock",
+        ":cluster-registry",
+        "//src/workerd/io:worker-interface_capnp",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
