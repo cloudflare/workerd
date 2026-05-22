@@ -884,8 +884,12 @@ class StateMachine {
   StateMachine& operator=(StateMachine&& other) noexcept {
     KJ_DASSERT(transitionLockCount == 0,
         "Cannot move-assign to StateMachine while transition locks are held");
+    KJ_DASSERT(!transitionInProgress,
+        "Cannot move-assign to StateMachine while a transition is in progress");
     KJ_DASSERT(other.transitionLockCount == 0,
         "Cannot move from StateMachine while transition locks are held");
+    KJ_DASSERT(!other.transitionInProgress,
+        "Cannot move from StateMachine while a transition is in progress");
     state = kj::mv(other.state);
     if constexpr (HAS_PENDING) {
       operationCount = other.operationCount;
@@ -905,6 +909,8 @@ class StateMachine {
     requires(_::isInTuple<S, StatesTuple>)
   {
     StateMachine m;
+    m.transitionInProgress = true;
+    KJ_DEFER(m.transitionInProgress = false);
     m.state.template init<S>(kj::fwd<TArgs>(args)...);
     return m;
   }
@@ -1116,6 +1122,8 @@ class StateMachine {
     if constexpr (HAS_PENDING) {
       clearPendingState();
     }
+    transitionInProgress = true;
+    KJ_DEFER(transitionInProgress = false);
     return state.template init<S>(kj::fwd<TArgs>(args)...);
   }
 
@@ -1141,6 +1149,8 @@ class StateMachine {
     if constexpr (HAS_PENDING) {
       clearPendingState();
     }
+    transitionInProgress = true;
+    KJ_DEFER(transitionInProgress = false);
     return state.template init<S>(kj::fwd<TArgs>(args)...);
   }
 
@@ -1162,6 +1172,8 @@ class StateMachine {
     if constexpr (HAS_PENDING) {
       clearPendingState();
     }
+    transitionInProgress = true;
+    KJ_DEFER(transitionInProgress = false);
     return state.template init<To>(kj::fwd<TArgs>(args)...);
   }
 
@@ -1477,6 +1489,8 @@ class StateMachine {
 
     if (operationCount == 0) {
       // No operation in progress, transition immediately
+      transitionInProgress = true;
+      KJ_DEFER(transitionInProgress = false);
       state.template init<S>(kj::fwd<TArgs>(args)...);
       return true;
     } else {
@@ -1669,6 +1683,17 @@ class StateMachine {
   // indicates "does not transition the state machine", not "thread-safe".
   mutable uint32_t transitionLockCount = 0;
 
+  // Flag to suppress GC tracing during state transitions. kj::OneOf::init()
+  // sets its tag to 0 before running the old variant's destructor and before
+  // constructing the new variant. If V8 GC fires during that window (e.g.,
+  // because a destructor rejects promises or a constructor allocates), the
+  // state machine's visitForGcImpl would see tag=0 and skip tracing any
+  // TracedReferences that the old variant held. V8 then frees the untraced
+  // handle nodes, leaving stale pointers that segfault on the next GC cycle.
+  // Setting this flag around every init() call makes visitForGc a no-op
+  // during that window, which is correct: there is nothing valid to trace.
+  bool transitionInProgress = false;
+
   // Pending state support (only allocated when HAS_PENDING is true)
   // Using _::Empty instead of char for proper [[no_unique_address]] optimization
   WD_NO_UNIQUE_ADDRESS std::conditional_t<HAS_PENDING, StateUnion, _::Empty> pendingState{};
@@ -1784,6 +1809,8 @@ class StateMachine {
       }
     }
 
+    transitionInProgress = true;
+    KJ_DEFER(transitionInProgress = false);
     visitPendingStates([this]<typename S>(S& s) { this->state.template init<S>(kj::mv(s)); });
     pendingState = StateUnion();
   }
@@ -1842,6 +1869,12 @@ class StateMachine {
   // Helper for visitForGc - visits the current state if the visitor can handle it
   template <typename Visitor, size_t... Is>
   void visitForGcImpl(Visitor& visitor, std::index_sequence<Is...>) {
+    // Skip tracing while a state transition is in progress. During
+    // kj::OneOf::init(), the tag is 0 while the old variant's destructor
+    // runs and the new variant is being constructed. If V8 GC fires in
+    // that window, there is nothing valid to trace.
+    if (transitionInProgress) return;
+
     auto tryVisit = [&]<size_t I>(StateUnion& s) {
       using S = std::tuple_element_t<I, StatesTuple>;
       if (s.template is<S>()) {
@@ -1862,6 +1895,8 @@ class StateMachine {
 
   template <typename Visitor, size_t... Is>
   void visitForGcImpl(Visitor& visitor, std::index_sequence<Is...>) const {
+    if (transitionInProgress) return;
+
     auto tryVisit = [&]<size_t I>(const StateUnion& s) {
       using S = std::tuple_element_t<I, StatesTuple>;
       if (s.template is<S>()) {

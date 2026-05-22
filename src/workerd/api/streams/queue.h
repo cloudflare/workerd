@@ -163,6 +163,13 @@ class QueueImpl final {
   QueueImpl& operator=(QueueImpl&&) = default;
 
   ~QueueImpl() noexcept(false) {
+    // Signal to any in-progress close()/error() call that *this has been destroyed.
+    // This can happen when consumer.close(js) or consumer.error(js, reason) triggers
+    // re-entrant JS (via V8's thenable check during promise resolution) that calls
+    // ctrl.error(), which destroys the ByteQueue containing this QueueImpl.
+    KJ_IF_SOME(flag, destroyedFlag) {
+      flag = true;
+    }
     // Detach all consumers before destruction to prevent UAF.
     // This can happen during isolate teardown when the destruction order
     // of JS wrapper objects doesn't follow the ownership hierarchy.
@@ -173,11 +180,21 @@ class QueueImpl final {
   // If we are already closed or errored, do nothing here.
   void close(jsg::Lock& js) {
     if (state.isActive()) {
+      // consumer.close(js) can trigger re-entrant JS that destroys *this (e.g., a
+      // malicious Object.prototype.then getter calling ctrl.error()). Use a
+      // stack-local canary to detect destruction and bail out. We save/restore
+      // the previous flag so nested calls (e.g., close → re-entrant error)
+      // don't disconnect the outer canary.
+      bool destroyed = false;
+      auto previousFlag = kj::mv(destroyedFlag);
+      destroyedFlag = destroyed;
+      KJ_DEFER(if (!destroyed) destroyedFlag = kj::mv(previousFlag));
 #ifdef KJ_DEBUG
       isClosingOrErroring = true;
-      KJ_DEFER(isClosingOrErroring = false);
+      KJ_DEFER(if (!destroyed) isClosingOrErroring = false);
 #endif
       allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.close(js); });
+      if (destroyed) return;
       state.template transitionTo<Closed>();
     }
   }
@@ -196,11 +213,17 @@ class QueueImpl final {
   // If we are already closed or errored, do nothing here.
   void error(jsg::Lock& js, jsg::JsValue reason) {
     if (state.isActive()) {
+      // Same re-entrancy concern as close() — see comment there.
+      bool destroyed = false;
+      auto previousFlag = kj::mv(destroyedFlag);
+      destroyedFlag = destroyed;
+      KJ_DEFER(if (!destroyed) destroyedFlag = kj::mv(previousFlag));
 #ifdef KJ_DEBUG
       isClosingOrErroring = true;
-      KJ_DEFER(isClosingOrErroring = false);
+      KJ_DEFER(if (!destroyed) isClosingOrErroring = false);
 #endif
       allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.error(js, reason); });
+      if (destroyed) return;
       state.template transitionTo<Errored>(reason.addRef(js));
     }
   }
@@ -302,6 +325,13 @@ class QueueImpl final {
   // is destroyed during iteration (e.g., resolving a read request triggers JS that
   // destroys another consumer in the same queue). When iterating, we check if the WeakRef is still valid.
   SmallSet<kj::Rc<WeakRef<ConsumerImpl>>> allConsumers;
+
+  // Pointer to a stack-local bool in close()/error(). Set to true by the
+  // destructor if *this is destroyed during the consumer iteration (re-entrant
+  // JS can destroy the ByteQueue containing this QueueImpl). The close()/error()
+  // methods check this flag after iteration and bail out instead of touching
+  // the now-dead state machine.
+  kj::Maybe<bool&> destroyedFlag;
 
 #ifdef KJ_DEBUG
   // Debug flag to detect if addConsumer is called during close/error iteration.

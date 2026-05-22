@@ -1298,8 +1298,7 @@ void ReadableImpl<Self>::forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
 
 template <typename Self>
 void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
-  // TODO(soon): We should also visit the errored state but we need to ensure that
-  // the state machine is not in an invalid state before we do.
+  state.visitForGc(visitor);
   KJ_IF_SOME(pendingCancel, maybePendingCancel) {
     visitor.visit(pendingCancel.fulfiller, pendingCancel.promise);
   }
@@ -1801,6 +1800,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
 
 template <typename Self>
 void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
+  state.visitForGc(visitor);
   visitor.visit(inFlightWrite, inFlightClose, closeRequest, algorithms, signal);
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     visitor.visit(*pendingAbort);
