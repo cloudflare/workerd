@@ -293,7 +293,7 @@ void ReadableLockImpl<Controller>::releaseReader(
       // Begin an operation so that any re-entrant releaseReader (triggered by
       // cancelPendingReads rejection handlers) defers its transition to Unlocked
       // rather than destroying the ReaderLocked state out from under us.
-      state.beginOperation();
+      auto token = state.beginOperation();
       KJ_SWITCH_ONEOF(self.state) {
         KJ_CASE_ONEOF(initial, typename Controller::Initial) {}
         KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
@@ -308,9 +308,9 @@ void ReadableLockImpl<Controller>::releaseReader(
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
       locked.clear();
       (void)state.template deferTransitionTo<Unlocked>();
-      // endOperation applies the deferred Unlocked transition (or any
+      // token->complete() applies the deferred Unlocked transition (or any
       // re-entrant one that was already deferred).
-      (void)state.endOperation();
+      (void)token->complete();
     } else {
       locked.clear();
     }
@@ -452,7 +452,7 @@ void WritableLockImpl<Controller>::releaseWriter(
       // cancelPendingWrites and promise rejections can trigger user JS which
       // could re-entrantly call releaseWriter. beginOperation defers the
       // Unlocked transition so that locked remains valid throughout.
-      state.beginOperation();
+      auto token = state.beginOperation();
       KJ_SWITCH_ONEOF(self.state) {
         KJ_CASE_ONEOF(initial, typename Controller::Initial) {}
         KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
@@ -464,7 +464,7 @@ void WritableLockImpl<Controller>::releaseWriter(
       }
       // Note that cancelPendingWrites can trigger user JavaScript to run, which can
       // trigger a state transition. Hoever, we're using "state.beginOperation" above
-      // to defer the transition until the state.endOperation call below.
+      // to defer the transition until the token->complete() call below.
       auto releaseReason = js.typeError("This WritableStream writer has been released."_kjc);
       if (FeatureFlags::get(js).getWritableStreamSpecCompliantWriter()) {
         self.maybeRejectReadyPromise(js, releaseReason);
@@ -474,7 +474,7 @@ void WritableLockImpl<Controller>::releaseWriter(
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(), releaseReason);
       locked.clear();
       (void)state.template deferTransitionTo<Unlocked>();
-      (void)state.endOperation();
+      (void)token->complete();
     } else {
       locked.clear();
     }
@@ -696,14 +696,14 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
   // methods, as well as the methods can trigger JavaScript errors to be thrown
   // synchronously in some cases. We want to make sure non-fatal errors cause the
   // stream to error and only fatal cases bubble up.
+  auto token = controller.state.beginOperation();
   JSG_TRY(js) {
-    controller.state.beginOperation();
     auto result = readCallback();
     endOperation = false;
 
-    // endOperation() will automatically apply any pending state if this was the last operation.
+    // token->complete() will automatically apply any pending state if this was the last operation.
     // Returns true if a pending state was applied.
-    if (controller.state.endOperation()) {
+    if (token->complete()) {
       // A pending state was applied. Call the appropriate callback.
       // Skip callbacks if execution is being terminated (e.g., CPU time limit) since we can't
       // safely execute JavaScript in that state.
@@ -724,7 +724,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     if (endOperation) {
       // Clear any pending state since we're erroring
       controller.state.clearPendingState();
-      (void)controller.state.endOperation();
+      (void)token->complete();
     }
     auto handle = jsg::JsValue(exception.getHandle(js));
     controller.doError(js, handle);
@@ -1915,10 +1915,10 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
 
   jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
     KJ_IF_SOME(s, state) {
-      // Note: We do NOT call beginOperation()/endOperation() here. The caller
+      // Note: We do NOT call beginOperation()/complete() here. The caller
       // (ReadableStreamJsController::drainingRead) manages the operation scope
       // around both this call and the returned promise's lifetime. If we added
-      // our own beginOperation/endOperation here, the endOperation would fire
+      // our own beginOperation/complete here, the complete would fire
       // before the caller's wrapDrainingRead could set up its .then() callbacks,
       // potentially destroying the Consumer while the returned promise still has
       // dangling this-capturing callbacks from consumer->drainingRead().
@@ -1974,13 +1974,13 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     // after calling doClose.
     KJ_IF_SOME(s, state) {
       // Protect against re-entrant destruction: beginOperation defers the
-      // transition until endOperation. But endOperation may destroy `this`
+      // transition until token->complete(). But token->complete() may destroy `this`
       // (the ValueReadable) when it applies the pending Closed state, so
       // we must save the owner reference into a local before that happens.
       auto& owner = s.owner;
-      owner.state.beginOperation();
+      auto token = owner.state.beginOperation();
       owner.doClose(js);
-      if (owner.state.endOperation()) {
+      if (token->complete()) {
         if (!js.v8Isolate->IsExecutionTerminating()) {
           if (owner.state.template is<StreamStates::Closed>()) {
             owner.lock.onClose(js);
@@ -1991,13 +1991,13 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
   }
 
   void onConsumerError(jsg::Lock& js, jsg::JsValue reason) override {
-    // Same pattern as onConsumerClose — save owner ref before endOperation
+    // Same pattern as onConsumerClose — save owner ref before token->complete()
     // can destroy this ValueReadable.
     KJ_IF_SOME(s, state) {
       auto& owner = s.owner;
-      owner.state.beginOperation();
+      auto token = owner.state.beginOperation();
       owner.doError(js, reason);
-      if (owner.state.endOperation()) {
+      if (token->complete()) {
         if (!js.v8Isolate->IsExecutionTerminating()) {
           KJ_IF_SOME(err, owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
             owner.lock.onError(js, err.getHandle(js));
@@ -2019,7 +2019,7 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
       // using beginOperation(), we ensure doClose/doError defers the
       // actual destruction until after we return.
       ReadableStreamJsController& owner = s.owner;
-      owner.state.beginOperation();
+      auto token = owner.state.beginOperation();
 
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
@@ -2029,13 +2029,13 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
         s.controller->pull(js);
       }
 
-      // Check if state is still valid BEFORE calling endOperation(),
+      // Check if state is still valid BEFORE calling token->complete(),
       // because that call may destroy this ValueReadable if close was deferred.
       bool result =
           state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
 
       // Process any deferred close/error. This may destroy this ValueReadable.
-      if (owner.state.endOperation()) {
+      if (token->complete()) {
         // A pending state was applied. Call the appropriate callback.
         if (owner.state.template is<StreamStates::Closed>()) {
           owner.lock.onClose(js);
@@ -2199,7 +2199,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
 
   jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead) {
     KJ_IF_SOME(s, state) {
-      // Note: We do NOT call beginOperation()/endOperation() here. The caller
+      // Note: We do NOT call beginOperation()/complete() here. The caller
       // (ReadableStreamJsController::drainingRead) manages the operation scope
       // around both this call and the returned promise's lifetime. See the
       // comment in ValueReadable::drainingRead for the detailed explanation.
@@ -2252,12 +2252,12 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   void onConsumerClose(jsg::Lock& js) override {
     // Note that the owner may drop this readable in doClose so it
     // is not safe to access anything on this after calling doClose.
-    // Save owner ref before endOperation can destroy this ByteReadable.
+    // Save owner ref before token->complete() can destroy this ByteReadable.
     KJ_IF_SOME(s, state) {
       auto& owner = s.owner;
-      owner.state.beginOperation();
+      auto token = owner.state.beginOperation();
       owner.doClose(js);
-      if (owner.state.endOperation()) {
+      if (token->complete()) {
         if (!js.v8Isolate->IsExecutionTerminating()) {
           if (owner.state.template is<StreamStates::Closed>()) {
             owner.lock.onClose(js);
@@ -2271,9 +2271,9 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     // Same pattern — save owner ref before endOperation can destroy this.
     KJ_IF_SOME(s, state) {
       auto& owner = s.owner;
-      owner.state.beginOperation();
+      auto token = owner.state.beginOperation();
       owner.doError(js, reason);
-      if (owner.state.endOperation()) {
+      if (token->complete()) {
         if (!js.v8Isolate->IsExecutionTerminating()) {
           KJ_IF_SOME(err, owner.state.template tryGetUnsafe<StreamStates::Errored>()) {
             owner.lock.onError(js, err.getHandle(js));
@@ -2295,7 +2295,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
       // using beginOperation(), we ensure doClose/doError defers the
       // actual destruction until after we return.
       ReadableStreamJsController& owner = s.owner;
-      owner.state.beginOperation();
+      auto token = owner.state.beginOperation();
 
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
@@ -2305,13 +2305,13 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
         s.controller->pull(js);
       }
 
-      // Check if state is still valid BEFORE calling endOperation(),
+      // Check if state is still valid BEFORE calling token->complete(),
       // because that call may destroy this ByteReadable if close was deferred.
       bool result =
           state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
 
       // Process any deferred close/error. This may destroy this ByteReadable.
-      if (owner.state.endOperation()) {
+      if (token->complete()) {
         // A pending state was applied. Call the appropriate callback.
         if (owner.state.template is<StreamStates::Closed>()) {
           owner.lock.onClose(js);
@@ -2790,17 +2790,17 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
 
   const auto doCancel = [&](auto& consumer) {
     auto reason = maybeReason.orDefault([&] { return js.undefined(); });
-    // Wrap in beginOperation/endOperation so that if the user's cancel callback
+    // Wrap in beginOperation/complete so that if the user's cancel callback
     // calls stream.tee(), tee()'s deferTransitionTo<Closed> is deferred instead
     // of applying immediately (which would destroy the ValueReadable/ByteReadable
-    // whose cancel() is on the stack). endOperation() applies the pending state
+    // whose cancel() is on the stack). token->complete() applies the pending state
     // after cancel() returns safely.
-    state.beginOperation();
+    auto token = state.beginOperation();
     auto promise = consumer->cancel(js, reason);
-    // If tee() deferred a Closed transition, endOperation() applies it now —
+    // If tee() deferred a Closed transition, token->complete() applies it now —
     // which is equivalent to doClose(). If no transition was deferred, we call
     // doClose() ourselves. Either way the stream ends up Closed.
-    if (!state.endOperation()) {
+    if (!token->complete()) {
       doClose(js);
     }
     return kj::mv(promise);
@@ -3021,14 +3021,16 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
   // -> close/error, which calls deferTransitionTo. If no operation is in progress at that
   // point, the transition fires immediately, destroying the Consumer while we're still
   // inside its method and before the returned promise's .then() callbacks are set up.
-  // The endOperation() happens in the .then() callbacks below, ensuring the deferred
+  // The token->complete() happens in the .then() callbacks below, ensuring the deferred
   // state change only fires after the promise resolves/rejects and the Consumer's
   // this-capturing callbacks have already run.
   auto wrapDrainingRead =
-      [this, ref = addRef()](jsg::Lock& js,
-          jsg::Promise<DrainingReadResult> promise) mutable -> jsg::Promise<DrainingReadResult> {
-    return promise.then(js, [this, ref = ref.addRef()](jsg::Lock& js, DrainingReadResult result) {
-      if (state.endOperation()) {
+      [this, ref = addRef()](jsg::Lock& js, jsg::Promise<DrainingReadResult> promise,
+          kj::Rc<OperationToken> token) mutable -> jsg::Promise<DrainingReadResult> {
+    return promise.then(js,
+        [this, ref = ref.addRef(), token = token.addRef()](
+            jsg::Lock& js, DrainingReadResult result) mutable {
+      if (token->complete()) {
         // A pending state was applied. Call the appropriate callback.
         if (state.template is<StreamStates::Closed>()) {
           lock.onClose(js);
@@ -3041,9 +3043,11 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
         }
       }
       return kj::mv(result);
-    }, [this, ref = ref.addRef()](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
+    },
+        [this, ref = ref.addRef(), token = token.addRef()](
+            jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
       state.clearPendingState();
-      (void)state.endOperation();
+      (void)token->complete();
       js.throwException(kj::mv(exception));
     });
   };
@@ -3067,13 +3071,13 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
       // beginOperation MUST be before consumer->drainingRead() — see comment above.
-      state.beginOperation();
+      auto token = state.beginOperation();
       JSG_TRY(js) {
-        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead), token.addRef());
       }
       JSG_CATCH(exception) {
         state.clearPendingState();
-        (void)state.endOperation();
+        (void)token->complete();
         auto handle = jsg::JsValue(exception.getHandle(js));
         doError(js, handle);
         return js.rejectedPromise<DrainingReadResult>(handle);
@@ -3081,13 +3085,13 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
       // beginOperation MUST be before consumer->drainingRead() — see comment above.
-      state.beginOperation();
+      auto token = state.beginOperation();
       JSG_TRY(js) {
-        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead), token.addRef());
       }
       JSG_CATCH(exception) {
         state.clearPendingState();
-        (void)state.endOperation();
+        (void)token->complete();
         auto handle = jsg::JsValue(exception.getHandle(js));
         doError(js, handle);
         return js.rejectedPromise<DrainingReadResult>(handle);
