@@ -736,6 +736,9 @@ wd_test(
     src = "autovuln-262-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-262-test.js"],
+    # Test uses HTMLRewriter which is excessively flaky under ASan re-enable
+    # there once the HTMLRewriter issues are identified.
+    tags = ["no-asan"],
 )
 
 wd_test(
