@@ -5509,9 +5509,6 @@ type ChatCompletionChoice = {
     | "function_call";
   logprobs: ChatCompletionLogprobs | null;
 };
-type ChatCompletionsPromptInput = {
-  prompt: string;
-} & ChatCompletionsCommonOptions;
 type ChatCompletionsMessagesInput = {
   messages: Array<ChatCompletionMessageParam>;
 } & ChatCompletionsCommonOptions;
@@ -9636,11 +9633,11 @@ declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
@@ -10735,7 +10732,7 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
-  inputs: ChatCompletionsBase;
+  inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
@@ -10743,7 +10740,7 @@ declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
   postProcessedOutputs: ChatCompletionsOutput;
 }
 declare abstract class Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT {
-  inputs: ChatCompletionsBase;
+  inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
 interface AiModels {
@@ -10890,16 +10887,8 @@ type AiModelsSearchObject = {
     value: string;
   }[];
 };
-type ChatCompletionsBase = XOR<
-  ChatCompletionsPromptInput,
-  ChatCompletionsMessagesInput
->;
-type ChatCompletionsInput = XOR<
-  ChatCompletionsBase,
-  {
-    requests: ChatCompletionsBase[];
-  }
->;
+type ChatCompletionsBase = ChatCompletionsMessagesInput;
+type ChatCompletionsInput = ChatCompletionsMessagesInput;
 interface InferenceUpstreamError extends Error {}
 interface AiInternalError extends Error {}
 type AiModelListType = Record<string, any>;
@@ -10962,9 +10951,16 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
     inputs: AiModelList[Name]["inputs"],
     options?: AiOptions,
   ): Promise<AiModelList[Name]["postProcessedOutputs"]>;
-  // Unknown model (gateway fallback)
-  run(
-    model: string & {},
+  // Unknown model (fallback).
+  //
+  // The `Exclude<..., keyof AiModelList>` constraint forces TypeScript to
+  // route any model name that is a literal key of `AiModelList` to one of
+  // the known-model overloads above (so input/output mismatches surface as
+  // type errors rather than silently falling back to `Record<string, unknown>`).
+  // Names that aren't in `AiModelList` — e.g. third-party gateway models
+  // like `"google/nano-banana"` — still hit this overload.
+  run<Model extends string>(
+    model: Model extends keyof AiModelList ? never : Model,
     inputs: Record<string, unknown>,
     options?: AiOptions,
   ): Promise<Record<string, unknown>>;
