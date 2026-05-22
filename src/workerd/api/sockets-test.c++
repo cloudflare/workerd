@@ -123,8 +123,8 @@ KJ_TEST("socket writes are blocked by output gate") {
     auto blocker = actor.getOutputGate().lockWhile(kj::mv(paf.promise), nullptr);
     auto writable = socket->getWritable();
     auto data = kj::heapArray<kj::byte>({'h', 'i'});
-    auto jsBuffer = env.js.bytes(kj::mv(data)).getHandle(env.js);
-    writable->getController().write(env.js, jsBuffer).markAsHandled(env.js);
+    auto u8 = jsg::JsUint8Array::create(env.js, data);
+    writable->getController().write(env.js, u8).markAsHandled(env.js);
 
     // With autogate (@all-autogates), connect is deferred. Wait for it.
     // After co_await, Worker lock is released — no V8 calls allowed.

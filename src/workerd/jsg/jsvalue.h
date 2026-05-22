@@ -58,7 +58,6 @@ inline void requireOnStack(void* self) {
   V(BigInt64Array)                                                                                 \
   V(BigUint64Array)                                                                                \
   V(DataView)                                                                                      \
-  V(SharedArrayBuffer)                                                                             \
   V(WasmMemoryObject)                                                                              \
   V(WasmModuleObject)                                                                              \
   JS_TYPE_CLASSES(V)
@@ -234,12 +233,16 @@ class JsArray final: public JsBase<v8::Array, JsArray> {
 
 class JsArrayBuffer final: public JsBase<v8::ArrayBuffer, JsArrayBuffer> {
  public:
+  static kj::Maybe<JsArrayBuffer> tryCreate(Lock& js, size_t length);
+
   static JsArrayBuffer create(Lock& js, size_t length);
 
   // Allocate and copy data from the given ArrayPtr in a single step.
   static JsArrayBuffer create(Lock& js, kj::ArrayPtr<const kj::byte> data);
 
+  // Take ownership of the given backing store.
   static JsArrayBuffer create(Lock& js, std::unique_ptr<v8::BackingStore> backingStore);
+  static JsArrayBuffer create(Lock& js, std::shared_ptr<v8::BackingStore> backingStore);
 
   JsArrayBuffer slice(Lock& js, size_t newLength) const;
 
@@ -251,7 +254,83 @@ class JsArrayBuffer final: public JsBase<v8::ArrayBuffer, JsArrayBuffer> {
   // Return a copy of this buffer's data as a kj::Array.
   kj::Array<kj::byte> copy();
 
+  // A JsArrayBuffer can be used as a JsBufferSource, which is a more general type that
+  // also includes JsArrayBufferView.
+  operator JsBufferSource() const;
+
+  // A JsArrayBuffer might be detachable.
+  bool isDetachable() const;
+  bool isDetached() const;
+  void detachInPlace(Lock& js);
+  JsArrayBuffer detachAndTake(Lock& js) KJ_WARN_UNUSED_RESULT;
+
+  // Return a view over this buffer
+  JsUint8Array newUint8View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newInt8View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newUint8ClampedView(size_t offset, size_t numElements) const;
+  JsArrayBufferView newUint16View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newInt16View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newUint32View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newInt32View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newFloat16View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newFloat32View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newFloat64View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newBigInt64View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newBigUint64View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newDataView(size_t offset, size_t numElements) const;
+
+  bool isResizable() const;
+
+  operator JsUint8Array() const;
+
   using JsBase<v8::ArrayBuffer, JsArrayBuffer>::JsBase;
+};
+
+class JsSharedArrayBuffer final: public JsBase<v8::SharedArrayBuffer, JsSharedArrayBuffer> {
+ public:
+  static kj::Maybe<JsSharedArrayBuffer> tryCreate(Lock& js, size_t length);
+
+  static JsSharedArrayBuffer create(Lock& js, size_t length);
+
+  // Allocate and copy data from the given ArrayPtr in a single step.
+  static JsSharedArrayBuffer create(Lock& js, kj::ArrayPtr<const kj::byte> data);
+
+  // Take ownership of the given backing store.
+  static JsSharedArrayBuffer create(Lock& js, std::unique_ptr<v8::BackingStore> backingStore);
+  static JsSharedArrayBuffer create(Lock& js, std::shared_ptr<v8::BackingStore> backingStore);
+
+  JsSharedArrayBuffer slice(Lock& js, size_t newLength) const;
+
+  kj::ArrayPtr<kj::byte> asArrayPtr();
+  kj::ArrayPtr<const kj::byte> asArrayPtr() const;
+
+  size_t size() const;
+
+  // Return a copy of this buffer's data as a kj::Array.
+  kj::Array<kj::byte> copy();
+
+  // A JsSharedArrayBuffer can be used as a JsBufferSource, which is a more general type that
+  // also includes JsArrayBufferView.
+  operator JsBufferSource() const;
+
+  // Return a view over this buffer
+  JsUint8Array newUint8View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newInt8View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newUint8ClampedView(size_t offset, size_t numElements) const;
+  JsArrayBufferView newUint16View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newInt16View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newUint32View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newInt32View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newFloat16View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newFloat32View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newFloat64View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newBigInt64View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newBigUint64View(size_t offset, size_t numElements) const;
+  JsArrayBufferView newDataView(size_t offset, size_t numElements) const;
+
+  operator JsUint8Array() const;
+
+  using JsBase<v8::SharedArrayBuffer, JsSharedArrayBuffer>::JsBase;
 };
 
 class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferView> {
@@ -264,22 +343,69 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
       return nullptr;
     }
     auto byteLength = inner->ByteLength();
-    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + inner->ByteOffset());
+    auto byteOffset = inner->ByteOffset();
+    // Sandbox hardening: validate that the view's byte range falls within the
+    // backing store's trusted size. In-cage ByteOffset/ByteLength fields can be
+    // corrupted by an attacker; buf->ByteLength() is the trusted out-of-cage value.
+    auto bufSize = buf->ByteLength();
+    if (byteOffset + byteLength > bufSize) [[unlikely]] {
+      return nullptr;
+    }
+    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + byteOffset);
     return kj::ArrayPtr(data, byteLength / sizeof(T));
   }
 
   size_t size() const;
+  size_t getOffset() const;
 
   // Returns true if the underlying view is an integer-typed TypedArray
   // (e.g. Uint8Array, Int32Array, BigUint64Array) as opposed to a float-typed
   // TypedArray or DataView.
   bool isIntegerType() const;
 
+  bool isUint8Array() const;
+  bool isInt8Array() const;
+  bool isUint8ClampedArray() const;
+  bool isUint16Array() const;
+  bool isInt16Array() const;
+  bool isUint32Array() const;
+  bool isInt32Array() const;
+  bool isFloat16Array() const;
+  bool isFloat32Array() const;
+  bool isFloat64Array() const;
+  bool isBigInt64Array() const;
+  bool isBigUint64Array() const;
+  bool isDataView() const;
+
+  size_t getElementSize() const;
+
+  JsArrayBuffer getBuffer() const;
+
+  bool isDetachable() const;
+  bool isDetached() const;
+  void detachInPlace(Lock& js);
+  JsArrayBufferView detachAndTake(Lock& js) KJ_WARN_UNUSED_RESULT;
+
+  // Get a new view of the same type over the same buffer. offset and length are in bytes,
+  // with offset relative to the start of this view. For multi-byte views, length is
+  // truncated to a multiple of getElementSize().
+  JsArrayBufferView slice(Lock& js, size_t offset, size_t length) const;
+
+  bool isResizable() const;
+
+  operator JsBufferSource() const;
+
+  // Regardless of what kind of typed array view this is, we can always get it as a Uint8Array
+  operator JsUint8Array() const;
+
+  JsArrayBufferView clone(jsg::Lock& js);
+
   using JsBase<v8::ArrayBufferView, JsArrayBufferView>::JsBase;
 };
 
 class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
  public:
+  static kj::Maybe<JsUint8Array> tryCreate(Lock& js, size_t length);
   static JsUint8Array create(Lock& js, size_t length);
 
   // Allocate and copy data from the given ArrayPtr in a single step.
@@ -287,6 +413,8 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
 
   // Create a Uint8Array view over the given ArrayBuffer.
   static JsUint8Array create(Lock& js, JsArrayBuffer& buffer);
+
+  static JsUint8Array create(Lock& js, JsSharedArrayBuffer& buffer);
 
   static JsUint8Array create(
       Lock& js, std::unique_ptr<v8::BackingStore> backingStore, size_t byteOffset, size_t length);
@@ -301,7 +429,15 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
       return nullptr;
     }
     auto byteLength = inner->ByteLength();
-    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + inner->ByteOffset());
+    auto byteOffset = inner->ByteOffset();
+    // Sandbox hardening: validate that the view's byte range falls within the
+    // backing store's trusted size. In-cage ByteOffset/ByteLength fields can be
+    // corrupted by an attacker; buf->ByteLength() is the trusted out-of-cage value.
+    auto bufSize = buf->ByteLength();
+    if (byteOffset + byteLength > bufSize) [[unlikely]] {
+      return nullptr;
+    }
+    T* data = reinterpret_cast<T*>(static_cast<kj::byte*>(buf->Data()) + byteOffset);
     return kj::ArrayPtr(data, byteLength / sizeof(T));
   }
 
@@ -311,6 +447,24 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
 
   // Return a copy of this buffer's data as a kj::Array.
   kj::Array<kj::byte> copy();
+
+  JsArrayBuffer getBuffer() const;
+
+  bool isDetachable() const;
+  bool isDetached() const;
+  void detachInPlace(Lock& js);
+  JsUint8Array detachAndTake(Lock& js) KJ_WARN_UNUSED_RESULT;
+
+  // Get a new view of the same type over the same buffer. offset and length are in bytes,
+  // with offset relative to the start of this view.
+  JsUint8Array slice(Lock& js, size_t offset, size_t length) const;
+
+  bool isResizable() const;
+
+  operator JsArrayBufferView() const;
+  operator JsBufferSource() const;
+
+  JsUint8Array clone(jsg::Lock& js);
 
   using JsBase<v8::Uint8Array, JsUint8Array>::JsBase;
 };
@@ -333,6 +487,8 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
   kj::ArrayPtr<kj::byte> asArrayPtr();
 
   size_t size() const;
+  size_t getOffset() const;
+  size_t underlyingArrayBufferSize(Lock& js) const;
 
   // Returns true if the underlying value is an integer-typed TypedArray.
   bool isIntegerType() const;
@@ -342,8 +498,16 @@ class JsBufferSource final: public JsBase<v8::Value, JsBufferSource> {
   bool isArrayBufferView() const;
   bool isResizable() const;
 
+  bool isDetachable() const;
+  bool isDetached() const;
+  void detachInPlace(Lock& js);
+  JsBufferSource detachAndTake(Lock& js) KJ_WARN_UNUSED_RESULT;
+
   // Return a copy of this buffer's data as a kj::Array.
   kj::Array<kj::byte> copy();
+
+  // Regardless of what kind of typed array view this is, we can always get it as a Uint8Array
+  operator JsUint8Array() const;
 
   using JsBase<v8::Value, JsBufferSource>::JsBase;
 };

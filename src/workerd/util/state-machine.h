@@ -85,13 +85,13 @@
 //    a read discovers EOF and needs to close), use deferred transitions:
 //
 //    {
-//      auto op = state.scopedOperation();
+//      auto token = state.beginOperation();
 //      state.whenActive([&](Readable& r) {
 //        if (r.source->atEof()) {
 //          state.deferTransitionTo<Closed>();  // Queued, not immediate
 //        }
 //      });
-//    }  // Transition happens here, after callback completes safely
+//    }  // token destroyed, transition happens here safely
 //
 // 3. TERMINAL STATE ENFORCEMENT:
 //
@@ -154,7 +154,7 @@
 //                              Enables: isActive(), isInactive(), whenActive(), whenActiveOr(),
 //                                       tryGetActiveUnsafe(), requireActiveUnsafe()
 //   - PendingStates<Ts...>   - States that can be deferred during operations
-//                              Enables: beginOperation(), endOperation(), deferTransitionTo(), etc.
+//                              Enables: beginOperation() -> OperationToken, deferTransitionTo(), etc.
 //
 // NAMING CONVENTIONS:
 //   - isTerminal()  = current state is in TerminalStates (enforces no outgoing transitions)
@@ -259,9 +259,9 @@
 //   KJ_IF_SOME(err, state.tryGetErrorUnsafe()) { ... }
 //
 //   // Deferred transitions during operations
-//   state.beginOperation();
-//   state.deferTransitionTo<Closed>();  // Deferred until operation ends
-//   state.endOperation();               // Now transitions to Closed
+//   auto token = state.beginOperation();
+//   state.deferTransitionTo<Closed>();  // Deferred until token completes
+//   token->complete();                  // Now transitions to Closed
 //
 //   // Terminal enforcement
 //   state.transitionTo<Closed>();
@@ -365,15 +365,15 @@
 //   }
 //
 //   // After (with PendingStates<Closed>):
-//   void startOp() { state.beginOperation(); }
-//   void endOp() { state.endOperation(); }  // Auto-applies pending
+//   kj::Rc<OperationToken> startOp() { return state.beginOperation(); }
+//   // Call token->complete() when done, or let the token's destructor handle it.
 //   void close() { state.deferTransitionTo<Closed>(); }
 //
-//   // Or with RAII:
+//   // RAII usage (token IS the scope):
 //   void doWork() {
-//     auto op = state.scopedOperation();
+//     auto token = state.beginOperation();
 //     // ... work ...
-//   }  // endOperation() called automatically
+//   }  // token destroyed, pending state applied if last
 //
 // STEP 7: Update visitForGc
 // -------------------------
@@ -412,8 +412,11 @@
 //
 // =============================================================================
 
+#include <workerd/util/weak-refs.h>
+
 #include <kj/common.h>
 #include <kj/debug.h>
+#include <kj/memory.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
 
@@ -680,6 +683,43 @@ struct ValidatePendingSpec<StatesTuple, PendingStates<Ts...>> {
 }  // namespace _
 
 // =============================================================================
+// Operation Token
+// =============================================================================
+
+// A token representing an in-progress operation on a state machine with
+// PendingStates. While any tokens are outstanding, deferred transitions
+// (via deferTransitionTo) are queued rather than applied immediately.
+// When the last token is completed (or destroyed), any pending transition
+// is applied.
+//
+// Tokens hold a WeakRef to the state machine, so completing a token after
+// the state machine has been destroyed is a safe no-op.
+//
+// Usage:
+//   auto token = machine.beginOperation();
+//   // ... do work that might trigger deferred transitions ...
+//   bool applied = token->complete();
+//
+//   // Or just let the destructor handle it (RAII):
+//   {
+//     auto token = machine.beginOperation();
+//     // ... work ...
+//   }  // token destroyed, pending state applied if last
+class OperationToken: public kj::Refcounted {
+ public:
+  virtual ~OperationToken() noexcept(false) = default;
+  KJ_DISALLOW_COPY_AND_MOVE(OperationToken);
+
+  // Complete the operation. Returns true if a pending state was applied.
+  // Safe to call even if the state machine has been destroyed (returns false).
+  // Must not be called more than once.
+  KJ_WARN_UNUSED_RESULT virtual bool complete() = 0;
+
+ protected:
+  OperationToken() = default;
+};
+
+// =============================================================================
 // Transition Lock
 // =============================================================================
 
@@ -711,7 +751,7 @@ struct ValidatePendingSpec<StatesTuple, PendingStates<Ts...>> {
 // accessors here, we may want to support deferred transitions (queued until lock
 // release), but this raises design questions about conditional transitions.
 //
-// The relationship between TransitionLock (for safe state access) and OperationScope
+// The relationship between TransitionLock (for safe state access) and OperationToken
 // (for pending operation tracking with deferred transitions) also needs clarification.
 template <typename Machine>
 class TransitionLock {
@@ -776,7 +816,7 @@ class StateMachine;
 //   - TerminalStates<...> -> isTerminal(), enforces no transitions from terminal
 //   - ErrorState<T> -> isErrored(), tryGetErrorUnsafe(), getErrorUnsafe()
 //   - ActiveState<T> -> isActive(), isInactive(), whenActive(), tryGetActiveUnsafe()
-//   - PendingStates<...> -> beginOperation(), endOperation(), deferTransitionTo(), etc.
+//   - PendingStates<...> -> beginOperation() -> OperationToken, deferTransitionTo(), etc.
 
 template <typename... Args>
 class StateMachine {
@@ -865,12 +905,27 @@ class StateMachine {
   // Default constructor is private - use StateMachine::create<State>(...) instead.
   // This ensures all state machines are properly initialized.
 
-  // Destructor checks for outstanding locks
+  // Destructor checks for outstanding locks and invalidates the WeakRef so
+  // any outstanding OperationTokens become safe no-ops.
   ~StateMachine() {
+    if constexpr (HAS_PENDING) {
+      selfRef->invalidate();
+#ifdef KJ_DEBUG
+      // There really should not be any outstanding operations at this point, but log a warning
+      // if there are. We're not going to throw because we actually test that this is safe in
+      // the state-machine-test.c++
+      if (operationCount > 0) {
+        KJ_LOG(WARNING, "StateMachine destroyed with outstanding operations", operationCount);
+      }
+#endif
+    }
     KJ_DASSERT(transitionLockCount == 0, "StateMachine destroyed while transition locks are held");
   }
 
-  // Move operations - both source and destination must not have locks held
+  // Move operations - both source and destination must not have locks held.
+  // When HAS_PENDING, we invalidate the source's selfRef (so any tokens from
+  // the old address become no-ops) and create a fresh selfRef for the new address.
+  // Outstanding tokens from before the move will safely no-op on complete().
   StateMachine(StateMachine&& other) noexcept: state(kj::mv(other.state)), transitionLockCount(0) {
     KJ_DASSERT(other.transitionLockCount == 0,
         "Cannot move from StateMachine while transition locks are held");
@@ -878,19 +933,28 @@ class StateMachine {
       operationCount = other.operationCount;
       pendingState = kj::mv(other.pendingState);
       other.operationCount = 0;
+      other.selfRef->invalidate();
+      selfRef = kj::rc<WeakRef<StateMachine>>(kj::Badge<StateMachine>{}, *this);
     }
   }
 
   StateMachine& operator=(StateMachine&& other) noexcept {
     KJ_DASSERT(transitionLockCount == 0,
         "Cannot move-assign to StateMachine while transition locks are held");
+    KJ_DASSERT(!transitionInProgress,
+        "Cannot move-assign to StateMachine while a transition is in progress");
     KJ_DASSERT(other.transitionLockCount == 0,
         "Cannot move from StateMachine while transition locks are held");
+    KJ_DASSERT(!other.transitionInProgress,
+        "Cannot move from StateMachine while a transition is in progress");
     state = kj::mv(other.state);
     if constexpr (HAS_PENDING) {
       operationCount = other.operationCount;
       pendingState = kj::mv(other.pendingState);
       other.operationCount = 0;
+      other.selfRef->invalidate();
+      selfRef->invalidate();
+      selfRef = kj::rc<WeakRef<StateMachine>>(kj::Badge<StateMachine>{}, *this);
     }
     return *this;
   }
@@ -905,6 +969,8 @@ class StateMachine {
     requires(_::isInTuple<S, StatesTuple>)
   {
     StateMachine m;
+    m.transitionInProgress = true;
+    KJ_DEFER(m.transitionInProgress = false);
     m.state.template init<S>(kj::fwd<TArgs>(args)...);
     return m;
   }
@@ -1116,6 +1182,8 @@ class StateMachine {
     if constexpr (HAS_PENDING) {
       clearPendingState();
     }
+    transitionInProgress = true;
+    KJ_DEFER(transitionInProgress = false);
     return state.template init<S>(kj::fwd<TArgs>(args)...);
   }
 
@@ -1141,6 +1209,8 @@ class StateMachine {
     if constexpr (HAS_PENDING) {
       clearPendingState();
     }
+    transitionInProgress = true;
+    KJ_DEFER(transitionInProgress = false);
     return state.template init<S>(kj::fwd<TArgs>(args)...);
   }
 
@@ -1162,6 +1232,8 @@ class StateMachine {
     if constexpr (HAS_PENDING) {
       clearPendingState();
     }
+    transitionInProgress = true;
+    KJ_DEFER(transitionInProgress = false);
     return state.template init<To>(kj::fwd<TArgs>(args)...);
   }
 
@@ -1347,57 +1419,29 @@ class StateMachine {
   // ---------------------------------------------------------------------------
   // Pending State Features (enabled when PendingStates<...> is provided)
   // ---------------------------------------------------------------------------
-  //
-  // RECOMMENDATION: Prefer scopedOperation() RAII guard over manual
-  // beginOperation()/endOperation() calls. Manual calls are error-prone:
-  //
-  //   void badExample() {
-  //     machine.beginOperation();
-  //     if (condition) return;  // BUG: leaks operation count!
-  //     machine.endOperation();
-  //   }
-  //
-  //   void goodExample() {
-  //     auto op = machine.scopedOperation();
-  //     if (condition) return;  // OK: destructor calls endOperation()
-  //   }
-  //
-  //   void exampleWithEarlyEnd() {
-  //     auto op = machine.scopedOperation();
-  //     // ... do work ...
-  //     if (op.end()) {  // End early and check if transition occurred
-  //       // A pending state was applied
-  //     }
-  //   }  // destructor is now a no-op
-  //
-  // Manual beginOperation()/endOperation() may still be appropriate when:
-  //   - You need different exception handling (e.g., clearPendingState() before endOperation())
-  //   - You need to conditionally execute callbacks after the pending state is applied
 
-  // Mark that an operation is starting. While operations are in progress,
-  // certain transitions (via deferTransitionTo) will be deferred rather than
-  // applied immediately. Prefer scopedOperation() for automatic cleanup.
-  void beginOperation()
+  // Begin an operation that should defer state transitions until complete.
+  // Returns an OperationToken; while any tokens are outstanding, transitions
+  // via deferTransitionTo() are queued. When the last token is completed
+  // (or destroyed), any pending transition is applied.
+  //
+  // The token holds a WeakRef to this state machine, so completing it after
+  // the machine is destroyed is a safe no-op.
+  //
+  // Usage:
+  //   auto token = machine.beginOperation();
+  //   // ... do work that might trigger deferred transitions ...
+  //   bool applied = token->complete();
+  //
+  //   // Or just let the destructor handle it (RAII):
+  //   {
+  //     auto token = machine.beginOperation();
+  //   }  // pending state applied if this was the last token
+  kj::Rc<OperationToken> beginOperation()
     requires(HAS_PENDING)
   {
     ++operationCount;
-  }
-
-  // Mark that an operation has completed. If no more operations are pending
-  // and there's a deferred state transition, it will be applied.
-  // Returns true if a pending state was applied.
-  // Prefer scopedOperation() for automatic cleanup.
-  KJ_WARN_UNUSED_RESULT bool endOperation()
-    requires(HAS_PENDING)
-  {
-    KJ_REQUIRE(operationCount > 0, "endOperation() called without matching beginOperation()");
-    --operationCount;
-
-    if (operationCount == 0 && hasPendingState()) {
-      applyPendingStateImpl();
-      return true;
-    }
-    return false;
+    return kj::rc<OperationTokenImpl>(selfRef.addRef());
   }
 
   // Check if any operations are currently in progress.
@@ -1448,17 +1492,17 @@ class StateMachine {
 
   // Transition to a pending state. If no operation is in progress, the
   // transition happens immediately. Otherwise, it's deferred until all
-  // operations complete.
+  // outstanding operation tokens complete.
   //
   // Returns true if the transition happened immediately, false if deferred.
   //
   // IMPORTANT: First-wins semantics! If a pending state is already set, this
   // call is SILENTLY IGNORED. The first deferred transition wins:
   //
-  //   machine.beginOperation();
+  //   auto token = machine.beginOperation();
   //   machine.deferTransitionTo<Closed>();   // This one wins
   //   machine.deferTransitionTo<Errored>(e); // IGNORED - Closed already pending!
-  //   machine.endOperation();                // Transitions to Closed, not Errored
+  //   token->complete();                     // Transitions to Closed, not Errored
   //
   // If you need error to take precedence over close, you must either:
   //   1. Use forceTransitionTo<Errored>() which bypasses deferral, or
@@ -1477,6 +1521,8 @@ class StateMachine {
 
     if (operationCount == 0) {
       // No operation in progress, transition immediately
+      transitionInProgress = true;
+      KJ_DEFER(transitionInProgress = false);
       state.template init<S>(kj::fwd<TArgs>(args)...);
       return true;
     } else {
@@ -1513,61 +1559,6 @@ class StateMachine {
     kj::StringPtr result = "(unknown)"_kj;
     visitPendingStates([&result]<typename S>(const S&) { result = _::getStateName<S>(); });
     return result;
-  }
-
-  // RAII guard for operation tracking.
-  //
-  // EXCEPTION SAFETY: If endOperation() triggers a pending state transition
-  // and the state constructor throws, the exception will propagate from the
-  // destructor. This is generally acceptable since state machine corruption
-  // is unrecoverable, but be aware when using this in exception-sensitive code.
-  //
-  // TODO(maybe): Currently, OperationScope does not check for transition locks at
-  // construction time - it only throws when endOperation() tries to apply a pending
-  // state while locks are held. This allows legitimate interleaved patterns like:
-  // start operation -> acquire lock -> read state -> release lock -> end operation.
-  // However, if TransitionLock and OperationScope become the only public APIs for
-  // mutating their respective counts (i.e., beginOperation()/endOperation() and
-  // lockTransitions()/unlockTransitions() are made private or removed), it might be
-  // reasonable to throw at construction time, making the error easier to diagnose.
-  class OperationScope {
-   public:
-    explicit OperationScope(StateMachine& m): machine(&m) {
-      m.beginOperation();
-    }
-
-    ~OperationScope() noexcept(false) {
-      // Note: endOperation() may throw if pending state constructor throws.
-      // We mark this noexcept(false) to be explicit about this.
-      KJ_IF_SOME(m, machine) {
-        auto applied KJ_UNUSED = m.endOperation();
-      }
-    }
-
-    OperationScope(const OperationScope&) = delete;
-    OperationScope& operator=(const OperationScope&) = delete;
-    OperationScope(OperationScope&&) = delete;
-    OperationScope& operator=(OperationScope&&) = delete;
-
-    // End the operation early, returning whether a pending state was applied.
-    // After calling end(), the destructor becomes a no-op.
-    // Similar to kj::Locked<T>::unlock().
-    KJ_WARN_UNUSED_RESULT bool end() {
-      KJ_IF_SOME(m, machine) {
-        machine = kj::none;
-        return m.endOperation();
-      }
-      return false;
-    }
-
-   private:
-    kj::Maybe<StateMachine&> machine;
-  };
-
-  OperationScope scopedOperation()
-    requires(HAS_PENDING)
-  {
-    return OperationScope(*this);
   }
 
   // ---------------------------------------------------------------------------
@@ -1658,7 +1649,49 @@ class StateMachine {
  private:
   // Private default constructor - use create<State>() factory function instead.
   // Making this private ensures state machines are always initialized.
-  StateMachine() = default;
+  StateMachine()
+    requires(!HAS_PENDING)
+  = default;
+
+  StateMachine()
+    requires(HAS_PENDING)
+      : selfRef(kj::rc<WeakRef<StateMachine>>(kj::Badge<StateMachine>{}, *this)) {}
+
+  // OperationTokenImpl - the StateMachine-specific implementation of OperationToken.
+  // Holds a WeakRef to the state machine so that completing the token after the
+  // machine is destroyed is a safe no-op (instead of UAF).
+  class OperationTokenImpl final: public OperationToken {
+   public:
+    explicit OperationTokenImpl(kj::Rc<WeakRef<StateMachine>> weakRef): weak(kj::mv(weakRef)) {}
+
+    ~OperationTokenImpl() noexcept(false) override {
+      if (!completed) {
+        (void)complete();
+      }
+    }
+
+    bool complete() override {
+      KJ_REQUIRE(!completed, "OperationToken already completed");
+      completed = true;
+      bool applied = false;
+      weak->runIfAlive([&](StateMachine& machine) {
+        KJ_REQUIRE(
+            machine.operationCount > 0, "OperationToken completed but operationCount is already 0");
+        --machine.operationCount;
+        if (machine.operationCount == 0 && machine.hasPendingState()) {
+          machine.applyPendingStateImpl();
+          applied = true;
+        }
+      });
+      return applied;
+    }
+
+   private:
+    kj::Rc<WeakRef<StateMachine>> weak;
+    bool completed = false;
+  };
+
+  friend class WeakRef<StateMachine>;
 
   StateUnion state;
 
@@ -1669,10 +1702,27 @@ class StateMachine {
   // indicates "does not transition the state machine", not "thread-safe".
   mutable uint32_t transitionLockCount = 0;
 
+  // Flag to suppress GC tracing during state transitions. kj::OneOf::init()
+  // sets its tag to 0 before running the old variant's destructor and before
+  // constructing the new variant. If V8 GC fires during that window (e.g.,
+  // because a destructor rejects promises or a constructor allocates), the
+  // state machine's visitForGcImpl would see tag=0 and skip tracing any
+  // TracedReferences that the old variant held. V8 then frees the untraced
+  // handle nodes, leaving stale pointers that segfault on the next GC cycle.
+  // Setting this flag around every init() call makes visitForGc a no-op
+  // during that window, which is correct: there is nothing valid to trace.
+  bool transitionInProgress = false;
+
   // Pending state support (only allocated when HAS_PENDING is true)
   // Using _::Empty instead of char for proper [[no_unique_address]] optimization
   WD_NO_UNIQUE_ADDRESS std::conditional_t<HAS_PENDING, StateUnion, _::Empty> pendingState{};
   WD_NO_UNIQUE_ADDRESS std::conditional_t<HAS_PENDING, uint32_t, _::Empty> operationCount{};
+
+  // WeakRef for OperationToken safety. Tokens hold an addRef() of this so they
+  // can safely detect if the state machine has been destroyed. Initialized in
+  // the private default constructor. Only present when HAS_PENDING is true.
+  WD_NO_UNIQUE_ADDRESS
+  std::conditional_t<HAS_PENDING, kj::Rc<WeakRef<StateMachine>>, _::Empty> selfRef;
 
   void requireUnlocked() const {
     KJ_REQUIRE(transitionLockCount == 0,
@@ -1760,13 +1810,13 @@ class StateMachine {
     requires(HAS_PENDING)
   {
     // Applying a pending state is a transition, so we must not be locked.
-    // This prevents UAF when endOperation() is called inside a whenState() callback:
+    // This prevents UAF when a token completes inside a whenState() callback:
     //
     //   machine.whenState<Active>([&](Active& a) {
     //     {
-    //       auto op = machine.scopedOperation();
+    //       auto token = machine.beginOperation();
     //       machine.deferTransitionTo<Closed>();
-    //     }  // op destroyed here - would transition while 'a' is still in use!
+    //     }  // token destroyed here - would transition while 'a' is still in use!
     //     a.doSomething();  // UAF if transition happened above
     //   });
     //
@@ -1784,6 +1834,8 @@ class StateMachine {
       }
     }
 
+    transitionInProgress = true;
+    KJ_DEFER(transitionInProgress = false);
     visitPendingStates([this]<typename S>(S& s) { this->state.template init<S>(kj::mv(s)); });
     pendingState = StateUnion();
   }
@@ -1842,6 +1894,12 @@ class StateMachine {
   // Helper for visitForGc - visits the current state if the visitor can handle it
   template <typename Visitor, size_t... Is>
   void visitForGcImpl(Visitor& visitor, std::index_sequence<Is...>) {
+    // Skip tracing while a state transition is in progress. During
+    // kj::OneOf::init(), the tag is 0 while the old variant's destructor
+    // runs and the new variant is being constructed. If V8 GC fires in
+    // that window, there is nothing valid to trace.
+    if (transitionInProgress) return;
+
     auto tryVisit = [&]<size_t I>(StateUnion& s) {
       using S = std::tuple_element_t<I, StatesTuple>;
       if (s.template is<S>()) {
@@ -1862,6 +1920,8 @@ class StateMachine {
 
   template <typename Visitor, size_t... Is>
   void visitForGcImpl(Visitor& visitor, std::index_sequence<Is...>) const {
+    if (transitionInProgress) return;
+
     auto tryVisit = [&]<size_t I>(const StateUnion& s) {
       using S = std::tuple_element_t<I, StatesTuple>;
       if (s.template is<S>()) {
@@ -2069,8 +2129,8 @@ class StateMachine {
 //
 //   state.transitionTo<Active>();
 //
-//   // Start an operation
-//   state.beginOperation();  // Or: auto scope = state.scopedOperation();
+//   // Start an operation (returns a token)
+//   auto token = state.beginOperation();
 //
 //   // Close is requested, but we're mid-operation - defer it
 //   state.deferTransitionTo<Closed>();
@@ -2079,12 +2139,12 @@ class StateMachine {
 //   KJ_EXPECT(state.hasPendingState());    // Close is pending
 //
 //   // Complete the operation - pending state is auto-applied
-//   state.endOperation();
+//   token->complete();
 //   KJ_EXPECT(state.is<Closed>());         // Now closed!
 //
-//   // Common pattern for streams:
+//   // Common pattern for streams (RAII via token destructor):
 //   void doRead(jsg::Lock& js) {
-//     auto scope = state.scopedOperation();  // RAII operation tracking
+//     auto token = state.beginOperation();  // RAII operation tracking
 //
 //     if (state.hasPendingState()) {
 //       // Don't start new work, we're shutting down
@@ -2092,7 +2152,7 @@ class StateMachine {
 //     }
 //
 //     // ... do the read ...
-//   }  // Operation ends, pending state applied if any
+//   }  // token destroyed, pending state applied if last
 //
 // Example 9: Visitor Pattern
 // --------------------------

@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  autogates = ["workerd-autogate-enable-draining-read-on-standard-streams"],
+  services = [
+    ( name = "autovuln-262-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "autovuln-262-test.js")
+        ],
+        compatibilityFlags = ["streams_enable_constructors"],
+      )
+    ),
+  ],
+);

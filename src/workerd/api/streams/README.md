@@ -299,10 +299,16 @@ Implemented in `readable-source-adapter.{h,c++}`.
 - **Entry point**: `deferControllerStateChange()` in `standard.h`
 
 ```cpp
-controller.state.beginOperation();  // Increment counter
-auto result = readCallback();       // May trigger JS that calls close()
-controller.state.endOperation();    // Apply pending state if counter == 0
+auto token = controller.state.beginOperation();  // Get operation token
+auto result = readCallback();                     // May trigger JS that calls close()
+token->complete();                                // Apply pending state if last token
 ```
+
+The `token` object is an RAII guard. If the operation completes normally, `complete()` applies
+any pending state.
+
+The `token` is a refcounted `kj::Rc<OperationToken>`, allowing multiple concurrent paths to
+participate in the same operation (e.g. `token.addRef()`).
 
 ### Pattern: Consumer Snapshot
 
@@ -426,6 +432,20 @@ struct Write {
     kj::ArrayPtr<kj::byte> bytes;          // Raw pointer into ownBytes
 };
 ```
+
+### Pattern: Post JS re-entrancy validation
+
+Operations like `resolver.resolve(js, obj)` can trigger user JavaScript, leading
+to potential re-entrancy issues. Various patterns are used to re-validate safe
+access to member variables on the stack. Most of these involve checking weak refs;
+others involve check canary variables held on the stack.
+
+### Defensive copy / transfer of backing stores
+
+JavaScript ArrayBuffer's can be created as resizable, or may be detached. Where
+appropriate, we implement transfer semantics to take exclusive ownership of the
+ArrayBuffer and where exclusive ownership is not possible we either copy or proactively
+perform size revalidation before access.
 
 ## Cross-Request Model
 
