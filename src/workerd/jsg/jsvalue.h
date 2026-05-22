@@ -309,7 +309,7 @@ class JsSharedArrayBuffer final: public JsBase<v8::SharedArrayBuffer, JsSharedAr
   // Return a copy of this buffer's data as a kj::Array.
   kj::Array<kj::byte> copy();
 
-  // A JsArrayBuffer can be used as a JsBufferSource, which is a more general type that
+  // A JsSharedArrayBuffer can be used as a JsBufferSource, which is a more general type that
   // also includes JsArrayBufferView.
   operator JsBufferSource() const;
 
@@ -346,8 +346,7 @@ class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferV
     auto byteOffset = inner->ByteOffset();
     // Sandbox hardening: validate that the view's byte range falls within the
     // backing store's trusted size. In-cage ByteOffset/ByteLength fields can be
-    // corrupted by a stage-2a attacker; buf->ByteLength() is the trusted
-    // out-of-cage value.
+    // corrupted by an attacker; buf->ByteLength() is the trusted out-of-cage value.
     auto bufSize = buf->ByteLength();
     if (byteOffset + byteLength > bufSize) [[unlikely]] {
       return nullptr;
@@ -433,8 +432,7 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
     auto byteOffset = inner->ByteOffset();
     // Sandbox hardening: validate that the view's byte range falls within the
     // backing store's trusted size. In-cage ByteOffset/ByteLength fields can be
-    // corrupted by a stage-2a attacker; buf->ByteLength() is the trusted
-    // out-of-cage value.
+    // corrupted by an attacker; buf->ByteLength() is the trusted out-of-cage value.
     auto bufSize = buf->ByteLength();
     if (byteOffset + byteLength > bufSize) [[unlikely]] {
       return nullptr;

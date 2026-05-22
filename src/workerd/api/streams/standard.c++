@@ -1184,10 +1184,6 @@ void ReadableImpl<Self>::close(jsg::Lock& js) {
   // queue.close(js) can trigger re-entrant JS (via thenable check during
   // promise resolution of pending reads) that calls controller.error() or
   // reader.cancel(), transitioning the state to a terminal state.
-  // We must NOT throw here — the re-entrant code ran inside V8's promise
-  // resolution machinery, and throwing a C++ exception through V8's internal
-  // frames is undefined behavior (V8 is not exception-safe). The stream is
-  // already in a terminal state, so silently return.
   if (state.isTerminal()) {
     return;
   }
@@ -1302,6 +1298,8 @@ void ReadableImpl<Self>::forcePullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
 
 template <typename Self>
 void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
+  // TODO(soon): We should also visit the errored state but we need to ensure that
+  // the state machine is not in an invalid state before we do.
   KJ_IF_SOME(pendingCancel, maybePendingCancel) {
     visitor.visit(pendingCancel.fulfiller, pendingCancel.promise);
   }
@@ -4177,7 +4175,7 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
 
   state.transitionTo<StreamStates::Closed>();
   KJ_IF_SOME(locked, lock.state.tryGetUnsafe<WriterLocked>()) {
-    // Callig maybeResolvePromise below can trigger user JavaScript to run, which could cause
+    // Calling maybeResolvePromise below can trigger user JavaScript to run, which could cause
     // the locked reference to be invalidated. Grab what we need up front.
     auto closedFulfiller = kj::mv(locked.getClosedFulfiller());
     auto readyFulfiller = kj::mv(locked.getReadyFulfiller());

@@ -766,7 +766,7 @@ class ValueQueue final {
     // Note that we intentionally do not trace the resolver here. The ReadRequest is held by
     // a kj::Own. The ownership of the own is passed around, not the actual ReadRequest. If we
     // traced the resolved, it would become weak and could be collected by GC while there are
-    // still live references to the kj::On that holds it. By not tracing it, we ensure the resolver
+    // still live references to the kj::Own that holds it. By not tracing it, we ensure the resolver
     // remains a strong root for GC purposes as long as there are any references to it.
   };
 
@@ -963,7 +963,7 @@ class ByteQueue final {
     // Note that we intentionally do not trace the resolver or pull-into store here.
     // The ReadRequest is held by a kj::Own. The ownership of the own is passed around, not
     // the actual ReadRequest. If we traced the resolved, it would become weak and could be
-    // collected by GC while there are still live references to the kj::On that holds it. By
+    // collected by GC while there are still live references to the kj::Own that holds it. By
     // not tracing it, we ensure the resolver remains a strong root for GC purposes as long as
     // there are any references to it.
   };

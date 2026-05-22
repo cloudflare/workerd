@@ -924,7 +924,7 @@ bool ByteQueue::ByobRequest::respond(
   JSG_REQUIRE(handle.size() > 0, RangeError,
       "The destination buffer for the BYOB read request was resized to zero, so it cannot be used to respond to the request.");
 
-  // Warning... do do not sourcePtr after anything that could run user code without
+  // Warning... do not use sourcePtr after anything that could run user code without
   // first checking that the underlying request buffer is still valid.
   auto sourcePtr = handle.asArrayPtr();
 
@@ -1086,7 +1086,7 @@ bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferSour
       "The given view has an invalid byte offset and length that exceed the bounds of the "
       "original buffer.");
 
-  // Fourth check, the new vie must have the same byte offset as the expectedOffset.
+  // Fourth check, the new view must have the same byte offset as the expectedOffset.
   JSG_REQUIRE(
       expectedOffset == view.getOffset(), RangeError, "The given view has an invalid byte offset.");
 
@@ -1635,7 +1635,7 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
           auto sourceStart = sourcePtr.slice(entry.offset);
           KJ_ASSERT(sourceStart.size() > 0);
 
-          // The pending request request contains a handle to a destination buffer
+          // The pending request contains a handle to a destination buffer
           // into which we will copy data from the current entry. We need to get a
           // pointer to the start of the remaining space in the destination buffer,
           // as well as the amount of space remaining in the destination buffer, so we
@@ -1818,7 +1818,7 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
   KJ_ASSERT(weak->isValid());
 
   // When we get here, the consumer should also still be in the active (Ready) state.
-  // If we're not, the the state reference we use belo is invalid/dangling, and we
+  // If we're not, the state reference we use below is invalid/dangling, and we
   // don't want a dangling state, now do we?
   KJ_ASSERT(consumer.state.isActive());
 

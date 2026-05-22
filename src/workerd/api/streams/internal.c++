@@ -563,7 +563,6 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             }
             KJ_IF_SOME(o, owner) {
               o.signalEof(js);
-            } else {
             }
             if (isByob && FeatureFlags::get(js).getInternalStreamByobReturn()) {
               return js.resolvedPromise(ReadResult{
@@ -617,7 +616,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
 
           // Sandbox hardening: validate that the view's byte range doesn't exceed the
           // backing store's trusted size. With a corrupted in-cage byteOffset (via a
-          // stage-2a V8 sandbox escape primitive), asArrayPtr() would compute a pointer
+          // V8 sandbox escape primitive), asArrayPtr() would compute a pointer
           // outside the backing allocation. This check ensures we don't write there.
           auto viewOffset = handle.getOffset();
           auto backingSize = handle.getBuffer().size();
@@ -725,7 +724,6 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
           }
           KJ_IF_SOME(o, owner) {
             o.signalEof(js);
-          } else {
           }
           return js.resolvedPromise(DrainingReadResult{.done = true});
         }
@@ -1887,7 +1885,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
             // deeper integration with the implementation of pumpTo(). Oh well. One consequence
             // of this is that if there is an error on the writable side, we error the readable
             // side, rather than close (cancel) it, which is what the spec would have us do.
-            // TODO(now): Warn on the console about this.
+            // TODO(soon): Warn on the console about this.
             sourceRef.error(js, handle);
             // Release the readable's pipe lock — same rationale as the success
             // path: the KJ tryPumpTo path has no loop iteration to detect the

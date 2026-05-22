@@ -219,7 +219,7 @@ KJ_TEST("Phantom Pipe in queue after AbortSignal — checkSignal preventAbort "
   // pipeTo(JS-backed source, internal-backed sink) with a signal that fires
   // during pull(). checkSignal's preventAbort branch must pop the Pipe from
   // the queue so handlePromise.success bails on queue.empty() instead of
-  // dereferencing a stale sourceRef at internal.c++:1807.
+  // dereferencing a stale sourceRef in internal.c++
 
   capnp::MallocMessageBuilder flagsBuilder;
   auto featureFlags = flagsBuilder.initRoot<CompatibilityFlags>();
@@ -318,7 +318,7 @@ KJ_TEST("Source error mid-pipe — pipeLoop tryGetErrored branch") {
   // We deliberately do NOT capture the source jsg::Ref in the .then
   // continuations so the source's PipeLocked storage actually goes through
   // heap free before the pipe's async continuations run. That gives ASAN a
-  // clean heap-use-after-free pre-fix at internal.c++:1815.
+  // clean heap-use-after-free pre-fix in internal.c++.
 
   capnp::MallocMessageBuilder flagsBuilder;
   auto featureFlags = flagsBuilder.initRoot<CompatibilityFlags>();

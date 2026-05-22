@@ -401,7 +401,7 @@ class WritableStreamInternalController: public WritableStreamController {
       // When pipeLoop captures a source error before releasing `source`, the
       // error is stashed here so handlePromise.success can still settle the
       // pipe promise with the right reason without needing a (now-gone)
-      // source reference.
+      // source reference. Mutually exclusive with `source`.
       kj::Maybe<jsg::JsRef<jsg::JsValue>> capturedSourceError;
 
       State(WritableStreamInternalController& parent,
