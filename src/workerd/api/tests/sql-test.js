@@ -1415,6 +1415,26 @@ export class DurableObjectExample extends DurableObject {
     assert.deepEqual([...cursor], [{ i: 123 }]);
   }
 
+  // Regression test for https://github.com/cloudflare/workerd/issues/5977
+  // An ODR violation caused kj::_::intHash32() to compile to different implementations
+  // (CRC32 vs Thomas Wang) in different translation units. This meant entries were inserted
+  // into the statement cache with one hash but looked up during eviction with another.
+  // When the bug is present, the HashIndex detects the mismatch and logs:
+  //   "kj/table.c++: error: HashIndex detected hash table inconsistency."
+  // To reproduce, we need to exceed SQL_STATEMENT_CACHE_MAX_SIZE (1MB) so that the cache
+  // eviction path in sql.c++ actually runs.
+  async testStatementCacheEviction() {
+    const sql = this.state.storage.sql;
+    const stmtSize = 50_000; // ~50KB per statement
+    const stmtCount = 25; // 25 * 50KB = ~1.25MB, exceeds the 1MB cache limit
+    const padding = 'x'.repeat(stmtSize);
+
+    for (let i = 0; i < stmtCount; i++) {
+      // Each statement must be unique to avoid hitting the cache. The padding pushes it to ~50KB.
+      sql.exec(`SELECT 1 /* stmt_${i}_${padding} */`);
+    }
+  }
+
   async testSessionsAPIBookmark(previousBookmark) {
     if (previousBookmark) {
       await this.state.storage.waitForBookmark(previousBookmark);
@@ -1540,6 +1560,13 @@ export let testMultiStatement = {
   async test(ctrl, env, ctx) {
     let stub = env.ns.get(env.ns.idFromName('multi-statement-test'));
     await stub.testMultiStatement();
+  },
+};
+
+export let testStatementCacheEviction = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('statement-cache-eviction-test'));
+    await stub.testStatementCacheEviction();
   },
 };
 
