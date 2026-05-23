@@ -212,6 +212,7 @@ wd_cc_library(
         ":channel-token_capnp",
         "//src/workerd/io",
         "//src/workerd/util:entropy",
+        "@ssl",
     ],
 )
 
@@ -228,6 +229,9 @@ wd_cc_library(
         ":alarm-scheduler",
         ":channel-token",
         ":channel-token_capnp",
+        ":cluster-lock",
+        ":cluster-registry",
+        ":cluster_capnp",
         ":container-client",
         ":facet-tree-index",
         ":fallback-service",
@@ -244,6 +248,7 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
+        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
