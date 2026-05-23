@@ -5,6 +5,7 @@
 #include "server.h"
 
 #include "alarm-scheduler.h"
+#include "cluster-lock.h"
 #include "container-client.h"
 #include "pyodide.h"
 #include "workerd-api.h"
@@ -46,6 +47,7 @@
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
 #include <capnp/rpc-twoparty.h>
+#include <capnp/rpc.h>
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
@@ -1915,6 +1917,8 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
     kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
     kj::Maybe<kj::Network&> workerdDebugPortNetwork;
+    kj::Maybe<ClusterRegistry&> clusterRegistry;
+    kj::Maybe<capnp::RpcSystem<cluster::VatId>&> clusterRpc;
   };
   using LinkCallback =
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
@@ -1971,9 +1975,11 @@ class Server::WorkerService final: public Service,
       }
 
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
-      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
-          kj::systemPreciseCalendarClock(), threadContext.getUnsafeTimer(),
-          threadContext.getByteStreamFactory(), channelTokenHandler, network, dockerPath,
+      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass),
+          // Dynamic workers can't have actor namespaces, so `serviceName` must be available here.
+          KJ_ASSERT_NONNULL(serviceName), entry.key, entry.value, kj::systemPreciseCalendarClock(),
+          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(),
+          threadContext.getHttpOverCapnpFactory(), channelTokenHandler, network, dockerPath,
           containerEgressInterceptorImage, waitUntilTasks);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
@@ -2078,7 +2084,7 @@ class Server::WorkerService final: public Service,
     auto linked = callback(*this, errorReporter);
 
     for (auto& ns: actorNamespaces) {
-      ns.value->link(linked.actorStorage);
+      ns.value->link(linked.actorStorage, linked.clusterRegistry, linked.clusterRpc);
     }
 
     ioChannels = kj::mv(linked);
@@ -2248,35 +2254,61 @@ class Server::WorkerService final: public Service,
   class ActorNamespace final {
    public:
     ActorNamespace(kj::Own<ActorClass> actorClass,
+        kj::StringPtr serviceName,
+        kj::StringPtr className,
         const ActorConfig& config,
         const kj::Clock& clock,
         kj::Timer& timer,
         capnp::ByteStreamFactory& byteStreamFactory,
+        capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
         ChannelTokenHandler& channelTokenHandler,
         kj::Network& dockerNetwork,
         kj::Maybe<kj::StringPtr> dockerPath,
         kj::Maybe<kj::StringPtr> containerEgressInterceptorImage,
         kj::TaskSet& waitUntilTasks)
         : actorClass(kj::mv(actorClass)),
+          serviceName(serviceName),
+          className(className),
           config(config),
           clock(clock),
           timer(timer),
           byteStreamFactory(byteStreamFactory),
+          httpOverCapnpFactory(httpOverCapnpFactory),
           channelTokenHandler(channelTokenHandler),
           dockerNetwork(dockerNetwork),
           dockerPath(dockerPath),
           containerEgressInterceptorImage(containerEgressInterceptorImage),
           waitUntilTasks(waitUntilTasks) {}
 
-    void link(kj::Maybe<const kj::Directory&> serviceActorStorage) {
+    class ClusterActorChannel;
+
+    void link(kj::Maybe<const kj::Directory&> serviceActorStorage,
+        kj::Maybe<ClusterRegistry&> clusterRegistry,
+        kj::Maybe<capnp::RpcSystem<cluster::VatId>&> clusterRpc) {
       KJ_IF_SOME(dir, serviceActorStorage) {
         KJ_IF_SOME(d, config.tryGet<Durable>()) {
-          this->actorStorage.emplace(dir.openSubdir(
-              kj::Path({d.uniqueKey}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY));
+          this->actorStorage.emplace(dir.openSubdir(kj::Path({d.uniqueKey}),
+                                         kj::WriteMode::CREATE | kj::WriteMode::MODIFY),
+              *this);
+          KJ_IF_SOME(registry, clusterRegistry) {
+            auto& rpc = KJ_ASSERT_NONNULL(clusterRpc);
+            this->clusterRegistry = registry;
+            auto lockDirectory = KJ_ASSERT_NONNULL(this->actorStorage)
+                                     .directory->openSubdir(kj::Path({"locks"}),
+                                         kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+            this->lockManager.emplace(kj::mv(lockDirectory), registry, rpc, timer);
+          }
         }
       }
 
       KJ_IF_SOME(d, config.tryGet<Durable>()) {
+        if (lockManager != kj::none) {
+          // TODO(clustering): Support alarms in cluster mode. Until then, we must skip creating
+          //   an AlarmScheduler altogether otherwise multiple instances will fight over the alarm
+          //   database.
+          return;
+        }
+
         auto idFactory = kj::heap<ActorIdFactoryImpl>(d.uniqueKey);
         AlarmScheduler::GetActorFn getActor =
             [this, idFactory = kj::mv(idFactory)](
@@ -2308,6 +2340,8 @@ class Server::WorkerService final: public Service,
       return config;
     }
 
+    // Get the ActorChannel for the given actor ID, routing to the appropriate workerd instance
+    // if needed.
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
       KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
         KJ_IF_SOME(name, doId->getName()) {
@@ -2320,7 +2354,43 @@ class Server::WorkerService final: public Service,
         }
       }
 
-      return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)));
+      KJ_IF_SOME(ld, lockManager) {
+        auto key = actorKey(id);
+
+        // First check if the container exists locally.
+        KJ_IF_SOME(container, actors.find(key)) {
+          return kj::refcounted<ActorChannelImpl>(container->addRef());
+        }
+
+        auto promise = ld.acquireOrRoute(key);
+        return kj::refcounted<PromisedActorChannel>(
+            promise.then([this, id = kj::mv(id), key = kj::mv(key)](
+                             kj::OneOf<ClusterLockManager::OwnedLock, rpc::WorkerdDebugPort::Client>
+                                 lockOrClient) mutable -> kj::Own<IoChannelFactory::ActorChannel> {
+          KJ_SWITCH_ONEOF(lockOrClient) {
+            KJ_CASE_ONEOF(ownership, ClusterLockManager::OwnedLock) {
+              return kj::refcounted<ActorChannelImpl>(
+                  createActorContainer(kj::mv(key), kj::mv(id), kj::mv(ownership)));
+            }
+            KJ_CASE_ONEOF(debugPort, rpc::WorkerdDebugPort::Client) {
+              auto req = debugPort.getActorRequest(capnp::MessageSize{32, 0});
+              req.setService(serviceName);
+              req.setEntrypoint(className);
+              req.setActorId(key);
+              KJ_IF_SOME(i, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
+                KJ_IF_SOME(name, i->getName()) {
+                  req.setActorName(name);
+                }
+              }
+              return kj::refcounted<RpcActorChannel>(
+                  byteStreamFactory, httpOverCapnpFactory, req.send().getActor());
+            }
+          }
+          KJ_UNREACHABLE;
+        }));
+      } else {
+        return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)));
+      }
     }
 
     class ActorContainer;
@@ -2353,7 +2423,8 @@ class Server::WorkerService final: public Service,
           ActorNamespace& ns,
           kj::Maybe<ActorContainer&> parent,
           kj::OneOf<ClassAndId, kj::Promise<ClassAndId>> classAndIdParam,
-          kj::Timer& timer)
+          kj::Timer& timer,
+          kj::Maybe<ClusterLockManager::OwnedLock> ownershipLock = kj::none)
           : key(kj::mv(key)),
             tracker(kj::refcounted<RequestTracker>(*this)),
             ns(ns),
@@ -2361,7 +2432,8 @@ class Server::WorkerService final: public Service,
                      .orDefault(*this)),
             parent(parent),
             timer(timer),
-            lastAccess(timer.now()) {
+            lastAccess(timer.now()),
+            ownershipLock(kj::mv(ownershipLock)) {
         KJ_SWITCH_ONEOF(classAndIdParam) {
           KJ_CASE_ONEOF(value, ClassAndId) {
             // `classAndId` is immediately available.
@@ -2623,6 +2695,7 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
       kj::Maybe<kj::Exception> brokenReason;
+      kj::Maybe<ClusterLockManager::OwnedLock> ownershipLock;  // in cluster mode
 
       // Reference to the ContainerClient (if container is enabled for this actor)
       kj::Maybe<kj::Own<ContainerClient>> containerClient;
@@ -2666,6 +2739,7 @@ class Server::WorkerService final: public Service,
               ns.actorStorage, "can't call getFacetId() when there's no backing storage");
           auto indexFile = as.directory->openFile(
               kj::Path({kj::str(key, ".facets")}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+          ns.verifyRegistration();
           return *facetTreeIndex.emplace(kj::heap<FacetTreeIndex>(kj::mv(indexFile)));
         }
       }
@@ -2816,7 +2890,9 @@ class Server::WorkerService final: public Service,
             KJ_IF_SOME(as, ns.actorStorage) {
               kj::Own<ActorSqlite::Hooks> sqliteHooks;
               if (parent == kj::none) {
-                KJ_IF_SOME(a, ns.alarmScheduler) {
+                if (ns.lockManager != kj::none) {
+                  sqliteHooks = kj::heap<ClusterActorSqliteHooks>();
+                } else KJ_IF_SOME(a, ns.alarmScheduler) {
                   sqliteHooks = kj::heap<ActorSqliteHooks>(a, ActorKey{.actorId = key});
                 } else {
                   // No alarm scheduler available, use default hooks instance.
@@ -2834,9 +2910,15 @@ class Server::WorkerService final: public Service,
 
               // Before we do anything, make sure the database is in WAL mode. We also need to
               // do this after reset() is used, so register a callback for that.
+              if (ns.nfsMode()) {
+                db->run("PRAGMA locking_mode=EXCLUSIVE;");
+              }
               db->run("PRAGMA journal_mode=WAL;");
 
               db->afterReset([this, &dir = *as.directory, selfId](SqliteDatabase& db) {
+                if (ns.nfsMode()) {
+                  db.run("PRAGMA locking_mode=EXCLUSIVE;");
+                }
                 db.run("PRAGMA journal_mode=WAL;");
 
                 // reset() is used when the app called deleteAll(), in which case we also want to
@@ -2920,19 +3002,25 @@ class Server::WorkerService final: public Service,
       }
     };
 
-    kj::Own<ActorContainer> getActorContainer(Worker::Actor::Id id) {
-      kj::String key;
-
+    kj::String actorKey(Worker::Actor::Id& id) {
       KJ_SWITCH_ONEOF(id) {
         KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
           KJ_REQUIRE(config.is<Durable>());
-          key = obj->toString();
+          return obj->toString();
         }
         KJ_CASE_ONEOF(str, kj::String) {
           KJ_REQUIRE(config.is<Ephemeral>());
-          key = kj::str(str);
+          return kj::str(str);
         }
       }
+      KJ_UNREACHABLE;
+    }
+
+    // Get or create an ActorContainer. Use only when NOT in cluster mode.
+    kj::Own<ActorContainer> getActorContainer(Worker::Actor::Id id) {
+      KJ_REQUIRE(lockManager == kj::none);
+
+      kj::String key = actorKey(id);
 
       return actors
           .findOrCreate(key, [&]() mutable {
@@ -2942,6 +3030,18 @@ class Server::WorkerService final: public Service,
         return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
           container->getKey(), kj::mv(container)};
       })->addRef();
+    }
+
+    // Create an ActorContainer in cluster mode.
+    kj::Own<ActorContainer> createActorContainer(
+        kj::String key, Worker::Actor::Id id, ClusterLockManager::OwnedLock ownership) {
+      KJ_ASSERT(actors.find(key) == kj::none);
+
+      auto container = kj::refcounted<ActorContainer>(kj::str(key), *this, kj::none,
+          ActorContainer::ClassAndId(kj::addRef(*actorClass), kj::mv(id)), timer,
+          kj::mv(ownership));
+      actors.insert(container->getKey(), container->addRef());
+      return container;
     }
 
     kj::Own<ContainerClient> getContainerClient(
@@ -3036,6 +3136,8 @@ class Server::WorkerService final: public Service,
 
    private:
     kj::Own<ActorClass> actorClass;
+    kj::StringPtr serviceName;
+    kj::StringPtr className;
     const ActorConfig& config;
     const kj::Clock& clock;
 
@@ -3043,15 +3145,21 @@ class Server::WorkerService final: public Service,
       kj::Own<const kj::Directory> directory;
       SqliteDatabase::Vfs vfs;
 
-      ActorStorage(kj::Own<const kj::Directory> directoryParam)
+      ActorStorage(kj::Own<const kj::Directory> directoryParam, ActorNamespace& ns)
           : directory(kj::mv(directoryParam)),
-            vfs(*directory) {}
+            vfs(*directory,
+                SqliteDatabase::VfsOptions{
+                  .afterOpen = kj::Function<void()>(KJ_BIND_METHOD(ns, verifyRegistration)),
+                }) {}
     };
 
     // Note: The Vfs, actorStorage, and ownAlarmScheduler must not be torn down until all actors
     // have been torn down, so we declare them before `actors`.
     kj::Maybe<ActorStorage> actorStorage;
     kj::Maybe<kj::Own<AlarmScheduler>> ownAlarmScheduler;
+
+    kj::Maybe<ClusterRegistry&> clusterRegistry;
+    kj::Maybe<ClusterLockManager> lockManager;
 
     // Tracks the canceler and cleanup promise for a Docker container's lifecycle cleanup.
     // Useful to await on async calls of a ContainerClient destructor when the new
@@ -3088,6 +3196,7 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
     capnp::ByteStreamFactory& byteStreamFactory;
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
     ChannelTokenHandler& channelTokenHandler;
     kj::Network& dockerNetwork;
     kj::Maybe<kj::StringPtr> dockerPath;
@@ -3131,6 +3240,23 @@ class Server::WorkerService final: public Service,
       }
     }
 
+    bool nfsMode() {
+      KJ_IF_SOME(r, clusterRegistry) {
+        return r.nfsMode();
+      } else {
+        return false;
+      }
+    }
+
+    // Callback called immediately after any actor storage file is opened to verify that the
+    // registry lock is still held, and therefore the new open must be on the same NFS lease as
+    // the registry lock.
+    void verifyRegistration() {
+      KJ_IF_SOME(r, clusterRegistry) {
+        r.verifyNfsLease();
+      }
+    }
+
     // Implements actor loopback, which is used by websocket hibernation to deliver events to the
     // actor from the websocket's read loop.
     class Loopback: public Worker::Actor::Loopback, public kj::Refcounted {
@@ -3169,6 +3295,43 @@ class Server::WorkerService final: public Service,
      private:
       AlarmScheduler& alarmScheduler;
       ActorKey actor;
+    };
+
+    class ClusterActorSqliteHooks final: public ActorSqlite::Hooks {
+     public:
+      kj::Promise<void> scheduleRun(
+          kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
+        // TODO(clustering): Support alarms.
+        JSG_FAIL_REQUIRE(Error, "Durable Object alarms are not yet supported in cluster mode");
+      }
+    };
+
+    // ActorChannel implementation wrapping a `WorkerdBootstrap` RPC stub.
+    class RpcActorChannel final: public IoChannelFactory::ActorChannel {
+     public:
+      RpcActorChannel(capnp::ByteStreamFactory& byteStreamFactory,
+          capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+          rpc::WorkerdBootstrap::Client client)
+          : byteStreamFactory(byteStreamFactory),
+            httpOverCapnpFactory(httpOverCapnpFactory),
+            client(kj::mv(client)) {}
+
+      kj::Own<WorkerInterface> startRequest(
+          IoChannelFactory::SubrequestMetadata metadata) override {
+        capnp::MessageSize sizeHint{4, 0};
+        KJ_IF_SOME(cf, metadata.cfBlobJson) {
+          sizeHint.wordCount += cf.size() / sizeof(capnp::word);
+        }
+
+        auto dispatcher = client.startEventRequest(sizeHint).sendForPipeline().getDispatcher();
+        return kj::heap<RpcWorkerInterface>(
+            httpOverCapnpFactory, byteStreamFactory, kj::mv(dispatcher));
+      }
+
+     private:
+      capnp::ByteStreamFactory& byteStreamFactory;
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+      rpc::WorkerdBootstrap::Client client;
     };
   };
 
@@ -3349,6 +3512,33 @@ class Server::WorkerService final: public Service,
 
    private:
     kj::Own<ActorNamespace::ActorContainer> actorContainer;
+  };
+
+  // TODO(clustering): Replace this with the promised channels coming in the async channel token
+  //   change, once it has landed.
+  class PromisedActorChannel final: public IoChannelFactory::ActorChannel {
+   public:
+    PromisedActorChannel(kj::Promise<kj::Own<IoChannelFactory::ActorChannel>> promise)
+        : promise(promise
+                      .then([this](kj::Own<IoChannelFactory::ActorChannel> inner) {
+                        this->inner = kj::mv(inner);
+                      })
+                      .fork()) {}
+
+    kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+      KJ_IF_SOME(i, inner) {
+        return i->startRequest(kj::mv(metadata));
+      } else {
+        return newPromisedWorkerInterface(promise.addBranch().then(
+            [self = addRefToThis(), metadata = kj::mv(metadata)]() mutable {
+          return KJ_ASSERT_NONNULL(self->inner)->startRequest(kj::mv(metadata));
+        }));
+      }
+    }
+
+   private:
+    kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> inner;
+    kj::ForkedPromise<void> promise;
   };
 
   // ---------------------------------------------------------------------------
@@ -4869,6 +5059,10 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   auto linkCallback = [this, def = kj::mv(def), totalActorChannels](WorkerService& workerService,
                           Worker::ValidationErrorReporter& errorReporter) mutable {
     WorkerService::LinkedIoChannels result;
+    KJ_IF_SOME(registry, this->clusterRegistry) {
+      result.clusterRegistry = *registry;
+      result.clusterRpc = KJ_ASSERT_NONNULL(this->clusterRpc);
+    }
 
     auto entrypointNames = workerService.getEntrypointNames();
     auto actorClassNames = workerService.getActorClassNames();
@@ -5624,6 +5818,15 @@ class Server::DebugPortListener {
     co_return co_await server.listen(*listener);
   }
 
+  // Expose WorkerdDebugPortImpl for use by the cluster RPC system.
+  //
+  // TODO(cleanup): Maybe move WorkerDebugPortImpl up into Server. However, note the clustering
+  //   code might also shift to a different interface.
+  static rpc::WorkerdDebugPort::Client makeBootstrap(
+      Server& owner, capnp::HttpOverCapnpFactory& httpOverCapnpFactory) {
+    return kj::heap<WorkerdDebugPortImpl>(&owner, httpOverCapnpFactory);
+  }
+
  private:
   Server& owner;
   kj::Own<kj::ConnectionReceiver> listener;
@@ -5765,6 +5968,12 @@ kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
     // doc comment, we instead add the promise to `tasks` to be safe.
     tasks.add(httpServer.httpServer.drain());
   }
+
+  // TODO(clustering): This is a harsh ending for actors on this machine. We should really evict
+  //   each one at a time that is convenient, and wait some time for RPC requests to drain.
+  //   Three-party handoff would help with straggler requests that we forward to the new owner.
+  clusterRpc = kj::none;
+  abortAllActors(kj::none);
 }
 
 kj::Promise<void> Server::run(
@@ -5953,7 +6162,22 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
           }
           goto validDurableObjectStorage;
         case config::Worker::DurableObjectStorage::IN_MEMORY:
+          if (config.hasCluster() && hadDurable) {
+            reportConfigError(kj::str("Worker service \"", name,
+                "\" uses in-memory Durable Object storage, which is not supported in cluster "
+                "mode."));
+          }
+          goto validDurableObjectStorage;
         case config::Worker::DurableObjectStorage::LOCAL_DISK:
+          if (config.hasCluster() && hadDurable &&
+              workerConf.getDurableObjectStorage().getLocalDisk() !=
+                  config.getCluster().getSharedDirectory()) {
+            reportConfigError(
+                kj::str("Worker service \"", name, "\" uses Durable Object storage disk service \"",
+                    workerConf.getDurableObjectStorage().getLocalDisk(),
+                    "\", but cluster.sharedDirectory is \"",
+                    config.getCluster().getSharedDirectory(), "\"."));
+          }
           goto validDurableObjectStorage;
       }
       reportConfigError(kj::str("Encountered unknown durableObjectStorage type in service \"", name,
@@ -6015,6 +6239,48 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
 
     return decltype(services)::Entry{kj::str("internet"_kj), kj::mv(service)};
   });
+
+  if (config.hasCluster()) {
+    if (!experimental) {
+      reportConfigError(
+          "Cluster mode is experimental and subject to change. You must run workerd with "
+          "`--experimental` to use it."_kj.clone());
+    }
+#ifndef __linux__
+    reportConfigError("Cluster mode is currently implemented only on Linux."_kj.clone());
+#endif
+
+    auto cluster = config.getCluster();
+    KJ_IF_SOME(sharedDirService, services.find(cluster.getSharedDirectory())) {
+      auto diskSvc = dynamic_cast<DiskDirectoryService*>(sharedDirService.get());
+      if (diskSvc == nullptr) {
+        reportConfigError(kj::str("cluster.sharedDirectory refers to service \"",
+            cluster.getSharedDirectory(), "\", but that service is not a disk directory."));
+      } else KJ_IF_SOME(dir, diskSvc->getWritable()) {
+        auto registryDir = dir.openSubdir(
+            kj::Path({cluster.getRegistrySubdir()}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+        auto registry =
+            kj::heap<ClusterRegistry>(kj::mv(registryDir), cluster.getNetwork(), network, timer);
+        tasks.add(registry->runMaintenance().exclusiveJoin(forkedDrainWhen.addBranch()));
+        auto& reg = *clusterRegistry.emplace(kj::mv(registry));
+        clusterRpc.emplace(capnp::makeRpcServer(
+            reg, DebugPortListener::makeBootstrap(*this, globalContext->httpOverCapnpFactory)));
+
+        // TODO(clustering): We really shouldn't start accepting connections until the server
+        //   is totally up, but the RPC system actually starts accepting immediately on
+        //   construction, even if you don't call run().
+        KJ_IF_SOME(rpc, clusterRpc) {
+          tasks.add(rpc.run().exclusiveJoin(forkedDrainWhen.addBranch()));
+        }
+      } else {
+        reportConfigError(kj::str("cluster.sharedDirectory refers to disk service \"",
+            cluster.getSharedDirectory(), "\", but that service is defined read-only."));
+      }
+    } else {
+      reportConfigError(kj::str("cluster.sharedDirectory refers to service \"",
+          cluster.getSharedDirectory(), "\", but no such service is defined."));
+    }
+  }
 
   // Third pass: Cross-link services.
   for (auto& service: services) {
