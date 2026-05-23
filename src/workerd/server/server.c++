@@ -191,7 +191,6 @@ Server::Server(kj::Filesystem& fs,
       reportConfigError(kj::mv(reportConfigError)),
       loggingOptions(loggingOptions),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
-      channelTokenHandler(*this),
       tasks(*this) {}
 
 struct Server::GlobalContext {
@@ -5020,13 +5019,13 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   kj::Maybe<kj::StringPtr> serviceName;
   if (!def.isDynamic) serviceName = name;
 
-  auto result =
-      kj::refcounted<WorkerService>(channelTokenHandler, serviceName, globalContext->threadContext,
-          monotonicClock, kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
-          kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
-          kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors),
-          KJ_BIND_METHOD(*this, deleteAllActors), kj::mv(dockerPath),
-          kj::mv(containerEgressInterceptorImage), def.isDynamic, kj::mv(abortIsolateCallback));
+  auto result = kj::refcounted<WorkerService>(KJ_ASSERT_NONNULL(channelTokenHandler), serviceName,
+      globalContext->threadContext, monotonicClock, kj::mv(worker),
+      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
+      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
+      KJ_BIND_METHOD(*this, abortAllActors), KJ_BIND_METHOD(*this, deleteAllActors),
+      kj::mv(dockerPath), kj::mv(containerEgressInterceptorImage), def.isDynamic,
+      kj::mv(abortIsolateCallback));
   result->initActorNamespaces(def.localActorConfigs, network);
   co_return result;
 }
@@ -5782,6 +5781,8 @@ kj::Promise<void> Server::run(
     loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
   }
 
+  setupChannelTokenHandler(config);
+
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
   invalidConfigServiceSingleton = kj::refcounted<InvalidConfigService>();
@@ -5802,6 +5803,15 @@ kj::Promise<void> Server::run(
   auto ownHeaderTable = headerTableBuilder.build();
 
   co_return co_await listenPromise.exclusiveJoin(kj::mv(fatalPromise));
+}
+
+void Server::setupChannelTokenHandler(config::Config::Reader config) {
+  ChannelTokenHandler::Resolver& tokenResolver = *this;
+  kj::Maybe<kj::StringPtr> channelTokenKey;
+  if (config.hasCluster()) {
+    channelTokenKey = config.getCluster().getKey();
+  }
+  channelTokenHandler.emplace(tokenResolver, channelTokenKey);
 }
 
 // Configure and start the inspector socket, returning the port the socket started on.
@@ -6219,6 +6229,8 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
   } else {
     loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
   }
+
+  setupChannelTokenHandler(config);
 
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
