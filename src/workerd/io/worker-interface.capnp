@@ -905,7 +905,10 @@ interface WorkerdDebugPort {
               -> (entrypoint :WorkerdBootstrap);
   # Get direct access to a stateless entrypoint.
 
-  getActor @1 (service :Text, entrypoint :Text, actorId :Text) -> (actor :WorkerdBootstrap);
+  getActor @1 (service :Text, entrypoint :Text, actorId :Text, actorName :Text)
+           -> (actor :WorkerdBootstrap);
   # Get an actor (Durable Object) stub.
   # The actorId should be a hex string for Durable Objects or a plain string for ephemeral actors.
+  # `actorName` may optionally be specified for Durable Objects, if `actorId` is derived from the
+  # name.
 }
