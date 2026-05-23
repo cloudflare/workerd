@@ -162,7 +162,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
 
-  ChannelTokenHandler channelTokenHandler;
+  kj::Maybe<ChannelTokenHandler> channelTokenHandler;
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
@@ -357,6 +357,8 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Maybe<SocketTypeConfig> parseSocketType(config::Socket::Reader sock, kj::StringPtr name);
 
   void unlinkWorkerLoaders();
+
+  void setupChannelTokenHandler(config::Config::Reader config);
 
   kj::Promise<void> preloadPython(
       kj::StringPtr workerName, const WorkerDef& workerDef, ErrorReporter& errorReporter);

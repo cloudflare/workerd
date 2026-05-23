@@ -58,7 +58,7 @@ class ChannelTokenHandler {
         IoChannelFactory::ChannelTokenUsage usage) = 0;
   };
 
-  explicit ChannelTokenHandler(Resolver& resolver);
+  explicit ChannelTokenHandler(Resolver& resolver, kj::Maybe<kj::StringPtr> clusterKey = kj::none);
 
   // Helpers to implement `IoChannelFactory::{SubrequestChannel,ActorClassChannel}::getToken()`.
   //
