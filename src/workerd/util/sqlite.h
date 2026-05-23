@@ -783,6 +783,11 @@ struct SqliteDatabase::VfsOptions {
   // will fall back to the native VFS implementation. In that case, the options you set here will
   // be ORed with the ones set by the underlying VFS.
   int deviceCharacteristics = 0x00001000;  // = SQLITE_FCNTL_POWERSAFE_OVERWRITE
+
+  // Called immediately after SQLite opens any file through this VFS. This is used by clustered
+  // Durable Object storage to verify that the original NFS lease is still valid and therefore
+  // covers the newly-opened file.
+  kj::Maybe<kj::Function<void()>> afterOpen;
 };
 
 // Implements a SQLite VFS based on a KJ directory.

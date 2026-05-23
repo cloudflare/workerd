@@ -1982,7 +1982,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
       file->pMethods = nullptr;
 
       // Set up currentVfsRoot.
-      auto& self = *reinterpret_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);
+      auto& self = *reinterpret_cast<SqliteDatabase::Vfs*>(vfs->pAppData);
       KJ_ASSERT(currentVfsRoot == AT_FDCWD);
       currentVfsRoot = self.rootFd;
       KJ_DEFER(currentVfsRoot = AT_FDCWD);
@@ -1994,6 +1994,16 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
       if (file->pMethods == nullptr) {
         wrapper->pMethods = nullptr;
       } else {
+        KJ_IF_SOME(afterOpen, self.options.afterOpen) {
+          try {
+            afterOpen();
+          } catch (kj::Exception& e) {
+            reportVfsErrorCaught(kj::mv(e));
+            file->pMethods->xClose(file);
+            wrapper->pMethods = nullptr;
+            return SQLITE_CANTOPEN;
+          }
+        }
         wrapper->pMethods = &WrappedNativeFileImpl::METHOD_TABLE;
         wrapper->vfs = &self;
         wrapper->rootFd = self.rootFd;
@@ -2298,7 +2308,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
     .pAppData = this,
 
 #define WRAP_METHOD(errorCode, block)                                                              \
-  auto& self KJ_UNUSED = *static_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);                  \
+  auto& self KJ_UNUSED = *static_cast<SqliteDatabase::Vfs*>(vfs->pAppData);                        \
   try block catch (kj::Exception& e) {                                                             \
     KJ_LOG(ERROR, "SQLite VFS I/O error", e);                                                      \
     return errorCode;                                                                              \
@@ -2315,6 +2325,11 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
 
           auto path = kj::Path::parse(zName);
           auto kjFile = KJ_UNWRAP_OR(self.directory.tryOpenFile(path), { return SQLITE_CANTOPEN; });
+          KJ_IF_SOME(afterOpen, self.options.afterOpen) {
+            afterOpen();
+          } else {
+            // sqelch spurious "dangling else" warning from clang
+          }
           kj::Maybe<kj::Own<Lock>> lock;
           if (flags & SQLITE_OPEN_MAIN_DB) {
             lock = self.lockManager.lock(path, *kjFile);
@@ -2330,6 +2345,11 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
             KJ_ASSERT(flags & SQLITE_OPEN_DELETEONCLOSE);
             KJ_ASSERT(!(flags & SQLITE_OPEN_MAIN_DB), "main DB can't be a temporary file");
             kjFile = self.directory.createTemporary();
+            KJ_IF_SOME(afterOpen, self.options.afterOpen) {
+              afterOpen();
+            } else {
+              // sqelch spurious "dangling else" warning from clang
+            }
           } else {
             kj::WriteMode mode;
             if (flags & SQLITE_OPEN_CREATE) {
@@ -2345,6 +2365,11 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
             auto path = kj::Path::parse(zName);
             kjFile =
                 KJ_UNWRAP_OR(self.directory.tryOpenFile(path, mode), { return SQLITE_CANTOPEN; });
+            KJ_IF_SOME(afterOpen, self.options.afterOpen) {
+              afterOpen();
+            } else {
+              // sqelch spurious "dangling else" warning from clang
+            }
             if (flags & SQLITE_OPEN_MAIN_DB) {
               lock = self.lockManager.lock(path, *kjFile);
             }
