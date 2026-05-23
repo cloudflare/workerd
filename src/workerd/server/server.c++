@@ -6790,8 +6790,12 @@ class Server::WorkerdDebugPortImpl final: public rpc::WorkerdDebugPort::Server {
         auto decoded = kj::decodeHex(actorIdStr);
         KJ_REQUIRE(decoded.size() == SHA256_DIGEST_LENGTH,
             "Invalid Durable Object ID: expected 64 hex characters (32 bytes)", decoded.size());
+        kj::Maybe<kj::String> name;
+        if (params.hasActorName()) {
+          name = params.getActorName().clone();
+        }
         kj::Own<ActorIdFactory::ActorId> id =
-            kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::none);
+            kj::heap<ActorIdFactoryImpl::ActorIdImpl>(decoded.begin(), kj::mv(name));
         actorId = kj::mv(id);
       }
       KJ_CASE_ONEOF(c, Ephemeral) {
