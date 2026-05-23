@@ -1,0 +1,60 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+# Config for the cluster integration test. Designed to be reused across multiple
+# workerd instances pointing at the same shared directory:
+#   - The `shared` disk service has no path; the test driver overrides it via
+#     `--directory-path shared=<tmpdir>` so all instances see the same directory.
+#   - The `http` socket has address `*:0`; the test driver overrides this and
+#     reads the actual assigned port from the control fd.
+#   - The cluster `network` field defaults to "unix"; the test driver overrides
+#     it to "127.0.0.0/8" when testing the CIDR/IP variant by passing a different
+#     config (see cluster-test-cidr.wd-test).
+#   - The NODE_ID env binding lets each instance be identified per request, so
+#     the test can verify which workerd owns/serves a given DO.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    # The shared filesystem used by the whole cluster. Path is supplied via
+    # `--directory-path shared=<path>` on the command line so all instances
+    # share the same directory.
+    ( name = "shared",
+      disk = (
+        writable = true,
+        allowDotfiles = true,
+      )
+    ),
+
+    ( name = "main",
+      worker = (
+        modules = [
+          ( name = "cluster-worker.js", esModule = embed "cluster-worker.js" ),
+        ],
+        compatibilityDate = "2024-09-01",
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          ( name = "COUNTER", durableObjectNamespace = "Counter" ),
+          ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Counter", uniqueKey = "counter-test-namespace" ),
+        ],
+        durableObjectStorage = ( localDisk = "shared" ),
+      )
+    ),
+  ],
+
+  sockets = [
+    ( name = "http", address = "*:0", http = (), service = "main" ),
+  ],
+
+  cluster = (
+    sharedDirectory = "shared",
+    registrySubdir = "workerd-registry",
+    network = "unix",
+    key = "test-cluster-shared-secret",
+  ),
+);

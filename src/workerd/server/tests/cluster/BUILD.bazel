@@ -1,0 +1,45 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+js_test(
+    name = "cluster-test-unix",
+    size = "medium",
+    data = [
+        ":cluster-test.wd-test",
+        ":cluster-worker.js",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "cluster-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WD_TEST_CONFIG": "$(rootpath :cluster-test.wd-test)",
+    },
+    tags = ["js-test"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
+js_test(
+    name = "cluster-test-cidr",
+    # The CIDR variant exercises the dead-peer detection path, which has to
+    # wait out the new-entry grace period before unlinking the dead peer's
+    # registry file. That makes the takeover test ~15s on its own, so the
+    # combined run needs more than the default "medium" budget.
+    size = "large",
+    data = [
+        ":cluster-test-cidr.wd-test",
+        ":cluster-worker.js",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "cluster-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WD_TEST_CONFIG": "$(rootpath :cluster-test-cidr.wd-test)",
+    },
+    tags = ["js-test"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
