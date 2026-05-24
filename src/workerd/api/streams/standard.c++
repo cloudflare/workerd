@@ -3751,7 +3751,7 @@ class PumpToReader {
 //
 // The pump loop is a kj coroutine. Dropping the returned kj::Promise drops the
 // coroutine frame, which destroys the DrainingReader (releasing the stream lock)
-// and the sink. No WeakRef/IoOwn dance is needed because ownership is clear.
+// and the sink.
 // The coroutine that implements the pump loop takes ownership of the DrainingReader
 // and sink. The jsg::Ref<ReadableStream> is not passed into the coroutine because
 // jsg::Ref is disallowed in coroutine parameters; instead, the DrainingReader holds
@@ -3774,6 +3774,9 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       }
     }
     KJ_CATCH(exception) {
+      if (!fulfiller->isWaiting() || exception.getType() == kj::Exception::Type::DISCONNECTED) {
+        co_return;
+      }
       fulfiller->reject(kj::mv(exception));
     }
   };
@@ -3786,12 +3789,17 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       // We cannot co_await the ioContext.run directly. If it is canceled,
       // we end up with a case where the promise destroys itself, causing
       // an assertion.
-      auto promise = ioContext.run([&reader](jsg::Lock& js) mutable {
+      auto promise = ioContext.run([reader = reader->getWeakRef()](
+                                       jsg::Lock& js) mutable -> kj::Promise<DrainingReadResult> {
         auto& ioContext = IoContext::current();
         // Use a 256KB limit to allow periodic yielding to the event loop,
         // preventing a fast producer from monopolizing the thread.
+        if (!reader->isValid()) {
+          return KJ_EXCEPTION(DISCONNECTED, "Pump was canceled");
+        }
+        auto& r = KJ_ASSERT_NONNULL(reader->tryGet());
         constexpr size_t kMaxReadPerCycle = 256 * 1024;
-        return ioContext.awaitJs(js, reader->read(js, kMaxReadPerCycle));
+        return ioContext.awaitJs(js, r.read(js, kMaxReadPerCycle));
       });
       ioContext.addTask(waiter(kj::mv(promise), kj::mv(prp.fulfiller)));
 
@@ -3820,10 +3828,17 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
       sink->abort(exception.clone());
     }
 
-    auto promise = ioContext.run([&reader, ex = exception.clone()](jsg::Lock& js) mutable {
+    auto promise = ioContext.run([reader = reader->getWeakRef(), ex = exception.clone()](
+                                     jsg::Lock& js) mutable -> kj::Promise<void> {
+      // Use a 256KB limit to allow periodic yielding to the event loop,
+      // preventing a fast producer from monopolizing the thread.
       auto& ioContext = IoContext::current();
+      if (!reader->isValid()) {
+        return KJ_EXCEPTION(DISCONNECTED, "Pump was canceled");
+      }
+      auto& r = KJ_ASSERT_NONNULL(reader->tryGet());
       auto error = js.exceptionToJsValue(kj::mv(ex));
-      return ioContext.awaitJs(js, reader->cancel(js, error.getHandle(js)));
+      return ioContext.awaitJs(js, r.cancel(js, error.getHandle(js)));
     });
     auto prp = kj::newPromiseAndFulfiller<void>();
     ioContext.addTask(waiter(kj::mv(promise), kj::mv(prp.fulfiller)));

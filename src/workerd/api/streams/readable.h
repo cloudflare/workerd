@@ -253,10 +253,14 @@ class DrainingReader: public ReadableStreamController::Reader {
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  kj::Rc<WeakRef<DrainingReader>> getWeakRef() { return selfRef.addRef(); }
+
  private:
   struct Initial {};
   using Attached = jsg::Ref<ReadableStream>;
   struct Released {};
+  kj::Rc<WeakRef<DrainingReader>> selfRef =
+      kj::rc<WeakRef<DrainingReader>>(kj::Badge<DrainingReader>(), *this);
 
   kj::Maybe<IoContext&> ioContext;
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
