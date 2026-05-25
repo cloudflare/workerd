@@ -5077,6 +5077,9 @@ KJ_TEST("Server: Durable Object facets") {
                 `
                 `      // Delete bar, which recursively deletes its children.
                 `      this.ctx.facets.delete("bar");
+                `
+                `      // Delete a facet name that never existed, to make sure this doesn't throw.
+                `      this.ctx.facets.delete("no-such-facet-ever");
                 `    } else if (request.url.endsWith("/props")) {
                 `      results.push(JSON.stringify(this.ctx.props));
                 `

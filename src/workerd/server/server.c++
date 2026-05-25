@@ -675,8 +675,7 @@ class Server::ActorNamespace final {
         // Note that if there's no facet index then there couldn't possibly be any child storage.
         KJ_IF_SOME(index, getFacetTreeIndexIfNotEmpty()) {
           uint childId = index.getId(getFacetId(), name);
-          deleteDescendantStorage(*as.directory, childId);
-          as.directory->remove(getSqlitePathForId(childId));
+          deleteFacetImpl(*as.directory, index, childId);
         }
       }
     }
@@ -789,12 +788,24 @@ class Server::ActorNamespace final {
     }
 
     // Get the path to the facet's sqlite database, within the actor namespace directory.
-    kj::Path getSqlitePathForId(uint id) {
+    //
+    // `suffix` can be e.g. "-wal" or "-shm".
+    kj::Path getSqlitePathForId(uint id, kj::StringPtr suffix = ""_kj) {
       if (id == 0) {
-        return kj::Path({kj::str(root.key, ".sqlite")});
+        return kj::Path({kj::str(root.key, ".sqlite", suffix)});
       } else {
-        return kj::Path({kj::str(root.key, '.', id, ".sqlite")});
+        return kj::Path({kj::str(root.key, '.', id, ".sqlite", suffix)});
       }
+    }
+
+    void deleteFacetImpl(const kj::Directory& dir, FacetTreeIndex& index, uint facetId) {
+      deleteDescendantStorage(dir, index, facetId);
+
+      // Remove the database, WAL, and SHM files, if present. Note that the database may not
+      // exist at all if this facet didn't exist before delete() was called on it.
+      dir.tryRemove(getSqlitePathForId(facetId));
+      dir.tryRemove(getSqlitePathForId(facetId, "-wal"));
+      dir.tryRemove(getSqlitePathForId(facetId, "-shm"));
     }
 
     void deleteDescendantStorage(const kj::Directory& dir, uint parentId) {
@@ -807,10 +818,8 @@ class Server::ActorNamespace final {
     }
 
     void deleteDescendantStorage(const kj::Directory& dir, FacetTreeIndex& index, uint parentId) {
-      index.forEachChild(parentId, [&](uint childId, kj::StringPtr childName) {
-        deleteDescendantStorage(dir, index, childId);
-        dir.remove(getSqlitePathForId(childId));
-      });
+      index.forEachChild(parentId,
+          [&](uint childId, kj::StringPtr childName) { deleteFacetImpl(dir, index, childId); });
     }
 
     void requireNotBroken() {
