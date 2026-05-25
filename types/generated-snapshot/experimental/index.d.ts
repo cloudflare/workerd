@@ -6177,9 +6177,6 @@ type ChatCompletionChoice = {
     | "function_call";
   logprobs: ChatCompletionLogprobs | null;
 };
-type ChatCompletionsPromptInput = {
-  prompt: string;
-} & ChatCompletionsCommonOptions;
 type ChatCompletionsMessagesInput = {
   messages: Array<ChatCompletionMessageParam>;
 } & ChatCompletionsCommonOptions;
@@ -10304,11 +10301,11 @@ declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
@@ -11402,6 +11399,10 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
@@ -11499,7 +11500,9 @@ interface AiModels {
   "@cf/black-forest-labs/flux-2-klein-9b": Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B;
   "@cf/zai-org/glm-4.7-flash": Base_Ai_Cf_Zai_Org_Glm_4_7_Flash;
   "@cf/moonshotai/kimi-k2.5": Base_Ai_Cf_Moonshotai_Kimi_K2_5;
+  "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
+  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
 }
 type AiOptions = {
   /**
@@ -11552,16 +11555,8 @@ type AiModelsSearchObject = {
     value: string;
   }[];
 };
-type ChatCompletionsBase = XOR<
-  ChatCompletionsPromptInput,
-  ChatCompletionsMessagesInput
->;
-type ChatCompletionsInput = XOR<
-  ChatCompletionsBase,
-  {
-    requests: ChatCompletionsBase[];
-  }
->;
+type ChatCompletionsBase = ChatCompletionsMessagesInput;
+type ChatCompletionsInput = ChatCompletionsMessagesInput;
 interface InferenceUpstreamError extends Error {}
 interface AiInternalError extends Error {}
 type AiModelListType = Record<string, any>;
@@ -11624,9 +11619,16 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
     inputs: AiModelList[Name]["inputs"],
     options?: AiOptions,
   ): Promise<AiModelList[Name]["postProcessedOutputs"]>;
-  // Unknown model (gateway fallback)
-  run(
-    model: string & {},
+  // Unknown model (fallback).
+  //
+  // The `Exclude<..., keyof AiModelList>` constraint forces TypeScript to
+  // route any model name that is a literal key of `AiModelList` to one of
+  // the known-model overloads above (so input/output mismatches surface as
+  // type errors rather than silently falling back to `Record<string, unknown>`).
+  // Names that aren't in `AiModelList` — e.g. third-party gateway models
+  // like `"google/nano-banana"` — still hit this overload.
+  run<Model extends string>(
+    model: Model extends keyof AiModelList ? never : Model,
     inputs: Record<string, unknown>,
     options?: AiOptions,
   ): Promise<Record<string, unknown>>;
@@ -14420,15 +14422,29 @@ declare namespace CloudflareWorkersModule {
     attempt: number;
     config: WorkflowStepConfig;
   };
+  export type WorkflowRollbackContext<T = unknown> = {
+    error: Error;
+    output: T | undefined;
+    stepName: string;
+  };
+  export type WorkflowRollbackHandler<T = unknown> = (
+    ctx: WorkflowRollbackContext<T>,
+  ) => Promise<void>;
+  export type WorkflowStepRollbackOptions<T = unknown> = {
+    rollback?: WorkflowRollbackHandler<T>;
+    rollbackConfig?: WorkflowStepConfig;
+  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
@@ -15820,6 +15836,103 @@ type WorkerVersionMetadata = {
   /** The timestamp of when the Worker Version was uploaded */
   timestamp: string;
 };
+// ============ Web Search Request Types ============
+/**
+ * Options for a Web Search query.
+ */
+type WebSearchSearchOptions = {
+  /** The search query. */
+  query: string;
+  /**
+   * Maximum number of results to return. Defaults to 10, capped at 20.
+   * The actual count may be lower if fewer matches exist.
+   */
+  limit?: number;
+};
+// ============ Web Search Response Types ============
+/**
+ * A single Web Search result.
+ *
+ * Web Search is discovery-only -- results carry catalog metadata about a page
+ * but never the page body. To read a result's content the caller invokes the
+ * global `fetch()` API against the result's `url`, at which point the
+ * destination's own access controls apply (including Cloudflare Pay-per-Crawl).
+ */
+type WebSearchResult = {
+  /** Canonical URL. */
+  url: string;
+  /** Page title. */
+  title: string;
+  /** Page-level description. May be absent. */
+  description?: string;
+  /**
+   * Last-modified date for the page, when known. Naive (no timezone)
+   * ISO-8601 datetime, e.g. `"2025-11-30T04:39:48"`.
+   */
+  lastModifiedDate?: string;
+  /**
+   * Page meta image URL (typically the `og:image`). May be absent.
+   */
+  imageUrl?: string;
+  /** Optional favicon URL for UI hints. */
+  faviconUrl?: string;
+};
+/**
+ * Per-response metadata for a Web Search query. Carries operational
+ * fields useful for support and debugging.
+ */
+type WebSearchResponseMetadata = {
+  /** The query that was executed. */
+  query: string;
+  /** Opaque request identifier used for support and debugging. */
+  requestId: string;
+  /** End-to-end latency for this search request, in milliseconds. */
+  latencyMs: number;
+};
+/**
+ * Response from a Web Search query.
+ */
+type WebSearchSearchResponse = {
+  items: WebSearchResult[];
+  metadata: WebSearchResponseMetadata;
+};
+// ============ Web Search Binding Class ============
+/**
+ * Cloudflare Web Search binding.
+ *
+ * Discovery-only primitive for agents and Workers. Returns URLs and catalog
+ * metadata for a query; never returns page content or excerpts. To read a
+ * result's body, fetch the URL with the global `fetch()` API.
+ *
+ * Declared in wrangler with a single object (there is exactly one corpus, the
+ * public web, so there is no name, namespace, or instance to specify):
+ *
+ * ```jsonc
+ * { "web_search": { "binding": "WEBSEARCH" } }
+ * ```
+ *
+ * @example
+ * ```ts
+ * const { items, metadata } = await env.WEBSEARCH.search({
+ *   query: "Cloudflare Workers",
+ * });
+ *
+ * const top = items[0];
+ * console.log(top.url, top.title, metadata.latencyMs);
+ *
+ * // Read content yourself; pay-per-crawl and other publisher
+ * // controls apply at the fetch site, not at search time.
+ * const page = await fetch(top.url);
+ * ```
+ */
+declare abstract class WebSearch {
+  /**
+   * Run a Web Search query.
+   * @param options Search options. Only `query` is required.
+   * @returns The matching results plus per-response metadata.
+   */
+  search(options: WebSearchSearchOptions): Promise<WebSearchSearchResponse>;
+}
 interface DynamicDispatchLimits {
   /**
    * Limit CPU time in milliseconds.
