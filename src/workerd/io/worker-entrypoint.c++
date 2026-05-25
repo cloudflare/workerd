@@ -87,6 +87,7 @@ class WorkerEntrypoint final: public WorkerInterface {
 
   ThreadContext& threadContext;
   kj::TaskSet& waitUntilTasks;
+  kj::Maybe<kj::Canceler&> canceler;
   kj::Maybe<kj::Own<IoContext::IncomingRequest>> incomingRequest;
   bool tunnelExceptions;
   bool isDynamicDispatch;
@@ -112,15 +113,31 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
 
+  kj::Promise<void> requestImpl(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response);
+
   kj::Promise<WorkerEntrypoint::AlarmResult> runAlarmImpl(
       kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Date scheduledTime,
       uint32_t retryCount);
 
+  template <typename T>
+  kj::Promise<T> wrapWithCanceler(kj::Promise<T> promise) {
+    KJ_IF_SOME(c, canceler) {
+      return c.wrap(kj::mv(promise));
+    } else {
+      return kj::mv(promise);
+    }
+  }
+
  public:  // For kj::heap() only; pretend this is private.
   WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       ThreadContext& threadContext,
       kj::TaskSet& waitUntilTasks,
+      kj::Maybe<kj::Canceler&> canceler,
       bool tunnelExceptions,
       bool isDynamicDispatch,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -184,8 +201,14 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     bool isDynamicDispatch) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
 
+  // Arrange to forcefully cancel work when the Actor is aborted.
+  kj::Maybe<kj::Canceler&> canceler;
+  KJ_IF_SOME(a, actor) {
+    canceler = a->getAbortCanceler();
+  }
+
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
-      waitUntilTasks, tunnelExceptions, isDynamicDispatch, entrypointName, kj::mv(props),
+      waitUntilTasks, canceler, tunnelExceptions, isDynamicDispatch, entrypointName, kj::mv(props),
       kj::mv(cfBlobJson), kj::mv(versionInfo));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
@@ -197,6 +220,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
 WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     ThreadContext& threadContext,
     kj::TaskSet& waitUntilTasks,
+    kj::Maybe<kj::Canceler&> canceler,
     bool tunnelExceptions,
     bool isDynamicDispatch,
     kj::Maybe<kj::StringPtr> entrypointName,
@@ -205,6 +229,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     kj::Maybe<Worker::VersionInfo> versionInfo)
     : threadContext(threadContext),
       waitUntilTasks(waitUntilTasks),
+      canceler(canceler),
       tunnelExceptions(tunnelExceptions),
       isDynamicDispatch(isDynamicDispatch),
       entrypointName(entrypointName),
@@ -305,6 +330,14 @@ kj::Exception exceptionToPropagate(bool isInternalException, kj::Exception&& exc
 }
 
 kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
+    kj::StringPtr url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    Response& response) {
+  return wrapWithCanceler(requestImpl(method, url, headers, requestBody, response));
+}
+
+kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     kj::StringPtr url,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
@@ -606,10 +639,11 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
 
-  return context
-      .run(
-          [this, &headers, &context, &connection, &response, entrypointName = entrypointName,
-              versionInfo = kj::mv(versionInfo), host = kj::str(host)](Worker::Lock& lock) mutable {
+  return wrapWithCanceler(
+      context
+          .run([this, &headers, &context, &connection, &response, entrypointName = entrypointName,
+                   versionInfo = kj::mv(versionInfo),
+                   host = kj::str(host)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
@@ -617,12 +651,12 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
         lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch));
   })
-      .then([&context, workerTracer]() {
+          .then([&context, workerTracer]() {
     KJ_IF_SOME(t, workerTracer) {
       t.setReturn(context.now());
     }
   })
-      .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
+          .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Log JS exceptions to the JS console, if inspector is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
@@ -635,12 +669,12 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       return kj::mv(exception);
     });
   })
-      .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest)]() mutable {
+          .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest)]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   }))
-      .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
-                  kj::Exception&& exception) mutable -> kj::Promise<void> {
+          .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
+                      kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.
     auto isInternalException = !jsg::isTunneledException(exception.getDescription()) &&
         !jsg::isDoNotLogException(exception.getDescription());
@@ -680,7 +714,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
       return kj::READY_NOW;
     }
-  });
+  }));
 }
 
 kj::Promise<void> WorkerEntrypoint::prewarm(kj::StringPtr url) {
@@ -740,7 +774,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
     return request->finishScheduled(kj::mv(request));
   };
 
-  return waitForFinished(kj::mv(incomingRequest));
+  return wrapWithCanceler(waitForFinished(kj::mv(incomingRequest)));
 }
 
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
@@ -860,7 +894,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
   this->incomingRequest = kj::none;
 
   auto& context = incomingRequest->getContext();
-  auto result = co_await runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount);
+  auto result =
+      co_await wrapWithCanceler(runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount));
   KJ_IF_SOME(t, context.getWorkerTracer()) {
     t.setReturn(context.now());
   }
@@ -919,7 +954,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
     co_return scheduledResult.outcome == EventOutcome::OK;
   };
 
-  return waitForFinished(kj::mv(incomingRequest));
+  return wrapWithCanceler(waitForFinished(kj::mv(incomingRequest)));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
@@ -936,10 +971,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
     t.setEventInfo(*incomingRequest, event->getEventInfo());
   }
 
-  return event
-      ->run(kj::mv(incomingRequest), entrypointName, kj::mv(versionInfo), kj::mv(props),
-          waitUntilTasks, isDynamicDispatch)
-      .attach(kj::mv(event));
+  return wrapWithCanceler(event
+                              ->run(kj::mv(incomingRequest), entrypointName, kj::mv(versionInfo),
+                                  kj::mv(props), waitUntilTasks, isDynamicDispatch)
+                              .attach(kj::mv(event)));
 }
 
 }  // namespace

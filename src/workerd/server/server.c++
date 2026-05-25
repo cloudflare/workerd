@@ -590,8 +590,12 @@ class Server::ActorNamespace final {
       if (brokenReason != kj::none) return;
 
       KJ_IF_SOME(a, actor) {
-        // Unknown broken reason.
-        a->shutdown(0, reason);
+        KJ_IF_SOME(r, reason) {
+          a->abort(r);
+        } else {
+          // Unknown broken reason.
+          a->shutdown(0, kj::none);
+        }
       }
 
       for (auto& facet: facets) {

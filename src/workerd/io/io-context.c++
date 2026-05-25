@@ -616,9 +616,22 @@ void IoContext::IncomingRequest::drain(
   }
   auto result = context->waitUntilTasks.onEmpty()
                     .exclusiveJoin(kj::mv(timeoutPromise))
-                    .exclusiveJoin(context->onAbort().catch_([](kj::Exception&&) {}));
+                    .exclusiveJoin(context->onAbort());
 
-  waitUntilTasks.add(maybeAddGcPassForTest(result.attach(kj::mv(self))));
+  result = result.attach(kj::mv(self));
+
+  KJ_IF_SOME(a, context->actor) {
+    // Make sure the drain is canceled and the IncomingRequest dropped on actor abort.
+    result = a.getAbortCanceler().wrap(kj::mv(result));
+  }
+
+  // We actually don't want the promise we put in `waitUntilTasks` to report errors when aborted.
+  // Abort errors are already propagated to any connected clients and other places. Note that
+  // `waitUntilTasks.onEmpty()` never throws, and `timeoutPromise` as constructed above also never
+  // throws, so this is just squelching abort errors.
+  result = result.catch_([](kj::Exception&&) {});
+
+  waitUntilTasks.add(maybeAddGcPassForTest(kj::mv(result)));
 }
 
 kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finishScheduled(

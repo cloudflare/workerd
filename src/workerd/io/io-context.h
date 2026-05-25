@@ -340,6 +340,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return abortPromise.addBranch();
   }
 
+  // If this IoContext has been aborted already, return the abort reason.
+  kj::Maybe<kj::Exception> getAbortReason() {
+    return abortException.clone();
+  }
+
   // Force context abort now.
   //
   // Note that abort() is safe to call while the IoContext is current. Becaues of this, it cannot

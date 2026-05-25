@@ -1926,6 +1926,18 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
       kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
   capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
 
+  KJ_DEFER({
+    // If run() is canceled while a call is still in flight, then when the `RevocableServer` is
+    // destroyed, the in-flight request will be canceled with a not-very-friendly error message.
+    // If the cancellation occurred because the Actor or IoContext was aborted, we'd rather
+    // propagate the abort error. So check for one, and revoke with that if present.
+    KJ_IF_SOME(r, incomingRequest->getContext().getAbortReason()) {
+      revcableTarget.revoke(kj::mv(r));
+    } else {
+      // silence bogus clang warning about dangling else
+    }
+  });
+
   try {
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
