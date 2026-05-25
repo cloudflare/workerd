@@ -621,7 +621,8 @@ void IoContext::IncomingRequest::drain(
   waitUntilTasks.add(maybeAddGcPassForTest(result.attach(kj::mv(self))));
 }
 
-kj::Promise<EventOutcome> IoContext::IncomingRequest::finishScheduled() {
+kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finishScheduled(
+    kj::Own<IoContext_IncomingRequest>&& self) {
   // TODO(someday): In principle we should be able to support delivering the "scheduled" event type
   //   to an actor, and this may be important if we open up the whole of WorkerInterface to be
   //   callable from any stub. However, the logic around async tasks would have to be different. We
@@ -640,16 +641,26 @@ kj::Promise<EventOutcome> IoContext::IncomingRequest::finishScheduled() {
     // "exceededWallTime" outcome instead?
     return EventOutcome::EXCEEDED_CPU;
   });
-  auto result = context->waitUntilTasks.onEmpty()
-                    .then([]() { return EventOutcome::OK; })
-                    .exclusiveJoin(kj::mv(timeoutPromise))
-                    .exclusiveJoin(context->onAbort().then([] {
+  auto outcome = context->waitUntilTasks.onEmpty()
+                     .then([this]() { return context->waitUntilStatus(); })
+                     .exclusiveJoin(kj::mv(timeoutPromise))
+                     .exclusiveJoin(context->onAbort().then([] {
     // abortFulfiller should only ever be rejected instead of being fulfilled, return an
     // internalError outcome if it does happen
     return EventOutcome::INTERNAL_ERROR;
-  }, [](kj::Exception&& e) { return RequestObserver::outcomeFromException(e); }));
+  }, [](kj::Exception&& e) {
+    KJ_LOG(INFO, "execution context aborted", e);  // for tests
+    return RequestObserver::outcomeFromException(e);
+  }));
 
-  return maybeAddGcPassForTest(kj::mv(result));
+  auto result = outcome.then([this](EventOutcome outcome) {
+    return WorkerInterface::ScheduledResult{
+      .retry = context->shouldRetryScheduled(),
+      .outcome = outcome,
+    };
+  });
+
+  return maybeAddGcPassForTest(result.attach(kj::mv(self)));
 }
 
 class IoContext::PendingEvent: public kj::Refcounted {

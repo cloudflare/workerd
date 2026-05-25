@@ -755,9 +755,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
       // It'd be nicer if we could fall through to the code below for the non-compat-flag logic in
       // this case, but we don't even know if the worker uses service worker syntax until after
       // runProm resolves, so we just copy the bare essentials here.
-      auto scheduledResult = co_await incomingRequest->finishScheduled();
-      bool completed = scheduledResult == EventOutcome::OK;
-      outcome = completed ? context.waitUntilStatus() : scheduledResult;
+      auto scheduledResult = co_await incomingRequest->finishScheduled(kj::mv(incomingRequest));
+      outcome = scheduledResult.outcome;
     } else {
       // We're responsible for calling drain() on the incomingRequest to ensure that waitUntil tasks
       // can continue to run in the backgound for a while even after we return a result to the
@@ -784,11 +783,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 
     // We reuse the finishScheduled() method for convenience, since queues use the same wall clock
     // timeout as scheduled workers.
-    auto scheduledResult = co_await incomingRequest->finishScheduled();
-    bool completed = scheduledResult == EventOutcome::OK;
-
+    auto scheduledResult = co_await incomingRequest->finishScheduled(kj::mv(incomingRequest));
     co_return WorkerInterface::CustomEvent::Result{
-      .outcome = completed ? context.waitUntilStatus() : scheduledResult,
+      .outcome = scheduledResult.outcome,
     };
   }
 }

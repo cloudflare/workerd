@@ -119,7 +119,12 @@ class IoContext_IncomingRequest final {
   // This method is also used by some custom event handlers (see WorkerInterface::CustomEvent) that
   // need similar behavior, as well as the test handler. TODO(cleanup): Rename to something more
   // generic?
-  kj::Promise<EventOutcome> finishScheduled();
+  //
+  // Similar to drain(), the IncomingRequest self-reference needs to be passed into this method.
+  // This allows finishScheduled() to arrange for the IncomingRequest to be *synchronously* dropped
+  // in certain situations (such as when an Actor is aborted).
+  kj::Promise<WorkerInterface::ScheduledResult> finishScheduled(
+      kj::Own<IoContext_IncomingRequest>&& self);
 
   // Access the event loop's current time point. This will remain constant between ticks. This is
   // used to implement IoContext::now(), which should be preferred so that time can be adjusted
