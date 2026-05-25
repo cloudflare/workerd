@@ -173,8 +173,8 @@ struct TestFixture {
   // shut down, or a new IncomingRequest takes over. In tests the second is unlikely so we mostly
   // rely on the first.
   void drainAndDestroy(kj::Own<IoContext::IncomingRequest> request) {
-    auto drained = request->drain();
-    drained.wait(getWaitScope());
+    request->drain(waitUntilTasks, kj::mv(request));
+    waitUntilTasks.onEmpty().wait(getWaitScope());
   }
 
   // Accessors for tests that want to construct objects (e.g. HibernationManagerImpl) outside any

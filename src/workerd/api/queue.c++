@@ -764,13 +764,18 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
       // caller of this event. But this is only needed in this code path because in all other code
       // paths we call incomingRequest->finishScheduled(), which already takes care of waiting on
       // waitUntil tasks.
-      waitUntilTasks.add(incomingRequest->drain().attach(
-          kj::mv(incomingRequest), kj::addRef(*queueEventHolder), kj::addRef(*this)));
+      incomingRequest = incomingRequest.attach(kj::addRef(*queueEventHolder), kj::addRef(*this));
+
+      // If we happen to already know that a limit was exceeded, set the outcome here. If it
+      // happens later during the drain, that's just too late to report. Oh well. (Note that the
+      // `finishScheduled()` route already handles limit-exceeded outcomes internally.)
+      KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
+        outcome = status;
+      }
+
+      incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
     }
 
-    KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
-      outcome = status;
-    }
     co_return WorkerInterface::CustomEvent::Result{.outcome = outcome};
   } else {
     // The user has not opted in to the new waitUntil behavior, so we need to add the queue()

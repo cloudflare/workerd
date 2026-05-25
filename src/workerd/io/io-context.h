@@ -90,13 +90,22 @@ class IoContext_IncomingRequest final {
   // If delivered() is never called, then drain() need not be called.
   void delivered(kj::SourceLocation = kj::SourceLocation());
 
-  // Waits until the request is "done". For non-actor requests this means waiting until
-  // all "waitUntil" tasks finish, applying the "soft timeout" time limit from WorkerLimits.
+  // Continues running the request in the background until it is "done", scheduling the work into
+  // `waitUntilTasks` and keeping `self` alive until work is finished.
+  //
+  // For non-actor requests this means waiting until all "waitUntil" tasks finish, applying the
+  // "soft timeout" time limit from WorkerLimits.
   //
   // For actor requests, this means waiting until either all tasks have finished (not just
   // waitUntil, all tasks), or a new incoming request has been received (which then takes over
   // responsibility for waiting for tasks), or the actor is shut down.
-  kj::Promise<void> drain();
+  //
+  // Note: `self` is declared as an rvalue reference here to ensure that if you write something
+  //   like `incomingRequest->drain(tasks, kj::mv(incomingRequest))`, the value of
+  //   `incomingRequest` will not be moved away until after the invocation of `drain()`. Otherwise,
+  //   the evaluation order would be unspecified and `incomingRequest->drain()` could be
+  //   dereferencing a moved-away pointer.
+  void drain(kj::TaskSet& waitUntilTasks, kj::Own<IoContext_IncomingRequest>&& self);
 
   // Waits for all "waitUntil" tasks to finish, up to the time limit for scheduled events, as
   // defined by `scheduledTimeoutMs` in `WorkerLimits`. Returns an enum indicating the event outcome

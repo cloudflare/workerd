@@ -582,12 +582,13 @@ kj::Promise<T> IoContext::IncomingRequest::maybeAddGcPassForTest(kj::Promise<T> 
 }
 
 // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
-kj::Promise<void> IoContext::IncomingRequest::drain() {
+void IoContext::IncomingRequest::drain(
+    kj::TaskSet& waitUntilTasks, kj::Own<IoContext_IncomingRequest>&& self) {
   waitedForWaitUntil = true;
 
   if (&context->incomingRequests.front() != this) {
     // A newer request was received, so draining isn't our job.
-    return kj::READY_NOW;
+    return;
   }
 
   kj::Promise<void> timeoutPromise = nullptr;
@@ -617,7 +618,7 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
                     .exclusiveJoin(kj::mv(timeoutPromise))
                     .exclusiveJoin(context->onAbort().catch_([](kj::Exception&&) {}));
 
-  return maybeAddGcPassForTest(kj::mv(result));
+  waitUntilTasks.add(maybeAddGcPassForTest(result.attach(kj::mv(self))));
 }
 
 kj::Promise<EventOutcome> IoContext::IncomingRequest::finishScheduled() {

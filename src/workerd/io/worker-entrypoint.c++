@@ -378,7 +378,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         // Either the waitUntilTask holds a reference to it, or it will never be triggered at all.
         abortController = kj::none;
 
-        waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+        incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
       });
 
       KJ_TRY {
@@ -576,7 +576,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
     KJ_DEFER({
       // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
-      waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+      incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
     });
     // connect_pass_through feature flag means we should just forward the connect request on to
     // the global outbound.
@@ -637,7 +637,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   })
       .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest)]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.
-    waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+    incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   }))
       .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
                   kj::Exception&& exception) mutable -> kj::Promise<void> {
@@ -796,7 +796,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
       KJ_DEFER({
         // The alarm has finished but allow the request to continue executing in the background.
-        waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+        incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
       });
 
       try {

@@ -1919,7 +1919,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
     // disconnects.
-    waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+    incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   });
 
   EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
