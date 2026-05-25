@@ -172,6 +172,9 @@ class IoContext_IncomingRequest final {
   // Tracks the location where delivered() was called for debugging.
   kj::Maybe<kj::SourceLocation> deliveredLocation;
 
+  template <typename T>
+  kj::Promise<T> maybeAddGcPassForTest(kj::Promise<T> promise);
+
   friend class IoContext;
 };
 

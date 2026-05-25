@@ -14,6 +14,7 @@
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 #include <kj/debug.h>
 
@@ -539,6 +540,47 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
   waitUntilTasks.add(kj::mv(promise));
 }
 
+namespace {
+
+#ifdef KJ_DEBUG
+
+void requestGc(const Worker& worker) {
+  TRACE_EVENT("workerd", "Debug: requestGc()");
+  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    auto& isolate = worker.getIsolate();
+    auto lock = isolate.getApi().lock(stackScope);
+    lock->requestGcForTesting();
+  });
+}
+
+template <typename T>
+kj::Promise<T> addGcPassForTest(IoContext& context, kj::Promise<T> promise) {
+  TRACE_EVENT("workerd", "Debug: addGcPassForTest");
+  auto worker = kj::atomicAddRef(context.getWorker());
+  if constexpr (kj::isSameType<T, void>()) {
+    co_await promise;
+    requestGc(*worker);
+  } else {
+    auto ret = co_await promise;
+    requestGc(*worker);
+    co_return kj::mv(ret);
+  }
+}
+
+#endif  // KJ_DEBUG
+
+}  // namespace
+
+template <typename T>
+kj::Promise<T> IoContext::IncomingRequest::maybeAddGcPassForTest(kj::Promise<T> promise) {
+#ifdef KJ_DEBUG
+  if (isPredictableModeForTest()) {
+    return addGcPassForTest(*context, kj::mv(promise));
+  }
+#endif
+  return kj::mv(promise);
+}
+
 // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
 kj::Promise<void> IoContext::IncomingRequest::drain() {
   waitedForWaitUntil = true;
@@ -571,9 +613,11 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     };
     timeoutPromise = context->limitEnforcer->limitDrain().then(kj::mv(timeoutLogPromise));
   }
-  return context->waitUntilTasks.onEmpty()
-      .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->onAbort().catch_([](kj::Exception&&) {}));
+  auto result = context->waitUntilTasks.onEmpty()
+                    .exclusiveJoin(kj::mv(timeoutPromise))
+                    .exclusiveJoin(context->onAbort().catch_([](kj::Exception&&) {}));
+
+  return maybeAddGcPassForTest(kj::mv(result));
 }
 
 kj::Promise<EventOutcome> IoContext::IncomingRequest::finishScheduled() {
@@ -595,14 +639,16 @@ kj::Promise<EventOutcome> IoContext::IncomingRequest::finishScheduled() {
     // "exceededWallTime" outcome instead?
     return EventOutcome::EXCEEDED_CPU;
   });
-  return context->waitUntilTasks.onEmpty()
-      .then([]() { return EventOutcome::OK; })
-      .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->onAbort().then([] {
+  auto result = context->waitUntilTasks.onEmpty()
+                    .then([]() { return EventOutcome::OK; })
+                    .exclusiveJoin(kj::mv(timeoutPromise))
+                    .exclusiveJoin(context->onAbort().then([] {
     // abortFulfiller should only ever be rejected instead of being fulfilled, return an
     // internalError outcome if it does happen
     return EventOutcome::INTERNAL_ERROR;
   }, [](kj::Exception&& e) { return RequestObserver::outcomeFromException(e); }));
+
+  return maybeAddGcPassForTest(kj::mv(result));
 }
 
 class IoContext::PendingEvent: public kj::Refcounted {
