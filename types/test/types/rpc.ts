@@ -8,6 +8,8 @@ import {
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
+  type WorkflowCronSchedule,
+  type WorkflowEvent,
   type WorkflowStep,
 } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
@@ -833,3 +835,27 @@ expectTypeOf(
     async (): Promise<string> => 'ok'
   )
 ).toMatchTypeOf<Promise<string>>();
+
+declare const cronSchedule: WorkflowCronSchedule;
+expectTypeOf(cronSchedule.cron).toEqualTypeOf<string>();
+expectTypeOf(cronSchedule.scheduledTime).toEqualTypeOf<number>();
+
+type WorkflowPayload = {foo: string};
+declare const workflowEvent: WorkflowEvent<WorkflowPayload>;
+expectTypeOf(workflowEvent.payload).toEqualTypeOf<Readonly<WorkflowPayload>>();
+expectTypeOf(workflowEvent.timestamp).toEqualTypeOf<Date>();
+expectTypeOf(workflowEvent.instanceId).toEqualTypeOf<string>();
+expectTypeOf(workflowEvent.workflowName).toEqualTypeOf<string>();
+expectTypeOf(workflowEvent.schedule).toEqualTypeOf<
+  WorkflowCronSchedule | undefined
+>();
+
+const withoutSchedule: WorkflowEvent<WorkflowPayload> = {
+  payload: {foo: 'bar'},
+  timestamp: new Date(),
+  instanceId: 'abc',
+  workflowName: 'my-workflow',
+};
+expectTypeOf(withoutSchedule.schedule).toEqualTypeOf<
+  WorkflowCronSchedule | undefined
+>();
