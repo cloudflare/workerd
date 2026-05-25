@@ -999,5 +999,63 @@ KJ_TEST("HibernationManager: auto-response (hibernated) bypasses the output gate
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+// Regression test for VULN-136638.
+//
+// In the hibernated branch of readLoop, an auto-response was sent by passing the borrowed
+// kj::ArrayPtr from autoResponsePair->response directly into ws.send(), then suspending on
+// co_await. kj::WebSocket::send() borrows that ArrayPtr across the suspension (http.h:633:
+// "The underlying buffer must remain valid ... until the returned promise resolves"). A
+// concurrent setWebSocketAutoResponse() call from JS would free the borrowed buffer mid-send.
+//
+// This test parks the readLoop at the co_await with the borrow in flight, then calls
+// setWebSocketAutoResponse(kj::none, kj::none) to free the kj::String backing the borrowed
+// pointer, then drains the eyeball. Under ASAN, the pipe's receive reading through the
+// freed pointer trips a use-after-free report. With the fix in place (a coroutine-local
+// kj::str(...) copy in the hibernated branch), the receive returns the original bytes
+// cleanly and the assertion passes.
+//
+// Outside ASAN this test only catches the bug probabilistically — the freed bytes may still
+// be readable. CI runs ASAN, so the regression is caught there.
+KJ_TEST("HibernationManager: hibernated auto-response copies buffer before suspending send "
+        "(regression VULN-136638)") {
+  DispatchStats stats;
+  TestFixture fixture(stubLoopbackParams(stats, kj::str("vuln-136638-autoresp-uaf")));
+
+  // Use a distinct, non-trivial response so the comparison at the end is unambiguous and any
+  // partial overwrite under non-ASAN is more likely to be detectable.
+  constexpr kj::StringPtr kResponse = "AUTO-RESPONSE-PAYLOAD-VULN-136638"_kj;
+
+  auto hm = makeTestHm(fixture, "ping"_kj, kResponse);
+  auto request = fixture.newIncomingRequest();
+  auto end1 = acceptNewWebSocket(fixture, *request, *hm);
+
+  fixture.enterWorkerLock([&](Worker::Lock& lock) { hm->hibernateWebSockets(lock); });
+
+  // Eyeball sends ping. end1->send().wait() returns once the readLoop's ws.receive() has
+  // consumed the message, but the readLoop may not yet have reached the
+  // ws.send(...).fork() / co_await p inside the hibernated branch — drive the event loop
+  // until it does. After this point, the readLoop is parked at co_await p with a
+  // BlockedSend on the pipe holding (under the bug) a borrowed pointer into
+  // autoResponsePair->response's heap buffer.
+  end1->send("ping"_kj).wait(fixture.getWaitScope());
+  fixture.pollEventLoop();
+
+  // Free the borrowed buffer by clearing the auto-response pair. Production reaches this
+  // synchronously from actor-state.c++:setWebSocketAutoResponse, which would race with the
+  // parked readLoop. Here we call it directly while the readLoop is suspended — same effect,
+  // deterministic.
+  hm->setWebSocketAutoResponse(kj::none, kj::none);
+
+  // Drain the eyeball. With the fix, the pipe reads the coroutine-local copy and we receive
+  // the original bytes. Without the fix and under ASAN, the pipe reads freed memory and ASAN
+  // fails the test with a use-after-free report.
+  auto msg = end1->receive().wait(fixture.getWaitScope());
+  KJ_ASSERT(msg.is<kj::String>(), "expected auto-response string message");
+  KJ_ASSERT(msg.get<kj::String>() == kResponse, "auto-response bytes were corrupted",
+      msg.get<kj::String>(), kResponse);
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 }  // namespace
 }  // namespace workerd
