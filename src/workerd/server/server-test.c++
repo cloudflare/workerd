@@ -5270,6 +5270,254 @@ KJ_TEST("Server: Durable Object facets") {
   }
 }
 
+KJ_TEST("Server: Durable Object facet cloning") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2026-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = ctx.exports.MyActorClass.idFromName("name");
+                `    let actor = ctx.exports.MyActorClass.get(id);
+                `    return await actor.fetch(request);
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async fetch(request) {
+                `    let url = new URL(request.url);
+                `    switch (url.pathname) {
+                `      case "/setup": {
+                `        // Create "src" with a value, and "src" has children "a" and "b".
+                `        let src = this.ctx.facets.get("src", () => ({class: this.env.NESTED}));
+                `        await src.setValue(10);
+                `        await src.setChildValue("a", 100);
+                `        await src.setChildValue("b", 200);
+                `        return new Response("ok");
+                `      }
+                `      case "/clone-basic": {
+                `        // Clone src to dst. Verify dst has matching data.
+                `        this.ctx.facets.clone("src", "dst");
+                `        let dst = this.ctx.facets.get("dst", () => ({class: this.env.NESTED}));
+                `        let dstVal = await dst.getValue();
+                `        let dstA = await dst.getChildValue("a");
+                `        let dstB = await dst.getChildValue("b");
+                `        return new Response(`dst=${dstVal} dst.a=${dstA} dst.b=${dstB}`);
+                `      }
+                `      case "/verify-src-unchanged": {
+                `        // The original src should still have its data, untouched.
+                `        let src = this.ctx.facets.get("src", () => ({class: this.env.NESTED}));
+                `        let srcVal = await src.getValue();
+                `        let srcA = await src.getChildValue("a");
+                `        let srcB = await src.getChildValue("b");
+                `        return new Response(`src=${srcVal} src.a=${srcA} src.b=${srcB}`);
+                `      }
+                `      case "/mutate-dst-then-check-src": {
+                `        // Mutating dst should not affect src.
+                `        let dst = this.ctx.facets.get("dst", () => ({class: this.env.NESTED}));
+                `        await dst.setValue(999);
+                `        await dst.setChildValue("a", 888);
+                `        let src = this.ctx.facets.get("src", () => ({class: this.env.NESTED}));
+                `        let srcVal = await src.getValue();
+                `        let srcA = await src.getChildValue("a");
+                `        return new Response(`src=${srcVal} src.a=${srcA}`);
+                `      }
+                `      case "/clone-replaces-existing": {
+                `        // Create a populated `target`, then clone src over it. The previous
+                `        // data of `target` should be gone.
+                `        let target = this.ctx.facets.get("target",
+                `            () => ({class: this.env.NESTED}));
+                `        await target.setValue(42);
+                `        await target.setChildValue("oldChild", 77);
+                `        this.ctx.facets.clone("src", "target");
+                `        // Look up "target" again -- the previous handle was aborted.
+                `        let target2 = this.ctx.facets.get("target",
+                `            () => ({class: this.env.NESTED}));
+                `        let val = await target2.getValue();
+                `        let a = await target2.getChildValue("a");
+                `        // The old child "oldChild" should NOT have data (it was deleted).
+                `        let oldChild = await target2.getChildValue("oldChild");
+                `        return new Response(`target=${val} target.a=${a} oldChild=${oldChild}`);
+                `      }
+                `      case "/clone-from-nonexistent-deletes-dst": {
+                `        // Populate dst, then clone from a never-existed src. dst should be
+                `        // empty afterwards (matching DO semantics: no-data is indistinguishable
+                `        // from never-ran).
+                `        let dst = this.ctx.facets.get("toBeWiped",
+                `            () => ({class: this.env.NESTED}));
+                `        await dst.setValue(123);
+                `        await dst.setChildValue("c", 456);
+                `        this.ctx.facets.clone("never-existed", "toBeWiped");
+                `        let dst2 = this.ctx.facets.get("toBeWiped",
+                `            () => ({class: this.env.NESTED}));
+                `        let val = await dst2.getValue();
+                `        let c = await dst2.getChildValue("c");
+                `        return new Response(`val=${val} c=${c}`);
+                `      }
+                `      case "/clone-self-aborts-but-preserves": {
+                `        // Set up "self": create it, store some data, and warm up its in-memory
+                `        // state by setting a non-persisted property.
+                `        let self = this.ctx.facets.get("self",
+                `            () => ({class: this.env.NESTED}));
+                `        await self.setValue(7);
+                `        await self.setMemoryOnly("alive");
+                `        // Confirm the in-memory property is set.
+                `        let beforeMem = await self.getMemoryOnly();
+                `        // Clone "self" onto itself. This should abort the running facet but
+                `        // leave its storage untouched.
+                `        this.ctx.facets.clone("self", "self");
+                `        // Old handle should now throw on use.
+                `        let oldThrew = false;
+                `        try { await self.getValue(); } catch (e) { oldThrew = true; }
+                `        // Get a fresh handle. The persisted data should still be intact, but
+                `        // the in-memory property should be cleared (fresh instance).
+                `        let self2 = this.ctx.facets.get("self",
+                `            () => ({class: this.env.NESTED}));
+                `        let val = await self2.getValue();
+                `        let mem = await self2.getMemoryOnly();
+                `        return new Response(
+                `            `beforeMem=${beforeMem} oldThrew=${oldThrew} val=${val} mem=${mem}`);
+                `      }
+                `      case "/read-restored": {
+                `        // Used after a server restart to verify dst's data persisted.
+                `        let dst = this.ctx.facets.get("dst", () => ({class: this.env.NESTED}));
+                `        let v = await dst.getValue();
+                `        let a = await dst.getChildValue("a");
+                `        let b = await dst.getChildValue("b");
+                `        return new Response(`dst=${v} dst.a=${a} dst.b=${b}`);
+                `      }
+                `    }
+                `    return new Response("bad url", {status: 404});
+                `  }
+                `}
+                `export class NestedFacet extends DurableObject {
+                `  async setValue(v) {
+                `    await this.ctx.storage.put("value", v);
+                `  }
+                `  async getValue() {
+                `    return (await this.ctx.storage.get("value")) ?? null;
+                `  }
+                `  async setChildValue(name, v) {
+                `    let child = this.ctx.facets.get(name, () => ({class: this.env.LEAF}));
+                `    await child.setValue(v);
+                `  }
+                `  async getChildValue(name) {
+                `    let child = this.ctx.facets.get(name, () => ({class: this.env.LEAF}));
+                `    return await child.getValue();
+                `  }
+                `  setMemoryOnly(v) { this.memoryOnly = v; }
+                `  getMemoryOnly() { return this.memoryOnly ?? null; }
+                `}
+                `export class LeafFacet extends DurableObject {
+                `  async setValue(v) {
+                `    await this.ctx.storage.put("value", v);
+                `  }
+                `  async getValue() {
+                `    return (await this.ctx.storage.get("value")) ?? null;
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            (name = "NESTED",
+              durableObjectClass = (name = "hello", entrypoint = "NestedFacet")),
+            (name = "LEAF",
+              durableObjectClass = (name = "hello", entrypoint = "LeafFacet"))
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  // A directory outside of the test scope that can be reused across multiple TestServers.
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+
+  {
+    TestServer test(config);
+
+    test.root->transfer(
+        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+
+    // Setup: create src with children a and b.
+    conn.httpGet200("/setup", "ok");
+
+    // Basic clone with descendant subtree.
+    conn.httpGet200("/clone-basic", "dst=10 dst.a=100 dst.b=200");
+
+    // Source is untouched after the clone.
+    conn.httpGet200("/verify-src-unchanged", "src=10 src.a=100 src.b=200");
+
+    // Mutating dst should not bleed back into src.
+    conn.httpGet200("/mutate-dst-then-check-src", "src=10 src.a=100");
+
+    // dst itself was mutated.
+    conn.httpGet200("/verify-src-unchanged", "src=10 src.a=100 src.b=200");
+
+    // Clone over an existing facet: previous data is gone.
+    conn.httpGet200("/clone-replaces-existing", "target=10 target.a=100 oldChild=null");
+
+    // Clone from a never-existed src acts as a delete on dst.
+    conn.httpGet200("/clone-from-nonexistent-deletes-dst", "val=null c=null");
+
+    // Cloning a facet onto itself aborts it (clearing in-memory state) but does not touch its
+    // stored data.
+    conn.httpGet200(
+        "/clone-self-aborts-but-preserves", "beforeMem=alive oldThrew=true val=7 mem=null");
+  }
+
+  // Verify a few key on-disk properties.
+  auto nsDir = dir->openSubdir(kj::Path({"mykey"}));
+  // The root, src (id 1), src/a, src/b, dst (some id), dst/a, dst/b, target, target/a, target/b
+  // should all have files. We don't assume specific IDs beyond src=1, but we do verify that
+  // the index and at least the first few facet files exist.
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.facets"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.1.sqlite"})));
+
+  // After a server restart, clone destinations should still be readable.
+  {
+    TestServer test(config);
+
+    test.root->transfer(
+        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    // We previously mutated dst to value=999 and dst.a=888, dst.b unchanged at 200.
+    conn.httpGet200("/read-restored", "dst=999 dst.a=888 dst.b=200");
+  }
+}
+
 KJ_TEST("Server: Durable Object facet limits") {
   kj::StringPtr config = R"((
     services = [
@@ -5317,6 +5565,22 @@ KJ_TEST("Server: Durable Object facet limits") {
                 `      case "/delete-name-too-long": {
                 `        try {
                 `          this.ctx.facets.delete("x".repeat(257));
+                `          return new Response("no error");
+                `        } catch (e) {
+                `          return new Response(e.constructor.name + ": " + e.message);
+                `        }
+                `      }
+                `      case "/clone-src-name-too-long": {
+                `        try {
+                `          this.ctx.facets.clone("x".repeat(257), "ok");
+                `          return new Response("no error");
+                `        } catch (e) {
+                `          return new Response(e.constructor.name + ": " + e.message);
+                `        }
+                `      }
+                `      case "/clone-dst-name-too-long": {
+                `        try {
+                `          this.ctx.facets.clone("ok", "x".repeat(257));
                 `          return new Response("no error");
                 `        } catch (e) {
                 `          return new Response(e.constructor.name + ": " + e.message);
@@ -5402,6 +5666,10 @@ KJ_TEST("Server: Durable Object facet limits") {
       "/abort-name-too-long", "TypeError: Facet name is too long (max 256 characters).");
   conn.httpGet200(
       "/delete-name-too-long", "TypeError: Facet name is too long (max 256 characters).");
+  conn.httpGet200(
+      "/clone-src-name-too-long", "TypeError: Facet name is too long (max 256 characters).");
+  conn.httpGet200(
+      "/clone-dst-name-too-long", "TypeError: Facet name is too long (max 256 characters).");
 
   // Depth limit.
   conn.httpGet200("/depth-ok", "ok");

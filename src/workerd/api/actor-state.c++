@@ -1070,6 +1070,12 @@ void DurableObjectFacets::delete_(jsg::Lock& js, kj::String name) {
   getFacetManager().deleteFacet(name);
 }
 
+void DurableObjectFacets::clone(jsg::Lock& js, kj::String src, kj::String dst) {
+  requireValidFacetName(src);
+  requireValidFacetName(dst);
+  getFacetManager().cloneFacet(src, dst);
+}
+
 ActorState::ActorState(Worker::Actor::Id actorId,
     kj::Maybe<jsg::JsRef<jsg::JsValue>> transient,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent)

@@ -467,11 +467,13 @@ class DurableObjectFacets: public jsg::Object {
 
   void abort(jsg::Lock& js, kj::String name, jsg::JsValue reason);
   void delete_(jsg::Lock& js, kj::String name);
+  void clone(jsg::Lock& js, kj::String src, kj::String dst);
 
   JSG_RESOURCE_TYPE(DurableObjectFacets) {
     JSG_METHOD(get);
     JSG_METHOD(abort);
     JSG_METHOD_NAMED(delete, delete_);
+    JSG_METHOD(clone);
 
     JSG_TS_OVERRIDE({
       get<T extends Rpc.DurableObjectBranded | undefined = undefined>(

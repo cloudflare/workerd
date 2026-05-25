@@ -927,6 +927,7 @@ class Worker::Actor final: public kj::Refcounted {
         kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) = 0;
     virtual void abortFacet(kj::StringPtr name, kj::Exception reason) = 0;
     virtual void deleteFacet(kj::StringPtr name) = 0;
+    virtual void cloneFacet(kj::StringPtr src, kj::StringPtr dst) = 0;
   };
 
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated

@@ -680,6 +680,36 @@ class Server::ActorNamespace final {
       }
     }
 
+    void cloneFacet(kj::StringPtr src, kj::StringPtr dst) override {
+      // Replacing a facet implies aborting it.
+      abortFacet(dst, JSG_KJ_EXCEPTION(FAILED, Error, "Facet was cloned-over."));
+
+      if (src == dst) {
+        // Cloning a facet to itself is equivalent to replacing it with an exact copy of its own
+        // data. Aborting matches the observable semantics of delete(dst), but we leave the
+        // storage untouched (since src == dst, copying it onto itself would be a no-op anyway).
+        return;
+      }
+
+      auto& as = KJ_UNWRAP_OR(ns.actorStorage, return);
+
+      // If no index exists on disk, there can be no storage to delete or copy.
+      KJ_IF_SOME(index, getFacetTreeIndexIfNotEmpty()) {
+        uint parentId = getFacetId();
+
+        // Delete dst's existing storage first, mirroring the storage-side behavior of
+        // deleteFacet() (the abort was already handled above).
+        uint dstId = index.getId(parentId, dst);
+        deleteFacetImpl(*as.directory, index, dstId);
+
+        // Now copy src to dst. If src's DB file does not exist, then src has no data, which
+        // in the Durable Objects model is indistinguishable from src never having run. In
+        // that case dst should also have no data, which it already does (we just deleted it).
+        uint srcId = index.getId(parentId, src);
+        cloneFacetImpl(*as.directory, index, srcId, dstId);
+      }
+    }
+
     void requireTransferrableStub() {
       JSG_REQUIRE(parent == kj::none, DOMDataCloneError,
           "Stubs pointing to Durable Object facets are not serializable.");
@@ -820,6 +850,55 @@ class Server::ActorNamespace final {
     void deleteDescendantStorage(const kj::Directory& dir, FacetTreeIndex& index, uint parentId) {
       index.forEachChild(parentId,
           [&](uint childId, kj::StringPtr childName) { deleteFacetImpl(dir, index, childId); });
+    }
+
+    // Recursively copy the subtree rooted at the facet with ID `srcParentId` to a new subtree
+    // rooted at the facet with ID `dstParentId`.
+    void cloneFacetImpl(const kj::Directory& dir, FacetTreeIndex& index, uint srcId, uint dstId) {
+      // Snapshot src's children before recursing, because the recursion mutates the index by
+      // allocating new IDs for the destination subtree, which would interfere with a live
+      // forEachChild iteration.
+      struct Child {
+        uint id;
+        kj::String name;
+      };
+      kj::Vector<Child> children;
+      index.forEachChild(srcId, [&](uint childId, kj::StringPtr childName) {
+        children.add(Child{childId, kj::str(childName)});
+      });
+
+      for (auto& child: children) {
+        uint newChildId = index.getId(dstId, child.name);
+        cloneFacetImpl(dir, index, child.id, newChildId);
+      }
+
+      // Now that the children are copied, copy the main facet.
+      auto srcDb = getSqlitePathForId(srcId);
+
+      // It's possible there's no backing file on disk, if the facet existed previously but was
+      // deleted. If the source facet has no data, then leaving the destination with no data
+      // is correct.
+      if (!dir.exists(srcDb)) return;
+
+      // Copy the database. Use KJ's Directory::transfer() which will use copy-on-write where
+      // available (e.g. FICLONE on Linux, if the FS supports it).
+      auto dstDb = getSqlitePathForId(dstId);
+      dir.transfer(dstDb, kj::WriteMode::CREATE, srcDb, kj::TransferMode::COPY);
+
+      // Copy the WAL if it exists. We can't rely on the source's WAL having been checkpointed
+      // and truncated at close time -- e.g., a previous process may have crashed leaving a
+      // valid WAL. Copying the WAL alongside the DB preserves any unmerged data.
+      auto srcWal = getSqlitePathForId(srcId, "-wal");
+      if (!dir.exists(srcWal)) return;
+      auto dstWal = getSqlitePathForId(dstId, "-wal");
+      dir.transfer(dstWal, kj::WriteMode::CREATE, srcWal, kj::TransferMode::COPY);
+
+      // Finally copy the SHM file if present. This is not strictly necessary but if the WAL is
+      // large this helps SQLite start up faster.
+      auto srcShm = getSqlitePathForId(srcId, "-shm");
+      if (!dir.exists(srcShm)) return;
+      auto dstShm = getSqlitePathForId(dstId, "-shm");
+      dir.transfer(dstShm, kj::WriteMode::CREATE, srcShm, kj::TransferMode::COPY);
     }
 
     void requireNotBroken() {
