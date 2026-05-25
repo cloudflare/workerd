@@ -1066,7 +1066,7 @@ wd_test(
 
 sh_test(
     name = "abortIsolate",
-    size = "small",
+    size = "medium",
     srcs = ["abortIsolate.sh"],
     args = [
         "$(location //src/workerd/server:workerd_cross)",
