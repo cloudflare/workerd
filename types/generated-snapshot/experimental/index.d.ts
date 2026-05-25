@@ -14406,10 +14406,18 @@ declare namespace CloudflareWorkersModule {
     timeout?: WorkflowTimeoutDuration | number;
     sensitive?: WorkflowStepSensitivity;
   };
+  export type WorkflowCronSchedule = {
+    /** Cron expression that triggered this event. */
+    cron: string;
+    /** Timestamp of the scheduled trigger, in milliseconds since the Unix epoch. */
+    scheduledTime: number;
+  };
   export type WorkflowEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
     instanceId: string;
+    workflowName: string;
+    schedule?: WorkflowCronSchedule;
   };
   export type WorkflowStepEvent<T> = {
     payload: Readonly<T>;
