@@ -103,10 +103,10 @@ class FileSystemModule final: public jsg::Object {
     JSG_STRUCT(position);
   };
 
-  uint32_t write(jsg::Lock& js, int fd, kj::Array<jsg::JsRef<jsg::JsBufferSource>> data, WriteOptions options);
-  uint32_t read(jsg::Lock& js, int fd, kj::Array<jsg::JsRef<jsg::JsUint8Array>> data, WriteOptions options);
+  uint32_t write(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options);
+  uint32_t read(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options);
 
-  jsg::JsUint8Array readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd);
+  jsg::BufferSource readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd);
 
   struct WriteAllOptions {
     bool exclusive;
@@ -116,7 +116,7 @@ class FileSystemModule final: public jsg::Object {
 
   uint32_t writeAll(jsg::Lock& js,
       kj::OneOf<int, FilePath> pathOrFd,
-      jsg::JsBufferSource data,
+      jsg::BufferSource data,
       WriteAllOptions options);
 
   struct RenameOrCopyOptions {
@@ -298,12 +298,12 @@ struct FileSystemFileWriteParams {
   jsg::Optional<uint32_t> position;
   // Yes, wrapping the kj::Maybe with a jsg::Optional is intentional here. We need to
   // be able to accept null or undefined values and handle them per the spec.
-  jsg::Optional<kj::Maybe<kj::OneOf<jsg::Ref<Blob>, jsg::JsRef<jsg::JsBufferSource>, kj::String>>> data;
+  jsg::Optional<kj::Maybe<kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String>>> data;
   JSG_STRUCT(type, size, position, data);
 };
 
 using FileSystemWritableData =
-    kj::OneOf<jsg::Ref<Blob>, jsg::JsBufferSource, kj::String, FileSystemFileWriteParams>;
+    kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, FileSystemFileWriteParams>;
 
 class FileSystemFileHandle final: public FileSystemHandle {
  public:

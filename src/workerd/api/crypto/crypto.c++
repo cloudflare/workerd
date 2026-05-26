@@ -800,7 +800,7 @@ void DigestStream::dispose(jsg::Lock& js) {
     KJ_IF_SOME(ready, state.tryGet<Ready>()) {
       auto reason = js.typeError("The DigestStream was disposed.");
       ready.resolver.reject(js, reason);
-      state.init<StreamStates::Errored>(reason.addRef(js));
+      state.init<StreamStates::Errored>(js.v8Ref<v8::Value>(reason));
     }
   }
   JSG_CATCH(exception) {
@@ -859,7 +859,7 @@ void DigestStream::abort(jsg::Lock& js, jsg::JsValue reason) {
   // If the state is already closed or errored, then this is a non-op
   KJ_IF_SOME(ready, state.tryGet<Ready>()) {
     ready.resolver.reject(js, reason);
-    state.init<StreamStates::Errored>(reason.addRef(js));
+    state.init<StreamStates::Errored>(js.v8Ref<v8::Value>(reason));
   }
 }
 

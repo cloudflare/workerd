@@ -41,6 +41,7 @@ export default {
       'a rejection from underlyingSource.cancel() should be returned by pipeTo()',
       'a rejection from underlyingSink.abort() should be preferred to one from underlyingSource.cancel()',
       'abort should do nothing after the readable is errored, even with pending writes',
+      'abort should do nothing after the writable is errored',
       'pipeTo on a teed readable byte stream should only be aborted when both branches are aborted',
       "(reason: 'null') underlyingSource.cancel() should called when abort, even with pending pull",
       "(reason: 'undefined') underlyingSource.cancel() should called when abort, even with pending pull",
@@ -206,6 +207,7 @@ export default {
       'ReadableStream with byte source: getReader(), read(view), then cancel()',
       'ReadableStream with byte source: read(view) with Uint32Array, then fill it by multiple enqueue() calls',
       'ReadableStream with byte source: enqueue(), read(view) partially, then read()',
+      'ReadableStream with byte source: read(view), then respond() and close() in pull()',
       // TODO(conform): The spec expects the read to fail here. Instead, we end up cancelling
       // it with a zero-length result, with the subsequent read marked as done.
       'ReadableStream with byte source: read(view) with Uint16Array on close()-d stream with 1 byte enqueue()-d must fail',
@@ -285,6 +287,7 @@ export default {
       'ReadableStream teeing with byte source: canceling both branches in reverse order should aggregate the cancel reasons into an array',
       'ReadableStream teeing with byte source: pull with BYOB reader, then pull with default reader',
       'ReadableStream teeing with byte source: failing to cancel the original stream should cause cancel() to reject on branches',
+      'ReadableStream teeing with byte source: should be able to read one branch to the end without affecting the other',
       'ReadableStream teeing with byte source: canceling branch1 should not impact branch2',
       'ReadableStream teeing with byte source: canceling branch2 should not impact branch1',
       'ReadableStream teeing with byte source: canceling both branches in sequence with delay',

@@ -89,15 +89,11 @@ export const kvPutNonResizableMutateAfterPut = {
     if (stored === 'changed') {
       console.log('KV.put .then() is DEFERRED: saw mutation after put()');
     } else if (stored === 'initial') {
-      console.log(
-        'KV.put .then() is SYNCHRONOUS: did not see mutation after put()'
-      );
+      console.log('KV.put .then() is SYNCHRONOUS: did not see mutation after put()');
     }
     // Either way, this test should not crash.  Log the result so we can see
     // which behaviour we get.  Accept both for now.
-    assert.ok(
-      stored === 'initial' || stored === 'changed',
-      `expected 'initial' or 'changed', got '${stored}'`
-    );
+    assert.ok(stored === 'initial' || stored === 'changed',
+      `expected 'initial' or 'changed', got '${stored}'`);
   },
 };

@@ -380,8 +380,8 @@ KJ_TEST("StateMachine: with PendingStates spec") {
       StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>::create<Active>(
           kj::str("resource"));
 
-  // Start an operation (returns a token)
-  auto token = machine.beginOperation();
+  // Start an operation
+  machine.beginOperation();
   KJ_EXPECT(machine.hasOperationInProgress());
 
   // Defer a close
@@ -392,27 +392,27 @@ KJ_TEST("StateMachine: with PendingStates spec") {
   KJ_EXPECT(machine.pendingStateIs<Closed>());
   KJ_EXPECT(machine.isOrPending<Closed>());
 
-  // Complete the token - pending state applied
-  bool applied = token->complete();
+  // End operation - pending state applied
+  bool applied = machine.endOperation();
   KJ_EXPECT(applied);
   KJ_EXPECT(machine.is<Closed>());
   KJ_EXPECT(!machine.hasPendingState());
 }
 
-KJ_TEST("StateMachine: with PendingStates token RAII") {
+KJ_TEST("StateMachine: with PendingStates scoped operation") {
   auto machine =
       StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>::create<Active>(
           kj::str("resource"));
 
   {
-    auto token = machine.beginOperation();
+    auto scope = machine.scopedOperation();
     KJ_EXPECT(machine.hasOperationInProgress());
 
     auto _ KJ_UNUSED = machine.deferTransitionTo<Closed>();
-    KJ_EXPECT(machine.is<Active>());  // Still active while token alive
+    KJ_EXPECT(machine.is<Active>());  // Still active in scope
   }
 
-  // Token destroyed, pending state applied
+  // Scope ended, pending state applied
   KJ_EXPECT(machine.is<Closed>());
 }
 
@@ -429,8 +429,8 @@ KJ_TEST("StateMachine: full-featured stream-like usage") {
   machine.whenActive([](Active& a) { a.resourceName = kj::str("modified"); });
   KJ_EXPECT(machine.getUnsafe<Active>().resourceName == "modified");
 
-  // Start a read operation (returns a token)
-  auto token = machine.beginOperation();
+  // Start a read operation
+  machine.beginOperation();
 
   // Close is requested mid-operation - deferred
   auto deferred KJ_UNUSED = machine.deferTransitionTo<Closed>();
@@ -438,8 +438,8 @@ KJ_TEST("StateMachine: full-featured stream-like usage") {
   KJ_EXPECT(machine.isOrPending<Closed>());
   KJ_EXPECT(!machine.isTerminal());  // Not terminal yet
 
-  // Complete the token - close applied
-  auto applied KJ_UNUSED = token->complete();
+  // End operation - close applied
+  auto applied KJ_UNUSED = machine.endOperation();
   KJ_EXPECT(machine.is<Closed>());
   KJ_EXPECT(machine.isTerminal());
   KJ_EXPECT(!machine.isActive());
@@ -625,7 +625,7 @@ class MockReadableStreamController {
     }
 
     // Start read operation (defers close/error during read)
-    auto token = dataState.beginOperation();
+    auto op = dataState.scopedOperation();
 
     // Safe access to source
     KJ_IF_SOME(result, dataState.whenActive([](Readable& r) -> kj::Maybe<kj::String> {
@@ -799,12 +799,12 @@ KJ_TEST("StateMachine: underlying accessor") {
 
 KJ_TEST("StateMachine: applyPendingStateImpl respects terminal") {
   // When we force-transition to a terminal state during an operation,
-  // the pending state should be discarded when the token completes.
+  // the pending state should be discarded on endOperation.
   auto machine = StateMachine<TerminalStates<Closed, Errored>, PendingStates<Closed, Errored>,
       Active, Closed, Errored>::create<Active>(kj::str("resource"));
 
   // Start an operation
-  auto token = machine.beginOperation();
+  machine.beginOperation();
 
   // Request a deferred close
   auto _ KJ_UNUSED = machine.deferTransitionTo<Closed>();
@@ -815,15 +815,15 @@ KJ_TEST("StateMachine: applyPendingStateImpl respects terminal") {
   machine.forceTransitionTo<Errored>(kj::str("forced error"));
   KJ_EXPECT(machine.is<Errored>());
 
-  // Complete token - pending Close should be discarded since we're in terminal state
-  bool pendingApplied = token->complete();
+  // End operation - pending Close should be discarded since we're in terminal state
+  bool pendingApplied = machine.endOperation();
   KJ_EXPECT(!pendingApplied);             // Pending was discarded, not applied
   KJ_EXPECT(machine.is<Errored>());       // Still in errored state
   KJ_EXPECT(!machine.hasPendingState());  // Pending was cleared
 }
 
-KJ_TEST("StateMachine: token complete inside whenState throws") {
-  // This test verifies that completing a token (which could apply a pending state)
+KJ_TEST("StateMachine: endOperation inside whenState throws") {
+  // This test verifies that ending an operation (which could apply a pending state)
   // inside a whenState() callback throws an error. This prevents UAF where a
   // transition invalidates the reference being used in the callback.
   auto machine =
@@ -832,14 +832,14 @@ KJ_TEST("StateMachine: token complete inside whenState throws") {
 
   // This pattern would cause UAF without the safety check:
   //   whenState gets reference to Active
-  //   token destroyed, applies pending state -> Active is destroyed
+  //   scopedOperation ends, applies pending state -> Active is destroyed
   //   callback continues using destroyed Active reference
   auto tryUnsafePattern = [&]() {
     machine.whenState<Active>([&](Active&) {
       {
-        auto token = machine.beginOperation();
+        auto op = machine.scopedOperation();
         auto _ KJ_UNUSED = machine.deferTransitionTo<Closed>();
-      }  // token destroyed here - would apply pending state
+      }  // op destroyed here - endOperation() would apply pending state
     });
   };
 
@@ -849,149 +849,22 @@ KJ_TEST("StateMachine: token complete inside whenState throws") {
   KJ_EXPECT(machine.is<Active>());
 }
 
-KJ_TEST("StateMachine: token complete outside whenState works") {
-  // Verify the correct pattern still works: complete tokens outside whenState
+KJ_TEST("StateMachine: endOperation outside whenState works") {
+  // Verify the correct pattern still works: end operations outside whenState
   auto machine =
       StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>::create<Active>(
           kj::str("resource"));
 
   {
-    auto token = machine.beginOperation();
+    auto op = machine.scopedOperation();
     machine.whenState<Active>([&](Active& a) {
-      // Safe to use 'a' here - no token completing in this scope
+      // Safe to use 'a' here - no operation ending in this scope
       KJ_EXPECT(a.resourceName == "resource");
     });
     auto _ KJ_UNUSED = machine.deferTransitionTo<Closed>();
-  }  // token destroyed here, OUTSIDE any whenState callback - safe!
+  }  // op ends here, OUTSIDE any whenState callback - safe!
 
   KJ_EXPECT(machine.is<Closed>());
-}
-
-KJ_TEST("StateMachine: double token complete throws") {
-  auto machine =
-      StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>::create<Active>(
-          kj::str("resource"));
-
-  auto token = machine.beginOperation();
-  auto _ KJ_UNUSED = machine.deferTransitionTo<Closed>();
-
-  bool applied = token->complete();
-  KJ_EXPECT(applied);
-  KJ_EXPECT(machine.is<Closed>());
-
-  // Second complete should throw
-  KJ_EXPECT_THROW_MESSAGE("already completed", (void)token->complete());
-}
-
-KJ_TEST("StateMachine: token complete after machine destroyed is safe no-op") {
-  kj::Rc<OperationToken> token = ([] {
-    auto machine =
-        StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>::create<Active>(
-            kj::str("resource"));
-    auto t = machine.beginOperation();
-    auto _ KJ_UNUSED = machine.deferTransitionTo<Closed>();
-    return t;
-  })();
-
-  // Machine is destroyed. Token holds a WeakRef that's been invalidated.
-  // complete() should be a safe no-op, not a crash or underflow.
-  bool applied = token->complete();
-  KJ_EXPECT(!applied);  // No machine to apply to
-}
-
-KJ_TEST("StateMachine: multiple tokens outstanding (order 1)") {
-  auto machine =
-      StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>::create<Active>(
-          kj::str("resource"));
-
-  auto token1 = machine.beginOperation();
-  auto token2 = machine.beginOperation();
-  KJ_EXPECT(machine.hasOperationInProgress());
-
-  auto _ KJ_UNUSED = machine.deferTransitionTo<Closed>();
-  KJ_EXPECT(machine.hasPendingState());
-
-  // First complete: count 2→1, pending NOT applied yet
-  bool applied1 = token1->complete();
-  KJ_EXPECT(!applied1);
-  KJ_EXPECT(machine.is<Active>());  // Still active
-  KJ_EXPECT(machine.hasOperationInProgress());
-
-  // Second complete: count 1→0, pending applied
-  bool applied2 = token2->complete();
-  KJ_EXPECT(applied2);
-  KJ_EXPECT(machine.is<Closed>());
-  KJ_EXPECT(!machine.hasOperationInProgress());
-}
-
-KJ_TEST("StateMachine: multiple tokens outstanding (order 2)") {
-  auto machine =
-      StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>::create<Active>(
-          kj::str("resource"));
-
-  auto token1 = machine.beginOperation();
-  auto token2 = machine.beginOperation();
-  KJ_EXPECT(machine.hasOperationInProgress());
-
-  auto _ KJ_UNUSED = machine.deferTransitionTo<Closed>();
-  KJ_EXPECT(machine.hasPendingState());
-
-  // Complete token2 first: count 2→1, pending NOT applied yet
-  bool applied2 = token2->complete();
-  KJ_EXPECT(!applied2);
-  KJ_EXPECT(machine.is<Active>());  // Still active
-  KJ_EXPECT(machine.hasOperationInProgress());
-
-  // Complete token1 second: count 1→0, pending applied
-  bool applied1 = token1->complete();
-  KJ_EXPECT(applied1);
-  KJ_EXPECT(machine.is<Closed>());
-  KJ_EXPECT(!machine.hasOperationInProgress());
-}
-
-KJ_TEST("StateMachine: shared token via Rc across two branches") {
-  auto machine =
-      StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>::create<Active>(
-          kj::str("resource"));
-
-  auto token = machine.beginOperation();
-  auto _ KJ_UNUSED = machine.deferTransitionTo<Closed>();
-
-  // Simulate sharing the token across two promise branches
-  auto branch1 = token.addRef();
-  auto branch2 = token.addRef();
-
-  // Drop the original
-  token = decltype(token)(nullptr);
-
-  // First branch completes
-  bool applied = branch1->complete();
-  KJ_EXPECT(applied);
-  KJ_EXPECT(machine.is<Closed>());
-
-  // Second branch's destructor runs — already completed, safe no-op
-  // (no double-complete, no underflow)
-}
-
-KJ_TEST("StateMachine: token destroyed with machine — no underflow") {
-  // Simulates the production scenario: token is held in an async callback,
-  // machine is destroyed by re-entrant JS, then the callback fires and
-  // the token is completed on the dead machine.
-  auto machine = kj::heap<StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>>(
-      StateMachine<PendingStates<Closed, Errored>, Active, Closed, Errored>::create<Active>(
-          kj::str("resource")));
-
-  auto token = machine->beginOperation();
-  auto _ KJ_UNUSED = machine->deferTransitionTo<Closed>();
-
-  // Destroy the machine while token is outstanding
-  machine = nullptr;
-
-  // Token complete is a safe no-op via WeakRef
-  bool applied = token->complete();
-  KJ_EXPECT(!applied);
-
-  // Token destructor also safe (already completed)
 }
 
 }  // namespace

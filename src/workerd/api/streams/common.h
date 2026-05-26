@@ -57,7 +57,7 @@ inline bool hasUtf8Bom(kj::ArrayPtr<const kj::byte> data) {
 }
 
 struct ReadResult {
-  jsg::Optional<jsg::JsRef<jsg::JsValue>> value;
+  jsg::Optional<jsg::Value> value;
   bool done;
 
   JSG_STRUCT(value, done);
@@ -80,7 +80,7 @@ struct DrainingReadResult {
 };
 
 struct StreamQueuingStrategy {
-  using SizeAlgorithm = uint64_t(jsg::JsValue);
+  using SizeAlgorithm = uint64_t(v8::Local<v8::Value>);
 
   jsg::Optional<uint64_t> highWaterMark;
   jsg::Optional<jsg::Function<SizeAlgorithm>> size;
@@ -96,7 +96,7 @@ struct UnderlyingSource {
       kj::OneOf<jsg::Ref<ReadableStreamDefaultController>, jsg::Ref<ReadableByteStreamController>>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
   using PullAlgorithm = jsg::Promise<void>(Controller);
-  using CancelAlgorithm = jsg::Promise<void>(jsg::JsValue reason);
+  using CancelAlgorithm = jsg::Promise<void>(v8::Local<v8::Value> reason);
 
   // The autoAllocateChunkSize mechanism allows byte streams to operate as if a BYOB
   // reader is being used even if it is just a default reader. Support is optional
@@ -152,8 +152,8 @@ struct UnderlyingSource {
 struct UnderlyingSink {
   using Controller = jsg::Ref<WritableStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
-  using WriteAlgorithm = jsg::Promise<void>(jsg::JsValue, Controller);
-  using AbortAlgorithm = jsg::Promise<void>(jsg::JsValue);
+  using WriteAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
+  using AbortAlgorithm = jsg::Promise<void>(v8::Local<v8::Value> reason);
   using CloseAlgorithm = jsg::Promise<void>();
 
   // Per the spec, the type property for the UnderlyingSink should always be either
@@ -179,9 +179,9 @@ struct UnderlyingSink {
 struct Transformer {
   using Controller = jsg::Ref<TransformStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
-  using TransformAlgorithm = jsg::Promise<void>(jsg::JsValue, Controller);
+  using TransformAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
   using FlushAlgorithm = jsg::Promise<void>(Controller);
-  using CancelAlgorithm = jsg::Promise<void>(jsg::JsValue);
+  using CancelAlgorithm = jsg::Promise<void>(jsg::JsValue reason);
 
   jsg::Optional<kj::String> readableType;
   jsg::Optional<kj::String> writableType;
@@ -319,12 +319,12 @@ namespace StreamStates {
 struct Closed {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
 };
-using Errored = jsg::JsRef<jsg::JsValue>;
+using Errored = jsg::Value;
 struct Erroring {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "erroring"_kj;
-  jsg::JsRef<jsg::JsValue> reason;
+  jsg::Value reason;
 
-  Erroring(jsg::Lock& js, jsg::JsValue reason): reason(reason.addRef(js)) {}
+  Erroring(jsg::Value reason): reason(kj::mv(reason)) {}
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(reason);
@@ -393,7 +393,9 @@ class ReadableStreamController {
   struct ByobOptions {
     static constexpr size_t DEFAULT_AT_LEAST = 1;
 
-    jsg::JsRef<jsg::JsArrayBufferView> bufferView;
+    jsg::V8Ref<v8::ArrayBufferView> bufferView;
+    size_t byteOffset = 0;
+    size_t byteLength;
 
     // The minimum number of elements that should be read. When not specified, the default
     // is DEFAULT_AT_LEAST. This is a non-standard, Workers-specific extension to
@@ -426,7 +428,7 @@ class ReadableStreamController {
       virtual ~Branch() noexcept(false) {}
 
       virtual void doClose(jsg::Lock& js) = 0;
-      virtual void doError(jsg::Lock& js, jsg::JsValue reason) = 0;
+      virtual void doError(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
       virtual void handleData(jsg::Lock& js, ReadResult result) = 0;
     };
 
@@ -443,7 +445,7 @@ class ReadableStreamController {
         inner->doClose(js);
       }
 
-      inline void doError(jsg::Lock& js, jsg::JsValue reason) {
+      inline void doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
         inner->doError(js, reason);
       }
 
@@ -468,7 +470,7 @@ class ReadableStreamController {
 
     virtual void close(jsg::Lock& js) = 0;
 
-    virtual void error(jsg::Lock& js, jsg::JsValue reason) = 0;
+    virtual void error(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
 
     virtual void ensurePulling(jsg::Lock& js) = 0;
 
@@ -484,11 +486,11 @@ class ReadableStreamController {
    public:
     virtual ~PipeController() noexcept(false) {}
     virtual bool isClosed() = 0;
-    virtual kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) = 0;
-    virtual void cancel(jsg::Lock& js, jsg::JsValue reason) = 0;
+    virtual kj::Maybe<v8::Local<v8::Value>> tryGetErrored(jsg::Lock& js) = 0;
+    virtual void cancel(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
     virtual void close(jsg::Lock& js) = 0;
-    virtual void error(jsg::Lock& js, jsg::JsValue reason) = 0;
-    virtual void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) = 0;
+    virtual void error(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
+    virtual void release(jsg::Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeError = kj::none) = 0;
     virtual kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) = 0;
     virtual jsg::Promise<ReadResult> read(jsg::Lock& js) = 0;
   };
@@ -535,7 +537,7 @@ class ReadableStreamController {
       jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) = 0;
 
   // Indicates that the consumer no longer has any interest in the streams data.
-  virtual jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) = 0;
+  virtual jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) = 0;
 
   // Branches the ReadableStreamController into two ReadableStream instances that will receive
   // this streams data. The specific details of how the branching occurs is entirely up to the
@@ -571,8 +573,7 @@ class ReadableStreamController {
   //
   // limit specifies an upper maximum bound on the number of bytes permitted to be read.
   // The promise will reject if the read will produce more bytes than the limit.
-  virtual jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> readAllBytes(
-      jsg::Lock& js, uint64_t limit) = 0;
+  virtual jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit) = 0;
 
   // Fully consumes the ReadableStream. If the stream is already locked to a reader or
   // errored, the returned JS promise will reject. If the stream is already closed, the
@@ -672,17 +673,19 @@ class WritableStreamController {
   struct PendingAbort {
     kj::Maybe<jsg::Promise<void>::Resolver> resolver;
     jsg::Promise<void> promise;
-    jsg::JsRef<jsg::JsValue> reason;
+    jsg::Value reason;
     bool reject = false;
 
-    PendingAbort(
-        jsg::Lock& js, jsg::PromiseResolverPair<void> prp, jsg::JsValue reason, bool reject);
+    PendingAbort(jsg::Lock& js,
+        jsg::PromiseResolverPair<void> prp,
+        v8::Local<v8::Value> reason,
+        bool reject);
 
-    PendingAbort(jsg::Lock& js, jsg::JsValue reason, bool reject);
+    PendingAbort(jsg::Lock& js, v8::Local<v8::Value> reason, bool reject);
 
     void complete(jsg::Lock& js);
 
-    void fail(jsg::Lock& js, jsg::JsValue reason);
+    void fail(jsg::Lock& js, v8::Local<v8::Value> reason);
 
     inline jsg::Promise<void> whenResolved(jsg::Lock& js) {
       return promise.whenResolved(js);
@@ -719,7 +722,7 @@ class WritableStreamController {
   // The controller implementation will determine what kind of JavaScript data
   // it is capable of writing, returning a rejected promise if the written
   // data type is not supported.
-  virtual jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> value) = 0;
+  virtual jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> value) = 0;
 
   // Indicates that no additional data will be written to the controller. All
   // existing pending writes should be allowed to complete.
@@ -730,7 +733,7 @@ class WritableStreamController {
   virtual jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) = 0;
 
   // Immediately interrupts existing pending writes and errors the stream.
-  virtual jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) = 0;
+  virtual jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) = 0;
 
   // The tryPipeFrom attempts to establish a data pipe where source's data
   // is delivered to this WritableStreamController as efficiently as possible.
@@ -762,7 +765,7 @@ class WritableStreamController {
   // If maybeJs is set, the writer's closed and ready promises will be resolved.
   virtual void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
-  virtual kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) = 0;
+  virtual kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) = 0;
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};
 
@@ -795,29 +798,9 @@ kj::Own<WritableStreamController> newWritableStreamInternalController(IoContext&
 
 struct Unlocked {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "unlocked"_kj;
-
-  // When PipeLocked (which inherits PipeController and has a vtable pointer
-  // at offset 0) is destroyed and replaced in-place by Unlocked in the lock
-  // state machine's OneOf storage, the stale vtable bytes normally survive
-  // because Unlocked has no data members. This makes type-confused virtual
-  // calls through a dangling PipeController& silently succeed rather than
-  // crash — defeating ASAN (no heap free) and making regression tests
-  // unreliable.
-  //
-  // Overwrite the first pointer-sized bytes of the union storage with an
-  // obviously invalid address so that any stale virtual call through a
-  // PipeController& pointing at this storage dereferences a bad vtable
-  // pointer and SIGSEGVs deterministically.
-  uintptr_t vtablePoison = 0xDEAD'BEEF'DEAD'BEEFull;
 };
 struct Locked {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "locked"_kj;
-
-  // Defense-in-depth: same vtable poison as Unlocked. No known code path
-  // transitions a vtable-bearing PipeLocked to Locked today, but if one
-  // were introduced, the ghost vtable bytes would survive in this empty
-  // struct's union storage just as they did in the original Unlocked.
-  uintptr_t vtablePoison = 0xDEAD'BEEF'DEAD'BEEFull;
 };
 
 // When a reader is locked to a ReadableStream, a ReaderLock instance
@@ -915,13 +898,6 @@ class WriterLocked {
     }
   }
 
-  void setResolvedReady(jsg::Lock& js, jsg::Promise<void> readyPromise) {
-    KJ_IF_SOME(w, writer) {
-      readyFulfiller = kj::none;
-      w.replaceReadyPromise(js, kj::mv(readyPromise));
-    }
-  }
-
   void clear() {
     writer = kj::none;
     closedFulfiller = kj::none;
@@ -959,7 +935,7 @@ inline void maybeResolvePromise(
 template <typename T>
 void maybeRejectPromise(jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver,
-    jsg::JsValue reason) {
+    v8::Local<v8::Value> reason) {
   KJ_IF_SOME(resolver, maybeResolver) {
     resolver.reject(js, reason);
     maybeResolver = kj::none;
@@ -967,7 +943,8 @@ void maybeRejectPromise(jsg::Lock& js,
 }
 
 template <typename T>
-jsg::Promise<T> rejectedMaybeHandledPromise(jsg::Lock& js, jsg::JsValue reason, bool handled) {
+jsg::Promise<T> rejectedMaybeHandledPromise(
+    jsg::Lock& js, v8::Local<v8::Value> reason, bool handled) {
   auto prp = js.newPromiseAndResolver<T>();
   if (handled) {
     prp.promise.markAsHandled(js);
@@ -979,11 +956,6 @@ jsg::Promise<T> rejectedMaybeHandledPromise(jsg::Lock& js, jsg::JsValue reason, 
 inline kj::Maybe<IoContext&> tryGetIoContext() {
   // TODO(cleanup): This function is obsolete; callers should just call IoContext::tryCurrent()
   return IoContext::tryCurrent();
-}
-
-inline bool isByteSource(const jsg::JsValue& value) {
-  return value.isArrayBuffer() || value.isSharedArrayBuffer() || value.isArrayBufferView() ||
-      value.isString();
 }
 
 }  // namespace workerd::api

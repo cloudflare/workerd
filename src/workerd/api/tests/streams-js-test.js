@@ -2366,8 +2366,7 @@ export const queuingStrategies = {
 
       ok(startRan);
       strictEqual(highWaterMark, 10);
-      // Non-standard, but strings are interpreted as UTF-8 length...
-      strictEqual(size('nothing'), 7);
+      strictEqual(size('nothing'), undefined);
       strictEqual(size(123), undefined);
       strictEqual(size(undefined), undefined);
       strictEqual(size(null), undefined);
