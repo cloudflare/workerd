@@ -2097,7 +2097,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
       auto store = source.detach(js);
       store.consume(store.size());
       return js.resolvedPromise(ReadResult{
-        .value = js.v8Ref(store.createHandle(js)),
+        .value = jsg::JsValue(store.createHandle(js)).addRef(js),
         .done = true,
       });
     } else {
@@ -2795,7 +2795,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       auto store = source.detach(js);
       store.consume(store.size());
       return js.resolvedPromise(ReadResult{
-        .value = js.v8Ref(store.createHandle(js)),
+        .value = jsg::JsValue(store.createHandle(js)).addRef(js),
         .done = true,
       });
     }
@@ -3295,7 +3295,7 @@ class AllReader {
           // If we're not done, the result value must be interpretable as
           // bytes for the read to make any sense.
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
-          if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
+          if (!handle.isArrayBufferView() && !handle.isArrayBuffer()) {
             auto error = js.typeError("This ReadableStream did not return bytes.");
             state.template transitionTo<StreamStates::Errored>(
                 js.v8Ref(v8::Local<v8::Value>(error)));
@@ -3443,7 +3443,7 @@ class PumpToReader {
           }
 
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
-          if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
+          if (!handle.isArrayBufferView() && !handle.isArrayBuffer()) {
             auto err = js.typeError("This ReadableStream did not return bytes.");
             return js.v8Ref(v8::Local<v8::Value>(err));
           }
@@ -4258,9 +4258,9 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     auto onSuccess = [this, ref = addRef()](jsg::Lock& js) { return pipeLoop(js); };
 
     auto onFailure = [this, ref = addRef(), preventCancel, pipeThrough](
-                         jsg::Lock& js, jsg::V8Ref<v8::Value> value) mutable {
+                         jsg::Lock& js, jsg::V8Ref<v8::Value> exception) mutable {
       // The write failed. We need to release the source if the pipe lock still exists.
-      auto reason = value.getHandle(js);
+      auto reason = exception.getHandle(js);
       KJ_IF_SOME(pipeLock, lock.tryGetPipe()) {
         if (!preventCancel) {
           pipeLock.source.release(js, reason);
@@ -4272,7 +4272,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     };
 
     auto promise = write(js,
-        result.value.map([&](jsg::V8Ref<v8::Value>& value) { return value.getHandle(js); }));
+        result.value.map([&](jsg::JsRef<jsg::JsValue>& value) { return value.getHandle(js); }));
 
     return maybeAddFunctor(js, kj::mv(promise), kj::mv(onSuccess), kj::mv(onFailure));
   };

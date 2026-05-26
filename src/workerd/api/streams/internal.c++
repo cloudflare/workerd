@@ -497,8 +497,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           return js.rejectedPromise<ReadResult>(
               js.typeError("Unable to allocate memory for read"_kj));
         }
+        auto u8 = v8::Uint8Array::New(theStore, 0, 0);
         return js.resolvedPromise(ReadResult{
-          .value = js.v8Ref(v8::Uint8Array::New(theStore, 0, 0).As<v8::Value>()),
+          .value = jsg::JsValue(u8).addRef(js),
           .done = true,
         });
       }
@@ -550,8 +551,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         auto currentByteLength = theStore->ByteLength();
         if (byteOffset >= currentByteLength) {
           readPending = false;
+          auto u8 = v8::Uint8Array::New(theStore, 0, 0);
           return js.resolvedPromise(ReadResult{
-            .value = js.v8Ref(v8::Uint8Array::New(theStore, 0, 0).As<v8::Value>()),
+            .value = jsg::JsValue(u8).addRef(js),
             .done = false,
           });
         }
@@ -608,7 +610,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             // by the ArrayBuffer passed in the options.
             auto u8 = v8::Uint8Array::New(store.getHandle(js), 0, 0);
             return js.resolvedPromise(ReadResult{
-              .value = js.v8Ref(u8.As<v8::Value>()),
+              .value = jsg::JsValue(u8).addRef(js),
               .done = true,
             });
           }
@@ -632,8 +634,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
               "flag, to prevent this from happening."_kj);
 
           auto buffer = v8::ArrayBuffer::New(js.v8Isolate, 0);
+          auto u8 = v8::Uint8Array::New(buffer, 0, 0);
           return js.resolvedPromise(ReadResult{
-            .value = js.v8Ref(v8::Uint8Array::New(buffer, 0, 0).As<v8::Value>()),
+            .value = jsg::JsValue(u8).addRef(js),
             .done = false,
           });
         }
@@ -650,8 +653,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
               "happening."_kj);
 
           if (byteOffset >= handle->ByteLength()) {
+            auto u8 = v8::Uint8Array::New(store.getHandle(js), 0, 0);
             return js.resolvedPromise(ReadResult{
-              .value = js.v8Ref(v8::Uint8Array::New(store.getHandle(js), 0, 0).As<v8::Value>()),
+              .value = jsg::JsValue(u8).addRef(js),
               .done = false,
             });
           }
@@ -665,9 +669,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           memcpy(destPtr + byteOffset, readPtr, amount);
         }
 
+        auto u8 = v8::Uint8Array::New(store.getHandle(js), byteOffset, amount);
         return js.resolvedPromise(ReadResult{
-          .value = js.v8Ref(
-              v8::Uint8Array::New(store.getHandle(js), byteOffset, amount).As<v8::Value>()),
+          .value = jsg::JsValue(u8).addRef(js),
           .done = false,
         });
       }),
@@ -2086,7 +2090,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
     // we sent those bytes on to the WritableStreamSink.
     KJ_IF_SOME(value, result.value) {
       auto handle = value.getHandle(js);
-      if (handle->IsArrayBuffer() || handle->IsArrayBufferView()) {
+      if (handle.isArrayBuffer() || handle.isArrayBufferView()) {
         return state->write(handle).then(js,
             [state = kj::addRef(*state)](jsg::Lock& js) mutable -> jsg::Promise<void> {
           if (state->aborted) {

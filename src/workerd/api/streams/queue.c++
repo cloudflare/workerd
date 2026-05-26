@@ -24,7 +24,11 @@ void ValueQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
 }
 
 void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
-  resolver.resolve(js, ReadResult{.value = kj::mv(value), .done = false});
+  resolver.resolve(js,
+      ReadResult{
+        .value = jsg::JsValue(value.getHandle(js)).addRef(js),
+        .done = false,
+      });
 }
 
 void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
@@ -516,20 +520,31 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
     // There's been at least some data written, we need to respond but not
     // set done to true since that's what the streams spec requires.
     pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
-    resolver.resolve(
-        js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
+    resolver.resolve(js,
+        ReadResult{
+          .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+          .done = false,
+        });
   } else {
     // Otherwise, we set the length to zero
     pullInto.store.trim(js, pullInto.store.size());
     KJ_ASSERT(pullInto.store.size() == 0);
-    resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = true});
+    resolver.resolve(js,
+        ReadResult{
+          .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+          .done = true,
+        });
   }
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
-  resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
+  resolver.resolve(js,
+      ReadResult{
+        .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+        .done = false,
+      });
   maybeInvalidateByobRequest(byobReadRequest);
 }
 

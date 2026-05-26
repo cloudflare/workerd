@@ -57,7 +57,7 @@ inline bool hasUtf8Bom(kj::ArrayPtr<const kj::byte> data) {
 }
 
 struct ReadResult {
-  jsg::Optional<jsg::V8Ref<v8::Value>> value;
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> value;
   bool done;
 
   JSG_STRUCT(value, done);
