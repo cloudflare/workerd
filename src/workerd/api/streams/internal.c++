@@ -847,7 +847,7 @@ void ReadableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
   // If already in a terminal state, nothing to do.
   if (state.isTerminal()) return;
 
-  state.transitionTo<StreamStates::Errored>(js.v8Ref(reason));
+  state.transitionTo<StreamStates::Errored>(jsg::JsValue(reason).addRef(js));
   KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
   } else {
@@ -1335,7 +1335,8 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
     writeState.transitionTo<Unlocked>();
     if (!preventCancel) {
-      sourceLock.release(js, errored.getHandle(js));
+      v8::Local<v8::Value> error = errored.getHandle(js);
+      sourceLock.release(js, error);
     } else {
       sourceLock.release(js);
     }
@@ -1551,7 +1552,7 @@ void WritableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
   // If already in a terminal state, nothing to do.
   if (state.isTerminal()) return;
 
-  state.transitionTo<StreamStates::Errored>(js.v8Ref(reason));
+  state.transitionTo<StreamStates::Errored>(jsg::JsValue(reason).addRef(js));
   KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
@@ -2033,7 +2034,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
   KJ_IF_SOME(errored, parent.state.tryGetUnsafe<StreamStates::Errored>()) {
     parent.writeState.transitionTo<Unlocked>();
     if (!preventCancel) {
-      auto reason = errored.getHandle(js);
+      v8::Local<v8::Value> reason = errored.getHandle(js);
       source.release(js, reason);
       return js.rejectedPromise<void>(reason);
     }
@@ -2199,7 +2200,8 @@ bool ReadableStreamInternalController::PipeLocked::isClosed() {
 kj::Maybe<v8::Local<v8::Value>> ReadableStreamInternalController::PipeLocked::tryGetErrored(
     jsg::Lock& js) {
   KJ_IF_SOME(errored, inner.state.tryGetUnsafe<StreamStates::Errored>()) {
-    return errored.getHandle(js);
+    v8::Local<v8::Value> error = errored.getHandle(js);
+    return error;
   }
   return kj::none;
 }

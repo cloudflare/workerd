@@ -97,7 +97,7 @@ class ReadableLockImpl {
 
     kj::Maybe<v8::Local<v8::Value>> tryGetErrored(jsg::Lock& js) override {
       KJ_IF_SOME(errored, inner.state.template tryGetUnsafe<StreamStates::Errored>()) {
-        return errored.getHandle(js);
+        return v8::Local<v8::Value>(errored.getHandle(js));
       }
       return kj::none;
     }
@@ -1156,8 +1156,9 @@ void ReadableImpl<Self>::doError(jsg::Lock& js, jsg::Value reason) {
   }
 
   auto& queue = state.template getUnsafe<Queue>();
+  auto error = jsg::JsValue(reason.getHandle(js));
   queue.error(js, reason.addRef(js));
-  state.template transitionTo<StreamStates::Errored>(kj::mv(reason));
+  state.template transitionTo<StreamStates::Errored>(error.addRef(js));
   algorithms.clear();
 }
 
@@ -1646,10 +1647,11 @@ template <typename Self>
 void WritableImpl<Self>::startErroring(
     jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason) {
   KJ_ASSERT(isWritable());
+  auto error = jsg::JsValue(reason);
   KJ_IF_SOME(owner, tryGetOwner()) {
-    owner.maybeRejectReadyPromise(js, reason);
+    owner.maybeRejectReadyPromise(js, error);
   }
-  state.template transitionTo<StreamStates::Erroring>(js.v8Ref(reason));
+  state.template transitionTo<StreamStates::Erroring>(error.addRef(js));
   if (inFlightWrite == kj::none && inFlightClose == kj::none && flags.started) {
     finishErroring(js, kj::mv(self));
   }
@@ -2717,7 +2719,7 @@ void ReadableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
 
   // deferTransitionTo will defer if an operation is in progress, otherwise transition immediately.
   // Returns true if transition happened immediately.
-  if (state.deferTransitionTo<StreamStates::Errored>(js.v8Ref(reason))) {
+  if (state.deferTransitionTo<StreamStates::Errored>(jsg::JsValue(reason).addRef(js))) {
     lock.onError(js, reason);
   }
   // If deferred, lock.onError will be called when the pending state is applied
@@ -3144,11 +3146,11 @@ kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
 kj::Maybe<v8::Local<v8::Value>> ReadableStreamJsController::isErrored(jsg::Lock& js) {
   // Check for pending error first
   KJ_IF_SOME(pendingError, state.tryGetPendingStateUnsafe<StreamStates::Errored>()) {
-    return pendingError.getHandle(js);
+    return v8::Local<v8::Value>(pendingError.getHandle(js));
   }
   // Pending Closed means not errored, so we can just check current state
   return state.tryGetUnsafe<StreamStates::Errored>().map(
-      [&](jsg::V8Ref<v8::Value>& reason) { return reason.getHandle(js); });
+      [&](jsg::JsRef<jsg::JsValue>& reason) { return v8::Local<v8::Value>(reason.getHandle(js)); });
 }
 
 bool ReadableStreamJsController::canCloseOrEnqueue() {
@@ -3297,8 +3299,7 @@ class AllReader {
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
           if (!handle.isArrayBufferView() && !handle.isArrayBuffer()) {
             auto error = js.typeError("This ReadableStream did not return bytes.");
-            state.template transitionTo<StreamStates::Errored>(
-                js.v8Ref(v8::Local<v8::Value>(error)));
+            state.template transitionTo<StreamStates::Errored>(error.addRef(js));
             return readable->getController().cancel(js, error).then(
                 js, [&](jsg::Lock& js) { return loop(js); });
           }
@@ -3312,8 +3313,7 @@ class AllReader {
 
           if ((runningTotal + bufferSource.size()) > limit) {
             auto error = js.typeError("Memory limit exceeded before EOF.");
-            state.template transitionTo<StreamStates::Errored>(
-                js.v8Ref(v8::Local<v8::Value>(error)));
+            state.template transitionTo<StreamStates::Errored>(error.addRef(js));
             return readable->getController().cancel(js, error).then(
                 js, [&](jsg::Lock& js) { return loop(js); });
           }
@@ -3325,7 +3325,8 @@ class AllReader {
 
         auto onFailure = [this](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
           // In this case the stream should already be errored.
-          state.template transitionTo<StreamStates::Errored>(js.v8Ref(exception.getHandle(js)));
+          auto error = jsg::JsValue(exception.getHandle(js));
+          state.template transitionTo<StreamStates::Errored>(error.addRef(js));
           return loop(js);
         };
 
@@ -3823,7 +3824,7 @@ jsg::Ref<AbortSignal> WritableStreamDefaultController::getSignal() {
 
 kj::Maybe<v8::Local<v8::Value>> WritableStreamDefaultController::isErroring(jsg::Lock& js) {
   KJ_IF_SOME(erroring, impl.state.tryGetUnsafe<StreamStates::Erroring>()) {
-    return erroring.reason.getHandle(js);
+    return v8::Local<v8::Value>(erroring.reason.getHandle(js));
   }
   return kj::none;
 }
@@ -3972,9 +3973,10 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
     controller->clearAlgorithms();
   }
 
-  state.transitionTo<StreamStates::Errored>(js.v8Ref(reason));
+  auto error = jsg::JsValue(reason);
+  state.transitionTo<StreamStates::Errored>(error.addRef(js));
   KJ_IF_SOME(locked, lock.state.tryGetUnsafe<WriterLocked>()) {
-    maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
+    maybeRejectPromise<void>(js, locked.getClosedFulfiller(), error);
     maybeResolvePromise(js, locked.getReadyFulfiller());
   } else KJ_IF_SOME(pipeLocked, lock.state.tryGetUnsafe<WritableLockImpl::PipeLocked>()) {
     // When the writable side of a pipe errors, we need to release the source stream.
@@ -4030,7 +4032,7 @@ bool WritableStreamDefaultController::isErroring() const {
 
 kj::Maybe<v8::Local<v8::Value>> WritableStreamJsController::isErroredOrErroring(jsg::Lock& js) {
   KJ_IF_SOME(err, state.tryGetErrorUnsafe()) {
-    return err.getHandle(js);
+    return v8::Local<v8::Value>(err.getHandle(js));
   }
   return isErroring(js);
 }
@@ -4187,7 +4189,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     lock.releasePipeLock();
     auto reason = errored.getHandle(js);
     if (!preventCancel) {
-      source.release(js, reason);
+      source.release(js, v8::Local<v8::Value>(reason));
     } else {
       source.release(js);
     }

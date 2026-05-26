@@ -319,12 +319,12 @@ namespace StreamStates {
 struct Closed {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
 };
-using Errored = jsg::V8Ref<v8::Value>;
+using Errored = jsg::JsRef<jsg::JsValue>;
 struct Erroring {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "erroring"_kj;
-  jsg::V8Ref<v8::Value> reason;
+  jsg::JsRef<jsg::JsValue> reason;
 
-  Erroring(jsg::V8Ref<v8::Value> reason): reason(kj::mv(reason)) {}
+  Erroring(jsg::JsRef<jsg::JsValue> reason): reason(kj::mv(reason)) {}
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(reason);
