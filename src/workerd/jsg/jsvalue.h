@@ -693,6 +693,10 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
   void setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value);
   void setNonEnumerable(Lock& js, const JsSymbol& name, const JsValue& value);
 
+  // Like set but uses the createDataProperty API instead to avoid invoking
+  // user-defined Object.prototype setters
+  void createDataProperty(Lock& js, const JsValue& name, const JsValue& value);
+
   // Like set but uses the defineProperty API instead in order to override
   // the default property attributes. This is useful for defining properties
   // that otherwise would not be normally settable, such as the name of an
@@ -1239,6 +1243,11 @@ inline void JsObject::set(Lock& js, const JsValue& name, const JsValue& value) {
 
 inline void JsObject::set(Lock& js, kj::StringPtr name, const JsValue& value) {
   set(js, js.strIntern(name), value);
+}
+
+inline void JsObject::createDataProperty(Lock& js, const JsValue& name, const JsValue& value) {
+  KJ_ASSERT(name.inner->IsName());
+  check(inner->CreateDataProperty(js.v8Context(), name.inner.As<v8::Name>(), value.inner));
 }
 
 inline JsValue JsObject::get(Lock& js, const JsValue& name) {
