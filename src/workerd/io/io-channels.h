@@ -249,18 +249,9 @@ class IoChannelFactory {
   virtual kj::Own<SubrequestChannel> getSubrequestChannelResolved(
       uint channel, kj::Maybe<Frankenvalue> props, kj::Maybe<VersionRequest> versionRequest) = 0;
 
-  // Stub for a remote actor. Allows sending requests to the actor.
-  class ActorChannel: public SubrequestChannel {
-   public:
-    // At present there are no methods beyond what `SubrequestChannel` defines. However, it's
-    // easy to imagine that actor stubs may have more functionality than just sending requests
-    // someday, so we keep this as a separate type.
-
-    // For now, actor stubs are not transferrable -- but we do intend to change that at some point.
-    void requireAllowsTransfer() override final;
-    kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
-        ChannelTokenUsage usage) override final;
-  };
+  // ActorChannel used to be its own type, but no longer is.
+  // TODO(cleanup): Update all references.
+  using ActorChannel = SubrequestChannel;
 
   // Get an actor stub from the given namespace for the actor with the given ID.
   //
@@ -488,5 +479,21 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
   Type type;
   uint channel;
 };
+
+// Construct a channel based on a promise for a future channel. These channels' `getResolved()`
+// methods will resolve to the underlying channel. `BaseChannelType` must be either
+// `SubrequestChannel` or `ActorClassChannel`.
+template <typename BaseChannelType>
+kj::Own<BaseChannelType> newPromisedChannel(kj::Promise<kj::Own<BaseChannelType>> promise);
+
+template <>
+kj::Own<IoChannelFactory::SubrequestChannel> newPromisedChannel<
+    IoChannelFactory::SubrequestChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>> promise);
+
+template <>
+kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
+    IoChannelFactory::ActorClassChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>> promise);
 
 }  // namespace workerd

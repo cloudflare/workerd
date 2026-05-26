@@ -124,6 +124,54 @@ class MockActorClassChannel: public IoChannelFactory::ActorClassChannel {
   }
 };
 
+class MockActorChannel: public IoChannelFactory::ActorChannel {
+ public:
+  MockActorChannel(
+      kj::StringPtr namespaceKey, kj::ArrayPtr<const byte> id, kj::Maybe<kj::StringPtr> name)
+      : namespaceKey(kj::str(namespaceKey)),
+        id(kj::heapArray(id)),
+        name(name.map([](kj::StringPtr s) { return kj::str(s); })) {}
+
+  MockActorChannel(ChannelTokenHandler& handler,
+      kj::StringPtr namespaceKey,
+      kj::ArrayPtr<const byte> id,
+      kj::Maybe<kj::StringPtr> name,
+      kj::Maybe<kj::Promise<void>> readyPromise = kj::none)
+      : handler(handler),
+        namespaceKey(kj::str(namespaceKey)),
+        id(kj::heapArray(id)),
+        name(name.map([](kj::StringPtr s) { return kj::str(s); })),
+        readyPromise(kj::mv(readyPromise)) {}
+
+  kj::Maybe<ChannelTokenHandler&> handler;
+  kj::String namespaceKey;
+  kj::Array<byte> id;
+  kj::Maybe<kj::String> name;
+  kj::Maybe<kj::Promise<void>> readyPromise;
+
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    KJ_UNREACHABLE;
+  }
+  void requireAllowsTransfer() override {
+    KJ_UNREACHABLE;
+  }
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    auto& h = KJ_ASSERT_NONNULL(handler, "this mock was not constructed with a handler ref");
+    KJ_IF_SOME(p, readyPromise) {
+      auto promise = kj::mv(p);
+      readyPromise = kj::none;
+      return promise.then([&h, usage, this]() mutable -> kj::Array<byte> {
+        return h.encodeActorChannelToken(
+            usage, namespaceKey, id, name.map([](kj::String& s) -> kj::StringPtr { return s; }));
+      });
+    } else {
+      return h.encodeActorChannelToken(
+          usage, namespaceKey, id, name.map([](kj::String& s) -> kj::StringPtr { return s; }));
+    }
+  }
+};
+
 class MockResolver: public ChannelTokenHandler::Resolver {
  public:
   kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(
@@ -136,6 +184,12 @@ class MockResolver: public ChannelTokenHandler::Resolver {
       kj::StringPtr serviceName, kj::Maybe<kj::StringPtr> entrypoint, Frankenvalue props) override {
     return kj::refcounted<MockActorClassChannel>(
         ServiceTriplet(serviceName, entrypoint, kj::mv(props)));
+  }
+
+  kj::Own<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
+      kj::ArrayPtr<const byte> id,
+      kj::Maybe<kj::StringPtr> name) override {
+    return kj::refcounted<MockActorChannel>(namespaceKey, id, name);
   }
 };
 
@@ -150,6 +204,18 @@ Frankenvalue propsWithCaps(kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> caps
   builder.setEmptyObject();
   builder.setCapTableSize(caps.size());
   return Frankenvalue::fromCapnp(builder.asReader(), kj::mv(caps));
+}
+
+void expectActorChannel(MockActorChannel& channel,
+    kj::StringPtr namespaceKey,
+    kj::ArrayPtr<const byte> id,
+    kj::Maybe<kj::StringPtr> name) {
+  KJ_EXPECT(channel.namespaceKey == namespaceKey);
+  KJ_ASSERT(channel.id.size() == id.size());
+  for (auto i: kj::indices(id)) {
+    KJ_EXPECT(channel.id[i] == id[i]);
+  }
+  KJ_EXPECT(channel.name.map([](kj::String& s) -> kj::StringPtr { return s; }) == name);
 }
 
 KJ_TEST("channel token basics") {
@@ -259,12 +325,41 @@ KJ_TEST("actor class channel tokens") {
       "channel token type mismatch", handler.decodeSubrequestChannelToken(Usage::RPC, token));
 }
 
+KJ_TEST("actor channel tokens") {
+  MockResolver resolver;
+  ChannelTokenHandler handler(resolver);
+
+  const byte actorId[] = {12, 34, 56, 78};
+
+  auto token = handler.encodeActorChannelToken(Usage::RPC, "foo-namespace", actorId, "my-actor"_kj);
+
+  {
+    auto channel =
+        handler.decodeSubrequestChannelToken(Usage::RPC, token).downcast<MockActorChannel>();
+    expectActorChannel(*channel, "foo-namespace", actorId, "my-actor"_kj);
+  }
+
+  auto storageToken = handler.encodeActorChannelToken(
+      Usage::STORAGE, "foo-namespace", actorId, kj::Maybe<kj::StringPtr>(kj::none));
+
+  {
+    auto channel = handler.decodeSubrequestChannelToken(Usage::STORAGE, storageToken)
+                       .downcast<MockActorChannel>();
+    expectActorChannel(*channel, "foo-namespace", actorId, kj::Maybe<kj::StringPtr>(kj::none));
+  }
+
+  KJ_EXPECT_THROW_MESSAGE(
+      "channel token type mismatch", handler.decodeActorClassChannelToken(Usage::RPC, token));
+}
+
 KJ_TEST("channel token with nested channels (all synchronous)") {
   MockResolver resolver;
   ChannelTokenHandler handler(resolver);
 
-  // Build a props cap table containing a SubrequestChannel and an ActorClassChannel, both of
-  // which produce their tokens synchronously.
+  const byte actorId[] = {90, 91, 92, 93};
+
+  // Build a props cap table containing a SubrequestChannel, an ActorClassChannel, and an
+  // ActorChannel, all of which produce their tokens synchronously.
   kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> caps;
   caps.add(kj::refcounted<MockSubrequestChannel>(handler,
       ServiceTriplet(
@@ -272,6 +367,8 @@ KJ_TEST("channel token with nested channels (all synchronous)") {
   caps.add(kj::refcounted<MockActorClassChannel>(handler,
       ServiceTriplet("nested-actor", kj::Maybe<kj::StringPtr>(kj::none),
           Frankenvalue::fromJson(kj::str("{\"inner\": 2}")))));
+  caps.add(kj::refcounted<MockActorChannel>(
+      handler, "nested-namespace", actorId, "nested-actor-name"_kj));
   auto props = propsWithCaps(kj::mv(caps));
 
   // Encoding is synchronous.
@@ -287,7 +384,7 @@ KJ_TEST("channel token with nested channels (all synchronous)") {
         "OuterEntry"_kj);
 
     auto capTable = channel->triplet.props.getCapTable();
-    KJ_ASSERT(capTable.size() == 2);
+    KJ_ASSERT(capTable.size() == 3);
 
     auto& nestedSub = KJ_ASSERT_NONNULL(kj::tryDowncast<MockSubrequestChannel>(*capTable[0]),
         "expected nested cap 0 to be a SubrequestChannel");
@@ -300,6 +397,10 @@ KJ_TEST("channel token with nested channels (all synchronous)") {
     KJ_EXPECT(nestedActor.triplet ==
         ServiceTriplet("nested-actor", kj::Maybe<kj::StringPtr>(kj::none),
             Frankenvalue::fromJson(kj::str("{\"inner\": 2}"))));
+
+    auto& nestedActorStub = KJ_ASSERT_NONNULL(kj::tryDowncast<MockActorChannel>(*capTable[2]),
+        "expected nested cap 2 to be an ActorChannel");
+    expectActorChannel(nestedActorStub, "nested-namespace", actorId, "nested-actor-name"_kj);
   }
 
   // Also works with STORAGE usage.
@@ -308,7 +409,7 @@ KJ_TEST("channel token with nested channels (all synchronous)") {
   {
     auto channel = handler.decodeSubrequestChannelToken(Usage::STORAGE, storageToken)
                        .downcast<MockSubrequestChannel>();
-    KJ_EXPECT(channel->triplet.props.getCapTable().size() == 2);
+    KJ_EXPECT(channel->triplet.props.getCapTable().size() == 3);
   }
 
   // And the outer channel can itself be an ActorClassChannel.
@@ -317,7 +418,7 @@ KJ_TEST("channel token with nested channels (all synchronous)") {
   {
     auto channel = handler.decodeActorClassChannelToken(Usage::RPC, actorToken)
                        .downcast<MockActorClassChannel>();
-    KJ_EXPECT(channel->triplet.props.getCapTable().size() == 2);
+    KJ_EXPECT(channel->triplet.props.getCapTable().size() == 3);
   }
 }
 

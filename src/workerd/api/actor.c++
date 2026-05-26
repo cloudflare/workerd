@@ -24,6 +24,23 @@ constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL = 32768;
 
 }  // namespace
 
+IoChannelFactory::ActorChannel& LocalActorOutgoingFactory::getOrCreateActorChannel(
+    IoContext& context, SpanParent parentSpan) {
+  if (actorChannel == kj::none) {
+    actorChannel = context.getColoLocalActorChannel(channelId, actorId, kj::mv(parentSpan));
+
+    // The ActorChannelImpl we just created holds a Cap'n Proto Pipeline::Client representing an
+    // open connection to the target DO's routing supervisor. Register external memory to pressure
+    // V8 into collecting this factory's owning stub promptly when it becomes unreachable,
+    // preventing connection/FD accumulation from stubs that are created and discarded in a loop.
+    jsg::Lock& js = context.getCurrentLock();
+    channelMemoryAdjustment =
+        js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
+  }
+
+  return *KJ_REQUIRE_NONNULL(actorChannel);
+}
+
 kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
   auto& context = IoContext::current();
@@ -32,25 +49,38 @@ kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, actorId.asPtr());
 
-    // Lazily initialize actorChannel
-    if (actorChannel == kj::none) {
-      actorChannel =
-          context.getColoLocalActorChannel(channelId, actorId, tracing.getInternalSpanParent());
-
-      // As in GlobalActorOutgoingFactory, account for external memory used by the open connection.
-      jsg::Lock& js = context.getCurrentLock();
-      channelMemoryAdjustment =
-          js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
-    }
-
-    return KJ_REQUIRE_NONNULL(actorChannel)
-        ->startRequest({.cfBlobJson = kj::mv(cfStr),
+    return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
+        .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = tracing.getUserSpanParent()});
   },
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> LocalActorOutgoingFactory::getSubrequestChannel() {
+  auto& context = IoContext::current();
+  return kj::addRef(getOrCreateActorChannel(context, context.getCurrentTraceSpan()));
+}
+
+IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChannel(
+    IoContext& context, SpanParent parentSpan) {
+  if (actorChannel == kj::none) {
+    KJ_SWITCH_ONEOF(channelIdOrFactory) {
+      KJ_CASE_ONEOF(channelId, uint) {
+        actorChannel =
+            context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint), mode,
+                enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
+      }
+      KJ_CASE_ONEOF(factory, kj::Own<DurableObjectNamespace::ActorChannelFactory>) {
+        actorChannel = factory->getGlobalActor(id->getInner(), kj::mv(locationHint), mode,
+            enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
+      }
+    }
+  }
+
+  return *KJ_REQUIRE_NONNULL(actorChannel);
 }
 
 kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
@@ -61,37 +91,19 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
       [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
     tracing.setTag("objectId"_kjc, id->toString());
 
-    // Lazily initialize actorChannel
-    if (actorChannel == kj::none) {
-      KJ_SWITCH_ONEOF(channelIdOrFactory) {
-        KJ_CASE_ONEOF(channelId, uint) {
-          actorChannel = context.getGlobalActorChannel(channelId, id->getInner(),
-              kj::mv(locationHint), mode, enableReplicaRouting, routingMode,
-              tracing.getInternalSpanParent(), kj::mv(version));
-        }
-        KJ_CASE_ONEOF(factory, kj::Own<DurableObjectNamespace::ActorChannelFactory>) {
-          actorChannel = factory->getGlobalActor(id->getInner(), kj::mv(locationHint), mode,
-              enableReplicaRouting, routingMode, tracing.getInternalSpanParent(), kj::mv(version));
-        }
-      }
-
-      // The ActorChannelImpl we just created holds a Cap'n Proto Pipeline::Client representing an
-      // open connection to the target DO's routing supervisor. Register external memory to pressure
-      // V8 into collecting this factory's owning stub promptly when it becomes unreachable,
-      // preventing connection/FD accumulation from stubs that are created and discarded in a loop.
-      jsg::Lock& js = context.getCurrentLock();
-      channelMemoryAdjustment =
-          js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
-    }
-
-    return KJ_REQUIRE_NONNULL(actorChannel)
-        ->startRequest({.cfBlobJson = kj::mv(cfStr),
+    return getOrCreateActorChannel(context, tracing.getInternalSpanParent())
+        .startRequest({.cfBlobJson = kj::mv(cfStr),
           .parentSpan = tracing.getInternalSpanParent(),
           .userSpanParent = tracing.getUserSpanParent()});
   },
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubrequestChannel() {
+  auto& context = IoContext::current();
+  return kj::addRef(getOrCreateActorChannel(context, context.getCurrentTraceSpan()));
 }
 
 kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
@@ -111,6 +123,10 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
       {.inHouse = true,
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
+}
+
+kj::Own<IoChannelFactory::SubrequestChannel> ReplicaActorOutgoingFactory::getSubrequestChannel() {
+  return kj::addRef(*actorChannel);
 }
 
 jsg::Ref<Fetcher> ColoLocalActorNamespace::get(jsg::Lock& js, kj::String actorId) {
