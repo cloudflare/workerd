@@ -595,7 +595,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           auto e = KJ_EXCEPTION(OVERLOADED,
               "broken.dropped; worker_do_not_log; jsg.Error: Alarm exceeded its allowed execution time");
           e.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<kj::byte>(0));
-          e.setDetail(CPU_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+          e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
           context.getMetrics().reportFailure(e);
 
           // We don't want the handler to keep running after timeout.
@@ -604,8 +604,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           // retriable, and we'll count the retries against the alarm retries limit. This will ensure
           // that the handler will attempt to run for a number of times before giving up and deleting
           // the alarm.
-          return WorkerInterface::AlarmResult{
-            .retry = true, .retryCountsAgainstLimit = true, .outcome = EventOutcome::EXCEEDED_CPU};
+          return WorkerInterface::AlarmResult{.retry = true,
+            .retryCountsAgainstLimit = true,
+            .outcome = EventOutcome::EXCEEDED_WALL_TIME};
         });
 
         return alarm(lock, js.alloc<AlarmInvocationInfo>(scheduledTime, retryCount))

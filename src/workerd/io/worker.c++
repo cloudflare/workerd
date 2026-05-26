@@ -3696,9 +3696,11 @@ struct Worker::Actor::Impl {
       auto timeout = 30 * kj::SECONDS;
       co_await timerChannel.afterLimitTimeout(timeout);
 
-      kj::throwFatalException(KJ_EXCEPTION(OVERLOADED,
+      auto e = KJ_EXCEPTION(OVERLOADED,
           "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
-          "timeout which caused object to be reset."));
+          "timeout which caused object to be reset.");
+      e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+      kj::throwFatalException(kj::mv(e));
     }
 
     // Implements OutputGate::Hooks.

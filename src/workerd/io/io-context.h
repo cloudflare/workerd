@@ -1723,9 +1723,11 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
       // Arrange to time out if the critical section runs more than 30 seconds, so that objects
       // won't be hung forever if they have a critical section that deadlocks.
       auto timeout = afterLimitTimeout(30 * kj::SECONDS).then([]() -> T {
-        kj::throwFatalException(JSG_KJ_EXCEPTION(OVERLOADED, Error,
+        auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error,
             "A call to blockConcurrencyWhile() in a Durable Object waited for "
-            "too long. The call was canceled and the Durable Object was reset."));
+            "too long. The call was canceled and the Durable Object was reset.");
+        e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        kj::throwFatalException(kj::mv(e));
       });
 
       return awaitJs(lock, kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
