@@ -80,7 +80,8 @@ interface ConnectEventInfo {
 
 type EventOutcome = "ok" | "canceled" | "exception" | "unknown" | "killSwitch" |
                     "daemonDown" | "exceededCpu" | "exceededMemory" | "loadShed" |
-                    "responseStreamDisconnected" | "scriptNotFound" | "internalError";
+                    "responseStreamDisconnected" | "scriptNotFound" | "internalError" |
+                    "exceededWallTime";
 
 interface ScriptVersion {
   readonly id: string;
