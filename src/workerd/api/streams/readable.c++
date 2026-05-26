@@ -266,7 +266,6 @@ DrainingReader::~DrainingReader() noexcept(false) {
   KJ_IF_SOME(stream, state.tryGet<Attached>()) {
     stream->getController().releaseReader(*this, kj::none);
   }
-  selfRef->invalidate();
 }
 
 kj::Maybe<kj::Own<DrainingReader>> DrainingReader::create(jsg::Lock& js, ReadableStream& stream) {
