@@ -101,6 +101,7 @@ def _clang_tidy_aspect_impl(target, ctx):
         ctx.attr._clang_tidy_plugin.files,
     ]
 
+    clang_tidy_config = ctx.attr._clang_tidy_config.files.to_list()[0]
     plugin_path = ctx.attr._clang_tidy_plugin.files.to_list()[0].path
 
     outs = []
@@ -120,7 +121,8 @@ def _clang_tidy_aspect_impl(target, ctx):
         # clang-tidy arguments
         # do not print statistics
         args.add("--quiet")
-        args.add("--config-file=" + ctx.attr._clang_tidy_config.files.to_list()[0].short_path)
+        args.add("--experimental-custom-checks")
+        args.add("--config-file=" + clang_tidy_config.path)
 
         if ctx.attr.clang_tidy_args:
             args.add_all(ctx.attr.clang_tidy_args.split(" "))
