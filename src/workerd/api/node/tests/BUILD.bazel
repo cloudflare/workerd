@@ -655,6 +655,12 @@ wd_test(
 )
 
 wd_test(
+    src = "fs-readsync-byteoffset-test.wd-test",
+    args = ["--experimental"],
+    data = ["fs-readsync-byteoffset-test.js"],
+)
+
+wd_test(
     src = "fs-link-test.wd-test",
     args = ["--experimental"],
     data = ["fs-link-test.js"],
