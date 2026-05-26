@@ -2122,7 +2122,7 @@ KJ_TEST("DrainingReader: pull that synchronously errors does not UAF (value stre
       .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
         KJ_SWITCH_ONEOF(controller) {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-            c->error(js, js.v8TypeError("test error"_kj));
+            c->error(js, js.typeError("test error"_kj));
             return js.resolvedPromise();
           }
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
@@ -2360,7 +2360,7 @@ KJ_TEST("DrainingReader: pending error in endOperation rejects read (value strea
             // and calls doError(), which defers the error because beginOperation() is
             // active. When wrapDrainingRead's endOperation() fires, it applies the
             // pending error and should throw rather than returning the data.
-            return js.rejectedPromise<void>(js.v8TypeError("pull failed"_kj));
+            return js.rejectedPromise<void>(js.typeError("pull failed"_kj));
           }
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {}
         }
@@ -2396,7 +2396,7 @@ KJ_TEST("DrainingReader: pending error in endOperation rejects read (byte stream
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
             c->enqueue(js, toBufferSource(js, kj::str("should-be-discarded")));
-            return js.rejectedPromise<void>(js.v8TypeError("pull failed"_kj));
+            return js.rejectedPromise<void>(js.typeError("pull failed"_kj));
           }
         }
         KJ_UNREACHABLE;

@@ -445,7 +445,7 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
     env.js.runMicrotasks();
 
     // Abort while pipeLoop is waiting for a pending read
-    auto abortPromise = sink->getController().abort(env.js, env.js.v8TypeError("Test abort"_kj));
+    auto abortPromise = sink->getController().abort(env.js, env.js.typeError("Test abort"_kj));
     abortPromise.markAsHandled(env.js);
     env.js.runMicrotasks();
 

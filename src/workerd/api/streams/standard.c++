@@ -429,7 +429,7 @@ void WritableLockImpl<Controller>::releaseWriter(
 
       // Per spec (WritableStreamDefaultWriterRelease), both the ready and closed
       // promises must be rejected when the writer is released.
-      auto releaseReason = js.v8TypeError("This WritableStream writer has been released."_kjc);
+      auto releaseReason = js.typeError("This WritableStream writer has been released."_kjc);
       if (FeatureFlags::get(js).getWritableStreamSpecCompliantWriter()) {
         if (locked.getReadyFulfiller() != kj::none) {
           maybeRejectPromise<void>(js, locked.getReadyFulfiller(), releaseReason);
@@ -1016,7 +1016,7 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
   // Per the streams spec, the size function should be called with `undefined` as `this`,
   // not as a method on the strategy object.
   KJ_IF_SOME(sizeFunc, algorithms.size) {
-    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.v8Undefined()));
+    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.undefined()));
   }
 
   auto onSuccess = [this, self = self.addRef()](jsg::Lock& js) mutable {
@@ -1131,8 +1131,8 @@ void ReadableImpl<Self>::close(jsg::Lock& js) {
   auto& queue = state.template getUnsafe<Queue>();
 
   if (queue.hasPartiallyFulfilledRead()) {
-    auto error =
-        js.v8Ref(js.v8TypeError("This ReadableStream was closed with a partial read pending."));
+    auto err = js.typeError("This ReadableStream was closed with a partial read pending.");
+    auto error = js.v8Ref(v8::Local<v8::Value>(err));
     doError(js, error.addRef(js));
     js.throwException(kj::mv(error));
     return;
@@ -1301,7 +1301,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   bool wasAlreadyErroring = false;
   if (state.template is<StreamStates::Erroring>()) {
     wasAlreadyErroring = true;
-    reason = js.v8Undefined();
+    reason = js.undefined();
   }
 
   KJ_DEFER(if (!wasAlreadyErroring) { startErroring(js, kj::mv(self), reason); });
@@ -1414,7 +1414,7 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::close(jsg::Lock& js, jsg::Ref<Self> self) {
   if (state.template is<StreamStates::Closed>()) {
-    return js.rejectedPromise<void>(js.v8TypeError("This WritableStream has been closed."_kj));
+    return js.rejectedPromise<void>(js.typeError("This WritableStream has been closed."_kj));
   }
   KJ_IF_SOME(errored, state.template tryGetUnsafe<StreamStates::Errored>()) {
     return js.rejectedPromise<void>(errored.addRef(js));
@@ -1610,7 +1610,7 @@ void WritableImpl<Self>::setup(jsg::Lock& js,
   // Per the streams spec, the size function should be called with `undefined` as `this`,
   // not as a method on the strategy object.
   KJ_IF_SOME(sizeFunc, algorithms.size) {
-    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.v8Undefined()));
+    sizeFunc.setReceiver(jsg::Value(js.v8Isolate, js.undefined()));
   }
 
   auto onSuccess = [this, self = self.addRef()](jsg::Lock& js) mutable {
@@ -1700,7 +1700,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
     KJ_IF_SOME(owner, tryGetOwner()) {
       if (!owner.isLockedToWriter()) {
         return js.rejectedPromise<void>(
-            js.v8TypeError("This WritableStream writer has been released."_kjc));
+            js.typeError("This WritableStream writer has been released."_kjc));
       }
     }
   }
@@ -1710,7 +1710,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
   }
 
   if (isCloseQueuedOrInFlight() || state.template is<StreamStates::Closed>()) {
-    return js.rejectedPromise<void>(js.v8TypeError("This ReadableStream is closed."_kj));
+    return js.rejectedPromise<void>(js.typeError("This ReadableStream is closed."_kj));
   }
 
   KJ_IF_SOME(erroring, state.template tryGetUnsafe<StreamStates::Erroring>()) {
@@ -2064,7 +2064,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
                     .type = ByteQueue::ReadRequest::Type::BYOB,
                   }));
         } else {
-          prp.resolver.reject(js, js.v8Error("Failed to allocate buffer for read."));
+          prp.resolver.reject(js, js.error("Failed to allocate buffer for read."));
         }
       } else {
         // autoAllocateChunkSize is not set. Per spec, we do a DEFAULT read which means
@@ -2079,7 +2079,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
                     .type = ByteQueue::ReadRequest::Type::DEFAULT,
                   }));
         } else {
-          prp.resolver.reject(js, js.v8Error("Failed to allocate buffer for read."));
+          prp.resolver.reject(js, js.error("Failed to allocate buffer for read."));
         }
       }
       // reading is reset by KJ_DEFER above.
@@ -2269,7 +2269,7 @@ void ReadableStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
 
 jsg::Promise<void> ReadableStreamDefaultController::cancel(
     jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  return impl.cancel(js, JSG_THIS, maybeReason.orDefault([&] { return js.v8Undefined(); }));
+  return impl.cancel(js, JSG_THIS, maybeReason.orDefault([&] { return js.undefined(); }));
 }
 
 void ReadableStreamDefaultController::close(jsg::Lock& js) {
@@ -2647,7 +2647,7 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
   disturbed = true;
 
   const auto doCancel = [&](auto& consumer) {
-    auto reason = js.v8Ref(maybeReason.orDefault([&] { return js.v8Undefined(); }));
+    auto reason = js.v8Ref(maybeReason.orDefault([&] { return js.undefined(); }));
     KJ_DEFER(doClose(js));
     return consumer->cancel(js, reason.getHandle(js));
   };
@@ -2762,7 +2762,7 @@ jsg::Promise<void> ReadableStreamJsController::pipeTo(
   }
 
   return js.rejectedPromise<void>(
-      js.v8TypeError("This ReadableStream cannot be piped to this WritableStream"_kj));
+      js.typeError("This ReadableStream cannot be piped to this WritableStream"_kj));
 }
 
 kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
@@ -2774,12 +2774,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     auto view = byobOptions.bufferView.getHandle(js);
     if (!view->Buffer()->IsDetachable()) {
       return js.rejectedPromise<ReadResult>(
-          js.v8TypeError("Unabled to use non-detachable ArrayBuffer."_kj));
+          js.typeError("Unabled to use non-detachable ArrayBuffer."_kj));
     }
 
     if (view->ByteLength() == 0 || view->Buffer()->ByteLength() == 0) {
       return js.rejectedPromise<ReadResult>(
-          js.v8TypeError("Unable to use a zero-length ArrayBuffer."_kj));
+          js.typeError("Unable to use a zero-length ArrayBuffer."_kj));
     }
 
     // Check for pending error first (deferred error during a prior read operation)
@@ -3296,10 +3296,11 @@ class AllReader {
           // bytes for the read to make any sense.
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
           if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
-            auto error = js.v8TypeError("This ReadableStream did not return bytes.");
-            state.template transitionTo<StreamStates::Errored>(js.v8Ref(error));
-            return readable->getController().cancel(js, error).then(
-                js, [&](jsg::Lock& js) { return loop(js); });
+          auto error = js.typeError("This ReadableStream did not return bytes.");
+          state.template transitionTo<StreamStates::Errored>(
+              js.v8Ref(v8::Local<v8::Value>(error)));
+          return readable->getController().cancel(js, error).then(
+              js, [&](jsg::Lock& js) { return loop(js); });
           }
 
           jsg::BufferSource bufferSource(js, handle);
@@ -3310,8 +3311,9 @@ class AllReader {
           }
 
           if ((runningTotal + bufferSource.size()) > limit) {
-            auto error = js.v8TypeError("Memory limit exceeded before EOF.");
-            state.template transitionTo<StreamStates::Errored>(js.v8Ref(error));
+            auto error = js.typeError("Memory limit exceeded before EOF.");
+            state.template transitionTo<StreamStates::Errored>(
+                js.v8Ref(v8::Local<v8::Value>(error)));
             return readable->getController().cancel(js, error).then(
                 js, [&](jsg::Lock& js) { return loop(js); });
           }
@@ -3441,7 +3443,8 @@ class PumpToReader {
 
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
           if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
-            return js.v8Ref(js.v8TypeError("This ReadableStream did not return bytes."));
+            auto err = js.typeError("This ReadableStream did not return bytes.");
+            return js.v8Ref(v8::Local<v8::Value>(err));
           }
 
           jsg::BufferSource bufferSource(js, handle);
@@ -3599,8 +3602,8 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
 template <typename T>
 jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limit) {
   if (isLockedToReader()) {
-    return js.rejectedPromise<T>(KJ_EXCEPTION(
-        FAILED, "jsg.TypeError: This ReadableStream is currently locked to a reader."));
+    return js.rejectedPromise<T>(
+        js.typeError("This ReadableStream is currently locked to a reader."));
   }
   disturbed = true;
 
@@ -3917,16 +3920,16 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsH
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {
       return rejectedMaybeHandledPromise<void>(
-          js, js.v8TypeError("This WritableStream has been closed."_kj), markAsHandled);
+          js, js.typeError("This WritableStream has been closed."_kj), markAsHandled);
     }
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       return rejectedMaybeHandledPromise<void>(
-          js, js.v8TypeError("This WritableStream has been closed."_kj), markAsHandled);
+          js, js.typeError("This WritableStream has been closed."_kj), markAsHandled);
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       if (FeatureFlags::get(js).getPedanticWpt()) {
         return rejectedMaybeHandledPromise<void>(
-            js, js.v8TypeError("This WritableStream has been errored."_kj), markAsHandled);
+            js, js.typeError("This WritableStream has been errored."_kj), markAsHandled);
       }
       return rejectedMaybeHandledPromise<void>(js, errored.getHandle(js), markAsHandled);
     }
@@ -4211,9 +4214,9 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
 
   if (state.is<StreamStates::Closed>()) {
     lock.releasePipeLock();
-    auto reason = js.v8TypeError("This destination writable stream is closed."_kj);
+    auto reason = js.typeError("This destination writable stream is closed."_kj);
     if (!preventCancel) {
-      source.release(js, reason);
+      source.release(js, v8::Local<v8::Value>(reason));
     } else {
       source.release(js);
     }
@@ -4297,10 +4300,10 @@ jsg::Promise<void> WritableStreamJsController::write(
     jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> value) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {
-      return js.rejectedPromise<void>(js.v8TypeError("This WritableStream has been closed."_kj));
+      return js.rejectedPromise<void>(js.typeError("This WritableStream has been closed."_kj));
     }
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return js.rejectedPromise<void>(js.v8TypeError("This WritableStream has been closed."_kj));
+      return js.rejectedPromise<void>(js.typeError("This WritableStream has been closed."_kj));
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return js.rejectedPromise<void>(errored.addRef(js));
@@ -4381,7 +4384,7 @@ void TransformStreamDefaultController::terminate(jsg::Lock& js) {
     readableController.close(js);
     readable = kj::none;
   }
-  errorWritableAndUnblockWrite(js, js.v8TypeError("The transform stream has been terminated"_kj));
+  errorWritableAndUnblockWrite(js, js.typeError("The transform stream has been terminated"_kj));
 }
 
 jsg::Promise<void> TransformStreamDefaultController::write(
@@ -4414,8 +4417,7 @@ jsg::Promise<void> TransformStreamDefaultController::write(
     }
     return performTransform(js, chunk);
   } else {
-    return js.rejectedPromise<void>(
-        KJ_EXCEPTION(FAILED, "jsg.TypeError: Writing to the TransformStream failed."));
+    return js.rejectedPromise<void>(js.typeError("Writing to the TransformStream failed."));
   }
 }
 
