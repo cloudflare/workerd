@@ -2199,7 +2199,8 @@ class JsMessage;
   V(Function)                                                                                      \
   V(Uint8Array)                                                                                    \
   V(ArrayBuffer)                                                                                   \
-  V(ArrayBufferView)
+  V(ArrayBufferView)                                                                               \
+  V(SharedArrayBuffer)
 
 #define V(Name) class Js##Name;
 JS_TYPE_CLASSES(V)
