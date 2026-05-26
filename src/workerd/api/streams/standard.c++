@@ -560,27 +560,19 @@ jsg::Promise<void> maybeRunAlgorithm(
     // onFailure case since such errors are generally indicative of a fatal
     // condition in the isolate (e.g. out of memory, other fatal exception, etc).
     JSG_TRY(js) {
+      auto promise = ([&]() -> jsg::Promise<void> {
+        JSG_TRY(js) {
+          return algorithm(js, kj::fwd<decltype(args)>(args)...);
+        }
+        JSG_CATCH(exception) {
+          return js.rejectedPromise<void>(kj::mv(exception));
+        }
+      })();
       KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-        auto getInnerPromise = [&]() -> jsg::Promise<void> {
-          JSG_TRY(js) {
-            return algorithm(js, kj::fwd<decltype(args)>(args)...);
-          }
-          JSG_CATCH(exception) {
-            return js.rejectedPromise<void>(kj::mv(exception));
-          }
-        };
-        return getInnerPromise().then(
+        return promise.then(
             js, ioContext.addFunctor(kj::mv(onSuccess)), ioContext.addFunctor(kj::mv(onFailure)));
       } else {
-        auto getInnerPromise = [&]() -> jsg::Promise<void> {
-          JSG_TRY(js) {
-            return algorithm(js, kj::fwd<decltype(args)>(args)...);
-          }
-          JSG_CATCH(exception) {
-            return js.rejectedPromise<void>(kj::mv(exception));
-          }
-        };
-        return getInnerPromise().then(js, kj::mv(onSuccess), kj::mv(onFailure));
+        return promise.then(js, kj::mv(onSuccess), kj::mv(onFailure));
       }
     }
     JSG_CATCH(exception) {
@@ -612,21 +604,25 @@ jsg::Promise<void> maybeRunAlgorithmAsync(
     // rare cases. For those we return a rejected promise but do not call the
     // onFailure case since such errors are generally indicative of a fatal
     // condition in the isolate (e.g. out of memory, other fatal exception, etc).
-    return js.tryCatch([&] {
-      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-        return js
-            .tryCatch([&] { return algorithm(js, kj::fwd<decltype(args)>(args)...); },
-                [&](jsg::Value&& exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
-            .then(js, ioContext.addFunctor(kj::mv(onSuccess)),
-                ioContext.addFunctor(kj::mv(onFailure)));
-      } else {
-        return js
-            .tryCatch([&] { return algorithm(js, kj::fwd<decltype(args)>(args)...); },
-                [&](jsg::Value&& exception) {
+    JSG_TRY(js) {
+      auto promise = ([&] {
+        JSG_TRY(js) {
+          return algorithm(js, kj::fwd<decltype(args)>(args)...);
+        }
+        JSG_CATCH(exception) {
           return js.rejectedPromise<void>(kj::mv(exception));
-        }).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+        };
+      })();
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+        return promise.then(
+            js, ioContext.addFunctor(kj::mv(onSuccess)), ioContext.addFunctor(kj::mv(onFailure)));
+      } else {
+        return promise.then(js, kj::mv(onSuccess), kj::mv(onFailure));
       }
-    }, [&](jsg::Value&& exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+    }
+    JSG_CATCH(exception) {
+      return js.rejectedPromise<void>(kj::mv(exception));
+    };
   }
 
   // If the algorithm does not exist, we handle it as a success but ensure
@@ -660,7 +656,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
   // methods, as well as the methods can trigger JavaScript errors to be thrown
   // synchronously in some cases. We want to make sure non-fatal errors cause the
   // stream to error and only fatal cases bubble up.
-  return js.tryCatch([&] {
+  JSG_TRY(js) {
     controller.state.beginOperation();
     auto result = readCallback();
     endOperation = false;
@@ -683,7 +679,8 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     }
 
     return kj::mv(result);
-  }, [&](jsg::Value exception) -> jsg::Promise<ReadResult> {
+  }
+  JSG_CATCH(exception) {
     if (endOperation) {
       // Clear any pending state since we're erroring
       controller.state.clearPendingState();
@@ -691,7 +688,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     }
     controller.doError(js, exception.getHandle(js));
     return js.rejectedPromise<ReadResult>(kj::mv(exception));
-  });
+  };
 }
 
 // The ReadableStreamJsController provides the implementation of custom
@@ -2290,10 +2287,13 @@ void ReadableStreamDefaultController::enqueue(
   size_t size = 1;
   bool errored = false;
   KJ_IF_SOME(sizeFunc, impl.algorithms.size) {
-    js.tryCatch([&] { size = sizeFunc(js, value); }, [&](jsg::Value exception) {
+    JSG_TRY(js) {
+      size = sizeFunc(js, value);
+    }
+    JSG_CATCH(exception) {
       impl.doError(js, kj::mv(exception));
       errored = true;
-    });
+    }
   }
 
   // Re-check canCloseOrEnqueue: the size callback may have errored us without
@@ -4352,10 +4352,13 @@ void TransformStreamDefaultController::enqueue(jsg::Lock& js, v8::Local<v8::Valu
 
   JSG_REQUIRE(readableController.canCloseOrEnqueue(), TypeError,
       "The readable side of this TransformStream is no longer readable.");
-  js.tryCatch([&] { readableController.enqueue(js, chunk); }, [&](jsg::Value exception) {
+  JSG_TRY(js) {
+    readableController.enqueue(js, chunk);
+  }
+  JSG_CATCH(exception) {
     errorWritableAndUnblockWrite(js, exception.getHandle(js));
     js.throwException(kj::mv(exception));
-  });
+  }
 
   // If the controller was errored during the enqueue (e.g. by the size callback
   // calling error()), skip the backpressure update — the stream is already torn down.
@@ -4601,10 +4604,13 @@ jsg::Promise<void> TransformStreamDefaultController::performTransform(
   }
   // If we got here, there is no transform algorithm. Per the spec, the default
   // behavior then is to just pass along the value untransformed.
-  return js.tryCatch([&] {
+  JSG_TRY(js) {
     enqueue(js, chunk);
     return js.resolvedPromise();
-  }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+  }
+  JSG_CATCH(exception) {
+    return js.rejectedPromise<void>(kj::mv(exception));
+  }
 }
 
 void TransformStreamDefaultController::setBackpressure(jsg::Lock& js, bool newBackpressure) {
