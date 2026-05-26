@@ -350,12 +350,12 @@ class Entry: public kj::Refcounted {
   re-acquire.
 
 ```cpp
-auto onSuccess = JSG_VISITABLE_LAMBDA((this, ref = addRef(), ...), ..., (...) {
+auto onSuccess = [this, ref = addRef(), ...](...) mutable {
     auto maybePipeLock = lock.tryGetPipe();
     if (maybePipeLock == kj::none) return js.resolvedPromise();
     auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
     // Now safe to use pipeLock
-});
+};
 ```
 
 ### Pattern: StateListener Self-Destruction Guard

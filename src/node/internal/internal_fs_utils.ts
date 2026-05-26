@@ -576,7 +576,7 @@ export function validateReadArgs(
   // Handle the case where the third argument is a number (offset)
   else if (typeof offsetOrOptions === 'number') {
     actualOffset += offsetOrOptions;
-    actualLength = length ?? (buffer.byteLength - offsetOrOptions);
+    actualLength = length ?? buffer.byteLength - offsetOrOptions;
     actualPosition = position;
   } else {
     throw new ERR_INVALID_ARG_TYPE(
