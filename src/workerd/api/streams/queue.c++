@@ -23,11 +23,11 @@ void ValueQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
   resolver.resolve(js, ReadResult{.done = true});
 }
 
-void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::Value value) {
+void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
   resolver.resolve(js, ReadResult{.value = kj::mv(value), .done = false});
 }
 
-void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
+void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
   resolver.reject(js, value.getHandle(js));
 }
 
@@ -35,9 +35,11 @@ void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
 
 #pragma region ValueQueue::Entry
 
-ValueQueue::Entry::Entry(jsg::Value value, size_t size): value(kj::mv(value)), size(size) {}
+ValueQueue::Entry::Entry(jsg::V8Ref<v8::Value> value, size_t size)
+    : value(kj::mv(value)),
+      size(size) {}
 
-jsg::Value ValueQueue::Entry::getValue(jsg::Lock& js) {
+jsg::V8Ref<v8::Value> ValueQueue::Entry::getValue(jsg::Lock& js) {
   return value.addRef(js);
 }
 
@@ -88,7 +90,7 @@ bool ValueQueue::Consumer::empty() {
   return impl.empty();
 }
 
-void ValueQueue::Consumer::error(jsg::Lock& js, jsg::Value reason) {
+void ValueQueue::Consumer::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
   impl.error(js, kj::mv(reason));
 };
 
@@ -133,7 +135,7 @@ bool ValueQueue::Consumer::hasPendingDrainingRead() {
 
 namespace {
 // Helper to convert a JS value to bytes. Returns kj::none if the value cannot be converted.
-kj::Maybe<kj::Array<kj::byte>> valueToBytes(jsg::Lock& js, jsg::Value& value) {
+kj::Maybe<kj::Array<kj::byte>> valueToBytes(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
   auto jsval = jsg::JsValue(value.getHandle(js));
 
   // Try ArrayBuffer first.
@@ -202,8 +204,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
           break;
         }
         KJ_CASE_ONEOF(entry, QueueEntry) {
-          auto value = entry.entry->getValue(js);
-          KJ_IF_SOME(bytes, valueToBytes(js, value)) {
+          KJ_IF_SOME(bytes, valueToBytes(js, entry.entry->getValue(js))) {
             totalRead += bytes.size();
             chunks.add(kj::mv(bytes));
             ready.queueTotalSize -= entry.entry->getSize();
@@ -211,7 +212,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
           } else {
             auto error = js.typeError(
                 "Draining read encountered a value that cannot be converted to bytes"_kj);
-            impl.error(js, jsg::Value(js.v8Isolate, error));
+            impl.error(js, js.v8Ref(v8::Local<v8::Value>(error)));
             return js.rejectedPromise<DrainingReadResult>(error);
           }
         }
@@ -328,7 +329,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     // Convert the value to bytes.
     kj::Vector<kj::Array<kj::byte>> chunks;
     KJ_IF_SOME(val, result.value) {
-      KJ_IF_SOME(bytes, valueToBytes(js, val)) {
+      KJ_IF_SOME(bytes, valueToBytes(js, val.addRef(js))) {
         chunks.add(kj::mv(bytes));
       }
       // If valueToBytes returned kj::none, we just return empty chunks.
@@ -367,7 +368,7 @@ ssize_t ValueQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ValueQueue::error(jsg::Lock& js, jsg::Value reason) {
+void ValueQueue::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
   impl.error(js, kj::mv(reason));
 }
 
@@ -532,7 +533,7 @@ void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
-void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
+void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
   resolver.reject(js, value.getHandle(js));
   maybeInvalidateByobRequest(byobReadRequest);
 }
@@ -602,7 +603,7 @@ bool ByteQueue::Consumer::empty() const {
   return impl.empty();
 }
 
-void ByteQueue::Consumer::error(jsg::Lock& js, jsg::Value reason) {
+void ByteQueue::Consumer::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
   impl.error(js, kj::mv(reason));
 }
 
@@ -1021,7 +1022,7 @@ ssize_t ByteQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ByteQueue::error(jsg::Lock& js, jsg::Value reason) {
+void ByteQueue::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
   impl.error(js, kj::mv(reason));
 }
 

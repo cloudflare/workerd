@@ -57,7 +57,7 @@ inline bool hasUtf8Bom(kj::ArrayPtr<const kj::byte> data) {
 }
 
 struct ReadResult {
-  jsg::Optional<jsg::Value> value;
+  jsg::Optional<jsg::V8Ref<v8::Value>> value;
   bool done;
 
   JSG_STRUCT(value, done);
@@ -319,12 +319,12 @@ namespace StreamStates {
 struct Closed {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
 };
-using Errored = jsg::Value;
+using Errored = jsg::V8Ref<v8::Value>;
 struct Erroring {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "erroring"_kj;
-  jsg::Value reason;
+  jsg::V8Ref<v8::Value> reason;
 
-  Erroring(jsg::Value reason): reason(kj::mv(reason)) {}
+  Erroring(jsg::V8Ref<v8::Value> reason): reason(kj::mv(reason)) {}
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(reason);
@@ -673,7 +673,7 @@ class WritableStreamController {
   struct PendingAbort {
     kj::Maybe<jsg::Promise<void>::Resolver> resolver;
     jsg::Promise<void> promise;
-    jsg::Value reason;
+    jsg::V8Ref<v8::Value> reason;
     bool reject = false;
 
     PendingAbort(jsg::Lock& js,
