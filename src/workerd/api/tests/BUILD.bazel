@@ -27,6 +27,12 @@ wd_test(
 )
 
 wd_test(
+    src = "error-deser-prototype-setter-test.wd-test",
+    args = ["--experimental"],
+    data = ["error-deser-prototype-setter-test.js"],
+)
+
+wd_test(
     src = "structuredclone-error-serialize-test.wd-test",
     args = ["--experimental"],
     data = ["structuredclone-error-serialize-test.js"],

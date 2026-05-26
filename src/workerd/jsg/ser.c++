@@ -283,7 +283,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
         // out here.
         if (name.strictEquals(nameStr) || name.strictEquals(messageStr)) continue;
 
-        obj.set(js, name, errorObj.get(js, name));
+        obj.createDataProperty(js, name, errorObj.get(js, name));
       }
       write(js, obj);
 
@@ -527,7 +527,13 @@ v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
           // serialized output.
           if (!preserveStackInErrors && name.strictEquals(stack)) continue;
           auto value = serObj.get(js, name);
-          obj.set(js, name, value);
+          // Use createDataProperty instead of ordinary set to avoid
+          // invoking prototype-chain setters. This code runs inside V8's
+          // DisallowJavascriptExecution scope; an ordinary Set() that hits
+          // a tenant-installed Error.prototype setter would trigger
+          // V8_Fatal -> abort(). CreateDataProperty defines an own data
+          // property directly, matching the HTML structured-clone spec.
+          obj.createDataProperty(js, name, value);
         }
       }
 
