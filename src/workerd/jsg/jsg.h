@@ -2199,8 +2199,7 @@ class JsMessage;
   V(Function)                                                                                      \
   V(Uint8Array)                                                                                    \
   V(ArrayBuffer)                                                                                   \
-  V(ArrayBufferView)                                                                               \
-  V(SharedArrayBuffer)
+  V(ArrayBufferView)
 
 #define V(Name) class Js##Name;
 JS_TYPE_CLASSES(V)
@@ -2773,8 +2772,13 @@ class Lock {
   template <typename T>
   JsObject opaque(T&& inner) KJ_WARN_UNUSED_RESULT;
 
-  JsUint8Array bytes(kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
-  JsArrayBuffer arrayBuffer(kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  // Returns a jsg::BufferSource whose underlying JavaScript handle is a Uint8Array.
+  BufferSource bytes(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
+
+  // Returns a jsg::BufferSource whose underlying JavaScript handle is an ArrayBuffer
+  // as opposed to the default Uint8Array.  May copy and move the bytes if they are
+  // not in the right sandbox.
+  BufferSource arrayBuffer(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   enum class AllocOption { ZERO_INITIALIZED, UNINITIALIZED };
 

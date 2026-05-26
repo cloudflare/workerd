@@ -10,7 +10,7 @@ export const pipeThroughJsToInternal = {
   async test() {
     const enc = new TextEncoder();
     const dec = new TextDecoder();
-    const chunks = [enc.encode('hello'), enc.encode('there'), '!', 1];
+    const chunks = [enc.encode('hello'), enc.encode('there'), 'hello'];
     const rs = new ReadableStream({
       pull(c) {
         c.enqueue(chunks.shift());
@@ -26,13 +26,12 @@ export const pipeThroughJsToInternal = {
         output.push(dec.decode(chunk));
       }
     }
-    // The 1 number at the end of chunks will cause an error to be thrown.
-    await rejects(consumeStream(), {
+    // The 'hello' string at the end of chunks will cause an error to be thrown.
+    await rejects(consumeStream, {
       message: 'This WritableStream only supports writing byte types.',
     });
 
-    // But we should have received the valid chunks before the error.
-    deepStrictEqual(output, ['hello', 'there', '!']);
+    deepStrictEqual(output, ['hello', 'there']);
   },
 };
 
@@ -743,77 +742,6 @@ export const pipeToJsToNativeCancel = {
 
     strictEqual(promises[0].reason.message, 'boom');
     strictEqual(promises[1].reason.message, 'boom');
-  },
-};
-
-// Test that pipeTo from internal readable to internal writable (KJ tryPumpTo path)
-// properly releases the readable's pipe lock after completion. Pre-fix, the readable
-// stayed PipeLocked forever because handlePromise.success called sourceRef.close()
-// but doClose() no longer transitions PipeLocked → Unlocked (vtable poison safety).
-// The KJ pump path has no pipe loop iteration to detect the close and release.
-export const pipeToInternalToInternalReleasesLock = {
-  async test() {
-    // Source
-    const resp = new Response('foo bar');
-
-    // Destination: IdentityTransformStream whose writable side we pipe TO
-    const dest = new IdentityTransformStream();
-
-    // Pipe internal readable → internal writable (uses KJ tryPumpTo, not JS pipeLoop)
-    const promise = resp.body.pipeTo(dest.writable);
-
-    const body = await new Response(dest.readable).text();
-    strictEqual(body, 'foo bar', 'pipeTo() sends all expected data');
-    await promise;
-
-    // After pipe completes, the source readable should be unlocked.
-    // Pre-fix: "This ReadableStream is currently locked to a reader" or
-    // the stream stays PipeLocked, preventing further use.
-    const reader = resp.body.getReader();
-    const { done } = await reader.read();
-    strictEqual(done, true, 'source readable is closed and unlocked');
-    reader.releaseLock();
-
-    // Can pipe again from the (now closed) readable — should complete immediately
-    const dest2 = new IdentityTransformStream();
-    const promise2 = resp.body.pipeTo(dest2.writable);
-    const body2 = await new Response(dest2.readable).text();
-    strictEqual(body2, '', 'second pipeTo on closed readable sends no data');
-    await promise2;
-  },
-};
-
-// Test that piping a cancelled (closed) internal readable to an internal writable
-// properly closes the destination and releases all locks. Exercises the pre-check
-// path in writeLoopAfterFrontOutputLock where source.isClosed() is true before the
-// pipe loop even starts. Pre-fix, doClose() left writeState as PipeLocked (vtable
-// poison safety) but nothing released it since the KJ pump path has no loop iteration.
-export const pipeToInternalClosedSourceClosesDestination = {
-  async test() {
-    const resp = new Response('foo bar');
-
-    // Cancel the readable — this closes it
-    await resp.body.cancel(new Error('test reason'));
-
-    const { readable, writable } = new IdentityTransformStream();
-
-    // Pipe the closed readable to the ITS writable — should close the writable
-    await resp.body.pipeTo(writable);
-
-    // The writable should now be closed — writing should fail
-    const writer = writable.getWriter();
-    await rejects(
-      writer.write(new TextEncoder().encode('should fail')),
-      TypeError,
-      'Writing to a closed writable should reject'
-    );
-    writer.releaseLock();
-
-    // The readable side should also be closed
-    const reader = readable.getReader();
-    const { done } = await reader.read();
-    strictEqual(done, true, 'Readable side of transform should be closed');
-    reader.releaseLock();
   },
 };
 

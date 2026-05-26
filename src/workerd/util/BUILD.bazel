@@ -63,13 +63,6 @@ wd_cc_library(
 # why the Windows build is failing, we could simplify things here a bit.
 
 wd_cc_library(
-    name = "weak-refs",
-    hdrs = ["weak-refs.h"],
-    visibility = ["//visibility:public"],
-    deps = ["@capnp-cpp//src/kj"],
-)
-
-wd_cc_library(
     name = "util",
     srcs = [
         "stream-utils.c++",
@@ -87,12 +80,12 @@ wd_cc_library(
         "stream-utils.h",
         "uncaught-exception-source.h",
         "wait-list.h",
+        "weak-refs.h",
         "xthreadnotifier.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":duration-exceeded-logger",
-        ":weak-refs",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
         # TODO(cleanup): Only for abortable.h, factor out
@@ -453,10 +446,7 @@ wd_cc_library(
     name = "state-machine",
     hdrs = ["state-machine.h"],
     visibility = ["//visibility:public"],
-    deps = [
-        ":weak-refs",
-        "@capnp-cpp//src/kj",
-    ],
+    deps = ["@capnp-cpp//src/kj"],
 )
 
 kj_test(
