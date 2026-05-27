@@ -465,7 +465,7 @@ void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
   // mainModule includes the .py extension, so we need to extract the base name
   kj::ArrayPtr<const char> mainModuleBase = mainModule;
   if (mainModule.endsWith(".py")) {
-    mainModuleBase = mainModuleBase.slice(0, mainModuleBase.size() - 3);
+    mainModuleBase = mainModuleBase.first(mainModuleBase.size() - 3);
   }
 
   for (auto& name: moduleInfo.names) {

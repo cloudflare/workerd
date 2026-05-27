@@ -2125,7 +2125,7 @@ bool FileSystemHandle::canBeModifiedCurrently(jsg::Lock& js) const {
   auto pathname = getLocator().getPathname();
   if (pathname.endsWith("/"_kj)) {
     auto cloned = getLocator().clone();
-    cloned.setPathname(pathname.slice(0, pathname.size() - 1));
+    cloned.setPathname(pathname.first(pathname.size() - 1));
     return !getVfs().isLocked(js, cloned);
   }
   return !getVfs().isLocked(js, getLocator());

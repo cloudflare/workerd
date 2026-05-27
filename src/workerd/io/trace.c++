@@ -70,7 +70,7 @@ kj::Maybe<TraceId> TraceId::fromGoString(kj::ArrayPtr<const char> s) {
       return TraceId(low, 0);
     }
   } else {
-    KJ_IF_SOME(high, hexToUint64(s.slice(0, n - 16))) {
+    KJ_IF_SOME(high, hexToUint64(s.first(n - 16))) {
       KJ_IF_SOME(low, hexToUint64(s.slice(n - 16, n))) {
         return TraceId(low, high);
       }
