@@ -45,6 +45,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "updated-auto-allocate-chunk-size"_kj;
     case AutogateKey::PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR:
       return "python-abort-isolate-on-fatal-error"_kj;
+    case AutogateKey::THROW_ON_NOT_IMPLEMENTED_TLS_OPTIONS:
+      return "throw-on-not-implemented-tls-options"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

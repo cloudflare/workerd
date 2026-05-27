@@ -6,6 +6,8 @@
 #include <workerd/api/filesystem.h>
 #include <workerd/api/node/exceptions.h>
 #include <workerd/io/features.h>
+#include <workerd/util/autogate.h>
+#include <workerd/util/sentry.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker-fs.h>
@@ -255,6 +257,14 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
   } else {
     node::THROW_ERR_UV_ENOENT(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
   }
+}
+
+bool ProcessModule::shouldThrowOnNotImplementedTlsOption(jsg::Lock& js) {
+  if (util::Autogate::isEnabled(util::AutogateKey::THROW_ON_NOT_IMPLEMENTED_TLS_OPTIONS)) {
+    return true;
+  }
+  LOG_WARNING_PERIODICALLY("NOSENTRY VULN-136596 Worker has set options.checkServerIdentity");
+  return false;
 }
 
 }  // namespace workerd::api::node

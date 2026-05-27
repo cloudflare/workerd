@@ -32,7 +32,6 @@ import {
   tryReadStart,
 } from 'node-internal:internal_net';
 import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
-import { checkServerIdentity } from 'node-internal:internal_tls';
 import type {
   ConnectionOptions,
   TlsOptions,
@@ -56,6 +55,7 @@ import {
   ERR_TLS_INVALID_CONTEXT,
 } from 'node-internal:internal_errors';
 import { SecureContext } from 'node-internal:internal_tls_common';
+import { default as processImpl } from 'node-internal:process';
 import { ok } from 'node-internal:internal_assert';
 
 const kConnectOptions = Symbol('connect-options');
@@ -220,13 +220,18 @@ export function TLSSocket(
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.pskCallback');
   }
 
-  // TODO(soon): Call this on secureConnect once connect() api supports
-  // getting peer certificate.
+  // checkServerIdentity requires access to the peer certificate via
+  // getPeerCertificate(), which is not yet implemented. When the autogate is
+  // enabled we throw; otherwise we log a periodic warning and continue so
+  // that existing workers are not broken.
   if (tlsOptions.checkServerIdentity !== undefined) {
     validateFunction(
       tlsOptions.checkServerIdentity,
       'options.checkServerIdentity'
     );
+    if (processImpl.shouldThrowOnNotImplementedTlsOption()) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.checkServerIdentity');
+    }
   }
 
   this._tlsOptions = tlsOptions;
@@ -702,6 +707,9 @@ export function connect(...args: unknown[]): TLSSocket {
       options.checkServerIdentity,
       'options.checkServerIdentity'
     );
+    if (processImpl.shouldThrowOnNotImplementedTlsOption()) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.checkServerIdentity');
+    }
   }
 
   // @ts-expect-error TS2345 Type incompatibility between Node.js Duplex and internal Duplex
@@ -712,7 +720,6 @@ export function connect(...args: unknown[]): TLSSocket {
     enableTrace: options.enableTrace,
     highWaterMark: options.highWaterMark,
     secureContext: options.secureContext,
-    checkServerIdentity: options.checkServerIdentity ?? checkServerIdentity,
     onread: options.onread,
     signal: options.signal,
     lookup: options.lookup,
