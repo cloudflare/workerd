@@ -588,12 +588,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       // That's a larger refactor, though.
       auto& ioContext = IoContext::current();
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
-          .then(js, ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
-                (this, ref = addRef(), store = js.v8Ref(store),
-                 byteOffset, byteLength, isByob = maybeByobOptions != kj::none,
-                 isResizable, readPtr, tempBuffer = kj::mv(tempBuffer)),
-                (ref),
-                (jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
+          .then(js,
+              ioContext.addFunctor(
+                  [this, ref = addRef(), store = js.v8Ref(store), byteOffset, byteLength,
+                      isByob = maybeByobOptions != kj::none, isResizable, readPtr,
+                      tempBuffer = kj::mv(tempBuffer)](
+                      jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
         readPending = false;
         KJ_ASSERT(amount <= byteLength);
         if (amount == 0) {
@@ -602,7 +602,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           }
           KJ_IF_SOME(o, owner) {
             o.signalEof(js);
-          } else {}
+          }
           if (isByob && FeatureFlags::get(js).getInternalStreamByobReturn()) {
             // When using the BYOB reader, we must return a sized-0 Uint8Array that is backed
             // by the ArrayBuffer passed in the options.
@@ -670,17 +670,15 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
               v8::Uint8Array::New(store.getHandle(js), byteOffset, amount).As<v8::Value>()),
           .done = false,
         });
-      })),
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
-                  (this, ref = addRef()),
-                  (ref),
-                  (jsg::Lock& js, jsg::Value reason) -> jsg::Promise<ReadResult> {
+      }),
+              ioContext.addFunctor([this, ref = addRef()](jsg::Lock& js,
+                                       jsg::Value reason) mutable -> jsg::Promise<ReadResult> {
         readPending = false;
         if (!state.is<StreamStates::Errored>()) {
           doError(js, reason.getHandle(js));
         }
         return js.rejectedPromise<ReadResult>(kj::mv(reason));
-      })));
+      }));
     }
   }
   KJ_UNREACHABLE;
@@ -749,10 +747,9 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
 
       auto& ioContext = IoContext::current();
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
-          .then(js, ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
-                (this, ref = addRef(), store = kj::mv(store)),
-                (ref),
-                (jsg::Lock& js, size_t amount) mutable -> jsg::Promise<DrainingReadResult> {
+          .then(js,
+              ioContext.addFunctor([this, ref = addRef(), store = kj::mv(store)](jsg::Lock& js,
+                                       size_t amount) mutable -> jsg::Promise<DrainingReadResult> {
         readPending = false;
         KJ_ASSERT(amount <= store.size());
         if (amount == 0) {
@@ -761,23 +758,22 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
           }
           KJ_IF_SOME(o, owner) {
             o.signalEof(js);
-          } else {}
+          }
           return js.resolvedPromise(DrainingReadResult{.done = true});
         }
         // Return a slice so the script can see how many bytes were read.
         return js.resolvedPromise(DrainingReadResult{
           .chunks = kj::arr(store.slice(0, amount).attach(kj::mv(store))), .done = false});
-      })),
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
-                  (this, ref = addRef()),
-                  (ref),
-                  (jsg::Lock& js, jsg::Value reason) -> jsg::Promise<DrainingReadResult> {
+      }),
+              ioContext.addFunctor(
+                  [this, ref = addRef()](jsg::Lock& js,
+                      jsg::Value reason) mutable -> jsg::Promise<DrainingReadResult> {
         readPending = false;
         if (!state.is<StreamStates::Errored>()) {
           doError(js, reason.getHandle(js));
         }
         return js.rejectedPromise<DrainingReadResult>(kj::mv(reason));
-      })));
+      }));
     }
   }
   KJ_UNREACHABLE;

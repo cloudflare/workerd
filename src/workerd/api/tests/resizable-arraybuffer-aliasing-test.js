@@ -57,10 +57,13 @@ async function sendMutateReceive(buffer, initialText, mutatedText) {
 // mutations are not visible.
 export const nonResizableBufferSnapshot = {
   async test() {
-    const ab = new ArrayBuffer(7);  // non-resizable
+    const ab = new ArrayBuffer(7); // non-resizable
     const text = await sendMutateReceive(ab, 'initial', 'CHANGED');
-    strictEqual(text, 'initial',
-      'non-resizable: data should be captured at send() time');
+    strictEqual(
+      text,
+      'initial',
+      'non-resizable: data should be captured at send() time'
+    );
   },
 };
 
@@ -70,10 +73,13 @@ export const nonResizableBufferSnapshot = {
 // data reflects the buffer content at the time of the send() call.
 export const resizableBufferSnapshot = {
   async test() {
-    const ab = new ArrayBuffer(7, { maxByteLength: 16 });  // resizable
+    const ab = new ArrayBuffer(7, { maxByteLength: 16 }); // resizable
     const text = await sendMutateReceive(ab, 'initial', 'CHANGED');
-    strictEqual(text, 'initial',
-      'resizable: data should be captured at send() time (deep copy)');
+    strictEqual(
+      text,
+      'initial',
+      'resizable: data should be captured at send() time (deep copy)'
+    );
   },
 };
 
@@ -102,10 +108,16 @@ export const resizableBufferAfterShrink = {
 
     const msg = await received;
     const text = new TextDecoder().decode(msg);
-    strictEqual(text, 'hello',
-      'resizable after shrink: should send only the current (5-byte) content');
-    strictEqual(msg.byteLength, 5,
-      'resizable after shrink: sent length should be current size, not max');
+    strictEqual(
+      text,
+      'hello',
+      'resizable after shrink: should send only the current (5-byte) content'
+    );
+    strictEqual(
+      msg.byteLength,
+      5,
+      'resizable after shrink: sent length should be current size, not max'
+    );
 
     client.close();
     server.close();
