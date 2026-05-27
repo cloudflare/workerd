@@ -6,6 +6,7 @@ import { connect } from 'cloudflare:sockets';
 import { ok, strict as assert } from 'node:assert';
 import { connect as tlsConnect, TLSSocket } from 'node:tls';
 import { connect as netConnect } from 'node:net';
+import unsafe from 'workerd:unsafe';
 
 export const checkPortsSetCorrectly = {
   test(ctrl, env, ctx) {
@@ -73,7 +74,21 @@ export const regressionServernamePassthrough = {
             }
           );
 
-          tlsSocket.on('error', reject);
+          // We use isTestAutogateEnabled() (which checks TEST_WORKERD) as a proxy
+          // for whether STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME is enabled,
+          // because the @all-autogates test variant enables every gate at once.
+          if (unsafe.isTestAutogateEnabled()) {
+            tlsSocket.on('error', (err) => {
+              try {
+                assert.match(err.message, /expectedServerHostname/);
+                resolve();
+              } catch (e) {
+                reject(e);
+              }
+            });
+          } else {
+            tlsSocket.on('error', reject);
+          }
         });
       });
 
@@ -144,10 +159,22 @@ export const regressionSetServernameStoresValue = {
             }
           });
 
-          tlsSocket.on('error', reject);
+          // We use isTestAutogateEnabled() (which checks TEST_WORKERD) as a proxy
+          // for whether STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME is enabled,
+          // because the @all-autogates test variant enables every gate at once.
+          if (unsafe.isTestAutogateEnabled()) {
+            tlsSocket.on('error', (err) => {
+              try {
+                assert.match(err.message, /expectedServerHostname/);
+                resolve();
+              } catch (e) {
+                reject(e);
+              }
+            });
+          } else {
+            tlsSocket.on('error', reject);
+          }
 
-          // Now kick off the TLS handshake — _start() will read
-          // tlsSocket.servername that we set above.
           tlsSocket._start();
         });
       });

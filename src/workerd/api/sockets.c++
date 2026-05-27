@@ -346,6 +346,18 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);
   JSG_REQUIRE(domain != kj::none, TypeError, "startTls can only be called once.");
 
+  KJ_IF_SOME(opts, tlsOptions) {
+    if (opts.expectedServerHostname != kj::none) {
+      if (util::Autogate::isEnabled(util::AutogateKey::STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME)) {
+        JSG_FAIL_REQUIRE(TypeError,
+            "The expectedServerHostname option is not currently supported in startTls.");
+      } else {
+        LOG_ERROR_PERIODICALLY(
+            "NOSENTRY startTls called with unsupported expectedServerHostname option");
+      }
+    }
+  }
+
   // The current socket's writable buffers need to be flushed. The socket's WritableStream is backed
   // by an AsyncIoStream which doesn't implement any buffering, so we don't need to worry about
   // flushing. But the JS WritableStream holds a queue so some data may still be buffered. This
