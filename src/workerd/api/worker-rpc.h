@@ -267,9 +267,16 @@ class JsRpcPromise: public JsRpcClientProvider {
 // Represents a property -- possibly, a method -- of a remote RPC object.
 class JsRpcProperty: public JsRpcClientProvider {
  public:
-  JsRpcProperty(jsg::Ref<JsRpcClientProvider> parent, kj::String name)
+  // Maximum depth of pipelined property chains. Prevents stack overflow when a chain of
+  // JsRpcProperty objects is destructed recursively. 64 is beyond any legitimate RPC pipelining
+  // depth.
+  static constexpr uint MAX_PROPERTY_DEPTH = 5120;
+  static constexpr uint MAX_PROPERTY_WARNING_DEPTH = 64;
+
+  JsRpcProperty(jsg::Ref<JsRpcClientProvider> parent, kj::String name, uint depth = 0)
       : parent(kj::mv(parent)),
-        name(kj::mv(name)) {}
+        name(kj::mv(name)),
+        depth(depth) {}
 
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
@@ -318,6 +325,10 @@ class JsRpcProperty: public JsRpcClientProvider {
 
   // Name of this property within its immediate parent.
   kj::String name;
+
+  // Number of JsRpcProperty links above this one in the chain. Used to enforce
+  // MAX_PROPERTY_DEPTH and prevent native stack overflow on destruction.
+  uint depth;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(parent);
