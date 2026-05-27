@@ -288,7 +288,7 @@ kj::Promise<void> RevocableWebSocketWorkerInterface::connect(kj::StringPtr host,
     return kj::READY_NOW;
   }).eagerlyEvaluate(nullptr);
 
-  return worker.connect(host, headers, *wrappedConnection.get(), response, kj::mv(settings))
+  return worker.connect(host, headers, *wrappedConnection, response, kj::mv(settings))
       .attach(kj::mv(wrappedConnection), kj::mv(revokeTask));
 }
 

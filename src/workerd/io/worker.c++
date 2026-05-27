@@ -986,7 +986,7 @@ struct Worker::Script::Impl {
 
   kj::Maybe<const workerd::jsg::modules::ModuleRegistry&> getNewModuleRegistry() const {
     return maybeNewModuleRegistry.map(
-        [](auto& r) -> const workerd::jsg::modules::ModuleRegistry& { return *r.get(); });
+        [](auto& r) -> const workerd::jsg::modules::ModuleRegistry& { return *r; });
   }
 };
 
