@@ -295,6 +295,10 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
   // Removes the cache entry with the given key, if it exists.
   void removeIfExistsWhileLocked(ThreadUnsafeData& data, const kj::String& key) const;
 
+  static Use::FallbackDoneCallback prepareFallback(
+      const SharedMemoryCache& cache, InProgress& inProgress);
+  static void handleFallbackFailure(const SharedMemoryCache& cache, InProgress& inProgress);
+
   // Callbacks for a HashIndex that allow locating cache entries based on the
   // cache key, which is a string. This is used for all key-based cache
   // operations.

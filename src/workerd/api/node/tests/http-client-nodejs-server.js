@@ -132,3 +132,15 @@ const gzipServer = http.createServer((_req, res) => {
 });
 
 listenTo(gzipServer, process.env.GZIP_SERVER_PORT);
+
+// Echoes back the Host header the sidecar received, so the test can verify
+// that a user-supplied Host header does not redirect the transport destination.
+const hostEchoServer = http.createServer((req, res) => {
+  req.resume();
+  req.on('end', () => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end(req.headers.host || '');
+  });
+});
+
+listenTo(hostEchoServer, process.env.HOST_ECHO_SERVER_PORT);

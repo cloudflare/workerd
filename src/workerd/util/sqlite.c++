@@ -252,7 +252,7 @@ class SqliteCallScope {
 // sqliteErrorCode is a kj::Maybe<int> and represents the error code from sqlite.
 #define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, ...)                              \
   if (!(condition)) {                                                                              \
-    regulator.onError(sqliteErrorCode, errorMessage);                                              \
+    regulator->onError(sqliteErrorCode, errorMessage);                                             \
     KJ_FAIL_REQUIRE("SENTRY_DO SQLite failed", errorMessage, ##__VA_ARGS__);                       \
   }
 
@@ -785,7 +785,7 @@ void SqliteDatabase::applyChange(const StateChange& change) {
 
 // Set up the regulator that will be used for authorizer callbacks while preparing this
 // statement.
-SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& regulator,
+SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator regulator,
     kj::StringPtr sqlCode,
     uint prepFlags,
     Multi multi,
@@ -904,8 +904,8 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
 
             // Report queryEvent for this statement
             sqliteObserver.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten,
-                queryLatency, dbWalBytesWritten, err, extendedCode, regulator.shouldAddQueryStats(),
-                kj::mv(queryErrorDescription));
+                queryLatency, dbWalBytesWritten, err, extendedCode,
+                regulator->shouldAddQueryStats(), kj::mv(queryErrorDescription));
 
             if (err == SQLITE_DONE) {
               // good
@@ -941,7 +941,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
 }
 
 SqliteDatabase::IngestResult SqliteDatabase::ingestSql(
-    const Regulator& regulator, kj::StringPtr sqlCode) {
+    StaticRegulator regulator, kj::StringPtr sqlCode) {
   uint64_t rowsRead = 0;
   uint64_t rowsWritten = 0;
   uint64_t statementCount = 0;
@@ -971,7 +971,7 @@ SqliteDatabase::IngestResult SqliteDatabase::ingestSql(
 }
 
 void SqliteDatabase::executeWithRegulator(
-    const Regulator& regulator, kj::FunctionParam<void()> func) {
+    StaticRegulator regulator, kj::FunctionParam<void()> func) {
   // currentRegulator would only be set if we're running this method while running something else
   // with a regulator.  I'm not sure what the ramifications are, so for now, we'll just assume that
   // we can only call executeWithRegulator when no regulator is currently set.
@@ -1023,7 +1023,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     kj::Maybe<kj::StringPtr> param2,
     kj::Maybe<kj::StringPtr> dbName,
     kj::Maybe<kj::StringPtr> triggerName) {
-  const Regulator& regulator = KJ_UNWRAP_OR(currentRegulator, {
+  StaticRegulator regulator = KJ_UNWRAP_OR(currentRegulator, {
     // We're not currently preparing a statement, so we didn't expect the authorizer callback to
     // run. We blanket-deny in this case as a precaution.
     KJ_LOG(ERROR, "SQLite authorizer callback invoked at unexpected time", kj::getStackTrace());
@@ -1031,7 +1031,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   });
 
   KJ_IF_SOME(t, triggerName) {
-    if (!regulator.isAllowedTrigger(t)) {
+    if (!regulator->isAllowedTrigger(t)) {
       // Log an error because it seems really suspicious if a trigger runs when it's not allowed.
       // I want to understand if this can even happen.
       KJ_LOG(ERROR, "disallowed trigger somehow ran in trusted scope?", t, kj::getStackTrace());
@@ -1071,7 +1071,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     }
   }
 
-  if (&regulator == &TRUSTED && actionCode != SQLITE_TRANSACTION &&
+  if (regulator.get() == &TRUSTED && actionCode != SQLITE_TRANSACTION &&
       actionCode != SQLITE_SAVEPOINT) {
     // Everything is allowed for trusted queries. (But transactions and savepoints need special
     // handling below.)
@@ -1097,7 +1097,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     case SQLITE_DROP_VIEW:    /* View Name       NULL            */
     case SQLITE_REINDEX:      /* Index Name      NULL            */
       KJ_ASSERT(param2 == kj::none);
-      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+      return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
 
     case SQLITE_ANALYZE: /* Table Name      NULL            */
       KJ_ASSERT(param2 == kj::none);
@@ -1119,22 +1119,22 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       return true;
 
     case SQLITE_ALTER_TABLE: /* Table Name      NULL (modified) */
-      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+      return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
 
     case SQLITE_READ:   /* Table Name      Column Name     */
     case SQLITE_UPDATE: /* Table Name      Column Name     */
-      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+      return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
 
     case SQLITE_CREATE_INDEX:   /* Index Name      Table Name      */
     case SQLITE_DROP_INDEX:     /* Index Name      Table Name      */
     case SQLITE_CREATE_TRIGGER: /* Trigger Name    Table Name      */
     case SQLITE_DROP_TRIGGER:   /* Trigger Name    Table Name      */
-      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1)) &&
-          regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
+      return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1)) &&
+          regulator->isAllowedName(KJ_ASSERT_NONNULL(param2));
 
     case SQLITE_TRANSACTION: /* Operation       NULL            */
     {
-      if (!regulator.allowTransactions()) {
+      if (!regulator->allowTransactions()) {
         return false;
       }
 
@@ -1160,7 +1160,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     case SQLITE_SAVEPOINT: /* Operation       Savepoint Name  */
     {
       kj::String name = kj::str(KJ_ASSERT_NONNULL(param2));
-      if (!regulator.allowTransactions() || !regulator.isAllowedName(name)) {
+      if (!regulator->allowTransactions() || !regulator->isAllowedName(name)) {
         return false;
       }
 
@@ -1197,7 +1197,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         } else if (pragma == "table_info" || pragma == "table_xinfo") {
           // Allow if the specific named table is not protected.
           KJ_IF_SOME(name, param2) {
-            return regulator.isAllowedName(name);
+            return regulator->isAllowedName(name);
           } else {
             return false;  // shouldn't happen?
           }
@@ -1237,11 +1237,11 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           case PragmaSignature::OBJECT_NAME: {
             // Argument is required.
             auto val = KJ_UNWRAP_OR(param2, return false);
-            return regulator.isAllowedName(val);
+            return regulator->isAllowedName(val);
           }
           case PragmaSignature::OPTIONAL_OBJECT_NAME: {
             auto val = KJ_UNWRAP_OR(param2, return true);
-            return regulator.isAllowedName(val);
+            return regulator->isAllowedName(val);
           }
           case PragmaSignature::NULL_OR_NUMBER: {
             // Argument is not required
@@ -1255,7 +1255,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
             // val is allowed if it parses to an integer
             if (val.tryParseAs<uint>() != kj::none) return true;
             // Otherwise, val must be the name of an object the user has access to
-            return regulator.isAllowedName(val);
+            return regulator->isAllowedName(val);
           }
         }
         KJ_UNREACHABLE;
@@ -1288,7 +1288,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           if (strcasecmp(moduleName.begin(), "fts5") == 0 ||
               strcasecmp(moduleName.begin(), "fts5vocab") == 0) {
             if (util::Autogate::isEnabled(util::AutogateKey::SQL_RESTRICT_RESERVED_NAMES)) {
-              return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+              return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
             }
             auto& tableName = KJ_ASSERT_NONNULL(param1);
             if (tableName.size() >= 4 && strncasecmp(tableName.begin(), "_cf_", 4) == 0) {
@@ -1336,12 +1336,12 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 bool SqliteDatabase::isAuthorizedTemp(int actionCode,
     const kj::Maybe<kj::StringPtr>& param1,
     const kj::Maybe<kj::StringPtr>& param2,
-    const Regulator& regulator) {
+    StaticRegulator regulator) {
 
   switch (actionCode) {
     case SQLITE_READ:   /* Table Name      Column Name     */
     case SQLITE_UPDATE: /* Table Name      Column Name     */
-      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+      return regulator->isAllowedName(KJ_ASSERT_NONNULL(param1));
     default:
       return false;
   }
@@ -1430,7 +1430,7 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
 }
 
 SqliteDatabase::Statement SqliteDatabase::prepare(
-    const Regulator& regulator, kj::StringPtr sqlCode) {
+    StaticRegulator regulator, kj::StringPtr sqlCode) {
   return Statement(
       *this, regulator, prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
@@ -1504,12 +1504,12 @@ void SqliteDatabase::Query::destroy() {
   // active from the caller.
   auto memoryScope = db.enterMemoryScope();
 
-  if (regulator.shouldAddQueryStats()) {
+  if (regulator->shouldAddQueryStats()) {
     // Update the db stats that we have collected for the query.
     db.sqliteObserver.addQueryStats(rowsRead, rowsWritten);
   }
 
-  queryEvent.setQueryEventStats(rowsRead, rowsWritten, !(regulator.shouldAddQueryStats()));
+  queryEvent.setQueryEventStats(rowsRead, rowsWritten, !(regulator->shouldAddQueryStats()));
 
   try {
     kj::StringPtr statement = sqlite3_sql(getStatementAndEffect().statement);
@@ -1546,7 +1546,7 @@ void SqliteDatabase::Query::destroy() {
 }
 
 void SqliteDatabase::Query::checkRequirements(size_t size) {
-  if (regulator.shouldAddQueryStats()) {
+  if (regulator->shouldAddQueryStats()) {
     KJ_IF_SOME(actorAccountLimits, db.actorAccountLimits) {
       actorAccountLimits.requireActorCanExecuteQueries();
     }
@@ -1756,7 +1756,7 @@ bool SqliteDatabase::Query::isNull(uint column) {
 
 SqliteDatabase::StatementAndEffect& SqliteDatabase::Query::getStatementAndEffect() {
   return KJ_UNWRAP_OR(maybeStatement, {
-    regulator.onError(kj::none, "SQLite query was canceled because the database was deleted.");
+    regulator->onError(kj::none, "SQLite query was canceled because the database was deleted.");
     KJ_FAIL_REQUIRE("query canceled because reset() was called on the database");
   });
 }

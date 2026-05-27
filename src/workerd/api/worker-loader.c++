@@ -65,10 +65,13 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
   auto& ioctx = IoContext::current();
 
   auto reenterAndGetCode = ioctx.makeReentryCallback(
-      [&ioctx, getCode = kj::mv(getCode), compatDateValidation = compatDateValidation](
-          jsg::Lock& js) mutable {
-    return getCode(js).then(
-        js, [&ioctx, compatDateValidation](jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
+      [weakIoctx = ioctx.getWeakRef(), getCode = kj::mv(getCode),
+          compatDateValidation = compatDateValidation](jsg::Lock& js) mutable {
+    return getCode(js).then(js,
+        [weakIoctx = kj::addRef(*weakIoctx), compatDateValidation](
+            jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
+      auto& ioctx = JSG_REQUIRE_NONNULL(weakIoctx->tryGet(), Error,
+          "The request which initiated this dynamic worker load has already completed.");
       return toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
     });
   });
@@ -220,6 +223,12 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           } else KJ_IF_SOME(text, module.text) {
             return Worker::Script::TextModule{.body = text};
           } else KJ_IF_SOME(data, module.data) {
+            // The kj::Array<const byte> produced by jsg::asBytes() points into a V8
+            // BackingStore. If the user passed a *resizable* ArrayBuffer they can call
+            // resize(0) (or transfer/detach) after load() returns but before the child
+            // isolate is compiled asynchronously, leaving us with a (ptr,len) into
+            // PROT_NONE pages. Copy now so the bytes survive until compileDataGlobal().
+            data = kj::heapArray<const kj::byte>(data.asPtr());
             return Worker::Script::DataModule{.body = data};
           } else KJ_IF_SOME(json, module.json) {
             kj::StringPtr serialized =
@@ -231,6 +240,8 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
           } else KJ_IF_SOME(py, module.py) {
             return Worker::Script::PythonModule{.body = py};
           } else KJ_IF_SOME(wasm, module.wasm) {
+            // Same as `data` above: copy out of the V8 BackingStore before going async.
+            wasm = kj::heapArray<const kj::byte>(wasm.asPtr());
             return Worker::Script::WasmModule{.body = wasm};
           } else {
             KJ_UNREACHABLE;

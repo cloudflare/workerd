@@ -110,6 +110,13 @@ void MessagePort::postMessage(jsg::Lock& js,
 
   // If the port is closed, other will be kj::none and we will just drop the message.
   other->runIfAlive([&](MessagePort& o) {
+    // Take a strong reference to prevent GC from freeing the target port during
+    // serialization. Serialization can run arbitrary user code via custom getters
+    // on the message object. That code could close this port (which also closes
+    // the entangled port), and then force GC to free the target port — leaving
+    // the `o` reference dangling for the deliver() call below.
+    auto ref = o.addRef();
+
     jsg::Serializer ser(js);
 
     KJ_IF_SOME(d, data) {

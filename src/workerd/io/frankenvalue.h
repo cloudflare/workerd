@@ -104,6 +104,32 @@ class Frankenvalue {
     }
   }
 
+  // Kind of like `rewriteCaps()`, but the callback returns
+  // kj::OneOf<kj::Own<CapTableEntry>, kj::Promise<kj::Own<CapTableEntry>>>, i.e. it may optionally
+  // decide to be async. If any of the calls return a promise, then `resolveCaps()` returns a
+  // promise created by joining the inner promises -- the Frankenvalue MUST NOT be used until that
+  // promise resolves. (If the promise fails or is canceled, the Frankenvalue must be discarded.)
+  template <typename Func>
+  kj::Maybe<kj::Promise<void>> resolveCaps(Func&& resolve) {
+    kj::Vector<kj::Promise<void>> promises;
+    for (auto& slot: capTable) {
+      KJ_SWITCH_ONEOF(resolve(kj::mv(slot))) {
+        KJ_CASE_ONEOF(replacement, kj::Own<CapTableEntry>) {
+          slot = kj::mv(replacement);
+        }
+        KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<CapTableEntry>>) {
+          promises.add(promise.then(
+              [&slot](kj::Own<CapTableEntry> replacement) { slot = kj::mv(replacement); }));
+        }
+      }
+    }
+    if (promises.empty()) {
+      return kj::none;
+    } else {
+      return kj::joinPromisesFailFast(promises.releaseAsArray());
+    }
+  }
+
   // When deserializing a JS value, the jsg::Deserializer's ExternalHandler will have this type.
   class CapTableReader final: public jsg::Deserializer::ExternalHandler {
    public:

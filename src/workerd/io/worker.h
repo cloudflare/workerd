@@ -911,6 +911,12 @@ class Worker::Actor final: public kj::Refcounted {
 
       // ctx.id for the child object.
       Worker::Actor::Id id;
+
+      // Ensures `actorClass` is a fully-resolved channel.
+      //
+      // This is implemented in io-channels.c++ next to DynamicWorkerSource::ensureAllResolved()
+      // since they are very similar.
+      kj::Promise<void> ensureAllResolved();
     };
 
     // Returns the nesting depth of this facet. Root = 0, direct child of root = 1, etc.

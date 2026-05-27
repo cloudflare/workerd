@@ -137,10 +137,14 @@ struct TestFixture {
     kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
       KJ_FAIL_ASSERT("no subrequests");
     }
-    kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
+    kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
         kj::Maybe<Frankenvalue> props,
         kj::Maybe<VersionRequest> versionRequest) override {
       KJ_FAIL_ASSERT("no subrequests");
+    }
+    kj::Own<ActorClassChannel> getActorClassResolved(
+        uint channel, kj::Maybe<Frankenvalue> props) override {
+      KJ_FAIL_ASSERT("no actor classes");
     }
     capnp::Capability::Client getCapability(uint channel) override {
       KJ_FAIL_ASSERT("no capabilities");
@@ -167,6 +171,10 @@ struct TestFixture {
     kj::Own<ActorChannel> getColoLocalActor(
         uint channel, kj::StringPtr id, SpanParent parentSpan) override {
       KJ_FAIL_REQUIRE("no actor channels");
+    }
+
+    kj::Own<void> addRef() override {
+      KJ_FAIL_REQUIRE("not used");
     }
 
     TimerChannel& timer;

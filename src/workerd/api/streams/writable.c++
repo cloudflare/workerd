@@ -168,7 +168,7 @@ void WritableStreamDefaultWriter::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
     visitor.visit(attached.stream);
   }
-  visitor.visit(closedPromise, readyPromise);
+  visitor.visit(closedPromise, readyPromise, readyPromisePending);
 }
 
 // ======================================================================================

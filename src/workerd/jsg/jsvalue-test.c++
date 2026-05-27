@@ -152,5 +152,17 @@ KJ_TEST("simple") {
       "boolean", "true");
 }
 
+KJ_TEST("regression_AUTOVULN_CLOUDFLARE_WORKERD_143: deep proxy chain in getPrototype") {
+  // Regression test for AUTOVULN-CLOUDFLARE-WORKERD-143: a deeply nested chain of
+  // Proxy objects with no getPrototypeOf trap caused unbounded native recursion in
+  // JsObject::getPrototype(), leading to SIGSEGV from stack overflow.
+  // After the fix, getPrototype() iterates instead of recursing and throws a
+  // RangeError when the depth limit is exceeded.
+  Evaluator<JsValueContext, JsValueIsolate> e(v8System);
+  e.expectEval(
+      "let p = function(){}; for (let i = 0; i < 200000; i++) { p = new Proxy(p, {}); } try { checkProxyPrototype(p); 'no error'; } catch (e) { e.constructor.name + ': ' + e.message; }",
+      "string", "RangeError: Maximum proxy chain length exceeded in getPrototype");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

@@ -83,6 +83,10 @@ class X509Certificate: public jsg::Object {
  private:
   kj::Own<X509> cert_;
   kj::Maybe<jsg::Ref<X509Certificate>> issuerCert_;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(issuerCert_);
+  }
 };
 
 }  // namespace workerd::api

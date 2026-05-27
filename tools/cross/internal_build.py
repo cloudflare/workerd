@@ -11,7 +11,7 @@ def parse_args():
     parser.add_argument("pr_id", help="Pull Request ID")
     parser.add_argument("merge_sha", help="Merge Commit SHA")
     parser.add_argument("head_sha", help="HEAD Commit SHA")
-    parser.add_argument("run_attempt", help="# of Run Attempt")
+    parser.add_argument("run_id", help="Unique ID for this CI job attempt")
     parser.add_argument("branch_name", help="PR's Branch Name")
     parser.add_argument("URL", help="URL to submit build task")
     parser.add_argument("client_id", help="CF Access client id")
@@ -33,7 +33,7 @@ if __name__ == "__main__":
         "pr_id": args.pr_id,
         "merge_commit_sha": args.merge_sha,
         "head_commit_sha": args.head_sha,
-        "run_attempt": args.run_attempt,
+        "run_id": args.run_id,
         "branch_name": args.branch_name,
     }
 

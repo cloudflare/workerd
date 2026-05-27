@@ -18,6 +18,7 @@ export const checkPortsSetCorrectly = {
       'REQUEST_ARGUMENTS_PORT',
       'HELLO_WORLD_SERVER_PORT',
       'GZIP_SERVER_PORT',
+      'HOST_ECHO_SERVER_PORT',
     ];
     for (const key of keys) {
       strictEqual(typeof env[key], 'string');
@@ -559,6 +560,53 @@ export const testHttpClientGzipResponseNotAutoDecompressed = {
         });
       }
     );
+    await promise;
+  },
+};
+
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-15: a user-supplied Host header
+// must NOT override the transport destination (options.hostname). The fetch URL
+// authority must always come from options.hostname/options.host, matching Node.js
+// semantics where Host is an HTTP header, not a routing directive.
+export const testHostHeaderDoesNotOverrideTransportDestination = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const attackerHost = '169.254.169.254';
+    http
+      .get(
+        {
+          hostname: env.SIDECAR_HOSTNAME,
+          port: env.HOST_ECHO_SERVER_PORT,
+          path: '/safe-endpoint',
+          headers: { Host: attackerHost },
+        },
+        (res) => {
+          let body = '';
+          res.on('data', (chunk) => (body += chunk));
+          res.on('end', () => {
+            try {
+              // The request must have reached the sidecar (not 169.254.169.254).
+              // If the Host header were used as the URL authority (the bug),
+              // the fetch would go to 169.254.169.254 and either fail or
+              // return a non-200 response from a different server.
+              strictEqual(res.statusCode, 200);
+              // The sidecar echoes back the Host header it received. Since
+              // fetch() derives the Host header from the URL (which now uses
+              // this.host, the transport destination), the echoed value will
+              // contain the sidecar's address, NOT the attacker-supplied value.
+              ok(
+                !body.includes(attackerHost),
+                `Host header must not contain the attacker-supplied value ` +
+                  `"${attackerHost}"; got "${body}"`
+              );
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          });
+        }
+      )
+      .on('error', reject);
     await promise;
   },
 };

@@ -1442,6 +1442,38 @@ export class DurableObjectExample extends DurableObject {
   async runActorFunc(name) {
     return actorFuncs[name](this.state);
   }
+
+  // Regression test for SQL cursor use-after-free (VULN-130998).
+  // If GC collects the SqlStorage handle while a cursor is still live, consuming
+  // the cursor dereferences a dangling Regulator& — a UAF that ASAN detects.
+  async testCursorUaf() {
+    const storage = this.state.storage;
+    let sql = storage.sql;
+
+    let cursor = sql.exec(`
+      SELECT 1 AS value
+      UNION ALL SELECT 2 AS value
+      UNION ALL SELECT 3 AS value
+    `);
+
+    // JSG_LAZY_INSTANCE_PROPERTY stores `sql` as a writable own property after first access.
+    // Replacing it drops the parent-side JS root; the cursor itself does not visit SqlStorage.
+    storage.sql = null;
+    sql = null;
+
+    for (let i = 0; i < 64; i++) {
+      gc();
+      const junk = [];
+      for (let j = 0; j < 1024; j++) junk.push({ i, j, data: 'x'.repeat(64) });
+      await scheduler.wait(0);
+    }
+
+    // Consuming the cursor to completion destroys Cursor::State and SqliteDatabase::Query.
+    // If SqlStorage was collected, we want to make sure that the below still works without tripping
+    // an ASan use-after-free.
+    const rows = cursor.toArray();
+    assert.deepEqual(rows, [{ value: 1 }, { value: 2 }, { value: 3 }]);
+  }
 }
 
 export default {
@@ -1749,4 +1781,11 @@ actorFuncs.doCriticalErrorOnTransactionRollback = async (state) => {
       txn.rollback();
     });
   }, /^Error: database or disk is full: SQLITE_FULL/);
+};
+
+export let testCursorUaf = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('cursor-uaf-test'));
+    await stub.testCursorUaf();
+  },
 };
