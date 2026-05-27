@@ -977,7 +977,7 @@ jsg::Ref<ReadableStream> createFiniteBytesReadableStream(
       auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
       jsg::BufferSource buffer(js, kj::mv(backing));
       buffer.asArrayPtr().fill(96 + counter);  // fill with 'a'...'j'
-      c->enqueue(js, buffer.getHandle(js));
+      c->enqueue(js, jsg::JsValue(buffer.getHandle(js)));
     }
     if (counter == 10) {
       c->close(js);
@@ -1590,7 +1590,7 @@ KJ_TEST("KjAdapter MinReadPolicy IMMEDIATE behavior") {
         auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 256);
         jsg::BufferSource buffer(js, kj::mv(backing));
         buffer.asArrayPtr().fill(97 + counter);  // 'a', 'b', 'c', etc.
-        c->enqueue(js, buffer.getHandle(js));
+        c->enqueue(js, jsg::JsValue(buffer.getHandle(js)));
         counter++;
       } else {
         c->close(js);
@@ -1646,7 +1646,7 @@ KJ_TEST("KjAdapter MinReadPolicy OPPORTUNISTIC behavior") {
         auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 256);
         jsg::BufferSource buffer(js, kj::mv(backing));
         buffer.asArrayPtr().fill(97 + counter);  // 'a', 'b', 'c', etc.
-        c->enqueue(js, buffer.getHandle(js));
+        c->enqueue(js, jsg::JsValue(buffer.getHandle(js)));
         counter++;
       } else {
         c->close(js);

@@ -749,7 +749,7 @@ class ValueQueue final {
     jsg::Promise<ReadResult>::Resolver resolver;
 
     void resolveAsDone(jsg::Lock& js);
-    void resolve(jsg::Lock& js, jsg::V8Ref<v8::Value> value);
+    void resolve(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value);
     void reject(jsg::Lock& js, jsg::JsValue value);
 
     JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
@@ -761,10 +761,10 @@ class ValueQueue final {
   // calculated by the size algorithm function provided in the stream constructor.
   class Entry: public kj::Refcounted {
    public:
-    explicit Entry(jsg::V8Ref<v8::Value> value, size_t size);
+    explicit Entry(jsg::JsRef<jsg::JsValue> value, size_t size);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
-    jsg::V8Ref<v8::Value> getValue(jsg::Lock& js);
+    jsg::JsRef<jsg::JsValue> getValue(jsg::Lock& js);
 
     size_t getSize() const;
 
@@ -777,7 +777,7 @@ class ValueQueue final {
     }
 
    private:
-    jsg::V8Ref<v8::Value> value;
+    jsg::JsRef<jsg::JsValue> value;
     size_t size;
   };
 

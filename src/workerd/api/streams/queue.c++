@@ -23,10 +23,10 @@ void ValueQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
   resolver.resolve(js, ReadResult{.done = true});
 }
 
-void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
+void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
   resolver.resolve(js,
       ReadResult{
-        .value = jsg::JsValue(value.getHandle(js)).addRef(js),
+        .value = kj::mv(value),
         .done = false,
       });
 }
@@ -39,11 +39,11 @@ void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
 
 #pragma region ValueQueue::Entry
 
-ValueQueue::Entry::Entry(jsg::V8Ref<v8::Value> value, size_t size)
+ValueQueue::Entry::Entry(jsg::JsRef<jsg::JsValue> value, size_t size)
     : value(kj::mv(value)),
       size(size) {}
 
-jsg::V8Ref<v8::Value> ValueQueue::Entry::getValue(jsg::Lock& js) {
+jsg::JsRef<jsg::JsValue> ValueQueue::Entry::getValue(jsg::Lock& js) {
   return value.addRef(js);
 }
 
@@ -139,9 +139,8 @@ bool ValueQueue::Consumer::hasPendingDrainingRead() {
 
 namespace {
 // Helper to convert a JS value to bytes. Returns kj::none if the value cannot be converted.
-kj::Maybe<kj::Array<kj::byte>> valueToBytes(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
-  auto jsval = jsg::JsValue(value.getHandle(js));
-
+kj::Maybe<kj::Array<kj::byte>> valueToBytes(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
+  auto jsval = value.getHandle(js);
   // Try ArrayBuffer first.
   KJ_IF_SOME(ab, jsval.tryCast<jsg::JsArrayBuffer>()) {
     auto src = ab.asArrayPtr();

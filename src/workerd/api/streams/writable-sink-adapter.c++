@@ -619,7 +619,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
     auto ready = KJ_ASSERT_NONNULL(writer->isReady(js));
     auto promise =
         ready.then(js, [writer = writer.addRef(), source = kj::mv(source)](jsg::Lock& js) mutable {
-      return writer->write(js, source.getHandle(js));
+      return writer->write(js, jsg::JsValue(source.getHandle(js)));
     });
     return IoContext::current().awaitJs(js, kj::mv(promise));
   })).then([self = selfRef.addRef()]() {

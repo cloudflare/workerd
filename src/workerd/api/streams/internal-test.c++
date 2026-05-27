@@ -285,7 +285,7 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
     bool writeFailed = false;
 
     auto write = sink->getController()
-                     .write(env.js, buffersource.getHandle(env.js))
+                     .write(env.js, jsg::JsValue(buffersource.getHandle(env.js)))
                      .catch_(env.js, [&](jsg::Lock& js, jsg::Value value) {
       writeFailed = true;
       auto ex = js.exceptionToKj(kj::mv(value));
@@ -378,7 +378,8 @@ KJ_TEST("WritableStreamInternalController observability") {
     auto write = [&](size_t size) {
       auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(size));
       return env.context.awaitJs(env.js,
-          KJ_ASSERT_NONNULL(stream)->getController().write(env.js, buffersource.getHandle(env.js)));
+          KJ_ASSERT_NONNULL(stream)->getController().write(
+              env.js, jsg::JsValue(buffersource.getHandle(env.js))));
     };
 
     KJ_ASSERT(observer.queueSize == 0);
@@ -428,7 +429,7 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
       if (pullCount == 1) {
         // First pull: enqueue some data so the pipe loop can make progress
         auto data = js.bytes(kj::heapArray<kj::byte>({1, 2, 3, 4}));
-        c->enqueue(js, data.getHandle(js));
+        c->enqueue(js, jsg::JsValue(data.getHandle(js)));
       }
       // Second pull onwards: don't enqueue anything, leaving the read pending.
       // This simulates an async data source that hasn't received data yet.

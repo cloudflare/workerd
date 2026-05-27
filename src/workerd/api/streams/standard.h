@@ -277,7 +277,7 @@ class WritableImpl {
 
   struct WriteRequest {
     jsg::Promise<void>::Resolver resolver;
-    jsg::V8Ref<v8::Value> value;
+    jsg::JsRef<jsg::JsValue> value;
     size_t size;
 
     void visitForGc(jsg::GcVisitor& visitor) {
@@ -339,7 +339,7 @@ class WritableImpl {
 
   // Writes a chunk to the Writable, possibly queuing the chunk in the internal buffer
   // if there are already other writes pending.
-  jsg::Promise<void> write(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> value);
+  jsg::Promise<void> write(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue value);
 
   // True if the writable is in a state where new chunks can be written
   bool isWritable() const;
@@ -454,7 +454,7 @@ class ReadableStreamDefaultController: public jsg::Object {
   bool hasBackpressure();
   kj::Maybe<int> getDesiredSize();
 
-  void enqueue(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk);
+  void enqueue(jsg::Lock& js, jsg::Optional<jsg::JsValue> chunk);
 
   void error(jsg::Lock& js, jsg::JsValue reason);
 
@@ -679,7 +679,7 @@ class WritableStreamDefaultController: public jsg::Object {
 
   void setup(jsg::Lock& js, UnderlyingSink underlyingSink, StreamQueuingStrategy queuingStrategy);
 
-  jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> value);
+  jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
 
   JSG_RESOURCE_TYPE(WritableStreamDefaultController) {
     JSG_READONLY_PROTOTYPE_PROPERTY(signal, getSignal);
@@ -728,7 +728,7 @@ class TransformStreamDefaultController: public jsg::Object {
 
   kj::Maybe<int> getDesiredSize();
 
-  void enqueue(jsg::Lock& js, v8::Local<v8::Value> chunk);
+  void enqueue(jsg::Lock& js, jsg::JsValue chunk);
 
   void error(jsg::Lock& js, jsg::JsValue reason);
 
@@ -745,7 +745,7 @@ class TransformStreamDefaultController: public jsg::Object {
     });
   }
 
-  jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> chunk);
+  jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue chunk);
   jsg::Promise<void> abort(jsg::Lock& js, jsg::JsValue reason);
   jsg::Promise<void> close(jsg::Lock& js);
   jsg::Promise<void> pull(jsg::Lock& js);
@@ -782,7 +782,7 @@ class TransformStreamDefaultController: public jsg::Object {
   };
 
   void errorWritableAndUnblockWrite(jsg::Lock& js, jsg::JsValue reason);
-  jsg::Promise<void> performTransform(jsg::Lock& js, v8::Local<v8::Value> chunk);
+  jsg::Promise<void> performTransform(jsg::Lock& js, jsg::JsValue chunk);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
 
   kj::Maybe<IoContext&> ioContext;

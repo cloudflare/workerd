@@ -1017,7 +1017,7 @@ jsg::Ref<WritableStream> WritableStreamInternalController::addRef() {
 }
 
 jsg::Promise<void> WritableStreamInternalController::write(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> value) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> value) {
   if (isPendingClosure) {
     return js.rejectedPromise<void>(
         js.typeError("This WritableStream belongs to an object that is closing."_kj));
@@ -1047,16 +1047,17 @@ jsg::Promise<void> WritableStreamInternalController::write(
       std::shared_ptr<v8::BackingStore> store;
       size_t byteLength = 0;
       size_t byteOffset = 0;
-      if (chunk->IsArrayBuffer()) {
-        auto buffer = chunk.As<v8::ArrayBuffer>();
+      if (chunk.isArrayBuffer()) {
+        v8::Local<v8::ArrayBuffer> buffer = KJ_ASSERT_NONNULL(chunk.tryCast<jsg::JsArrayBuffer>());
         store = buffer->GetBackingStore();
         byteLength = buffer->ByteLength();
-      } else if (chunk->IsArrayBufferView()) {
-        auto view = chunk.As<v8::ArrayBufferView>();
+      } else if (chunk.isArrayBufferView()) {
+        v8::Local<v8::ArrayBufferView> view =
+            KJ_ASSERT_NONNULL(chunk.tryCast<jsg::JsArrayBufferView>());
         store = view->Buffer()->GetBackingStore();
         byteLength = view->ByteLength();
         byteOffset = view->ByteOffset();
-      } else if (chunk->IsString()) {
+      } else if (chunk.isString()) {
         // TODO(later): This really ought to return a rejected promise and not a sync throw.
         // This case caused me a moment of confusion during testing, so I think it's worth
         // a specific error message.
@@ -1954,20 +1955,20 @@ bool WritableStreamInternalController::Pipe::State::checkSignal(jsg::Lock& js) {
   return false;
 }
 
-jsg::Promise<void> WritableStreamInternalController::Pipe::State::write(
-    v8::Local<v8::Value> handle) {
+jsg::Promise<void> WritableStreamInternalController::Pipe::State::write(jsg::JsValue handle) {
   auto& writable = parent.state.getUnsafe<IoOwn<Writable>>();
   // TODO(soon): Once jsg::BufferSource lands and we're able to use it, this can be simplified.
-  KJ_ASSERT(handle->IsArrayBuffer() || handle->IsArrayBufferView());
+  KJ_ASSERT(handle.isArrayBuffer() || handle.isArrayBufferView());
   std::shared_ptr<v8::BackingStore> store;
   size_t byteLength = 0;
   size_t byteOffset = 0;
-  if (handle->IsArrayBuffer()) {
-    auto buffer = handle.template As<v8::ArrayBuffer>();
+  if (handle.isArrayBuffer()) {
+    v8::Local<v8::ArrayBuffer> buffer = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsArrayBuffer>());
     store = buffer->GetBackingStore();
     byteLength = buffer->ByteLength();
   } else {
-    auto view = handle.template As<v8::ArrayBufferView>();
+    v8::Local<v8::ArrayBufferView> view =
+        KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsArrayBufferView>());
     store = view->Buffer()->GetBackingStore();
     byteLength = view->ByteLength();
     byteOffset = view->ByteOffset();

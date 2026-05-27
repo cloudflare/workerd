@@ -80,7 +80,7 @@ struct DrainingReadResult {
 };
 
 struct StreamQueuingStrategy {
-  using SizeAlgorithm = uint64_t(v8::Local<v8::Value>);
+  using SizeAlgorithm = uint64_t(jsg::JsValue);
 
   jsg::Optional<uint64_t> highWaterMark;
   jsg::Optional<jsg::Function<SizeAlgorithm>> size;
@@ -152,7 +152,7 @@ struct UnderlyingSource {
 struct UnderlyingSink {
   using Controller = jsg::Ref<WritableStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
-  using WriteAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
+  using WriteAlgorithm = jsg::Promise<void>(jsg::JsValue, Controller);
   using AbortAlgorithm = jsg::Promise<void>(jsg::JsValue reason);
   using CloseAlgorithm = jsg::Promise<void>();
 
@@ -179,7 +179,7 @@ struct UnderlyingSink {
 struct Transformer {
   using Controller = jsg::Ref<TransformStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
-  using TransformAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
+  using TransformAlgorithm = jsg::Promise<void>(jsg::JsValue, Controller);
   using FlushAlgorithm = jsg::Promise<void>(Controller);
   using CancelAlgorithm = jsg::Promise<void>(jsg::JsValue reason);
 
@@ -720,7 +720,7 @@ class WritableStreamController {
   // The controller implementation will determine what kind of JavaScript data
   // it is capable of writing, returning a rejected promise if the written
   // data type is not supported.
-  virtual jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> value) = 0;
+  virtual jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> value) = 0;
 
   // Indicates that no additional data will be written to the controller. All
   // existing pending writes should be allowed to complete.

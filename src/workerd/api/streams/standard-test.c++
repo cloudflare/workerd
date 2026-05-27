@@ -15,8 +15,9 @@ void preamble(auto callback) {
   fixture.runInIoContext([&](const TestFixture::Environment& env) { callback(env.js); });
 }
 
-v8::Local<v8::Value> toBytes(jsg::Lock& js, kj::String str) {
-  return jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js);
+jsg::JsValue toBytes(jsg::Lock& js, kj::String str) {
+  return jsg::JsValue(
+      jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js));
 }
 
 jsg::BufferSource toBufferSource(jsg::Lock& js, kj::String str) {
