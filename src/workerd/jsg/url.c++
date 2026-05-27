@@ -1,5 +1,6 @@
 #include "url.h"
 
+#include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
 
 #include <kj/hash.h>
@@ -1672,11 +1673,31 @@ UrlPattern::Result<UrlPattern::Component> tryCompileComponent(kj::Maybe<kj::Stri
 
 bool protocolComponentMatchesSpecialScheme(
     kj::StringPtr regex, const UrlPattern::CompileOptions& options) {
-  std::regex rx(regex.begin(), regex.size());
-  std::cmatch cmatch;
-  return std::regex_match("http", cmatch, rx) || std::regex_match("https", cmatch, rx) ||
-      std::regex_match("ws", cmatch, rx) || std::regex_match("wss", cmatch, rx) ||
-      std::regex_match("ftp", cmatch, rx);
+  // libc++ std::regex uses an unbounded recursive-descent parser. A hostile
+  // pattern with deeply nested groups can exhaust the stack and crash the
+  // process. The only strings we ever match here are 2-5 byte scheme names,
+  // so any generated regex longer than a few hundred bytes cannot usefully
+  // be a special-scheme matcher. Bail out early instead of feeding
+  // attacker-controlled source to std::regex.
+  static constexpr size_t kMaxProtocolRegexLen = 5120;
+  static constexpr size_t kMaxProtocolRegexWarnLen = 256;
+  if (regex.size() > kMaxProtocolRegexLen) {
+    return false;
+  }
+  if (regex.size() > kMaxProtocolRegexWarnLen) {
+    LOG_PERIODICALLY(WARNING, "NOSENTRY VULN-136606 Used large regex in urlpattern", regex.size());
+  }
+  try {
+    std::regex rx(regex.begin(), regex.size());
+    std::cmatch cmatch;
+    return std::regex_match("http", cmatch, rx) || std::regex_match("https", cmatch, rx) ||
+        std::regex_match("ws", cmatch, rx) || std::regex_match("wss", cmatch, rx) ||
+        std::regex_match("ftp", cmatch, rx);
+  } catch (const std::regex_error&) {
+    // Invalid regex per libc++ -- treat as non-special. The component will be
+    // re-validated by V8's regex engine later and a proper TypeError thrown.
+    return false;
+  }
 }
 
 UrlPattern::Result<UrlPattern::Init> tryParseConstructorString(
