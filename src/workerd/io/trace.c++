@@ -717,6 +717,7 @@ HibernatableWebSocketEventInfo::Type HibernatableWebSocketEventInfo::readFrom(
       return Error{};
     }
   }
+  KJ_UNREACHABLE;
 }
 
 FetchResponseInfo::FetchResponseInfo(uint16_t statusCode): statusCode(statusCode) {}
