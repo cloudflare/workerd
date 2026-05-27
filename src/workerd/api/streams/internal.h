@@ -28,7 +28,7 @@ namespace workerd::api {
 // The ReadableStreamInternalController is always in one of three states: Readable, Closed,
 // or Errored. When the state is Readable, the controller has an associated ReadableStreamSource.
 // When the state is Errored, the ReadableStreamSource has been released and the controller
-// stores a jsg::V8Ref<v8::Value> with whatever value was used to error. When Closed, the
+// stores a js Value with whatever value was used to error. When Closed, the
 // ReadableStreamSource has been released.
 
 // Likewise, the WritableStreamInternalController is always either Writable, Closed, or Errored.

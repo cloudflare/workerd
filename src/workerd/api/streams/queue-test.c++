@@ -91,7 +91,8 @@ auto byobRead(jsg::Lock& js, auto& consumer, int size) {
 };
 
 auto getEntry(jsg::Lock& js, auto size) {
-  return kj::rc<ValueQueue::Entry>(js.boolean(true).addRef(js), size);
+  jsg::JsValue b = js.boolean(true);
+  return kj::rc<ValueQueue::Entry>(b.addRef(js), size);
 }
 
 #pragma region ValueQueue Tests
@@ -1312,7 +1313,7 @@ KJ_TEST("ValueQueue draining read with buffered data") {
     queue.push(js, kj::rc<ValueQueue::Entry>(ab.addRef(js), 4));
 
     // Push a string
-    auto str = js.str("hello"_kj);
+    auto str = jsg::JsValue(js.str("hello"_kj));
     queue.push(js, kj::rc<ValueQueue::Entry>(str.addRef(js), 5));
 
     KJ_ASSERT(consumer.size() == 9);
@@ -1636,7 +1637,8 @@ KJ_TEST("ValueQueue draining read errors on non-byte value") {
     ValueQueue::Consumer consumer(queue);
 
     // Push a plain object - this cannot be converted to bytes
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.obj().addRef(js), 1));
+    jsg::JsValue obj = jsg::JsValue(js.obj());
+    queue.push(js, kj::rc<ValueQueue::Entry>(obj.addRef(js), 1));
 
     KJ_ASSERT(consumer.size() == 1);
 
@@ -1670,7 +1672,8 @@ KJ_TEST("ValueQueue draining read errors on number value") {
     ValueQueue::Consumer consumer(queue);
 
     // Push a number - this cannot be converted to bytes
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.num(42).addRef(js), 1));
+    jsg::JsValue num = jsg::JsValue(js.num(42));
+    queue.push(js, kj::rc<ValueQueue::Entry>(num.addRef(js), 1));
 
     MustNotCall<DrainingReadContinuation> readContinuation;
     MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
