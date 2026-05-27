@@ -3296,11 +3296,11 @@ class AllReader {
           // bytes for the read to make any sense.
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
           if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
-          auto error = js.typeError("This ReadableStream did not return bytes.");
-          state.template transitionTo<StreamStates::Errored>(
-              js.v8Ref(v8::Local<v8::Value>(error)));
-          return readable->getController().cancel(js, error).then(
-              js, [&](jsg::Lock& js) { return loop(js); });
+            auto error = js.typeError("This ReadableStream did not return bytes.");
+            state.template transitionTo<StreamStates::Errored>(
+                js.v8Ref(v8::Local<v8::Value>(error)));
+            return readable->getController().cancel(js, error).then(
+                js, [&](jsg::Lock& js) { return loop(js); });
           }
 
           jsg::BufferSource bufferSource(js, handle);

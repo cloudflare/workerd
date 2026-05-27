@@ -6,12 +6,12 @@
 #include <workerd/api/filesystem.h>
 #include <workerd/api/node/exceptions.h>
 #include <workerd/io/features.h>
-#include <workerd/util/autogate.h>
-#include <workerd/util/sentry.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
+#include <workerd/util/sentry.h>
 
 #include <kj/vector.h>
 
