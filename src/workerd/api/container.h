@@ -258,6 +258,8 @@ class Container: public jsg::Object {
 
   jsg::Promise<kj::Maybe<Info>> inspect(jsg::Lock& js);
 
+  jsg::Promise<void> setLabels(jsg::Lock& js, jsg::Dict<kj::String> labels);
+
   // TODO(containers): listenTcp()
 
   JSG_RESOURCE_TYPE(Container, CompatibilityFlags::Reader flags) {
@@ -278,6 +280,7 @@ class Container: public jsg::Object {
       JSG_METHOD(exec);
       JSG_METHOD(interceptOutboundTcp);
       JSG_METHOD(inspect);
+      JSG_METHOD(setLabels);
     }
   }
 

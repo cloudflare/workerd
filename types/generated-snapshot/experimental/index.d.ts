@@ -4004,6 +4004,7 @@ interface Container {
   exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
   interceptOutboundTcp(addr: string, binding: Fetcher): Promise<void>;
   inspect(): Promise<ContainerInfo | null>;
+  setLabels(labels: Record<string, string>): Promise<void>;
 }
 interface ContainerDirectorySnapshot {
   id: string;

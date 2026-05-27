@@ -253,6 +253,9 @@ interface Container @0x9aaceefc06523bca {
   inspect @14 () -> (info :InspectInfo);
   # Returns information about the container, or `none` if the container has not been started.
 
+  setLabels @15 (labels :List(Label));
+  # Replaces the container's current label set with the provided list.
+
   struct InspectInfo {
     union {
       none @0 :Void;
