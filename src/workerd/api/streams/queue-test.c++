@@ -129,7 +129,8 @@ KJ_TEST("ValueQueue erroring works") {
   preamble([](jsg::Lock& js) {
     ValueQueue queue(2);
 
-    queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
+    auto err = js.error("boom"_kj);
+    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
 
     KJ_ASSERT(queue.desiredSize() == 0);
 
@@ -307,7 +308,8 @@ KJ_TEST("ValueQueue errors consumer with multiple-reads") {
     read(js, consumer).then(js, readContinuation, errorContinuation);
     read(js, consumer).then(js, readContinuation, errorContinuation);
 
-    queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
+    auto err = js.error("boom"_kj);
+    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
 
     js.runMicrotasks();
   });
@@ -388,7 +390,8 @@ KJ_TEST("ByteQueue erroring works") {
   preamble([](jsg::Lock& js) {
     ByteQueue queue(2);
 
-    queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
+    auto err = js.error("boom"_kj);
+    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
 
     KJ_ASSERT(queue.desiredSize() == 0);
 
@@ -1243,7 +1246,8 @@ KJ_TEST("ValueQueue push to errored consumer is safe") {
     ValueQueue::Consumer consumer2(queue);
 
     // Error consumer2
-    consumer2.error(js, js.v8Ref(js.v8Error("error reason"_kj)));
+    auto err = js.error("error reason"_kj);
+    consumer2.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
 
     // Now push to the queue
     queue.push(js, getEntry(js, 4));
@@ -1404,7 +1408,8 @@ KJ_TEST("ValueQueue draining read on errored stream") {
     ValueQueue queue(10);
     ValueQueue::Consumer consumer(queue);
 
-    queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
+    auto err = js.error("boom"_kj);
+    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
 
     MustNotCall<DrainingReadContinuation> readContinuation;
     MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
@@ -1544,7 +1549,8 @@ KJ_TEST("ByteQueue draining read on errored stream") {
     ByteQueue queue(10);
     ByteQueue::Consumer consumer(queue);
 
-    queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
+    auto err = js.error("boom"_kj);
+    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
 
     MustNotCall<DrainingReadContinuation> readContinuation;
     MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
@@ -1965,7 +1971,8 @@ KJ_TEST("ValueQueue error then destroy before consumer doesn't crash") {
     auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
 
     // Error the queue first
-    queue->error(js, js.v8Ref(js.v8Error("boom"_kj)));
+    auto err = js.error("boom"_kj);
+    queue->error(js, js.v8Ref(v8::Local<v8::Value>(err)));
 
     // Then destroy it
     queue = nullptr;
