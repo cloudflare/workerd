@@ -130,7 +130,7 @@ KJ_TEST("ValueQueue erroring works") {
     ValueQueue queue(2);
 
     auto err = js.error("boom"_kj);
-    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
+    queue.error(js, err.addRef(js));
 
     KJ_ASSERT(queue.desiredSize() == 0);
 
@@ -309,7 +309,7 @@ KJ_TEST("ValueQueue errors consumer with multiple-reads") {
     read(js, consumer).then(js, readContinuation, errorContinuation);
 
     auto err = js.error("boom"_kj);
-    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
+    queue.error(js, err.addRef(js));
 
     js.runMicrotasks();
   });
@@ -391,7 +391,7 @@ KJ_TEST("ByteQueue erroring works") {
     ByteQueue queue(2);
 
     auto err = js.error("boom"_kj);
-    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
+    queue.error(js, err.addRef(js));
 
     KJ_ASSERT(queue.desiredSize() == 0);
 
@@ -1259,7 +1259,7 @@ KJ_TEST("ValueQueue push to errored consumer is safe") {
 
     // Error consumer2
     auto err = js.error("error reason"_kj);
-    consumer2.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
+    consumer2.error(js, err.addRef(js));
 
     // Now push to the queue
     queue.push(js, getEntry(js, 4));
@@ -1421,7 +1421,7 @@ KJ_TEST("ValueQueue draining read on errored stream") {
     ValueQueue::Consumer consumer(queue);
 
     auto err = js.error("boom"_kj);
-    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
+    queue.error(js, err.addRef(js));
 
     MustNotCall<DrainingReadContinuation> readContinuation;
     MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
@@ -1562,7 +1562,7 @@ KJ_TEST("ByteQueue draining read on errored stream") {
     ByteQueue::Consumer consumer(queue);
 
     auto err = js.error("boom"_kj);
-    queue.error(js, js.v8Ref(v8::Local<v8::Value>(err)));
+    queue.error(js, err.addRef(js));
 
     MustNotCall<DrainingReadContinuation> readContinuation;
     MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
@@ -1984,7 +1984,7 @@ KJ_TEST("ValueQueue error then destroy before consumer doesn't crash") {
 
     // Error the queue first
     auto err = js.error("boom"_kj);
-    queue->error(js, js.v8Ref(v8::Local<v8::Value>(err)));
+    queue->error(js, err.addRef(js));
 
     // Then destroy it
     queue = nullptr;

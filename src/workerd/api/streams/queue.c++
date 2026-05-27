@@ -31,7 +31,7 @@ void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::V8Ref<v8::Value> value
       });
 }
 
-void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
+void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
   resolver.reject(js, value.getHandle(js));
 }
 
@@ -82,7 +82,7 @@ ValueQueue::Consumer::Consumer(
 ValueQueue::Consumer::Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
     : impl(stateListener) {}
 
-void ValueQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+void ValueQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   impl.cancel(js, maybeReason);
 }
 
@@ -94,7 +94,7 @@ bool ValueQueue::Consumer::empty() {
   return impl.empty();
 }
 
-void ValueQueue::Consumer::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
+void ValueQueue::Consumer::error(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason) {
   impl.error(js, kj::mv(reason));
 };
 
@@ -216,7 +216,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
           } else {
             auto error = js.typeError(
                 "Draining read encountered a value that cannot be converted to bytes"_kj);
-            impl.error(js, js.v8Ref(v8::Local<v8::Value>(error)));
+            impl.error(js, error.addRef(js));
             return js.rejectedPromise<DrainingReadResult>(error);
           }
         }
@@ -372,7 +372,7 @@ ssize_t ValueQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ValueQueue::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
+void ValueQueue::error(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason) {
   impl.error(js, kj::mv(reason));
 }
 
@@ -548,7 +548,7 @@ void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
-void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
+void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
   resolver.reject(js, value.getHandle(js));
   maybeInvalidateByobRequest(byobReadRequest);
 }
@@ -606,7 +606,7 @@ ByteQueue::Consumer::Consumer(
 ByteQueue::Consumer::Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
     : impl(stateListener) {}
 
-void ByteQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+void ByteQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   impl.cancel(js, maybeReason);
 }
 
@@ -618,7 +618,7 @@ bool ByteQueue::Consumer::empty() const {
   return impl.empty();
 }
 
-void ByteQueue::Consumer::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
+void ByteQueue::Consumer::error(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason) {
   impl.error(js, kj::mv(reason));
 }
 
@@ -1037,7 +1037,7 @@ ssize_t ByteQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ByteQueue::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
+void ByteQueue::error(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason) {
   impl.error(js, kj::mv(reason));
 }
 
