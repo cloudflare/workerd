@@ -179,7 +179,7 @@ KJ_TEST("PumpToReader regression") {
                              [](jsg::Lock& js, auto controller) {
       auto& c = KJ_REQUIRE_NONNULL(
           controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
-      c->enqueue(js, v8::ArrayBuffer::New(js.v8Isolate, 10));
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
       c->close(js);
       return js.resolvedPromise();
     }},

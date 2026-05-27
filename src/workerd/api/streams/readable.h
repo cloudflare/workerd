@@ -491,8 +491,7 @@ struct QueuingStrategyInit {
   JSG_STRUCT(highWaterMark);
 };
 
-using QueuingStrategySizeFunction =
-    jsg::Optional<uint32_t>(jsg::Optional<v8::Local<v8::Value>>);
+using QueuingStrategySizeFunction = jsg::Optional<uint32_t>(jsg::Optional<jsg::JsValue>);
 
 // Utility class defined by the streams spec that uses byteLength to calculate
 // backpressure changes.
@@ -519,7 +518,7 @@ public:
   }
 
 private:
-  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>>);
+  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<jsg::JsValue>);
 
   QueuingStrategyInit init;
 };
@@ -549,7 +548,7 @@ public:
   }
 
 private:
-  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>>) {
+  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<jsg::JsValue>) {
     return 1;
   }
 

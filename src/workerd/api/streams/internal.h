@@ -222,7 +222,7 @@ class WritableStreamInternalController: public WritableStreamController {
 
   jsg::Ref<WritableStream> addRef() override;
 
-  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> value) override;
+  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> value) override;
 
   jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
 
@@ -405,7 +405,7 @@ class WritableStreamInternalController: public WritableStreamController {
 
       bool checkSignal(jsg::Lock& js);
       jsg::Promise<void> pipeLoop(jsg::Lock& js);
-      jsg::Promise<void> write(v8::Local<v8::Value> value);
+      jsg::Promise<void> write(jsg::JsValue value);
 
       JSG_MEMORY_INFO(State) {
         tracker.trackField("resolver", promise);
@@ -462,7 +462,7 @@ class WritableStreamInternalController: public WritableStreamController {
     jsg::Promise<void> pipeLoop(jsg::Lock& js) {
       return state->pipeLoop(js);
     }
-    jsg::Promise<void> write(v8::Local<v8::Value> value) {
+    jsg::Promise<void> write(jsg::JsValue value) {
       return state->write(value);
     }
 

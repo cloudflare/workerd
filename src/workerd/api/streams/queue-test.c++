@@ -91,7 +91,7 @@ auto byobRead(jsg::Lock& js, auto& consumer, int size) {
 };
 
 auto getEntry(jsg::Lock& js, auto size) {
-  return kj::rc<ValueQueue::Entry>(js.v8Ref(v8::True(js.v8Isolate).As<v8::Value>()), size);
+  return kj::rc<ValueQueue::Entry>(js.boolean(true).addRef(js), size);
 }
 
 #pragma region ValueQueue Tests
@@ -1308,12 +1308,12 @@ KJ_TEST("ValueQueue draining read with buffered data") {
     store.asArrayPtr()[1] = 'b';
     store.asArrayPtr()[2] = 'c';
     store.asArrayPtr()[3] = 'd';
-    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 4));
+    auto ab = jsg::JsValue(jsg::BufferSource(js, kj::mv(store)).getHandle(js));
+    queue.push(js, kj::rc<ValueQueue::Entry>(ab.addRef(js), 4));
 
     // Push a string
-    auto str = jsg::v8Str(js.v8Isolate, "hello");
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(str.As<v8::Value>()), 5));
+    auto str = js.str("hello"_kj);
+    queue.push(js, kj::rc<ValueQueue::Entry>(str.addRef(js), 5));
 
     KJ_ASSERT(consumer.size() == 9);
 
@@ -1580,8 +1580,8 @@ KJ_TEST("ValueQueue draining read with close signal") {
     store.asArrayPtr()[1] = 'b';
     store.asArrayPtr()[2] = 'c';
     store.asArrayPtr()[3] = 'd';
-    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 4));
+    auto ab = jsg::JsValue(jsg::BufferSource(js, kj::mv(store)).getHandle(js));
+    queue.push(js, kj::rc<ValueQueue::Entry>(ab.addRef(js), 4));
 
     // Close the queue
     queue.close(js);
@@ -1636,8 +1636,7 @@ KJ_TEST("ValueQueue draining read errors on non-byte value") {
     ValueQueue::Consumer consumer(queue);
 
     // Push a plain object - this cannot be converted to bytes
-    auto obj = v8::Object::New(js.v8Isolate);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(obj.As<v8::Value>()), 1));
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.obj().addRef(js), 1));
 
     KJ_ASSERT(consumer.size() == 1);
 
@@ -1671,8 +1670,7 @@ KJ_TEST("ValueQueue draining read errors on number value") {
     ValueQueue::Consumer consumer(queue);
 
     // Push a number - this cannot be converted to bytes
-    auto num = v8::Number::New(js.v8Isolate, 42);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(num.As<v8::Value>()), 1));
+    queue.push(js, kj::rc<ValueQueue::Entry>(js.num(42).addRef(js), 1));
 
     MustNotCall<DrainingReadContinuation> readContinuation;
     MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
@@ -1705,13 +1703,13 @@ KJ_TEST("ValueQueue draining read respects maxRead during buffer drain") {
     // Buffer 200 bytes of data (two 100-byte chunks)
     auto store1 = jsg::BackingStore::alloc(js, 100);
     store1.asArrayPtr().fill(0xAA);
-    auto ab1 = jsg::BufferSource(js, kj::mv(store1)).getHandle(js);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab1.As<v8::Value>()), 100));
+    auto ab1 = jsg::JsValue(jsg::BufferSource(js, kj::mv(store1)).getHandle(js));
+    queue.push(js, kj::rc<ValueQueue::Entry>(ab1.addRef(js), 100));
 
     auto store2 = jsg::BackingStore::alloc(js, 100);
     store2.asArrayPtr().fill(0xBB);
-    auto ab2 = jsg::BufferSource(js, kj::mv(store2)).getHandle(js);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab2.As<v8::Value>()), 100));
+    auto ab2 = jsg::JsValue(jsg::BufferSource(js, kj::mv(store2)).getHandle(js));
+    queue.push(js, kj::rc<ValueQueue::Entry>(ab2.addRef(js), 100));
 
     KJ_ASSERT(consumer.size() == 200);
 
@@ -1772,13 +1770,13 @@ KJ_TEST("ValueQueue draining read with large maxRead drains entire buffer") {
     // Buffer 200 bytes (two 100-byte chunks)
     auto store1 = jsg::BackingStore::alloc(js, 100);
     store1.asArrayPtr().fill(0xAA);
-    auto ab1 = jsg::BufferSource(js, kj::mv(store1)).getHandle(js);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab1.As<v8::Value>()), 100));
+    auto ab1 = jsg::JsValue(jsg::BufferSource(js, kj::mv(store1)).getHandle(js));
+    queue.push(js, kj::rc<ValueQueue::Entry>(ab1.addRef(js), 100));
 
     auto store2 = jsg::BackingStore::alloc(js, 100);
     store2.asArrayPtr().fill(0xBB);
-    auto ab2 = jsg::BufferSource(js, kj::mv(store2)).getHandle(js);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab2.As<v8::Value>()), 100));
+    auto ab2 = jsg::JsValue(jsg::BufferSource(js, kj::mv(store2)).getHandle(js));
+    queue.push(js, kj::rc<ValueQueue::Entry>(ab2.addRef(js), 100));
 
     KJ_ASSERT(consumer.size() == 200);
 
@@ -1806,8 +1804,8 @@ KJ_TEST("ValueQueue draining read with default maxRead (unlimited)") {
     // Buffer some data
     auto store = jsg::BackingStore::alloc(js, 100);
     store.asArrayPtr().fill(0xAA);
-    auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
-    queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 100));
+    auto ab = jsg::JsValue(jsg::BufferSource(js, kj::mv(store)).getHandle(js));
+    queue.push(js, kj::rc<ValueQueue::Entry>(ab.addRef(js), 100));
 
     // Default maxRead (kj::maxValue) should drain buffer normally
     MustCall<DrainingReadContinuation> readContinuation(
@@ -1834,8 +1832,8 @@ KJ_TEST("ValueQueue draining read maxRead bounds multiple iterations") {
     for (int i = 0; i < 4; i++) {
       auto store = jsg::BackingStore::alloc(js, 100);
       store.asArrayPtr().fill(0x10 * (i + 1));
-      auto ab = jsg::BufferSource(js, kj::mv(store)).getHandle(js);
-      queue.push(js, kj::rc<ValueQueue::Entry>(js.v8Ref(ab.As<v8::Value>()), 100));
+      auto ab = jsg::JsValue(jsg::BufferSource(js, kj::mv(store)).getHandle(js));
+      queue.push(js, kj::rc<ValueQueue::Entry>(ab.addRef(js), 100));
     }
     KJ_ASSERT(consumer.size() == 400);
 

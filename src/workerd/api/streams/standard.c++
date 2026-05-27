@@ -943,7 +943,7 @@ class WritableStreamJsController final: public WritableStreamController {
 
   void updateBackpressure(jsg::Lock& js, bool backpressure);
 
-  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> value) override;
+  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> value) override;
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
@@ -1676,7 +1676,7 @@ void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
 
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::write(
-    jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> value) {
+    jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue value) {
 
   size_t size = 1;
   KJ_IF_SOME(sizeFunc, algorithms.size) {
@@ -1725,7 +1725,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
   auto prp = js.newPromiseAndResolver<void>();
   writeRequests.push_back(WriteRequest{
     .resolver = kj::mv(prp.resolver),
-    .value = js.v8Ref(value),
+    .value = value.addRef(js),
     .size = size,
   });
   amountBuffered += size;
@@ -2279,8 +2279,7 @@ void ReadableStreamDefaultController::close(jsg::Lock& js) {
   impl.close(js);
 }
 
-void ReadableStreamDefaultController::enqueue(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk) {
+void ReadableStreamDefaultController::enqueue(jsg::Lock& js, jsg::Optional<jsg::JsValue> chunk) {
   // Hold a strong reference to prevent this controller from being freed if the
   // user-provided size algorithm (below) re-enters JS and errors the controller
   // through a side-channel (e.g. TransformStreamDefaultController::error()
@@ -2306,7 +2305,7 @@ void ReadableStreamDefaultController::enqueue(
   // throwing (e.g. by calling transformController.error()), in which case
   // `errored` is still false but the impl state has transitioned to Errored.
   if (!errored && impl.canCloseOrEnqueue()) {
-    impl.enqueue(js, kj::rc<ValueQueue::Entry>(js.v8Ref(value), size), kj::mv(self));
+    impl.enqueue(js, kj::rc<ValueQueue::Entry>(value.addRef(js), size), kj::mv(self));
   }
 }
 
@@ -3844,8 +3843,7 @@ void WritableStreamDefaultController::setup(
   impl.setup(js, JSG_THIS, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 
-jsg::Promise<void> WritableStreamDefaultController::write(
-    jsg::Lock& js, v8::Local<v8::Value> value) {
+jsg::Promise<void> WritableStreamDefaultController::write(jsg::Lock& js, jsg::JsValue value) {
   return impl.write(js, JSG_THIS, value);
 }
 
@@ -4313,7 +4311,7 @@ void WritableStreamJsController::updateBackpressure(jsg::Lock& js, bool backpres
 }
 
 jsg::Promise<void> WritableStreamJsController::write(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> value) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> value) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(initial, Initial) {
       return js.rejectedPromise<void>(js.typeError("This WritableStream has been closed."_kj));
@@ -4325,7 +4323,7 @@ jsg::Promise<void> WritableStreamJsController::write(
       return js.rejectedPromise<void>(errored.getHandle(js));
     }
     KJ_CASE_ONEOF(controller, Controller) {
-      return controller->write(js, value.orDefault([&] { return js.undefined(); }));
+      return controller->write(js, value.orDefault(js.undefined()));
     }
   }
   KJ_UNREACHABLE;
@@ -4349,7 +4347,7 @@ kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
   return kj::none;
 }
 
-void TransformStreamDefaultController::enqueue(jsg::Lock& js, v8::Local<v8::Value> chunk) {
+void TransformStreamDefaultController::enqueue(jsg::Lock& js, jsg::JsValue chunk) {
   auto& readableController = JSG_REQUIRE_NONNULL(tryGetReadableController(), TypeError,
       "The readable side of this TransformStream is no longer readable.");
   // Hold a strong reference to the readable controller for the duration of this
@@ -4407,8 +4405,7 @@ void TransformStreamDefaultController::terminate(jsg::Lock& js) {
   errorWritableAndUnblockWrite(js, js.typeError("The transform stream has been terminated"_kj));
 }
 
-jsg::Promise<void> TransformStreamDefaultController::write(
-    jsg::Lock& js, v8::Local<v8::Value> chunk) {
+jsg::Promise<void> TransformStreamDefaultController::write(jsg::Lock& js, jsg::JsValue chunk) {
   KJ_IF_SOME(writableController, tryGetWritableController()) {
     KJ_IF_SOME(error, writableController.isErroredOrErroring(js)) {
       return js.rejectedPromise<void>(error);
@@ -4417,7 +4414,7 @@ jsg::Promise<void> TransformStreamDefaultController::write(
     KJ_ASSERT(writableController.isWritable());
 
     if (backpressure) {
-      auto chunkRef = js.v8Ref(chunk);
+      auto chunkRef = chunk.addRef(js);
       return KJ_ASSERT_NONNULL(maybeBackpressureChange)
           .promise.whenResolved(js)
           .then(js,
@@ -4606,7 +4603,7 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
 }
 
 jsg::Promise<void> TransformStreamDefaultController::performTransform(
-    jsg::Lock& js, v8::Local<v8::Value> chunk) {
+    jsg::Lock& js, jsg::JsValue chunk) {
   if (algorithms.transform != kj::none) {
     return maybeRunAlgorithm(js, algorithms.transform, [](jsg::Lock& js) -> jsg::Promise<void> {
       return js.resolvedPromise();
@@ -4906,11 +4903,11 @@ jsg::Ref<ReadableStream> ReadableStream::from(
                     return js.toPromise(handle.As<v8::Promise>()).then(js,
                         [controller=controller.addRef()]
                         (jsg::Lock& js, jsg::V8Ref<v8::Value> val) mutable {
-                      controller->enqueue(js, val.getHandle(js));
+                      controller->enqueue(js, jsg::JsValue(val.getHandle(js)));
                       return js.resolvedPromise();
                     });
                   }
-                  controller->enqueue(js, v.getHandle(js));
+                  controller->enqueue(js, jsg::JsValue(v.getHandle(js)));
                 } else {
                   controller->close(js);
                 }

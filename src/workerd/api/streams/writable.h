@@ -40,7 +40,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
   //   complete on this side if we don't care that they're actually read?
   jsg::Promise<void> close(jsg::Lock& js);
 
-  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk);
+  jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<jsg::JsValue> chunk);
   void releaseLock(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(WritableStreamDefaultWriter, CompatibilityFlags::Reader flags) {

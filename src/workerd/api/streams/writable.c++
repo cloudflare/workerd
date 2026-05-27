@@ -135,7 +135,7 @@ void WritableStreamDefaultWriter::replaceReadyPromise(
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::write(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> chunk) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
@@ -410,7 +410,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       auto& writer = getInner();
       auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, buffer.size()));
       source.asArrayPtr().copyFrom(buffer);
-      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(source.getHandle(lock))));
     }));
   }
 
@@ -439,7 +439,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         ptr = ptr.slice(piece.size());
       }
 
-      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(source.getHandle(lock))));
     }));
   }
 
