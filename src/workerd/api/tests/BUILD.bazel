@@ -212,6 +212,12 @@ wd_test(
 )
 
 wd_test(
+    src = "queue-resizable-arraybuffer-test.wd-test",
+    args = ["--experimental"],
+    data = ["queue-resizable-arraybuffer-test.js"],
+)
+
+wd_test(
     src = "queue-do-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["queue-do-uaf-test.js"],

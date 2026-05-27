@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "queue-resizable-arraybuffer-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "queue-resizable-arraybuffer-test.js")
+        ],
+        bindings = [
+          ( name = "QUEUE", queue = "queue-resizable-arraybuffer-test" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "queues_json_messages"],
+      )
+    ),
+  ],
+);
