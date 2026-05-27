@@ -30,7 +30,7 @@ jsg::Ref<WritableStreamDefaultWriter> WritableStreamDefaultWriter::constructor(
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::abort(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
@@ -215,8 +215,7 @@ void WritableStream::detach(jsg::Lock& js) {
   getController().detach(js);
 }
 
-jsg::Promise<void> WritableStream::abort(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) {
+jsg::Promise<void> WritableStream::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
         js.typeError("This WritableStream is currently locked to a writer."_kj));
@@ -369,7 +368,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         context.addTask(context.run([writer = kj::mv(writer), exception = cancellationException()](
                                         Worker::Lock& lock) mutable {
           jsg::Lock& js = lock;
-          auto ex = js.exceptionToJs(kj::mv(exception));
+          auto ex = js.exceptionToJsValue(kj::mv(exception));
           return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
         }));
       }
@@ -394,7 +393,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
               obj.context.run([writer = kj::mv(writer), exception = cancellationException()](
                                   Worker::Lock& lock) mutable {
             jsg::Lock& js = lock;
-            auto ex = js.exceptionToJs(kj::mv(exception));
+            auto ex = js.exceptionToJsValue(kj::mv(exception));
             return IoContext::current().awaitJs(lock, writer->abort(lock, ex.getHandle(js)));
           }));
         }

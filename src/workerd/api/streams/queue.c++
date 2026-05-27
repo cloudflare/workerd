@@ -24,11 +24,15 @@ void ValueQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
 }
 
 void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
-  resolver.resolve(js, ReadResult{.value = kj::mv(value), .done = false});
+  resolver.resolve(js,
+      ReadResult{
+        .value = jsg::JsValue(value.getHandle(js)).addRef(js),
+        .done = false,
+      });
 }
 
-void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
-  resolver.reject(js, value.getHandle(js));
+void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
+  resolver.reject(js, value);
 }
 
 #pragma endregion ValueQueue::ReadRequest
@@ -78,7 +82,7 @@ ValueQueue::Consumer::Consumer(
 ValueQueue::Consumer::Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
     : impl(stateListener) {}
 
-void ValueQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+void ValueQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   impl.cancel(js, maybeReason);
 }
 
@@ -90,8 +94,8 @@ bool ValueQueue::Consumer::empty() {
   return impl.empty();
 }
 
-void ValueQueue::Consumer::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
-  impl.error(js, kj::mv(reason));
+void ValueQueue::Consumer::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 };
 
 void ValueQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
@@ -212,7 +216,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
           } else {
             auto error = js.typeError(
                 "Draining read encountered a value that cannot be converted to bytes"_kj);
-            impl.error(js, js.v8Ref(v8::Local<v8::Value>(error)));
+            impl.error(js, error);
             return js.rejectedPromise<DrainingReadResult>(error);
           }
         }
@@ -368,8 +372,8 @@ ssize_t ValueQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ValueQueue::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
-  impl.error(js, kj::mv(reason));
+void ValueQueue::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 }
 
 void ValueQueue::maybeUpdateBackpressure() {
@@ -516,25 +520,36 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
     // There's been at least some data written, we need to respond but not
     // set done to true since that's what the streams spec requires.
     pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
-    resolver.resolve(
-        js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
+    resolver.resolve(js,
+        ReadResult{
+          .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+          .done = false,
+        });
   } else {
     // Otherwise, we set the length to zero
     pullInto.store.trim(js, pullInto.store.size());
     KJ_ASSERT(pullInto.store.size() == 0);
-    resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = true});
+    resolver.resolve(js,
+        ReadResult{
+          .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+          .done = true,
+        });
   }
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
-  resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
+  resolver.resolve(js,
+      ReadResult{
+        .value = jsg::JsValue(pullInto.store.getHandle(js)).addRef(js),
+        .done = false,
+      });
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
-void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value) {
-  resolver.reject(js, value.getHandle(js));
+void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
+  resolver.reject(js, value);
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
@@ -591,7 +606,7 @@ ByteQueue::Consumer::Consumer(
 ByteQueue::Consumer::Consumer(kj::Maybe<ConsumerImpl::StateListener&> stateListener)
     : impl(stateListener) {}
 
-void ByteQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+void ByteQueue::Consumer::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   impl.cancel(js, maybeReason);
 }
 
@@ -603,8 +618,8 @@ bool ByteQueue::Consumer::empty() const {
   return impl.empty();
 }
 
-void ByteQueue::Consumer::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
-  impl.error(js, kj::mv(reason));
+void ByteQueue::Consumer::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 }
 
 void ByteQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
@@ -1022,8 +1037,8 @@ ssize_t ByteQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ByteQueue::error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
-  impl.error(js, kj::mv(reason));
+void ByteQueue::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 }
 
 void ByteQueue::maybeUpdateBackpressure() {

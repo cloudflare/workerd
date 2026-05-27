@@ -143,14 +143,14 @@ class ReadableImpl {
   void start(jsg::Lock& js, jsg::Ref<Self> self);
 
   // If the readable is not already closed or errored, initiates a cancellation.
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue maybeReason);
 
   // True if the readable is not closed, not errored, and close has not already been requested.
   bool canCloseOrEnqueue();
 
   // Invokes the cancel algorithm to let the underlying source know that the
   // readable has been canceled.
-  void doCancel(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
+  void doCancel(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
   // Close the queue if we are in a state where we can be closed.
   void close(jsg::Lock& js);
@@ -162,7 +162,7 @@ class ReadableImpl {
 
   // If it isn't already errored or closed, errors the queue, causing all consumers to be errored
   // and detached.
-  void doError(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
+  void doError(jsg::Lock& js, jsg::JsValue reason);
 
   // When a negative number is returned, indicates that we are above the highwatermark
   // and backpressure should be signaled.
@@ -292,29 +292,29 @@ class WritableImpl {
 
   WritableImpl(jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
 
-  jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
   void advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self);
 
   jsg::Promise<void> close(jsg::Lock& js, jsg::Ref<Self> self);
 
-  void dealWithRejection(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
+  void dealWithRejection(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
   WriteRequest dequeueWriteRequest();
 
   void doClose(jsg::Lock& js);
 
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void doError(jsg::Lock& js, jsg::JsValue reason);
 
-  void error(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
+  void error(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
   void finishErroring(jsg::Lock& js, jsg::Ref<Self> self);
 
   void finishInFlightClose(
-      jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
+      jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<jsg::JsValue> reason = kj::none);
 
   void finishInFlightWrite(
-      jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
+      jsg::Lock& js, jsg::Ref<Self> self, kj::Maybe<jsg::JsValue> reason = kj::none);
 
   ssize_t getDesiredSize();
 
@@ -331,7 +331,7 @@ class WritableImpl {
 
   // Puts the writable into an erroring state. This allows any in flight write or
   // close to complete before actually transitioning the writable.
-  void startErroring(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
+  void startErroring(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsValue reason);
 
   // Notifies the Writer of the current backpressure state. If the amount of data queued
   // is equal to or above the highwatermark, then backpressure is applied.
@@ -446,7 +446,7 @@ class ReadableStreamDefaultController: public jsg::Object {
 
   void start(jsg::Lock& js);
 
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
   void close(jsg::Lock& js);
 
@@ -456,7 +456,7 @@ class ReadableStreamDefaultController: public jsg::Object {
 
   void enqueue(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> chunk);
 
-  void error(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void error(jsg::Lock& js, jsg::JsValue reason);
 
   void pull(jsg::Lock& js);
 
@@ -584,13 +584,13 @@ class ReadableByteStreamController: public jsg::Object {
 
   void start(jsg::Lock& js);
 
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
   void close(jsg::Lock& js);
 
   void enqueue(jsg::Lock& js, jsg::BufferSource chunk);
 
-  void error(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void error(jsg::Lock& js, jsg::JsValue reason);
 
   bool canCloseOrEnqueue();
   bool hasBackpressure();
@@ -652,17 +652,17 @@ class WritableStreamDefaultController: public jsg::Object {
 
   ~WritableStreamDefaultController() noexcept(false);
 
-  jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::JsValue reason);
 
   jsg::Promise<void> close(jsg::Lock& js);
 
-  void error(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
+  void error(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   kj::Maybe<ssize_t> getDesiredSize();
 
   jsg::Ref<AbortSignal> getSignal();
 
-  kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
+  kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js);
 
   // Returns true if the stream is in the erroring state. Unlike the overload
   // that takes a lock, this method does not require a lock since it doesn't
@@ -730,7 +730,7 @@ class TransformStreamDefaultController: public jsg::Object {
 
   void enqueue(jsg::Lock& js, v8::Local<v8::Value> chunk);
 
-  void error(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void error(jsg::Lock& js, jsg::JsValue reason);
 
   void terminate(jsg::Lock& js);
 
@@ -746,10 +746,10 @@ class TransformStreamDefaultController: public jsg::Object {
   }
 
   jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> chunk);
-  jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::JsValue reason);
   jsg::Promise<void> close(jsg::Lock& js);
   jsg::Promise<void> pull(jsg::Lock& js);
-  jsg::Promise<void> cancel(jsg::Lock& js, v8::Local<v8::Value> reason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::JsValue reason);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
@@ -781,7 +781,7 @@ class TransformStreamDefaultController: public jsg::Object {
     }
   };
 
-  void errorWritableAndUnblockWrite(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void errorWritableAndUnblockWrite(jsg::Lock& js, jsg::JsValue reason);
   jsg::Promise<void> performTransform(jsg::Lock& js, v8::Local<v8::Value> chunk);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
 
@@ -791,7 +791,7 @@ class TransformStreamDefaultController: public jsg::Object {
   kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();
   kj::Maybe<WritableStreamJsController&> tryGetWritableController();
 
-  kj::Maybe<jsg::V8Ref<v8::Value>> getReadableErrorState(jsg::Lock& js);
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> getReadableErrorState(jsg::Lock& js);
 
   // Currently, JS-backed transform streams only support value-oriented streams.
   // In the future, that may change and this will need to become a kj::OneOf

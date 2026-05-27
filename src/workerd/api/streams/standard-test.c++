@@ -1994,7 +1994,7 @@ KJ_TEST("WritableStream close during abort algorithm returns rejected promise") 
 
     // clang-format off
     ws->getController().setup(js, UnderlyingSink{
-      .abort = [&](jsg::Lock& js, v8::Local<v8::Value> reason) -> jsg::Promise<void> {
+      .abort = [&](jsg::Lock& js, jsg::JsValue reason) -> jsg::Promise<void> {
         abortCalled = true;
         // Re-entrantly call close() on the writer during the abort algorithm.
         // At this point, WritableImpl has already transitioned to Errored state

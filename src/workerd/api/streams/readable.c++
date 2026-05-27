@@ -39,8 +39,7 @@ void ReaderImpl::detach() {
   }
 }
 
-jsg::Promise<void> ReaderImpl::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+jsg::Promise<void> ReaderImpl::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
@@ -153,7 +152,7 @@ void ReadableStreamDefaultReader::attach(
 }
 
 jsg::Promise<void> ReadableStreamDefaultReader::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   return impl.cancel(js, kj::mv(maybeReason));
 }
 
@@ -206,7 +205,7 @@ void ReadableStreamBYOBReader::attach(
 }
 
 jsg::Promise<void> ReadableStreamBYOBReader::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   return impl.cancel(js, kj::mv(maybeReason));
 }
 
@@ -331,8 +330,7 @@ jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js, size_t maxR
   KJ_UNREACHABLE;
 }
 
-jsg::Promise<void> DrainingReader::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+jsg::Promise<void> DrainingReader::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this reader was never attached");
@@ -430,8 +428,7 @@ ReadableStreamController& ReadableStream::getController() {
   return *controller;
 }
 
-jsg::Promise<void> ReadableStream::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+jsg::Promise<void> ReadableStream::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
         js.typeError("This ReadableStream is currently locked to a reader."_kj));

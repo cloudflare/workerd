@@ -194,14 +194,14 @@ class QueueImpl final {
   // which will, in turn, reset their internal buffers and reject
   // all pending consume promises.
   // If we are already closed or errored, do nothing here.
-  void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
+  void error(jsg::Lock& js, jsg::JsValue reason) {
     if (state.isActive()) {
 #ifdef KJ_DEBUG
       isClosingOrErroring = true;
       KJ_DEFER(isClosingOrErroring = false);
 #endif
-      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.error(js, reason.addRef(js)); });
-      state.template transitionTo<Errored>(kj::mv(reason));
+      allConsumers.forEach([&](ConsumerImpl& consumer) { consumer.error(js, reason); });
+      state.template transitionTo<Errored>(reason.addRef(js));
     }
   }
 
@@ -274,7 +274,7 @@ class QueueImpl final {
   };
   struct Errored {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
-    jsg::V8Ref<v8::Value> reason;
+    jsg::JsRef<jsg::JsValue> reason;
   };
 
   struct Ready final: public State {
@@ -337,7 +337,7 @@ class ConsumerImpl final {
  public:
   struct StateListener {
     virtual void onConsumerClose(jsg::Lock& js) = 0;
-    virtual void onConsumerError(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) = 0;
+    virtual void onConsumerError(jsg::Lock& js, jsg::JsValue reason) = 0;
     // Called when the consumer has a pending read and needs data.
     // Returns true if the pull algorithm completed synchronously (meaning
     // more pumping might yield additional synchronous data), false if the
@@ -400,7 +400,7 @@ class ConsumerImpl final {
     queue = kj::none;
   }
 
-  void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+  void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue>) {
     // Already closed or errored - nothing to do.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       for (auto& request: ready.readRequests) {
@@ -428,11 +428,11 @@ class ConsumerImpl final {
     return size() == 0;
   }
 
-  void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
+  void error(jsg::Lock& js, jsg::JsValue reason) {
     // If we are already closed or errored, then we do nothing here.
     // The new error doesn't matter.
     if (state.isActive()) {
-      maybeDrainAndSetState(js, kj::mv(reason));
+      maybeDrainAndSetState(js, reason);
     }
   }
 
@@ -458,13 +458,13 @@ class ConsumerImpl final {
       return request.resolveAsDone(js);
     }
     KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
-      return request.reject(js, errored.reason.addRef(js));
+      return request.reject(js, errored.reason.getHandle(js));
     }
     auto& ready = state.requireActiveUnsafe();
     // Mutual exclusion with draining reads.
     if (ready.hasPendingDrainingRead) {
       auto err = js.typeError("Cannot call read while there is a pending draining read"_kj);
-      return request.reject(js, js.v8Ref(v8::Local<v8::Value>(err)));
+      return request.reject(js, err);
     }
     // handleRead may trigger the pull callback (via onConsumerWantsData), which
     // may synchronously call reader.cancel(). Cancel can destroy this ConsumerImpl
@@ -579,7 +579,7 @@ class ConsumerImpl final {
   };
   struct Errored {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
-    jsg::V8Ref<v8::Value> reason;
+    jsg::JsRef<jsg::JsValue> reason;
   };
   struct Ready {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "ready"_kj;
@@ -642,8 +642,7 @@ class ConsumerImpl final {
     return result;
   }
 
-  void maybeDrainAndSetState(
-      jsg::Lock& js, kj::Maybe<jsg::V8Ref<v8::Value>> maybeReason = kj::none) {
+  void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeReason = kj::none) {
     // If the state is already errored or closed then there is nothing to drain.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       UpdateBackpressureScope scope(*this);
@@ -667,14 +666,14 @@ class ConsumerImpl final {
         auto pendingReads = extractPendingReads(ready);
         auto weak = selfRef.addRef();
         for (auto& request: pendingReads) {
-          request->reject(js, reason.addRef(js));
+          request->reject(js, reason);
         }
         // After the reject calls, `this` may have been destroyed by GC.
         // Use the weak ref to safely access members only if still alive.
         weak->runIfAlive([&](ConsumerImpl& self) {
           self.state.template transitionTo<Errored>(reason.addRef(js));
           KJ_IF_SOME(listener, self.stateListener) {
-            listener.onConsumerError(js, kj::mv(reason));
+            listener.onConsumerError(js, reason);
             // After this point, we should not assume that this consumer can
             // be safely used at all. It's most likely the stateListener has
             // released it.
@@ -751,7 +750,7 @@ class ValueQueue final {
 
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js, jsg::V8Ref<v8::Value> value);
-    void reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value);
+    void reject(jsg::Lock& js, jsg::JsValue value);
 
     JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
@@ -802,13 +801,13 @@ class ValueQueue final {
     Consumer& operator=(Consumer&&) = delete;
     Consumer& operator=(Consumer&) = delete;
 
-    void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
+    void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
     void close(jsg::Lock& js);
 
     bool empty();
 
-    void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
+    void error(jsg::Lock& js, jsg::JsValue reason);
 
     void read(jsg::Lock& js, ReadRequest request);
 
@@ -852,7 +851,7 @@ class ValueQueue final {
 
   ssize_t desiredSize() const;
 
-  void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
+  void error(jsg::Lock& js, jsg::JsValue reason);
 
   void maybeUpdateBackpressure();
 
@@ -928,7 +927,7 @@ class ByteQueue final {
     ~ReadRequest() noexcept(false);
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js);
-    void reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value);
+    void reject(jsg::Lock& js, jsg::JsValue value);
 
     kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, QueueImpl& queue);
 
@@ -1051,13 +1050,13 @@ class ByteQueue final {
     Consumer& operator=(Consumer&&) = delete;
     Consumer& operator=(Consumer&) = delete;
 
-    void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
+    void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
     void close(jsg::Lock& js);
 
     bool empty() const;
 
-    void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
+    void error(jsg::Lock& js, jsg::JsValue reason);
 
     void read(jsg::Lock& js, ReadRequest request);
 
@@ -1097,7 +1096,7 @@ class ByteQueue final {
 
   ssize_t desiredSize() const;
 
-  void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
+  void error(jsg::Lock& js, jsg::JsValue reason);
 
   void maybeUpdateBackpressure();
 

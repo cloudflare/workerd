@@ -71,7 +71,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
   jsg::Promise<void> pipeTo(
       jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) override;
 
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) override;
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) override;
 
   Tee tee(jsg::Lock& js) override;
 
@@ -124,9 +124,9 @@ class ReadableStreamInternalController: public ReadableStreamController {
   void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
 
  private:
-  void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
+  void doCancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
   void doClose(jsg::Lock& js);
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void doError(jsg::Lock& js, jsg::JsValue reason);
 
   class PipeLocked: public PipeController {
    public:
@@ -135,15 +135,15 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
     bool isClosed() override;
 
-    kj::Maybe<v8::Local<v8::Value>> tryGetErrored(jsg::Lock& js) override;
+    kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) override;
 
-    void cancel(jsg::Lock& js, v8::Local<v8::Value> reason) override;
+    void cancel(jsg::Lock& js, jsg::JsValue reason) override;
 
     void close(jsg::Lock& js) override;
 
-    void error(jsg::Lock& js, v8::Local<v8::Value> reason) override;
+    void error(jsg::Lock& js, jsg::JsValue reason) override;
 
-    void release(jsg::Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeError = kj::none) override;
+    void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) override;
 
     kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
 
@@ -228,7 +228,7 @@ class WritableStreamInternalController: public WritableStreamController {
 
   jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override;
 
-  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) override;
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) override;
 
   kj::Maybe<jsg::Promise<void>> tryPipeFrom(
       jsg::Lock& js, jsg::Ref<ReadableStream> source, PipeToOptions options) override;
@@ -247,7 +247,7 @@ class WritableStreamInternalController: public WritableStreamController {
   void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
 
-  kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override {
+  kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) override {
     // TODO(later): The internal controller has no concept of an "erroring"
     // state, so for now we just return kj::none here.
     return kj::none;
@@ -280,17 +280,17 @@ class WritableStreamInternalController: public WritableStreamController {
   };
 
   jsg::Promise<void> doAbort(jsg::Lock& js,
-      v8::Local<v8::Value> reason,
+      jsg::JsValue reason,
       AbortOptions options = {.reject = false, .handled = false});
   void doClose(jsg::Lock& js);
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void doError(jsg::Lock& js, jsg::JsValue reason);
   void ensureWriting(jsg::Lock& js);
   jsg::Promise<void> writeLoop(jsg::Lock& js, IoContext& ioContext);
   jsg::Promise<void> writeLoopAfterFrontOutputLock(jsg::Lock& js);
 
-  void drain(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void drain(jsg::Lock& js, jsg::JsValue reason);
   void finishClose(jsg::Lock& js);
-  void finishError(jsg::Lock& js, v8::Local<v8::Value> reason);
+  void finishError(jsg::Lock& js, jsg::JsValue reason);
   jsg::Promise<void> closeImpl(jsg::Lock& js, bool markAsHandled);
 
   struct PipeLocked {

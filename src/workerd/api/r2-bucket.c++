@@ -572,7 +572,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
         KJ_SWITCH_ONEOF(v) {
           KJ_CASE_ONEOF(v, jsg::Ref<ReadableStream>) {
             (*v).cancel(js,
-                js.v8Error(
+                js.error(
                     "Stream cancelled because the associated put operation encountered an error."));
           }
           KJ_CASE_ONEOF_DEFAULT {}

@@ -176,7 +176,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
   KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<void>(js.exceptionToJs(exc.clone()));
+    return js.rejectedPromise<void>(js.exceptionToJsValue(exc.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -306,7 +306,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::flush(jsg::Lock& js) {
   KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<void>(js.exceptionToJs(exc.clone()));
+    return js.rejectedPromise<void>(js.exceptionToJsValue(exc.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -343,7 +343,7 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::end(jsg::Lock& js) {
   KJ_IF_SOME(exc, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<void>(js.exceptionToJs(exc.clone()));
+    return js.rejectedPromise<void>(js.exceptionToJsValue(exc.clone()));
   }
 
   if (state.is<Closed>()) {
