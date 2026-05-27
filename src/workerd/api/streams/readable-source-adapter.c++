@@ -753,7 +753,7 @@ jsg::Promise<kj::Own<ReadableSourceKjAdapter::ReadContext>> ReadableSourceKjAdap
 
     // Ok, we have some data. Let's make sure it is bytes.
     // We accept either an ArrayBuffer, ArrayBufferView, or string.
-    auto jsval = jsg::JsValue(value.getHandle(js));
+    auto jsval = value.getHandle(js);
     KJ_IF_SOME(result, tryExtractJsByteSource(js, jsval)) {
       // Process the resulting data.
       KJ_IF_SOME(leftOver, copyFromSource(js, *context, result)) {
@@ -1361,7 +1361,7 @@ jsg::Promise<kj::Array<T>> ReadableSourceKjAdapter::readAllReadImpl(jsg::Lock& j
     }
 
     auto& value = KJ_ASSERT_NONNULL(result.value);
-    auto jsval = jsg::JsValue(value.getHandle(js));
+    auto jsval = value.getHandle(js);
 
     kj::ArrayPtr<const kj::byte> bytes;
     kj::Maybe<kj::String> maybeOwnedString;

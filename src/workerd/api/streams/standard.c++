@@ -1284,7 +1284,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
           kj::str("AbortError"), kj::str("This writable stream has been aborted."), kj::none);
       return jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
     }
-    return jsg::JsValue(reason);
+    return reason;
   }();
   signal->triggerAbort(js, signalReason);
 
@@ -2722,7 +2722,7 @@ void ReadableStreamJsController::doError(jsg::Lock& js, jsg::JsValue reason) {
 
   // deferTransitionTo will defer if an operation is in progress, otherwise transition immediately.
   // Returns true if transition happened immediately.
-  if (state.deferTransitionTo<StreamStates::Errored>(jsg::JsValue(reason).addRef(js))) {
+  if (state.deferTransitionTo<StreamStates::Errored>(reason.addRef(js))) {
     lock.onError(js, reason);
   }
   // If deferred, lock.onError will be called when the pending state is applied
@@ -3477,42 +3477,40 @@ class PumpToReader {
             auto& ioContext = IoContext::current();
             KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
-              auto promise = reader.sink->write(bytes).attach(kj::mv(bytes));
-              return ioContext.awaitIo(js, reader.canceler.wrap(kj::mv(promise)))
-                  .then(js,
-                      [](jsg::Lock& js) -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
-                return kj::Maybe<jsg::JsRef<jsg::JsValue>>(kj::none);
-              },
-                      [](jsg::Lock& js,
-                          jsg::Value exception) mutable -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
-                auto err = jsg::JsValue(exception.getHandle(js));
-                return err.addRef(js);
-              })
-                  .then(js,
-                      ioContext.addFunctor(
-                          [readable = readable.addRef(), pumpToReader = kj::mv(pumpToReader)]
-                          (jsg::Lock& js,
-                              kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeException) mutable {
-                            KJ_IF_SOME(reader, pumpToReader->tryGet()) {
-                            auto& ioContext = reader.ioContext;
-                            ioContext.requireCurrentOrThrowJs();
-                            KJ_IF_SOME(exception, maybeException) {
-                            if (!reader.isErroredOrClosed()) {
-                            reader.state.transitionTo<kj::Exception>(
-                                js.exceptionToKj(kj::mv(exception)));
-                            }
-                            } else {
-                            // Else block to avert dangling else compiler warning.
-                            }
-                            return reader.pumpLoop(
-                                js, ioContext, readable.addRef(), kj::mv(pumpToReader));
-                            } else {
-                            return readable->getController().cancel(
-                                js, maybeException.map([&](jsg::JsRef<jsg::JsValue>& ex) {
-                              return ex.getHandle(js);
-                            }));
-                            }
-                          }));
+                auto promise = reader.sink->write(bytes).attach(kj::mv(bytes));
+                return ioContext.awaitIo(js, reader.canceler.wrap(kj::mv(promise)))
+                    .then(js,
+                        [](jsg::Lock& js) -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
+                  return kj::Maybe<jsg::JsRef<jsg::JsValue>>(kj::none);
+                },
+                        [](jsg::Lock& js,
+                            jsg::Value exception) mutable -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
+                  auto err = jsg::JsValue(exception.getHandle(js));
+                  return err.addRef(js);
+                })
+                    .then(js,
+                        ioContext.addFunctor(
+                            [readable = readable.addRef(), pumpToReader = kj::mv(pumpToReader)](
+                                jsg::Lock& js,
+                                kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeException) mutable {
+                  KJ_IF_SOME(reader, pumpToReader->tryGet()) {
+                    auto& ioContext = reader.ioContext;
+                    ioContext.requireCurrentOrThrowJs();
+                    KJ_IF_SOME(exception, maybeException) {
+                      if (!reader.isErroredOrClosed()) {
+                        reader.state.transitionTo<kj::Exception>(
+                            js.exceptionToKj(kj::mv(exception)));
+                      }
+                    } else {
+                      // Else block to avert dangling else compiler warning.
+                    }
+                    return reader.pumpLoop(js, ioContext, readable.addRef(), kj::mv(pumpToReader));
+                  } else {
+                    return readable->getController().cancel(js,
+                        maybeException.map(
+                            [&](jsg::JsRef<jsg::JsValue>& ex) { return ex.getHandle(js); }));
+                  }
+                }));
               }
               KJ_CASE_ONEOF(pumping, Pumping) {}
               KJ_CASE_ONEOF(closed, StreamStates::Closed) {
@@ -3522,7 +3520,8 @@ class PumpToReader {
               }
               KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
                 if (!reader.isErroredOrClosed()) {
-                  reader.state.transitionTo<kj::Exception>(js.exceptionToKj(exception.getHandle(js)));
+                  reader.state.transitionTo<kj::Exception>(
+                      js.exceptionToKj(exception.getHandle(js)));
                 }
               }
             }
@@ -3981,10 +3980,9 @@ void WritableStreamJsController::doError(jsg::Lock& js, jsg::JsValue reason) {
     controller->clearAlgorithms();
   }
 
-  auto error = jsg::JsValue(reason);
-  state.transitionTo<StreamStates::Errored>(error.addRef(js));
+  state.transitionTo<StreamStates::Errored>(reason.addRef(js));
   KJ_IF_SOME(locked, lock.state.tryGetUnsafe<WriterLocked>()) {
-    maybeRejectPromise<void>(js, locked.getClosedFulfiller(), error);
+    maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
   } else KJ_IF_SOME(pipeLocked, lock.state.tryGetUnsafe<WritableLockImpl::PipeLocked>()) {
     // When the writable side of a pipe errors, we need to release the source stream.
@@ -4280,8 +4278,8 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
       return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
     };
 
-    auto promise = write(js,
-        result.value.map([&](jsg::JsRef<jsg::JsValue>& value) { return value.getHandle(js); }));
+    auto promise = write(
+        js, result.value.map([&](jsg::JsRef<jsg::JsValue>& value) { return value.getHandle(js); }));
 
     return maybeAddFunctor(js, kj::mv(promise), kj::mv(onSuccess), kj::mv(onFailure));
   };
@@ -4465,7 +4463,7 @@ jsg::Promise<void> TransformStreamDefaultController::abort(jsg::Lock& js, jsg::J
 
   return algorithms.maybeFinish
       .emplace(maybeRunAlgorithm(js, algorithms.cancel,
-          [this, ref = JSG_THIS, reason = jsg::JsValue(reason).addRef(js)](
+          [this, ref = JSG_THIS, reason = reason.addRef(js)](
               jsg::Lock& js) mutable -> jsg::Promise<void> {
     // If the readable side is errored, return a rejected promise with the stored error
     KJ_IF_SOME(err, getReadableErrorState(js)) {
@@ -4479,7 +4477,7 @@ jsg::Promise<void> TransformStreamDefaultController::abort(jsg::Lock& js, jsg::J
     auto err = jsg::JsValue(reason.getHandle(js));
     error(js, err);
     return js.rejectedPromise<void>(err);
-  }, jsg::JsValue(reason)))
+  }, reason))
       .whenResolved(js);
 }
 
@@ -4598,7 +4596,7 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(jsg::Lock& js, jsg::
     auto error = jsg::JsValue(reason.getHandle(js));
     errorWritableAndUnblockWrite(js, error);
     return js.rejectedPromise<void>(error);
-  }, jsg::JsValue(reason)))
+  }, reason))
       .whenResolved(js);
 }
 

@@ -23,7 +23,7 @@ export default {
       const bytes = Buffer.from(body.messages[0].body, 'base64');
       assert.strictEqual(bytes.length, 64);
       for (let i = 0; i < 64; i++) {
-        assert.strictEqual(bytes[i], 0xAA, `byte ${i} should be 0xAA`);
+        assert.strictEqual(bytes[i], 0xaa, `byte ${i} should be 0xAA`);
       }
 
       // The json message should contain the hostile toJSON() result.
@@ -47,7 +47,7 @@ export default {
   async test(ctrl, env, ctx) {
     // Create a resizable ArrayBuffer and fill with a known pattern.
     const rab = new ArrayBuffer(64, { maxByteLength: 128 });
-    new Uint8Array(rab).fill(0xAA);
+    new Uint8Array(rab).fill(0xaa);
     const view = new Uint8Array(rab);
 
     // Craft a hostile object whose toJSON() shrinks the earlier message's buffer.
@@ -67,7 +67,10 @@ export default {
     ]);
 
     // sendBatch must not detach the buffer — users may reuse it across calls.
-    assert.strictEqual(rab.detached, false,
-      'sendBatch should not detach the ArrayBuffer');
+    assert.strictEqual(
+      rab.detached,
+      false,
+      'sendBatch should not detach the ArrayBuffer'
+    );
   },
 };

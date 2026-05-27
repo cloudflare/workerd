@@ -918,7 +918,7 @@ jsg::Ref<WritableStream> createSimpleWritableStream(jsg::Lock& js, WritableStrea
   },
         .abort =
             [&context](jsg::Lock& js, auto reason) {
-    context.maybeAbort = jsg::JsRef<jsg::JsValue>(js, jsg::JsValue(reason));
+    context.maybeAbort = reason.addRef(js);
     return js.resolvedPromise();
   },
         .close =
