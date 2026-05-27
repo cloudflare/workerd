@@ -285,7 +285,8 @@ struct MockResponse final: public kj::HttpService::Response {
 class MockActorLoopback: public Worker::Actor::Loopback, public kj::Refcounted {
  public:
   kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
-    return kj::Own<WorkerInterface>();
+    return WorkerInterface::fromException(
+        KJ_EXCEPTION(FAILED, "MockActorLoopback::getWorker() not available in test fixture"));
   };
 
   kj::Own<Worker::Actor::Loopback> addRef() override {
@@ -369,22 +370,46 @@ TestFixture::TestFixture(SetupParams&& params)
       headerTable(headerTableBuilder.build()),
       ioChannelFactory(kj::mv(params.ioChannelFactory)) {
   KJ_IF_SOME(id, params.actorId) {
-    auto makeActorCache = [](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
-                              ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
-      return kj::heap<ActorCache>(
-          server::newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
-    };
-    auto makeStorage = [](jsg::Lock& js, const Worker::Api& api,
-                           ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
-      return js.alloc<api::DurableObjectStorage>(
-          js, IoContext::current().addObject(actorCache), /*enableSql=*/false);
-    };
-    actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
-        /*hasTransient=*/false, makeActorCache,
-        /*classname=*/kj::none, /*props=*/Frankenvalue(), makeStorage,
-        kj::refcounted<MockActorLoopback>(), *timerChannel, kj::refcounted<ActorObserver>(),
-        kj::none, kj::none);
+    KJ_IF_SOME(provided, params.actorLoopback) {
+      savedActorLoopback = kj::mv(provided);
+    } else {
+      savedActorLoopback = kj::refcounted<MockActorLoopback>();
+    }
+    actor = makeActor(kj::mv(id));
   }
+}
+
+namespace {
+
+// Factory functions used by TestFixture's actor construction; passed by name (decay to
+// function pointers) into kj::Function-typed parameters.
+kj::Maybe<kj::Own<ActorCacheInterface>> actorCacheFactory(const ActorCache::SharedLru& sharedLru,
+    OutputGate& outputGate,
+    ActorCache::Hooks& hooks,
+    SqliteObserver& sqliteObserver) {
+  return kj::heap<ActorCache>(server::newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
+}
+
+jsg::Ref<api::DurableObjectStorage> storageFactory(
+    jsg::Lock& js, const Worker::Api& api, ActorCacheInterface& actorCache) {
+  return js.alloc<api::DurableObjectStorage>(
+      js, IoContext::current().addObject(actorCache), /*enableSql=*/false);
+}
+
+}  // namespace
+
+kj::Own<Worker::Actor> TestFixture::makeActor(Worker::Actor::Id id) {
+  auto& loopback = KJ_ASSERT_NONNULL(savedActorLoopback);
+  return kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
+      /*hasTransient=*/false, actorCacheFactory, /*classname=*/kj::none,
+      /*props=*/Frankenvalue(), storageFactory, loopback->addRef(), *timerChannel,
+      kj::refcounted<ActorObserver>(), kj::none, kj::none);
+}
+
+void TestFixture::resetActor() {
+  auto id = KJ_ASSERT_NONNULL(actor)->cloneId();
+  actor = kj::none;  // Drop the old Actor (and its OutputGate / InputGate / ActorCache).
+  actor = makeActor(kj::mv(id));
 }
 
 void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environment&)>&& callback,
@@ -418,16 +443,24 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
   }
 }
 
-kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
-  auto context = kj::refcounted<IoContext>(
+kj::Own<IoContext> TestFixture::newIoContext() {
+  return kj::refcounted<IoContext>(
       threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
+}
+
+kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest() {
+  auto context = newIoContext();
+  return newIncomingRequest(*context);
+}
+
+kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest(IoContext& context) {
   kj::Own<IoChannelFactory> channelFactory;
   KJ_IF_SOME(factory, ioChannelFactory) {
     channelFactory = factory(*timerChannel);
   } else {
     channelFactory = kj::heap<DummyIoChannelFactory>(*timerChannel);
   }
-  auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(*context),
+  auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(context),
       kj::mv(channelFactory), kj::refcounted<RequestObserver>(), kj::none, kj::none);
   incomingRequest->delivered();
   return incomingRequest;
