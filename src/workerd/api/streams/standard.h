@@ -162,7 +162,7 @@ class ReadableImpl {
 
   // If it isn't already errored or closed, errors the queue, causing all consumers to be errored
   // and detached.
-  void doError(jsg::Lock& js, jsg::Value reason);
+  void doError(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
 
   // When a negative number is returned, indicates that we are above the highwatermark
   // and backpressure should be signaled.
@@ -277,7 +277,7 @@ class WritableImpl {
 
   struct WriteRequest {
     jsg::Promise<void>::Resolver resolver;
-    jsg::Value value;
+    jsg::V8Ref<v8::Value> value;
     size_t size;
 
     void visitForGc(jsg::GcVisitor& visitor) {
@@ -791,7 +791,7 @@ class TransformStreamDefaultController: public jsg::Object {
   kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();
   kj::Maybe<WritableStreamJsController&> tryGetWritableController();
 
-  kj::Maybe<jsg::Value> getReadableErrorState(jsg::Lock& js);
+  kj::Maybe<jsg::V8Ref<v8::Value>> getReadableErrorState(jsg::Lock& js);
 
   // Currently, JS-backed transform streams only support value-oriented streams.
   // In the future, that may change and this will need to become a kj::OneOf

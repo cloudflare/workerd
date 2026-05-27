@@ -194,7 +194,7 @@ class QueueImpl final {
   // which will, in turn, reset their internal buffers and reject
   // all pending consume promises.
   // If we are already closed or errored, do nothing here.
-  void error(jsg::Lock& js, jsg::Value reason) {
+  void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
     if (state.isActive()) {
 #ifdef KJ_DEBUG
       isClosingOrErroring = true;
@@ -274,7 +274,7 @@ class QueueImpl final {
   };
   struct Errored {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
-    jsg::Value reason;
+    jsg::V8Ref<v8::Value> reason;
   };
 
   struct Ready final: public State {
@@ -337,7 +337,7 @@ class ConsumerImpl final {
  public:
   struct StateListener {
     virtual void onConsumerClose(jsg::Lock& js) = 0;
-    virtual void onConsumerError(jsg::Lock& js, jsg::Value reason) = 0;
+    virtual void onConsumerError(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) = 0;
     // Called when the consumer has a pending read and needs data.
     // Returns true if the pull algorithm completed synchronously (meaning
     // more pumping might yield additional synchronous data), false if the
@@ -428,7 +428,7 @@ class ConsumerImpl final {
     return size() == 0;
   }
 
-  void error(jsg::Lock& js, jsg::Value reason) {
+  void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason) {
     // If we are already closed or errored, then we do nothing here.
     // The new error doesn't matter.
     if (state.isActive()) {
@@ -458,14 +458,13 @@ class ConsumerImpl final {
       return request.resolveAsDone(js);
     }
     KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
-      return request.reject(js, errored.reason);
+      return request.reject(js, errored.reason.addRef(js));
     }
     auto& ready = state.requireActiveUnsafe();
     // Mutual exclusion with draining reads.
     if (ready.hasPendingDrainingRead) {
-      auto error = jsg::Value(
-          js.v8Isolate, js.typeError("Cannot call read while there is a pending draining read"_kj));
-      return request.reject(js, error);
+      auto err = js.typeError("Cannot call read while there is a pending draining read"_kj);
+      return request.reject(js, js.v8Ref(v8::Local<v8::Value>(err)));
     }
     // handleRead may trigger the pull callback (via onConsumerWantsData), which
     // may synchronously call reader.cancel(). Cancel can destroy this ConsumerImpl
@@ -580,7 +579,7 @@ class ConsumerImpl final {
   };
   struct Errored {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "errored"_kj;
-    jsg::Value reason;
+    jsg::V8Ref<v8::Value> reason;
   };
   struct Ready {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "ready"_kj;
@@ -643,7 +642,8 @@ class ConsumerImpl final {
     return result;
   }
 
-  void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = kj::none) {
+  void maybeDrainAndSetState(
+      jsg::Lock& js, kj::Maybe<jsg::V8Ref<v8::Value>> maybeReason = kj::none) {
     // If the state is already errored or closed then there is nothing to drain.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
       UpdateBackpressureScope scope(*this);
@@ -667,7 +667,7 @@ class ConsumerImpl final {
         auto pendingReads = extractPendingReads(ready);
         auto weak = selfRef.addRef();
         for (auto& request: pendingReads) {
-          request->reject(js, reason);
+          request->reject(js, reason.addRef(js));
         }
         // After the reject calls, `this` may have been destroyed by GC.
         // Use the weak ref to safely access members only if still alive.
@@ -750,8 +750,8 @@ class ValueQueue final {
     jsg::Promise<ReadResult>::Resolver resolver;
 
     void resolveAsDone(jsg::Lock& js);
-    void resolve(jsg::Lock& js, jsg::Value value);
-    void reject(jsg::Lock& js, jsg::Value& value);
+    void resolve(jsg::Lock& js, jsg::V8Ref<v8::Value> value);
+    void reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value);
 
     JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
@@ -762,10 +762,10 @@ class ValueQueue final {
   // calculated by the size algorithm function provided in the stream constructor.
   class Entry: public kj::Refcounted {
    public:
-    explicit Entry(jsg::Value value, size_t size);
+    explicit Entry(jsg::V8Ref<v8::Value> value, size_t size);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
-    jsg::Value getValue(jsg::Lock& js);
+    jsg::V8Ref<v8::Value> getValue(jsg::Lock& js);
 
     size_t getSize() const;
 
@@ -778,7 +778,7 @@ class ValueQueue final {
     }
 
    private:
-    jsg::Value value;
+    jsg::V8Ref<v8::Value> value;
     size_t size;
   };
 
@@ -808,7 +808,7 @@ class ValueQueue final {
 
     bool empty();
 
-    void error(jsg::Lock& js, jsg::Value reason);
+    void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
 
     void read(jsg::Lock& js, ReadRequest request);
 
@@ -852,7 +852,7 @@ class ValueQueue final {
 
   ssize_t desiredSize() const;
 
-  void error(jsg::Lock& js, jsg::Value reason);
+  void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
 
   void maybeUpdateBackpressure();
 
@@ -928,7 +928,7 @@ class ByteQueue final {
     ~ReadRequest() noexcept(false);
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js);
-    void reject(jsg::Lock& js, jsg::Value& value);
+    void reject(jsg::Lock& js, jsg::V8Ref<v8::Value> value);
 
     kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, QueueImpl& queue);
 
@@ -1057,7 +1057,7 @@ class ByteQueue final {
 
     bool empty() const;
 
-    void error(jsg::Lock& js, jsg::Value reason);
+    void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
 
     void read(jsg::Lock& js, ReadRequest request);
 
@@ -1097,7 +1097,7 @@ class ByteQueue final {
 
   ssize_t desiredSize() const;
 
-  void error(jsg::Lock& js, jsg::Value reason);
+  void error(jsg::Lock& js, jsg::V8Ref<v8::Value> reason);
 
   void maybeUpdateBackpressure();
 
