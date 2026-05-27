@@ -62,7 +62,7 @@ KJ_TEST("The BundleDirectoryDelegate works") {
 
     // Iterating over the directory should work.
     size_t counter = 0;
-    for (auto& _ KJ_UNUSED: *dir.get()) {
+    for (auto& _ KJ_UNUSED: *dir) {
       counter++;
     }
     KJ_EXPECT(counter, 3);

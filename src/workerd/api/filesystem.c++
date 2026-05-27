@@ -1147,7 +1147,7 @@ void readdirImpl(jsg::Lock& js,
     const kj::Path& path,
     const FileSystemModule::ReadDirOptions& options,
     kj::Vector<FileSystemModule::DirEntHandle>& entries) {
-  for (auto& entry: *dir.get()) {
+  for (auto& entry: *dir) {
     auto name = options.recursive ? path.append(entry.key).toString(false) : kj::str(entry.key);
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -1421,7 +1421,7 @@ void handleCpDir(jsg::Lock& js,
 
   // Here, we iterate through each of the entries in the source directory,
   // recursively copying them to the destination directory.
-  for (auto& entry: *src.get()) {
+  for (auto& entry: *src) {
     kj::StringPtr name = entry.key;
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -2357,7 +2357,7 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileS
     kj::Rc<workerd::Directory> inner,
     const jsg::Url& parentLocator) {
   kj::Vector<jsg::Ref<FileSystemHandle>> entries;
-  for (auto& entry: *inner.get()) {
+  for (auto& entry: *inner) {
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.key));
@@ -2659,8 +2659,7 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
                    jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
     return js.tryCatch([&] {
       KJ_IF_SOME(unwrapped, dataHandler.tryUnwrap(js, chunk)) {
-        return FileSystemWritableFileStream::writeImpl(
-            js, kj::mv(unwrapped), *state.get(), deHandler);
+        return FileSystemWritableFileStream::writeImpl(js, kj::mv(unwrapped), *state, deHandler);
       }
       return js.rejectedPromise<void>(
           js.typeError("WritableStream received a value that is not writable"));
@@ -2730,7 +2729,7 @@ jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
       "Cannot write to a stream that is locked to a reader");
   auto writer = getWriter(js);
   KJ_DEFER(writer->releaseLock(js));
-  return writeImpl(js, kj::mv(data), *sharedState.get(), deHandler);
+  return writeImpl(js, kj::mv(data), *sharedState, deHandler);
 }
 
 jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,

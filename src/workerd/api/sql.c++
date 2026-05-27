@@ -57,9 +57,9 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
 
   // Move cached statement to end of LRU queue.
   if (slot->lruLink.isLinked()) {
-    statementCache.lru.remove(*slot.get());
+    statementCache.lru.remove(*slot);
   }
-  statementCache.lru.add(*slot.get());
+  statementCache.lru.add(*slot);
 
   // In order to get accurate statistics, we have to keep the spans around until the query is
   // actually done, which for read queries that iterate over a cursor won't be until later.

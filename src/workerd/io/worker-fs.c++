@@ -559,11 +559,11 @@ class DirectoryBase final: public Directory {
     for (auto& entry: entries) {
       KJ_SWITCH_ONEOF(entry.value) {
         KJ_CASE_ONEOF(file, kj::Rc<File>) {
-          tracker.trackField("file", *file.get());
+          tracker.trackField("file", *file);
           break;
         }
         KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-          tracker.trackField("directory", *dir.get());
+          tracker.trackField("directory", *dir);
           break;
         }
         KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
