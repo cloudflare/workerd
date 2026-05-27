@@ -103,8 +103,17 @@ Serialized serializeV8(jsg::Lock& js, const jsg::JsValue& body) {
   return kj::mv(result);
 }
 
-// Control whether the serialize() method makes a deep copy of provided ArrayBuffer types or if it
-// just returns a shallow reference that is only valid until the given method returns.
+// Control whether serialize() detaches/copies the ArrayBuffer or holds a shallow reference.
+//
+// send() uses DEEP_COPY, which detaches the buffer when possible (transferring ownership
+// without copying).  sendBatch() uses SHALLOW_REFERENCE, which avoids detaching so the
+// caller can reuse the buffer after the call.  Do not change sendBatch() to DEEP_COPY
+// without a compat flag — users may depend on the buffer remaining usable.
+//
+// SHALLOW_REFERENCE holds a raw pointer into the BackingStore.  This is safe for
+// non-resizable buffers (the BackingStore shared_ptr prevents deallocation), but
+// resizable buffers can have pages decommitted by resize(0) while the pointer is held.
+// The SHALLOW_REFERENCE path deep-copies resizable buffers to prevent this.
 enum class SerializeArrayBufferBehavior {
   DEEP_COPY,
   SHALLOW_REFERENCE,
@@ -131,7 +140,16 @@ Serialized serialize(jsg::Lock& js,
 
     jsg::BufferSource source(js, body);
     if (bufferBehavior == SerializeArrayBufferBehavior::SHALLOW_REFERENCE) {
-      // If we know the data will be consumed synchronously, we can avoid copying it.
+      if (source.getJsHandle(js).isResizable()) {
+        // Resizable buffers can have pages decommitted by resize(0) while
+        // the shallow reference is held. Deep-copy to prevent OOB read.
+        kj::Array<kj::byte> bytes = kj::heapArray(source.asArrayPtr());
+        Serialized result;
+        result.data = bytes;
+        result.own = kj::mv(bytes);
+        return kj::mv(result);
+      }
+      // Non-resizable: safe to hold a shallow reference.
       Serialized result;
       result.data = source.asArrayPtr();
       result.own = kj::mv(source);
