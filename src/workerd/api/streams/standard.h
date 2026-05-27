@@ -162,7 +162,7 @@ class ReadableImpl {
 
   // If it isn't already errored or closed, errors the queue, causing all consumers to be errored
   // and detached.
-  void doError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason);
+  void doError(jsg::Lock& js, jsg::JsValue reason);
 
   // When a negative number is returned, indicates that we are above the highwatermark
   // and backpressure should be signaled.

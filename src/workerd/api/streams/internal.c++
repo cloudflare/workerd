@@ -506,7 +506,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       return js.resolvedPromise(ReadResult{.done = true});
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return js.rejectedPromise<ReadResult>(errored.addRef(js));
+      return js.rejectedPromise<ReadResult>(errored.getHandle(js));
     }
     KJ_CASE_ONEOF(readable, Readable) {
       // TODO(conform): Requiring serialized read requests is non-conformant, but we've never had a
@@ -1036,7 +1036,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
       KJ_UNREACHABLE;
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return js.rejectedPromise<void>(errored.addRef(js));
+      return js.rejectedPromise<void>(errored.getHandle(js));
     }
     KJ_CASE_ONEOF(writable, IoOwn<Writable>) {
       if (value == kj::none) {
@@ -2258,7 +2258,7 @@ jsg::Promise<jsg::BufferSource> ReadableStreamInternalController::readAllBytes(
       return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return js.rejectedPromise<jsg::BufferSource>(errored.addRef(js));
+      return js.rejectedPromise<jsg::BufferSource>(errored.getHandle(js));
     }
     KJ_CASE_ONEOF(readable, Readable) {
       auto source = KJ_ASSERT_NONNULL(removeSource(js));
@@ -2292,7 +2292,7 @@ jsg::Promise<kj::String> ReadableStreamInternalController::readAllText(
       return js.resolvedPromise(kj::String());
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return js.rejectedPromise<kj::String>(errored.addRef(js));
+      return js.rejectedPromise<kj::String>(errored.getHandle(js));
     }
     KJ_CASE_ONEOF(readable, Readable) {
       auto source = KJ_ASSERT_NONNULL(removeSource(js));

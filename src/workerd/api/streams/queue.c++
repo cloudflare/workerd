@@ -31,8 +31,8 @@ void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::V8Ref<v8::Value> value
       });
 }
 
-void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
-  resolver.reject(js, value.getHandle(js));
+void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
+  resolver.reject(js, value);
 }
 
 #pragma endregion ValueQueue::ReadRequest
@@ -94,8 +94,8 @@ bool ValueQueue::Consumer::empty() {
   return impl.empty();
 }
 
-void ValueQueue::Consumer::error(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason) {
-  impl.error(js, kj::mv(reason));
+void ValueQueue::Consumer::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 };
 
 void ValueQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
@@ -216,7 +216,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
           } else {
             auto error = js.typeError(
                 "Draining read encountered a value that cannot be converted to bytes"_kj);
-            impl.error(js, error.addRef(js));
+            impl.error(js, error);
             return js.rejectedPromise<DrainingReadResult>(error);
           }
         }
@@ -372,8 +372,8 @@ ssize_t ValueQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ValueQueue::error(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason) {
-  impl.error(js, kj::mv(reason));
+void ValueQueue::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 }
 
 void ValueQueue::maybeUpdateBackpressure() {
@@ -548,8 +548,8 @@ void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
-void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
-  resolver.reject(js, value.getHandle(js));
+void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
+  resolver.reject(js, value);
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
@@ -618,8 +618,8 @@ bool ByteQueue::Consumer::empty() const {
   return impl.empty();
 }
 
-void ByteQueue::Consumer::error(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason) {
-  impl.error(js, kj::mv(reason));
+void ByteQueue::Consumer::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 }
 
 void ByteQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
@@ -1037,8 +1037,8 @@ ssize_t ByteQueue::desiredSize() const {
   return impl.desiredSize();
 }
 
-void ByteQueue::error(jsg::Lock& js, jsg::JsRef<jsg::JsValue> reason) {
-  impl.error(js, kj::mv(reason));
+void ByteQueue::error(jsg::Lock& js, jsg::JsValue reason) {
+  impl.error(js, reason);
 }
 
 void ByteQueue::maybeUpdateBackpressure() {

@@ -129,8 +129,7 @@ KJ_TEST("ValueQueue erroring works") {
   preamble([](jsg::Lock& js) {
     ValueQueue queue(2);
 
-    auto err = js.error("boom"_kj);
-    queue.error(js, err.addRef(js));
+    queue.error(js, js.error("boom"_kj));
 
     KJ_ASSERT(queue.desiredSize() == 0);
 
@@ -308,8 +307,7 @@ KJ_TEST("ValueQueue errors consumer with multiple-reads") {
     read(js, consumer).then(js, readContinuation, errorContinuation);
     read(js, consumer).then(js, readContinuation, errorContinuation);
 
-    auto err = js.error("boom"_kj);
-    queue.error(js, err.addRef(js));
+    queue.error(js, js.error("boom"_kj));
 
     js.runMicrotasks();
   });
@@ -390,8 +388,7 @@ KJ_TEST("ByteQueue erroring works") {
   preamble([](jsg::Lock& js) {
     ByteQueue queue(2);
 
-    auto err = js.error("boom"_kj);
-    queue.error(js, err.addRef(js));
+    queue.error(js, js.error("boom"_kj));
 
     KJ_ASSERT(queue.desiredSize() == 0);
 
@@ -1258,8 +1255,7 @@ KJ_TEST("ValueQueue push to errored consumer is safe") {
     ValueQueue::Consumer consumer2(queue);
 
     // Error consumer2
-    auto err = js.error("error reason"_kj);
-    consumer2.error(js, err.addRef(js));
+    consumer2.error(js, js.error("error reason"_kj));
 
     // Now push to the queue
     queue.push(js, getEntry(js, 4));
@@ -1420,8 +1416,7 @@ KJ_TEST("ValueQueue draining read on errored stream") {
     ValueQueue queue(10);
     ValueQueue::Consumer consumer(queue);
 
-    auto err = js.error("boom"_kj);
-    queue.error(js, err.addRef(js));
+    queue.error(js, js.error("boom"_kj));
 
     MustNotCall<DrainingReadContinuation> readContinuation;
     MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
@@ -1561,8 +1556,7 @@ KJ_TEST("ByteQueue draining read on errored stream") {
     ByteQueue queue(10);
     ByteQueue::Consumer consumer(queue);
 
-    auto err = js.error("boom"_kj);
-    queue.error(js, err.addRef(js));
+    queue.error(js, js.error("boom"_kj));
 
     MustNotCall<DrainingReadContinuation> readContinuation;
     MustCall<DrainingReadErrorContinuation> errorContinuation([&](jsg::Lock& js, auto&& value) {
@@ -1983,8 +1977,7 @@ KJ_TEST("ValueQueue error then destroy before consumer doesn't crash") {
     auto consumer = kj::heap<ValueQueue::Consumer>(*queue);
 
     // Error the queue first
-    auto err = js.error("boom"_kj);
-    queue->error(js, err.addRef(js));
+    queue->error(js, js.error("boom"_kj));
 
     // Then destroy it
     queue = nullptr;

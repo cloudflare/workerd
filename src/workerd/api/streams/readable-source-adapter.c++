@@ -165,7 +165,7 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<ReadResult>(js.exceptionToJs(exception.clone()));
+    return js.rejectedPromise<ReadResult>(js.exceptionToJsValue(exception.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -283,7 +283,7 @@ jsg::Promise<void> ReadableStreamSourceJsAdapter::close(jsg::Lock& js) {
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<void>(js.exceptionToJs(exception.clone()));
+    return js.rejectedPromise<void>(js.exceptionToJsValue(exception.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -322,7 +322,7 @@ jsg::Promise<jsg::JsRef<jsg::JsString>> ReadableStreamSourceJsAdapter::readAllTe
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<jsg::JsRef<jsg::JsString>>(js.exceptionToJs(exception.clone()));
+    return js.rejectedPromise<jsg::JsRef<jsg::JsString>>(js.exceptionToJsValue(exception.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -382,7 +382,7 @@ jsg::Promise<jsg::BufferSource> ReadableStreamSourceJsAdapter::readAllBytes(
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
     // Really should not have been called if errored but just in case,
     // return a rejected promise.
-    return js.rejectedPromise<jsg::BufferSource>(js.exceptionToJs(exception.clone()));
+    return js.rejectedPromise<jsg::BufferSource>(js.exceptionToJsValue(exception.clone()));
   }
 
   if (state.is<Closed>()) {
@@ -452,7 +452,7 @@ kj::Maybe<uint64_t> ReadableStreamSourceJsAdapter::tryGetLength(StreamEncoding e
 kj::Maybe<ReadableStreamSourceJsAdapter::Tee> ReadableStreamSourceJsAdapter::tryTee(
     jsg::Lock& js, uint64_t limit) {
   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-    js.throwException(js.exceptionToJs(exception.clone()));
+    js.throwException(js.exceptionToJsValue(exception.clone()));
   }
 
   if (state.is<Closed>()) {
