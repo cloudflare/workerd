@@ -329,6 +329,15 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
             // We'll store the current timestamp in the HibernatableWebSocket to assure it gets
             // stored even if the WebSocket is currently hibernating. In that scenario, the timestamp
             // value will be loaded into the WebSocket during unhibernation.
+            // Copy autoResponsePair->response into a coroutine-local kj::String before either
+            // branch sends it. The hibernated branch's ws.send() borrows the underlying
+            // ArrayPtr across the co_await per kj::WebSocket::send()'s documented contract,
+            // and any concurrent JS call to state.setWebSocketAutoResponse() would reassign
+            // or clear autoResponsePair->response, freeing the buffer while the write is
+            // still in flight. The active branch's sendAutoResponse takes ownership of the
+            // kj::String anyway, so hoisting the copy serves both cases with a single
+            // allocation.
+            auto responseCopy = kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response));
             KJ_SWITCH_ONEOF(hib.activeOrPackage) {
               KJ_CASE_ONEOF(apiWs, jsg::Ref<api::WebSocket>) {
                 // If the actor is not hibernated/If the WebSocket is active, we need to update
@@ -337,8 +346,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
                 // Since we had a request set, we must have and response that's sent back using the
                 // same websocket here. The sending of response is managed in web-socket to avoid
                 // possible racing problems with regular websocket messages.
-                co_await apiWs->sendAutoResponse(
-                    kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response).asArray()), ws);
+                co_await apiWs->sendAutoResponse(kj::mv(responseCopy), ws);
               }
               KJ_CASE_ONEOF(package, api::WebSocket::HibernationPackage) {
                 if (!package.closedOutgoingConnection) {
@@ -346,7 +354,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
                   // If we do that, we have to provide it with the promise to avoid races. This can
                   // happen if we have a websocket hibernating, that unhibernates and sends a
                   // message while ws.send() for auto-response is also sending.
-                  auto p = ws.send(KJ_REQUIRE_NONNULL(autoResponsePair->response).asArray()).fork();
+                  auto p = ws.send(responseCopy.asArray()).fork();
                   hib.autoResponsePromise = p.addBranch();
                   co_await p;
                   hib.autoResponsePromise = kj::READY_NOW;
