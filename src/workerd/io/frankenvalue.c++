@@ -163,7 +163,7 @@ jsg::JsValue Frankenvalue::toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTable
         }
         KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
           CapTableReader capTableReader(
-              properties.empty() ? capTable : capTable.slice(0, properties[0].capTableOffset));
+              properties.empty() ? capTable : capTable.first(properties[0].capTableOffset));
 
           jsg::Deserializer deser(js, v8Serialized.data, kj::none, kj::none,
               jsg::Deserializer::Options{

@@ -489,7 +489,7 @@ kj::Array<kj::byte> createTarWithFile(
   tar.asPtr().fill(0);
 
   auto header = tar.first(512);
-  writeTarField(header.slice(0, 100), filename);
+  writeTarField(header.first(100), filename);
   writeTarField(header.slice(100, 108), "0000644"_kj);
   writeTarField(header.slice(108, 116), "0000000"_kj);
   writeTarField(header.slice(116, 124), "0000000"_kj);
