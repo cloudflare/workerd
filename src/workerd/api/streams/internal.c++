@@ -1035,23 +1035,27 @@ jsg::Promise<void> WritableStreamInternalController::write(
     KJ_IF_SOME(chunk, value) {
       KJ_IF_SOME(ab, chunk.tryCast<jsg::JsArrayBuffer>()) {
         if (ab.size() > 0) return ab.copy();
+        return kj::none;
       } else KJ_IF_SOME(sab, chunk.tryCast<jsg::JsSharedArrayBuffer>()) {
         if (sab.size() > 0) return sab.copy();
+        return kj::none;
       } else KJ_IF_SOME(view, chunk.tryCast<jsg::JsArrayBufferView>()) {
         if (view.size() > 0) return jsg::JsBufferSource(view).copy();
+        return kj::none;
       } else if (chunk.isString()) {
-        // TODO(later): This really ought to return a rejected promise and not a sync throw.
-        // This case caused me a moment of confusion during testing, so I think it's worth
-        // a specific error message.
-        throwTypeErrorAndConsoleWarn(
-            "This TransformStream is being used as a byte stream, but received a string on its "
-            "writable side. If you wish to write a string, you'll probably want to explicitly "
-            "UTF-8-encode it with TextEncoder.");
+        // While slightly outside of spec, we can allow writing strings by converting those
+        // to UTF-8 bytes. This is an ergonomic improvement to avoid forcing users to create
+        // a TextEncoder just to write strings to a stream, which is an exceedingly common
+        // use case.
+        auto str = chunk.toString(js);
+        auto ptr = str.asBytes();
+        return ptr.attach(kj::mv(str));
       } else {
         // TODO(later): This really ought to return a rejected promise and not a sync throw.
         throwTypeErrorAndConsoleWarn(
             "This TransformStream is being used as a byte stream, but received an object of "
             "non-ArrayBuffer/ArrayBufferView type on its writable side.");
+        // The throwTypeErrorAndConsoleWarn is marked [[noreturn]]
       }
       KJ_UNREACHABLE;
     }
@@ -1080,7 +1084,6 @@ jsg::Promise<void> WritableStreamInternalController::write(
         KJ_IF_SOME(o, observer) {
           o->onChunkEnqueued(len);
         }
-
         queue.push_back(
             WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
               .event = kj::heap<Write>({
@@ -1956,7 +1959,8 @@ bool WritableStreamInternalController::Pipe::State::checkSignal(jsg::Lock& js) {
 jsg::Promise<void> WritableStreamInternalController::Pipe::State::write(
     jsg::Lock& js, jsg::JsValue handle) {
   auto& writable = parent.state.getUnsafe<IoOwn<Writable>>();
-  KJ_ASSERT(handle.isArrayBuffer() || handle.isSharedArrayBuffer() || handle.isArrayBufferView());
+  KJ_ASSERT(handle.isArrayBuffer() || handle.isSharedArrayBuffer() || handle.isArrayBufferView() ||
+      handle.isString());
 
   // For resizable ArrayBuffers or shared backing stores, we must eagerly copy
   // the data. A resizable ArrayBuffer's logical byte length can be changed by user
@@ -1965,6 +1969,13 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::write(
   // But also just beacuse of V8 Sandbox requirements, we really should be copying
   // the data from the ArrayBuffer anyway... We incur an allocation and copy cost
   // here but that's to be expected.
+  if (handle.isString()) {
+    auto str = handle.toString(js);
+    return IoContext::current().awaitIo(js,
+        writable->canceler.wrap(writable->sink->write(str.asBytes())).attach(kj::mv(str)),
+        [](jsg::Lock&) {});
+  }
+
   auto data = jsg::JsBufferSource(handle).copy();
   return IoContext::current().awaitIo(js,
       writable->canceler.wrap(writable->sink->write(data)).attach(kj::mv(data)), [](jsg::Lock&) {});
@@ -2073,7 +2084,9 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::State::pipeLoop(jsg::
     // we sent those bytes on to the WritableStreamSink.
     KJ_IF_SOME(value, result.value) {
       auto handle = value.getHandle(js);
-      if (handle.isArrayBuffer() || handle.isArrayBufferView()) {
+
+      if (handle.isArrayBuffer() || handle.isSharedArrayBuffer() || handle.isArrayBufferView() ||
+          handle.isString()) {
         return state->write(js, handle)
             .then(js,
                 [state = kj::addRef(*state)](jsg::Lock& js) mutable -> jsg::Promise<void> {
