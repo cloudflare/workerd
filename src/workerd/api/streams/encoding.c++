@@ -150,7 +150,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
                         JSG_REQUIRE(chunk.isArrayBuffer() || chunk.isArrayBufferView(), TypeError,
                             "This TransformStream is being used as a byte stream, "
                             "but received a value that is not a BufferSource.");
-                        jsg::BufferSource source(js, chunk);
+                        jsg::JsBufferSource source(chunk);
                         auto decoded =
                             JSG_REQUIRE_NONNULL(decoder->decodePtr(js, source.asArrayPtr(), false),
                                 TypeError, "Failed to decode input.");

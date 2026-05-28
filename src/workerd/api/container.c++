@@ -154,8 +154,8 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
     stdoutPromise =
         stream->getController()
             .readAllBytes(js, IoContext::current().getLimitEnforcer().getBufferingLimit())
-            .then(js, [](jsg::Lock&, jsg::BufferSource bytes) {
-      return kj::heapArray(bytes.asArrayPtr());
+            .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
+      return bytes.getHandle(js).copy();
     });
   }
 
@@ -165,8 +165,8 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
         "Cannot call output() after stderr has started being consumed.");
     stderrPromise = stream->getController()
                         .readAllBytes(js, kj::maxValue)
-                        .then(js, [](jsg::Lock&, jsg::BufferSource bytes) {
-      return kj::heapArray(bytes.asArrayPtr());
+                        .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
+      return bytes.getHandle(js).copy();
     });
   }
 

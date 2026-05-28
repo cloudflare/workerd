@@ -2243,35 +2243,31 @@ jsg::Promise<ReadResult> ReadableStreamInternalController::PipeLocked::read(jsg:
   return KJ_ASSERT_NONNULL(inner.read(js, kj::none));
 }
 
-jsg::Promise<jsg::BufferSource> ReadableStreamInternalController::readAllBytes(
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> ReadableStreamInternalController::readAllBytes(
     jsg::Lock& js, uint64_t limit) {
   if (isLockedToReader()) {
-    return js.rejectedPromise<jsg::BufferSource>(
+    return js.rejectedPromise<jsg::JsRef<jsg::JsArrayBuffer>>(
         js.typeError("This ReadableStream is currently locked to a reader."_kj));
   }
   if (isPendingClosure) {
-    return js.rejectedPromise<jsg::BufferSource>(
+    return js.rejectedPromise<jsg::JsRef<jsg::JsArrayBuffer>>(
         js.typeError("This ReadableStream belongs to an object that is closing."_kj));
   }
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-      return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
+      auto ab = jsg::JsArrayBuffer::create(js, 0);
+      return js.resolvedPromise(ab.addRef(js));
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return js.rejectedPromise<jsg::BufferSource>(errored.getHandle(js));
+      return js.rejectedPromise<jsg::JsRef<jsg::JsArrayBuffer>>(errored.getHandle(js));
     }
     KJ_CASE_ONEOF(readable, Readable) {
       auto source = KJ_ASSERT_NONNULL(removeSource(js));
       auto& context = IoContext::current();
-      // TODO(perf): v8 sandboxing will require that backing stores are allocated within
-      // the sandbox. This will require a change to the API of ReadableStreamSource::readAllBytes.
-      // For now, we'll read and allocate into a proper backing store.
       return context.awaitIoLegacy(js, source->readAllBytes(limit).attach(kj::mv(source)))
-          .then(js, [](jsg::Lock& js, kj::Array<kj::byte> bytes) -> jsg::BufferSource {
-        auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, bytes.size());
-        backing.asArrayPtr().copyFrom(bytes);
-        return jsg::BufferSource(js, kj::mv(backing));
+          .then(js, [](jsg::Lock& js, kj::Array<kj::byte> bytes) -> jsg::JsRef<jsg::JsArrayBuffer> {
+        auto ab = jsg::JsArrayBuffer::create(js, bytes);
+        return ab.addRef(js);
       });
     }
   }

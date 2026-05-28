@@ -242,7 +242,7 @@ bool Body::getBodyUsed() {
   }
   return false;
 }
-jsg::Promise<jsg::BufferSource> Body::arrayBuffer(jsg::Lock& js) {
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> Body::arrayBuffer(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
     return js.evalNow([&] {
       JSG_REQUIRE(!i.stream->isDisturbed(), TypeError,
@@ -255,13 +255,15 @@ jsg::Promise<jsg::BufferSource> Body::arrayBuffer(jsg::Lock& js) {
 
   // If there's no body, we just return an empty array.
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-  return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
+  auto ab = jsg::JsArrayBuffer::create(js, 0);
+  return js.resolvedPromise(ab.addRef(js));
 }
 
-jsg::Promise<jsg::BufferSource> Body::bytes(jsg::Lock& js) {
-  return arrayBuffer(js).then(js,
-      [](jsg::Lock& js, jsg::BufferSource data) { return data.getTypedView<v8::Uint8Array>(js); });
+jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> Body::bytes(jsg::Lock& js) {
+  return arrayBuffer(js).then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> data) {
+    auto handle = data.getHandle(js);
+    return jsg::JsUint8Array::create(js, handle).addRef(js);
+  });
 }
 
 jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
@@ -333,7 +335,8 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
   // the promise continuation is pending. Without it, the bare `this` pointer dangles.
-  return arrayBuffer(js).then(js, [this, self = JSG_THIS](jsg::Lock& js, jsg::BufferSource buffer) {
+  return arrayBuffer(js).then(
+      js, [this, self = JSG_THIS](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
     kj::String contentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
                                  .map([](auto&& b) -> kj::String {
       return kj::mv(b);
@@ -346,7 +349,7 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
       }).orDefault(nullptr);
     }
 
-    return js.alloc<Blob>(js, buffer.getJsHandle(js), kj::mv(contentType));
+    return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
   });
 }
 

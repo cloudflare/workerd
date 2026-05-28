@@ -231,8 +231,8 @@ KJ_TEST("ReadableStream read all bytes (value readable)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(
-        js, [&](jsg::Lock& js, jsg::BufferSource&& text) {
-      KJ_ASSERT(text.asArrayPtr() == "Hello, world!"_kjb);
+        js, [&](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) {
+      KJ_ASSERT(text.getHandle(js).asArrayPtr() == "Hello, world!"_kjb);
       checked++;
     });
 
@@ -288,8 +288,8 @@ KJ_TEST("ReadableStream read all bytes (byte readable)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(
-        js, [&](jsg::Lock& js, jsg::BufferSource&& text) {
-      KJ_ASSERT(text.asArrayPtr() == "Hello, world!"_kjb);
+        js, [&](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) {
+      KJ_ASSERT(text.getHandle(js).asArrayPtr() == "Hello, world!"_kjb);
       checked++;
     });
 
@@ -350,8 +350,8 @@ KJ_TEST("ReadableStream read all bytes (value readable, more reads)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(
-        js, [&](jsg::Lock& js, jsg::BufferSource&& text) {
-      KJ_ASSERT(text.asArrayPtr() == "Hello, world!"_kjb);
+        js, [&](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) {
+      KJ_ASSERT(text.getHandle(js).asArrayPtr() == "Hello, world!"_kjb);
       checked++;
     });
 
@@ -413,8 +413,8 @@ KJ_TEST("ReadableStream read all bytes (byte readable, more reads)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(
-        js, [&](jsg::Lock& js, jsg::BufferSource&& text) {
-      KJ_ASSERT(text.asArrayPtr() == "Hello, world!"_kjb);
+        js, [&](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) {
+      KJ_ASSERT(text.getHandle(js).asArrayPtr() == "Hello, world!"_kjb);
       checked++;
     });
 
@@ -480,13 +480,14 @@ KJ_TEST("ReadableStream read all bytes (byte readable, large data)") {
     // Starts a read loop of javascript promises.
     auto promise = rs->getController()
                        .readAllBytes(js, (BASE * 7) + 1)
-                       .then(js, [&](jsg::Lock& js, jsg::BufferSource&& text) {
+                       .then(js, [&](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) {
       kj::byte check[BASE * 7]{};
       kj::arrayPtr(check).first(BASE).fill('A');
       kj::arrayPtr(check).slice(BASE).first(BASE * 2).fill('B');
       kj::arrayPtr(check).slice(BASE * 3).fill('C');
-      KJ_ASSERT(text.size() == BASE * 7);
-      KJ_ASSERT(text.asArrayPtr() == check);
+      auto handle = text.getHandle(js);
+      KJ_ASSERT(handle.size() == BASE * 7);
+      KJ_ASSERT(handle.asArrayPtr() == check);
       checked++;
     });
 
@@ -547,7 +548,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, wrong type)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(js,
-        [](jsg::Lock& js, jsg::BufferSource&& text) { KJ_UNREACHABLE; },
+        [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) { KJ_UNREACHABLE; },
         [&](jsg::Lock& js, jsg::Value&& exception) {
       KJ_ASSERT(kj::str(exception.getHandle(js)) ==
           "TypeError: This ReadableStream did not return bytes.");
@@ -602,7 +603,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, to many bytes)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(js,
-        [](jsg::Lock& js, jsg::BufferSource&& text) { KJ_UNREACHABLE; },
+        [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) { KJ_UNREACHABLE; },
         [&](jsg::Lock& js, jsg::Value&& exception) {
       KJ_ASSERT(kj::str(exception.getHandle(js)) == "TypeError: Memory limit exceeded before EOF.");
       checked++;
@@ -657,7 +658,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, to many bytes)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(js,
-        [](jsg::Lock& js, jsg::BufferSource&& text) { KJ_UNREACHABLE; },
+        [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) { KJ_UNREACHABLE; },
         [&](jsg::Lock& js, jsg::Value&& exception) {
       KJ_ASSERT(kj::str(exception.getHandle(js)) == "TypeError: Memory limit exceeded before EOF.");
       checked++;
@@ -699,7 +700,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed read)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(js,
-        [](jsg::Lock& js, jsg::BufferSource&& text) { KJ_UNREACHABLE; },
+        [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) { KJ_UNREACHABLE; },
         [&](jsg::Lock& js, jsg::Value&& exception) {
       KJ_ASSERT(kj::str(exception.getHandle(js)) == "Error: boom");
       checked++;
@@ -740,7 +741,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, failed read)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(js,
-        [](jsg::Lock& js, jsg::BufferSource&& text) { KJ_UNREACHABLE; },
+        [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) { KJ_UNREACHABLE; },
         [&](jsg::Lock& js, jsg::Value&& exception) {
       KJ_ASSERT(kj::str(exception.getHandle(js)) == "Error: boom");
       checked++;
@@ -782,7 +783,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed start)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(js,
-        [](jsg::Lock& js, jsg::BufferSource&& text) { KJ_UNREACHABLE; },
+        [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) { KJ_UNREACHABLE; },
         [&](jsg::Lock& js, jsg::Value&& exception) {
       KJ_ASSERT(kj::str(exception.getHandle(js)) == "Error: boom");
       checked++;
@@ -824,7 +825,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed start 2)") {
 
     // Starts a read loop of javascript promises.
     auto promise = rs->getController().readAllBytes(js, 20).then(js,
-        [](jsg::Lock& js, jsg::BufferSource&& text) { KJ_UNREACHABLE; },
+        [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> text) { KJ_UNREACHABLE; },
         [&](jsg::Lock& js, jsg::Value&& exception) {
       KJ_ASSERT(kj::str(exception.getHandle(js)) == "Error: boom");
       checked++;
