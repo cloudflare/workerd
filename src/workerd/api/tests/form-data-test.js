@@ -946,3 +946,26 @@ export const w3cTestFormData = {
     //do_test("formdata with named string", create_formdata(['key', new Blob(['value'], {type: 'text/plain'}), 'kv.txt']), '\nkey=kv.txt:text/plain:5,');
   },
 };
+
+export const urlencodedReasonableEntryCount = {
+  async test() {
+    const entryCount = 100;
+    const body = Array.from(
+      { length: entryCount },
+      (_, i) => `key${i}=val${i}`
+    ).join('&');
+
+    const req = new Request('http://example.org', {
+      method: 'POST',
+      body,
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+    });
+
+    const fd = await req.formData();
+    strictEqual([...fd].length, entryCount);
+    strictEqual(fd.get('key0'), 'val0');
+    strictEqual(fd.get('key99'), 'val99');
+  },
+};
