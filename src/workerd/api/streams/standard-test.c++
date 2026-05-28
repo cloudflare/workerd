@@ -15,14 +15,14 @@ void preamble(auto callback) {
   fixture.runInIoContext([&](const TestFixture::Environment& env) { callback(env.js); });
 }
 
-jsg::JsValue toBytes(jsg::Lock& js, kj::String str) {
-  return jsg::JsValue(
-      jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js));
+jsg::JsValue toBytes(jsg::Lock& js, kj::StringPtr str) {
+  // Copies the bytes
+  return jsg::JsUint8Array::create(js, str.asBytes());
 }
 
 jsg::JsBufferSource toBufferSource(jsg::Lock& js, kj::StringPtr str) {
   // Copies the bytes
-  return jsg::JsBufferSource(jsg::JsUint8Array::create(js, str.asBytes()));
+  return jsg::JsBufferSource(toBytes(js, str));
 }
 
 jsg::JsBufferSource toBufferSource(jsg::Lock& js, kj::ArrayPtr<kj::byte> bytes) {
@@ -49,8 +49,8 @@ KJ_TEST("ReadableStream read all text (value readable)") {
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
             checked++;
-            c->enqueue(js, toBytes(js, kj::str("Hello, ")));
-            c->enqueue(js, toBytes(js, kj::str("world!")));
+            c->enqueue(js, toBytes(js, "Hello, "));
+            c->enqueue(js, toBytes(js, "world!"));
             c->close(js);
             return js.resolvedPromise();
           }
@@ -105,8 +105,8 @@ KJ_TEST("ReadableStream read all text, rs ref held (value readable)") {
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
             checked++;
-            c->enqueue(js, toBytes(js, kj::str("Hello, ")));
-            c->enqueue(js, toBytes(js, kj::str("world!")));
+            c->enqueue(js, toBytes(js, "Hello, "));
+            c->enqueue(js, toBytes(js, "world!"));
             c->close(js);
             return js.resolvedPromise();
           }
@@ -214,8 +214,8 @@ KJ_TEST("ReadableStream read all bytes (value readable)") {
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
             checked++;
-            c->enqueue(js, toBytes(js, kj::str("Hello, ")));
-            c->enqueue(js, toBytes(js, kj::str("world!")));
+            c->enqueue(js, toBytes(js, "Hello, "));
+            c->enqueue(js, toBytes(js, "world!"));
             c->close(js);
             return js.resolvedPromise();
           }
@@ -331,7 +331,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, more reads)") {
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
             checked++;
-            c->enqueue(js, toBytes(js, kj::mv(chunks[counter++])));
+            c->enqueue(js, toBytes(js, chunks[counter++]));
             if (counter == chunks.size()) {
               c->close(js);
             }
@@ -587,7 +587,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, to many bytes)") {
           // require at least three reads to complete: one for the first chunk, 'hello, ',
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-            c->enqueue(js, toBytes(js, kj::str("123456789012345678901")));
+            c->enqueue(js, toBytes(js, "123456789012345678901"));
             checked++;
             return js.resolvedPromise();
           }
@@ -907,8 +907,8 @@ KJ_TEST("DrainingReader read drains buffered data (value stream)") {
             pullCount++;
             if (pullCount == 1) {
               // First pull - enqueue multiple chunks
-              c->enqueue(js, toBytes(js, kj::str("Hello, ")));
-              c->enqueue(js, toBytes(js, kj::str("world!")));
+              c->enqueue(js, toBytes(js, "Hello, "));
+              c->enqueue(js, toBytes(js, "world!"));
             } else {
               // Second pull - close the stream
               c->close(js);
@@ -1074,7 +1074,7 @@ KJ_TEST("DrainingReader sync data then async pull waits") {
             pullCount++;
             if (pullCount == 1) {
               // First pull: enqueue data synchronously, but return async promise
-              c->enqueue(js, toBytes(js, kj::str("sync-chunk")));
+              c->enqueue(js, toBytes(js, "sync-chunk"));
               // Return a promise that resolves later
               auto prp = js.newPromiseAndResolver<void>();
               asyncResolver = kj::mv(prp.resolver);
@@ -1082,7 +1082,7 @@ KJ_TEST("DrainingReader sync data then async pull waits") {
               return kj::mv(prp.promise);
             } else if (pullCount == 2) {
               // Second pull after async resolution: enqueue more data
-              c->enqueue(js, toBytes(js, kj::str("async-chunk")));
+              c->enqueue(js, toBytes(js, "async-chunk"));
               return js.resolvedPromise();
             }
             return js.resolvedPromise();
@@ -1180,7 +1180,7 @@ KJ_TEST("DrainingReader with fully async pull") {
       KJ_ASSERT(pullCount == 1);
 
       // Enqueue data and resolve the pull
-      KJ_ASSERT_NONNULL(savedController)->enqueue(js, toBytes(js, kj::str("async-data")));
+      KJ_ASSERT_NONNULL(savedController)->enqueue(js, toBytes(js, "async-data"));
       KJ_ASSERT_NONNULL(asyncResolver).resolve(js);
       js.runMicrotasks();
 
@@ -1262,9 +1262,9 @@ KJ_TEST("DrainingReader multiple sync chunks then close") {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
             pullCount++;
             // Enqueue multiple chunks then close
-            c->enqueue(js, toBytes(js, kj::str("chunk1")));
-            c->enqueue(js, toBytes(js, kj::str("chunk2")));
-            c->enqueue(js, toBytes(js, kj::str("chunk3")));
+            c->enqueue(js, toBytes(js, "chunk1"));
+            c->enqueue(js, toBytes(js, "chunk2"));
+            c->enqueue(js, toBytes(js, "chunk3"));
             c->close(js);
             return js.resolvedPromise();
           }
@@ -1307,8 +1307,8 @@ KJ_TEST("DrainingReader read from teed branches") {
       .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
         KJ_SWITCH_ONEOF(controller) {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-            c->enqueue(js, toBytes(js, kj::str("chunk1")));
-            c->enqueue(js, toBytes(js, kj::str("chunk2")));
+            c->enqueue(js, toBytes(js, "chunk1"));
+            c->enqueue(js, toBytes(js, "chunk2"));
             c->close(js);
             return js.resolvedPromise();
           }
@@ -1431,7 +1431,7 @@ KJ_TEST("DrainingReader error during pull in value stream") {
       .pull = [](jsg::Lock& js, UnderlyingSource::Controller controller) {
         KJ_SWITCH_ONEOF(controller) {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-            c->enqueue(js, toBytes(js, kj::str("before-error")));
+            c->enqueue(js, toBytes(js, "before-error"));
             c->error(js, js.error("deliberate error"));
             return js.resolvedPromise();
           }
@@ -1535,8 +1535,8 @@ KJ_TEST("DrainingReader read from stream with transform-like pattern") {
 
     // Simulate TransformStream write->transform->enqueue pattern
     // Enqueue transformed chunks (like what TransformStream's transform callback would do)
-    controller->enqueue(js, toBytes(js, kj::str("transformed-a")));
-    controller->enqueue(js, toBytes(js, kj::str("transformed-b")));
+    controller->enqueue(js, toBytes(js, "transformed-a"));
+    controller->enqueue(js, toBytes(js, "transformed-b"));
 
     // Create DrainingReader to drain all buffered transformed data
     KJ_IF_SOME(reader, DrainingReader::create(js, *rs)) {
@@ -1554,7 +1554,7 @@ KJ_TEST("DrainingReader read from stream with transform-like pattern") {
       KJ_ASSERT(readCompleted);
 
       // Simulate more data being written/transformed
-      controller->enqueue(js, toBytes(js, kj::str("transformed-c")));
+      controller->enqueue(js, toBytes(js, "transformed-c"));
       controller->close(js);
 
       bool finalReadCompleted = false;
@@ -1707,7 +1707,7 @@ KJ_TEST("DrainingReader cancel while read is pending with buffered data") {
         KJ_SWITCH_ONEOF(controller) {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
             // Enqueue some data synchronously
-            c->enqueue(js, toBytes(js, kj::str("buffered-data")));
+            c->enqueue(js, toBytes(js, "buffered-data"));
             savedController = c.addRef();
             // But return a pending promise (more data coming)
             auto prp = js.newPromiseAndResolver<void>();
@@ -2160,7 +2160,7 @@ KJ_TEST("DrainingReader: pull enqueues then closes on next pull (value stream)")
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
             pullCount++;
             if (pullCount == 1) {
-              c->enqueue(js, toBytes(js, kj::str("data")));
+              c->enqueue(js, toBytes(js, "data"));
             } else {
               // Second pull: close synchronously without enqueuing.
               c->close(js);
@@ -2296,7 +2296,7 @@ KJ_TEST("DrainingReader: pull enqueues then cancels on next pull (value stream)"
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
             pullCount++;
             if (pullCount == 1) {
-              c->enqueue(js, toBytes(js, kj::str("data")));
+              c->enqueue(js, toBytes(js, "data"));
             } else {
               // Second pull: cancel synchronously without enqueuing.
               auto promise KJ_UNUSED = c->cancel(js, kj::none);
@@ -2357,7 +2357,7 @@ KJ_TEST("DrainingReader: pending error in endOperation rejects read (value strea
         KJ_SWITCH_ONEOF(controller) {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
             // Enqueue data synchronously — drainingRead will collect it.
-            c->enqueue(js, toBytes(js, kj::str("should-be-discarded")));
+            c->enqueue(js, toBytes(js, "should-be-discarded"));
             // Return rejected promise — the pull failure handler runs as a microtask
             // and calls doError(), which defers the error because beginOperation() is
             // active. When wrapDrainingRead's endOperation() fires, it applies the
@@ -2446,7 +2446,7 @@ KJ_TEST("DrainingReader: controller closes promptly after drainingRead done (val
             // Enqueue data and close in the same pull. This causes
             // ConsumerImpl::close() → maybeDrainAndSetState() to find non-empty
             // buffer, preventing immediate finalization.
-            c->enqueue(js, toBytes(js, kj::str("hello")));
+            c->enqueue(js, toBytes(js, "hello"));
             c->close(js);
             return js.resolvedPromise();
           }
