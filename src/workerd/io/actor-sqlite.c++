@@ -95,6 +95,9 @@ void ActorSqlite::ImplicitTxn::commit() {
 void ActorSqlite::ImplicitTxn::rollback() {
   // Ignore redundant commit()s.
   if (!committed) {
+    // Cancel any blocking async tasks that were scheduled as part of the transaction.
+    parent.blockTasks.clear();
+
     // As of this writing, rollback() is only called when the database is about to be reset.
     // Preparing a statement for it would be a waste since that statement would never be executed
     // more than once, since resetting requires repreparing all statements anyway. So we don't
@@ -188,6 +191,27 @@ bool ActorSqlite::ExplicitTxn::isSomeWriteConfirmed() const {
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
+  if (!actorSqlite.blockTasks.isEmpty()) {
+    // Although the promise returned here was originally intended for "backpressure", it turns out
+    // if we return a promise here, the one call site (DurableObjectStorage::asyncTransactionImpl())
+    // will actually keep the input gate locked until the commit finishes, which is what we need.
+    return actorSqlite.blockTasks.onEmpty().then([this]() {
+      commitImpl();
+    }).catch_([self = kj::addRef(*this)](kj::Exception&& e) mutable {
+      if (self->actorSqlite.broken == kj::none) {
+        self->rollbackImpl();
+      }
+      kj::throwFatalException(kj::mv(e));
+    });
+  } else {
+    commitImpl();
+
+    // No backpressure for SQLite.
+    return kj::none;
+  }
+}
+
+void ActorSqlite::ExplicitTxn::commitImpl() {
   actorSqlite.requireNotBroken();
   KJ_REQUIRE(!hasChild,
       "critical sections should have prevented committing transaction while "
@@ -240,9 +264,6 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     actorSqlite.commitTasks.add(forkedPromise.addBranch());
     actorSqlite.lastCommit = kj::mv(forkedPromise);
   }
-
-  // No backpressure for SQLite.
-  return kj::none;
 }
 
 kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
@@ -257,6 +278,9 @@ kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
 }
 
 void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
+  // Cancel any blocking async tasks that were scheduled as part of the transaction.
+  actorSqlite.blockTasks.clear();
+
   actorSqlite.db->run(
       {.regulator = SqliteDatabase::TRUSTED}, kj::str("ROLLBACK TO _cf_savepoint_", depth));
   actorSqlite.db->run(
@@ -823,6 +847,12 @@ kj::OneOf<kj::Own<ActorCacheInterface::Transaction>, kj::Promise<void>> ActorSql
 
   KJ_IF_SOME(itxn, currentTxn.tryGet<ImplicitTxn*>()) {
     return itxn->waitForCompletion();
+  } else if (!blockTasks.isEmpty()) {
+    // We may be starting a nested async transaction (nested within another async transaction).
+    // We should wait for any blocking tasks to finish first, otherwise they might accidentally
+    // deliver their writes inside the nested transaction, leading to inconsistency if it is rolled
+    // back.
+    return blockTasks.onEmpty();
   } else {
     return kj::Own<ActorCacheInterface::Transaction>(kj::refcounted<ExplicitTxn>(*this));
   }

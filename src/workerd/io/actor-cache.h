@@ -210,7 +210,9 @@ class ActorCacheInterface: public ActorCacheOps {
     //
     // If commit() is not called before the Transaction is destroyed, nothing is written.
     //
-    // Returns a promise if backpressure needs to be applied (like ActorCache::put()).
+    // Returns a promise if backpressure needs to be applied (like ActorCache::put()) or if
+    // additional work needs to be done before the commit is actually complete. The caller must
+    // keep the input lock held until this promise completes.
     //
     // This will NOT detect conflicts, it will always just write blindly, because conflicts
     // inherently cannot happen.

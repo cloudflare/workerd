@@ -74,6 +74,9 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // events from arriving until the transaction can finish.
   //
   // If no transaction is currently open, an implicit transaction is started.
+  //
+  // NOTE: It's important that canceling this promise early cancels all work as this means the
+  //   transaction is being rolled back.
   void blockTransaction(kj::Promise<void> promise) override;
 
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override {
@@ -235,6 +238,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     bool someWriteConfirmed = false;
 
     void rollbackImpl();
+    void commitImpl();
   };
 
   // When set to NoTxn, there is no transaction outstanding.
