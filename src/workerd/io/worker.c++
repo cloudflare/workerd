@@ -3,11 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor-cache.h"
+#include "stored-value.h"
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/streams/common.h>  // for api::StreamEncoding
+#include <workerd/io/actor-sqlite.h>
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
@@ -3647,6 +3649,7 @@ struct Worker::Actor::Impl {
   kj::OneOf<bool, jsg::JsRef<jsg::JsValue>> transient;
 
   kj::Maybe<kj::Own<ActorCacheInterface>> actorCache;
+  kj::Maybe<StoredExternalHandler> storageExternalHandler;
 
   kj::Maybe<jsg::JsRef<jsg::JsObject>> ctxObject;
 
@@ -4127,6 +4130,26 @@ kj::Maybe<jsg::JsRef<jsg::JsValue>> Worker::Actor::getTransient(Worker::Lock& lo
 
 kj::Maybe<ActorCacheInterface&> Worker::Actor::getPersistent() {
   return impl->actorCache;
+}
+
+StoredExternalHandler& Worker::Actor::getOrCreateStoredExternalHandler() {
+  KJ_IF_SOME(handler, impl->storageExternalHandler) {
+    return handler;
+  }
+
+  KJ_IF_SOME(ac, impl->actorCache) {
+    KJ_IF_SOME(kv, ac->getSqliteKv()) {
+      return impl->storageExternalHandler.emplace(*ac, kv);
+    }
+  }
+
+  JSG_FAIL_REQUIRE(DOMDataCloneError,
+      "Storing RPC stubs in Durable Object KV storage is only supported when using the SQLite "
+      "storage backend.");
+}
+
+kj::Maybe<StoredExternalHandler&> Worker::Actor::getStoredExternalHandler() {
+  return impl->storageExternalHandler;
 }
 
 kj::Own<Worker::Actor::Loopback> Worker::Actor::getLoopback() {

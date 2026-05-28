@@ -571,6 +571,10 @@ jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
     jsg::Lock& js, kj::String key, const PutOptions& options) {
   auto& context = IoContext::current();
 
+  KJ_IF_SOME(handler, KJ_ASSERT_NONNULL(context.getActor()).getStoredExternalHandler()) {
+    handler.cancelPutExternals(key);
+  }
+
   return transformCacheResult(js,
       getCache(OP_DELETE).delete_(kj::mv(key), options, context.getCurrentTraceSpan()), options,
       [](jsg::Lock&, bool value) {
@@ -620,6 +624,12 @@ jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
   auto numKeys = keys.size();
 
   auto& context = IoContext::current();
+
+  KJ_IF_SOME(handler, KJ_ASSERT_NONNULL(context.getActor()).getStoredExternalHandler()) {
+    for (auto& key: keys) {
+      handler.cancelPutExternals(key);
+    }
+  }
 
   return transformCacheResult(js,
       getCache(OP_DELETE).delete_(kj::mv(keys), options, context.getCurrentTraceSpan()), options,
@@ -712,6 +722,8 @@ jsg::Promise<DurableObjectStorage::AsyncTxnResult> DurableObjectStorage::asyncTr
 jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     jsg::Lock& js, jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
   KJ_IF_SOME(sqlite, cache->getSqliteDatabase()) {
+    auto& context = IoContext::current();
+
     // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
     sqlite.notifyWrite();
 
@@ -725,6 +737,10 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 
     sqlite.run(
         {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
+
+    StoredExternalHandler::SyncNestedTransaction syncExternalTxn(
+        context.getActorOrThrow().getOrCreateStoredExternalHandler());
+
     return js.tryCatch([&]() {
       auto result = callback(js);
 
@@ -735,6 +751,7 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 
       sqlite.run(
           {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      syncExternalTxn.commit();
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
       // If a critical error forced an automatic rollback, we skip the rollback and release

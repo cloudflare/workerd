@@ -113,8 +113,13 @@ void SyncKvStorage::put(jsg::Lock& js, kj::String key, jsg::JsValue value) {
 }
 
 kj::OneOf<bool, int> SyncKvStorage::delete_(jsg::Lock& js, kj::String key) {
-  TraceContext traceContext =
-      IoContext::current().makeUserTraceSpan("durable_object_storage_kv_delete"_kjc);
+  auto& ioctx = IoContext::current();
+
+  KJ_IF_SOME(handler, KJ_ASSERT_NONNULL(ioctx.getActor()).getStoredExternalHandler()) {
+    handler.cancelPutExternals(key);
+  }
+
+  TraceContext traceContext = ioctx.makeUserTraceSpan("durable_object_storage_kv_delete"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
 
   traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
