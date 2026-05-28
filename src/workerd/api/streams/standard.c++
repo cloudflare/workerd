@@ -2099,11 +2099,11 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     KJ_IF_SOME(byob, byobOptions) {
       // If a BYOB buffer was given, we need to give it back wrapped in a TypedArray
       // whose size is set to zero.
-      jsg::BufferSource source(js, byob.bufferView.getHandle(js));
-      auto store = source.detach(js);
-      store.consume(store.size());
+      jsg::JsArrayBufferView source(byob.bufferView.getHandle(js));
+      auto store = source.detachAndTake(js);
+      store = store.slice(js, 0, 0);
       return js.resolvedPromise(ReadResult{
-        .value = jsg::JsValue(store.createHandle(js)).addRef(js),
+        .value = jsg::JsValue(store).addRef(js),
         .done = true,
       });
     } else {
