@@ -204,12 +204,12 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
   // types: ArrayBuffer, ArrayBufferView, and String. If it is a string,
   // we convert it to UTF-8 bytes. Anything else is an error.
   if (value.isArrayBufferView() || value.isArrayBuffer() || value.isSharedArrayBuffer()) {
-    // We can just wrap the value with a jsg::BufferSource and write it.
-    jsg::BufferSource source(js, value);
-    if (active.options.detachOnWrite && source.canDetach(js)) {
+    // We can just wrap the value with a buffer source and write it.
+    jsg::JsBufferSource source(value);
+    if (active.options.detachOnWrite && source.isDetachable()) {
       // Detach from the original ArrayBuffer...
-      // ... and re-wrap it with a new BufferSource that we own.
-      source = jsg::BufferSource(js, source.detach(js));
+      // ... and re-wrap it with a new buffer source that we own.
+      source = source.detachAndTake(js);
     }
 
     // Zero-length writes are a no-op.
@@ -240,12 +240,14 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
     // held by the write queue, which is itself held by Active. If active
     // is destroyed, the write queue is destroyed along with the lambda.
     auto promise =
-        active.enqueue(kj::coCapture([&active, source = kj::mv(source)]() -> kj::Promise<void> {
-      co_await active.sink->write(source.asArrayPtr());
-      active.bytesInFlight -= source.size();
+        active.enqueue(kj::coCapture([&active, ptr = source.asArrayPtr()]() -> kj::Promise<void> {
+      co_await active.sink->write(ptr);
+      active.bytesInFlight -= ptr.size();
     }));
+
     return ioContext
-        .awaitIo(js, kj::mv(promise), [self = selfRef.addRef()](jsg::Lock& js) {
+        .awaitIo(js, kj::mv(promise),
+            [self = selfRef.addRef(), source = source.addRef(js)](jsg::Lock& js) {
       // Why do we need a weak ref here? Well, because this is a JavaScript
       // promise continuation. It is possible that the kj::Own holding our
       // adapter can be dropped while we are waiting for the continuation
@@ -608,17 +610,17 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
     // WritableStream API has no concept of a vector write, so each write
     // would incur the overhead of a separate promise and microtask checkpoint.
     // By collapsing into a single write we reduce that overhead.
-    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, totalAmount);
-    auto ptr = backing.asArrayPtr();
+    auto source = jsg::JsArrayBuffer::create(js, totalAmount);
+    auto ptr = source.asArrayPtr();
     for (auto piece: pieces) {
       ptr.first(piece.size()).copyFrom(piece);
       ptr = ptr.slice(piece.size());
     }
-    jsg::BufferSource source(js, kj::mv(backing));
 
-    auto ready = KJ_ASSERT_NONNULL(writer->isReady(js));
     auto promise =
-        ready.then(js, [writer = writer.addRef(), source = kj::mv(source)](jsg::Lock& js) mutable {
+        KJ_ASSERT_NONNULL(writer->isReady(js))
+            .then(
+                js, [writer = writer.addRef(), source = source.addRef(js)](jsg::Lock& js) mutable {
       return writer->write(js, jsg::JsValue(source.getHandle(js)));
     });
     return IoContext::current().awaitJs(js, kj::mv(promise));
