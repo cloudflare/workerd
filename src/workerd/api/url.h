@@ -180,11 +180,11 @@ public:
                 IteratorState,
                 entryIteratorNext)
   JSG_ITERATOR(KeyIterator, keys,
-                kj::StringPtr,
+                kj::String,
                 IteratorState,
                 keyIteratorNext)
   JSG_ITERATOR(ValueIterator, values,
-                kj::StringPtr,
+                kj::String,
                 IteratorState,
                 valueIteratorNext)
 
@@ -253,20 +253,20 @@ private:
     return kj::arr(kj::str(key), kj::str(value));
   }
 
-  static kj::Maybe<kj::StringPtr> keyIteratorNext(jsg::Lock& js, IteratorState& state) {
+  static kj::Maybe<kj::String> keyIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->url->query.size()) {
       return kj::none;
     }
     auto& [key, value] = state.parent->url->query[state.index++];
-    return key.asPtr();
+    return kj::str(key);
   }
 
-  static kj::Maybe<kj::StringPtr> valueIteratorNext(jsg::Lock& js, IteratorState& state) {
+  static kj::Maybe<kj::String> valueIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->url->query.size()) {
       return kj::none;
     }
     auto& [key, value] = state.parent->url->query[state.index++];
-    return value.asPtr();
+    return kj::str(value);
   }
 };
 

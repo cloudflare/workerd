@@ -58,15 +58,15 @@ public:
   void sort();
 
   JSG_ITERATOR(EntryIterator, entries,
-               kj::Array<kj::ArrayPtr<const char>>,
+               kj::Array<kj::String>,
                IteratorState<jsg::UrlSearchParams::EntryIterator>,
                entryIteratorNext)
   JSG_ITERATOR(KeyIterator, keys,
-               kj::ArrayPtr<const char>,
+               kj::String,
                IteratorState<jsg::UrlSearchParams::KeyIterator>,
                keyIteratorNext)
   JSG_ITERATOR(ValueIterator, values,
-               kj::ArrayPtr<const char>,
+               kj::String,
                IteratorState<jsg::UrlSearchParams::ValueIterator>,
                valueIteratorNext)
 
@@ -141,13 +141,13 @@ private:
   // URLs search component.
   void reset();
 
-  static kj::Maybe<kj::Array<kj::ArrayPtr<const char>>> entryIteratorNext(
+  static kj::Maybe<kj::Array<kj::String>> entryIteratorNext(
       jsg::Lock& js,
       IteratorState<jsg::UrlSearchParams::EntryIterator>& state);
-  static kj::Maybe<kj::ArrayPtr<const char>> keyIteratorNext(
+  static kj::Maybe<kj::String> keyIteratorNext(
       jsg::Lock& js,
       IteratorState<jsg::UrlSearchParams::KeyIterator>& state);
-  static kj::Maybe<kj::ArrayPtr<const char>> valueIteratorNext(
+  static kj::Maybe<kj::String> valueIteratorNext(
       jsg::Lock& js,
       IteratorState<jsg::UrlSearchParams::ValueIterator>& state);
 

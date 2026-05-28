@@ -307,21 +307,21 @@ jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock& js) 
       IteratorState<jsg::UrlSearchParams::ValueIterator>(JSG_THIS, inner.getValues()));
 }
 
-kj::Maybe<kj::Array<kj::ArrayPtr<const char>>> URLSearchParams::entryIteratorNext(
+kj::Maybe<kj::Array<kj::String>> URLSearchParams::entryIteratorNext(
     jsg::Lock& js, URLSearchParams::IteratorState<jsg::UrlSearchParams::EntryIterator>& state) {
   return state.inner.next().map([](const jsg::UrlSearchParams::EntryIterator::Entry& entry) {
-    return kj::arr(entry.key, entry.value);
+    return kj::arr(kj::str(entry.key), kj::str(entry.value));
   });
 }
 
-kj::Maybe<kj::ArrayPtr<const char>> URLSearchParams::keyIteratorNext(
+kj::Maybe<kj::String> URLSearchParams::keyIteratorNext(
     jsg::Lock& js, URLSearchParams::IteratorState<jsg::UrlSearchParams::KeyIterator>& state) {
-  return state.inner.next();
+  return state.inner.next().map([](kj::ArrayPtr<const char> ptr) { return kj::str(ptr); });
 }
 
-kj::Maybe<kj::ArrayPtr<const char>> URLSearchParams::valueIteratorNext(
+kj::Maybe<kj::String> URLSearchParams::valueIteratorNext(
     jsg::Lock& js, URLSearchParams::IteratorState<jsg::UrlSearchParams::ValueIterator>& state) {
-  return state.inner.next();
+  return state.inner.next().map([](kj::ArrayPtr<const char> ptr) { return kj::str(ptr); });
 }
 
 void URLSearchParams::forEach(jsg::Lock& js,
