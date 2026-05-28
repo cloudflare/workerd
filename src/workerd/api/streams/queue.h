@@ -553,17 +553,7 @@ class ConsumerImpl final {
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    // Technically we shouldn't really have to GC visit the stored error here but there
-    // should not be any harm in doing so.
-    KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
-      visitor.visit(errored.reason);
-    }
-    // There's no reason to GC visit the promise resolver or buffer in Ready state and it is
-    // potentially problematic if we do. Since the read requests are queued, if we
-    // GC visit it once, remove it from the queue, and GC happens to kick in before
-    // we access the resolver, then v8 could determine that the resolver or buffered
-    // entries are no longer reachable via tracing and free them before we can
-    // actually try to access the held resolver.
+    // GC visitation is an intentional no-op for the queue/consumer implementation.
   }
 
   inline kj::StringPtr jsgGetMemoryName() const;
@@ -768,7 +758,9 @@ class ValueQueue final {
 
     size_t getSize() const;
 
-    void visitForGc(jsg::GcVisitor& visitor);
+    void visitForGc(jsg::GcVisitor& visitor) {
+      // GC visitation is an intentional no-op for Entry.
+    }
 
     kj::Rc<Entry> clone(jsg::Lock& js);
 
@@ -833,7 +825,9 @@ class ValueQueue final {
     bool hasPendingDrainingRead();
     void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason);
 
-    void visitForGc(jsg::GcVisitor& visitor);
+    void visitForGc(jsg::GcVisitor& visitor) {
+      // GC visitation is an intentional no-op for the consumer implementation.
+    }
 
     inline kj::StringPtr jsgGetMemoryName() const;
     inline size_t jsgGetMemorySelfSize() const;
@@ -865,7 +859,9 @@ class ValueQueue final {
 
   bool hasPartiallyFulfilledRead();
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) {
+    // GC visitation is an intentional no-op for the queue implementation.
+  }
 
   inline kj::StringPtr jsgGetMemoryName() const;
   inline size_t jsgGetMemorySelfSize() const;
@@ -1012,7 +1008,9 @@ class ByteQueue final {
 
     size_t getSize() const;
 
-    void visitForGc(jsg::GcVisitor& visitor);
+    void visitForGc(jsg::GcVisitor& visitor) {
+      // GC visitation is an intentional no-op for Entry.
+    }
 
     kj::Rc<Entry> clone(jsg::Lock& js);
 
@@ -1080,7 +1078,9 @@ class ByteQueue final {
     bool hasPendingDrainingRead();
     void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason);
 
-    void visitForGc(jsg::GcVisitor& visitor);
+    void visitForGc(jsg::GcVisitor& visitor) {
+      // GC visitation is an intentional no-op for the consumer implementation.
+    }
 
     inline kj::StringPtr jsgGetMemoryName() const;
     inline size_t jsgGetMemorySelfSize() const;
@@ -1120,7 +1120,9 @@ class ByteQueue final {
   // will be disconnected as appropriate.
   kj::Maybe<kj::Own<ByobRequest>> nextPendingByobReadRequest();
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) {
+    // GC visitation is an intentional no-op for the queue implementation.
+  }
 
   inline kj::StringPtr jsgGetMemoryName() const;
   inline size_t jsgGetMemorySelfSize() const;

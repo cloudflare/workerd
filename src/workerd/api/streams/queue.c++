@@ -51,10 +51,6 @@ size_t ValueQueue::Entry::getSize() const {
   return size;
 }
 
-void ValueQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(value);
-}
-
 #pragma endregion ValueQueue::Entry
 
 #pragma region ValueQueue::QueueEntry
@@ -355,10 +351,6 @@ void ValueQueue::Consumer::cancelPendingReads(jsg::Lock& js, jsg::JsValue reason
   impl.cancelPendingReads(js, reason);
 }
 
-void ValueQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(impl);
-}
-
 #pragma endregion ValueQueue::Consumer
 
 ValueQueue::ValueQueue(size_t highWaterMark): impl(highWaterMark) {}
@@ -485,8 +477,6 @@ bool ValueQueue::hasPartiallyFulfilledRead() {
   return false;
 }
 
-void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {}
-
 #pragma endregion ValueQueue
 
 // ======================================================================================
@@ -576,8 +566,6 @@ size_t ByteQueue::Entry::getSize() const {
 kj::Rc<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
   return addRefToThis();
 }
-
-void ByteQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma endregion ByteQueue::Entry
 
@@ -846,10 +834,6 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
 
 void ByteQueue::Consumer::cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
   impl.cancelPendingReads(js, reason);
-}
-
-void ByteQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(impl);
 }
 
 #pragma endregion ByteQueue::Consumer
@@ -1583,8 +1567,6 @@ bool ByteQueue::wantsRead() const {
 size_t ByteQueue::getConsumerCount() {
   return impl.getConsumerCount();
 }
-
-void ByteQueue::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma endregion ByteQueue
 
