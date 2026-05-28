@@ -2433,14 +2433,14 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
           // We do not want to invalidate the read request and we need to update the
           // view so that on the next read the view will be properly adjusted.
           // There's a possibility the impl.readRequest->response can call user JavaScript,
-          // let's revalidate access to the the controller before calling updateView.
+          // let's revalidate access to the controller before calling updateView.
           KJ_IF_SOME(i, maybeImpl) {
             i.updateView(js);
           }
         }
       }
-      // There's a possibility the impl.readRequest->response can call user JavsScript,
-      // let's revalidate access to the the controller before calling pull.
+      // There's a possibility the impl.readRequest->response can call user JavaScript,
+      // let's revalidate access to the controller before calling pull.
       KJ_IF_SOME(i, maybeImpl) {
         i.controller->runIfAlive(
             [&](ReadableByteStreamController& controller) { controller.pull(js); });
