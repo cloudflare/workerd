@@ -2808,12 +2808,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
   KJ_IF_SOME(byobOptions, maybeByobOptions) {
     byobOptions.detachBuffer = true;
     auto view = byobOptions.bufferView.getHandle(js);
-    if (!view->Buffer()->IsDetachable()) {
+    if (!view.isDetachable()) {
       return js.rejectedPromise<ReadResult>(
           js.typeError("Unabled to use non-detachable ArrayBuffer."_kj));
     }
 
-    if (view->ByteLength() == 0 || view->Buffer()->ByteLength() == 0) {
+    if (view.size() == 0 || view.getBuffer().size() == 0) {
       return js.rejectedPromise<ReadResult>(
           js.typeError("Unable to use a zero-length ArrayBuffer."_kj));
     }
@@ -2827,7 +2827,6 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // If it is a BYOB read, then the spec requires that we return an empty
       // view of the same type provided, that uses the same backing memory
       // as that provided, but with zero-length.
-      jsg::JsArrayBufferView view(byobOptions.bufferView.getHandle(js));
       auto store = view.detachAndTake(js);
       store = store.slice(js, 0, 0);
       return js.resolvedPromise(ReadResult{
