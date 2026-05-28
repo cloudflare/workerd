@@ -15,6 +15,7 @@ archive_override(
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
         "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
         "//:patches/sqlite/0004-invalid-wal-on-rollback-fix.patch",
+        "//:patches/sqlite/0005-authorizer-rename-to-destination-name.patch",
     ],
     remote_file_integrity = {
         "MODULE.bazel": "sha256-+H38CSP6DtMT+YPSy9lplRLcfBApkukY4vdX6lBjDfI=",

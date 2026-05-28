@@ -1770,28 +1770,6 @@ KJ_TEST("SQLite critical error handling for SQLITE_FULL") {
   });
 }
 
-KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
-  testCriticalError("out of memory", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
-    db.run("CREATE TABLE test_nomem (id INTEGER PRIMARY KEY, data BLOB)");
-    db.run(
-        "CREATE TABLE test_refs (id INTEGER PRIMARY KEY, ref_id INTEGER, FOREIGN KEY(ref_id) REFERENCES test_nomem(id) ON DELETE CASCADE)");
-
-    db.run("BEGIN TRANSACTION");
-
-    db.run("INSERT INTO test_nomem VALUES (1, 'small data')");
-    db.run("INSERT INTO test_refs VALUES (1, 1)");
-
-    // Set SQLite's memory limit very low to trigger SQLITE_NOMEM
-    db.run("PRAGMA hard_heap_limit=8192");  // 8KB limit
-
-    // Create data that will exceed the memory limit
-    auto largeData = kj::heapArray<byte>(50000, 'X');  // 50KB
-
-    db.run({.regulator = SqliteDatabase::TRUSTED}, "INSERT INTO test_nomem VALUES (?, ?)", 2,
-        largeData.asPtr());
-  });
-}
-
 KJ_TEST("SQLite Regulator blocks RENAME TO reserved name") {
   // Regression test: ALTER TABLE ... RENAME TO must be checked against the regulator's
   // isAllowedName for the DESTINATION name, not just the source.  Without the SQLite
@@ -1821,10 +1799,34 @@ KJ_TEST("SQLite Regulator blocks RENAME TO reserved name") {
 
   // Renaming into the _cf_ namespace must be blocked by the authorizer.
   KJ_EXPECT_THROW_MESSAGE(
-      "prohibited", db.run({.regulator = reg}, "ALTER TABLE other_data RENAME TO _cf_KV"));
+      "not authorized", db.run({.regulator = reg}, "ALTER TABLE other_data RENAME TO _cf_KV"));
 
   // Verify the table was NOT renamed — it should still be other_data.
   KJ_EXPECT(db.prepare(reg, "SELECT value FROM other_data").run().getBlob(0).size() == 4);
+}
+
+// NOTE: This test sets a process-global SQLite hard_heap_limit that is never reset.
+// It must remain the LAST test in this file.
+KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
+  testCriticalError("out of memory", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+    db.run("CREATE TABLE test_nomem (id INTEGER PRIMARY KEY, data BLOB)");
+    db.run(
+        "CREATE TABLE test_refs (id INTEGER PRIMARY KEY, ref_id INTEGER, FOREIGN KEY(ref_id) REFERENCES test_nomem(id) ON DELETE CASCADE)");
+
+    db.run("BEGIN TRANSACTION");
+
+    db.run("INSERT INTO test_nomem VALUES (1, 'small data')");
+    db.run("INSERT INTO test_refs VALUES (1, 1)");
+
+    // Set SQLite's memory limit very low to trigger SQLITE_NOMEM
+    db.run("PRAGMA hard_heap_limit=8192");  // 8KB limit
+
+    // Create data that will exceed the memory limit
+    auto largeData = kj::heapArray<byte>(50000, 'X');  // 50KB
+
+    db.run({.regulator = SqliteDatabase::TRUSTED}, "INSERT INTO test_nomem VALUES (?, ?)", 2,
+        largeData.asPtr());
+  });
 }
 
 }  // namespace
