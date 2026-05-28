@@ -1792,5 +1792,40 @@ KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
   });
 }
 
+KJ_TEST("SQLite Regulator blocks RENAME TO reserved name") {
+  // Regression test: ALTER TABLE ... RENAME TO must be checked against the regulator's
+  // isAllowedName for the DESTINATION name, not just the source.  Without the SQLite
+  // patch (0005-authorizer-rename-to-destination-name.patch), the authorizer only sees
+  // the source table name, allowing renames into the _cf_ reserved namespace.
+
+  TempDirOnDisk dir;
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // Regulator that blocks names starting with _cf_ (mirrors SqlStorageRegulator).
+  class CfRegulator: public SqliteDatabase::Regulator {
+   public:
+    bool isAllowedName(kj::StringPtr name) const override {
+      return !name.startsWith("_cf_");
+    }
+  };
+  static CfRegulator reg;
+
+  // Create a user table and populate it.
+  db.run("CREATE TABLE user_data (key TEXT PRIMARY KEY, value BLOB)");
+  db.run("INSERT INTO user_data VALUES ('k', x'deadbeef')");
+
+  // Renaming to a non-reserved name should succeed.
+  db.run({.regulator = reg}, "ALTER TABLE user_data RENAME TO other_data");
+  KJ_EXPECT(db.prepare(reg, "SELECT value FROM other_data").run().getBlob(0).size() == 4);
+
+  // Renaming into the _cf_ namespace must be blocked by the authorizer.
+  KJ_EXPECT_THROW_MESSAGE(
+      "prohibited", db.run({.regulator = reg}, "ALTER TABLE other_data RENAME TO _cf_KV"));
+
+  // Verify the table was NOT renamed — it should still be other_data.
+  KJ_EXPECT(db.prepare(reg, "SELECT value FROM other_data").run().getBlob(0).size() == 4);
+}
+
 }  // namespace
 }  // namespace workerd
