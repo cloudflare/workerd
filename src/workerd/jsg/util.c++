@@ -626,12 +626,16 @@ static kj::Array<kj::byte> getEmptyArray() {
 }
 
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer) {
-  if (arrayBuffer->IsResizableByUserJavaScript()) {
+  if (arrayBuffer->IsResizableByUserJavaScript() || arrayBuffer->IsImmutable()) {
     // For resizable ArrayBuffers, resize(0) decommits pages (PROT_NONE) even while the
     // BackingStore shared_ptr is held. Deep-copy to prevent SIGSEGV if JS shrinks the
     // buffer after we capture the pointer. We use arrayBuffer->ByteLength() (the live
     // length) rather than backing->ByteLength() (which returns the max reservation size).
     // Ref: AUTOVULN-CLOUDFLARE-WORKERD-73
+    //
+    // We also want to copy for immutable ArrayBuffers. Since the expectation might
+    // be that the memory buffer returned from asBytes() is mutable, we don't want
+    // to violate the expectation.
     auto byteLength = arrayBuffer->ByteLength();
     if (byteLength == 0) {
       return getEmptyArray();
@@ -648,8 +652,8 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer) {
 }
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   auto buffer = arrayBufferView->Buffer();
-  if (buffer->IsResizableByUserJavaScript()) {
-    // Deep-copy for resizable ArrayBuffers -- see comment above.
+  if (buffer->IsResizableByUserJavaScript() || buffer->IsImmutable()) {
+    // Deep-copy for resizable or immutable ArrayBuffers -- see comment above.
     // CopyContents handles bounds checking internally for out-of-bounds views.
     auto len = arrayBufferView->ByteLength();
     if (len == 0) {
