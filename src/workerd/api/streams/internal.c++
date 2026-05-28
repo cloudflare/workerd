@@ -1957,7 +1957,6 @@ bool WritableStreamInternalController::Pipe::State::checkSignal(jsg::Lock& js) {
 
 jsg::Promise<void> WritableStreamInternalController::Pipe::State::write(jsg::JsValue handle) {
   auto& writable = parent.state.getUnsafe<IoOwn<Writable>>();
-  // TODO(soon): Once jsg::BufferSource lands and we're able to use it, this can be simplified.
   KJ_ASSERT(handle.isArrayBuffer() || handle.isArrayBufferView());
   std::shared_ptr<v8::BackingStore> store;
   size_t byteLength = 0;
