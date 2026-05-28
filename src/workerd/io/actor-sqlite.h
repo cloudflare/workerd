@@ -307,6 +307,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   void startImplicitTxn();
 
+  kj::Promise<void> startImplicitTxnImpl(kj::Own<ImplicitTxn> txn);
+
   void onWrite(bool allowUnconfirmed);
 
   void onCriticalError(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException);

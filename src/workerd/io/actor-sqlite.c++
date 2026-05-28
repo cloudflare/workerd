@@ -288,37 +288,7 @@ void ActorSqlite::onCriticalError(
 void ActorSqlite::startImplicitTxn() {
   auto txn = kj::heap<ImplicitTxn>(*this);
 
-  // We implement the magic of accumulating all of the writes between JavaScript awaits in one
-  // transaction by evaluating by wrapping the commit function with kj::evalLater, which runs the
-  // function on the next turn of the event loop
-  auto commitPromise =
-      kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
-    // Don't commit if shutdown() has been called.
-    requireNotBroken();
-
-    // Start the schedule request before commit(), for correctness in workerd.
-    auto precommitAlarmState = startPrecommitAlarmScheduling();
-
-    try {
-      txn->commit();
-    } catch (...) {
-      // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
-      // instead of whatever SQLite threw.
-      requireNotBroken();
-
-      // No, we're not broken, so propagate the exception as-is.
-      throw;
-    }
-
-    // The callback is only expected to commit writes up until this point. Any new writes that
-    // occur while the callback is in progress are NOT included, therefore require a new commit
-    // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
-    // rather than after the callback.
-    { auto drop = kj::mv(txn); }
-
-    // Move the commit span out immediately so new writes can capture a fresh span.
-    return commitImpl(kj::mv(precommitAlarmState), kj::mv(currentCommitSpan));
-  })
+  auto commitPromise = startImplicitTxnImpl(kj::mv(txn))
           // Unconditionally break the output gate if commit threw an error, no matter whether the
           // commit was confirmed or unconfirmed.
           .catch_([this](kj::Exception&& e) {
@@ -331,6 +301,39 @@ void ActorSqlite::startImplicitTxn() {
 
   // Commits must be executed in order, so we only have to track the most recent commit promise.
   lastCommit = kj::mv(commitPromise);
+}
+
+kj::Promise<void> ActorSqlite::startImplicitTxnImpl(kj::Own<ImplicitTxn> txn) {
+  // We implement the magic of accumulating all of the writes between JavaScript awaits in one
+  // transaction by evaluating by awaiting kj::yield() first, which runs the function on the next
+  // turn of the event loop
+  co_await kj::yield();
+
+  // Don't commit if shutdown() has been called.
+  requireNotBroken();
+
+  // Start the schedule request before commit(), for correctness in workerd.
+  auto precommitAlarmState = startPrecommitAlarmScheduling();
+
+  try {
+    txn->commit();
+  } catch (...) {
+    // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
+    // instead of whatever SQLite threw.
+    requireNotBroken();
+
+    // No, we're not broken, so propagate the exception as-is.
+    throw;
+  }
+
+  // The callback is only expected to commit writes up until this point. Any new writes that
+  // occur while the callback is in progress are NOT included, therefore require a new commit
+  // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
+  // rather than after the callback.
+  { auto drop = kj::mv(txn); }
+
+  // Move the commit span out immediately so new writes can capture a fresh span.
+  co_await commitImpl(kj::mv(precommitAlarmState), kj::mv(currentCommitSpan));
 }
 
 void ActorSqlite::onWrite(bool allowUnconfirmed) {
