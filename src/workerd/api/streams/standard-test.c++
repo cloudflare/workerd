@@ -20,14 +20,14 @@ jsg::JsValue toBytes(jsg::Lock& js, kj::String str) {
       jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js));
 }
 
-jsg::BufferSource toBufferSource(jsg::Lock& js, kj::String str) {
-  auto backing = jsg::BackingStore::from(js, str.asBytes().attach(kj::mv(str))).createHandle(js);
-  return jsg::BufferSource(js, kj::mv(backing));
+jsg::JsBufferSource toBufferSource(jsg::Lock& js, kj::StringPtr str) {
+  // Copies the bytes
+  return jsg::JsBufferSource(jsg::JsUint8Array::create(js, str.asBytes()));
 }
 
-jsg::BufferSource toBufferSource(jsg::Lock& js, kj::Array<kj::byte> bytes) {
-  auto backing = jsg::BackingStore::from(js, kj::mv(bytes)).createHandle(js);
-  return jsg::BufferSource(js, kj::mv(backing));
+jsg::JsBufferSource toBufferSource(jsg::Lock& js, kj::ArrayPtr<kj::byte> bytes) {
+  // Copies the bytes
+  return jsg::JsBufferSource(jsg::JsUint8Array::create(js, bytes));
 }
 
 // ======================================================================================
@@ -158,8 +158,8 @@ KJ_TEST("ReadableStream read all text (byte readable)") {
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
             checked++;
-            c->enqueue(js, toBufferSource(js, kj::str("Hello, ")));
-            c->enqueue(js, toBufferSource(js, kj::str("world!")));
+            c->enqueue(js, toBufferSource(js, "Hello, "));
+            c->enqueue(js, toBufferSource(js, "world!"));
             c->close(js);
             return js.resolvedPromise();
           }
@@ -271,8 +271,8 @@ KJ_TEST("ReadableStream read all bytes (byte readable)") {
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
             checked++;
-            c->enqueue(js, toBufferSource(js, kj::str("Hello, ")));
-            c->enqueue(js, toBufferSource(js, kj::str("world!")));
+            c->enqueue(js, toBufferSource(js, "Hello, "));
+            c->enqueue(js, toBufferSource(js, "world!"));
             c->close(js);
             return js.resolvedPromise();
           }
@@ -394,7 +394,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, more reads)") {
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
             checked++;
-            c->enqueue(js, toBufferSource(js, kj::mv(chunks[counter++])));
+            c->enqueue(js, toBufferSource(js, chunks[counter++]));
             if (counter == chunks.size()) {
               c->close(js);
             }
@@ -460,7 +460,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, large data)") {
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
             checked++;
-            c->enqueue(js, toBufferSource(js, kj::mv(chunks[counter++])));
+            c->enqueue(js, toBufferSource(js, chunks[counter++]));
             if (counter == chunks.size()) {
               c->close(js);
             }
@@ -642,7 +642,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, to many bytes)") {
           // require at least three reads to complete: one for the first chunk, 'hello, ',
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
-            c->enqueue(js, toBufferSource(js, kj::str("123456789012345678901")));
+            c->enqueue(js, toBufferSource(js, "123456789012345678901"));
             checked++;
             return js.resolvedPromise();
           }
@@ -957,8 +957,8 @@ KJ_TEST("DrainingReader read drains buffered data (byte stream)") {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
             pullCount++;
             if (pullCount == 1) {
-              c->enqueue(js, toBufferSource(js, kj::str("Hello, ")));
-              c->enqueue(js, toBufferSource(js, kj::str("world!")));
+              c->enqueue(js, toBufferSource(js, "Hello, "));
+              c->enqueue(js, toBufferSource(js, "world!"));
             } else {
               c->close(js);
             }
@@ -1212,7 +1212,7 @@ KJ_TEST("DrainingReader byte stream with async pull") {
             pullCount++;
             if (pullCount == 1) {
               // Enqueue sync data but return async
-              c->enqueue(js, toBufferSource(js, kj::str("sync-bytes")));
+              c->enqueue(js, toBufferSource(js, "sync-bytes"));
               auto prp = js.newPromiseAndResolver<void>();
               asyncResolver = kj::mv(prp.resolver);
               savedController = c.addRef();
@@ -1381,9 +1381,9 @@ KJ_TEST("DrainingReader read from byte stream with BYOB support") {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
             // Enqueue multiple byte chunks - verifies DrainingReader handles
             // byte stream chunks correctly and preserves order
-            c->enqueue(js, toBufferSource(js, kj::str("byob-chunk1")));
-            c->enqueue(js, toBufferSource(js, kj::str("byob-chunk2")));
-            c->enqueue(js, toBufferSource(js, kj::str("byob-chunk3")));
+            c->enqueue(js, toBufferSource(js, "byob-chunk1"));
+            c->enqueue(js, toBufferSource(js, "byob-chunk2"));
+            c->enqueue(js, toBufferSource(js, "byob-chunk3"));
             // Close synchronously - this tests that the fix for use-after-free works.
             // Without the fix, this would cause ByteReadable to be destroyed while
             // onConsumerWantsData is still on the stack.
@@ -1472,7 +1472,7 @@ KJ_TEST("DrainingReader error during pull in byte stream") {
         KJ_SWITCH_ONEOF(controller) {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
-            c->enqueue(js, toBufferSource(js, kj::str("before-error")));
+            c->enqueue(js, toBufferSource(js, "before-error"));
             c->error(js, js.error("deliberate error"));
             return js.resolvedPromise();
           }
@@ -2397,7 +2397,7 @@ KJ_TEST("DrainingReader: pending error in endOperation rejects read (byte stream
         KJ_SWITCH_ONEOF(controller) {
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
-            c->enqueue(js, toBufferSource(js, kj::str("should-be-discarded")));
+            c->enqueue(js, toBufferSource(js, "should-be-discarded"));
             return js.rejectedPromise<void>(js.typeError("pull failed"_kj));
           }
         }
@@ -2491,7 +2491,7 @@ KJ_TEST("DrainingReader: controller closes promptly after drainingRead done (byt
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {}
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableByteStreamController>) {
             // Enqueue data and close in the same pull.
-            c->enqueue(js, toBufferSource(js, kj::str("world")));
+            c->enqueue(js, toBufferSource(js, "world"));
             c->close(js);
             return js.resolvedPromise();
           }

@@ -522,13 +522,13 @@ class ReadableStreamBYOBRequest: public jsg::Object {
   // added to support the readAtLeast extension on the ReadableStreamBYOBReader.
   kj::Maybe<int> getAtLeast();
 
-  kj::Maybe<jsg::V8Ref<v8::Uint8Array>> getView(jsg::Lock& js);
+  kj::Maybe<jsg::JsUint8Array> getView(jsg::Lock& js);
 
   void invalidate(jsg::Lock& js);
 
   void respond(jsg::Lock& js, int bytesWritten);
 
-  void respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
+  void respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view);
 
   JSG_RESOURCE_TYPE(ReadableStreamBYOBRequest) {
     JSG_READONLY_PROTOTYPE_PROPERTY(view, getView);
@@ -540,7 +540,7 @@ class ReadableStreamBYOBRequest: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(atLeast, getAtLeast);
   }
 
-  bool isPartiallyFulfilled();
+  bool isPartiallyFulfilled(jsg::Lock& js);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
@@ -548,7 +548,7 @@ class ReadableStreamBYOBRequest: public jsg::Object {
   struct Impl {
     kj::Own<ByteQueue::ByobRequest> readRequest;
     kj::Rc<WeakRef<ReadableByteStreamController>> controller;
-    jsg::V8Ref<v8::Uint8Array> view;
+    jsg::JsRef<jsg::JsUint8Array> view;
 
     size_t originalBufferByteLength;
     size_t originalByteOffsetPlusBytesFilled;
@@ -588,7 +588,7 @@ class ReadableByteStreamController: public jsg::Object {
 
   void close(jsg::Lock& js);
 
-  void enqueue(jsg::Lock& js, jsg::BufferSource chunk);
+  void enqueue(jsg::Lock& js, jsg::JsBufferSource chunk);
 
   void error(jsg::Lock& js, jsg::JsValue reason);
 
