@@ -95,7 +95,7 @@ jsg::Promise<ReadResult> ReaderImpl::read(
 
     // Both read() and readAtLeast() pass atLeast in element count.
     // Convert to bytes before validation and forwarding to the controller.
-    jsg::BufferSource source(js, options.bufferView.getHandle(js));
+    jsg::JsArrayBufferView source(options.bufferView.getHandle(js));
     auto elementSize = source.getElementSize();
     atLeast = atLeast * elementSize;
 
