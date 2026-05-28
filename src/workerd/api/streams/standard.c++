@@ -3253,7 +3253,7 @@ namespace {
 // of producing either a single concatenated kj::Array<byte> or kj::String.
 class AllReader {
  public:
-  using PartList = kj::Array<kj::ArrayPtr<byte>>;
+  using PartList = kj::Array<jsg::JsRef<jsg::JsBufferSource>>;
 
   AllReader(jsg::Ref<ReadableStream> stream, uint64_t limit)
       : state(State::create<jsg::Ref<ReadableStream>>(kj::mv(stream))),
@@ -3264,7 +3264,7 @@ class AllReader {
     return loop(js).then(
         js, [this](auto& js, PartList&& partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
       auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
-      copyInto(ab.asArrayPtr(), partPtrs.asPtr());
+      copyInto(js, ab.asArrayPtr(), partPtrs.asPtr());
       return ab.addRef(js);
     });
   }
@@ -3272,19 +3272,18 @@ class AllReader {
   jsg::Promise<kj::String> allText(
       jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
     return loop(js).then(js, [this, option](auto& js, PartList&& partPtrs) {
-      // Strip UTF-8 BOM if requested
-      if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
-          hasUtf8Bom(partPtrs[0])) {
-        partPtrs[0] = partPtrs[0].slice(UTF8_BOM_SIZE);
-        runningTotal -= UTF8_BOM_SIZE;
-      }
-
       JSG_REQUIRE(runningTotal <= v8::String::kMaxLength, RangeError,
           "String length exceeds v8::String::kMaxLength.");
 
       auto out = kj::heapArray<char>(runningTotal + 1);
-      copyInto(out.first(out.size() - 1).asBytes(), partPtrs.asPtr());
+      copyInto(js, out.first(out.size() - 1).asBytes(), partPtrs.asPtr());
       out.back() = '\0';
+
+      // Strip UTF-8 BOM if requested
+      if ((option & ReadAllTextOption::STRIP_BOM) && out.size() > 0 && hasUtf8Bom(out.asBytes())) {
+        return kj::String(out.slice(UTF8_BOM_SIZE).attach(kj::mv(out)));
+      }
+
       return kj::String(kj::mv(out));
     });
   }
@@ -3308,15 +3307,17 @@ class AllReader {
       jsg::Ref<ReadableStream>>;
   State state;
   uint64_t limit;
-  kj::Vector<jsg::BufferSource> parts;
+  kj::Vector<jsg::JsRef<jsg::JsBufferSource>> parts;
   uint64_t runningTotal = 0;
 
   jsg::Promise<PartList> loop(jsg::Lock& js) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return js.resolvedPromise(KJ_MAP(p, parts) { return p.asArrayPtr(); });
+        return js.resolvedPromise(parts.releaseAsArray());
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+        // Throw away the parts we've accumulated
+        auto _ KJ_UNUSED = kj::mv(parts);
         return js.template rejectedPromise<PartList>(errored.getHandle(js));
       }
       KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
@@ -3341,7 +3342,7 @@ class AllReader {
                 js, [&](jsg::Lock& js) { return loop(js); });
           }
 
-          jsg::BufferSource bufferSource(js, handle);
+          jsg::JsBufferSource bufferSource(handle);
 
           if (bufferSource.size() == 0) {
             // Weird but allowed, we'll skip it.
@@ -3356,7 +3357,7 @@ class AllReader {
           }
 
           runningTotal += bufferSource.size();
-          parts.add(bufferSource.copy(js));
+          parts.add(bufferSource.addRef(js));
           return loop(js);
         };
 
@@ -3374,12 +3375,24 @@ class AllReader {
     KJ_UNREACHABLE;
   }
 
-  void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
+  void copyInto(
+      jsg::Lock& js, kj::ArrayPtr<byte> out, kj::ArrayPtr<jsg::JsRef<jsg::JsBufferSource>> in) {
     for (auto& part: in) {
-      KJ_ASSERT(part.size() <= out.size());
-      out.first(part.size()).copyFrom(part);
-      out = out.slice(part.size());
+      auto handle = part.getHandle(js);
+      size_t len = handle.size();
+      // If the len is larger than the out, that suggests that one or more of
+      // the stored ArrayBuffers were realized larger! Let's throw a fit!
+      JSG_REQUIRE(len <= out.size(), TypeError,
+          "One or more of the ArrayBuffer instances received while reading was resized "
+          "larger while reading.");
+      out.first(len).copyFrom(handle.asArrayPtr());
+      out = out.slice(len);
     }
+    // We should have consumed the entire thing. However, if, for whatever reason,
+    // any of the stored ArrayBuffers were resized smaller, let's throw a fit!
+    JSG_REQUIRE(out.size() == 0, TypeError,
+        "One or more of the ArrayBuffer instances received while reading were either "
+        "detached or resized smaller.");
   }
 };
 
