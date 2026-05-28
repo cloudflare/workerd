@@ -1,0 +1,16 @@
+diff --git a/src/alter.c b/src/alter.c
+index 7e6ab32557..e5f0eac4e6 100644
+--- a/src/alter.c
++++ b/src/alter.c
+@@ -179,8 +179,9 @@ void sqlite3AlterRenameTable(
+ #endif
+ 
+ #ifndef SQLITE_OMIT_AUTHORIZATION
+-  /* Invoke the authorization callback. */
+-  if( sqlite3AuthCheck(pParse, SQLITE_ALTER_TABLE, zDb, pTab->zName, 0) ){
++  /* Invoke the authorization callback. Pass the new table name as the 4th
++  ** argument so the authorizer can reject renames into reserved namespaces. */
++  if( sqlite3AuthCheck(pParse, SQLITE_ALTER_TABLE, zDb, pTab->zName, zName) ){
+     goto exit_rename_table;
+   }
+ #endif
