@@ -80,7 +80,7 @@ kj::StringPtr validateContentType(kj::StringPtr contentType) {
 }
 
 struct Serialized {
-  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>, jsg::BufferSource, jsg::BackingStore>> own;
+  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>, jsg::JsRef<jsg::JsArrayBufferView>>> own;
   // Holds onto the owner of a given array of serialized data.
   kj::ArrayPtr<kj::byte> data;
   // A pointer into that data that can be directly written into an outgoing queue send, regardless
@@ -134,16 +134,15 @@ Serialized serialize(jsg::Lock& js,
     result.own = kj::mv(s);
     return kj::mv(result);
   } else if (contentType == IncomingQueueMessage::ContentType::BYTES) {
-    JSG_REQUIRE(body.isArrayBufferView(), TypeError,
+    auto source = JSG_REQUIRE_NONNULL(body.tryCast<jsg::JsArrayBufferView>(), TypeError,
         kj::str("Content Type \"", IncomingQueueMessage::ContentType::BYTES,
             "\" requires a value of type ArrayBufferView, but received: ", body.typeOf(js)));
 
-    jsg::BufferSource source(js, body);
     if (bufferBehavior == SerializeArrayBufferBehavior::SHALLOW_REFERENCE) {
-      if (source.getJsHandle(js).isResizable()) {
+      if (source.isResizable()) {
         // Resizable buffers can have pages decommitted by resize(0) while
         // the shallow reference is held. Deep-copy to prevent OOB read.
-        kj::Array<kj::byte> bytes = kj::heapArray(source.asArrayPtr());
+        kj::Array<kj::byte> bytes = jsg::JsBufferSource(source).copy();
         Serialized result;
         result.data = bytes;
         result.own = kj::mv(bytes);
@@ -152,17 +151,17 @@ Serialized serialize(jsg::Lock& js,
       // Non-resizable: safe to hold a shallow reference.
       Serialized result;
       result.data = source.asArrayPtr();
-      result.own = kj::mv(source);
+      result.own = source.addRef(js);
       return kj::mv(result);
-    } else if (source.canDetach(js)) {
+    } else if (source.isDetachable()) {
       // Prefer detaching the input ArrayBuffer whenever possible to avoid needing to copy it.
-      auto backingSource = source.detach(js);
+      auto backingSource = source.detachAndTake(js);
       Serialized result;
       result.data = backingSource.asArrayPtr();
-      result.own = kj::mv(backingSource);
+      result.own = backingSource.addRef(js);
       return kj::mv(result);
     } else {
-      kj::Array<kj::byte> bytes = kj::heapArray(source.asArrayPtr());
+      kj::Array<kj::byte> bytes = jsg::JsBufferSource(source).copy();
       Serialized result;
       result.data = bytes;
       result.own = kj::mv(bytes);
