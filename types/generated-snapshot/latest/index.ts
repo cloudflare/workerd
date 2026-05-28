@@ -4060,7 +4060,6 @@ export declare abstract class Performance {
    */
   toJSON(): object;
 }
-<<<<<<< HEAD
 export interface Tracing {
   enterSpan<T, A extends unknown[]>(
     name: string,
@@ -4073,8 +4072,6 @@ export declare abstract class Span {
   get isTraced(): boolean;
   setAttribute(key: string, value?: boolean | number | string): void;
 }
-||||||| parent of 2c960abf4 (Add AgentMemoryNamespace types scaffold)
-=======
 // ============================================================================
 // Agent Memory
 //
@@ -4308,7 +4305,6 @@ export declare abstract class AgentMemoryNamespace {
    */
   deleteProfile(profileName: string): Promise<void>;
 }
->>>>>>> 2c960abf4 (Add AgentMemoryNamespace types scaffold)
 // ============ AI Search Error Interfaces ============
 export interface AiSearchInternalError extends Error {}
 export interface AiSearchNotFoundError extends Error {}
