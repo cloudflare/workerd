@@ -349,7 +349,7 @@ class WritableStreamInternalController: public WritableStreamController {
   struct Write {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
     size_t totalBytes;
-    kj::Array<kj::byte> ownBytes;
+    kj::Array<const kj::byte> ownBytes;
     kj::ArrayPtr<const kj::byte> bytes;
 
     JSG_MEMORY_INFO(Write) {
@@ -405,7 +405,7 @@ class WritableStreamInternalController: public WritableStreamController {
 
       bool checkSignal(jsg::Lock& js);
       jsg::Promise<void> pipeLoop(jsg::Lock& js);
-      jsg::Promise<void> write(jsg::JsValue value);
+      jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
 
       JSG_MEMORY_INFO(State) {
         tracker.trackField("resolver", promise);
@@ -462,8 +462,8 @@ class WritableStreamInternalController: public WritableStreamController {
     jsg::Promise<void> pipeLoop(jsg::Lock& js) {
       return state->pipeLoop(js);
     }
-    jsg::Promise<void> write(jsg::JsValue value) {
-      return state->write(value);
+    jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value) {
+      return state->write(js, value);
     }
 
     JSG_MEMORY_INFO(Pipe) {
