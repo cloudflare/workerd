@@ -302,9 +302,11 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   readable->getController().setPendingClosure();
 
   // Wait until the socket connects (successfully or otherwise)
+  // Note: `self` (jsg::Ref) is captured in each continuation to prevent GC from collecting
+  // this object while the promise chain is pending. Without it, the bare `this` pointer dangles.
   return openedPromiseCopy.whenResolved(js)
       .then(js,
-          [this](jsg::Lock& js) {
+          [this, self = JSG_THIS](jsg::Lock& js) {
     if (!writable->getController().isClosedOrClosing()) {
       return writable->getController().flush(js);
     } else {
@@ -312,7 +314,7 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
     }
   })
       .then(js,
-          [this](jsg::Lock& js) {
+          [this, self = JSG_THIS](jsg::Lock& js) {
     // Forcibly abort the readable/writable streams.
     auto cancelPromise = readable->getController().cancel(js, kj::none);
     auto abortPromise = writable->getController().abort(js, kj::none);
@@ -322,14 +324,16 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
       return kj::mv(abortPromise);
     });
   })
-      .then(js, [this](jsg::Lock& js) {
+      .then(js, [this, self = JSG_THIS](jsg::Lock& js) {
     // Destroy the connection stream to close the connection.
     { auto _ = kj::mv(connectionData); }
     connectionData = kj::none;
 
     resolveFulfiller(js, kj::none);
     return js.resolvedPromise();
-  }).catch_(js, [this](jsg::Lock& js, jsg::Value err) { errorHandler(js, kj::mv(err)); });
+  }).catch_(js, [this, self = JSG_THIS](jsg::Lock& js, jsg::Value err) {
+    errorHandler(js, kj::mv(err));
+  });
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
