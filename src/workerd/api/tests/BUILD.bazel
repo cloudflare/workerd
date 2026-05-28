@@ -711,6 +711,18 @@ wd_test(
 )
 
 wd_test(
+    src = "url-searchparams-iterator-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["url-searchparams-iterator-uaf-test.js"],
+)
+
+wd_test(
+    src = "url_standard-searchparams-iterator-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["url-searchparams-iterator-uaf-test.js"],
+)
+
+wd_test(
     src = "websocket-allow-half-open-test.wd-test",
     args = ["--experimental"],
     data = ["websocket-allow-half-open-test.js"],

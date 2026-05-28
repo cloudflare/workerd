@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "url_standard-searchparams-iterator-uaf-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "url-searchparams-iterator-uaf-test.js")
+        ],
+        compatibilityFlags = [
+          "nodejs_compat",
+          "url_standard"
+        ]
+      )
+    ),
+  ],
+);
