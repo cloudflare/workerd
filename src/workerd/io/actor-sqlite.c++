@@ -51,6 +51,7 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       kv(*db),
       metadata(*db),
       commitTasks(*this),
+      blockTasks(*this),
       debugAlarmSync(debugAlarmSyncParam) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
   db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
@@ -285,10 +286,31 @@ void ActorSqlite::onCriticalError(
   }
 }
 
+void ActorSqlite::blockTransaction(kj::Promise<void> promise) {
+  requireNotBroken();
+
+  // Start a transaction if one isn't already open. (You might argue that we should call onWrite(),
+  // but externalTransaction() itself isn't actually a write, though writes are expected to happen
+  // while we wait for the promise. We don't want to preempt those other writes from setting the
+  // `allowUnconfirmed` flag.)
+  if (currentTxn.is<NoTxn>()) {
+    startImplicitTxn();
+  }
+
+  blockTasks.add(promise.catch_([this](kj::Exception&& e) {
+    // We didn't wrap the whole promise in the outputGate because we want to leave it up to the
+    // app to specify allowUnconfirmed on the actual write that contained the externals that
+    // required asynchronous handling. But if the external promise failed, we should probably
+    // go ahead and break the output gate! (Also, `taskFailed()` expects us to have done this.)
+    return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)), nullptr);
+  }));
+}
+
 void ActorSqlite::startImplicitTxn() {
   auto txn = kj::heap<ImplicitTxn>(*this);
 
-  auto commitPromise = startImplicitTxnImpl(kj::mv(txn))
+  auto commitPromise =
+      startImplicitTxnImpl(kj::mv(txn))
           // Unconditionally break the output gate if commit threw an error, no matter whether the
           // commit was confirmed or unconfirmed.
           .catch_([this](kj::Exception&& e) {
@@ -309,7 +331,13 @@ kj::Promise<void> ActorSqlite::startImplicitTxnImpl(kj::Own<ImplicitTxn> txn) {
   // turn of the event loop
   co_await kj::yield();
 
-  // Don't commit if shutdown() has been called.
+  // If there were tasks blocking the transaction, wait for them.
+  if (!blockTasks.isEmpty()) {
+    co_await blockTasks.onEmpty();
+  }
+
+  // Don't commit if shutdown() has been called, or if one of the blockTasks threw, or we broke
+  // for any other reason before the transaction could complete.
   requireNotBroken();
 
   // Start the schedule request before commit(), for correctness in workerd.
@@ -587,6 +615,9 @@ kj::Promise<void> ActorSqlite::commitImpl(
 }
 
 void ActorSqlite::taskFailed(kj::Exception&& exception) {
+  // commitTasks and blockTasks both use this taskFailed callback. In either case, we just want
+  // to mark ourselves broken.
+
   // The output gate should already have been broken since it wraps all commit tasks that can
   // throw. So, we don't have to report anything here, the exception will already propagate
   // elsewhere. We should block further operations, though.

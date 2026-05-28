@@ -60,6 +60,22 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     return !currentTxn.is<NoTxn>() || deleteAllCommitScheduled;
   }
 
+  // Prevents the current transaction from being committed until `promise` resolves. This is used
+  // when storing an external capability that requires performing some async RPC to obtain the
+  // token -- the transaction must be held open until the token is obtained and stored.
+  //
+  // For implicit transactions (or explicit synchronous transactions nested within an implicit
+  // transaction), extending the transaction lifetime may mean that several independent events get
+  // coalesced into a single transaction that normally wouldn't. That's fine, as long as the output
+  // gate stays closed until the commit actually happens.
+  //
+  // For explicit, asynchronous transactions, the input gate is locked until the transaction
+  // completes. This just means that the promise extends the input gate lock, preventing any other
+  // events from arriving until the transaction can finish.
+  //
+  // If no transaction is currently open, an implicit transaction is started.
+  void blockTransaction(kj::Promise<void> promise) override;
+
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override {
     return *db;
   }
@@ -278,6 +294,9 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   kj::Maybe<kj::ForkedPromise<void>> pendingCommit;
 
   kj::TaskSet commitTasks;
+
+  // Tasks queued by blockTransaction().
+  kj::TaskSet blockTasks;
 
   // Trace span for the current commit operation. Captured from each write and used
   // for the output gate lock hold trace when a non-allowUnconfirmed write occurs.

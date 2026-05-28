@@ -194,6 +194,16 @@ class ActorCacheInterface: public ActorCacheOps {
   // old-style DOs have asyncronous storage.
   virtual kj::Maybe<SqliteKv&> getSqliteKv() = 0;
 
+  // Prevents the current transaction from being committed until `promise` resolves. This is used
+  // when storing an external capability that requires performing some async RPC to obtain the
+  // token -- the transaction must be held open until the token is obtained and stored.
+  //
+  // This is only supported for SQLite-backed actor storage. For non-SQLite backends, calling this
+  // method is a programming error.
+  //
+  // See `ActorSqlite::blockTransaction()` for additional details on the semantics.
+  virtual void blockTransaction(kj::Promise<void> promise) = 0;
+
   class Transaction: public ActorCacheOps {
    public:
     // Write all changes to the underlying ActorCache.
@@ -364,6 +374,9 @@ class ActorCache final: public ActorCacheInterface {
   }
   kj::Maybe<SqliteKv&> getSqliteKv() override {
     return kj::none;
+  }
+  void blockTransaction(kj::Promise<void> promise) override {
+    KJ_UNIMPLEMENTED("blockTransaction() is only supported on SQLite-backed actors");
   }
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
