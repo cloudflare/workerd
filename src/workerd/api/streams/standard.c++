@@ -2827,11 +2827,11 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // If it is a BYOB read, then the spec requires that we return an empty
       // view of the same type provided, that uses the same backing memory
       // as that provided, but with zero-length.
-      auto source = jsg::BufferSource(js, byobOptions.bufferView.getHandle(js));
-      auto store = source.detach(js);
-      store.consume(store.size());
+      jsg::JsArrayBufferView view(byobOptions.bufferView.getHandle(js));
+      auto store = view.detachAndTake(js);
+      store = store.slice(js, 0, 0);
       return js.resolvedPromise(ReadResult{
-        .value = jsg::JsValue(store.createHandle(js)).addRef(js),
+        .value = jsg::JsValue(store).addRef(js),
         .done = true,
       });
     }
