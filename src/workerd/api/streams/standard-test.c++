@@ -527,7 +527,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, wrong type)") {
           // require at least three reads to complete: one for the first chunk, 'hello, ',
           // one for the second chunk, 'world!', and one to signal close.
           KJ_CASE_ONEOF(c, jsg::Ref<ReadableStreamDefaultController>) {
-            c->enqueue(js, js.str("wrong type"_kjc));
+            c->enqueue(js, js.num(123));
             checked++;
             return js.resolvedPromise();
           }

@@ -3310,6 +3310,20 @@ class AllReader {
   kj::Vector<jsg::JsRef<jsg::JsBufferSource>> parts;
   uint64_t runningTotal = 0;
 
+  kj::Maybe<jsg::JsBufferSource> processChunk(jsg::Lock& js, const jsg::JsValue& value) {
+    KJ_IF_SOME(ab, value.tryCast<jsg::JsArrayBuffer>()) {
+      return jsg::JsBufferSource(ab);
+    } else KJ_IF_SOME(sab, value.tryCast<jsg::JsSharedArrayBuffer>()) {
+      return jsg::JsBufferSource(sab);
+    } else KJ_IF_SOME(view, value.tryCast<jsg::JsArrayBufferView>()) {
+      return jsg::JsBufferSource(view);
+    } else KJ_IF_SOME(str, value.tryCast<jsg::JsString>()) {
+      auto s = str.toString(js);
+      return jsg::JsBufferSource(jsg::JsUint8Array::create(js, s.asBytes()));
+    }
+    return kj::none;
+  }
+
   jsg::Promise<PartList> loop(jsg::Lock& js) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
@@ -3332,33 +3346,32 @@ class AllReader {
             return loop(js);
           }
 
+          auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
           // If we're not done, the result value must be interpretable as
           // bytes for the read to make any sense.
-          auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
-          if (!handle.isArrayBufferView() && !handle.isArrayBuffer()) {
+          KJ_IF_SOME(chunk, processChunk(js, handle)) {
+            size_t len = chunk.size();
+            if (len == 0) {
+              // Weird but allowed, we'll skip it.
+              return loop(js);
+            }
+
+            if ((runningTotal + len) > limit) {
+              auto error = js.typeError("Memory limit exceeded before EOF.");
+              state.template transitionTo<StreamStates::Errored>(error.addRef(js));
+              return readable->getController().cancel(js, error).then(
+                  js, [&](jsg::Lock& js) { return loop(js); });
+            }
+
+            runningTotal += len;
+            parts.add(chunk.addRef(js));
+            return loop(js);
+          } else {
             auto error = js.typeError("This ReadableStream did not return bytes.");
             state.template transitionTo<StreamStates::Errored>(error.addRef(js));
             return readable->getController().cancel(js, error).then(
                 js, [&](jsg::Lock& js) { return loop(js); });
           }
-
-          jsg::JsBufferSource bufferSource(handle);
-
-          if (bufferSource.size() == 0) {
-            // Weird but allowed, we'll skip it.
-            return loop(js);
-          }
-
-          if ((runningTotal + bufferSource.size()) > limit) {
-            auto error = js.typeError("Memory limit exceeded before EOF.");
-            state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-            return readable->getController().cancel(js, error).then(
-                js, [&](jsg::Lock& js) { return loop(js); });
-          }
-
-          runningTotal += bufferSource.size();
-          parts.add(bufferSource.addRef(js));
-          return loop(js);
         };
 
         auto onFailure = [this](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
