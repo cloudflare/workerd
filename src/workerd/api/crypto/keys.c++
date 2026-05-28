@@ -453,9 +453,10 @@ AsymmetricKeyData importAsymmetricForWebCrypto(jsg::Lock& js,
 
     return {readJwk(kj::mv(keyDataJwk)), keyType, usages};
   } else if (format == "spki") {
-    kj::ArrayPtr<const kj::byte> keyBytes =
-        JSG_REQUIRE_NONNULL(keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
-            "SPKI import requires an ArrayBuffer.");
+    auto& source = JSG_REQUIRE_NONNULL(keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>(),
+        DOMDataError, "SPKI import requires an ArrayBuffer.");
+    auto handle = source.getHandle(js);
+    kj::ArrayPtr<const kj::byte> keyBytes = handle.asArrayPtr();
     const kj::byte* ptr = keyBytes.begin();
     auto evpPkey = OSSLCALL_OWN(
         EVP_PKEY, d2i_PUBKEY(nullptr, &ptr, keyBytes.size()), DOMDataError, "Invalid SPKI input.");
@@ -472,9 +473,10 @@ AsymmetricKeyData importAsymmetricForWebCrypto(jsg::Lock& js,
             (normalizedName == "ECDH" ? CryptoKeyUsageSet() : CryptoKeyUsageSet::publicKeyMask()));
     return {kj::mv(evpPkey), KeyType::PUBLIC, usages};
   } else if (format == "pkcs8") {
-    kj::ArrayPtr<const kj::byte> keyBytes =
-        JSG_REQUIRE_NONNULL(keyData.tryGet<kj::Array<kj::byte>>(), DOMDataError,
-            "PKCS8 import requires an ArrayBuffer.");
+    auto& source = JSG_REQUIRE_NONNULL(keyData.tryGet<jsg::JsRef<jsg::JsBufferSource>>(),
+        DOMDataError, "PKCS8 import requires an ArrayBuffer.");
+    auto handle = source.getHandle(js);
+    kj::ArrayPtr<const kj::byte> keyBytes = handle.asArrayPtr();
     const kj::byte* ptr = keyBytes.begin();
     auto evpPkey = OSSLCALL_OWN(EVP_PKEY, d2i_AutoPrivateKey(nullptr, &ptr, keyBytes.size()),
         DOMDataError, "Invalid PKCS8 input.");

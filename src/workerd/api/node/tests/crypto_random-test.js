@@ -438,6 +438,74 @@ export const randomFillSyncTest = {
   },
 };
 
+// Regression: randomFillSync with DataView was silently filling zero bytes
+// because DataView has no .length property (only .byteLength).
+export const randomFillSyncDataView = {
+  async test() {
+    const { randomFillSync } = await import('node:crypto');
+
+    // DataView without explicit offset/size — should fill all 8 bytes.
+    const ab = new ArrayBuffer(16);
+    const dv = new DataView(ab, 4, 8);
+    randomFillSync(dv);
+
+    // Verify the DataView region was actually filled (not left as zeros).
+    // With 8 random bytes, P(all zero) = 2^-64 — negligible false-positive.
+    const filled = new Uint8Array(ab, 4, 8);
+    let allZero = true;
+    for (let i = 0; i < filled.length; i++) {
+      if (filled[i] !== 0) {
+        allZero = false;
+        break;
+      }
+    }
+    if (allZero)
+      throw new Error('DataView region was not filled with random data');
+
+    // Verify bytes outside the DataView window were NOT touched.
+    const before = new Uint8Array(ab, 0, 4);
+    const after = new Uint8Array(ab, 12, 4);
+    for (let i = 0; i < 4; i++) {
+      strictEqual(
+        before[i],
+        0,
+        `byte before DataView at ${i} should be untouched`
+      );
+      strictEqual(
+        after[i],
+        0,
+        `byte after DataView at ${i} should be untouched`
+      );
+    }
+
+    // DataView with explicit offset and size args.
+    const ab2 = new ArrayBuffer(16);
+    const dv2 = new DataView(ab2);
+    randomFillSync(dv2, 2, 4);
+    const slice = new Uint8Array(ab2, 2, 4);
+    allZero = true;
+    for (let i = 0; i < slice.length; i++) {
+      if (slice[i] !== 0) {
+        allZero = false;
+        break;
+      }
+    }
+    if (allZero) throw new Error('DataView with offset/size was not filled');
+
+    // Bytes outside the fill region should be untouched.
+    strictEqual(
+      new Uint8Array(ab2, 0, 2).every((b) => b === 0),
+      true,
+      'bytes before fill region should be zero'
+    );
+    strictEqual(
+      new Uint8Array(ab2, 6, 10).every((b) => b === 0),
+      true,
+      'bytes after fill region should be zero'
+    );
+  },
+};
+
 // Ref: https://github.com/cloudflare/workerd/issues/2716
 export const getRandomValuesIllegalInvocation = {
   async test() {

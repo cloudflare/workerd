@@ -11,8 +11,8 @@ namespace workerd::api {
 class DiffieHellman final {
  public:
   DiffieHellman(kj::StringPtr group);
-  DiffieHellman(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
-      kj::OneOf<kj::Array<kj::byte>, int>& generator);
+  DiffieHellman(kj::OneOf<kj::ArrayPtr<kj::byte>, int>& sizeOrKey,
+      kj::OneOf<kj::ArrayPtr<kj::byte>, int>& generator);
   DiffieHellman(DiffieHellman&&) = default;
   DiffieHellman& operator=(DiffieHellman&&) = default;
   KJ_DISALLOW_COPY(DiffieHellman);

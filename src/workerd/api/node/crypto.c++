@@ -17,15 +17,24 @@
 using namespace std::string_view_literals;
 
 namespace workerd::api::node {
+namespace {
+// BoringSSL does not tolerate null pointers even when the length is zero.
+// JsBufferSource::asArrayPtr() can return {nullptr, 0} for empty buffers,
+// so we ensure a non-null pointer before passing to OpenSSL.
+kj::ArrayPtr<kj::byte> nonNullBytes(kj::ArrayPtr<kj::byte> ptr) {
+  static kj::byte DUMMY = 0;
+  return ptr == nullptr ? kj::arrayPtr(&DUMMY, 0) : ptr;
+}
+}  // namespace
 
 // ======================================================================================
 #pragma region KDF
 
 jsg::JsArrayBuffer CryptoImpl::getHkdf(jsg::Lock& js,
     kj::String hash,
-    kj::Array<const kj::byte> key,
-    kj::Array<const kj::byte> salt,
-    kj::Array<const kj::byte> info,
+    jsg::JsBufferSource key,
+    jsg::JsBufferSource salt,
+    jsg::JsBufferSource info,
     uint32_t length) {
   // The Node.js version of the HKDF is a bit different from the Web Crypto API
   // version. For one, the length here specifies the number of bytes, whereas
@@ -44,12 +53,14 @@ jsg::JsArrayBuffer CryptoImpl::getHkdf(jsg::Lock& js,
   JSG_REQUIRE(key.size() <= INT32_MAX, RangeError, "Hkdf failed: key is too large");
   JSG_REQUIRE(ncrypto::checkHkdfLength(digest, length), RangeError, "Invalid Hkdf key length");
 
-  return JSG_REQUIRE_NONNULL(api::hkdf(js, length, digest, key, salt, info), Error, "Hkdf failed");
+  return JSG_REQUIRE_NONNULL(api::hkdf(js, length, digest, nonNullBytes(key.asArrayPtr()),
+                                 nonNullBytes(salt.asArrayPtr()), nonNullBytes(info.asArrayPtr())),
+      Error, "Hkdf failed");
 }
 
 jsg::JsArrayBuffer CryptoImpl::getPbkdf(jsg::Lock& js,
-    kj::Array<const kj::byte> password,
-    kj::Array<const kj::byte> salt,
+    jsg::JsBufferSource password,
+    jsg::JsBufferSource salt,
     uint32_t num_iterations,
     uint32_t keylen,
     kj::String name) {
@@ -71,12 +82,14 @@ jsg::JsArrayBuffer CryptoImpl::getPbkdf(jsg::Lock& js,
       "Pbkdf2 failed: derived key length exceeds maximum for this hash");
 
   return JSG_REQUIRE_NONNULL(
-      api::pbkdf2(js, keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
+      api::pbkdf2(js, keylen, num_iterations, digest, nonNullBytes(password.asArrayPtr()),
+          nonNullBytes(salt.asArrayPtr())),
+      Error, "Pbkdf2 failed");
 }
 
 jsg::JsArrayBuffer CryptoImpl::getScrypt(jsg::Lock& js,
-    kj::Array<const kj::byte> password,
-    kj::Array<const kj::byte> salt,
+    jsg::JsBufferSource password,
+    jsg::JsBufferSource salt,
     uint32_t N,
     uint32_t r,
     uint32_t p,
@@ -87,25 +100,25 @@ jsg::JsArrayBuffer CryptoImpl::getScrypt(jsg::Lock& js,
   checkScryptLimits(js, N, r, p);
 
   return JSG_REQUIRE_NONNULL(
-      api::scrypt(js, keylen, N, r, p, maxmem, password, salt), Error, "Scrypt failed");
+      api::scrypt(js, keylen, N, r, p, maxmem, nonNullBytes(password.asArrayPtr()),
+          nonNullBytes(salt.asArrayPtr())),
+      Error, "Scrypt failed");
 }
 #pragma endregion  // KDF
 
 // ======================================================================================
 #pragma region SPKAC
 
-bool CryptoImpl::verifySpkac(kj::Array<const kj::byte> input) {
-  return workerd::api::verifySpkac(input);
+bool CryptoImpl::verifySpkac(jsg::Lock& js, jsg::JsBufferSource input) {
+  return workerd::api::verifySpkac(nonNullBytes(input.asArrayPtr()));
 }
 
-kj::Maybe<jsg::JsUint8Array> CryptoImpl::exportPublicKey(
-    jsg::Lock& js, kj::Array<const kj::byte> input) {
-  return workerd::api::exportPublicKey(js, input);
+kj::Maybe<jsg::JsUint8Array> CryptoImpl::exportPublicKey(jsg::Lock& js, jsg::JsBufferSource input) {
+  return workerd::api::exportPublicKey(js, nonNullBytes(input.asArrayPtr()));
 }
 
-kj::Maybe<jsg::JsUint8Array> CryptoImpl::exportChallenge(
-    jsg::Lock& js, kj::Array<const kj::byte> input) {
-  return workerd::api::exportChallenge(js, input);
+kj::Maybe<jsg::JsUint8Array> CryptoImpl::exportChallenge(jsg::Lock& js, jsg::JsBufferSource input) {
+  return workerd::api::exportChallenge(js, nonNullBytes(input.asArrayPtr()));
 }
 #pragma endregion  // SPKAC
 
@@ -115,25 +128,27 @@ kj::Maybe<jsg::JsUint8Array> CryptoImpl::exportChallenge(
 jsg::JsArrayBuffer CryptoImpl::randomPrime(jsg::Lock& js,
     uint32_t size,
     bool safe,
-    jsg::Optional<kj::Array<kj::byte>> add_buf,
-    jsg::Optional<kj::Array<kj::byte>> rem_buf) {
+    jsg::Optional<jsg::JsBufferSource> add_buf,
+    jsg::Optional<jsg::JsBufferSource> rem_buf) {
   return workerd::api::randomPrime(js, size, safe,
-      add_buf.map([](kj::Array<kj::byte>& buf) { return buf.asPtr(); }),
-      rem_buf.map([](kj::Array<kj::byte>& buf) { return buf.asPtr(); }));
+      add_buf.map([&](jsg::JsBufferSource& buf) mutable { return nonNullBytes(buf.asArrayPtr()); }),
+      rem_buf.map(
+          [&](jsg::JsBufferSource& buf) mutable { return nonNullBytes(buf.asArrayPtr()); }));
 }
 
-bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks) {
-  return workerd::api::checkPrime(bufferView.asPtr(), num_checks);
+bool CryptoImpl::checkPrimeSync(
+    jsg::Lock& js, jsg::JsBufferSource bufferView, uint32_t num_checks) {
+  return workerd::api::checkPrime(nonNullBytes(bufferView.asArrayPtr()), num_checks);
 }
 #pragma endregion  // Primes
 
 // ======================================================================================
 #pragma region Hmac
 jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
-    jsg::Lock& js, kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
+    jsg::Lock& js, kj::String algorithm, KeyParam key) {
   KJ_SWITCH_ONEOF(key) {
-    KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
-      return js.alloc<HmacHandle>(HmacContext(js, algorithm, key_data.asPtr()));
+    KJ_CASE_ONEOF(key_data, jsg::JsBufferSource) {
+      return js.alloc<HmacHandle>(HmacContext(js, algorithm, nonNullBytes(key_data.asArrayPtr())));
     }
     KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
       return js.alloc<HmacHandle>(HmacContext(js, algorithm, key->impl.get()));
@@ -142,8 +157,8 @@ jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
   KJ_UNREACHABLE;
 }
 
-int CryptoImpl::HmacHandle::update(kj::Array<kj::byte> data) {
-  ctx.update(data);
+int CryptoImpl::HmacHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
+  ctx.update(nonNullBytes(data.asArrayPtr()));
   return 1;  // This just always returns 1 no matter what.
 }
 
@@ -154,16 +169,16 @@ jsg::JsUint8Array CryptoImpl::HmacHandle::digest(jsg::Lock& js) {
 jsg::JsUint8Array CryptoImpl::HmacHandle::oneshot(jsg::Lock& js,
     kj::String algorithm,
     CryptoImpl::HmacHandle::KeyParam key,
-    kj::Array<kj::byte> data) {
+    jsg::JsBufferSource data) {
   KJ_SWITCH_ONEOF(key) {
-    KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
-      HmacContext ctx(js, algorithm, key_data.asPtr());
-      ctx.update(data);
+    KJ_CASE_ONEOF(key_data, jsg::JsBufferSource) {
+      HmacContext ctx(js, algorithm, nonNullBytes(key_data.asArrayPtr()));
+      ctx.update(nonNullBytes(data.asArrayPtr()));
       return ctx.digest(js);
     }
     KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
       HmacContext ctx(js, algorithm, key->impl.get());
-      ctx.update(data);
+      ctx.update(nonNullBytes(data.asArrayPtr()));
       return ctx.digest(js);
     }
   }
@@ -182,8 +197,8 @@ jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::constructor(
   return js.alloc<HashHandle>(HashContext(algorithm, xofLen));
 }
 
-int CryptoImpl::HashHandle::update(kj::Array<kj::byte> data) {
-  ctx.update(data);
+int CryptoImpl::HashHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {
+  ctx.update(nonNullBytes(data.asArrayPtr()));
   return 1;
 }
 
@@ -201,9 +216,9 @@ void CryptoImpl::HashHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) con
 }
 
 jsg::JsUint8Array CryptoImpl::HashHandle::oneshot(
-    jsg::Lock& js, kj::String algorithm, kj::Array<kj::byte> data, kj::Maybe<uint32_t> xofLen) {
+    jsg::Lock& js, kj::String algorithm, jsg::JsBufferSource data, kj::Maybe<uint32_t> xofLen) {
   HashContext ctx(algorithm, xofLen);
-  ctx.update(data);
+  ctx.update(nonNullBytes(data.asArrayPtr()));
   return ctx.digest(js);
 }
 #pragma endregion Hash
@@ -218,21 +233,43 @@ jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanGroupHandle(
 
 jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanHandle::constructor(
     jsg::Lock& js,
-    kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
-    kj::OneOf<kj::Array<kj::byte>, int> generator) {
-  return js.alloc<DiffieHellmanHandle>(DiffieHellman(sizeOrKey, generator));
+    kj::OneOf<jsg::JsBufferSource, int> sizeOrKey,
+    kj::OneOf<jsg::JsBufferSource, int> generator) {
+  auto sizeOrKeyParam = [&]() -> kj::OneOf<kj::ArrayPtr<kj::byte>, int> {
+    KJ_SWITCH_ONEOF(sizeOrKey) {
+      KJ_CASE_ONEOF(size, int) {
+        return size;
+      }
+      KJ_CASE_ONEOF(key, jsg::JsBufferSource) {
+        return nonNullBytes(key.asArrayPtr());
+      }
+    }
+    KJ_UNREACHABLE;
+  }();
+  auto generatorParam = [&]() -> kj::OneOf<kj::ArrayPtr<kj::byte>, int> {
+    KJ_SWITCH_ONEOF(generator) {
+      KJ_CASE_ONEOF(gen, int) {
+        return gen;
+      }
+      KJ_CASE_ONEOF(gen, jsg::JsBufferSource) {
+        return nonNullBytes(gen.asArrayPtr());
+      }
+    }
+    KJ_UNREACHABLE;
+  }();
+  return js.alloc<DiffieHellmanHandle>(DiffieHellman(sizeOrKeyParam, generatorParam));
 }
 
 CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(DiffieHellman dh): dh(kj::mv(dh)) {
   verifyError = JSG_REQUIRE_NONNULL(this->dh.check(), Error, "DiffieHellman init failed");
 };
 
-void CryptoImpl::DiffieHellmanHandle::setPrivateKey(kj::Array<kj::byte> key) {
-  dh.setPrivateKey(key);
+void CryptoImpl::DiffieHellmanHandle::setPrivateKey(jsg::Lock& js, jsg::JsBufferSource key) {
+  dh.setPrivateKey(nonNullBytes(key.asArrayPtr()));
 }
 
-void CryptoImpl::DiffieHellmanHandle::setPublicKey(kj::Array<kj::byte> key) {
-  dh.setPublicKey(key);
+void CryptoImpl::DiffieHellmanHandle::setPublicKey(jsg::Lock& js, jsg::JsBufferSource key) {
+  dh.setPublicKey(nonNullBytes(key.asArrayPtr()));
 }
 
 jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::getPublicKey(jsg::Lock& js) {
@@ -252,8 +289,8 @@ jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::getPrime(jsg::Lock& js) {
 }
 
 jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::computeSecret(
-    jsg::Lock& js, kj::Array<kj::byte> key) {
-  return dh.computeSecret(js, key);
+    jsg::Lock& js, jsg::JsBufferSource key) {
+  return dh.computeSecret(js, nonNullBytes(key.asArrayPtr()));
 }
 
 jsg::JsUint8Array CryptoImpl::DiffieHellmanHandle::generateKeys(jsg::Lock& js) {
@@ -756,9 +793,7 @@ jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::construct(jsg::Lock
   // Copy the IV into C++-owned memory so that later modifications to the JS buffer
   // cannot affect the cipher. This matches Node.js, which copies the IV into OpenSSL
   // at init time.
-  auto ivCopy = kj::heapArray<kj::byte>(iv.asArrayPtr());
-  return js.alloc<CipherHandle>(
-      mode, kj::mv(ctx), kj::mv(key), kj::mv(ivCopy), kj::mv(maybeAuthInfo));
+  return js.alloc<CipherHandle>(mode, kj::mv(ctx), kj::mv(key), iv.copy(), kj::mv(maybeAuthInfo));
 }
 
 jsg::JsUint8Array CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::JsBufferSource data) {

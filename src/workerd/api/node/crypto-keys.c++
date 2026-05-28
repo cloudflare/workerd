@@ -406,8 +406,9 @@ kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> CryptoImpl::
   }
 
   kj::StringPtr type = JSG_REQUIRE_NONNULL(opts.type, TypeError, "Missing type option");
-  auto data =
-      key->impl->exportKeyExt(js, format, type, kj::mv(opts.cipher), kj::mv(opts.passphrase));
+  auto maybePass = opts.passphrase.map(
+      [&](auto& pass) mutable -> kj::Array<kj::byte> { return pass.getHandle(js).copy(); });
+  auto data = key->impl->exportKeyExt(js, format, type, kj::mv(opts.cipher), kj::mv(maybePass));
   if (format == "pem"_kj) {
     // TODO(perf): As a later performance optimization, change this so that it doesn't copy.
     return kj::str(data.asArrayPtr().asChars());
