@@ -90,13 +90,22 @@ class IoContext_IncomingRequest final {
   // If delivered() is never called, then drain() need not be called.
   void delivered(kj::SourceLocation = kj::SourceLocation());
 
-  // Waits until the request is "done". For non-actor requests this means waiting until
-  // all "waitUntil" tasks finish, applying the "soft timeout" time limit from WorkerLimits.
+  // Continues running the request in the background until it is "done", scheduling the work into
+  // `waitUntilTasks` and keeping `self` alive until work is finished.
+  //
+  // For non-actor requests this means waiting until all "waitUntil" tasks finish, applying the
+  // "soft timeout" time limit from WorkerLimits.
   //
   // For actor requests, this means waiting until either all tasks have finished (not just
   // waitUntil, all tasks), or a new incoming request has been received (which then takes over
   // responsibility for waiting for tasks), or the actor is shut down.
-  kj::Promise<void> drain();
+  //
+  // Note: `self` is declared as an rvalue reference here to ensure that if you write something
+  //   like `incomingRequest->drain(tasks, kj::mv(incomingRequest))`, the value of
+  //   `incomingRequest` will not be moved away until after the invocation of `drain()`. Otherwise,
+  //   the evaluation order would be unspecified and `incomingRequest->drain()` could be
+  //   dereferencing a moved-away pointer.
+  void drain(kj::TaskSet& waitUntilTasks, kj::Own<IoContext_IncomingRequest>&& self);
 
   // Waits for all "waitUntil" tasks to finish, up to the time limit for scheduled events, as
   // defined by `scheduledTimeoutMs` in `WorkerLimits`. Returns an enum indicating the event outcome
@@ -110,7 +119,12 @@ class IoContext_IncomingRequest final {
   // This method is also used by some custom event handlers (see WorkerInterface::CustomEvent) that
   // need similar behavior, as well as the test handler. TODO(cleanup): Rename to something more
   // generic?
-  kj::Promise<EventOutcome> finishScheduled();
+  //
+  // Similar to drain(), the IncomingRequest self-reference needs to be passed into this method.
+  // This allows finishScheduled() to arrange for the IncomingRequest to be *synchronously* dropped
+  // in certain situations (such as when an Actor is aborted).
+  kj::Promise<WorkerInterface::ScheduledResult> finishScheduled(
+      kj::Own<IoContext_IncomingRequest>&& self);
 
   // Access the event loop's current time point. This will remain constant between ticks. This is
   // used to implement IoContext::now(), which should be preferred so that time can be adjusted
@@ -171,6 +185,9 @@ class IoContext_IncomingRequest final {
 
   // Tracks the location where delivered() was called for debugging.
   kj::Maybe<kj::SourceLocation> deliveredLocation;
+
+  template <typename T>
+  kj::Promise<T> maybeAddGcPassForTest(kj::Promise<T> promise);
 
   friend class IoContext;
 };
@@ -321,6 +338,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // incoming tasks.
   kj::Promise<void> onAbort() {
     return abortPromise.addBranch();
+  }
+
+  // If this IoContext has been aborted already, return the abort reason.
+  kj::Maybe<kj::Exception> getAbortReason() {
+    return abortException.clone();
   }
 
   // Force context abort now.

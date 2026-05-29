@@ -87,6 +87,7 @@ class WorkerEntrypoint final: public WorkerInterface {
 
   ThreadContext& threadContext;
   kj::TaskSet& waitUntilTasks;
+  kj::Maybe<kj::Canceler&> canceler;
   kj::Maybe<kj::Own<IoContext::IncomingRequest>> incomingRequest;
   bool tunnelExceptions;
   bool isDynamicDispatch;
@@ -112,18 +113,31 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
 
-  template <typename T>
-  kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
+  kj::Promise<void> requestImpl(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response);
 
   kj::Promise<WorkerEntrypoint::AlarmResult> runAlarmImpl(
       kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Date scheduledTime,
       uint32_t retryCount);
 
+  template <typename T>
+  kj::Promise<T> wrapWithCanceler(kj::Promise<T> promise) {
+    KJ_IF_SOME(c, canceler) {
+      return c.wrap(kj::mv(promise));
+    } else {
+      return kj::mv(promise);
+    }
+  }
+
  public:  // For kj::heap() only; pretend this is private.
   WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       ThreadContext& threadContext,
       kj::TaskSet& waitUntilTasks,
+      kj::Maybe<kj::Canceler&> canceler,
       bool tunnelExceptions,
       bool isDynamicDispatch,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -187,8 +201,14 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     bool isDynamicDispatch) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
 
+  // Arrange to forcefully cancel work when the Actor is aborted.
+  kj::Maybe<kj::Canceler&> canceler;
+  KJ_IF_SOME(a, actor) {
+    canceler = a->getAbortCanceler();
+  }
+
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
-      waitUntilTasks, tunnelExceptions, isDynamicDispatch, entrypointName, kj::mv(props),
+      waitUntilTasks, canceler, tunnelExceptions, isDynamicDispatch, entrypointName, kj::mv(props),
       kj::mv(cfBlobJson), kj::mv(versionInfo));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
@@ -200,6 +220,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
 WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     ThreadContext& threadContext,
     kj::TaskSet& waitUntilTasks,
+    kj::Maybe<kj::Canceler&> canceler,
     bool tunnelExceptions,
     bool isDynamicDispatch,
     kj::Maybe<kj::StringPtr> entrypointName,
@@ -208,6 +229,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     kj::Maybe<Worker::VersionInfo> versionInfo)
     : threadContext(threadContext),
       waitUntilTasks(waitUntilTasks),
+      canceler(canceler),
       tunnelExceptions(tunnelExceptions),
       isDynamicDispatch(isDynamicDispatch),
       entrypointName(entrypointName),
@@ -312,6 +334,14 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
+  return wrapWithCanceler(requestImpl(method, url, headers, requestBody, response));
+}
+
+kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
+    kj::StringPtr url,
+    const kj::HttpHeaders& headers,
+    kj::AsyncInputStream& requestBody,
+    Response& response) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::request()", "url", url.cStr(),
       PERFETTO_FLOW_FROM_POINTER(this));
 
@@ -381,8 +411,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         // Either the waitUntilTask holds a reference to it, or it will never be triggered at all.
         abortController = kj::none;
 
-        auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
-        waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
+        incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
       });
 
       KJ_TRY {
@@ -580,8 +609,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
     KJ_DEFER({
       // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
-      auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
-      waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
+      incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
     });
     // connect_pass_through feature flag means we should just forward the connect request on to
     // the global outbound.
@@ -611,10 +639,11 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
 
-  return context
-      .run(
-          [this, &headers, &context, &connection, &response, entrypointName = entrypointName,
-              versionInfo = kj::mv(versionInfo), host = kj::str(host)](Worker::Lock& lock) mutable {
+  return wrapWithCanceler(
+      context
+          .run([this, &headers, &context, &connection, &response, entrypointName = entrypointName,
+                   versionInfo = kj::mv(versionInfo),
+                   host = kj::str(host)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
@@ -622,12 +651,12 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
         lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch));
   })
-      .then([&context, workerTracer]() {
+          .then([&context, workerTracer]() {
     KJ_IF_SOME(t, workerTracer) {
       t.setReturn(context.now());
     }
   })
-      .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
+          .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Log JS exceptions to the JS console, if inspector is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
@@ -640,13 +669,12 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       return kj::mv(exception);
     });
   })
-      .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest), &context]() mutable {
+          .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest)]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.
-    auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
-    waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
+    incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   }))
-      .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
-                  kj::Exception&& exception) mutable -> kj::Promise<void> {
+          .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
+                      kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.
     auto isInternalException = !jsg::isTunneledException(exception.getDescription()) &&
         !jsg::isDoNotLogException(exception.getDescription());
@@ -686,7 +714,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
       return kj::READY_NOW;
     }
-  });
+  }));
 }
 
 kj::Promise<void> WorkerEntrypoint::prewarm(kj::StringPtr url) {
@@ -740,19 +768,13 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
             entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor()));
   }));
 
-  static auto constexpr waitForFinished = [](IoContext& context,
-                                              kj::Own<IoContext::IncomingRequest> request)
+  static auto constexpr waitForFinished = [](kj::Own<IoContext::IncomingRequest> request)
       -> kj::Promise<WorkerInterface::ScheduledResult> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() waitForFinished()");
-    auto scheduledResult = co_await request->finishScheduled();
-    bool completed = scheduledResult == EventOutcome::OK;
-    co_return WorkerInterface::ScheduledResult{.retry = context.shouldRetryScheduled(),
-      .outcome = completed ? context.waitUntilStatus() : scheduledResult};
+    return request->finishScheduled(kj::mv(request));
   };
 
-  auto promise = waitForFinished(context, kj::mv(incomingRequest));
-
-  return maybeAddGcPassForTest(context, kj::mv(promise));
+  return wrapWithCanceler(waitForFinished(kj::mv(incomingRequest)));
 }
 
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
@@ -804,7 +826,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
       KJ_DEFER({
         // The alarm has finished but allow the request to continue executing in the background.
-        waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+        incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
       });
 
       try {
@@ -872,8 +894,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
   this->incomingRequest = kj::none;
 
   auto& context = incomingRequest->getContext();
-  auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount);
-  auto result = co_await maybeAddGcPassForTest(context, kj::mv(promise));
+  auto result =
+      co_await wrapWithCanceler(runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount));
   KJ_IF_SOME(t, context.getWorkerTracer()) {
     t.setReturn(context.now());
   }
@@ -920,34 +942,19 @@ kj::Promise<bool> WorkerEntrypoint::test() {
   }));
 
   static auto constexpr waitForFinished =
-      [](IoContext& context, kj::Own<IoContext::IncomingRequest> request) -> kj::Promise<bool> {
+      [](kj::Own<IoContext::IncomingRequest> request) -> kj::Promise<bool> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() waitForFinished()");
-    auto scheduledResult = co_await request->finishScheduled();
 
-    if (scheduledResult == EventOutcome::EXCEPTION) {
-      // If the test handler throws an exception (without aborting - just a regular exception),
-      // then `outcome` ends up being EventOutcome::EXCEPTION, which causes us to return false.
-      // But in that case we are separately relying on the exception being logged as an uncaught
-      // exception, rather than throwing it.
-      // This is why we don't rethrow the exception but rather log it as an uncaught exception.
-      try {
-        co_await context.onAbort();
-      } catch (...) {
-        auto exception = kj::getCaughtExceptionAsKj();
-        KJ_LOG(ERROR, exception);
-      }
-    }
+    auto scheduledResult = co_await request->finishScheduled(kj::mv(request));
 
     // Not adding a return event here – we only provide rudimentary tracing support for test events
     // (enough so that we can get logs/spans from them in wd-tests), so this is not needed in
     // practice.
 
-    bool completed = scheduledResult == EventOutcome::OK;
-    auto outcome = completed ? context.waitUntilStatus() : scheduledResult;
-    co_return outcome == EventOutcome::OK;
+    co_return scheduledResult.outcome == EventOutcome::OK;
   };
 
-  return maybeAddGcPassForTest(context, waitForFinished(context, kj::mv(incomingRequest)));
+  return wrapWithCanceler(waitForFinished(kj::mv(incomingRequest)));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
@@ -957,8 +964,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "customEvent() can only be called once"));
   this->incomingRequest = kj::none;
 
-  auto& context = incomingRequest->getContext();
-
   // Set event info BEFORE calling run() to ensure onset event is reported before
   // any user code executes (particularly important for actors whose constructors may run
   // during delivered()).
@@ -966,52 +971,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
     t.setEventInfo(*incomingRequest, event->getEventInfo());
   }
 
-  auto promise = event
-                     ->run(kj::mv(incomingRequest), entrypointName, kj::mv(versionInfo),
-                         kj::mv(props), waitUntilTasks, isDynamicDispatch)
-                     .attach(kj::mv(event));
-
-  // TODO(cleanup): In theory `context` may have been destroyed by now if `event->run()` dropped
-  //   the `incomingRequest` synchronously. No current implementation does that, and
-  //   maybeAddGcPassForTest() is a no-op outside of tests, so I'm ignoring the theoretical problem
-  //   for now. Otherwise we will need to `atomicAddRef()` the `Worker` at some point earlier on
-  //   but I'd like to avoid that in the non-test case.
-  return maybeAddGcPassForTest(context, kj::mv(promise));
-}
-
-#ifdef KJ_DEBUG
-void requestGc(const Worker& worker) {
-  TRACE_EVENT("workerd", "Debug: requestGc()");
-  jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    auto& isolate = worker.getIsolate();
-    auto lock = isolate.getApi().lock(stackScope);
-    lock->requestGcForTesting();
-  });
-}
-
-template <typename T>
-kj::Promise<T> addGcPassForTest(IoContext& context, kj::Promise<T> promise) {
-  TRACE_EVENT("workerd", "Debug: addGcPassForTest");
-  auto worker = kj::atomicAddRef(context.getWorker());
-  if constexpr (kj::isSameType<T, void>()) {
-    co_await promise;
-    requestGc(*worker);
-  } else {
-    auto ret = co_await promise;
-    requestGc(*worker);
-    co_return kj::mv(ret);
-  }
-}
-#endif
-
-template <typename T>
-kj::Promise<T> WorkerEntrypoint::maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise) {
-#ifdef KJ_DEBUG
-  if (isPredictableModeForTest()) {
-    return addGcPassForTest(context, kj::mv(promise));
-  }
-#endif
-  return kj::mv(promise);
+  return wrapWithCanceler(event
+                              ->run(kj::mv(incomingRequest), entrypointName, kj::mv(versionInfo),
+                                  kj::mv(props), waitUntilTasks, isDynamicDispatch)
+                              .attach(kj::mv(event)));
 }
 
 }  // namespace

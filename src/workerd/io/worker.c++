@@ -3737,6 +3737,10 @@ struct Worker::Actor::Impl {
   // Handles output locks.
   OutputGate outputGate;
 
+  // All incoming requests are registered with this, so that work can be forcefully canceled when
+  // the Actor is aborted.
+  kj::Canceler abortCanceler;
+
   // `ioContext` is initialized upon delivery of the first request.
   kj::Maybe<kj::Own<IoContext>> ioContext;
 
@@ -3830,6 +3834,11 @@ struct Worker::Actor::Impl {
         hibernationEventType(kj::mv(hibernationEventType)) {
     actorCache =
         makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks, *metrics);
+  }
+
+  ~Impl() noexcept(false) {
+    // Don't cancel anything if we weren't actually aborted.
+    abortCanceler.release();
   }
 };
 
@@ -4010,6 +4019,37 @@ void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
   }
 }
 
+void Worker::Actor::abort(const kj::Exception& error) {
+  KJ_IF_SOME(ctx, impl->ioContext) {
+    impl->metrics->shutdown(0, ctx->getLimitEnforcer());
+    ctx->abort(error.clone());
+  } else {
+    shutdownActorCache(error);
+  }
+  impl->shutdownFulfiller->fulfill();
+
+  // Now hard-cancel everything that might be using the actor.
+  //
+  // Canceling tasks can queue more tasks (especially drain() tasks), so keep canceling until
+  // nothing more is queued.
+  while (!impl->abortCanceler.isEmpty()) {
+    impl->abortCanceler.cancel(error);
+  }
+
+  KJ_IF_SOME(ctx, impl->ioContext) {
+    if (ctx->hasCurrentIncomingRequest()) {
+      // This should never happen, but if it does we'll defer killing the ioContext for fear of
+      // creating UaFs.
+      DEBUG_FATAL_RELEASE_LOG(ERROR, "abortCanceler wasn't able to cancel all IncomingRequests");
+    } else {
+      // Eagerly kill off the IoContext itself to ensure that all tasks are canceled, reentry
+      // callbacks are dead, etc.
+      impl->metricsFlushLoopTask = kj::none;
+      impl->ioContext = kj::none;
+    }
+  }
+}
+
 kj::Promise<void> Worker::Actor::onShutdown() {
   return impl->shutdownPromise.addBranch();
 }
@@ -4028,6 +4068,10 @@ kj::Promise<void> Worker::Actor::onBroken() {
   }
 
   return abortPromise;
+}
+
+kj::Canceler& Worker::Actor::getAbortCanceler() {
+  return impl->abortCanceler;
 }
 
 const Worker::Actor::Id& Worker::Actor::getId() {

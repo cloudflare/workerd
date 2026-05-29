@@ -1919,18 +1919,30 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
     // disconnects.
-    waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+    incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   });
 
   EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
       kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
-  capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
+  capnp::RevocableServer<rpc::JsRpcTarget> revocableTarget(target);
+
+  KJ_DEFER({
+    // If run() is canceled while a call is still in flight, then when the `RevocableServer` is
+    // destroyed, the in-flight request will be canceled with a not-very-friendly error message.
+    // If the cancellation occurred because the Actor or IoContext was aborted, we'd rather
+    // propagate the abort error. So check for one, and revoke with that if present.
+    KJ_IF_SOME(r, incomingRequest->getContext().getAbortReason()) {
+      revocableTarget.revoke(kj::mv(r));
+    } else {
+      // silence bogus clang warning about dangling else
+    }
+  });
 
   try {
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
     capFulfiller->fulfill(capnp::membrane(
-        revcableTarget.getClient(), kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))));
+        revocableTarget.getClient(), kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))));
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
@@ -1941,7 +1953,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // Make sure the top-level capability is revoked with the same exception that `run()` is
     // throwing, rather than some generic revocation exception.
     auto e = kj::getCaughtExceptionAsKj();
-    revcableTarget.revoke(e.clone());
+    revocableTarget.revoke(e.clone());
     kj::throwFatalException(kj::mv(e));
   }
 }

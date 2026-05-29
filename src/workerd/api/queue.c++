@@ -755,22 +755,26 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
       // It'd be nicer if we could fall through to the code below for the non-compat-flag logic in
       // this case, but we don't even know if the worker uses service worker syntax until after
       // runProm resolves, so we just copy the bare essentials here.
-      auto scheduledResult = co_await incomingRequest->finishScheduled();
-      bool completed = scheduledResult == EventOutcome::OK;
-      outcome = completed ? context.waitUntilStatus() : scheduledResult;
+      auto scheduledResult = co_await incomingRequest->finishScheduled(kj::mv(incomingRequest));
+      outcome = scheduledResult.outcome;
     } else {
       // We're responsible for calling drain() on the incomingRequest to ensure that waitUntil tasks
       // can continue to run in the backgound for a while even after we return a result to the
       // caller of this event. But this is only needed in this code path because in all other code
       // paths we call incomingRequest->finishScheduled(), which already takes care of waiting on
       // waitUntil tasks.
-      waitUntilTasks.add(incomingRequest->drain().attach(
-          kj::mv(incomingRequest), kj::addRef(*queueEventHolder), kj::addRef(*this)));
+      incomingRequest = incomingRequest.attach(kj::addRef(*queueEventHolder), kj::addRef(*this));
+
+      // If we happen to already know that a limit was exceeded, set the outcome here. If it
+      // happens later during the drain, that's just too late to report. Oh well. (Note that the
+      // `finishScheduled()` route already handles limit-exceeded outcomes internally.)
+      KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
+        outcome = status;
+      }
+
+      incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
     }
 
-    KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
-      outcome = status;
-    }
     co_return WorkerInterface::CustomEvent::Result{.outcome = outcome};
   } else {
     // The user has not opted in to the new waitUntil behavior, so we need to add the queue()
@@ -779,11 +783,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
 
     // We reuse the finishScheduled() method for convenience, since queues use the same wall clock
     // timeout as scheduled workers.
-    auto scheduledResult = co_await incomingRequest->finishScheduled();
-    bool completed = scheduledResult == EventOutcome::OK;
-
+    auto scheduledResult = co_await incomingRequest->finishScheduled(kj::mv(incomingRequest));
     co_return WorkerInterface::CustomEvent::Result{
-      .outcome = completed ? context.waitUntilStatus() : scheduledResult,
+      .outcome = scheduledResult.outcome,
     };
   }
 }

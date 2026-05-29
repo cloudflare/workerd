@@ -927,6 +927,7 @@ class Worker::Actor final: public kj::Refcounted {
         kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) = 0;
     virtual void abortFacet(kj::StringPtr name, kj::Exception reason) = 0;
     virtual void deleteFacet(kj::StringPtr name) = 0;
+    virtual void cloneFacet(kj::StringPtr src, kj::StringPtr dst) = 0;
   };
 
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
@@ -969,6 +970,11 @@ class Worker::Actor final: public kj::Refcounted {
   // interactions between `onAbort` and `onShutdown` promises.
   void shutdownActorCache(kj::Maybe<const kj::Exception&> error);
 
+  // Immediately, synchronously abort all work going on in the actor. All requests throw the
+  // given exception. All background work stops. Any async task that holds a strong reference on
+  // the Actor is canceled, so that there should be no more references floating around.
+  void abort(const kj::Exception& error);
+
   // Get a promise that resolves when `shutdown()` has been called.
   kj::Promise<void> onShutdown();
 
@@ -978,6 +984,11 @@ class Worker::Actor final: public kj::Refcounted {
   // in worker-set or process-sandbox code, in particular code updates and exceeded memory.
   // This method can only be called once.
   kj::Promise<void> onBroken();
+
+  // Get a canceler which will be canceled when `abort()` is called. All incoming requests to
+  // the actor and all background work should be wrapped in this canceler. (worker-entrypoint.c++
+  // takes care of this.)
+  kj::Canceler& getAbortCanceler();
 
   const Id& getId();
   Id cloneId();

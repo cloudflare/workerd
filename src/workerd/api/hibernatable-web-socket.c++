@@ -68,7 +68,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
   auto& context = incomingRequest->getContext();
   incomingRequest->delivered();
 
-  KJ_DEFER({ waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest))); });
+  KJ_DEFER({ incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest)); });
 
   EventOutcome outcome = EventOutcome::OK;
 
