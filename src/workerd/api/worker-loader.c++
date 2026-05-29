@@ -114,6 +114,31 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
   auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);
   CompatibilityFlags::Reader compatFlags = *ownCompatFlags;
 
+  // Set up compat flags for Python Workers so that the caller doesn't have to specify them manually.
+  if (code.mainModule.endsWith(".py"_kj)) {
+    capnp::MallocMessageBuilder flagsMessage;
+    flagsMessage.setRoot(compatFlags);
+    auto flagsBuilder = flagsMessage.getRoot<CompatibilityFlags>();
+    flagsBuilder.setPythonWorkers(true);
+    bool userExplicitlyEnabledExternalSdk = false;
+
+    KJ_IF_SOME(f, code.compatibilityFlags) {
+      for (auto& flag: f) {
+        if (flag == "enable_python_external_sdk") {
+          userExplicitlyEnabledExternalSdk = true;
+          break;
+        }
+      }
+    }
+    if (!userExplicitlyEnabledExternalSdk) {
+      // TODO: We currently need to disable this because we have no way to include the SDK
+      // in dynamic workers. Once RM-28738 is implemented we may be able to get rid of this.
+      flagsBuilder.setPythonExternalSDK(false);
+    }
+    ownCompatFlags = capnp::clone(flagsBuilder.asReader());
+    compatFlags = *ownCompatFlags;
+  }
+
   Frankenvalue env;
   KJ_IF_SOME(codeEnv, code.env) {
     env = Frankenvalue::fromJs(js, codeEnv.getHandle(js));
