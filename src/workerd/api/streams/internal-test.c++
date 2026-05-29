@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "identity-transform-stream.h"
 #include "internal.h"
 #include "readable.h"
 #include "standard.h"
@@ -944,6 +945,29 @@ KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
     });
     env.js.runMicrotasks();
     KJ_ASSERT(rejected, "Expected read() to reject after releaseLock");
+  });
+}
+
+KJ_TEST("Writing strings works") {
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto sink = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
+    auto writer = sink->getWriter(env.js);
+    // Previously this would throw synchronously when a string was passed.
+    auto writePromise = writer->write(env.js, env.js.str("works"_kj));
+    env.js.runMicrotasks();
+  });
+}
+
+KJ_TEST("Writing SharedArrayBuffer works") {
+  auto fixture = makeStreamTestFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto sink = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
+    auto writer = sink->getWriter(env.js);
+    // Previously this would throw synchronously when a SAB was passed.
+    auto sab = v8::SharedArrayBuffer::New(env.js.v8Isolate, 5);
+    auto writePromise = writer->write(env.js, jsg::JsSharedArrayBuffer(sab));
+    env.js.runMicrotasks();
   });
 }
 
