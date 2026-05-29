@@ -1153,14 +1153,14 @@ kj::OneOf<FsError, jsg::JsString> File::readAllText(jsg::Lock& js) {
   return js.str(data);
 }
 
-kj::OneOf<FsError, jsg::BufferSource> File::readAllBytes(jsg::Lock& js) {
+kj::OneOf<FsError, jsg::JsRef<jsg::JsUint8Array>> File::readAllBytes(jsg::Lock& js) {
   auto info = stat(js);
   KJ_DASSERT(info.type == FsType::FILE);
-  auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(js, info.size);
+  auto u8 = jsg::JsUint8Array::create(js, info.size);
   if (info.size > 0) {
-    KJ_ASSERT(read(js, 0, backing) == info.size);
+    KJ_ASSERT(read(js, 0, u8.asArrayPtr()) == info.size);
   }
-  return jsg::BufferSource(js, kj::mv(backing));
+  return u8.addRef(js);
 }
 
 void Directory::Builder::add(
