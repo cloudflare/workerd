@@ -1924,7 +1924,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
 
   EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(versionInfo), kj::mv(props),
       kj::mv(wrapperModule), mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
-  capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
+  capnp::RevocableServer<rpc::JsRpcTarget> revocableTarget(target);
 
   KJ_DEFER({
     // If run() is canceled while a call is still in flight, then when the `RevocableServer` is
@@ -1932,7 +1932,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // If the cancellation occurred because the Actor or IoContext was aborted, we'd rather
     // propagate the abort error. So check for one, and revoke with that if present.
     KJ_IF_SOME(r, incomingRequest->getContext().getAbortReason()) {
-      revcableTarget.revoke(kj::mv(r));
+      revocableTarget.revoke(kj::mv(r));
     } else {
       // silence bogus clang warning about dangling else
     }
@@ -1942,7 +1942,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
     capFulfiller->fulfill(capnp::membrane(
-        revcableTarget.getClient(), kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))));
+        revocableTarget.getClient(), kj::refcounted<CompletionMembrane>(kj::mv(doneFulfiller))));
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
@@ -1953,7 +1953,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // Make sure the top-level capability is revoked with the same exception that `run()` is
     // throwing, rather than some generic revocation exception.
     auto e = kj::getCaughtExceptionAsKj();
-    revcableTarget.revoke(e.clone());
+    revocableTarget.revoke(e.clone());
     kj::throwFatalException(kj::mv(e));
   }
 }
