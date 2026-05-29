@@ -178,8 +178,9 @@ class Frankenvalue {
   kj::Vector<kj::Own<CapTableEntry>> capTable;
 
   Frankenvalue cloneImpl() const;
-  void fromCapnpImpl(rpc::Frankenvalue::Reader reader, size_t& capCount, size_t capTableTotal);
-  void toCapnpImpl(rpc::Frankenvalue::Builder builder, uint capTableSize);
+  // `capTableTotal` is the real cap table size; `capCount` must never advance past it.
+  size_t fromCapnpImpl(rpc::Frankenvalue::Reader reader, size_t capCount, size_t capTableTotal);
+  void toCapnpImpl(rpc::Frankenvalue::Builder builder, size_t capTableSize);
   jsg::JsValue toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTableEntry>> capTable);
 };
 
@@ -190,8 +191,8 @@ struct Frankenvalue::Property {
 
   // `value.capTable` is always empty. Instead, these two values specify the slice of the parent's
   // capTable which this Frankenvalue refers into.
-  uint capTableOffset = 0;
-  uint capTableSize = 0;
+  size_t capTableOffset = 0;
+  size_t capTableSize = 0;
 };
 
 }  // namespace workerd
