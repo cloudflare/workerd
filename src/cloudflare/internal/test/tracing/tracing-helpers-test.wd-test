@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "tracing-helpers-test.js"),
         ],
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat"],
         streamingTails = ["tail"],
         bindings = [
           (
@@ -28,5 +28,5 @@ const tailWorker :Workerd.Worker = (
     (name = "worker", esModule = embed "tracing-helpers-instrumentation-test.js"),
     (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js")
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityFlags = ["nodejs_compat"],
 );

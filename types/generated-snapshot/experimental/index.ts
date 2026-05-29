@@ -503,7 +503,7 @@ export interface ExecutionContext<Props = unknown> {
     readonly key?: string;
     readonly override?: string;
   };
-  tracing?: Tracing;
+  tracing: Tracing;
   abort(reason?: any): void;
 }
 export type ExportedHandlerFetchHandler<

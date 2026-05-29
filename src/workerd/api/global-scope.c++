@@ -84,10 +84,7 @@ jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
   JSG_FAIL_REQUIRE(Error, "Cache purge is not available in this context.");
 }
 
-jsg::Optional<jsg::Ref<Tracing>> ExecutionContext::getTracing(jsg::Lock& js) {
-  if (!FeatureFlags::get(js).getWorkerdExperimental()) {
-    return kj::none;
-  }
+jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {
   // A new Tracing handle is allocated on first access only - `JSG_LAZY_INSTANCE_PROPERTY`
   // uses V8's SetLazyDataProperty, which caches the getter result on the instance after the
   // first call. So `ctx.tracing === ctx.tracing` and only one allocation per

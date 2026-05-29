@@ -482,7 +482,7 @@ export interface ExecutionContext<Props = unknown> {
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
   cache?: CacheContext;
-  tracing?: Tracing;
+  tracing: Tracing;
 }
 export type ExportedHandlerFetchHandler<
   Env = unknown,
