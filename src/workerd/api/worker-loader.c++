@@ -323,8 +323,10 @@ kj::Own<CompatibilityFlags::Reader> WorkerLoader::extractCompatFlags(
 
   SimpleWorkerErrorReporter errorReporter;
 
+  // allowedExperimentalFlags is nullptr on purpose, a worker loader being trusted with specific
+  // experimental flags should not imply that it can delegate that trust to its dynamic workers.
   compileCompatibilityFlags(code.compatibilityDate, compatFlags, compatFlagsBuilder, errorReporter,
-      allowExperimental, compatDateValidation);
+      allowExperimental, compatDateValidation, nullptr);
 
   if (!errorReporter.errors.empty()) {
     JSG_FAIL_REQUIRE(Error, errorReporter.errors.front());

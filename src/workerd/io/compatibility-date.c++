@@ -104,7 +104,8 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
     CompatibilityFlags::Builder output,
     Worker::ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
-    CompatibilityDateValidation dateValidation) {
+    CompatibilityDateValidation dateValidation,
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags) {
   auto parsedCompatDate = CompatDate::parse(compatDate, errorReporter);
 
   switch (dateValidation) {
@@ -235,14 +236,23 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
       // set the flag early to make sure they don't forget later.
     }
     if (enableByFlag && isExperimental && !allowExperimentalFeatures) {
-      if (dateValidation == CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE) {
-        errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
-            " is experimental and cannot yet be used in Workers deployed to Cloudflare."));
-      } else {
-        errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
-            " is experimental and may break or be "
-            "removed in a future version of workerd. To use this flag, you must pass --experimental "
-            "on the command line."));
+      // Check whether this experimental flag is individually permitted via the allowlist.
+      bool experimentalFlagAllowlisted = false;
+      for (auto& allowed: allowedExperimentalFlags) {
+        if (allowed == enableFlagName) {
+          experimentalFlagAllowlisted = true;
+          break;
+        }
+      }
+      if (!experimentalFlagAllowlisted) {
+        if (dateValidation == CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE) {
+          errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
+              " is experimental and cannot yet be used in Workers deployed to Cloudflare."));
+        } else {
+          errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
+              " is experimental and may break or be removed in a future version of workerd. To use "
+              "this flag, you must pass --experimental on the command line."));
+        }
       }
     }
 
@@ -265,7 +275,8 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     CompatibilityFlags::Builder output,
     Worker::ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
-    CompatibilityDateValidation dateValidation) {
+    CompatibilityDateValidation dateValidation,
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags) {
   kj::HashSet<kj::String> flagSet;
   flagSet.reserve(compatFlags.size());
   for (auto flag: compatFlags) {
@@ -275,7 +286,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
   }
 
   return compileCompatibilityFlags(compatDate, kj::mv(flagSet), output, errorReporter,
-      allowExperimentalFeatures, dateValidation);
+      allowExperimentalFeatures, dateValidation, allowedExperimentalFlags);
 }
 
 void compileCompatibilityFlags(kj::StringPtr compatDate,
@@ -283,7 +294,8 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     CompatibilityFlags::Builder output,
     Worker::ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
-    CompatibilityDateValidation dateValidation) {
+    CompatibilityDateValidation dateValidation,
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags) {
   kj::HashSet<kj::String> flagSet;
   flagSet.reserve(compatFlags.size());
   for (auto& flag: compatFlags) {
@@ -293,7 +305,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
   }
 
   return compileCompatibilityFlags(compatDate, kj::mv(flagSet), output, errorReporter,
-      allowExperimentalFeatures, dateValidation);
+      allowExperimentalFeatures, dateValidation, allowedExperimentalFlags);
 }
 
 namespace {
