@@ -70,7 +70,10 @@ void Frankenvalue::toCapnp(rpc::Frankenvalue::Builder builder) {
   toCapnpImpl(builder, capTable.size());
 }
 
-void Frankenvalue::toCapnpImpl(rpc::Frankenvalue::Builder builder, uint capTableSize) {
+void Frankenvalue::toCapnpImpl(rpc::Frankenvalue::Builder builder, size_t capTableSize) {
+  KJ_REQUIRE(capTableSize <= static_cast<uint32_t>(kj::maxValue),
+      "Frankenvalue capTable is too large to serialize");
+
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(_, EmptyObject) {
       builder.setEmptyObject();
@@ -84,10 +87,10 @@ void Frankenvalue::toCapnpImpl(rpc::Frankenvalue::Builder builder, uint capTable
   }
 
   if (properties.empty()) {
-    builder.setCapTableSize(capTableSize);
+    builder.setCapTableSize(static_cast<uint32_t>(capTableSize));
   } else {
-    uint capTablePos = properties[0].capTableOffset;
-    builder.setCapTableSize(capTablePos);
+    size_t capTablePos = properties[0].capTableOffset;
+    builder.setCapTableSize(static_cast<uint32_t>(capTablePos));
 
     auto listBuilder = builder.initProperties(properties.size());
 
@@ -106,16 +109,16 @@ Frankenvalue Frankenvalue::fromCapnp(
     rpc::Frankenvalue::Reader reader, kj::Vector<kj::Own<CapTableEntry>> capTable) {
   Frankenvalue result;
 
-  uint capCount = 0;
-  result.fromCapnpImpl(reader, capCount);
+  size_t capCount = result.fromCapnpImpl(reader, 0, capTable.size());
 
-  KJ_REQUIRE(capTable.size() == capCount);
+  KJ_REQUIRE(capTable.size() == capCount, "Frankenvalue capTable size doesn't match contents");
   result.capTable = kj::mv(capTable);
 
   return result;
 }
 
-void Frankenvalue::fromCapnpImpl(rpc::Frankenvalue::Reader reader, uint& capCount) {
+size_t Frankenvalue::fromCapnpImpl(
+    rpc::Frankenvalue::Reader reader, size_t capCount, size_t capTableTotal) {
   switch (reader.which()) {
     case rpc::Frankenvalue::EMPTY_OBJECT:
       this->value = EmptyObject();
@@ -128,7 +131,10 @@ void Frankenvalue::fromCapnpImpl(rpc::Frankenvalue::Reader reader, uint& capCoun
       break;
   }
 
-  capCount += reader.getCapTableSize();
+  size_t nodeCaps = reader.getCapTableSize();
+  // Security invariant: never create OOB cap table slices.
+  KJ_REQUIRE(nodeCaps <= capTableTotal - capCount, "Frankenvalue capTableSize exceeds capTable");
+  capCount += nodeCaps;
 
   auto properties = reader.getProperties();
   if (properties.size() > 0) {
@@ -139,11 +145,13 @@ void Frankenvalue::fromCapnpImpl(rpc::Frankenvalue::Reader reader, uint& capCoun
         .name = kj::str(property.getName()),
         .capTableOffset = capCount,
       };
-      result.value.fromCapnpImpl(property, capCount);
+      capCount = result.value.fromCapnpImpl(property, capCount, capTableTotal);
       result.capTableSize = capCount - result.capTableOffset;
       this->properties.add(kj::mv(result));
     }
   }
+
+  return capCount;
 }
 
 jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) {

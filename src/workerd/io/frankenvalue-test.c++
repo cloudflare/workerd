@@ -143,5 +143,50 @@ KJ_TEST("Frankenvalue") {
   });
 }
 
+KJ_TEST("Frankenvalue fromCapnp rejects capTableSize uint32 overflow") {
+  // Regression test for AUTOVULN-EW-EDGEWORKER-15: fromCapnpImpl() accumulated per-node
+  // UInt32 capTableSize fields into a 32-bit uint capCount with no overflow check. An attacker
+  // could craft capTableSize values that wrap around 2^32 so the final sum equals capTable.size()
+  // while individual Property::capTableOffset/capTableSize values are arbitrary, leading to OOB
+  // slice bounds in toJsImpl().
+  //
+  // Construction: root capTableSize=0x80000000, one property with capTableSize=0x80000001.
+  // Walk: capCount=0 -> +=0x80000000 -> 0x80000000; record property offset=0x80000000;
+  // recurse: capCount += 0x80000001 -> wraps to 0x00000001 (mod 2^32).
+  // Final KJ_REQUIRE(capTable.size()==1 == capCount==1) would pass without the fix.
+
+  capnp::MallocMessageBuilder message;
+  auto builder = message.initRoot<rpc::Frankenvalue>();
+  builder.setEmptyObject();
+  builder.setCapTableSize(0x80000000u);
+
+  auto props = builder.initProperties(1);
+  props[0].setName("p");
+  props[0].setEmptyObject();
+  props[0].setCapTableSize(0x80000001u);
+
+  // Provide exactly 1 real cap table entry — the wrapped sum would equal 1.
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+  capTable.add(kj::heap<TestCapEntry>(42));
+
+  // The fix must reject this before the overflow can produce bogus slice bounds.
+  KJ_EXPECT_THROW_MESSAGE(
+      "capTableSize exceeds", Frankenvalue::fromCapnp(builder.asReader(), kj::mv(capTable)));
+}
+
+KJ_TEST("Frankenvalue fromCapnp rejects capTableSize exceeding capTable") {
+  // Simpler case: a single node claims more caps than actually exist, without overflow.
+  capnp::MallocMessageBuilder message;
+  auto builder = message.initRoot<rpc::Frankenvalue>();
+  builder.setEmptyObject();
+  builder.setCapTableSize(100);  // Claims 100 caps but we only provide 1.
+
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+  capTable.add(kj::heap<TestCapEntry>(42));
+
+  KJ_EXPECT_THROW_MESSAGE(
+      "capTableSize exceeds", Frankenvalue::fromCapnp(builder.asReader(), kj::mv(capTable)));
+}
+
 }  // namespace
 }  // namespace workerd
