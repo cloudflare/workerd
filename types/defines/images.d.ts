@@ -88,9 +88,9 @@ type ImageCompositeMode =
   | 'atop'
   /** Foreground shown only where backdrop is transparent */
   | 'out'
-  /** Foreground and background visible only where the other is not */
+  /** Foreground and backdrop visible only where the other is not */
   | 'xor'
-  /** Foreground and background channels added (brightening) */
+  /** Foreground and backdrop channels added (brightening) */
   | 'lighter';
 
 type ImageInputOptions = {
