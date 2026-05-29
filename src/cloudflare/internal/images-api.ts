@@ -250,6 +250,7 @@ interface ServiceEntrypointStub {
     image: ReadableStream<Uint8Array> | ArrayBuffer,
     options?: ImageUploadOptions
   ): Promise<ImageMetadata>;
+  directUploadUrl(options?: DirectUploadOptions): Promise<DirectUploadResult>;
   list(options?: ImageListOptions): Promise<ImageList>;
 }
 
@@ -269,6 +270,12 @@ class HostedImagesBindingImpl implements HostedImagesBinding {
     options?: ImageUploadOptions
   ): Promise<ImageMetadata> {
     return this.#fetcher.upload(image, options);
+  }
+
+  async directUploadUrl(
+    options?: DirectUploadOptions
+  ): Promise<DirectUploadResult> {
+    return this.#fetcher.directUploadUrl(options);
   }
 
   async list(options?: ImageListOptions): Promise<ImageList> {
