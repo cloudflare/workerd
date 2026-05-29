@@ -153,14 +153,12 @@ Serialized serialize(jsg::Lock& js,
       result.data = source.asArrayPtr();
       result.own = source.addRef(js);
       return kj::mv(result);
-    } else if (source.isDetachable()) {
-      // Prefer detaching the input ArrayBuffer whenever possible to avoid needing to copy it.
-      auto backingSource = source.detachAndTake(js);
-      Serialized result;
-      result.data = backingSource.asArrayPtr();
-      result.own = backingSource.addRef(js);
-      return kj::mv(result);
     } else {
+      // DEEP_COPY: the data will be held across an async boundary and read by
+      // I/O code that runs without the isolate lock.  If using MPK to protect
+      // isolate memory, the V8 sandbox backing store pages are tagged with the
+      // isolate's pkey and are inaccessible from other threads.  Memcpy into
+      // an unprotected kj-heap allocation.
       kj::Array<kj::byte> bytes = jsg::JsBufferSource(source).copy();
       Serialized result;
       result.data = bytes;

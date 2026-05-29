@@ -217,7 +217,16 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
       return js.resolvedPromise();
     }
 
-    active.bytesInFlight += source.size();
+    // Copy the bytes into a kj-heap allocation while we hold the isolate lock.
+    // The kj sink->write below runs from the kj event loop after the lock has
+    // been released.  If using MPK to protect isolate memory, the V8 sandbox
+    // pages are tagged with the isolate's pkey and the sink would fault.  Per
+    // Fetch-like semantics the caller is free to mutate the buffer once
+    // write() returns its promise.
+    kj::Array<kj::byte> bytes = kj::heapArray(source.asArrayPtr());
+    size_t byteSize = bytes.size();
+
+    active.bytesInFlight += byteSize;
     maybeSignalBackpressure(js);
     // Enqueue the actual write operation into the write queue. We pass in
     // two lambdas, one that does the actual write, and one that handles
@@ -239,15 +248,14 @@ jsg::Promise<void> WritableStreamSinkJsAdapter::write(jsg::Lock& js, const jsg::
     // Capturing active by reference here is safe because the lambda is
     // held by the write queue, which is itself held by Active. If active
     // is destroyed, the write queue is destroyed along with the lambda.
-    auto promise =
-        active.enqueue(kj::coCapture([&active, ptr = source.asArrayPtr()]() -> kj::Promise<void> {
-      co_await active.sink->write(ptr);
-      active.bytesInFlight -= ptr.size();
+    auto promise = active.enqueue(
+        kj::coCapture([&active, bytes = kj::mv(bytes), byteSize]() -> kj::Promise<void> {
+      co_await active.sink->write(bytes);
+      active.bytesInFlight -= byteSize;
     }));
 
     return ioContext
-        .awaitIo(js, kj::mv(promise),
-            [self = selfRef.addRef(), source = source.addRef(js)](jsg::Lock& js) {
+        .awaitIo(js, kj::mv(promise), [self = selfRef.addRef()](jsg::Lock& js) {
       // Why do we need a weak ref here? Well, because this is a JavaScript
       // promise continuation. It is possible that the kj::Own holding our
       // adapter can be dropped while we are waiting for the continuation
