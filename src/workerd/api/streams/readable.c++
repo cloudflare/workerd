@@ -39,12 +39,11 @@ void ReaderImpl::detach() {
   }
 }
 
-jsg::Promise<void> ReaderImpl::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+jsg::Promise<void> ReaderImpl::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This ReadableStream reader has been released."_kj));
+        js.typeError("This ReadableStream reader has been released."_kj));
   }
   if (state.is<Closed>()) {
     return js.resolvedPromise();
@@ -74,36 +73,35 @@ jsg::Promise<ReadResult> ReaderImpl::read(
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<ReadResult>(
-        js.v8TypeError("This ReadableStream reader has been released."_kj));
+        js.typeError("This ReadableStream reader has been released."_kj));
   }
   if (state.is<Closed>()) {
-    return js.rejectedPromise<ReadResult>(
-        js.v8TypeError("This ReadableStream has been closed."_kj));
+    return js.rejectedPromise<ReadResult>(js.typeError("This ReadableStream has been closed."_kj));
   }
   auto& attached = state.requireActiveUnsafe();
   KJ_IF_SOME(options, byobOptions) {
     // Per the spec, we must perform these checks before disturbing the stream.
     size_t atLeast = options.atLeast.orDefault(1);
+    auto view = options.bufferView.getHandle(js);
 
-    if (options.byteLength == 0) {
+    if (view.size() == 0) {
       return js.rejectedPromise<ReadResult>(
-          js.v8TypeError("You must call read() on a \"byob\" reader with a positive-sized "
-                         "TypedArray object."_kj));
+          js.typeError("You must call read() on a \"byob\" reader with a positive-sized "
+                       "TypedArray object."_kj));
     }
     if (atLeast == 0) {
-      return js.rejectedPromise<ReadResult>(js.v8TypeError(
+      return js.rejectedPromise<ReadResult>(js.typeError(
           kj::str("Requested invalid minimum number of bytes to read (", atLeast, ").")));
     }
 
     // Both read() and readAtLeast() pass atLeast in element count.
     // Convert to bytes before validation and forwarding to the controller.
-    jsg::BufferSource source(js, options.bufferView.getHandle(js));
-    auto elementSize = source.getElementSize();
+    auto elementSize = view.getElementSize();
     atLeast = atLeast * elementSize;
 
-    if (atLeast > options.byteLength) {
-      return js.rejectedPromise<ReadResult>(js.v8TypeError(kj::str("Minimum bytes to read (",
-          atLeast, ") exceeds size of buffer (", options.byteLength, ").")));
+    if (atLeast > view.size()) {
+      return js.rejectedPromise<ReadResult>(js.typeError(kj::str(
+          "Minimum bytes to read (", atLeast, ") exceeds size of buffer (", view.size(), ").")));
     }
 
     options.atLeast = atLeast;
@@ -113,8 +111,6 @@ jsg::Promise<ReadResult> ReaderImpl::read(
 }
 
 void ReaderImpl::releaseLock(jsg::Lock& js) {
-  // TODO(soon): Releasing the lock should cancel any pending reads. This is a recent
-  // modification to the spec that we have not yet implemented.
   assertAttachedOrTerminal();
   // Closed and Released states are no-ops.
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
@@ -154,8 +150,8 @@ void ReadableStreamDefaultReader::attach(
 }
 
 jsg::Promise<void> ReadableStreamDefaultReader::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  return impl.cancel(js, kj::mv(maybeReason));
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
+  return impl.cancel(js, maybeReason);
 }
 
 void ReadableStreamDefaultReader::detach() {
@@ -207,8 +203,8 @@ void ReadableStreamBYOBReader::attach(
 }
 
 jsg::Promise<void> ReadableStreamBYOBReader::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  return impl.cancel(js, kj::mv(maybeReason));
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
+  return impl.cancel(js, maybeReason);
 }
 
 void ReadableStreamBYOBReader::detach() {
@@ -224,13 +220,11 @@ void ReadableStreamBYOBReader::lockToStream(jsg::Lock& js, ReadableStream& strea
 }
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
-    v8::Local<v8::ArrayBufferView> byobBuffer,
+    jsg::JsArrayBufferView byobBuffer,
     jsg::Optional<ReadableStreamBYOBReaderReadOptions> maybeOptions) {
   static const ReadableStreamBYOBReaderReadOptions defaultOptions{};
   auto options = ReadableStreamController::ByobOptions{
-    .bufferView = js.v8Ref(byobBuffer),
-    .byteOffset = byobBuffer->ByteOffset(),
-    .byteLength = byobBuffer->ByteLength(),
+    .bufferView = byobBuffer.addRef(js),
     .atLeast = maybeOptions.orDefault(defaultOptions).min.orDefault(1),
     .detachBuffer = FeatureFlags::get(js).getStreamsByobReaderDetachesBuffer(),
   };
@@ -238,11 +232,9 @@ jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
 }
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::readAtLeast(
-    jsg::Lock& js, int minElements, v8::Local<v8::ArrayBufferView> byobBuffer) {
+    jsg::Lock& js, int minElements, jsg::JsArrayBufferView byobBuffer) {
   auto options = ReadableStreamController::ByobOptions{
-    .bufferView = js.v8Ref(byobBuffer),
-    .byteOffset = byobBuffer->ByteOffset(),
-    .byteLength = byobBuffer->ByteLength(),
+    .bufferView = byobBuffer.addRef(js),
     .atLeast = minElements,
     .detachBuffer = true,
   };
@@ -316,11 +308,11 @@ jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js, size_t maxR
         return kj::mv(result);
       }
       return js.rejectedPromise<DrainingReadResult>(
-          js.v8TypeError("Unable to perform draining read on this stream."_kj));
+          js.typeError("Unable to perform draining read on this stream."_kj));
     }
     KJ_CASE_ONEOF(r, Released) {
       return js.rejectedPromise<DrainingReadResult>(
-          js.v8TypeError("This ReadableStream reader has been released."_kj));
+          js.typeError("This ReadableStream reader has been released."_kj));
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {
       return js.resolvedPromise(DrainingReadResult{
@@ -332,8 +324,7 @@ jsg::Promise<DrainingReadResult> DrainingReader::read(jsg::Lock& js, size_t maxR
   KJ_UNREACHABLE;
 }
 
-jsg::Promise<void> DrainingReader::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+jsg::Promise<void> DrainingReader::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this reader was never attached");
@@ -344,7 +335,7 @@ jsg::Promise<void> DrainingReader::cancel(
     }
     KJ_CASE_ONEOF(r, Released) {
       return js.rejectedPromise<void>(
-          js.v8TypeError("This ReadableStream reader has been released."_kj));
+          js.typeError("This ReadableStream reader has been released."_kj));
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {
       return js.resolvedPromise();
@@ -431,11 +422,10 @@ ReadableStreamController& ReadableStream::getController() {
   return *controller;
 }
 
-jsg::Promise<void> ReadableStream::cancel(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+jsg::Promise<void> ReadableStream::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
+        js.typeError("This ReadableStream is currently locked to a reader."_kj));
   }
   return getController().cancel(js, maybeReason);
 }
@@ -496,12 +486,12 @@ jsg::Promise<void> ReadableStream::pipeTo(jsg::Lock& js,
     jsg::Optional<PipeToOptions> maybeOptions) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
+        js.typeError("This ReadableStream is currently locked to a reader."_kj));
   }
 
   if (destination->getController().isLockedToWriter()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream is currently locked to a writer"_kj));
+        js.typeError("This WritableStream is currently locked to a writer"_kj));
   }
 
   auto options = kj::mv(maybeOptions).orDefault({});
@@ -530,24 +520,25 @@ jsg::Optional<uint64_t> ReadableStream::inspectLength() {
   return tryGetLength(StreamEncoding::IDENTITY);
 }
 
-jsg::Promise<kj::Maybe<jsg::Value>> ReadableStream::nextFunction(
+jsg::Promise<kj::Maybe<jsg::JsRef<jsg::JsValue>>> ReadableStream::nextFunction(
     jsg::Lock& js, AsyncIteratorState& state) {
   return state.reader->read(js).then(
       js, [reader = state.reader.addRef()](jsg::Lock& js, ReadResult result) mutable {
     if (result.done) {
       reader->releaseLock(js);
-      return js.resolvedPromise(kj::Maybe<jsg::Value>(kj::none));
+      return js.resolvedPromise(kj::Maybe<jsg::JsRef<jsg::JsValue>>(kj::none));
     }
-    return js.resolvedPromise<kj::Maybe<jsg::Value>>(kj::mv(result.value));
+    return js.resolvedPromise<kj::Maybe<jsg::JsRef<jsg::JsValue>>>(kj::mv(result.value));
   });
 }
 
 jsg::Promise<void> ReadableStream::returnFunction(
-    jsg::Lock& js, AsyncIteratorState& state, jsg::Optional<jsg::Value>& value) {
+    jsg::Lock& js, AsyncIteratorState& state, jsg::Optional<jsg::JsRef<jsg::JsValue>>& value) {
   if (state.reader.get() != nullptr) {
     auto reader = kj::mv(state.reader);
     if (!state.preventCancel) {
-      auto promise = reader->cancel(js, value.map([&](jsg::Value& v) { return v.getHandle(js); }));
+      auto promise = reader->cancel(
+          js, value.map([&](jsg::JsRef<jsg::JsValue>& v) { return v.getHandle(js); }));
       reader->releaseLock(js);
       auto result = promise.then(js,
           JSG_VISITABLE_LAMBDA((reader = kj::mv(reader)), (reader), (jsg::Lock& js) {
@@ -566,7 +557,7 @@ jsg::Promise<void> ReadableStream::returnFunction(
   return js.resolvedPromise();
 }
 
-jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js, bool ignoreDisturbed) {
+jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) {
   JSG_REQUIRE(
       !isDisturbed() || ignoreDisturbed, TypeError, "The ReadableStream has already been read.");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
@@ -578,7 +569,7 @@ kj::Maybe<uint64_t> ReadableStream::tryGetLength(StreamEncoding encoding) {
 }
 
 kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
-    jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
+    jsg::Lock& js, kj::Own<WritableStreamSink> sink, End end) {
   JSG_REQUIRE(
       IoContext::hasCurrent(), Error, "Unable to consume this ReadableStream outside of a request");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
@@ -598,29 +589,37 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(jsg::Lock& js,
   auto controller = newReadableStreamJsController();
   auto stream = js.allocAccounted<ReadableStream>(
       sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
-  stream->getController().setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
+
+  auto source = kj::heap<UnderlyingSourceImpl>(
+      js, kj::mv(underlyingSource).orDefault({}), kj::mv(queuingStrategy).orDefault({}));
+
+  stream->getController().setup(js, kj::mv(source));
   return kj::mv(stream);
 }
 
 jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
-    jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeValue) {
+    jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeValue) {
   KJ_IF_SOME(value, maybeValue) {
-    if ((value)->IsArrayBuffer()) {
-      auto buffer = value.As<v8::ArrayBuffer>();
-      return buffer->ByteLength();
-    } else if ((value)->IsArrayBufferView()) {
-      auto view = value.As<v8::ArrayBufferView>();
-      return view->ByteLength();
-    } else {
-      // Per the WHATWG Streams spec, ByteLengthQueuingStrategy.size should return
-      // GetV(chunk, "byteLength"), which means getting the byteLength property
-      // from any object, not just ArrayBuffer/ArrayBufferView.
-      KJ_IF_SOME(obj, jsg::JsValue(value).tryCast<jsg::JsObject>()) {
-        auto byteLength = obj.get(js, "byteLength"_kj);
-        KJ_IF_SOME(num, byteLength.tryCast<jsg::JsNumber>()) {
-          KJ_IF_SOME(val, num.value(js)) {
-            return static_cast<uint32_t>(val);
-          }
+    KJ_IF_SOME(ab, value.tryCast<jsg::JsArrayBuffer>()) {
+      return ab.size();
+    }
+    KJ_IF_SOME(sab, value.tryCast<jsg::JsSharedArrayBuffer>()) {
+      return sab.size();
+    }
+    KJ_IF_SOME(view, value.tryCast<jsg::JsArrayBufferView>()) {
+      return view.size();
+    }
+    KJ_IF_SOME(str, value.tryCast<jsg::JsString>()) {
+      return str.utf8Length(js);
+    }
+    // Per the WHATWG Streams spec, ByteLengthQueuingStrategy.size should return
+    // GetV(chunk, "byteLength"), which means getting the byteLength property
+    // from any object, not just ArrayBuffer/ArrayBufferView.
+    KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
+      auto byteLength = obj.get(js, "byteLength"_kj);
+      KJ_IF_SOME(num, byteLength.tryCast<jsg::JsNumber>()) {
+        KJ_IF_SOME(val, num.value(js)) {
+          return static_cast<uint32_t>(val);
         }
       }
     }
@@ -733,7 +732,7 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
     return inner->tryRead(buffer, minBytes, maxBytes);
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, End end) override {
     // Move the deferred proxy part of the task over to the non-deferred part. To do this,
     // we use `ioctx.waitForDeferredProxy()`, which returns a single promise covering both parts
     // (and, importantly, registering pending events where needed). Then, we add a noop deferred
@@ -826,7 +825,7 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto sink = newSystemStream(kj::mv(kjStream), encoding, ioctx);
 
   ioctx.addTask(
-      ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), true)).catch_([](kj::Exception&& e) {
+      ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), End::YES)).catch_([](kj::Exception&& e) {
     // Errors in pumpTo() are automatically propagated to the source and destination. We don't
     // want to throw them from here since it'll cause an uncaught exception to be reported, even
     // if the application actually does handle it!

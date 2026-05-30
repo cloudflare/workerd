@@ -22,7 +22,7 @@ public:
 
   void attach(ReadableStreamController& controller, jsg::Promise<void> closedPromise);
 
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
   void detach();
 
@@ -105,7 +105,7 @@ public:
       jsg::Lock& js, jsg::Ref<ReadableStream> stream);
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
   jsg::Promise<ReadResult> read(jsg::Lock& js);
   void releaseLock(jsg::Lock& js);
 
@@ -156,26 +156,25 @@ public:
       jsg::Ref<ReadableStream> stream);
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   struct ReadableStreamBYOBReaderReadOptions {
     jsg::Optional<int> min;
     JSG_STRUCT(min);
   };
 
-  jsg::Promise<ReadResult> read(jsg::Lock& js, v8::Local<v8::ArrayBufferView> byobBuffer,
+  jsg::Promise<ReadResult> read(jsg::Lock& js, jsg::JsArrayBufferView byobBuffer,
       jsg::Optional<ReadableStreamBYOBReaderReadOptions> options = kj::none);
 
-  // Non-standard extension so that reads can specify a minimum number of elements to read. It's a
-  // struct so that we could eventually add things like timeouts if we need to. Since there's no
-  // existing spec that's a leading contender, this is behind a different method name to avoid
-  // conflicts with any changes to `read`. Fewer than `minElements` may be returned if EOF is hit
-  // or the underlying stream is closed/errors out. In all cases the read result is either
-  // {value: theChunk, done: false} or {value: undefined, done: true} as with read.
-  // TODO(soon): Like fetch() and Cache.match(), readAtLeast() returns a promise for a V8 object.
+  // Non-standard extension so that reads can specify a minimum number of elements to read.
+  // Note: The standard read() method now supports a `min` option via
+  // ReadableStreamBYOBReaderReadOptions (see above), which largely supersedes this method.
+  // readAtLeast() is retained for backward compatibility. Fewer than `minElements` may be
+  // returned if EOF is hit or the underlying stream is closed/errors out. In all cases the
+  // read result is either {value: theChunk, done: false} or {value: undefined, done: true}.
   jsg::Promise<ReadResult> readAtLeast(jsg::Lock& js,
                                         int minElements,
-                                        v8::Local<v8::ArrayBufferView> byobBuffer);
+                                        jsg::JsArrayBufferView byobBuffer);
 
   void releaseLock(jsg::Lock& js);
 
@@ -238,7 +237,7 @@ class DrainingReader: public ReadableStreamController::Reader {
   jsg::Promise<DrainingReadResult> read(jsg::Lock& js, size_t maxRead = kj::maxValue);
 
   // Cancels the stream.
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
   // Releases the lock on the stream.
   void releaseLock(jsg::Lock& js);
@@ -272,14 +271,14 @@ private:
     bool preventCancel;
   };
 
-  static jsg::Promise<kj::Maybe<jsg::Value>> nextFunction(
+  static jsg::Promise<kj::Maybe<jsg::JsRef<jsg::JsValue>>> nextFunction(
       jsg::Lock& js,
       AsyncIteratorState& state);
 
   static jsg::Promise<void> returnFunction(
       jsg::Lock& js,
       AsyncIteratorState& state,
-      jsg::Optional<jsg::Value>& value);
+      jsg::Optional<jsg::JsRef<jsg::JsValue>>& value);
 
 public:
   explicit ReadableStream(IoContext& ioContext,
@@ -304,7 +303,8 @@ public:
       jsg::Optional<UnderlyingSource> underlyingSource,
       jsg::Optional<StreamQueuingStrategy> queuingStrategy);
 
-  static jsg::Ref<ReadableStream> from(jsg::Lock& js, jsg::AsyncGenerator<jsg::Value> generator);
+  static jsg::Ref<ReadableStream> from(jsg::Lock& js,
+      jsg::AsyncGenerator<jsg::JsRef<jsg::JsValue>> generator);
 
   bool isLocked();
 
@@ -312,7 +312,7 @@ public:
   // results. `reason` will be passed to the underlying source's cancel algorithm -- if this
   // readable stream is one side of a transform stream, then its cancel algorithm causes the
   // transform's writable side to become errored with `reason`.
-  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
+  jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   using Reader = kj::OneOf<jsg::Ref<ReadableStreamDefaultReader>,
                            jsg::Ref<ReadableStreamBYOBReader>>;
@@ -337,7 +337,7 @@ public:
 
   JSG_ASYNC_ITERATOR_WITH_OPTIONS(ReadableStreamAsyncIterator,
                                    values,
-                                   jsg::Value,
+                                   jsg::JsRef<jsg::JsValue>,
                                    AsyncIteratorState,
                                    nextFunction,
                                    returnFunction,
@@ -446,7 +446,7 @@ public:
   // ReadableStream that will take over ownership of the internal state of this one,
   // leaving this ReadableStream locked and disturbed so that it is no longer usable.
   // The name "detach" here is used in the sense of "detaching the internal state".
-  jsg::Ref<ReadableStream> detach(jsg::Lock& js, bool ignoreDisturbed=false);
+  jsg::Ref<ReadableStream> detach(jsg::Lock& js, IgnoreDisturbed ignoreDisturbed = IgnoreDisturbed::NO);
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
@@ -456,7 +456,7 @@ public:
   // state of the readable.
   kj::Promise<DeferredProxy<void>> pumpTo(jsg::Lock& js,
                                           kj::Own<WritableStreamSink> sink,
-                                          bool end);
+                                          End end);
 
   // Initializes signalling mechanism for EOF detection. Returns a promise that will resolve when
   // EOF is reached.
@@ -492,7 +492,7 @@ struct QueuingStrategyInit {
 };
 
 using QueuingStrategySizeFunction =
-    jsg::Optional<uint32_t>(jsg::Optional<v8::Local<v8::Value>>);
+    jsg::Optional<uint32_t>(jsg::Optional<jsg::JsValue>);
 
 // Utility class defined by the streams spec that uses byteLength to calculate
 // backpressure changes.
@@ -519,7 +519,7 @@ public:
   }
 
 private:
-  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>>);
+  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<jsg::JsValue>);
 
   QueuingStrategyInit init;
 };
@@ -549,7 +549,7 @@ public:
   }
 
 private:
-  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>>) {
+  static jsg::Optional<uint32_t> size(jsg::Lock& js, jsg::Optional<jsg::JsValue>) {
     return 1;
   }
 

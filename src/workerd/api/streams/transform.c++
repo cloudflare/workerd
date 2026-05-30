@@ -22,81 +22,116 @@ jsg::Function<T> maybeAddFunctor(auto t) {
 }
 }  // namespace
 
+jsg::Ref<TransformStream> TransformStream::constructorNoCheck(jsg::Lock& js,
+    jsg::Optional<Transformer> maybeTransformer,
+    jsg::Optional<StreamQueuingStrategy> maybeWritableStrategy,
+    jsg::Optional<StreamQueuingStrategy> maybeReadableStrategy,
+    ReadableIsBytes readableIsBytes) {
+  // The standard implementation. Here the TransformStream is backed by readable
+  // and writable streams using the JavaScript-backed controllers. Data that is
+  // written to the writable side passes through the transform function that is
+  // given in maybeTransformer. If no transform function is given, then any value
+  // written is passed through unchanged.
+  //
+  // Per the standard specification, any JavaScript value can be written to and
+  // read from the transform stream, and the readable side does *not* support BYOB
+  // reads.
+  //
+  // Persistent references to the TransformStreamDefaultController are held by both
+  // the readable and writable sides. The actual TransformStream object can be dropped
+  // and allowed to be garbage collected.
+
+  // ReadableIsBytes is a non-standard extension that signals that the readable side
+  // of the transform stream should use a ReadableByteStreamController and support
+  // BYOB reads.
+
+  auto transformer = kj::mv(maybeTransformer).orDefault(Transformer{});
+  auto expectedLength = transformer.expectedLength;
+
+  auto transformerImpl = kj::heap<TransformerImpl>(js, kj::mv(transformer));
+  bool hasTransformv = transformerImpl->transformv() != kj::none;
+  auto controller = js.alloc<TransformStreamDefaultController>(js, kj::mv(transformerImpl));
+
+  // By default, let's signal backpressure on the readable side by setting the highWaterMark
+  // to zero if a strategy is not given. This effectively means that writes/reads will be
+  // one to one as long as the writer is respecting backpressure signals. If buffering
+  // occurs, it will happen in the writable side of the transform stream.
+  auto readableStrategy = kj::mv(maybeReadableStrategy)
+                              .orDefault(StreamQueuingStrategy{
+                                .highWaterMark = 0,
+                              });
+  auto writableStrategy = kj::mv(maybeWritableStrategy).orDefault(StreamQueuingStrategy{});
+
+  auto readableController = newReadableStreamJsController();
+  auto readable = js.alloc<ReadableStream>(kj::mv(readableController));
+  readable->getController().setup(js,
+      kj::heap<UnderlyingSourceImpl>(js,
+          UnderlyingSource{
+            .type = readableIsBytes ? kj::Maybe<kj::String>(kj::str("bytes")) : kj::none,
+            .autoAllocateChunkSize = readableIsBytes
+                ? kj::Maybe<int>(UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2)
+                : kj::none,
+            .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>(
+                JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+                    (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
+            .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(
+                JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+                    (jsg::Lock & js, auto c) mutable { return controller->pull(js); })),
+            .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>( JSG_VISITABLE_LAMBDA(
+                (controller = controller.addRef()), (controller),
+                (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); })),
+            .expectedLength = expectedLength,
+          },
+          kj::mv(readableStrategy)));
+
+  auto writableController = newWritableStreamJsController();
+  auto writable = js.alloc<WritableStream>(kj::mv(writableController));
+
+  auto sink = kj::heap<UnderlyingSinkImpl>(js,
+      UnderlyingSink{
+        .type = kj::none,
+        .start = maybeAddFunctor<UnderlyingSink::StartAlgorithm>(
+            JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+                (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
+        .write = maybeAddFunctor<UnderlyingSink::WriteAlgorithm>( JSG_VISITABLE_LAMBDA(
+            (controller = controller.addRef()), (controller),
+            (jsg::Lock & js, auto chunk, auto c) mutable { return controller->write(js, chunk); })),
+        .abort = maybeAddFunctor<UnderlyingSink::AbortAlgorithm>(
+            JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+                (jsg::Lock & js, auto reason) mutable { return controller->abort(js, reason); })),
+        .close = maybeAddFunctor<UnderlyingSink::CloseAlgorithm>(
+            JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+                (jsg::Lock & js) mutable { return controller->close(js); })),
+      },
+      kj::mv(writableStrategy));
+
+  // If the transform supports the optional vectorized transform algorithm, then we also
+  // set up a vectorized writev function on the sink.
+  if (hasTransformv) {
+    sink->setWritev(maybeAddFunctor<UnderlyingSink::WritevAlgorithm>(
+        JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
+            (jsg::Lock & js, kj::Array<jsg::JsRef<jsg::JsValue>> chunks, auto c) mutable {
+              return controller->writev(js, kj::mv(chunks));
+            })));
+  }
+
+  writable->getController().setup(js, kj::mv(sink));
+
+  // The controller will store c++ references to both the readable and writable
+  // streams underlying controllers.
+  controller->init(js, readable, writable);
+
+  return js.alloc<TransformStream>(kj::mv(readable), kj::mv(writable));
+}
+
 jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
     jsg::Optional<Transformer> maybeTransformer,
     jsg::Optional<StreamQueuingStrategy> maybeWritableStrategy,
     jsg::Optional<StreamQueuingStrategy> maybeReadableStrategy) {
 
   if (FeatureFlags::get(js).getTransformStreamJavaScriptControllers()) {
-    // The standard implementation. Here the TransformStream is backed by readable
-    // and writable streams using the JavaScript-backed controllers. Data that is
-    // written to the writable side passes through the transform function that is
-    // given in maybeTransformer. If no transform function is given, then any value
-    // written is passed through unchanged.
-    //
-    // Per the standard specification, any JavaScript value can be written to and
-    // read from the transform stream, and the readable side does *not* support BYOB
-    // reads.
-    //
-    // Persistent references to the TransformStreamDefaultController are held by both
-    // the readable and writable sides. The actual TransformStream object can be dropped
-    // and allowed to be garbage collected.
-
-    auto controller = js.alloc<TransformStreamDefaultController>(js);
-    auto transformer = kj::mv(maybeTransformer).orDefault({});
-
-    // By default, let's signal backpressure on the readable side by setting the highWaterMark
-    // to zero if a strategy is not given. This effectively means that writes/reads will be
-    // one to one as long as the writer is respecting backpressure signals. If buffering
-    // occurs, it will happen in the writable side of the transform stream.
-    auto readableStrategy = kj::mv(maybeReadableStrategy)
-                                .orDefault(StreamQueuingStrategy{
-                                  .highWaterMark = 0,
-                                });
-
-    auto readable = ReadableStream::constructor(js,
-        UnderlyingSource{
-          .type = kj::none,
-          .autoAllocateChunkSize = kj::none,
-          .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
-          .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->pull(js); })),
-          .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>( JSG_VISITABLE_LAMBDA(
-              (controller = controller.addRef()), (controller),
-              (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); })),
-          .expectedLength = transformer.expectedLength.map(
-              [](uint64_t expectedLength) { return expectedLength; }),
-        },
-        kj::mv(readableStrategy));
-
-    auto writable = WritableStream::constructor(js,
-        UnderlyingSink{
-          .type = kj::none,
-          .start = maybeAddFunctor<UnderlyingSink::StartAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
-          .write = maybeAddFunctor<UnderlyingSink::WriteAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto chunk, auto c) mutable {
-                    return controller->write(js, chunk);
-                  })),
-          .abort = maybeAddFunctor<UnderlyingSink::AbortAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto reason) mutable { return controller->abort(js, reason); })),
-          .close = maybeAddFunctor<UnderlyingSink::CloseAlgorithm>(
-              JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js) mutable { return controller->close(js); })),
-        },
-        kj::mv(maybeWritableStrategy));
-
-    // The controller will store c++ references to both the readable and writable
-    // streams underlying controllers.
-    controller->init(js, readable, writable, kj::mv(transformer));
-
-    return js.alloc<TransformStream>(kj::mv(readable), kj::mv(writable));
+    return constructorNoCheck(
+        js, kj::mv(maybeTransformer), kj::mv(maybeWritableStrategy), kj::mv(maybeReadableStrategy));
   }
 
   // The old implementation just defers to IdentityTransformStream. If any of the arguments

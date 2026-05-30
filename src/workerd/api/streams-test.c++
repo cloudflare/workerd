@@ -58,12 +58,13 @@ KJ_TEST("Reading from default reader") {
       KJ_ASSERT(!readResult.done);
       auto& value = KJ_REQUIRE_NONNULL(readResult.value);
       auto handle = value.getHandle(js);
-      KJ_ASSERT(handle->IsUint8Array());
+      KJ_ASSERT(handle.isUint8Array());
+      jsg::JsBufferSource source(handle);
       if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
         // With 16KB buffer, the entire 10KB stream fits in one read.
-        KJ_ASSERT(streamLength == handle.As<v8::Uint8Array>()->ByteLength());
+        KJ_ASSERT(streamLength == source.size());
       } else {
-        KJ_ASSERT(4 * 1024 == handle.As<v8::Uint8Array>()->ByteLength());
+        KJ_ASSERT(4 * 1024 == source.size());
       }
     })));
   });
@@ -95,9 +96,7 @@ KJ_TEST("Reading from byob reader") {
       KJ_REQUIRE(reader.is<jsg::Ref<ReadableStreamBYOBReader>>());
       auto& byobReader = reader.get<jsg::Ref<ReadableStreamBYOBReader>>();
 
-      auto buffer = v8::Uint8Array::New(
-          v8::ArrayBuffer::New(js.v8Isolate, test.bufferSize), 0, test.bufferSize);
-
+      auto buffer = jsg::JsUint8Array::create(js, test.bufferSize);
       return env.context.awaitJs(js, byobReader->read(js, buffer, {}).then(js,
                   JSG_VISITABLE_LAMBDA(
                       (test, reader = byobReader.addRef(), stream = stream.addRef()),
@@ -106,10 +105,9 @@ KJ_TEST("Reading from byob reader") {
 
         auto& value = KJ_REQUIRE_NONNULL(readResult.value);
         auto handle = value.getHandle(js);
-        KJ_ASSERT(handle->IsUint8Array());
-        auto view = handle.As<v8::Uint8Array>();
-        KJ_ASSERT(kj::min(test.streamLength, test.bufferSize) == view->ByteLength());
-        KJ_ASSERT(test.bufferSize == view->Buffer()->ByteLength());
+        auto view = KJ_REQUIRE_NONNULL(handle.tryCast<jsg::JsUint8Array>());
+        KJ_ASSERT(kj::min(test.streamLength, test.bufferSize) == view.size());
+        KJ_ASSERT(test.bufferSize == view.getBuffer().size());
       })));
       return kj::READY_NOW;
     });
@@ -179,7 +177,8 @@ KJ_TEST("PumpToReader regression") {
                              [](jsg::Lock& js, auto controller) {
       auto& c = KJ_REQUIRE_NONNULL(
           controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
-      c->enqueue(js, v8::ArrayBuffer::New(js.v8Isolate, 10));
+      auto ab = jsg::JsArrayBuffer::create(js, 10);
+      c->enqueue(js, ab);
       c->close(js);
       return js.resolvedPromise();
     }},
@@ -187,7 +186,7 @@ KJ_TEST("PumpToReader regression") {
 
     auto sink = kj::heap<TestSink>(events);
     auto writePromise = kj::mv(sink->paf.promise);
-    auto promise = stream->pumpTo(js, kj::mv(sink), true);
+    auto promise = stream->pumpTo(js, kj::mv(sink), End::YES);
 
     return writePromise.attach(kj::mv(promise));
   });

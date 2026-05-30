@@ -109,7 +109,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
       return kj::mv(stream);
     }
-    KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
+    KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::JsRef<jsg::JsValue>>) {
       return ReadableStream::from(js, gen.release());
     }
     KJ_CASE_ONEOF(text, kj::String) {
@@ -242,7 +242,7 @@ bool Body::getBodyUsed() {
   }
   return false;
 }
-jsg::Promise<jsg::BufferSource> Body::arrayBuffer(jsg::Lock& js) {
+jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> Body::arrayBuffer(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
     return js.evalNow([&] {
       JSG_REQUIRE(!i.stream->isDisturbed(), TypeError,
@@ -255,13 +255,15 @@ jsg::Promise<jsg::BufferSource> Body::arrayBuffer(jsg::Lock& js) {
 
   // If there's no body, we just return an empty array.
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
-  return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
+  auto empty = jsg::JsArrayBuffer::create(js, 0);
+  return js.resolvedPromise(empty.addRef(js));
 }
 
-jsg::Promise<jsg::BufferSource> Body::bytes(jsg::Lock& js) {
-  return arrayBuffer(js).then(js,
-      [](jsg::Lock& js, jsg::BufferSource data) { return data.getTypedView<v8::Uint8Array>(js); });
+jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> Body::bytes(jsg::Lock& js) {
+  return arrayBuffer(js).then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> data) {
+    jsg::JsUint8Array u8 = data.getHandle(js);
+    return u8.addRef(js);
+  });
 }
 
 jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
@@ -331,7 +333,7 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
-  return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::BufferSource buffer) {
+  return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
     kj::String contentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
                                  .map([](auto&& b) -> kj::String {
       return kj::mv(b);
@@ -344,7 +346,7 @@ jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
       }).orDefault(nullptr);
     }
 
-    return js.alloc<Blob>(js, buffer.getJsHandle(js), kj::mv(contentType));
+    return js.alloc<Blob>(js, buffer.getHandle(js), kj::mv(contentType));
   });
 }
 
@@ -1353,7 +1355,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
-    return jsBody->pumpTo(js, kj::mv(stream), true);
+    return jsBody->pumpTo(js, kj::mv(stream), End::YES);
   } else {
     outer.send(statusCode, getStatusText(), outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
@@ -1700,7 +1702,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       // TODO(someday): Allow deferred proxying for bidirectional streaming.
       ioContext.addWaitUntil(handleCancelablePump(
           AbortSignal::maybeCancelWrap(
-              js, signal, ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), true))),
+              js, signal, ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), End::YES))),
           jsBody.addRef()));
     } else {
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, static_cast<uint64_t>(0));

@@ -301,6 +301,12 @@ class AsyncGenerator final {
     return js.rejectedPromise<kj::Maybe<T>>(kj::mv(exception));
   }
 
+  void visitForGc(GcVisitor& visitor) {
+    KJ_IF_SOME(active, maybeActive) {
+      active.visitForGc(visitor);
+    }
+  }
+
  private:
   using Next = GeneratorNext<T>;
   using NextSignature = Function<Promise<Next>()>;

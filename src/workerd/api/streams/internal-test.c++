@@ -62,8 +62,9 @@ TestFixture makeAbortClearsQueueTestFixture() {
 // Creates a BYOB-capable ReadableStream
 jsg::Ref<ReadableStream> makeByteStream(jsg::Lock& js) {
   auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
-  rs->getController().setup(
-      js, UnderlyingSource{.type = kj::str("bytes")}, StreamQueuingStrategy{});
+  rs->getController().setup(js,
+      kj::heap<UnderlyingSourceImpl>(
+          js, UnderlyingSource{.type = kj::str("bytes")}, StreamQueuingStrategy{}));
   return rs;
 }
 
@@ -280,12 +281,12 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
           "is currently locked to a writer.");
     }
 
-    auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(10));
+    auto u8 = jsg::JsUint8Array::create(env.js, 10);
 
     bool writeFailed = false;
 
     auto write = sink->getController()
-                     .write(env.js, buffersource.getHandle(env.js))
+                     .write(env.js, u8)
                      .catch_(env.js, [&](jsg::Lock& js, jsg::Value value) {
       writeFailed = true;
       auto ex = js.exceptionToKj(kj::mv(value));
@@ -293,7 +294,7 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
           ex.getDescription() == "jsg.TypeError: This WritableStream is currently being piped to.");
     });
 
-    source->getController().cancel(env.js, kj::none);
+    auto _ KJ_UNUSED = source->getController().cancel(env.js, kj::none);
 
     env.js.runMicrotasks();
 
@@ -343,7 +344,7 @@ KJ_TEST("WritableStreamInternalController operations reject when piped to") {
       KJ_FAIL_ASSERT("Expected tryPipeFrom to return a promise");
     }
 
-    source->getController().cancel(env.js, kj::none);
+    auto _ KJ_UNUSED = source->getController().cancel(env.js, kj::none);
     env.js.runMicrotasks();
 
     KJ_ASSERT(closeFailed);
@@ -376,9 +377,9 @@ KJ_TEST("WritableStreamInternalController observability") {
     stream = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::mv(myObserver));
 
     auto write = [&](size_t size) {
-      auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(size));
-      return env.context.awaitJs(env.js,
-          KJ_ASSERT_NONNULL(stream)->getController().write(env.js, buffersource.getHandle(env.js)));
+      auto u8 = jsg::JsUint8Array::create(env.js, size);
+      return env.context.awaitJs(
+          env.js, KJ_ASSERT_NONNULL(stream)->getController().write(env.js, u8));
     };
 
     KJ_ASSERT(observer.queueSize == 0);
@@ -427,8 +428,7 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
       auto& c = KJ_ASSERT_NONNULL(controller.tryGet<jsg::Ref<ReadableStreamDefaultController>>());
       if (pullCount == 1) {
         // First pull: enqueue some data so the pipe loop can make progress
-        auto data = js.bytes(kj::heapArray<kj::byte>({1, 2, 3, 4}));
-        c->enqueue(js, data.getHandle(js));
+        c->enqueue(js, jsg::JsUint8Array::create(js, 4));
       }
       // Second pull onwards: don't enqueue anything, leaving the read pending.
       // This simulates an async data source that hasn't received data yet.
@@ -445,7 +445,7 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
     env.js.runMicrotasks();
 
     // Abort while pipeLoop is waiting for a pending read
-    auto abortPromise = sink->getController().abort(env.js, env.js.v8TypeError("Test abort"_kj));
+    auto abortPromise = sink->getController().abort(env.js, env.js.typeError("Test abort"_kj));
     abortPromise.markAsHandled(env.js);
     env.js.runMicrotasks();
 
@@ -646,7 +646,7 @@ KJ_TEST("DrainingReader on closed stream (internal stream)") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto rs = env.js.alloc<ReadableStream>(env.context, kj::heap<EofSource>());
-    rs->getController().cancel(env.js, kj::none);
+    auto _ KJ_UNUSED = rs->getController().cancel(env.js, kj::none);
 
     KJ_IF_SOME(reader, DrainingReader::create(env.js, *rs)) {
       bool done = false;
@@ -753,8 +753,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read with zero-sized buffer") {
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 0);
-    auto view = v8::Uint8Array::New(buffer, 0, 0);
+    auto view = jsg::JsUint8Array::create(env.js, 0);
 
     bool rejected = false;
     reader->read(env.js, view, kj::none)
@@ -777,8 +776,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read with atLeast=0") {
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsUint8Array::create(env.js, 10);
 
     bool rejected = false;
     reader->readAtLeast(env.js, 0, view)
@@ -801,8 +799,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read when atLeast exceeds buffer size"
     auto rs = makeByteStream(env.js);
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsUint8Array::create(env.js, 10);
 
     bool rejected = false;
     reader->readAtLeast(env.js, 20, view)
@@ -832,7 +829,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast with element count within capacity
     auto view = v8::Uint32Array::New(buffer, 0, 10);
 
     bool rejected = false;
-    reader->readAtLeast(env.js, 10, view)
+    reader->readAtLeast(env.js, 10, jsg::JsArrayBufferView(view))
         .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
       rejected = true;
       auto ex = js.exceptionToKj(kj::mv(reason));
@@ -859,7 +856,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects when element count exceeds
     auto view = v8::Uint32Array::New(buffer, 0, 10);
 
     bool rejected = false;
-    reader->readAtLeast(env.js, 11, view)
+    reader->readAtLeast(env.js, 11, jsg::JsArrayBufferView(view))
         .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
       rejected = true;
       auto ex = js.exceptionToKj(kj::mv(reason));
@@ -883,7 +880,7 @@ KJ_TEST("ReadableStreamBYOBReader readAtLeast rejects byteLength as element coun
     auto view = v8::Uint32Array::New(buffer, 0, 1024);
 
     bool rejected = false;
-    reader->readAtLeast(env.js, 4096, view)
+    reader->readAtLeast(env.js, 4096, jsg::JsArrayBufferView(view))
         .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
       rejected = true;
       auto ex = js.exceptionToKj(kj::mv(reason));
@@ -911,7 +908,7 @@ KJ_TEST("ReadableStreamBYOBReader read() with min exceeding element capacity rej
     ReadableStreamBYOBReader::ReadableStreamBYOBReaderReadOptions opts;
     opts.min = 11;
     bool rejected = false;
-    reader->read(env.js, view, kj::mv(opts))
+    reader->read(env.js, jsg::JsArrayBufferView(view), kj::mv(opts))
         .catch_(env.js, [&](jsg::Lock& js, jsg::Value reason) -> ReadResult {
       rejected = true;
       auto ex = js.exceptionToKj(kj::mv(reason));
@@ -930,8 +927,7 @@ KJ_TEST("ReadableStreamBYOBReader rejects read after releaseLock") {
     auto reader = ReadableStreamBYOBReader::constructor(env.js, rs.addRef());
     reader->releaseLock(env.js);
 
-    auto buffer = v8::ArrayBuffer::New(env.js.v8Isolate, 10);
-    auto view = v8::Uint8Array::New(buffer, 0, 10);
+    auto view = jsg::JsUint8Array::create(env.js, 10);
 
     bool rejected = false;
     reader->read(env.js, view, kj::none)

@@ -154,8 +154,8 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
     stdoutPromise =
         stream->getController()
             .readAllBytes(js, IoContext::current().getLimitEnforcer().getBufferingLimit())
-            .then(js, [](jsg::Lock&, jsg::BufferSource bytes) {
-      return kj::heapArray(bytes.asArrayPtr());
+            .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
+      return bytes.getHandle(js).copy();
     });
   }
 
@@ -165,8 +165,8 @@ jsg::Promise<jsg::Ref<ExecOutput>> ExecProcess::output(jsg::Lock& js) {
         "Cannot call output() after stderr has started being consumed.");
     stderrPromise = stream->getController()
                         .readAllBytes(js, kj::maxValue)
-                        .then(js, [](jsg::Lock&, jsg::BufferSource bytes) {
-      return kj::heapArray(bytes.asArrayPtr());
+                        .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> bytes) {
+      return bytes.getHandle(js).copy();
     });
   }
 
@@ -525,7 +525,7 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
         KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
           auto sink = newSystemStream(kj::mv(stdinWriter), StreamEncoding::IDENTITY, ioContext);
           auto pipePromise =
-              (ioContext.waitForDeferredProxy(readable->pumpTo(js, kj::mv(sink), true)));
+              (ioContext.waitForDeferredProxy(readable->pumpTo(js, kj::mv(sink), End::YES)));
           ioContext.addTask(pipePromise.attach(readable.addRef()));
         }
         // user sets "pipe"... they want to consume the API with the stdin WritableStream

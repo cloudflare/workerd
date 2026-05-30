@@ -9,6 +9,8 @@
 
 namespace workerd::api {
 
+WD_STRONG_BOOL(ReadableIsBytes);
+
 // A TransformStream is a readable, writable pair in which whatever is written to the writable
 // side can be read from the readable side, possibly transformed into a different type of value.
 //
@@ -30,6 +32,15 @@ class TransformStream: public jsg::Object {
       jsg::Optional<Transformer> maybeTransformer,
       jsg::Optional<StreamQueuingStrategy> maybeWritableStrategy,
       jsg::Optional<StreamQueuingStrategy> maybeReadableStrategy);
+
+  // When readableIsBytes is true, the readable side uses a ReadableByteStreamController
+  // instead of ReadableStreamDefaultController, enabling BYOB reads. This is a non-standard
+  // extension for internal use by CompressionStream/DecompressionStream.
+  static jsg::Ref<TransformStream> constructorNoCheck(jsg::Lock& js,
+      jsg::Optional<Transformer> maybeTransformer,
+      jsg::Optional<StreamQueuingStrategy> maybeWritableStrategy,
+      jsg::Optional<StreamQueuingStrategy> maybeReadableStrategy,
+      ReadableIsBytes readableIsBytes = ReadableIsBytes::NO);
 
   jsg::Ref<ReadableStream> getReadable() {
     return readable.addRef();

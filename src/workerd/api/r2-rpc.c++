@@ -233,7 +233,8 @@ kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
         co_await context.run(
             [dest = newSystemStream(kj::mv(request.body), StreamEncoding::IDENTITY, context),
                 stream = kj::mv(stream)](jsg::Lock& js) mutable {
-          return IoContext::current().waitForDeferredProxy(stream->pumpTo(js, kj::mv(dest), true));
+          return IoContext::current().waitForDeferredProxy(
+              stream->pumpTo(js, kj::mv(dest), End::YES));
         });
       }
     }

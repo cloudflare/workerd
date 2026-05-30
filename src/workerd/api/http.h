@@ -50,7 +50,7 @@ class Body: public jsg::Object {
       jsg::Ref<FormData>,
       jsg::Ref<URLSearchParams>,
       jsg::Ref<url::URLSearchParams>,
-      jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
+      jsg::AsyncGeneratorIgnoringStrings<jsg::JsRef<jsg::JsValue>>>;
 
   struct RefcountedBytes final: public kj::Refcounted {
     kj::Array<kj::byte> bytes;
@@ -164,8 +164,8 @@ class Body: public jsg::Object {
 
   kj::Maybe<jsg::Ref<ReadableStream>> getBody();
   bool getBodyUsed();
-  jsg::Promise<jsg::BufferSource> arrayBuffer(jsg::Lock& js);
-  jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
+  jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> arrayBuffer(jsg::Lock& js);
+  jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> bytes(jsg::Lock& js);
   jsg::Promise<kj::String> text(jsg::Lock& js);
   jsg::Promise<jsg::Ref<FormData>> formData(jsg::Lock& js);
   jsg::Promise<jsg::Value> json(jsg::Lock& js);
@@ -362,7 +362,8 @@ class Fetcher: public JsRpcClientProvider {
       kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
       jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit);
 
-  using GetResult = kj::OneOf<jsg::Ref<ReadableStream>, jsg::BufferSource, kj::String, jsg::Value>;
+  using GetResult =
+      kj::OneOf<jsg::Ref<ReadableStream>, jsg::JsRef<jsg::JsArrayBuffer>, kj::String, jsg::Value>;
 
   jsg::Promise<GetResult> get(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> type);
 

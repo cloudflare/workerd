@@ -34,7 +34,7 @@ jsg::Promise<void> WritableStreamDefaultWriter::abort(
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream writer has been released."_kj));
+        js.typeError("This WritableStream writer has been released."_kj));
   }
   if (state.is<Closed>()) {
     return js.resolvedPromise();
@@ -62,10 +62,10 @@ jsg::Promise<void> WritableStreamDefaultWriter::close(jsg::Lock& js) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream writer has been released."_kj));
+        js.typeError("This WritableStream writer has been released."_kj));
   }
   if (state.is<Closed>()) {
-    return js.rejectedPromise<void>(js.v8TypeError("This WritableStream has been closed."_kj));
+    return js.rejectedPromise<void>(js.typeError("This WritableStream has been closed."_kj));
   }
   auto& attached = state.requireActiveUnsafe();
   // In some edge cases, this writer is the last thing holding a strong
@@ -114,7 +114,6 @@ void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& st
 }
 
 void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
-  // TODO(soon): Releasing the lock should cancel any pending writes.
   assertAttachedOrTerminal();
   // Closed and Released states are no-ops.
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
@@ -139,10 +138,10 @@ jsg::Promise<void> WritableStreamDefaultWriter::write(
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream writer has been released."_kj));
+        js.typeError("This WritableStream writer has been released."_kj));
   }
   if (state.is<Closed>()) {
-    return js.rejectedPromise<void>(js.v8TypeError("This WritableStream has been closed."_kj));
+    return js.rejectedPromise<void>(js.typeError("This WritableStream has been closed."_kj));
   }
   auto& attached = state.requireActiveUnsafe();
   return attached.stream->getController().write(js, chunk);
@@ -219,7 +218,7 @@ jsg::Promise<void> WritableStream::abort(
     jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
+        js.typeError("This WritableStream is currently locked to a writer."_kj));
   }
   return getController().abort(js, reason);
 }
@@ -227,7 +226,7 @@ jsg::Promise<void> WritableStream::abort(
 jsg::Promise<void> WritableStream::close(jsg::Lock& js) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
+        js.typeError("This WritableStream is currently locked to a writer."_kj));
   }
   return getController().close(js);
 }
@@ -235,7 +234,7 @@ jsg::Promise<void> WritableStream::close(jsg::Lock& js) {
 jsg::Promise<void> WritableStream::flush(jsg::Lock& js) {
   if (isLocked()) {
     return js.rejectedPromise<void>(
-        js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
+        js.typeError("This WritableStream is currently locked to a writer."_kj));
   }
   return getController().flush(js);
 }
@@ -256,7 +255,11 @@ jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
   // lifetimes are identical and memory accounting itself has a memory overhead.
   auto stream = js.allocAccounted<WritableStream>(
       sizeof(WritableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
-  stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
+
+  auto sink = kj::heap<UnderlyingSinkImpl>(
+      js, kj::mv(underlyingSink).orDefault({}), kj::mv(queuingStrategy).orDefault({}));
+
+  stream->getController().setup(js, kj::mv(sink));
   return kj::mv(stream);
 }
 
@@ -409,9 +412,8 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     if (buffer == nullptr) return kj::READY_NOW;
     return canceler.wrap(context.run([this, buffer](Worker::Lock& lock) mutable {
       auto& writer = getInner();
-      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, buffer.size()));
-      source.asArrayPtr().copyFrom(buffer);
-      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+      auto source = jsg::JsArrayBuffer::create(lock, buffer);
+      return context.awaitJs(lock, writer.write(lock, source));
     }));
   }
 
@@ -430,7 +432,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       // guaranteed to live until the returned promise is resolved, but the application code
       // may hold onto the ArrayBuffer for longer. We need to make sure that the backing store
       // for the ArrayBuffer remains valid.
-      auto source = KJ_ASSERT_NONNULL(jsg::BufferSource::tryAlloc(lock, amount));
+      auto source = jsg::JsArrayBuffer::create(lock, amount);
       auto ptr = source.asArrayPtr();
       for (auto& piece: pieces) {
         KJ_DASSERT(ptr.size() > 0);
@@ -440,7 +442,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         ptr = ptr.slice(piece.size());
       }
 
-      return context.awaitJs(lock, writer.write(lock, source.getHandle(lock)));
+      return context.awaitJs(lock, writer.write(lock, source));
     }));
   }
 
@@ -515,9 +517,6 @@ void WritableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       "WritableStream can only be serialized for RPC.");
 
   IoContext& ioctx = IoContext::current();
-
-  // TODO(soon): Support JS-backed WritableStreams. Currently this only supports native streams
-  //   and IdentityTransformStream, since only they are backed by WritableStreamSink.
 
   KJ_IF_SOME(sink, getController().removeSink(js)) {
     // NOTE: We're counting on `removeSink()`, to check that the stream is not locked and other

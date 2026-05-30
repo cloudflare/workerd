@@ -98,6 +98,172 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     return result;
   }
 
+  // ---- PersistentContinuation tests ----
+
+  void testPersistentContinuation(jsg::Lock& js) {
+    // Test PersistentContinuation (then+catch) with reuse across multiple promises.
+    struct Callbacks {
+      int successCount = 0;
+      int failureCount = 0;
+
+      void thenFunc(jsg::Lock& js) {
+        successCount++;
+      }
+      void catchFunc(jsg::Lock& js, jsg::Value reason) {
+        failureCount++;
+      }
+    };
+
+    using FuncPair = jsg::ThenCatchPair<kj::Function<void(jsg::Lock&)>,
+        kj::Function<void(jsg::Lock&, jsg::Value)>>;
+
+    Callbacks callbacks;
+    auto continuation = jsg::PersistentContinuation<FuncPair, void, void>::create(js,
+        FuncPair{
+          .thenFunc = [&callbacks](jsg::Lock& js) { callbacks.thenFunc(js); },
+          .catchFunc = [&callbacks](jsg::Lock& js,
+                           jsg::Value reason) { callbacks.catchFunc(js, kj::mv(reason)); },
+        });
+
+    // Use the continuation for a resolved promise.
+    {
+      auto [promise, resolver] = js.newPromiseAndResolver<void>();
+      promise.thenRef(js, continuation);
+      resolver.resolve(js);
+      js.runMicrotasks();
+      KJ_ASSERT(callbacks.successCount == 1);
+      KJ_ASSERT(callbacks.failureCount == 0);
+    }
+
+    // Reuse the same continuation for another resolved promise.
+    {
+      auto [promise, resolver] = js.newPromiseAndResolver<void>();
+      promise.thenRef(js, continuation);
+      resolver.resolve(js);
+      js.runMicrotasks();
+      KJ_ASSERT(callbacks.successCount == 2);
+      KJ_ASSERT(callbacks.failureCount == 0);
+    }
+
+    // Reuse for a rejected promise — the catch side should fire.
+    {
+      auto promise = js.rejectedPromise<void>(v8StrIntern(js.v8Isolate, "test error"));
+      promise.markAsHandled(js);
+      promise.thenRef(js, continuation);
+      js.runMicrotasks();
+      KJ_ASSERT(callbacks.successCount == 2);
+      KJ_ASSERT(callbacks.failureCount == 1);
+    }
+  }
+
+  void testPersistentThenContinuation(jsg::Lock& js) {
+    // Test PersistentThenContinuation (then-only, identity on rejection) with reuse.
+    int result = 0;
+
+    using Func = kj::Function<int(jsg::Lock&, int)>;
+    auto continuation = jsg::PersistentThenContinuation<Func, int, int>::create(
+        js, [&result](jsg::Lock& js, int value) -> int {
+      result = value * 2;
+      return result;
+    });
+
+    // First use.
+    {
+      auto [promise, resolver] = js.newPromiseAndResolver<int>();
+      promise.thenRef(js, continuation);
+      resolver.resolve(js, 21);
+      js.runMicrotasks();
+      KJ_ASSERT(result == 42);
+    }
+
+    // Reuse with a different value.
+    {
+      auto [promise, resolver] = js.newPromiseAndResolver<int>();
+      promise.thenRef(js, continuation);
+      resolver.resolve(js, 5);
+      js.runMicrotasks();
+      KJ_ASSERT(result == 10);
+    }
+
+    // Rejection should propagate through (identity behavior).
+    {
+      bool rejected = false;
+      auto promise = js.rejectedPromise<int>(v8StrIntern(js.v8Isolate, "oops"));
+      promise.markAsHandled(js);
+      auto chained = promise.thenRef(js, continuation);
+      chained.catch_(js, [&rejected](jsg::Lock& js, jsg::Value reason) -> int {
+        rejected = true;
+        return 0;
+      });
+      js.runMicrotasks();
+      KJ_ASSERT(rejected);
+      KJ_ASSERT(result == 10);  // Unchanged — then callback not called.
+    }
+  }
+
+  void testPersistentCatchContinuation(jsg::Lock& js) {
+    // Test PersistentCatchContinuation (catch-only, identity on fulfillment) with reuse.
+    int catchCount = 0;
+
+    using ErrorFunc = kj::Function<int(jsg::Lock&, jsg::Value)>;
+    auto continuation = jsg::PersistentCatchContinuation<ErrorFunc, int>::create(
+        js, [&catchCount](jsg::Lock& js, jsg::Value reason) -> int {
+      catchCount++;
+      return -1;
+    });
+
+    // Rejected promise — catch handler fires.
+    {
+      auto promise = js.rejectedPromise<int>(v8StrIntern(js.v8Isolate, "err"));
+      promise.markAsHandled(js);
+      int result = 0;
+      promise.catchRef(js, continuation).then(js, [&result](jsg::Lock& js, int v) { result = v; });
+      js.runMicrotasks();
+      KJ_ASSERT(catchCount == 1);
+      KJ_ASSERT(result == -1);
+    }
+
+    // Reuse with another rejection.
+    {
+      auto promise = js.rejectedPromise<int>(v8StrIntern(js.v8Isolate, "err2"));
+      promise.markAsHandled(js);
+      int result = 0;
+      promise.catchRef(js, continuation).then(js, [&result](jsg::Lock& js, int v) { result = v; });
+      js.runMicrotasks();
+      KJ_ASSERT(catchCount == 2);
+      KJ_ASSERT(result == -1);
+    }
+
+    // Fulfilled promise — identity propagation, catch handler not called.
+    {
+      auto [promise, resolver] = js.newPromiseAndResolver<int>();
+      int result = 0;
+      promise.catchRef(js, continuation).then(js, [&result](jsg::Lock& js, int v) { result = v; });
+      resolver.resolve(js, 99);
+      js.runMicrotasks();
+      KJ_ASSERT(catchCount == 2);  // Unchanged.
+      KJ_ASSERT(result == 99);
+    }
+  }
+
+  void testPersistentContinuationChaining(jsg::Lock& js) {
+    // Test that the promise returned by thenRef can be further chained with .then().
+    int finalResult = 0;
+
+    using Func = kj::Function<int(jsg::Lock&, int)>;
+    auto continuation = jsg::PersistentThenContinuation<Func, int, int>::create(
+        js, [](jsg::Lock& js, int value) -> int { return value + 10; });
+
+    auto [promise, resolver] = js.newPromiseAndResolver<int>();
+    promise.thenRef(js, continuation).then(js, [&finalResult](jsg::Lock& js, int v) -> kj::String {
+      finalResult = v;
+      return kj::str(v);
+    });
+    resolver.resolve(js, 32);
+    js.runMicrotasks();
+    KJ_ASSERT(finalResult == 42);
+  }
+
   JSG_RESOURCE_TYPE(PromiseContext) {
     JSG_READONLY_PROTOTYPE_PROPERTY(promise, makePromise);
     JSG_METHOD(resolvePromise);
@@ -111,6 +277,11 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     JSG_METHOD(whenResolved);
 
     JSG_METHOD(thenable);
+
+    JSG_METHOD(testPersistentContinuation);
+    JSG_METHOD(testPersistentThenContinuation);
+    JSG_METHOD(testPersistentCatchContinuation);
+    JSG_METHOD(testPersistentContinuationChaining);
   }
 
   kj::Maybe<Promise<int>::Resolver> resolver;
@@ -190,6 +361,26 @@ KJ_TEST("thenable") {
   Evaluator<PromiseContext, PromiseIsolate, ThenableConfig> e(v8System);
 
   e.expectEval("thenable({ then(res) { res(123) } })", "number", "123");
+}
+
+KJ_TEST("PersistentContinuation") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+  e.expectEval("testPersistentContinuation()", "undefined", "undefined");
+}
+
+KJ_TEST("PersistentThenContinuation") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+  e.expectEval("testPersistentThenContinuation()", "undefined", "undefined");
+}
+
+KJ_TEST("PersistentCatchContinuation") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+  e.expectEval("testPersistentCatchContinuation()", "undefined", "undefined");
+}
+
+KJ_TEST("PersistentContinuation chaining") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+  e.expectEval("testPersistentContinuationChaining()", "undefined", "undefined");
 }
 
 }  // namespace

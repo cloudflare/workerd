@@ -369,7 +369,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 auto& context = IoContext::current();
 
                 self->writable->detach(js);
-                self->readable->detach(js, true);
+                self->readable->detach(js, IgnoreDisturbed::YES);
 
                 // We should set this before closedResolver.resolve() in order to give the user
                 // the option to check if the closed promise is resolved due to upgrade or not.
@@ -565,7 +565,7 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
   // We do not care if the socket was disturbed, we require the user to ensure the socket is not
   // being used.
   writable->detach(js);
-  readable->detach(js, true);
+  readable->detach(js, IgnoreDisturbed::YES);
 
   // Move the stream out of the socket, to ensure the stream is properly destroyed when the
   // caller is done with it.

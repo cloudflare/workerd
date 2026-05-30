@@ -211,6 +211,174 @@ void identityPromiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args
   }
 }
 
+// =======================================================================================
+// Persistent (reusable) promise continuations
+//
+// The standard promiseContinuation/identityPromiseContinuation functions consume their
+// OpaqueWrappable data on first invocation (via unwrapOpaque/dropOpaque). The "Ref"
+// variants below borrow by reference instead, allowing the same OpaqueWrappable to be
+// reused across multiple .then() calls. The caller must ensure the OpaqueWrappable
+// outlives all promises that reference it (typically by storing the PersistentContinuation
+// on the same object whose methods the callbacks invoke, and tracing it via visitForGc).
+
+// Like promiseContinuation, but borrows the FuncPair by reference instead of consuming it.
+template <typename FuncPairType, bool isCatch, typename Input, typename Output>
+void promiseContinuationRef(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  liftKj(args, [&]() {
+    auto isolate = args.GetIsolate();
+    auto& funcPair = unwrapOpaqueRef<FuncPairType>(isolate, args.Data());
+
+    auto callFunc = [&]() -> Output {
+      auto& js = Lock::from(isolate);
+      if constexpr (isCatch) {
+        return funcPair.catchFunc(js, Value(isolate, args[0]));
+      } else if constexpr (isVoid<Input>()) {
+        return funcPair.thenFunc(js);
+      } else if constexpr (isV8Ref<Input>()) {
+        return funcPair.thenFunc(js, Input(isolate, args[0]));
+      } else {
+        return funcPair.thenFunc(js, unwrapOpaque<Input>(isolate, args[0]));
+      }
+    };
+    if constexpr (isVoid<Output>()) {
+      callFunc();
+    } else if constexpr (isPromise<Output>()) {
+      return v8::Local<v8::Value>(callFunc().consumeHandle(Lock::from(isolate)));
+    } else if constexpr (isV8Ref<Output>()) {
+      return callFunc().getHandle(isolate);
+    } else {
+      return wrapOpaque(isolate->GetCurrentContext(), callFunc());
+    }
+  });
+}
+
+// Like identityPromiseContinuation, but does NOT destroy the OpaqueWrappable data.
+template <bool isCatch>
+void identityPromiseContinuationRef(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  if constexpr (isCatch) {
+    args.GetIsolate()->ThrowException(args[0]);
+  } else {
+    args.GetReturnValue().Set(args[0]);
+  }
+}
+
+// A pre-built pair of v8::Functions backed by a persistent OpaqueWrappable<FuncPair>.
+// Created once, reused across multiple promise.then() calls. The FuncPair's thenFunc
+// and catchFunc must be safe to invoke repeatedly (they must not consume captured state).
+//
+// The holder is responsible for calling visitForGc() to trace the stored V8 references.
+template <typename FuncPair, typename Input, typename Output>
+struct PersistentContinuation {
+  V8Ref<v8::Value> data;
+  V8Ref<v8::Function> onFulfilled;
+  V8Ref<v8::Function> onRejected;
+
+  static PersistentContinuation create(Lock& js, FuncPair&& funcPair) {
+    auto isolate = js.v8Isolate;
+    auto context = js.v8Context();
+    auto dataHandle = wrapOpaque(context, kj::mv(funcPair));
+
+    auto fulfilled =
+        check(v8::Function::New(context, &promiseContinuationRef<FuncPair, false, Input, Output>,
+            dataHandle, 1, v8::ConstructorBehavior::kThrow));
+    auto rejected =
+        check(v8::Function::New(context, &promiseContinuationRef<FuncPair, true, Value, Output>,
+            dataHandle, 1, v8::ConstructorBehavior::kThrow));
+
+    return {
+      .data = V8Ref<v8::Value>(isolate, dataHandle),
+      .onFulfilled = V8Ref<v8::Function>(isolate, fulfilled),
+      .onRejected = V8Ref<v8::Function>(isolate, rejected),
+    };
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(data, onFulfilled, onRejected);
+  }
+
+  JSG_MEMORY_INFO(PersistentContinuation) {
+    tracker.trackField("data", data);
+    tracker.trackField("onFulfilled", onFulfilled);
+    tracker.trackField("onRejected", onRejected);
+  }
+};
+
+// Pre-built continuation for promise.then(onFulfilled) — identity propagation on rejection.
+template <typename Func, typename Input, typename Output>
+struct PersistentThenContinuation {
+  V8Ref<v8::Value> data;
+  V8Ref<v8::Function> onFulfilled;
+  V8Ref<v8::Function> onRejected;
+
+  static PersistentThenContinuation create(Lock& js, Func&& func) {
+    using FuncPair = ThenCatchPair<Func, bool>;
+    auto isolate = js.v8Isolate;
+    auto context = js.v8Context();
+    auto dataHandle = wrapOpaque(context, FuncPair{kj::mv(func), false});
+
+    auto fulfilled =
+        check(v8::Function::New(context, &promiseContinuationRef<FuncPair, false, Input, Output>,
+            dataHandle, 1, v8::ConstructorBehavior::kThrow));
+    auto rejected = check(v8::Function::New(context, &identityPromiseContinuationRef<true>,
+        dataHandle, 1, v8::ConstructorBehavior::kThrow));
+
+    return {
+      .data = V8Ref<v8::Value>(isolate, dataHandle),
+      .onFulfilled = V8Ref<v8::Function>(isolate, fulfilled),
+      .onRejected = V8Ref<v8::Function>(isolate, rejected),
+    };
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(data, onFulfilled, onRejected);
+  }
+
+  JSG_MEMORY_INFO(PersistentThenContinuation) {
+    tracker.trackField("data", data);
+    tracker.trackField("onFulfilled", onFulfilled);
+    tracker.trackField("onRejected", onRejected);
+  }
+};
+
+// Pre-built continuation for promise.catch_(onRejected) — identity propagation on fulfillment.
+template <typename ErrorFunc, typename T>
+struct PersistentCatchContinuation {
+  V8Ref<v8::Value> data;
+  V8Ref<v8::Function> onFulfilled;
+  V8Ref<v8::Function> onRejected;
+
+  static PersistentCatchContinuation create(Lock& js, ErrorFunc&& errorFunc) {
+    using FuncPair = ThenCatchPair<bool, ErrorFunc>;
+    auto isolate = js.v8Isolate;
+    auto context = js.v8Context();
+    auto dataHandle = wrapOpaque(context, FuncPair{false, kj::mv(errorFunc)});
+
+    auto fulfilled = check(v8::Function::New(context, &identityPromiseContinuationRef<false>,
+        dataHandle, 1, v8::ConstructorBehavior::kThrow));
+    auto rejected =
+        check(v8::Function::New(context, &promiseContinuationRef<FuncPair, true, Value, T>,
+            dataHandle, 1, v8::ConstructorBehavior::kThrow));
+
+    return {
+      .data = V8Ref<v8::Value>(isolate, dataHandle),
+      .onFulfilled = V8Ref<v8::Function>(isolate, fulfilled),
+      .onRejected = V8Ref<v8::Function>(isolate, rejected),
+    };
+  }
+
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(data, onFulfilled, onRejected);
+  }
+
+  JSG_MEMORY_INFO(PersistentCatchContinuation) {
+    tracker.trackField("data", data);
+    tracker.trackField("onFulfilled", onFulfilled);
+    tracker.trackField("onRejected", onRejected);
+  }
+};
+
+// =======================================================================================
+
 template <typename TypeWrapper>
 class PromiseWrapper;
 
@@ -272,6 +440,44 @@ class Promise {
     return thenImpl<T>(js, FuncPair{false, kj::fwd<ErrorFunc>(errorFunc)},
         &identityPromiseContinuation<FuncPair, false>,
         &promiseContinuation<FuncPair, true, Value, T>);
+  }
+
+  // Attach pre-built then+catch continuation functions from a PersistentContinuation.
+  // Unlike then(), this does not allocate any new V8 objects per call — it reuses the
+  // pre-built functions from the continuation. The PersistentContinuation must outlive
+  // the returned promise's resolution.
+  template <typename FuncPair, typename Output>
+  MaintainPromise<Output> thenRef(
+      Lock& js, PersistentContinuation<FuncPair, T, Output>& continuation) {
+    return js.withinHandleScope([&] {
+      auto context = js.v8Context();
+      return MaintainPromise<Output>(js.v8Isolate,
+          check(consumeHandle(js)->Then(context, continuation.onFulfilled.getHandle(js),
+              continuation.onRejected.getHandle(js))));
+    });
+  }
+
+  // Attach pre-built then-only continuation (identity propagation on rejection).
+  template <typename Func, typename Output>
+  MaintainPromise<Output> thenRef(
+      Lock& js, PersistentThenContinuation<Func, T, Output>& continuation) {
+    return js.withinHandleScope([&] {
+      auto context = js.v8Context();
+      return MaintainPromise<Output>(js.v8Isolate,
+          check(consumeHandle(js)->Then(context, continuation.onFulfilled.getHandle(js),
+              continuation.onRejected.getHandle(js))));
+    });
+  }
+
+  // Attach pre-built catch-only continuation (identity propagation on fulfillment).
+  template <typename ErrorFunc>
+  Promise<T> catchRef(Lock& js, PersistentCatchContinuation<ErrorFunc, T>& continuation) {
+    return js.withinHandleScope([&] {
+      auto context = js.v8Context();
+      return Promise<T>(js.v8Isolate,
+          check(consumeHandle(js)->Then(context, continuation.onFulfilled.getHandle(js),
+              continuation.onRejected.getHandle(js))));
+    });
   }
 
   // whenResolved returns a new Promise<void> that resolves when this promise resolves,

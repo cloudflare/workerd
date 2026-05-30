@@ -31,6 +31,12 @@ class TransformStreamDefaultController;
 
 using rpc::StreamEncoding;
 
+WD_STRONG_BOOL(MarkAsHandled);
+WD_STRONG_BOOL(End);
+WD_STRONG_BOOL(IgnoreDisturbed);
+WD_STRONG_BOOL(Reject);
+WD_STRONG_BOOL(UpdateBackpressure);
+
 enum class ReadAllTextOption : uint8_t {
   NONE = 0,
   NULL_TERMINATE = 1 << 0,
@@ -57,7 +63,7 @@ inline bool hasUtf8Bom(kj::ArrayPtr<const kj::byte> data) {
 }
 
 struct ReadResult {
-  jsg::Optional<jsg::Value> value;
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> value;
   bool done;
 
   JSG_STRUCT(value, done);
@@ -80,7 +86,7 @@ struct DrainingReadResult {
 };
 
 struct StreamQueuingStrategy {
-  using SizeAlgorithm = uint64_t(v8::Local<v8::Value>);
+  using SizeAlgorithm = uint64_t(jsg::JsValue);
 
   jsg::Optional<uint64_t> highWaterMark;
   jsg::Optional<jsg::Function<SizeAlgorithm>> size;
@@ -96,7 +102,7 @@ struct UnderlyingSource {
       kj::OneOf<jsg::Ref<ReadableStreamDefaultController>, jsg::Ref<ReadableByteStreamController>>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
   using PullAlgorithm = jsg::Promise<void>(Controller);
-  using CancelAlgorithm = jsg::Promise<void>(v8::Local<v8::Value> reason);
+  using CancelAlgorithm = jsg::Promise<void>(jsg::JsValue reason);
 
   // The autoAllocateChunkSize mechanism allows byte streams to operate as if a BYOB
   // reader is being used even if it is just a default reader. Support is optional
@@ -149,11 +155,116 @@ struct UnderlyingSource {
   });
 };
 
+class UnderlyingSourceImpl {
+ public:
+  // Default high water mark: 1 for value streams, 0 for byte streams (type="bytes").
+  static constexpr uint64_t DEFAULT_HIGH_WATER_MARK_VALUE = 1;
+  static constexpr uint64_t DEFAULT_HIGH_WATER_MARK_BYTES = 0;
+
+  using StartAlgorithm = UnderlyingSource::StartAlgorithm;
+  using PullAlgorithm = UnderlyingSource::PullAlgorithm;
+  using CancelAlgorithm = UnderlyingSource::CancelAlgorithm;
+  using SizeAlgorithm = StreamQueuingStrategy::SizeAlgorithm;
+
+  UnderlyingSourceImpl(jsg::Lock& js, UnderlyingSource source, StreamQueuingStrategy strategy);
+  virtual ~UnderlyingSourceImpl() noexcept(false) = default;
+  KJ_DISALLOW_COPY_AND_MOVE(UnderlyingSourceImpl);
+
+  inline uint64_t getHighWaterMark() const {
+    return highWaterMark_;
+  }
+
+  inline bool isBytes() const {
+    return isBytes_;
+  }
+
+  inline kj::Maybe<uint64_t> getExpectedLength() const {
+    return expectedLength_;
+  }
+
+  inline kj::Maybe<int> getAutoAllocateChunkSize() const {
+    return autoAllocateChunkSize_;
+  }
+
+  inline kj::Maybe<jsg::Function<StartAlgorithm>>& start() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return start_;
+  }
+
+  inline kj::Maybe<jsg::Function<PullAlgorithm>>& pull() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return pull_;
+  }
+
+  inline kj::Maybe<jsg::Function<CancelAlgorithm>>& cancel()
+      KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return cancel_;
+  }
+
+  inline kj::Maybe<jsg::Function<SizeAlgorithm>>& size() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return size_;
+  }
+
+  void clearStart();
+
+  void clear();
+
+  virtual kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() KJ_WARN_UNUSED_RESULT {
+    return kj::none;
+  }
+
+  struct Tee {
+    kj::Own<UnderlyingSourceImpl> branch1;
+    kj::Own<UnderlyingSourceImpl> branch2;
+  };
+  virtual kj::Maybe<Tee> tryTee(uint64_t limit) KJ_WARN_UNUSED_RESULT {
+    return kj::none;
+  }
+
+  virtual bool isInternal() const {
+    return false;
+  }
+
+  // Called after the ReadableStream is fully constructed. Allows internal source
+  // implementations to store a back-reference to the owning stream (e.g., for
+  // signalEof support). Default is a no-op.
+  virtual void setOwner(ReadableStream& stream) {}
+
+  virtual StreamEncoding getPreferredEncoding() {
+    return StreamEncoding::IDENTITY;
+  }
+
+  virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
+    return kj::none;
+  }
+
+  JSG_MEMORY_INFO(UnderlyingSourceImpl) {
+    tracker.trackField("start", start_);
+    tracker.trackField("pull", pull_);
+    tracker.trackField("cancel", cancel_);
+    tracker.trackField("size", size_);
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(start_, pull_, cancel_, size_);
+  }
+
+ protected:
+  UnderlyingSourceImpl() = default;
+  kj::Maybe<jsg::Function<StartAlgorithm>> start_;
+  kj::Maybe<jsg::Function<PullAlgorithm>> pull_;
+  kj::Maybe<jsg::Function<CancelAlgorithm>> cancel_;
+  kj::Maybe<jsg::Function<SizeAlgorithm>> size_;
+  bool isBytes_ = false;
+  uint64_t highWaterMark_;
+  kj::Maybe<uint64_t> expectedLength_;
+  kj::Maybe<int> autoAllocateChunkSize_;
+};
+
 struct UnderlyingSink {
   using Controller = jsg::Ref<WritableStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
-  using WriteAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
-  using AbortAlgorithm = jsg::Promise<void>(v8::Local<v8::Value> reason);
+  using WriteAlgorithm = jsg::Promise<void>(jsg::JsValue, Controller);
+  using WritevAlgorithm = jsg::Promise<void>(kj::Array<jsg::JsRef<jsg::JsValue>>, Controller);
+  using AbortAlgorithm = jsg::Promise<void>(jsg::JsValue);
   using CloseAlgorithm = jsg::Promise<void>();
 
   // Per the spec, the type property for the UnderlyingSink should always be either
@@ -174,14 +285,109 @@ struct UnderlyingSink {
     abort?: (reason: any) => void | Promise<void>;
     close?: () => void | Promise<void>;
   });
+
+  // Non-standard extension: vectorized write algorithm. When set, allows the stream
+  // to batch multiple queued writes into a single call. Only set by internal C++ sinks
+  // that support vectorized I/O, never by user-provided JS sinks.
+  jsg::Optional<jsg::Function<WritevAlgorithm>> writev;
+};
+
+class UnderlyingSinkImpl {
+ public:
+  constexpr static uint64_t DEFAULT_HIGH_WATER_MARK = 1;
+  using StartAlgorithm = UnderlyingSink::StartAlgorithm;
+  using WriteAlgorithm = UnderlyingSink::WriteAlgorithm;
+  using AbortAlgorithm = UnderlyingSink::AbortAlgorithm;
+  using CloseAlgorithm = UnderlyingSink::CloseAlgorithm;
+  using SizeAlgorithm = StreamQueuingStrategy::SizeAlgorithm;
+
+  // Non-standard extension: vectorized write algorithm. When set, allows the stream
+  // to batch multiple queued writes into a single call. Only set by internal C++ sinks
+  // that support vectorized I/O, never by user-provided JS sinks.
+  using WritevAlgorithm = UnderlyingSink::WritevAlgorithm;
+
+  UnderlyingSinkImpl(jsg::Lock& js, UnderlyingSink sink, StreamQueuingStrategy strategy);
+  virtual ~UnderlyingSinkImpl() noexcept(false) = default;
+  KJ_DISALLOW_COPY_AND_MOVE(UnderlyingSinkImpl);
+
+  inline uint64_t getHighWaterMark() const {
+    return highWaterMark_;
+  }
+
+  inline kj::Maybe<jsg::Function<StartAlgorithm>>& start() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return start_;
+  }
+  inline kj::Maybe<jsg::Function<WriteAlgorithm>>& write() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return write_;
+  }
+  inline kj::Maybe<jsg::Function<AbortAlgorithm>>& abort() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return abort_;
+  }
+  inline kj::Maybe<jsg::Function<CloseAlgorithm>>& close() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return close_;
+  }
+  inline kj::Maybe<jsg::Function<SizeAlgorithm>>& size() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return size_;
+  }
+  inline kj::Maybe<jsg::Function<WritevAlgorithm>>& writev()
+      KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return writev_;
+  }
+
+  inline void setWritev(jsg::Function<WritevAlgorithm> writev) {
+    writev_ = kj::mv(writev);
+  }
+
+  void clearStart();
+
+  void clear();
+
+  virtual kj::Maybe<kj::Own<WritableStreamSink>> tryReleaseSink() KJ_WARN_UNUSED_RESULT {
+    return kj::none;
+  }
+
+  // Returns a non-owning reference to the underlying WritableStreamSink, if this
+  // is an internal source. The sink remains owned by this impl. Returns kj::none
+  // for JS-backed sinks or if the sink is not in an active state.
+  virtual kj::Maybe<WritableStreamSink&> tryGetSink() KJ_WARN_UNUSED_RESULT {
+    return kj::none;
+  }
+
+  virtual bool isInternal() const {
+    return false;
+  }
+
+  JSG_MEMORY_INFO(UnderlyingSinkImpl) {
+    tracker.trackField("start", start_);
+    tracker.trackField("write", write_);
+    tracker.trackField("writev", writev_);
+    tracker.trackField("abort", abort_);
+    tracker.trackField("close", close_);
+    tracker.trackField("size", size_);
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(start_, write_, writev_, abort_, close_, size_);
+  }
+
+ protected:
+  UnderlyingSinkImpl() = default;
+  kj::Maybe<jsg::Function<StartAlgorithm>> start_;
+  kj::Maybe<jsg::Function<WriteAlgorithm>> write_;
+  kj::Maybe<jsg::Function<WritevAlgorithm>> writev_;
+  kj::Maybe<jsg::Function<AbortAlgorithm>> abort_;
+  kj::Maybe<jsg::Function<CloseAlgorithm>> close_;
+  kj::Maybe<jsg::Function<SizeAlgorithm>> size_;
+  uint64_t highWaterMark_ = DEFAULT_HIGH_WATER_MARK;
 };
 
 struct Transformer {
   using Controller = jsg::Ref<TransformStreamDefaultController>;
   using StartAlgorithm = jsg::Promise<void>(Controller);
-  using TransformAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
+  using TransformAlgorithm = jsg::Promise<void>(jsg::JsValue, Controller);
+  using TransformvAlgorithm = jsg::Promise<void>(kj::Array<jsg::JsRef<jsg::JsValue>>, Controller);
   using FlushAlgorithm = jsg::Promise<void>(Controller);
-  using CancelAlgorithm = jsg::Promise<void>(jsg::JsValue reason);
+  using CancelAlgorithm = jsg::Promise<void>(jsg::JsValue);
 
   jsg::Optional<kj::String> readableType;
   jsg::Optional<kj::String> writableType;
@@ -204,6 +410,67 @@ struct Transformer {
     cancel?: (reason: any) => void | Promise<void>;
     expectedLength?: number;
   });
+
+  // Non-standard extension: vectorized transform algorithm. When set, allows the stream
+  // to transform multiple queued chunks into a single call.
+  jsg::Optional<jsg::Function<TransformvAlgorithm>> transformv;
+};
+
+class TransformerImpl {
+ public:
+  using StartAlgorithm = Transformer::StartAlgorithm;
+  using TransformAlgorithm = Transformer::TransformAlgorithm;
+  using TransformvAlgorithm = Transformer::TransformvAlgorithm;
+  using FlushAlgorithm = Transformer::FlushAlgorithm;
+  using CancelAlgorithm = Transformer::CancelAlgorithm;
+
+  TransformerImpl(jsg::Lock& js, Transformer transformer);
+  virtual ~TransformerImpl() noexcept(false) = default;
+  KJ_DISALLOW_COPY_AND_MOVE(TransformerImpl);
+
+  inline kj::Maybe<jsg::Function<StartAlgorithm>>& start() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return start_;
+  }
+  inline kj::Maybe<jsg::Function<TransformAlgorithm>>& transform()
+      KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return transform_;
+  }
+  inline kj::Maybe<jsg::Function<FlushAlgorithm>>& flush() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return flush_;
+  }
+  inline kj::Maybe<jsg::Function<CancelAlgorithm>>& cancel()
+      KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return cancel_;
+  }
+
+  inline kj::Maybe<jsg::Function<TransformvAlgorithm>>& transformv()
+      KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT {
+    return transformv_;
+  }
+
+  void clearStart();
+
+  void clear();
+
+  JSG_MEMORY_INFO(TransformerImpl) {
+    tracker.trackField("start", start_);
+    tracker.trackField("transform", transform_);
+    tracker.trackField("flush", flush_);
+    tracker.trackField("cancel", cancel_);
+    tracker.trackField("transformv", transformv_);
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(start_, transform_, flush_, cancel_, transformv_);
+  }
+
+ protected:
+  TransformerImpl() = default;
+  kj::Maybe<jsg::Function<StartAlgorithm>> start_;
+  kj::Maybe<jsg::Function<TransformAlgorithm>> transform_;
+  kj::Maybe<jsg::Function<FlushAlgorithm>> flush_;
+  kj::Maybe<jsg::Function<CancelAlgorithm>> cancel_;
+  kj::Maybe<jsg::Function<TransformvAlgorithm>> transformv_;
 };
 
 // ReadableStreamSource and WritableStreamSink
@@ -236,11 +503,12 @@ class WritableStreamSink {
   // Must call to flush and finish the stream.
 
   virtual kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
-      ReadableStreamSource& input, bool end);
+      ReadableStreamSource& input, End end) KJ_WARN_UNUSED_RESULT;
 
   virtual void abort(kj::Exception reason) = 0;
-  // TODO(conform): abort() should return a promise after which closed fulfillers should be
-  //   rejected. This may necessitate an "erroring" state.
+  // Note: The JS-facing WritableStream abort API returns a promise and uses an "erroring"
+  // state — both are handled by the controller layer (WritableStreamJsController). This
+  // internal WritableStreamSink interface intentionally uses void + kj::Exception.
 
   // Tells the sink that it is no longer to be responsible for encoding in the correct format.
   // Instead, the caller takes responsibility. The expected encoding is returned; the caller
@@ -254,7 +522,8 @@ class WritableStreamSink {
 
 class ReadableStreamSource {
  public:
-  virtual kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) = 0;
+  virtual kj::Promise<size_t> tryRead(
+      void* buffer, size_t minBytes, size_t maxBytes) KJ_WARN_UNUSED_RESULT = 0;
 
   // The ReadableStreamSource version of pumpTo() has no `amount` parameter, since the Streams spec
   // only defines pumping everything.
@@ -262,7 +531,8 @@ class ReadableStreamSource {
   // If `end` is true, then `output.end()` will be called after pumping. Note that it's especially
   // important to take advantage of this when using deferred proxying since calling `end()`
   // directly might attempt to use the `IoContext` to call `registerPendingEvent()`.
-  virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end);
+  virtual kj::Promise<DeferredProxy<void>> pumpTo(
+      WritableStreamSink& output, End end) KJ_WARN_UNUSED_RESULT;
 
   // If pumpTo() pumps to a system stream, what is the best encoding for that system stream to
   // use? This is just a hint.
@@ -272,23 +542,16 @@ class ReadableStreamSource {
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
-  kj::Promise<kj::Array<byte>> readAllBytes(uint64_t limit);
-  kj::Promise<kj::String> readAllText(
-      uint64_t limit, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE);
+  kj::Promise<kj::Array<byte>> readAllBytes(uint64_t limit) KJ_WARN_UNUSED_RESULT;
+  kj::Promise<kj::String> readAllText(uint64_t limit,
+      ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) KJ_WARN_UNUSED_RESULT;
 
-  // Hook to inform this ReadableStreamSource that the ReadableStream has been canceled. This only
-  // really means anything to TransformStreams, which are supposed to propagate the error to the
-  // writable side, and custom ReadableStreams, which we don't implement yet.
-  //
-  // NOTE: By "propagate the error back to the writable stream", I mean: if the WritableStream is in
-  //   the Writable state, set it to the Errored state and reject its closed fulfiller with
-  //   `reason`. I'm not sure how I'm going to do this yet.
+  // Hook to inform this ReadableStreamSource that the ReadableStream has been canceled.
+  // This is primarily meaningful for TransformStreams, which propagate cancellation to
+  // the writable side. The JS-facing ReadableStream.cancel() API (which accepts any JS
+  // value and returns a promise) is handled by the controller layer; this internal
+  // interface intentionally uses kj::Exception and returns void.
   virtual void cancel(kj::Exception reason);
-  // TODO(conform): Should return promise.
-  //
-  // TODO(conform): `reason` should be allowed to be any JS value, and not just an exception.
-  //   That is, something silly like `stream.cancel(42)` should be allowed and trigger a
-  //   rejection with the integer `42`.
 
   struct Tee {
     kj::Own<ReadableStreamSource> branches[2];
@@ -296,7 +559,7 @@ class ReadableStreamSource {
 
   // Implement this if your ReadableStreamSource has a better way to tee a stream than the naive
   // method, which relies upon `tryRead()`. The default implementation returns nullptr.
-  virtual kj::Maybe<Tee> tryTee(uint64_t limit);
+  virtual kj::Maybe<Tee> tryTee(uint64_t limit) KJ_WARN_UNUSED_RESULT;
 };
 
 struct PipeToOptions {
@@ -319,12 +582,12 @@ namespace StreamStates {
 struct Closed {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "closed"_kj;
 };
-using Errored = jsg::Value;
+using Errored = jsg::JsRef<jsg::JsValue>;
 struct Erroring {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "erroring"_kj;
-  jsg::Value reason;
+  jsg::JsRef<jsg::JsValue> reason;
 
-  Erroring(jsg::Value reason): reason(kj::mv(reason)) {}
+  Erroring(jsg::Lock& js, jsg::JsValue reason): reason(reason.addRef(js)) {}
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(reason);
@@ -333,19 +596,15 @@ struct Erroring {
 }  // namespace StreamStates
 
 // A ReadableStreamController provides the underlying implementation for a ReadableStream.
-// We will generally have three implementations:
-//  * ReadableStreamDefaultController
-//  * ReadableByteStreamController
-//  * ReadableStreamInternalController
+// There are two implementations:
+//  * ReadableStreamJsController — JS-backed streams (standard). Internally delegates to
+//    a ReadableStreamDefaultController (value streams) or ReadableByteStreamController
+//    (byte streams), which are the JS-visible controller objects defined by the spec.
+//  * ReadableStreamInternalController — Workers runtime specific, bridges to the
+//    kj-backed ReadableStreamSource API.
 //
-// The ReadableStreamDefaultController and ReadableByteStreamController are defined by the
-// streams standard and source all of the stream data from JavaScript functions provided by
-// user code.
-//
-// The ReadableStreamInternalController is Workers runtime specific and provides a bridge
-// to the existing ReadableStreamSource API. At the API contract layer, the
-// ReadableByteStreamController and ReadableStreamInternalController will appear to be
-// identical. Internally, however, they will be very different from one another.
+// At the API contract layer, byte-oriented JS streams and internal streams appear
+// identical. Internally, however, they are very different from one another.
 //
 // The ReadableStreamController instance is meant to be a private member of the ReadableStream,
 // e.g.
@@ -393,9 +652,7 @@ class ReadableStreamController {
   struct ByobOptions {
     static constexpr size_t DEFAULT_AT_LEAST = 1;
 
-    jsg::V8Ref<v8::ArrayBufferView> bufferView;
-    size_t byteOffset = 0;
-    size_t byteLength;
+    jsg::JsRef<jsg::JsArrayBufferView> bufferView;
 
     // The minimum number of elements that should be read. When not specified, the default
     // is DEFAULT_AT_LEAST. This is a non-standard, Workers-specific extension to
@@ -428,7 +685,7 @@ class ReadableStreamController {
       virtual ~Branch() noexcept(false) {}
 
       virtual void doClose(jsg::Lock& js) = 0;
-      virtual void doError(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
+      virtual void doError(jsg::Lock& js, jsg::JsValue reason) = 0;
       virtual void handleData(jsg::Lock& js, ReadResult result) = 0;
     };
 
@@ -445,7 +702,7 @@ class ReadableStreamController {
         inner->doClose(js);
       }
 
-      inline void doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
+      inline void doError(jsg::Lock& js, jsg::JsValue reason) {
         inner->doError(js, reason);
       }
 
@@ -470,7 +727,7 @@ class ReadableStreamController {
 
     virtual void close(jsg::Lock& js) = 0;
 
-    virtual void error(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
+    virtual void error(jsg::Lock& js, jsg::JsValue reason) = 0;
 
     virtual void ensurePulling(jsg::Lock& js) = 0;
 
@@ -486,31 +743,36 @@ class ReadableStreamController {
    public:
     virtual ~PipeController() noexcept(false) {}
     virtual bool isClosed() = 0;
-    virtual kj::Maybe<v8::Local<v8::Value>> tryGetErrored(jsg::Lock& js) = 0;
-    virtual void cancel(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
+    virtual kj::Maybe<jsg::JsValue> tryGetErrored(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
+    virtual void cancel(jsg::Lock& js, jsg::JsValue reason) = 0;
     virtual void close(jsg::Lock& js) = 0;
-    virtual void error(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
-    virtual void release(jsg::Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeError = kj::none) = 0;
-    virtual kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) = 0;
-    virtual jsg::Promise<ReadResult> read(jsg::Lock& js) = 0;
+    virtual void error(jsg::Lock& js, jsg::JsValue reason) = 0;
+    virtual void release(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) = 0;
+    virtual kj::Maybe<kj::Promise<void>> tryPumpTo(
+        WritableStreamSink& sink, End end) KJ_WARN_UNUSED_RESULT = 0;
+    virtual jsg::Promise<ReadResult> read(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
   };
 
   virtual ~ReadableStreamController() noexcept(false) {}
 
   virtual void setOwnerRef(ReadableStream& stream) = 0;
 
-  virtual jsg::Ref<ReadableStream> addRef() = 0;
+  virtual jsg::Ref<ReadableStream> addRef() KJ_WARN_UNUSED_RESULT = 0;
 
   // Returns true if the underlying source for this controller is byte-oriented and
   // therefore supports the pull into API. When false, the stream can be used to pass
   // any arbitrary JavaScript value through.
   virtual bool isByteOriented() const = 0;
+  virtual bool isInternal() const = 0;
+  virtual kj::Maybe<kj::Own<ReadableStreamSource>> tryReleaseSource() KJ_WARN_UNUSED_RESULT {
+    return kj::none;
+  }
 
   // Reads data from the stream. If the stream is byte-oriented, then the ByobOptions can be
   // specified to provide a v8::ArrayBuffer to be filled by the read operation. If the ByobOptions
   // are provided and the stream is not byte-oriented, the operation will return a rejected promise.
   virtual kj::Maybe<jsg::Promise<ReadResult>> read(
-      jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) = 0;
+      jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) KJ_WARN_UNUSED_RESULT = 0;
 
   // Performs a draining read operation that:
   // 1. Drains all currently buffered data from the queue
@@ -527,22 +789,24 @@ class ReadableStreamController {
   // reaches maxRead (after finishing the current item). This prevents unbounded memory
   // accumulation when a fast producer outpaces a slow consumer.
   virtual kj::Maybe<jsg::Promise<DrainingReadResult>> drainingRead(
-      jsg::Lock& js, size_t maxRead = kj::maxValue) = 0;
+      jsg::Lock& js, size_t maxRead = kj::maxValue) KJ_WARN_UNUSED_RESULT = 0;
 
   // The pipeTo implementation fully consumes the stream by directing all of its data at the
   // destination. Controllers should try to be as efficient as possible here. For instance, if
   // a ReadableStreamInternalController is piping to a WritableStreamInternalController, then
   // a more efficient kj pipe should be possible.
-  virtual jsg::Promise<void> pipeTo(
-      jsg::Lock& js, WritableStreamController& destination, PipeToOptions options) = 0;
+  virtual jsg::Promise<void> pipeTo(jsg::Lock& js,
+      WritableStreamController& destination,
+      PipeToOptions options) KJ_WARN_UNUSED_RESULT = 0;
 
   // Indicates that the consumer no longer has any interest in the streams data.
-  virtual jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) = 0;
+  virtual jsg::Promise<void> cancel(
+      jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) KJ_WARN_UNUSED_RESULT = 0;
 
   // Branches the ReadableStreamController into two ReadableStream instances that will receive
   // this streams data. The specific details of how the branching occurs is entirely up to the
   // controller implementation.
-  virtual Tee tee(jsg::Lock& js) = 0;
+  virtual Tee tee(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
 
   virtual bool isClosedOrErrored() const = 0;
 
@@ -562,7 +826,7 @@ class ReadableStreamController {
   // If maybeJs is set, the reader's closed promise will be resolved.
   virtual void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
-  virtual kj::Maybe<PipeController&> tryPipeLock() = 0;
+  virtual kj::Maybe<PipeController&> tryPipeLock() KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT = 0;
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};
 
@@ -573,7 +837,8 @@ class ReadableStreamController {
   //
   // limit specifies an upper maximum bound on the number of bytes permitted to be read.
   // The promise will reject if the read will produce more bytes than the limit.
-  virtual jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit) = 0;
+  virtual jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> readAllBytes(
+      jsg::Lock& js, uint64_t limit) KJ_WARN_UNUSED_RESULT = 0;
 
   // Fully consumes the ReadableStream. If the stream is already locked to a reader or
   // errored, the returned JS promise will reject. If the stream is already closed, the
@@ -582,16 +847,15 @@ class ReadableStreamController {
   //
   // limit specifies an upper maximum bound on the number of bytes permitted to be read.
   // The promise will reject if the read will produce more bytes than the limit.
-  virtual jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) = 0;
+  virtual jsg::Promise<kj::String> readAllText(
+      jsg::Lock& js, uint64_t limit) KJ_WARN_UNUSED_RESULT = 0;
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) = 0;
 
-  virtual void setup(jsg::Lock& js,
-      jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
-      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {}
+  virtual void setup(jsg::Lock& js, kj::Own<UnderlyingSourceImpl> source) {}
 
   virtual kj::Promise<DeferredProxy<void>> pumpTo(
-      jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
+      jsg::Lock& js, kj::Own<WritableStreamSink> sink, End end) KJ_WARN_UNUSED_RESULT = 0;
 
   // If pumpTo() pumps to a system stream, what is the best encoding for that system stream to
   // use? This is just a hint.
@@ -599,7 +863,8 @@ class ReadableStreamController {
     return StreamEncoding::IDENTITY;
   }
 
-  virtual kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) = 0;
+  virtual kj::Own<ReadableStreamController> detach(
+      jsg::Lock& js, IgnoreDisturbed ignoreDisturbed) KJ_WARN_UNUSED_RESULT = 0;
 
   // Used by sockets to signal that the ReadableStream shouldn't allow reads due to pending
   // closure.
@@ -673,29 +938,27 @@ class WritableStreamController {
   struct PendingAbort {
     kj::Maybe<jsg::Promise<void>::Resolver> resolver;
     jsg::Promise<void> promise;
-    jsg::Value reason;
+    jsg::JsRef<jsg::JsValue> reason;
     bool reject = false;
 
-    PendingAbort(jsg::Lock& js,
-        jsg::PromiseResolverPair<void> prp,
-        v8::Local<v8::Value> reason,
-        bool reject);
+    PendingAbort(
+        jsg::Lock& js, jsg::PromiseResolverPair<void> prp, jsg::JsValue reason, Reject reject);
 
-    PendingAbort(jsg::Lock& js, v8::Local<v8::Value> reason, bool reject);
+    PendingAbort(jsg::Lock& js, jsg::JsValue reason, Reject reject);
 
     void complete(jsg::Lock& js);
 
-    void fail(jsg::Lock& js, v8::Local<v8::Value> reason);
+    void fail(jsg::Lock& js, jsg::JsValue reason);
 
-    inline jsg::Promise<void> whenResolved(jsg::Lock& js) {
+    inline jsg::Promise<void> whenResolved(jsg::Lock& js) KJ_WARN_UNUSED_RESULT {
       return promise.whenResolved(js);
     }
 
-    inline jsg::Promise<void> whenResolved(auto&& func) {
+    inline jsg::Promise<void> whenResolved(auto&& func) KJ_WARN_UNUSED_RESULT {
       return promise.whenResolved(kj::fwd(func));
     }
 
-    inline jsg::Promise<void> whenResolved(auto&& func, auto&& errFunc) {
+    inline jsg::Promise<void> whenResolved(auto&& func, auto&& errFunc) KJ_WARN_UNUSED_RESULT {
       return promise.whenResolved(kj::fwd(func), kj::fwd(errFunc));
     }
 
@@ -704,7 +967,7 @@ class WritableStreamController {
     }
 
     static kj::Maybe<kj::Own<PendingAbort>> dequeue(
-        kj::Maybe<kj::Own<PendingAbort>>& maybePendingAbort);
+        kj::Maybe<kj::Own<PendingAbort>>& maybePendingAbort) KJ_WARN_UNUSED_RESULT;
 
     JSG_MEMORY_INFO(PendingAbort) {
       tracker.trackField("resolver", resolver);
@@ -717,35 +980,41 @@ class WritableStreamController {
 
   virtual void setOwnerRef(WritableStream& stream) = 0;
 
-  virtual jsg::Ref<WritableStream> addRef() = 0;
+  virtual jsg::Ref<WritableStream> addRef() KJ_WARN_UNUSED_RESULT = 0;
 
   // The controller implementation will determine what kind of JavaScript data
   // it is capable of writing, returning a rejected promise if the written
   // data type is not supported.
-  virtual jsg::Promise<void> write(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> value) = 0;
+  virtual jsg::Promise<void> write(
+      jsg::Lock& js, jsg::Optional<jsg::JsValue> value) KJ_WARN_UNUSED_RESULT = 0;
 
   // Indicates that no additional data will be written to the controller. All
   // existing pending writes should be allowed to complete.
-  virtual jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) = 0;
+  virtual jsg::Promise<void> close(
+      jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) KJ_WARN_UNUSED_RESULT = 0;
 
   // Waits for pending data to be written. The returned promise is resolved when all pending writes
   // have completed.
-  virtual jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) = 0;
+  virtual jsg::Promise<void> flush(
+      jsg::Lock& js, MarkAsHandled markAsHandled = MarkAsHandled::NO) KJ_WARN_UNUSED_RESULT = 0;
 
   // Immediately interrupts existing pending writes and errors the stream.
-  virtual jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) = 0;
+  virtual jsg::Promise<void> abort(
+      jsg::Lock& js, jsg::Optional<jsg::JsValue> reason) KJ_WARN_UNUSED_RESULT = 0;
 
   // The tryPipeFrom attempts to establish a data pipe where source's data
   // is delivered to this WritableStreamController as efficiently as possible.
-  virtual kj::Maybe<jsg::Promise<void>> tryPipeFrom(
-      jsg::Lock& js, jsg::Ref<ReadableStream> source, PipeToOptions options) = 0;
+  virtual kj::Maybe<jsg::Promise<void>> tryPipeFrom(jsg::Lock& js,
+      jsg::Ref<ReadableStream> source,
+      PipeToOptions options) KJ_WARN_UNUSED_RESULT = 0;
 
   // Only byte-oriented WritableStreamController implementations will have a WritableStreamSink
   // that can be detached using removeSink. A nullptr should be returned by any controller that
   // does not support removing the sink. After the WritableStreamSink has been released, all other
   // methods on the controller should fail with an exception as the WritableStreamSink should be
   // the only way to interact with the underlying sink.
-  virtual kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) = 0;
+  virtual kj::Maybe<kj::Own<WritableStreamSink>> removeSink(
+      jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
 
   // Detaches the WritableStreamController from its underlying implementation, leaving the
   // writable stream locked and in a state where no further writes can be made.
@@ -765,13 +1034,11 @@ class WritableStreamController {
   // If maybeJs is set, the writer's closed and ready promises will be resolved.
   virtual void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
-  virtual kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) = 0;
+  virtual kj::Maybe<jsg::JsValue> isErroring(jsg::Lock& js) = 0;
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};
 
-  virtual void setup(jsg::Lock& js,
-      jsg::Optional<UnderlyingSink> underlyingSink,
-      jsg::Optional<StreamQueuingStrategy> queuingStrategy) {}
+  virtual void setup(jsg::Lock& js, kj::Own<UnderlyingSinkImpl> underlyingSink) {}
 
   virtual bool isClosedOrClosing() = 0;
   virtual bool isErrored() = 0;
@@ -782,6 +1049,9 @@ class WritableStreamController {
   // Used by sockets to signal that the WritableStream shouldn't allow writes due to pending
   // closure.
   virtual void setPendingClosure() = 0;
+
+  // Used by sockets to ensure the connection is established before close.
+  virtual void setClosureWaitable(jsg::Promise<void> waitable) {}
 
   // For memory tracking
   virtual kj::StringPtr jsgGetMemoryName() const = 0;
@@ -827,15 +1097,15 @@ class ReaderLocked {
     visitor.visit(closedFulfiller);
   }
 
-  ReadableStreamController::Reader& getReader() {
+  ReadableStreamController::Reader& getReader() KJ_LIFETIMEBOUND {
     return KJ_ASSERT_NONNULL(reader);
   }
 
-  kj::Maybe<jsg::Promise<void>::Resolver>& getClosedFulfiller() {
+  kj::Maybe<jsg::Promise<void>::Resolver>& getClosedFulfiller() KJ_WARN_UNUSED_RESULT {
     return closedFulfiller;
   }
 
-  kj::Maybe<IoOwn<kj::Canceler>>& getCanceler() {
+  kj::Maybe<IoOwn<kj::Canceler>>& getCanceler() KJ_LIFETIMEBOUND {
     return canceler;
   }
 
@@ -879,15 +1149,15 @@ class WriterLocked {
     visitor.visit(closedFulfiller, readyFulfiller);
   }
 
-  WritableStreamController::Writer& getWriter() {
+  WritableStreamController::Writer& getWriter() KJ_LIFETIMEBOUND {
     return KJ_ASSERT_NONNULL(writer);
   }
 
-  kj::Maybe<jsg::Promise<void>::Resolver>& getClosedFulfiller() {
+  kj::Maybe<jsg::Promise<void>::Resolver>& getClosedFulfiller() KJ_WARN_UNUSED_RESULT {
     return closedFulfiller;
   }
 
-  kj::Maybe<jsg::Promise<void>::Resolver>& getReadyFulfiller() {
+  kj::Maybe<jsg::Promise<void>::Resolver>& getReadyFulfiller() KJ_WARN_UNUSED_RESULT {
     return readyFulfiller;
   }
 
@@ -935,7 +1205,7 @@ inline void maybeResolvePromise(
 template <typename T>
 void maybeRejectPromise(jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver,
-    v8::Local<v8::Value> reason) {
+    jsg::JsValue reason) {
   KJ_IF_SOME(resolver, maybeResolver) {
     resolver.reject(js, reason);
     maybeResolver = kj::none;
@@ -944,7 +1214,7 @@ void maybeRejectPromise(jsg::Lock& js,
 
 template <typename T>
 jsg::Promise<T> rejectedMaybeHandledPromise(
-    jsg::Lock& js, v8::Local<v8::Value> reason, bool handled) {
+    jsg::Lock& js, jsg::JsValue reason, MarkAsHandled handled) {
   auto prp = js.newPromiseAndResolver<T>();
   if (handled) {
     prp.promise.markAsHandled(js);
@@ -957,5 +1227,58 @@ inline kj::Maybe<IoContext&> tryGetIoContext() {
   // TODO(cleanup): This function is obsolete; callers should just call IoContext::tryCurrent()
   return IoContext::tryCurrent();
 }
+
+inline bool isByteSource(const jsg::JsValue& value) {
+  return value.isArrayBuffer() || value.isSharedArrayBuffer() || value.isArrayBufferView() ||
+      value.isString();
+}
+
+// ======================================================================================
+
+// Adapt ReadableStreamSource to kj::AsyncInputStream's interface for use with `kj::newTee()`.
+class TeeAdapter final: public kj::AsyncInputStream {
+ public:
+  explicit TeeAdapter(kj::Own<ReadableStreamSource> inner);
+  kj::Promise<size_t> tryRead(
+      void* buffer, size_t minBytes, size_t maxBytes) override KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<uint64_t> tryGetLength() override;
+
+ private:
+  kj::Own<ReadableStreamSource> inner;
+};
+
+class TeeBranch final: public ReadableStreamSource {
+ public:
+  explicit TeeBranch(kj::Own<kj::AsyncInputStream> inner);
+
+  kj::Promise<size_t> tryRead(
+      void* buffer, size_t minBytes, size_t maxBytes) override KJ_WARN_UNUSED_RESULT;
+
+  kj::Promise<DeferredProxy<void>> pumpTo(
+      WritableStreamSink& output, End end) override KJ_WARN_UNUSED_RESULT;
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
+
+  kj::Maybe<Tee> tryTee(uint64_t limit) override KJ_WARN_UNUSED_RESULT;
+
+  void cancel(kj::Exception reason) override;
+
+ private:
+  // Adapt WritableStreamSink to kj::AsyncOutputStream's interface for use in
+  // `TeeBranch::pumpTo()`. If you squint, the write logic looks very similar to TeeAdapter's
+  // read logic.
+  class PumpAdapter final: public kj::AsyncOutputStream {
+   public:
+    explicit PumpAdapter(WritableStreamSink& inner);
+    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override KJ_WARN_UNUSED_RESULT;
+    kj::Promise<void> write(
+        kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override KJ_WARN_UNUSED_RESULT;
+    kj::Promise<void> whenWriteDisconnected() override KJ_WARN_UNUSED_RESULT;
+
+    WritableStreamSink& inner;
+  };
+
+  kj::Own<kj::AsyncInputStream> inner;
+};
 
 }  // namespace workerd::api
