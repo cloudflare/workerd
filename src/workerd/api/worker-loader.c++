@@ -64,7 +64,10 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
     jsg::Lock& js, kj::Maybe<kj::String> name, jsg::Function<jsg::Promise<WorkerCode>()> getCode) {
   auto& ioctx = IoContext::current();
 
-  auto reenterAndGetCode = ioctx.makeReentryCallback(
+  // It's important that we use a *weak* reentry callback because this callback will held by the
+  // WorkerStub and any entrypoint stubs in vends until they are GC'd. We don't want to create
+  // a cycle where a request context holds itself open (which would block DO hibernation).
+  auto reenterAndGetCode = ioctx.makeReentryCallbackWeak(
       [weakIoctx = ioctx.getWeakRef(), getCode = kj::mv(getCode),
           compatDateValidation = compatDateValidation](jsg::Lock& js) mutable {
     return getCode(js).then(js,
