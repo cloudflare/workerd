@@ -309,7 +309,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
         routingMode(routingMode),
         version(kj::mv(version)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
 
  private:
   ChannelIdOrFactory channelIdOrFactory;
@@ -329,7 +329,7 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       : channelId(channelId),
         actorId(kj::mv(actorId)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
 
  private:
   uint channelId;
@@ -348,7 +348,7 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       : actorChannel(kj::mv(channel)),
         actorId(kj::mv(actorId)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
 
  private:
   kj::Own<IoChannelFactory::ActorChannel> actorChannel;

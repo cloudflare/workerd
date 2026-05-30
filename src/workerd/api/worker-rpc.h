@@ -126,14 +126,18 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
  public:
   // The `streamSink` parameter should be provided if a StreamSink already exists, e.g. when
   // deserializing results. If omitted, it will be constructed on-demand.
+  // `originatingCall`, when present, is recorded on any stubs deserialized so that
+  // follow-up calls on those stubs nest under the call that returned them.
   RpcDeserializerExternalHandler(capnp::List<rpc::JsValue::External>::Reader externals,
       RpcStubDisposalGroup& disposalGroup,
       kj::Maybe<StreamSinkImpl&> streamSink,
-      kj::LiteralStringConst debugContext)
+      kj::LiteralStringConst debugContext,
+      kj::Maybe<TraceContextParent> originatingCall)
       : externals(externals),
         disposalGroup(disposalGroup),
         streamSink(streamSink),
-        debugContext(debugContext) {}
+        debugContext(debugContext),
+        originatingCall(kj::mv(originatingCall)) {}
   ~RpcDeserializerExternalHandler() noexcept(false);
 
   // Read and return the next external.
@@ -162,6 +166,10 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
     return debugContext;
   }
 
+  kj::Maybe<TraceContextParent> getOriginatingCall() {
+    return originatingCall.map([](TraceContextParent& p) { return p.addRef(); });
+  }
+
  private:
   capnp::List<rpc::JsValue::External>::Reader externals;
   uint i = 0;
@@ -173,6 +181,7 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
   kj::Maybe<rpc::JsValue::StreamSink::Client> streamSinkCap;
 
   kj::LiteralStringConst debugContext;
+  kj::Maybe<TraceContextParent> originatingCall;
 };
 
 // Base class for objects which can be sent over RPC, but doing so actually sends a stub which
@@ -197,12 +206,23 @@ class JsRpcTarget: public jsg::Object {
 // it's only a C++ class used to abstract how to get a capnp client out of the object.
 class JsRpcClientProvider: public jsg::Object {
  public:
+  // Result of resolving a stub for one call's worth of dispatch.
+  struct ClientForOneCall {
+    rpc::JsRpcTarget::Client client;
+    // Spans to parent the per-call jsRpcCall under (Fetcher: the new session;
+    // JsRpcStub: the call that returned this stub).
+    kj::Maybe<TraceContextParent> callSpanParents;
+  };
+
   // Get a capnp client that can be used to dispatch one call.
   //
   // If this isn't the root object (i.e. this is a JsRpcProperty), the property path starting from
   // the root object will be appended to `path`.
-  virtual rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
+  virtual ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) = 0;
+
+  // Tracing tag value for jsrpc.target_kind on the client-side per-call span
+  // (see JsRpcTargetBase::getTargetKind for the server-side equivalent).
+  virtual kj::LiteralStringConst getRpcTargetKind() = 0;
 };
 
 class JsRpcProperty;
@@ -234,8 +254,11 @@ class JsRpcPromise: public JsRpcClientProvider {
   void resolve(jsg::Lock& js, jsg::JsValue result);
   void dispose(jsg::Lock& js);
 
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  kj::LiteralStringConst getRpcTargetKind() override {
+    return "promise"_kjc;
+  }
 
   // Expect that the call is itself going to return a function... and call that.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -313,8 +336,13 @@ class JsRpcProperty: public JsRpcClientProvider {
       : parent(kj::mv(parent)),
         name(kj::mv(name)) {}
 
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  // Forward to parent: a property chain dispatches to the root's target, and
+  // the property path itself is captured separately by jsrpc.method.
+  kj::LiteralStringConst getRpcTargetKind() override {
+    return parent->getRpcTargetKind();
+  }
 
   // Call the property as a method.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -386,13 +414,17 @@ class JsRpcStub: public JsRpcClientProvider {
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient): capnpClient(kj::mv(capnpClient)) {}
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient,
       RpcStubDisposalGroup& disposalGroup,
-      jsg::ExternalMemoryAdjustment externalMemoryAdjustment);
+      jsg::ExternalMemoryAdjustment externalMemoryAdjustment,
+      kj::Maybe<TraceContextParent> originatingCall);
   ~JsRpcStub() noexcept(false);
 
   rpc::JsRpcTarget::Client getClient();
 
-  rpc::JsRpcTarget::Client getClientForOneCall(
-      jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+  ClientForOneCall getClientForOneCall(jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
+
+  kj::LiteralStringConst getRpcTargetKind() override {
+    return "stub"_kjc;
+  }
 
   jsg::Ref<JsRpcStub> dup(jsg::Lock& js);
   void dispose();
@@ -430,6 +462,17 @@ class JsRpcStub: public JsRpcClientProvider {
   kj::Maybe<RpcStubDisposalGroup&> disposalGroup;
   kj::ListLink<JsRpcStub> disposalGroupLink;
   kj::Maybe<jsg::ExternalMemoryAdjustment> externalMemoryAdjustment;
+
+  // The jsRpcCall of the call that returned this stub (set on stubs received via
+  // deserialization), used to parent follow-up calls on the stub under it.
+  //
+  // Note: the originating jsRpcCall span is normally already closed by the time we open
+  // a child here (the originating SpanBuilder is destroyed when the awaitIo callback that
+  // produced this stub returns). That's OK: SpanParent holds a refcount on the underlying
+  // refcounted SpanObserver, so the parent identity remains valid for newChild() even after
+  // the parent has been reported closed. Observers must tolerate children opening after
+  // their parent's onClose().
+  kj::Maybe<TraceContextParent> originatingCall;
 
   friend class RpcStubDisposalGroup;
 };

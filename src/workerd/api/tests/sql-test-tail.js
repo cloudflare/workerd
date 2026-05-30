@@ -29,6 +29,13 @@ export const test = {
       durable_object_storage_get: 18,
       durable_object_storage_transaction: 8,
       durable_object_subrequest: 47,
+      // Inner spans nested under durable_object_subrequest: jsRpcSession for RPC
+      // dispatches (one per call, client-side only -- the server's jsrpc-typed
+      // onset is its equivalent), fetch for fetch dispatches.
+      jsRpcSession: 35,
+      fetch: 12,
+      // jsRpcCall: 35 client-side + 35 server-side.
+      jsRpcCall: 70,
       durable_object_storage_deleteAll: 1,
       createStringTable: 4,
       runActorFunc: 4,

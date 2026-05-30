@@ -781,11 +781,13 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
         headerTable(headerTable),
         port(kj::mv(port)) {}
 
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+  Result newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     // At present we have no use for `cfStr`.
-    return IoContext::current().getSubrequestNoChecks([&](auto& tracing, auto& channelFactory) {
+    auto client = IoContext::current().getSubrequestNoChecks(
+        [&](auto& tracing, auto& channelFactory) -> kj::Own<WorkerInterface> {
       return kj::heap<TcpPortWorkerInterface>(byteStreamFactory, entropySource, headerTable, port);
     }, {.inHouse = false, .wrapMetrics = false});
+    return {.client = kj::mv(client), .spanParents = kj::none};
   }
 
  private:
