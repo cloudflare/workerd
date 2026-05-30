@@ -1008,7 +1008,7 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
   auto& ioCtx = IoContext::current();
 
   kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo =
-      ioCtx.makeReentryCallback(
+      ioCtx.makeReentryCallbackWeak(
           [&ioCtx, getStartupOptions = kj::mv(getStartupOptions)](jsg::Lock& js) mutable {
     return getStartupOptions(js).then(js, [&ioCtx](jsg::Lock& js, StartupOptions options) {
       Worker::Actor::Id id;

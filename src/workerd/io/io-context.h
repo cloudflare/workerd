@@ -614,6 +614,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <TopUpFlag topUp = NO_TOP_UP, typename Func>
   auto makeReentryCallback(Func func);
 
+  // Like makeReentryCallback(), but the existence of the callback doesn't hold open the IoContext
+  // at all, that is, it is NOT "treated as if a task were added using addTask()".
+  template <TopUpFlag topUp = NO_TOP_UP, typename Func>
+  auto makeReentryCallbackWeak(Func func);
+
   // Returns the number of times addTask() has been called (even if the tasks have completed).
   uint taskCount() {
     return addTaskCounter;
@@ -1157,6 +1162,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename Result>
   friend Result throwOrReturnResult(
       jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult);
+
+  template <TopUpFlag topUp, typename Func>
+  auto makeReentryCallbackImpl(Func func, kj::Own<void> attachment);
 };
 
 // The SuppressIoContextScope utility is used to temporarily suppress the active IoContext
@@ -1545,9 +1553,22 @@ auto IoContext::makeReentryCallback(Func func) {
     fulfiller->fulfill();
   });
 
+  return makeReentryCallbackImpl<topUp>(kj::mv(func), kj::heap(kj::mv(releaseNotifier)));
+}
+
+template <IoContext::TopUpFlag topUp, typename Func>
+auto IoContext::makeReentryCallbackWeak(Func func) {
+  requireCurrent();
+
+  // Skip the addTask stuff but still do attach a pending event.
+  return makeReentryCallbackImpl<topUp>(kj::mv(func), registerPendingEvent());
+}
+
+template <IoContext::TopUpFlag topUp, typename Func>
+auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
   auto ioFunc = addObjectReverse(kj::heap(kj::fwd<Func>(func)));
 
-  return [self = getWeakRef(), cs = getCriticalSection(), releaseNotifier = kj::mv(releaseNotifier),
+  return [self = getWeakRef(), cs = getCriticalSection(), attachment = kj::mv(attachment),
              ioFunc = kj::mv(ioFunc)](auto&&... params) mutable {
     auto& ctx = JSG_REQUIRE_NONNULL(self->tryGet(), Error,
         "The execution context which hosts this callback is no longer running.");
