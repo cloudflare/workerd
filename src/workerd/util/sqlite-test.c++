@@ -434,8 +434,8 @@ KJ_TEST("SQLite Regulator") {
     INSERT INTO bar VALUES (456);
   )");
 
-  RegulatorImpl noFoo("foo");
-  RegulatorImpl noBar("bar");
+  static RegulatorImpl noFoo("foo");
+  static RegulatorImpl noBar("bar");
 
   // We can prepare and run statements that comply with the regulator.
   auto getFoo = db.prepare(noBar, "SELECT value FROM foo");
@@ -493,7 +493,7 @@ struct RowCounts {
 
 template <typename... Params>
 RowCounts countRowsTouched(SqliteDatabase& db,
-    const SqliteDatabase::Regulator& regulator,
+    SqliteDatabase::StaticRegulator regulator,
     kj::StringPtr sqlCode,
     Params... bindParams) {
   uint64_t rowsFound = 0;
@@ -734,7 +734,7 @@ KJ_TEST("SQLite row counters with triggers") {
     }
   };
 
-  RegulatorImpl regulator;
+  static RegulatorImpl regulator;
 
   db.run(R"(
     CREATE TABLE things (
@@ -860,7 +860,7 @@ KJ_TEST("SQLite observer addQueryStats") {
   TempDirOnDisk dir;
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver = TestSqliteObserver();
-  TestQueryStatsRegulator regulator;
+  static TestQueryStatsRegulator regulator;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
       /*sqliteMaxMemoryBytes=*/kj::maxValue, sqliteObserver);
 

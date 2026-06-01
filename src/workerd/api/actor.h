@@ -320,6 +320,11 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   ActorRoutingMode routingMode;
   kj::Maybe<ActorVersion> version;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+
+  // Registered when actorChannel is lazily created, to reflect the cost of holding an open
+  // connection (file descriptor) to the target DO. This pressures V8 to GC the owning stub
+  // promptly when it becomes unreachable, preventing FD accumulation.
+  kj::Maybe<jsg::ExternalMemoryAdjustment> channelMemoryAdjustment;
 };
 
 // Like `GlobalActorOutgoingFactory`, but for colo-local actors
@@ -335,6 +340,8 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   uint channelId;
   kj::String actorId;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+  // As in GlobalActorOutgoingFactory, reflects the cost of holding an open connection.
+  kj::Maybe<jsg::ExternalMemoryAdjustment> channelMemoryAdjustment;
 };
 
 // Like `GlobalActorOutgoingFactory`, but only used for creating a stub to the primary DO so the

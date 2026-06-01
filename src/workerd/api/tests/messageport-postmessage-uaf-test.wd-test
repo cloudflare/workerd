@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [(
+    name = "messageport-postmessage-uaf-test",
+    worker = (
+      modules = [
+        (name = "worker", esModule = embed "messageport-postmessage-uaf-test.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat_v2", "expose_global_message_channel"],
+    ),
+  )],
+);

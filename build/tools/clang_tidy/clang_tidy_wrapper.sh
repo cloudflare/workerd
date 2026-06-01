@@ -9,6 +9,10 @@ shift
 OUTPUT=$1
 shift
 
+# Path to the workerd jsg-lint plugin shared library.
+CLANG_TIDY_PLUGIN=$1
+shift
+
 PWD=$(pwd)/
 ESCAPED_PWD=$(sed 's/[\*\.&/]/\\&/g' <<< "$PWD")
 
@@ -18,7 +22,7 @@ ESCAPED_PWD=$(sed 's/[\*\.&/]/\\&/g' <<< "$PWD")
 CLANG_TIDY_STDERR=$(mktemp)
 
 set +e
-"${CLANG_TIDY_BIN}" "$@" 2>"$CLANG_TIDY_STDERR" | \
+"${CLANG_TIDY_BIN}" "--load=${CLANG_TIDY_PLUGIN}" "$@" 2>"$CLANG_TIDY_STDERR" | \
   # clang-tidy insists on printing absolute file paths, chop current dir off
   sed "s/$ESCAPED_PWD//g"
 CLANG_TIDY_EXIT_CODE=$?

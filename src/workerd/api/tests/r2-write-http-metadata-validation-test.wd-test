@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "r2-write-http-metadata-validation-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "r2-write-http-metadata-validation-test.js")
+        ],
+        bindings = [
+          ( name = "BUCKET", r2Bucket = "r2-write-http-metadata-validation-test" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+      )
+    ),
+  ],
+);

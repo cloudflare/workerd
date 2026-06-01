@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "http-client-path-ssrf-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "http-client-path-ssrf-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "experimental", "enable_nodejs_http_modules"],
+      )
+    ),
+  ],
+);

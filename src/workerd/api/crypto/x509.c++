@@ -625,10 +625,9 @@ kj::Maybe<kj::Array<kj::String>> X509Certificate::getKeyUsage() {
   kj::Vector<kj::String> ext_key_usage(count);
   char buf[256]{};
 
-  int j = 0;
   for (int i = 0; i < count; i++) {
     if (OBJ_obj2txt(buf, sizeof(buf), sk_ASN1_OBJECT_value(eku.get(), i), 1) >= 0) {
-      ext_key_usage[j++] = kj::str(buf);
+      ext_key_usage.add(kj::str(buf));
     }
   }
 

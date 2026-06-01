@@ -82,9 +82,8 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     //
     // In theory we could try to cache multiple copies of the statement, but as this is probably
     // exceedingly rare, it is not worth the added code complexity.
-    SqliteDatabase::Regulator& regulator = *this;
-    return js.alloc<Cursor>(
-        js, kj::mv(doneCallback), db, regulator, js.toString(querySql), kj::mv(bindings));
+    return js.alloc<Cursor>(js, kj::mv(doneCallback), db,
+        SqliteDatabase::StaticRegulator(regulator), js.toString(querySql), kj::mv(bindings));
   }
 
   auto result = js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings));
@@ -104,7 +103,6 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
   auto& context = IoContext::current();
   TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_ingest"_kjc);
-  SqliteDatabase::Regulator& regulator = *this;
   auto result = getDb(js).ingestSql(regulator, querySql);
 
   traceContext.setTag(
@@ -142,7 +140,7 @@ double SqlStorage::getDatabaseSize(jsg::Lock& js) {
   return dbSize;
 }
 
-bool SqlStorage::isAllowedName(kj::StringPtr name) const {
+bool SqlStorageRegulator::isAllowedName(kj::StringPtr name) const {
   if (util::Autogate::isEnabled(util::AutogateKey::SQL_RESTRICT_RESERVED_NAMES)) {
     return strncasecmp(name.begin(), "_cf_", 4) != 0;
   }
@@ -152,15 +150,15 @@ bool SqlStorage::isAllowedName(kj::StringPtr name) const {
   return !name.startsWith("_cf_");
 }
 
-bool SqlStorage::isAllowedTrigger(kj::StringPtr name) const {
+bool SqlStorageRegulator::isAllowedTrigger(kj::StringPtr name) const {
   return true;
 }
 
-void SqlStorage::onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const {
+void SqlStorageRegulator::onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const {
   JSG_ASSERT(false, Error, message);
 }
 
-bool SqlStorage::allowTransactions() const {
+bool SqlStorageRegulator::allowTransactions() const {
   JSG_FAIL_REQUIRE(Error,
       "To execute a transaction, please use the state.storage.transaction() or "
       "state.storage.transactionSync() APIs instead of the SQL BEGIN TRANSACTION or SAVEPOINT "
@@ -169,7 +167,7 @@ bool SqlStorage::allowTransactions() const {
       "write coalescing.");
 }
 
-bool SqlStorage::shouldAddQueryStats() const {
+bool SqlStorageRegulator::shouldAddQueryStats() const {
   // Bill for queries executed from JavaScript.
   return true;
 }
@@ -200,7 +198,7 @@ jsg::JsValue SqlStorage::wrapSqlValue(jsg::Lock& js, SqlValue value) {
 }
 
 SqlStorage::Cursor::State::State(SqliteDatabase& db,
-    SqliteDatabase::Regulator& regulator,
+    SqliteDatabase::StaticRegulator regulator,
     kj::StringPtr sqlCode,
     kj::Array<BindingValue> bindingsParam)
     : bindings(kj::mv(bindingsParam)),

@@ -197,13 +197,20 @@ export const newReadableStreamSyncAlgorithmErrorsHandled = {
 
     // Pull error
     {
+      let thrown = false;
       const rs = new ReadableStream({
         pull() {
-          throw new Error('boom');
+          if (!thrown) {
+            thrown = true;
+            throw new Error('boom');
+          }
         },
       });
 
-      await rejects(rs.getReader().read(), { message: 'boom' });
+      const reader = rs.getReader();
+      await rejects(reader.read(), { message: 'boom' });
+      // Verify the stream is persistently errored, not just pull throwing again.
+      await rejects(reader.read(), { message: 'boom' });
     }
 
     // Cancel error
@@ -234,13 +241,20 @@ export const newReadableStreamAsyncAlgorithmErrorsHandled = {
 
     // Async pull error
     {
+      let thrown = false;
       const rs = new ReadableStream({
         async pull() {
-          throw new Error('boom');
+          if (!thrown) {
+            thrown = true;
+            throw new Error('boom');
+          }
         },
       });
 
-      await rejects(rs.getReader().read(), { message: 'boom' });
+      const reader = rs.getReader();
+      await rejects(reader.read(), { message: 'boom' });
+      // Verify the stream is persistently errored, not just pull throwing again.
+      await rejects(reader.read(), { message: 'boom' });
     }
 
     // Async cancel error

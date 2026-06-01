@@ -61,6 +61,8 @@ build --per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
 build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations
+build --per_file_copt=external/protobuf@-Wno-deprecated-this-capture
+build --host_per_file_copt=external/protobuf@-Wno-deprecated-this-capture
 
 # opt in to capnp deprecation warnings about trying to attach to a refcounted object
 build --cxxopt=-DKJ_WARN_REFCOUNTED_ATTACH=1

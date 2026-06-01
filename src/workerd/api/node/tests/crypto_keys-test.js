@@ -2191,3 +2191,59 @@ export const export_encrypted_ec_private_key = {
     );
   },
 };
+
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-30:
+// createSecretKey() must correctly copy DataView key material.
+// Previously, Buffer.from(dataView) produced an empty Buffer because
+// DataView has no .length property, causing the key material to be lost.
+export const regression_create_secret_key_dataview = {
+  test() {
+    // Create a 16-byte ArrayBuffer filled with 0x41 ('A')
+    const ab = new ArrayBuffer(16);
+    new Uint8Array(ab).fill(0x41);
+
+    // Create a secret key from a DataView over the full buffer
+    const dvFull = new DataView(ab);
+    const keyFull = createSecretKey(dvFull);
+    const exported = keyFull.export();
+
+    // The exported key must contain exactly the 16 bytes, not be empty
+    strictEqual(exported.length, 16, 'DataView key material must not be empty');
+    strictEqual(
+      exported.toString(),
+      'A'.repeat(16),
+      'DataView key material must match the original bytes'
+    );
+    strictEqual(keyFull.symmetricKeySize, 16);
+
+    // Also verify a DataView over a sub-range of the buffer works correctly
+    const abLarge = new ArrayBuffer(32);
+    const u8 = new Uint8Array(abLarge);
+    u8.fill(0x42); // fill with 'B'
+    u8.fill(0x43, 8, 16); // bytes 8..15 = 'C'
+
+    const dvSlice = new DataView(abLarge, 8, 8);
+    const keySlice = createSecretKey(dvSlice);
+    const exportedSlice = keySlice.export();
+
+    strictEqual(
+      exportedSlice.length,
+      8,
+      'DataView sub-range key must have correct length'
+    );
+    strictEqual(
+      exportedSlice.toString(),
+      'C'.repeat(8),
+      'DataView sub-range key must contain the correct bytes'
+    );
+    strictEqual(keySlice.symmetricKeySize, 8);
+
+    // Verify the DataView-created key matches a Uint8Array-created key
+    // over the same bytes
+    const keyFromUint8 = createSecretKey(Buffer.from('A'.repeat(16)));
+    ok(
+      keyFull.equals(keyFromUint8),
+      'DataView key must equal Buffer key with same bytes'
+    );
+  },
+};

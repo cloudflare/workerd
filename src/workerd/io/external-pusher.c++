@@ -12,10 +12,6 @@ namespace workerd {
 
 namespace {
 
-// TODO(cleanup): These classes have been copied from streams/readable.c++. The copies there can be
-//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
-//   StreamSink-related code. For now I'm not trying to avoid duplication.
-
 // HACK: We need as async pipe, like kj::newOneWayPipe(), except supporting explicit end(). So we
 //   wrap the two ends of the pipe in special adapters that track whether end() was called.
 class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream {
@@ -131,14 +127,14 @@ kj::Promise<void> ExternalPusherImpl::pushByteStream(PushByteStreamContext conte
 }
 
 kj::Own<kj::AsyncInputStream> ExternalPusherImpl::unwrapStream(
-    ExternalPusher::InputStream::Client cap, kj::LiteralStringConst debugContext) {
-  return kj::newPromisedStream(unwrapStreamImpl(kj::mv(cap), debugContext));
+    ExternalPusher::InputStream::Client cap) {
+  return kj::newPromisedStream(unwrapStreamImpl(kj::mv(cap)));
 }
 
 kj::Promise<kj::Own<kj::AsyncInputStream>> ExternalPusherImpl::unwrapStreamImpl(
-    ExternalPusher::InputStream::Client cap, kj::LiteralStringConst debugContext) {
+    ExternalPusher::InputStream::Client cap) {
   auto& unwrapped = KJ_REQUIRE_NONNULL(co_await inputStreamSet.getLocalServer(cap),
-      "pushed external is not a byte stream", debugContext, cap.debugInfo());
+      "pushed external is not a byte stream", cap.debugInfo());
 
   co_return KJ_REQUIRE_NONNULL(kj::mv(kj::downcast<InputStreamImpl>(unwrapped).stream),
       "pushed byte stream has already been consumed");
@@ -149,10 +145,6 @@ kj::Promise<kj::Own<kj::AsyncInputStream>> ExternalPusherImpl::unwrapStreamImpl(
 namespace {
 
 // The jsrpc handler that receives aborts from the remote and triggers them locally
-//
-// TODO(cleanup): This class has been copied from basics.c++. The copy there can be
-//   deleted as soon as we've switched from StreamSink to ExternalPusher and can delete all the
-//   StreamSink-related code. For now I'm not trying to avoid duplication.
 class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
  public:
   AbortTriggerRpcServer(kj::Own<kj::PromiseFulfiller<void>> fulfiller,
@@ -256,6 +248,32 @@ kj::Promise<void> ExternalPusherImpl::unwrapAbortSignalImpl(
   }
 
   co_await paf.promise;
+}
+
+// =======================================================================================
+// DelayedChannelToken handling
+
+class ExternalPusherImpl::DelayedChannelTokenImpl final
+    : public ExternalPusher::DelayedChannelToken::Server {
+ public:
+  DelayedChannelTokenImpl(kj::Array<byte> token): token(kj::mv(token)) {}
+
+  kj::Array<byte> token;
+};
+
+kj::Promise<void> ExternalPusherImpl::pushDelayedChannelToken(
+    PushDelayedChannelTokenContext context) {
+  auto token = kj::heapArray(context.getParams().getToken());
+  auto cap = delayedChannelTokenSet.add(kj::heap<DelayedChannelTokenImpl>(kj::mv(token)));
+  context.getResults(capnp::MessageSize{2, 1}).setCap(kj::mv(cap));
+  return kj::READY_NOW;
+}
+
+kj::Promise<kj::Array<byte>> ExternalPusherImpl::unwrapDelayedChannelToken(
+    rpc::JsValue::ExternalPusher::DelayedChannelToken::Client cap) {
+  auto& unwrapped = KJ_REQUIRE_NONNULL(co_await delayedChannelTokenSet.getLocalServer(cap),
+      "pushed external is not a DelayedChannelToken");
+  co_return kj::mv(kj::downcast<DelayedChannelTokenImpl>(unwrapped).token);
 }
 
 }  // namespace workerd

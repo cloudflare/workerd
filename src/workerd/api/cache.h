@@ -139,6 +139,10 @@ class CacheStorage: public jsg::Object {
 
  private:
   jsg::Ref<Cache> default_;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(default_);
+  }
 };
 
 #define EW_CACHE_ISOLATE_TYPES api::CacheStorage, api::Cache, api::CacheQueryOptions

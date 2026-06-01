@@ -1847,11 +1847,12 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     KJ_IF_SOME(s, state) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
       reading = true;
+      KJ_DEFER(reading = false);
       s.consumer->read(js,
           ValueQueue::ReadRequest{
             .resolver = kj::mv(prp.resolver),
           });
-      reading = false;
+      // reading is reset by KJ_DEFER above.
       if (pendingCancel) {
         // If we were canceled while reading, we need to drop our state now.
         state = kj::none;
@@ -1998,6 +1999,7 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
   using State = ReadableState<ByobController, ByteQueue>;
   kj::Maybe<State> state;
   kj::Maybe<int> autoAllocateChunkSize;
+  bool reading = false;
   bool pendingCancel = false;
 
   JSG_MEMORY_INFO(ByteReadable) {
@@ -2045,6 +2047,13 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
     KJ_IF_SOME(s, state) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
 
+      // Set reading = true to prevent cancel() from destroying the consumer
+      // while we're in the middle of a synchronous read operation. The pull()
+      // callback triggered by consumer->read() may call reader.cancel(), which
+      // would otherwise immediately set state = kj::none and free the consumer.
+      // KJ_DEFER ensures the flag is cleared even if an operation throws.
+      reading = true;
+      KJ_DEFER(reading = false);
       KJ_IF_SOME(byob, byobOptions) {
         jsg::BufferSource source(js, byob.bufferView.getHandle(js));
         // If atLeast is not given, then by default it is the element size of the view
@@ -2089,6 +2098,12 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
         } else {
           prp.resolver.reject(js, js.v8Error("Failed to allocate buffer for read."));
         }
+      }
+      // reading is reset by KJ_DEFER above.
+      if (pendingCancel) {
+        // If we were canceled while reading, we need to drop our state now.
+        state = kj::none;
+        pendingCancel = false;
       }
 
       return kj::mv(prp.promise);
@@ -2141,11 +2156,12 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
       bool hasPendingDrainingRead = s.consumer->hasPendingDrainingRead();
       s.consumer->cancel(js, maybeReason);
       auto promise = s.controller->cancel(js, kj::mv(maybeReason));
-      // If there's a pending draining read, we need to wait for it to finish before
-      // dropping our state. The draining read's promise callbacks capture 'this' (the
-      // Consumer) to clear hasPendingDrainingRead. If we destroy the state now, those
-      // callbacks will UAF.
-      if (hasPendingDrainingRead) {
+      // If we're currently in a read (sync or draining), we need to wait for that to
+      // finish before dropping our state. For sync reads, consumer->read() is still on
+      // the call stack and will access the consumer after we return. For draining reads,
+      // the promise callbacks capture 'this' (the Consumer) to clear hasPendingDrainingRead.
+      // In either case, destroying state now would UAF.
+      if (reading || hasPendingDrainingRead) {
         pendingCancel = true;
       } else {
         state = kj::none;
@@ -3253,6 +3269,9 @@ class AllReader {
 
   void visitForGc(jsg::GcVisitor& visitor) {
     state.visitForGc(visitor);
+    for (auto& part: parts) {
+      visitor.visit(part);
+    }
   }
 
  private:

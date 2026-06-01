@@ -569,6 +569,15 @@ kj_test(
 )
 
 kj_test(
+    src = "memory-cache-test.c++",
+    deps = [
+        ":memory-cache",
+        "//src/workerd/io",
+        "//src/workerd/io:trace",
+    ],
+)
+
+kj_test(
     src = "streams/internal-test.c++",
     deps = [
         "//src/workerd/io",

@@ -241,8 +241,8 @@ kj::Own<NeuterableInputStream> newNeuterableInputStream(kj::AsyncInputStream& in
   return kj::refcounted<NeuterableInputStreamImpl>(inner);
 }
 
-kj::Own<NeuterableIoStream> newNeuterableIoStream(kj::AsyncIoStream& inner) {
-  return kj::heap<NeuterableIoStreamImpl>(inner);
+kj::Rc<NeuterableIoStream> newNeuterableIoStream(kj::AsyncIoStream& inner) {
+  return kj::rc<NeuterableIoStreamImpl>(inner);
 }
 
 }  // namespace workerd

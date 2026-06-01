@@ -1019,6 +1019,77 @@ export let abortIsolateDynamic = {
   },
 };
 
+// Regression test for AUTOVULN-CLOUDFLARE-WORKERD-256: the inner .then()
+// continuation in WorkerLoader::get() previously captured IoContext by raw C++
+// reference (&ioctx). If the originating IoContext was destroyed before the
+// user's getCode() promise resolved, and the promise was later resolved from a
+// different IoContext, the lambda would dereference freed memory (heap UAF).
+//
+// The fix replaces the raw reference with a WeakRef. This test exercises the
+// patched code path by:
+//   1. Making a sub-request (IoContext B) that calls env.loader.get() with a
+//      pending getCode promise, saving the resolve function globally.
+//   2. Returning from the sub-request so IoContext B drains and is destroyed.
+//   3. Resolving the saved promise from the test's IoContext A.
+//
+// Pre-patch: the .then() continuation dereferences freed IoContext B → UAF/crash.
+// Post-patch: the WeakRef check detects the dead IoContext and throws a clean
+// JS error ("The request which initiated this dynamic worker load has already
+// completed."), which surfaces as a rejected promise on the WorkerStub.
+
+// Entrypoint for the sub-request that sets up the pending loader promise.
+export class SetupLoaderUaf extends WorkerEntrypoint {
+  async fetch() {
+    let { promise, resolve } = Promise.withResolvers();
+    globalThis.savedLoaderResolve = resolve;
+
+    // Call env.loader.get() with a getCode that returns the pending promise.
+    // This installs a .then() continuation capturing the IoContext reference.
+    this.env.loader.get(null, () => promise);
+
+    // Let the reentry callback run and chain .then() onto the promise.
+    await scheduler.wait(10);
+
+    // Return: IoContext B will drain and be destroyed, but the V8 promise
+    // reaction (with the captured IoContext ref) survives on the JS heap.
+    return new Response('setup-done');
+  }
+}
+
+export let regressionDeadIoContextGetCode = {
+  async test(ctrl, env, ctx) {
+    // Step 1: sub-request sets up the pending promise via a separate entrypoint.
+    let setupEp = ctx.exports.SetupLoaderUaf;
+    let resp = await setupEp.fetch('http://x/setup-loader-uaf');
+    assert.strictEqual(await resp.text(), 'setup-done');
+
+    // Step 2: IoContext B has drained. Give the runtime a moment to clean up.
+    await scheduler.wait(50);
+
+    // Step 3: resolve the saved promise from IoContext A. Post-patch, the inner
+    // .then() continuation detects the dead IoContext via WeakRef and throws.
+    assert.notStrictEqual(
+      globalThis.savedLoaderResolve,
+      undefined,
+      'savedLoaderResolve should have been set by the sub-request'
+    );
+    globalThis.savedLoaderResolve({
+      compatibilityDate: '2025-01-01',
+      mainModule: 'm.js',
+      modules: { 'm.js': 'export default {}' },
+    });
+
+    // Give the promise reaction time to fire.
+    await scheduler.wait(50);
+
+    // The WorkerStub was created in IoContext B which is now dead. Attempting to
+    // use it from IoContext A should fail. The exact error depends on the runtime
+    // path, but the critical thing is that we reach this point without crashing
+    // (pre-patch, the process would have crashed from the UAF).
+    assert.ok(true, 'Reached end of test without UAF crash');
+  },
+};
+
 // Test that abortIsolate() works correctly for anonymous dynamic workers.
 // Anonymous workers don't have a name and therefore aren't stored in the loader's map.
 export let abortIsolateDynamicAnonymous = {

@@ -13670,6 +13670,32 @@ export interface IncomingRequestCfPropertiesTLSClientAuth {
    * @example "Dec 22 19:39:00 2018 GMT"
    */
   certNotAfter: string;
+  /**
+   * The client leaf certificate in [RFC 9440](https://www.rfc-editor.org/rfc/rfc9440)
+   * format (`:base64-DER:`). Empty if no client certificate was presented or if
+   * the leaf certificate exceeded 10 KB (see {@link certRFC9440TooLarge}).
+   *
+   * Suitable for forwarding to an origin via the `Client-Cert` HTTP header.
+   */
+  certRFC9440: string;
+  /**
+   * `true` if the leaf certificate exceeded 10 KB and was omitted from
+   * {@link certRFC9440}.
+   */
+  certRFC9440TooLarge: boolean;
+  /**
+   * The intermediate certificate chain in [RFC 9440](https://www.rfc-editor.org/rfc/rfc9440)
+   * format as a comma-separated list. Empty if no intermediates were sent or
+   * if the chain exceeded 16 KB (see {@link certChainRFC9440TooLarge}).
+   *
+   * Suitable for forwarding to an origin via the `Client-Cert-Chain` HTTP header.
+   */
+  certChainRFC9440: string;
+  /**
+   * `true` if the intermediate chain exceeded 16 KB and was omitted from
+   * {@link certChainRFC9440}.
+   */
+  certChainRFC9440TooLarge: boolean;
 }
 /** Placeholder values for TLS Client Authorization */
 export interface IncomingRequestCfPropertiesTLSClientAuthPlaceholder {
@@ -13690,6 +13716,10 @@ export interface IncomingRequestCfPropertiesTLSClientAuthPlaceholder {
   certFingerprintSHA256: "";
   certNotBefore: "";
   certNotAfter: "";
+  certRFC9440: "";
+  certRFC9440TooLarge: false;
+  certChainRFC9440: "";
+  certChainRFC9440TooLarge: false;
 }
 /** Possible outcomes of TLS verification */
 export declare type CertVerificationStatus =

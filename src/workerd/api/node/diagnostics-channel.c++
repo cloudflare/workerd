@@ -116,6 +116,9 @@ v8::Local<v8::Value> Channel::runStores(jsg::Lock& js,
 }
 
 void Channel::visitForGc(jsg::GcVisitor& visitor) {
+  // `name` (jsg::Name) is intentionally not visited here: jsg::Name's
+  // visitForGc is private and visitation happens through NameWrapper, not
+  // through GcVisitor::visit().
   for (auto& sub: subscribers) {
     visitor.visit(sub.key, sub.value);
   }
