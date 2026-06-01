@@ -51,6 +51,12 @@ wd_test(
 )
 
 wd_test(
+    src = "struct-prototype-pollution-test.wd-test",
+    args = ["--experimental"],
+    data = ["struct-prototype-pollution-test.js"],
+)
+
+wd_test(
     src = "settimeout-test.wd-test",
     args = ["--experimental"],
     data = ["settimeout-test.js"],

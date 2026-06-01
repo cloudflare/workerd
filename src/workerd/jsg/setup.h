@@ -152,6 +152,19 @@ class IsolateBase {
     evalAllowed = allow;
   }
 
+  inline void setDisallowJavascriptExecution(kj::Badge<Lock>, bool allow) {
+    if (allow) {
+      javascriptExecutionDisallowed++;
+    } else {
+      KJ_ASSERT(javascriptExecutionDisallowed > 0);
+      javascriptExecutionDisallowed--;
+    }
+  }
+
+  inline bool getDisallowJavascriptExecution() const {
+    return javascriptExecutionDisallowed != 0;
+  }
+
   inline void setAllowsAllowEval() {
     alwaysAllowEval = true;
     evalAllowed = true;
@@ -373,6 +386,12 @@ class IsolateBase {
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
+
+  // When > 0, we take the "safe" path in unwrap() to avoid calling Get() which can invoke
+  // user-defined getters, triggering the `DisallowJavascriptExecution` scope constructed
+  // as part of `Deserializer::readValue`
+  // This is a counter instead of a boolean as `readValue` calls can be nested
+  uint javascriptExecutionDisallowed = 0;
 
   // The Web Platform API specifications require that any API that returns a JavaScript Promise
   // should never throw errors synchronously. Rather, they are supposed to capture any synchronous

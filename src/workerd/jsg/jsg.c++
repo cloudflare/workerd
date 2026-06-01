@@ -191,6 +191,14 @@ void Lock::setAllowEval(bool allow) {
   IsolateBase::from(v8Isolate).setAllowEval({}, allow);
 }
 
+void Lock::setDisallowJavascriptExecution(bool allow) {
+  IsolateBase::from(v8Isolate).setDisallowJavascriptExecution({}, allow);
+}
+
+bool Lock::isJavascriptExecutionDisallowed() const {
+  return IsolateBase::from(v8Isolate).getDisallowJavascriptExecution();
+}
+
 void Lock::setUsingEnhancedErrorSerialization() {
   IsolateBase::from(v8Isolate).setUsingEnhancedErrorSerialization();
 }

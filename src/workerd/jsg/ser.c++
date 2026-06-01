@@ -434,6 +434,8 @@ void Deserializer::init(Lock& js,
 }
 
 JsValue Deserializer::readValue(Lock& js) {
+  js.setDisallowJavascriptExecution(true);
+  KJ_DEFER(js.setDisallowJavascriptExecution(false));
   return JsValue(check(deser.ReadValue(js.v8Context())));
 }
 
