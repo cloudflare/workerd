@@ -692,7 +692,7 @@ class FileImpl final: public File {
     auto src = data.slice(offset);
     KJ_DASSERT(src.size() > 0);
     if (buffer.size() > src.size()) {
-      buffer.first(src.size()).copyFrom(src);
+      buffer.write(src);
       return src.size();
     }
     buffer.copyFrom(src.first(buffer.size()));
@@ -741,8 +741,9 @@ class FileImpl final: public File {
     if (size > owned.data.size()) {
       // To grow the file, we need to allocate a new array, copy the old data over,
       // and replace the original.
-      newData.first(owned.data.size()).copyFrom(owned.data);
-      newData.slice(owned.data.size()).fill(0);
+      auto remaining = newData.asPtr();
+      remaining.write(owned.data);
+      remaining.fill(0);
     } else {
       newData.asPtr().copyFrom(owned.data.first(size));
     }
