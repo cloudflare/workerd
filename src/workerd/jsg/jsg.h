@@ -2665,6 +2665,11 @@ class Lock {
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
 
+  // Use to choose the safe path in unwrap() when under a `DisallowJavascriptExecution` scope
+  // TODO(cleanup): replace with scope guard if we need to use this in multiple places
+  void setDisallowJavascriptExecution(bool allow);
+  bool isJavascriptExecutionDisallowed() const;
+
   void setCaptureThrowsAsRejections(bool capture);
   void setUsingEnhancedErrorSerialization();
   void setUsingFastJsgStruct();
