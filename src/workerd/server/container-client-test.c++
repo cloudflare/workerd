@@ -13,10 +13,49 @@
 
 #include "container-client.h"
 
+#include <kj/async-io.h>
 #include <kj/test.h>
 
 namespace workerd::server {
 namespace {
+
+void addDockerFrame(kj::Vector<kj::byte>& frames, kj::byte streamId, kj::StringPtr payload) {
+  auto size = static_cast<uint32_t>(payload.size());
+  frames.add(streamId);
+  frames.add(0);
+  frames.add(0);
+  frames.add(0);
+  frames.add(static_cast<kj::byte>((size >> 24) & 0xff));
+  frames.add(static_cast<kj::byte>((size >> 16) & 0xff));
+  frames.add(static_cast<kj::byte>((size >> 8) & 0xff));
+  frames.add(static_cast<kj::byte>(size & 0xff));
+  frames.addAll(payload.asBytes());
+}
+
+kj::Array<kj::byte> readDockerExecOutputInChunks(
+    kj::ArrayPtr<const kj::byte> input, size_t chunkSize) {
+  auto io = kj::setupAsyncIo();
+  auto pipe = kj::newTwoWayPipe();
+  auto stream = newDockerExecOutputStream(kj::mv(pipe.ends[0]));
+  auto writer = kj::mv(pipe.ends[1]);
+  auto& writerRef = *writer;
+  auto writeTask = writerRef.write(input)
+                       .then([writer = kj::mv(writer)]() mutable { writer->shutdownWrite(); })
+                       .eagerlyEvaluate(nullptr);
+
+  kj::Vector<kj::byte> result;
+  auto chunk = kj::heapArray<kj::byte>(chunkSize);
+  while (true) {
+    auto amount = stream->tryRead(chunk.begin(), 1, chunk.size()).wait(io.waitScope);
+    if (amount == 0) {
+      break;
+    }
+    result.addAll(chunk.asPtr().first(amount));
+  }
+
+  writeTask.wait(io.waitScope);
+  return result.releaseAsArray();
+}
 
 // Regression test for VULN-127728: ContainerInspectResponse decode must not
 // use-after-free.  With the old buggy code every field access after decode
@@ -193,6 +232,44 @@ KJ_TEST("ContainerCreateRequest encodes HostConfig Dns") {
   KJ_REQUIRE(decodedDns.size() == 2);
   KJ_EXPECT(decodedDns[0] == "1.1.1.1");
   KJ_EXPECT(decodedDns[1] == "8.8.8.8");
+}
+
+KJ_TEST("newDockerExecOutputStream strips Docker attach frame headers") {
+  kj::Vector<kj::byte> frames;
+  addDockerFrame(frames, 1, "he"_kj);
+  addDockerFrame(frames, 1, ""_kj);
+  addDockerFrame(frames, 2, "ignored stderr"_kj);
+  addDockerFrame(frames, 1, "llo"_kj);
+  addDockerFrame(frames, 1, " world"_kj);
+
+  auto output = readDockerExecOutputInChunks(frames.asPtr(), 2);
+  KJ_EXPECT(kj::str(output.asChars()) == "hello world");
+}
+
+KJ_TEST("newDockerExecOutputStream handles clean EOF without stdout payload") {
+  kj::Vector<kj::byte> frames;
+  addDockerFrame(frames, 2, "ignored stderr"_kj);
+  addDockerFrame(frames, 1, ""_kj);
+
+  auto output = readDockerExecOutputInChunks(frames.asPtr(), 3);
+  KJ_EXPECT(output.size() == 0);
+}
+
+KJ_TEST("newDockerExecOutputStream rejects truncated Docker attach frames") {
+  kj::Vector<kj::byte> frames;
+  frames.add(1);
+  frames.add(0);
+  frames.add(0);
+  frames.add(0);
+  frames.add(0);
+  frames.add(0);
+  frames.add(0);
+  frames.add(5);
+  frames.addAll("he"_kj.asBytes());
+
+  KJ_EXPECT_THROW_MESSAGE(
+      "Docker exec raw stream ended in the middle of a frame",
+      readDockerExecOutputInChunks(frames.asPtr(), 2));
 }
 
 }  // namespace
