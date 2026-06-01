@@ -4,6 +4,7 @@
 
 import { connect, internalNewHttpClient } from 'cloudflare:sockets';
 import { strict as assert } from 'node:assert';
+import unsafe from 'workerd:unsafe';
 
 // Basic connectivity and GET test
 export const oneRequest = {
@@ -500,6 +501,49 @@ export const startTlsEarlySend = {
     assert.equal(response.status, 200);
     const text = await response.text();
     assert.equal(text, 'pong');
+  },
+};
+
+// When the STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME autogate is enabled
+// (e.g. @all-autogates variant), startTls must throw a TypeError if
+// expectedServerHostname is provided. When the autogate is off, startTls
+// logs and proceeds — both outcomes are acceptable.
+export const startTlsRejectExpectedServerHostname = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.STARTTLS_SOCKET}`, {
+      secureTransport: 'starttls',
+    });
+
+    const writer = socket.writable.getWriter();
+    const reader = socket.readable.getReader();
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    const { value: greeting } = await reader.read();
+    const greetingText = decoder.decode(greeting).trim();
+    if (greetingText !== 'HELLO') throw new Error('Wrong Handshake');
+    await writer.write(encoder.encode('HELLO_BACK\n'));
+
+    const { value: signal } = await reader.read();
+    const signalText = decoder.decode(signal).trim();
+    if (signalText !== 'START_TLS') throw new Error('Cannot Start TLS');
+
+    reader.releaseLock();
+    writer.releaseLock();
+
+    // We use isTestAutogateEnabled() (which checks the TEST_WORKERD gate) as a proxy
+    // for whether STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME is enabled, because the
+    // @all-autogates test variant enables every gate at once.
+    if (unsafe.isTestAutogateEnabled()) {
+      // Autogate is on — startTls must throw.
+      assert.throws(() => socket.startTls({ expectedServerHostname: 'other.com' }), {
+        name: 'TypeError',
+        message: /expectedServerHostname/,
+      });
+    } else {
+      // Autogate is off — startTls logs but does not throw.
+      socket.startTls({ expectedServerHostname: 'other.com' });
+    }
   },
 };
 

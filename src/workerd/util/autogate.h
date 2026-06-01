@@ -53,6 +53,9 @@ enum class AutogateKey {
   // When enabled, throw ERR_OPTION_NOT_IMPLEMENTED for unsupported TLS options
   // (e.g. checkServerIdentity) instead of logging a warning and continuing.
   THROW_ON_NOT_IMPLEMENTED_TLS_OPTIONS,
+  // When enabled, reject startTls calls that pass the expectedServerHostname option,
+  // which is not currently supported. When disabled, log the usage instead.
+  STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME,
   NumOfKeys  // Reserved for iteration.
 };
 

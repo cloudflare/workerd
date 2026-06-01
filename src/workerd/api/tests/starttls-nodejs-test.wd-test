@@ -12,21 +12,21 @@ const config :Workerd.Config = (
         modules = [
           (name = "worker.js", esModule = embed "starttls-nodejs-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "experimental"],
+        compatibilityFlags = ["nodejs_compat", "experimental", "unsafe_module"],
         bindings = [
           (name = "STARTTLS_CA_PORT", fromEnvironment = "STARTTLS_CA_PORT"),
         ],
       )
     ),
-    ( name = "internet", 
-      network = ( 
+    ( name = "internet",
+      network = (
         allow = ["private"],
         tlsOptions = (
           trustedCertificates = [
             embed "starttls-server.pem",
           ],
         ),
-      ) 
+      )
     ),
   ],
 );
