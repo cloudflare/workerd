@@ -296,6 +296,8 @@ declare namespace CloudflareWorkersModule {
 
   export type WorkflowBackoff = 'constant' | 'linear' | 'exponential';
 
+  export type WorkflowStepSensitivity = 'output';
+
   export type WorkflowStepConfig = {
     retries?: {
       limit: number;
@@ -303,18 +305,29 @@ declare namespace CloudflareWorkersModule {
       backoff?: WorkflowBackoff;
     };
     timeout?: WorkflowTimeoutDuration | number;
+    sensitive?: WorkflowStepSensitivity;
+  };
+
+  export type WorkflowCronSchedule = {
+    /** Cron expression that triggered this event. */
+    cron: string;
+    /** Timestamp of the scheduled trigger, in milliseconds since the Unix epoch. */
+    scheduledTime: number;
   };
 
   export type WorkflowEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
     instanceId: string;
+    workflowName: string;
+    schedule?: WorkflowCronSchedule;
   };
 
   export type WorkflowStepEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
     type: string;
+    sensitive?: WorkflowStepSensitivity;
   };
 
   export type WorkflowStepContext = {
@@ -326,15 +339,32 @@ declare namespace CloudflareWorkersModule {
     config: WorkflowStepConfig;
   };
 
+  export type WorkflowRollbackContext<T = unknown> = {
+    error: Error;
+    output: T | undefined;
+    stepName: string;
+  };
+
+  export type WorkflowRollbackHandler<T = unknown> = (
+    ctx: WorkflowRollbackContext<T>
+  ) => Promise<void>;
+
+  export type WorkflowStepRollbackOptions<T = unknown> = {
+    rollback?: WorkflowRollbackHandler<T>;
+    rollbackConfig?: WorkflowStepConfig;
+  };
+
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
-      callback: (ctx: WorkflowStepContext) => Promise<T>
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
-      callback: (ctx: WorkflowStepContext) => Promise<T>
+      callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;

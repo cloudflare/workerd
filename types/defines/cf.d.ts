@@ -199,6 +199,23 @@ interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
    */
   repeat?: true | "x" | "y";
   /**
+   * How to combine the foreground and backdrop pixels to create the result
+   */
+  composite?:
+    /** Foreground drawn on top of backdrop (default) */
+    | 'over'
+    /** Foreground shown only where backdrop is opaque */
+    | 'in'
+    /** Foreground drawn on top, but clipped to the backdrop's shape */
+    | 'atop'
+    /** Foreground shown only where backdrop is transparent */
+    | 'out'
+    /** Foreground and backdrop visible only where the other is not */
+    | 'xor'
+    /** Foreground and backdrop channels added (brightening) */
+    | 'lighter';
+
+  /**
    * Position of the overlay image relative to a given edge. Each property is
    * an offset in pixels. 0 aligns exactly to the edge. For example, left: 10
    * positions left side of the overlay 10 pixels from the left edge of the

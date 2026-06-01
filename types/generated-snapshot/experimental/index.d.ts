@@ -4734,6 +4734,239 @@ declare abstract class Span {
   get isTraced(): boolean;
   setAttribute(key: string, value?: boolean | number | string): void;
 }
+// ============================================================================
+// Agent Memory
+//
+// Public type surface for user Workers binding to an Agent Memory namespace.
+// ============================================================================
+/** Memory type — every memory is classified into exactly one. */
+type AgentMemoryMemoryType = "fact" | "event" | "instruction" | "task";
+/** Search intensity for recall. */
+type AgentMemoryThinkingLevel = "low" | "medium" | "high";
+/** Response verbosity for recall. */
+type AgentMemoryResponseLength = "short" | "medium" | "long";
+/** A conversation message passed to ingest(). */
+interface AgentMemoryMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+  /** Optional message timestamp. */
+  timestamp?: Date;
+}
+/** Raw memory content passed to remember(). */
+interface AgentMemoryIncomingMemory {
+  /** Raw memory content. The service classifies and summarizes automatically. */
+  content: string;
+  /** Optional session identifier to associate with this memory. */
+  sessionId?: string | null | undefined;
+}
+/** A stored memory returned from remember(), get(), and delete(). */
+interface AgentMemoryMemory {
+  /** Memory ID. */
+  id: string;
+  /** Memory type. */
+  type: AgentMemoryMemoryType;
+  /** Text summary. */
+  summary: string;
+  /** Memory text. */
+  content: string;
+  /** Session that created this memory. */
+  sessionId: string | null;
+  /** Memory creation time. */
+  createdAt: Date;
+  /** Memory last-update time. */
+  updatedAt: Date;
+}
+/** Single entry in a list() response. Same shape as Memory minus full content. */
+type AgentMemoryMemoryListEntry = Omit<AgentMemoryMemory, "content">;
+/** A scored memory candidate in a recall result. */
+interface AgentMemoryScoredCandidate {
+  /** Candidate ID. */
+  id: string;
+  /** Text summary. */
+  summary: string;
+  /** Session that created this candidate, when known. */
+  sessionId: string | null;
+  /** Relevance score (higher is better). Comparable only within a single query. */
+  score: number;
+}
+/** Options for the ingest() method. */
+interface AgentMemoryIngestOptions {
+  /** Session identifier to associate with memories created during ingestion. */
+  sessionId?: string | null | undefined;
+}
+/** Options for the getSummary() method. */
+interface AgentMemoryGetSummaryOptions {
+  /** Session identifier to retrieve session summary for. */
+  sessionId?: string | null | undefined;
+}
+/** Response from the getSummary() method. */
+interface AgentMemoryGetSummaryResponse {
+  /** Markdown summary. */
+  summary: string;
+}
+/**
+ * Options for the recall() method.
+ *
+ * `referenceDate` accepts a Date object, an ISO-8601 date string
+ * (YYYY-MM-DD), or a full ISO-8601 datetime string. When provided, this
+ * date is used as "today" for resolving relative time references
+ * ("how many days ago", "last week") instead of the server's wall-clock time.
+ */
+interface AgentMemoryRecallOptions {
+  /** Recall intensity: "low" (default), "medium", or "high". */
+  thinkingLevel?: AgentMemoryThinkingLevel;
+  /** Response verbosity: "short", "medium" (default), or "long". */
+  responseLength?: AgentMemoryResponseLength;
+  /** Temporal anchor for date arithmetic. */
+  referenceDate?: Date | string;
+}
+/** Response from the recall() method. */
+interface AgentMemoryRecallResult {
+  /** Number of memories retrieved. */
+  count: number;
+  /** LLM-generated answer synthesizing the matching memories. */
+  answer: string;
+  /** Matching memories ranked by relevance. */
+  candidates: AgentMemoryScoredCandidate[];
+}
+/**
+ * Options for the list() method.
+ *
+ * `cursor` is the opaque continuation token returned by the previous page;
+ * pass it back unchanged to fetch the next page. `sessionId` and `type`
+ * are exact-match filters; combining them is allowed.
+ */
+interface AgentMemoryListMemoriesOptions {
+  /** Maximum number of memories to return. Default 20, max 500. */
+  limit?: number;
+  /** Opaque cursor from a previous page. */
+  cursor?: string;
+  /** Exact-match session filter. */
+  sessionId?: string;
+  /** Exact-match memory-type filter. */
+  type?: AgentMemoryMemoryType;
+}
+/** Response from the list() method. */
+interface AgentMemoryListMemoriesResult {
+  memories: AgentMemoryMemoryListEntry[];
+  /** Continuation cursor; absent when this page exhausted the result set. */
+  cursor?: string;
+}
+/**
+ * A single Agent Memory profile, scoped to a profile name.
+ *
+ * Returned by {@link AgentMemoryNamespace.getProfile}.
+ */
+declare abstract class AgentMemoryProfile {
+  /**
+   * Retrieve a memory by ID.
+   *
+   * @param memoryId - ULID of the memory to retrieve.
+   * @throws if the memory does not exist.
+   */
+  get(memoryId: string): Promise<AgentMemoryMemory>;
+  /**
+   * Delete a memory by ID.
+   *
+   * Removes the memory and any source messages linked by the memory's
+   * source message IDs.
+   *
+   * @param memoryId - ULID of the memory to delete.
+   * @throws if the memory does not exist.
+   */
+  delete(memoryId: string): Promise<AgentMemoryMemory>;
+  /**
+   * Store a memory in this profile. The content is automatically classified,
+   * summarized, and indexed.
+   *
+   * @param memory - Raw memory content to persist.
+   */
+  remember(memory: AgentMemoryIncomingMemory): Promise<AgentMemoryMemory>;
+  /**
+   * Extract memories from a conversation.
+   *
+   * @param messages - Conversation messages to extract memories from.
+   * @param options  - Optional ingest options.
+   */
+  ingest(
+    messages: Iterable<AgentMemoryMessage>,
+    options?: AgentMemoryIngestOptions,
+  ): Promise<void>;
+  /**
+   * Get a profile summary.
+   *
+   * @param options - Optional getSummary options.
+   */
+  getSummary(
+    options?: AgentMemoryGetSummaryOptions,
+  ): Promise<AgentMemoryGetSummaryResponse>;
+  /**
+   * Recall memories in this profile.
+   *
+   * @param query   - Recall query matched against memory content and keywords.
+   * @param options - Optional recall parameters.
+   * @returns Matching memories with relevance scores and a synthesized answer.
+   */
+  recall(
+    query: string,
+    options?: AgentMemoryRecallOptions,
+  ): Promise<AgentMemoryRecallResult>;
+  /**
+   * List active memories in this profile.
+   *
+   * Returns a paginated, filterable view of stored memories. Superseded
+   * versions are excluded. Use the returned `cursor` (when present) to
+   * fetch the next page.
+   *
+   * @param options - Optional pagination and filter options.
+   */
+  list(
+    options?: AgentMemoryListMemoriesOptions,
+  ): Promise<AgentMemoryListMemoriesResult>;
+  /**
+   * Soft-delete every memory and message in this profile that is tagged
+   * with `sessionId`.
+   *
+   * Idempotent: deleting a sessionId that has no rows is a no-op.
+   *
+   * @param sessionId - Session to delete.
+   */
+  deleteSession(sessionId: string): Promise<void>;
+}
+/**
+ * Namespace-level Agent Memory binding.
+ *
+ * Used as the type of an `env.MEMORY`-style binding backed by the Agent
+ * Memory product.
+ *
+ * @example
+ * ```ts
+ * export default {
+ *   async fetch(_request: Request, env: Env): Promise<Response> {
+ *     const profile = await env.MEMORY.getProfile("wrangler-e2e");
+ *     const summary = await profile.getSummary();
+ *     return Response.json(summary);
+ *   },
+ * };
+ * ```
+ */
+declare abstract class AgentMemoryNamespace {
+  /**
+   * Get a memory profile by name. Profiles are isolated by namespace and
+   * addressed by a compound key (namespaceId:profileName).
+   *
+   * @param profileName - Profile name (validated against naming rules).
+   * @returns RPC target for interacting with the profile.
+   */
+  getProfile(profileName: string): Promise<AgentMemoryProfile>;
+  /**
+   * Soft-delete a profile and schedule deferred purge. Marks all
+   * memories and messages as deleted.
+   *
+   * @param profileName - Name of the profile to delete.
+   */
+  deleteProfile(profileName: string): Promise<void>;
+}
 // ============ AI Search Error Interfaces ============
 interface AiSearchInternalError extends Error {}
 interface AiSearchNotFoundError extends Error {}
@@ -6177,9 +6410,6 @@ type ChatCompletionChoice = {
     | "function_call";
   logprobs: ChatCompletionLogprobs | null;
 };
-type ChatCompletionsPromptInput = {
-  prompt: string;
-} & ChatCompletionsCommonOptions;
 type ChatCompletionsMessagesInput = {
   messages: Array<ChatCompletionMessageParam>;
 } & ChatCompletionsCommonOptions;
@@ -10304,11 +10534,11 @@ declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
-  inputs: XOR<ResponsesInput, ChatCompletionsInput>;
+  inputs: XOR<ResponsesInput, ChatCompletionsMessagesInput>;
   postProcessedOutputs: XOR<ResponsesOutput, ChatCompletionsOutput>;
 }
 interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
@@ -11402,6 +11632,10 @@ declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_5 {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
 }
+declare abstract class Base_Ai_Cf_Moonshotai_Kimi_K2_6 {
+  inputs: ChatCompletionsInput;
+  postProcessedOutputs: ChatCompletionsOutput;
+}
 declare abstract class Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B {
   inputs: ChatCompletionsInput;
   postProcessedOutputs: ChatCompletionsOutput;
@@ -11499,7 +11733,9 @@ interface AiModels {
   "@cf/black-forest-labs/flux-2-klein-9b": Base_Ai_Cf_Black_Forest_Labs_Flux_2_Klein_9B;
   "@cf/zai-org/glm-4.7-flash": Base_Ai_Cf_Zai_Org_Glm_4_7_Flash;
   "@cf/moonshotai/kimi-k2.5": Base_Ai_Cf_Moonshotai_Kimi_K2_5;
+  "@cf/moonshotai/kimi-k2.6": Base_Ai_Cf_Moonshotai_Kimi_K2_6;
   "@cf/nvidia/nemotron-3-120b-a12b": Base_Ai_Cf_Nvidia_Nemotron_3_120B_A12B;
+  "@cf/google/gemma-4-26b-a4b-it": Base_Ai_Cf_Google_Gemma_4_26B_A4B_IT;
 }
 type AiOptions = {
   /**
@@ -11552,16 +11788,8 @@ type AiModelsSearchObject = {
     value: string;
   }[];
 };
-type ChatCompletionsBase = XOR<
-  ChatCompletionsPromptInput,
-  ChatCompletionsMessagesInput
->;
-type ChatCompletionsInput = XOR<
-  ChatCompletionsBase,
-  {
-    requests: ChatCompletionsBase[];
-  }
->;
+type ChatCompletionsBase = ChatCompletionsMessagesInput;
+type ChatCompletionsInput = ChatCompletionsMessagesInput;
 interface InferenceUpstreamError extends Error {}
 interface AiInternalError extends Error {}
 type AiModelListType = Record<string, any>;
@@ -11624,9 +11852,16 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
     inputs: AiModelList[Name]["inputs"],
     options?: AiOptions,
   ): Promise<AiModelList[Name]["postProcessedOutputs"]>;
-  // Unknown model (gateway fallback)
-  run(
-    model: string & {},
+  // Unknown model (fallback).
+  //
+  // The `Exclude<..., keyof AiModelList>` constraint forces TypeScript to
+  // route any model name that is a literal key of `AiModelList` to one of
+  // the known-model overloads above (so input/output mismatches surface as
+  // type errors rather than silently falling back to `Record<string, unknown>`).
+  // Names that aren't in `AiModelList` — e.g. third-party gateway models
+  // like `"google/nano-banana"` — still hit this overload.
+  run<Model extends string>(
+    model: Model extends keyof AiModelList ? never : Model,
     inputs: Record<string, unknown>,
     options?: AiOptions,
   ): Promise<Record<string, unknown>>;
@@ -12141,6 +12376,513 @@ declare abstract class AutoRAG {
     params: AutoRagAiSearchRequest,
   ): Promise<AutoRagAiSearchResponse | Response>;
 }
+type BrowserRunLifecycleEvent =
+  | "load"
+  | "domcontentloaded"
+  | "networkidle0"
+  | "networkidle2";
+type BrowserRunResourceType =
+  | "document"
+  | "stylesheet"
+  | "image"
+  | "media"
+  | "font"
+  | "script"
+  | "texttrack"
+  | "xhr"
+  | "fetch"
+  | "prefetch"
+  | "eventsource"
+  | "websocket"
+  | "manifest"
+  | "signedexchange"
+  | "ping"
+  | "cspviolationreport"
+  | "preflight"
+  | "other";
+/** Options fields shared by all quick actions. */
+interface BrowserRunBaseOptions {
+  /** Adds `<script>` tags into the page with the desired URL or content.
+   * @see https://pptr.dev/api/puppeteer.frameaddscripttagoptions
+   */
+  addScriptTag?: Array<{
+    content?: string;
+    url?: string;
+    type?: string;
+    id?: string;
+  }>;
+  /** Adds `<link rel="stylesheet">` or `<style>` tags into the page.
+   * @see https://pptr.dev/api/puppeteer.frameaddstyletagoptions
+   */
+  addStyleTag?: Array<{
+    content?: string;
+    url?: string;
+  }>;
+  /** Provide credentials for HTTP authentication. @see https://pptr.dev/api/puppeteer.credentials */
+  authenticate?: {
+    username: string;
+    password: string;
+  };
+  /** Set cookies before navigating. @see https://pptr.dev/api/puppeteer.cookieparam */
+  cookies?: Array<{
+    name: string;
+    value: string;
+    url?: string;
+    domain?: string;
+    path?: string;
+    secure?: boolean;
+    httpOnly?: boolean;
+    sameSite?: "Strict" | "Lax" | "None";
+    expires?: number;
+    priority?: "Low" | "Medium" | "High";
+    sameParty?: boolean;
+    sourceScheme?: "Unset" | "NonSecure" | "Secure";
+    sourcePort?: number;
+    partitionKey?: string;
+  }>;
+  /** Emulate a specific CSS media type (e.g. `"screen"`, `"print"`). */
+  emulateMediaType?: string;
+  /** Navigation options. @see https://pptr.dev/api/puppeteer.gotooptions */
+  gotoOptions?: {
+    /** Navigation timeout in milliseconds (max 60 000). @default 30000 */
+    timeout?: number;
+    /** When to consider navigation complete. @default "domcontentloaded" */
+    waitUntil?: BrowserRunLifecycleEvent | BrowserRunLifecycleEvent[];
+    referer?: string;
+    referrerPolicy?: string;
+  };
+  /** Block requests matching these regex patterns. Mutually exclusive with `allowRequestPattern`. */
+  rejectRequestPattern?: string[];
+  /** Only allow requests matching these regex patterns. Mutually exclusive with `rejectRequestPattern`. */
+  allowRequestPattern?: string[];
+  /** Block requests of these resource types. Mutually exclusive with `allowResourceTypes`. */
+  rejectResourceTypes?: BrowserRunResourceType[];
+  /** Only allow requests of these resource types. Mutually exclusive with `rejectResourceTypes`. */
+  allowResourceTypes?: BrowserRunResourceType[];
+  /** Additional HTTP headers sent with every request. */
+  setExtraHTTPHeaders?: Record<string, string>;
+  /** Whether JavaScript is enabled on the page. */
+  setJavaScriptEnabled?: boolean;
+  /** Override the default user agent string.
+   * @default "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+   * */
+  userAgent?: string;
+  /** Set the browser viewport size.
+   * @see https://pptr.dev/api/puppeteer.viewport
+   * @default {width:1920,height:1080}
+   * */
+  viewport?: {
+    width: number;
+    height: number;
+    deviceScaleFactor?: number;
+    isMobile?: boolean;
+    isLandscape?: boolean;
+    hasTouch?: boolean;
+  };
+  /** Wait for a CSS selector to appear in the page before proceeding.
+   * @see https://pptr.dev/api/puppeteer.waitforselectoroptions
+   */
+  waitForSelector?: {
+    selector: string;
+    hidden?: true;
+    visible?: true;
+    /** Timeout in milliseconds. Max 120000 */
+    timeout?: number;
+  };
+  /** Wait for a fixed delay in milliseconds before proceeding. Max 120000 */
+  waitForTimeout?: number;
+  /** When true, continue on best-effort when awaited events fail or timeout. */
+  bestAttempt?: boolean;
+  /** Maximum duration in milliseconds for the browser action after page load. Max 120000 */
+  actionTimeout?: number;
+  /** Cache time to live in seconds (0-86400). Set to 0 to disable.
+   * @default 5
+   */
+  cacheTTL?: number;
+}
+/** Common options shared by all quick actions. Exactly one of `url` or `html` must be provided.*/
+type BrowserRunCommonOptions =
+  | (BrowserRunBaseOptions & {
+      /** URL to navigate to, e.g. `"https://example.com"`. */
+      url: string;
+    })
+  | (BrowserRunBaseOptions & {
+      /** Set the HTML content of the page directly. */
+      html: string;
+    });
+type BrowserRunPuppeteerScreenshotOptions = {
+  /** @default "png" */
+  type?: "png" | "jpeg" | "webp";
+  /** @default "binary" */
+  encoding?: "binary" | "base64";
+  quality?: number;
+  fullPage?: boolean;
+  clip?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    scale?: number;
+  };
+  omitBackground?: boolean;
+  optimizeForSpeed?: boolean;
+  captureBeyondViewport?: boolean;
+  fromSurface?: boolean;
+};
+type BrowserRunScreenshotOptions = BrowserRunCommonOptions & {
+  /** CSS selector of the element to screenshot. */
+  selector?: string;
+  /** When true, scroll the entire page before taking the screenshot. */
+  scrollPage?: boolean;
+  /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
+  screenshotOptions?: BrowserRunPuppeteerScreenshotOptions;
+};
+type BrowserRunPDFOptions = BrowserRunCommonOptions & {
+  /** @see https://pptr.dev/api/puppeteer.pdfoptions */
+  pdfOptions?: {
+    /** @default 1 */
+    scale?: number;
+    /** @default false */
+    displayHeaderFooter?: boolean;
+    headerTemplate?: string;
+    footerTemplate?: string;
+    /** @default false */
+    printBackground?: boolean;
+    /** @default false */
+    landscape?: boolean;
+    pageRanges?: string;
+    /** @default "letter" */
+    format?:
+      | "letter"
+      | "legal"
+      | "tabloid"
+      | "ledger"
+      | "a0"
+      | "a1"
+      | "a2"
+      | "a3"
+      | "a4"
+      | "a5"
+      | "a6";
+    width?: string | number;
+    height?: string | number;
+    /** @default false */
+    preferCSSPageSize?: boolean;
+    margin?: {
+      top?: string | number;
+      right?: string | number;
+      bottom?: string | number;
+      left?: string | number;
+    };
+    /** @default false */
+    omitBackground?: boolean;
+    /** @default true */
+    tagged?: boolean;
+    /** @default false */
+    outline?: boolean;
+    /** @default 30000 */
+    timeout?: number;
+  };
+};
+type BrowserRunScrapeOptions = BrowserRunCommonOptions & {
+  /** CSS selectors to scrape. At least one element is required. */
+  elements: Array<{
+    selector: string;
+  }>;
+};
+type BrowserRunLinksOptions = BrowserRunCommonOptions & {
+  /** When true, only return links that are visible on the page. @default false */
+  visibleLinksOnly?: boolean;
+  /** When true, exclude links pointing to external domains. @default false */
+  excludeExternalLinks?: boolean;
+};
+type BrowserRunSnapshotOptions = BrowserRunCommonOptions & {
+  /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
+  screenshotOptions?: Omit<BrowserRunPuppeteerScreenshotOptions, "encoding">;
+};
+interface BrowserRunJsonBaseOptions {
+  /** Custom AI models to try in order. Max 3. Falls back to next on error. */
+  custom_ai?: Array<{
+    /** Model ID in `<provider>/<model_name>` format, e.g. `"workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"`. */
+    model: string;
+    /** Bearer token. Not needed for workers-ai models. */
+    authorization?: string;
+  }>;
+}
+/**
+ * Options for the `json` quick action.
+ * At least one of `prompt` or `response_format` must be provided.
+ */
+type BrowserRunJsonOptions = BrowserRunCommonOptions &
+  BrowserRunJsonBaseOptions &
+  (
+    | {
+        /** Natural-language prompt describing what data to extract. */
+        prompt: string;
+        /** Structured output schema for the AI model. @see https://developers.cloudflare.com/workers-ai/json-mode/ */
+        response_format?: AiTextGenerationResponseFormat;
+      }
+    | {
+        /** Natural-language prompt describing what data to extract. */
+        prompt?: string;
+        /** Structured output schema for the AI model. @see https://developers.cloudflare.com/workers-ai/json-mode/ */
+        response_format: AiTextGenerationResponseFormat;
+      }
+  );
+type BrowserRunContentOptions = BrowserRunCommonOptions;
+type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
+type BrowserRunResponseMeta = {
+  /** HTTP status code of the rendered page */
+  status: number;
+  /** Page title */
+  title: string;
+};
+/** Success response for `content` action. */
+type BrowserRunContentSuccessResponse = {
+  success: true;
+  /** Extracted HTML content */
+  result: string;
+  meta: BrowserRunResponseMeta;
+};
+/** Success response for `links` action. */
+type BrowserRunLinksSuccessResponse = {
+  success: true;
+  /** Extracted links */
+  result: string[];
+};
+/** Success response for `scrape` action. */
+type BrowserRunScrapeSuccessResponse = {
+  success: true;
+  result: Array<{
+    /** The CSS selector used to find elements. */
+    selector: string;
+    /** Array of elements matching the selector. */
+    results: Array<{
+      /** Outer HTML of the element. */
+      html: string;
+      /** Text content of the element. */
+      text: string;
+      /** Width of the element in pixels. */
+      width: number;
+      /** Height of the element in pixels. */
+      height: number;
+      /** Top position of the element relative to the viewport in pixels. */
+      top: number;
+      /** Left position of the element relative to the viewport in pixels. */
+      left: number;
+      /** Array of HTML attributes on the element. */
+      attributes: Array<{
+        /** Attribute name. */
+        name: string;
+        /** Attribute value. */
+        value: string;
+      }>;
+    }>;
+  }>;
+};
+/** Success response for `snapshot` action. */
+type BrowserRunSnapshotSuccessResponse = {
+  success: true;
+  result: {
+    /** HTML content of the page. */
+    content: string;
+    /** Base64-encoded screenshot image. */
+    screenshot: string;
+  };
+  meta: BrowserRunResponseMeta;
+};
+/** Success response for `json` action. */
+type BrowserRunJsonSuccessResponse = {
+  success: true;
+  /** JSON data extracted from the page using an AI model */
+  result: Record<string, unknown>;
+};
+/** Success response for `markdown` action. */
+type BrowserRunMarkdownSuccessResponse = {
+  success: true;
+  /** Extracted markdown content */
+  result: string;
+};
+/** Error response for BrowserRun actions. */
+type BrowserRunErrorResponse = {
+  success: false;
+  errors: {
+    message: string;
+    code?: number;
+    detail?: string;
+    path?: string;
+  }[];
+};
+/** Error response for BrowserRun `json` action. */
+type BrowserRunJsonErrorResponse = BrowserRunErrorResponse & {
+  /** Raw AI response text for debugging */
+  rawAiResponse?: string;
+};
+/**
+ * Browser Run API binding for automating headless browsers.
+ * @see https://developers.cloudflare.com/browser-run/
+ */
+declare abstract class BrowserRun {
+  /**
+   * Send a raw HTTP request to the Browser Run API.
+   * Used by libraries like `@cloudflare/puppeteer` to acquire and connect to a browser instance.
+   * @see https://developers.cloudflare.com/browser-run/
+   */
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  /**
+   * Take a screenshot of a web page.
+   * @param action - Must be `'screenshot'`.
+   * @param options - Screenshot options including viewport, selectors, and image format.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - Binary image data with `Content-Type: image/png`, `image/jpeg`, or `image/webp` (when `encoding: 'binary'`, the default)
+   * - Data URI string with `Content-Type: text/plain` (when `encoding: 'base64'`)
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "screenshot",
+    options: BrowserRunScreenshotOptions,
+  ): Promise<Response>;
+  /**
+   * Generate a PDF of a web page.
+   * @param action - Must be `'pdf'`.
+   * @param options - PDF generation options including page size, margins, and headers/footers.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - Binary PDF data with `Content-Type: application/pdf`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(action: "pdf", options: BrowserRunPDFOptions): Promise<Response>;
+  /**
+   * Get the HTML content of a web page.
+   * @param action - Must be `'content'`.
+   * @param options - Navigation and page interaction options.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunContentSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "content",
+    options: BrowserRunContentOptions,
+  ): Promise<Response>;
+  /**
+   * Scrape elements from a web page by CSS selector.
+   * @param action - Must be `'scrape'`.
+   * @param options - Scrape options with CSS selectors for elements to extract.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunScrapeSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "scrape",
+    options: BrowserRunScrapeOptions,
+  ): Promise<Response>;
+  /**
+   * Extract all links from a web page.
+   * @param action - Must be `'links'`.
+   * @param options - Options to filter visible or internal links only.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunLinksSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "links",
+    options: BrowserRunLinksOptions,
+  ): Promise<Response>;
+  /**
+   * Get both the HTML content and a base64-encoded screenshot of a web page.
+   * @param action - Must be `'snapshot'`.
+   * @param options - Snapshot options including screenshot settings (encoding is always base64).
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunSnapshotSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "snapshot",
+    options: BrowserRunSnapshotOptions,
+  ): Promise<Response>;
+  /**
+   * Extract structured JSON data from a web page using AI.
+   * @param action - Must be `'json'`.
+   * @param options - JSON extraction options with prompt or response_format schema.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunJsonSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   * - HTTP 422 with code `2012` for HTML-to-markdown conversion failures
+   * - HTTP 422/500 for AI extraction failures (may include `rawAiResponse` field)
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "json",
+    options: BrowserRunJsonOptions,
+  ): Promise<Response>;
+  /**
+   * Convert a web page to Markdown.
+   * @param action - Must be `'markdown'`.
+   * @param options - Navigation and page interaction options.
+   * @returns A `Response` containing one of:
+   *
+   * **Success (HTTP 200):**
+   * - `BrowserRunMarkdownSuccessResponse` JSON with `Content-Type: application/json`
+   *
+   * **Error:**
+   * - `BrowserRunErrorResponse` JSON with appropriate HTTP status code (400, 422, 429, 500, 503)
+   * - HTTP 422 with code `2012` for HTML-to-markdown conversion failures
+   *
+   * **Headers:**
+   * - `X-Browser-Ms-Used`: Browser time consumed in milliseconds (set when status < 500)
+   */
+  quickAction(
+    action: "markdown",
+    options: BrowserRunMarkdownOptions,
+  ): Promise<Response>;
+}
 interface BasicImageTransformations {
   /**
    * Maximum width in image pixels. The value must be an integer.
@@ -12338,6 +13080,21 @@ interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
    *   (form a line).
    */
   repeat?: true | "x" | "y";
+  /**
+   * How to combine the foreground and backdrop pixels to create the result
+   */
+  composite?: /** Foreground drawn on top of backdrop (default) */
+    | "over"
+    /** Foreground shown only where backdrop is opaque */
+    | "in"
+    /** Foreground drawn on top, but clipped to the backdrop's shape */
+    | "atop"
+    /** Foreground shown only where backdrop is transparent */
+    | "out"
+    /** Foreground and backdrop visible only where the other is not */
+    | "xor"
+    /** Foreground and backdrop channels added (brightening) */
+    | "lighter";
   /**
    * Position of the overlay image relative to a given edge. Each property is
    * an offset in pixels. 0 aligns exactly to the edge. For example, left: 10
@@ -13681,11 +14438,25 @@ type ImageTransform = {
 type ImageDrawOptions = {
   opacity?: number;
   repeat?: boolean | string;
+  composite?: ImageCompositeMode;
   top?: number;
   left?: number;
   bottom?: number;
   right?: number;
 };
+type ImageCompositeMode =
+  /** Foreground drawn on top of backdrop (default) */
+  | "over"
+  /** Foreground shown only where backdrop is opaque */
+  | "in"
+  /** Foreground drawn on top, but clipped to the backdrop's shape */
+  | "atop"
+  /** Foreground shown only where backdrop is transparent */
+  | "out"
+  /** Foreground and backdrop visible only where the other is not */
+  | "xor"
+  /** Foreground and backdrop channels added (brightening) */
+  | "lighter";
 type ImageInputOptions = {
   encoding?: "base64";
 };
@@ -14394,6 +15165,7 @@ declare namespace CloudflareWorkersModule {
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
   export type WorkflowRetentionDuration = WorkflowSleepDuration;
   export type WorkflowBackoff = "constant" | "linear" | "exponential";
+  export type WorkflowStepSensitivity = "output";
   export type WorkflowStepConfig = {
     retries?: {
       limit: number;
@@ -14401,16 +15173,26 @@ declare namespace CloudflareWorkersModule {
       backoff?: WorkflowBackoff;
     };
     timeout?: WorkflowTimeoutDuration | number;
+    sensitive?: WorkflowStepSensitivity;
+  };
+  export type WorkflowCronSchedule = {
+    /** Cron expression that triggered this event. */
+    cron: string;
+    /** Timestamp of the scheduled trigger, in milliseconds since the Unix epoch. */
+    scheduledTime: number;
   };
   export type WorkflowEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
     instanceId: string;
+    workflowName: string;
+    schedule?: WorkflowCronSchedule;
   };
   export type WorkflowStepEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
     type: string;
+    sensitive?: WorkflowStepSensitivity;
   };
   export type WorkflowStepContext = {
     step: {
@@ -14420,15 +15202,29 @@ declare namespace CloudflareWorkersModule {
     attempt: number;
     config: WorkflowStepConfig;
   };
+  export type WorkflowRollbackContext<T = unknown> = {
+    error: Error;
+    output: T | undefined;
+    stepName: string;
+  };
+  export type WorkflowRollbackHandler<T = unknown> = (
+    ctx: WorkflowRollbackContext<T>,
+  ) => Promise<void>;
+  export type WorkflowStepRollbackOptions<T = unknown> = {
+    rollback?: WorkflowRollbackHandler<T>;
+    rollbackConfig?: WorkflowStepConfig;
+  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     do<T extends Rpc.Serializable<T>>(
       name: string,
       config: WorkflowStepConfig,
       callback: (ctx: WorkflowStepContext) => Promise<T>,
+      rollbackOptions?: WorkflowStepRollbackOptions<T>,
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
@@ -15820,6 +16616,103 @@ type WorkerVersionMetadata = {
   /** The timestamp of when the Worker Version was uploaded */
   timestamp: string;
 };
+// ============ Web Search Request Types ============
+/**
+ * Options for a Web Search query.
+ */
+type WebSearchSearchOptions = {
+  /** The search query. */
+  query: string;
+  /**
+   * Maximum number of results to return. Defaults to 10, capped at 20.
+   * The actual count may be lower if fewer matches exist.
+   */
+  limit?: number;
+};
+// ============ Web Search Response Types ============
+/**
+ * A single Web Search result.
+ *
+ * Web Search is discovery-only -- results carry catalog metadata about a page
+ * but never the page body. To read a result's content the caller invokes the
+ * global `fetch()` API against the result's `url`, at which point the
+ * destination's own access controls apply (including Cloudflare Pay-per-Crawl).
+ */
+type WebSearchResult = {
+  /** Canonical URL. */
+  url: string;
+  /** Page title. */
+  title: string;
+  /** Page-level description. May be absent. */
+  description?: string;
+  /**
+   * Last-modified date for the page, when known. Naive (no timezone)
+   * ISO-8601 datetime, e.g. `"2025-11-30T04:39:48"`.
+   */
+  lastModifiedDate?: string;
+  /**
+   * Page meta image URL (typically the `og:image`). May be absent.
+   */
+  imageUrl?: string;
+  /** Optional favicon URL for UI hints. */
+  faviconUrl?: string;
+};
+/**
+ * Per-response metadata for a Web Search query. Carries operational
+ * fields useful for support and debugging.
+ */
+type WebSearchResponseMetadata = {
+  /** The query that was executed. */
+  query: string;
+  /** Opaque request identifier used for support and debugging. */
+  requestId: string;
+  /** End-to-end latency for this search request, in milliseconds. */
+  latencyMs: number;
+};
+/**
+ * Response from a Web Search query.
+ */
+type WebSearchSearchResponse = {
+  items: WebSearchResult[];
+  metadata: WebSearchResponseMetadata;
+};
+// ============ Web Search Binding Class ============
+/**
+ * Cloudflare Web Search binding.
+ *
+ * Discovery-only primitive for agents and Workers. Returns URLs and catalog
+ * metadata for a query; never returns page content or excerpts. To read a
+ * result's body, fetch the URL with the global `fetch()` API.
+ *
+ * Declared in wrangler with a single object (there is exactly one corpus, the
+ * public web, so there is no name, namespace, or instance to specify):
+ *
+ * ```jsonc
+ * { "web_search": { "binding": "WEBSEARCH" } }
+ * ```
+ *
+ * @example
+ * ```ts
+ * const { items, metadata } = await env.WEBSEARCH.search({
+ *   query: "Cloudflare Workers",
+ * });
+ *
+ * const top = items[0];
+ * console.log(top.url, top.title, metadata.latencyMs);
+ *
+ * // Read content yourself; pay-per-crawl and other publisher
+ * // controls apply at the fetch site, not at search time.
+ * const page = await fetch(top.url);
+ * ```
+ */
+declare abstract class WebSearch {
+  /**
+   * Run a Web Search query.
+   * @param options Search options. Only `query` is required.
+   * @returns The matching results plus per-response metadata.
+   */
+  search(options: WebSearchSearchOptions): Promise<WebSearchSearchResponse>;
+}
 interface DynamicDispatchLimits {
   /**
    * Limit CPU time in milliseconds.

@@ -8,6 +8,9 @@ import {
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
+  type WorkflowCronSchedule,
+  type WorkflowEvent,
+  type WorkflowStep,
 } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
 
@@ -794,3 +797,65 @@ export default <ExportedHandler<Env>>{
     return new Response();
   },
 };
+
+declare const workflowStep: WorkflowStep;
+
+expectTypeOf(
+  workflowStep.do('step with rollback', async (): Promise<string> => 'ok', {
+    rollback: async (ctx) => {
+      expectTypeOf(ctx.error).toEqualTypeOf<Error>();
+      expectTypeOf(ctx.output).toEqualTypeOf<string | undefined>();
+      expectTypeOf(ctx.stepName).toEqualTypeOf<string>();
+    },
+  })
+).toMatchTypeOf<Promise<string>>();
+
+workflowStep.do(
+  'configured rollback',
+  {retries: {limit: 0, delay: 0}},
+  async (): Promise<string> => 'ok',
+  {
+    rollback: async (ctx) => {
+      expectTypeOf(ctx.output).toEqualTypeOf<string | undefined>();
+    },
+    rollbackConfig: {retries: {limit: 0, delay: 0}},
+  }
+);
+
+workflowStep.do('empty rollback options', async () => 'ok', {});
+
+expectTypeOf(
+  workflowStep.do('no rollback 2-arg', async (): Promise<string> => 'ok')
+).toMatchTypeOf<Promise<string>>();
+
+expectTypeOf(
+  workflowStep.do(
+    'no rollback 3-arg',
+    {retries: {limit: 1, delay: 0}},
+    async (): Promise<string> => 'ok'
+  )
+).toMatchTypeOf<Promise<string>>();
+
+declare const cronSchedule: WorkflowCronSchedule;
+expectTypeOf(cronSchedule.cron).toEqualTypeOf<string>();
+expectTypeOf(cronSchedule.scheduledTime).toEqualTypeOf<number>();
+
+type WorkflowPayload = {foo: string};
+declare const workflowEvent: WorkflowEvent<WorkflowPayload>;
+expectTypeOf(workflowEvent.payload).toEqualTypeOf<Readonly<WorkflowPayload>>();
+expectTypeOf(workflowEvent.timestamp).toEqualTypeOf<Date>();
+expectTypeOf(workflowEvent.instanceId).toEqualTypeOf<string>();
+expectTypeOf(workflowEvent.workflowName).toEqualTypeOf<string>();
+expectTypeOf(workflowEvent.schedule).toEqualTypeOf<
+  WorkflowCronSchedule | undefined
+>();
+
+const withoutSchedule: WorkflowEvent<WorkflowPayload> = {
+  payload: {foo: 'bar'},
+  timestamp: new Date(),
+  instanceId: 'abc',
+  workflowName: 'my-workflow',
+};
+expectTypeOf(withoutSchedule.schedule).toEqualTypeOf<
+  WorkflowCronSchedule | undefined
+>();
