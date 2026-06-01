@@ -288,7 +288,8 @@ interface Container @0x9aaceefc06523bca {
       none @0 :Void;
       started :group {
         labels @1 :List(Label);
-        # Echo of StartParams.labels. Empty list means start() was called with no labels.
+        # Current label set. Initially populated from StartParams.labels and replaced by
+        # setLabels(). Empty list means the current set is empty.
 
         image @2 :Text;
         # The container's image registry reference, e.g.
