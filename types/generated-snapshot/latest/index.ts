@@ -790,6 +790,7 @@ export interface DurableObjectFacets {
   ): Fetcher<T>;
   abort(name: string, reason: any): void;
   delete(name: string): void;
+  clone(src: string, dst: string): void;
 }
 export interface FacetStartupOptions<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
