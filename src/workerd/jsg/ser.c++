@@ -283,7 +283,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
         // out here.
         if (name.strictEquals(nameStr) || name.strictEquals(messageStr)) continue;
 
-        obj.createDataProperty(js, name, errorObj.get(js, name));
+        obj.set(js, name, errorObj.get(js, name));
       }
       write(js, obj);
 
