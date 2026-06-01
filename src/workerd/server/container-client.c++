@@ -1612,6 +1612,15 @@ kj::Promise<kj::Maybe<ContainerClient::SidecarInspectResponse>> ContainerClient:
   };
 }
 
+kj::Promise<void> ContainerClient::ensureSidecarBridgeBypass(kj::String networkCidr) {
+  auto script = kj::str("cidr=$1\n"
+      "iptables -t mangle -C PREROUTING -s \"$cidr\" -d \"$cidr\" -j RETURN 2>/dev/null || "
+      "iptables -t mangle -I PREROUTING 1 -s \"$cidr\" -d \"$cidr\" -j RETURN\n");
+  auto cmd =
+      kj::arr(kj::str("sh"), kj::str("-c"), kj::mv(script), kj::str("sh"), kj::mv(networkCidr));
+  co_await runSimpleExecInContainer(sidecarContainerName, cmd.asPtr());
+}
+
 kj::Promise<void> ContainerClient::updateSidecarEgressPort(
     uint16_t ingressHostPort, uint16_t egressPort) {
   capnp::JsonCodec codec;
@@ -1844,7 +1853,8 @@ kj::Promise<ContainerClient::ExecInspectResponse> ContainerClient::inspectExec(
   };
 }
 
-kj::Promise<void> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> cmd) {
+kj::Promise<void> ContainerClient::runSimpleExecInContainer(
+    kj::StringPtr targetContainerName, kj::ArrayPtr<const kj::String> cmd) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ExecCreateRequest>();
 
@@ -1862,7 +1872,7 @@ kj::Promise<void> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> 
 
   auto createResponse =
       co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
-          kj::str("/containers/", containerName, "/exec"), codec.encode(createRequest));
+          kj::str("/containers/", targetContainerName, "/exec"), codec.encode(createRequest));
   JSG_REQUIRE(createResponse.statusCode == 201, Error, "Creating helper Docker exec failed with [",
       createResponse.statusCode, "] ", createResponse.body);
 
@@ -1892,6 +1902,10 @@ kj::Promise<void> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> 
     }
     co_await timer.afterDelay(50 * kj::MILLISECONDS);
   }
+}
+
+kj::Promise<void> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> cmd) {
+  co_await runSimpleExecInContainer(containerName, cmd);
 }
 
 kj::Promise<void> ContainerClient::startContainer() {
@@ -2202,6 +2216,8 @@ kj::Promise<void> ContainerClient::status(StatusContext context) {
     containerSidecarStarted.store(true, std::memory_order_release);
     this->sidecarIngressHostPort = sidecar.ingressHostPort;
     co_await ensureEgressListenerStarted();
+    auto ipamConfig = co_await getDockerBridgeIPAMConfig();
+    co_await ensureSidecarBridgeBypass(kj::mv(ipamConfig.subnet));
     co_await updateSidecarEgressPort(sidecar.ingressHostPort, egressListenerPort);
     co_await readCACert();
   }
@@ -2673,8 +2689,10 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
   KJ_ON_SCOPE_FAILURE(containerSidecarStarted.store(false, std::memory_order_release));
 
   auto ipamConfig = co_await getDockerBridgeIPAMConfig();
+  auto networkCidr = kj::str(ipamConfig.subnet);
   co_await createSidecarContainer(egressListenerPort, kj::mv(ipamConfig.subnet));
   co_await startSidecarContainer();
+  co_await ensureSidecarBridgeBypass(kj::mv(networkCidr));
 
   auto sidecar = KJ_REQUIRE_NONNULL(co_await inspectSidecar(), "started sidecar not running");
   this->sidecarIngressHostPort = sidecar.ingressHostPort;
