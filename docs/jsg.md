@@ -2301,7 +2301,7 @@ v8::Local<v8::Value> handle = backing.createHandle(js);
 
 ### `jsg::BufferSource`
 
-** Deprecated: Not not use.** The `jsg::BufferSource` and `jsg::BackingStore` APIs are in the
+** Deprecated: Do not use.** The `jsg::BufferSource` and `jsg::BackingStore` APIs are in the
 process of being replaced by the `jsg::JsBufferSource`, `jsg::JsArrayBuffer`, and related APIs
 in `jsvalue.h`. The `jsg::BufferSource` and `jsg::BackingStore` will be removed once all of the
 replacements are fully applied.
