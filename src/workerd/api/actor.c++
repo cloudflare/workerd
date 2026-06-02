@@ -78,6 +78,10 @@ IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChan
             enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version));
       }
     }
+
+    jsg::Lock& js = context.getCurrentLock();
+    channelMemoryAdjustment =
+        js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
   }
 
   return *KJ_REQUIRE_NONNULL(actorChannel);
