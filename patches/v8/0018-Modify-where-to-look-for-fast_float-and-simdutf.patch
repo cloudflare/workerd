@@ -12,10 +12,10 @@ include changes are needed.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 8049d631cc50f2ca1059f81b59f5955337189d47..8eb045f0260fc30a786acfabfcae3d62879aaef3 100644
+index 0ed98573e821a3104ce529ef27af88ac80ccacbf..c1eb923ec676d0a982a53d884bb7102fc1cc2c16 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4612,17 +4612,19 @@ cc_library(
+@@ -4613,17 +4613,19 @@ cc_library(
      ],
  )
  
@@ -46,7 +46,7 @@ index 8049d631cc50f2ca1059f81b59f5955337189d47..8eb045f0260fc30a786acfabfcae3d62
  
  v8_library(
      name = "v8_libshared",
-@@ -4653,15 +4655,15 @@ v8_library(
+@@ -4654,15 +4656,15 @@ v8_library(
      ],
      deps = [
          ":lib_dragonbox",

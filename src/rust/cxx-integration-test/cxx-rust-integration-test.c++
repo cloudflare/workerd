@@ -4,6 +4,7 @@
 #include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
 #include <signal.h>
+#include <stdlib.h>
 
 #include <kj/async.h>
 #include <kj/test.h>

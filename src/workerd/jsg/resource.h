@@ -886,8 +886,9 @@ template <typename TypeWrapper,
     void (T::*method)(Arg),
     bool isContext>
 struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isContext> {
-  static void callback(
-      v8::Local<v8::Name>, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info) {
+  static void callback(v8::Local<v8::Name>,
+      v8::Local<v8::Value> value,
+      const v8::PropertyCallbackInfo<v8::Boolean>& info) {
     liftKj(info, [&]() {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
@@ -913,8 +914,9 @@ template <typename TypeWrapper,
     void (T::*method)(Lock&, Arg),
     bool isContext>
 struct SetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), method, isContext> {
-  static void callback(
-      v8::Local<v8::Name>, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info) {
+  static void callback(v8::Local<v8::Name>,
+      v8::Local<v8::Value> value,
+      const v8::PropertyCallbackInfo<v8::Boolean>& info) {
     liftKj(info, [&]() {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();

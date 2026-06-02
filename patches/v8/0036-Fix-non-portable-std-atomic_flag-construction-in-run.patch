@@ -10,10 +10,10 @@ before C++20, but cleared from C++20 onward, which matches the
 intent of the original code (which used the equivalent of false).
 
 diff --git a/src/runtime/runtime-test.cc b/src/runtime/runtime-test.cc
-index 12a2ead2d07900e70100d862f58db68401d96901..00ff940e335df0224081cd93198c293f748b964a 100644
+index 478a697dd7eea78ae8dcc44f4ae70148aaf88a4c..6979ba62427161db69b863e0734c616ecbeb6588 100644
 --- a/src/runtime/runtime-test.cc
 +++ b/src/runtime/runtime-test.cc
-@@ -1173,7 +1173,7 @@ RUNTIME_FUNCTION(Runtime_SetAllocationTimeout) {
+@@ -1194,7 +1194,7 @@ RUNTIME_FUNCTION(Runtime_SetAllocationTimeout) {
    CONVERT_INT32_ARG_FUZZ_SAFE(timeout, 1);
    isolate->heap()->set_allocation_timeout(timeout);
  #else   // !V8_ENABLE_ALLOCATION_TIMEOUT
