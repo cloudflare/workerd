@@ -234,9 +234,9 @@ class DurableObjectNamespace: public jsg::Object {
 
     JSG_STRUCT(locationHint, routingMode, version);
 
-    // DurableObjectLocationHint values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#providing-a-location-hint
+    // DurableObjectLocationHint values from https://developers.cloudflare.com/durable-objects/reference/data-location/#provide-a-location-hint
     JSG_STRUCT_TS_DEFINE(
-      type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me";
+      type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "apac-ne" | "apac-se" | "oc" | "afr" | "me";
       type DurableObjectRoutingMode = "primary-only");
 
     JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
