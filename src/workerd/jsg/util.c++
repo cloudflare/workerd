@@ -663,6 +663,8 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer) {
   }
   return bytes.attach(kj::mv(backing));
 }
+
+// See the ArrayBuffer overload above for the aliasing contract (MPK + write-through).
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   auto buffer = arrayBufferView->Buffer();
   if (buffer->IsResizableByUserJavaScript() || buffer->IsImmutable()) {
@@ -688,6 +690,7 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   return bytes.attach(kj::mv(backing));
 }
 
+// See the ArrayBuffer overload above for the aliasing contract (MPK + write-through).
 kj::Array<kj::byte> asBytes(v8::Local<v8::SharedArrayBuffer> sharedArrayBuffer) {
   auto backing = sharedArrayBuffer->GetBackingStore();
   kj::ArrayPtr bytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
