@@ -4502,6 +4502,17 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
 
     ~WorkerStubImpl() {
       unlink();
+      // Defer destruction of `WorkerService` to the next turn of the event loop. This is needed
+      // for ephemeral dynamic workers as they are torn down synchronously under GC cycles of the
+      // parent isolate, and this nested isolate teardown breaks a few invariants:
+      //   - Failed `KJ_ASSERT(!inCppgcShimDestructor)` in `HeapTracer::clearWrappers()`, because
+      //     `inCppgcShimDestructor` is set to `true` by the parent isolate
+      //   - If we bypass the previous failure by shifting the flag to be per-isolate, we trigger
+      //     a V8 assertion `AllowGarbageCollection::IsAllowed()` during isolate teardown, as the
+      //     `no_gc_during_gc` was constructed as part of the parent isolate's GC cycle
+      KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
+        ioContext.addTask(kj::evalLater([service = kj::mv(service)]() {}));
+      }
     }
 
     void unlink() {
