@@ -621,7 +621,7 @@ export const jsNotBytesInPull = {
   async test() {
     const rs = new ReadableStream({
       pull(c) {
-        c.enqueue('hello');
+        c.enqueue(123);
         c.close();
       },
     });
@@ -635,7 +635,7 @@ export const jsNotBytesInStart = {
   async test() {
     const rs = new ReadableStream({
       start(c) {
-        c.enqueue('hello');
+        c.enqueue(123);
         c.close();
       },
     });
