@@ -1085,6 +1085,12 @@ struct HeapSnapshotDeleter: public kj::Disposer {
 };
 const HeapSnapshotDeleter HeapSnapshotDeleter::INSTANCE;
 
+void messageCallback(v8::Local<v8::Message> msg, v8::Local<v8::Value>) {
+  auto scriptLocation = kj::str(msg->GetScriptResourceName(), ":", msg->GetStartPosition());
+  auto message = kj::str(msg->Get());
+  KJ_LOG(ERROR, "NOSENTRY V8 message callback", message, scriptLocation, kj::getStackTrace());
+}
+
 }  // namespace
 
 Worker::Isolate::Isolate(kj::Own<Api> apiParam,
@@ -1175,6 +1181,10 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
         KJ_LOG(INFO, "uncaught exception", desc);
       });
     }
+
+    // If no message listeners are registered, then the default message reporter writes errors to
+    // stdout. Add a callback that instead writes the message to KJ_LOG
+    lock->v8Isolate->AddMessageListener(messageCallback);
 
     // By default, V8's memory pressure level is "none". This tells V8 that no one else on the
     // machine is competing for memory so it might as well use all it wants and be lazy about GC.
