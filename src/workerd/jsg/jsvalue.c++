@@ -664,10 +664,6 @@ uint JsFunction::hashCode() const {
   return kj::hashCode(obj->GetIdentityHash());
 }
 
-BufferSource Lock::bytes(kj::Array<kj::byte> data) {
-  return BufferSource(*this, BackingStore::from(*this, kj::mv(data)));
-}
-
 // ======================================================================================
 // JsArrayBuffer
 

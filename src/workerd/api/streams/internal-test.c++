@@ -281,12 +281,12 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
           "is currently locked to a writer.");
     }
 
-    auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(10));
+    jsg::JsValue buffersource = jsg::JsUint8Array::create(env.js, 10);
 
     bool writeFailed = false;
 
     auto write = sink->getController()
-                     .write(env.js, jsg::JsValue(buffersource.getHandle(env.js)))
+                     .write(env.js, buffersource)
                      .catch_(env.js, [&](jsg::Lock& js, jsg::Value value) {
       writeFailed = true;
       auto ex = js.exceptionToKj(kj::mv(value));
@@ -377,10 +377,9 @@ KJ_TEST("WritableStreamInternalController observability") {
     stream = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::mv(myObserver));
 
     auto write = [&](size_t size) {
-      auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(size));
-      return env.context.awaitJs(env.js,
-          KJ_ASSERT_NONNULL(stream)->getController().write(
-              env.js, jsg::JsValue(buffersource.getHandle(env.js))));
+      jsg::JsValue buffersource = jsg::JsUint8Array::create(env.js, size);
+      return env.context.awaitJs(
+          env.js, KJ_ASSERT_NONNULL(stream)->getController().write(env.js, buffersource));
     };
 
     KJ_ASSERT(observer.queueSize == 0);
@@ -429,8 +428,8 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
       auto& c = KJ_ASSERT_NONNULL(controller.tryGet<jsg::Ref<ReadableStreamDefaultController>>());
       if (pullCount == 1) {
         // First pull: enqueue some data so the pipe loop can make progress
-        auto data = js.bytes(kj::heapArray<kj::byte>({1, 2, 3, 4}));
-        c->enqueue(js, jsg::JsValue(data.getHandle(js)));
+        jsg::JsValue data = jsg::JsUint8Array::create(js, {1, 2, 3, 4});
+        c->enqueue(js, data);
       }
       // Second pull onwards: don't enqueue anything, leaving the read pending.
       // This simulates an async data source that hasn't received data yet.
