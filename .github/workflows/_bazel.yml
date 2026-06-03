@@ -121,51 +121,17 @@ jobs:
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak build/deps/nodejs.MODULE.bazel
           fi
-      - name: Bazel build (Windows workaround)
+      - name: Bazel build (windows exp nocache)
         if: runner.os == 'Windows'
-        # HACK: Work around Bazel Windows bug: Some targets need to be compiled without symlink
-        # support. Since we still need symlinks to compile C++ code properly, compile these targets
-        # separately.
+        # EXP: Check if Windows can now build without workaround
         run: |
-          bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --profile build-win-workaround.bazel-profile.gz --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
+          bazel build --config=ci ${{ inputs.extra_bazel_args }} //src/pyodide:pyodide_static@tsproject //src/workerd/api/tests:new-module-registry-ts-test@ts_project //src/workerd/api/tests:new-module-registry-ts-test@ts_project //src/pyodide:pyodide_static@tsproject
+          bazel build --config=ci ${{ inputs.extra_bazel_args }} //...
+          bazel test --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
       - name: Bazel build
+        if: runner.os != 'Windows'
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //...
-      - name: Configure Docker daemon for IPv6
-        if: inputs.build_container_images
-        run: |
-          sudo mkdir -p /etc/docker
-          echo '{"ipv6": true, "fixed-cidr-v6": "fd00::/80"}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
-      - name: Build and load container images
-        if: inputs.build_container_images
-        run: |
-          docker context use default
-          echo "Docker info:"
-          docker info
-          echo "Docker version:"
-          docker version
-          bazel run --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //images:load_all
-      - name: Bazel test
-        if: inputs.run_tests
-        run: |
-          bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
-      - name: Bazel coverage
-        if: inputs.run_coverage
-        run: |
-          bazel coverage --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
-      - name: Upload coverage to Codecov
-        if: inputs.run_coverage
-        uses: codecov/codecov-action@v5
-        with:
-          # Use bazel info to get the actual output path, avoiding symlink issues
-          files: ${{ github.workspace }}/bazel-out/_coverage/_coverage_report.dat
-          fail_ci_if_error: true
-          verbose: true
-          disable_search: true
-          root_dir: ${{ github.workspace }}
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       - name: Parse headers
         # TODO(cleanup): Bazel does not allow for only parsing headers in non-recursive targets, so
         # we can't widely enable header parsing for now (dependencies like V8 do not specify
@@ -173,12 +139,6 @@ jobs:
         if: inputs.parse_headers
         run: |
           bazel build --config=parse_headers --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util
-      - name: Upload test logs
-        if: always() && inputs.upload_test_logs
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-logs-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}.zip
-          path: bazel-testlogs/**/test.xml
       - name: Report disk usage (in MB)
         if: always() && runner.os != 'Windows'
         shell: bash
