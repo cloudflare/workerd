@@ -536,10 +536,13 @@ export const startTlsRejectExpectedServerHostname = {
     // @all-autogates test variant enables every gate at once.
     if (unsafe.isTestAutogateEnabled()) {
       // Autogate is on — startTls must throw.
-      assert.throws(() => socket.startTls({ expectedServerHostname: 'other.com' }), {
-        name: 'TypeError',
-        message: /expectedServerHostname/,
-      });
+      assert.throws(
+        () => socket.startTls({ expectedServerHostname: 'other.com' }),
+        {
+          name: 'TypeError',
+          message: /expectedServerHostname/,
+        }
+      );
     } else {
       // Autogate is off — startTls logs but does not throw.
       socket.startTls({ expectedServerHostname: 'other.com' });

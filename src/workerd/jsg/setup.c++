@@ -73,8 +73,8 @@ static kj::Own<v8::Platform> userPlatform(v8::Platform& platform) {
   return kj::Own<v8::Platform>(&platform, kj::NullDisposer::instance);
 }
 
-V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags,
-    JitCodeEventTracking jitCodeEventTracking) {
+V8System::V8System(
+    kj::ArrayPtr<const kj::StringPtr> flags, JitCodeEventTracking jitCodeEventTracking) {
   auto platform = defaultPlatform(0);
   auto defaultPlatformPtr = platform.get();
   init(kj::mv(platform), flags, [defaultPlatformPtr](v8::Isolate* isolate) {

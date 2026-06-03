@@ -349,8 +349,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   KJ_IF_SOME(opts, tlsOptions) {
     if (opts.expectedServerHostname != kj::none) {
       if (util::Autogate::isEnabled(util::AutogateKey::STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME)) {
-        JSG_FAIL_REQUIRE(TypeError,
-            "The expectedServerHostname option is not currently supported in startTls.");
+        JSG_FAIL_REQUIRE(
+            TypeError, "The expectedServerHostname option is not currently supported in startTls.");
       } else {
         LOG_ERROR_PERIODICALLY(
             "NOSENTRY startTls called with unsupported expectedServerHostname option");
