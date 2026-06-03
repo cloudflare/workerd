@@ -213,7 +213,7 @@ async function injectWorkersApi(pyodide: Pyodide): Promise<void> {
     pyodide.FS.mkdir(`${pyodide.FS.sitePackages}/workers`);
     const template = [
       `err = ModuleNotFoundError("No module named '$MODNAME'", name="$MODNAME")`,
-      `err.add_note("You need to update to workers-py >= 1.9.0 or to pass disable_python_external_sdk")`,
+      `err.add_note("You need to update to workers-py >= 1.9.0 or to specify the disable_python_external_sdk compat flag")`,
       `raise err`,
     ].join('\n');
     pyodide.FS.writeFile(
