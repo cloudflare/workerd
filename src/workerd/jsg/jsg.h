@@ -1836,7 +1836,6 @@ class MemoizedIdentity {
  private:
   kj::OneOf<T, Value> value;
 
-  template <typename TypeWrapper>
   friend class MemoizedIdentityWrapper;
   friend class MemoryTracker;
 };

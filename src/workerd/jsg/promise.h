@@ -625,7 +625,8 @@ class PromiseWrapper {
   }
 
   template <typename T>
-  kj::Maybe<Promise<T>> tryUnwrap(Lock& js,
+  kj::Maybe<Promise<T>> tryUnwrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Promise<T>*,
@@ -655,10 +656,12 @@ class PromiseWrapper {
       // Unfortunately this needs to be gated by a compatibility flag because there are
       // existing workers that appear to rely on the old behavior -- although it's not clear
       // if those workers actually work the way they were intended to.
-      if (config.unwrapCustomThenables && isThenable(context, handle)) {
+      PromiseWrapper& promiseWrapper = self;
+      if (promiseWrapper.config.unwrapCustomThenables &&
+          PromiseWrapper::isThenable(context, handle)) {
         auto paf = check(v8::Promise::Resolver::New(context));
         check(paf->Resolve(context, handle));
-        return tryUnwrap(
+        return self.tryUnwrap(
             js, context, paf->GetPromise(), static_cast<Promise<T>*>(nullptr), parentObject);
       }
 
@@ -677,8 +680,7 @@ class PromiseWrapper {
         // are missing. This is probably common in user code, too.
         return js.resolvedPromise();
       } else {
-        auto& wrapper = *static_cast<TypeWrapper*>(this);
-        KJ_IF_SOME(value, wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
+        KJ_IF_SOME(value, self.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
           return js.resolvedPromise(kj::mv(value));
         } else {
           // Wrong type.

@@ -491,8 +491,8 @@ class GeneratorWrapper {
           .value = kj::mv(v),
         };
       } else {
-        throwTypeError(js.v8Isolate, TypeErrorContext::other(),
-            TypeWrapper::getName(static_cast<T*>(nullptr)));
+        throwTypeError(
+            js.v8Isolate, TypeErrorContext::other(), typeWrapper.getName(static_cast<T*>(nullptr)));
       }
     }
 
@@ -691,15 +691,12 @@ class SequenceWrapper {
       v8::Local<v8::Value> handle,
       Sequence<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto isolate = js.v8Isolate;
-    auto& typeWrapper = self.from(isolate);
     // In this case, if handle is a string, we likely do not want to treat it as
     // a sequence of characters, which the Generator case would do. If someone
     // really wants to treat a string as a sequence of characters, then they
     // should use the Generator interface directly.
     if (handle->IsString()) return kj::none;
-    KJ_IF_SOME(gen,
-        typeWrapper.tryUnwrap(js, context, handle, (Generator<U>*)nullptr, parentObject)) {
+    KJ_IF_SOME(gen, self.tryUnwrap(js, context, handle, (Generator<U>*)nullptr, parentObject)) {
       // The generator gives us no indication of how many items there might be, so we
       // have to just keep pulling them until it says it's done.
       kj::Vector<U> items;

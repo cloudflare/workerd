@@ -94,9 +94,9 @@ class FieldWrapper {
   // The is the original, slow-path wrap implementation that uses Set(). Prefer the other overload
   // for better performance. It is, however, a breaking change to remove this overload so we
   // need to keep it with a compatibility flag.
-  template <typename TypeWrapper, typename T>
+  template <typename T>
   void wrap(Lock& js,
-      TypeWrapper& wrapper,
+      auto& wrapper,
       v8::Isolate* isolate,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -116,9 +116,9 @@ class FieldWrapper {
     }
   }
 
-  template <typename TypeWrapper, typename T>
+  template <typename T>
   void wrap(Lock& js,
-      TypeWrapper& wrapper,
+      auto& wrapper,
       v8::Isolate* isolate,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -136,8 +136,8 @@ class FieldWrapper {
   }
 
   // `structType` identifies the struct declaring this field and is used for type error messages.
-  template <typename T, typename TypeWrapper>
-  T unwrap(TypeWrapper& wrapper,
+  template <typename T>
+  T unwrap(auto& wrapper,
       v8::Isolate* isolate,
       v8::Local<v8::Context> context,
       v8::Local<v8::Object> in,
@@ -186,13 +186,13 @@ struct FieldType_<T Struct::*> {
 template <auto field>
 using FieldType = FieldType_<decltype(field)>::Type;
 
-template <typename Self, typename T, typename Fields, typename Indices = Fields::Indexes>
+template <typename T, typename Fields, typename Indices = Fields::Indexes>
 class StructWrapper;
 
 // TypeWrapper mixin for struct types (application-defined C++ structs declared with a
 // JSG_STRUCT block).
-template <typename Self, typename T, auto... fields, size_t... indices>
-class StructWrapper<Self, T, StructFields<fields...>, kj::_::Indexes<indices...>> {
+template <typename T, auto... fields, size_t... indices>
+class StructWrapper<T, StructFields<fields...>, kj::_::Indexes<indices...>> {
  public:
   static const JsgKind JSG_KIND = JsgKind::STRUCT;
 
@@ -205,10 +205,14 @@ class StructWrapper<Self, T, StructFields<fields...>, kj::_::Indexes<indices...>
   static constexpr size_t kCountOfUsableFields =
       ((isUsableStructField<FieldType<fields>> ? 1 : 0) + ...);
 
-  v8::Local<v8::Object> wrap(
-      Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
+  v8::Local<v8::Object> wrap(this auto&& self,
+      Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      T&& in) {
     auto isolate = js.v8Isolate;
-    auto fieldWrappers = getFields(isolate);
+    StructWrapper& structWrapper = self;
+    auto fieldWrappers = structWrapper.getFields(isolate);
 
     // Fast path using a cached dictionary template.
     if (js.isUsingFastJsgStruct()) {
@@ -216,17 +220,17 @@ class StructWrapper<Self, T, StructFields<fields...>, kj::_::Indexes<indices...>
 
       size_t idx = 0;
       (fieldWrappers[indices].wrap(
-           js, static_cast<Self&>(*this), isolate, context, creator, in.*fields, values[idx], idx),
+           js, self, isolate, context, creator, in.*fields, values[idx], idx),
           ...);
 
       // We use a cached dictionary template to improve performance on repeated struct wraps.
 
       v8::Local<v8::DictionaryTemplate> tmpl;
-      if (templateHandle.IsEmpty()) {
+      if (structWrapper.templateHandle.IsEmpty()) {
         tmpl = makeTemplate(isolate);
-        templateHandle.Reset(isolate, tmpl);
+        structWrapper.templateHandle.Reset(isolate, tmpl);
       } else {
-        tmpl = templateHandle.Get(isolate);
+        tmpl = structWrapper.templateHandle.Get(isolate);
       }
 
       // Make sure we filled in the expected number of fields.
@@ -237,13 +241,12 @@ class StructWrapper<Self, T, StructFields<fields...>, kj::_::Indexes<indices...>
 
     // Original slow path.
     v8::Local<v8::Object> out = v8::Object::New(isolate);
-    (fieldWrappers[indices].wrap(
-         js, static_cast<Self&>(*this), isolate, context, creator, in.*fields, out),
-        ...);
+    (fieldWrappers[indices].wrap(js, self, isolate, context, creator, in.*fields, out), ...);
     return out;
   }
 
-  kj::Maybe<T> tryUnwrap(Lock& js,
+  kj::Maybe<T> tryUnwrap(this auto&& self,
+      Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       T*,
@@ -275,7 +278,8 @@ class StructWrapper<Self, T, StructFields<fields...>, kj::_::Indexes<indices...>
 
     if (!handle->IsObject()) return kj::none;
 
-    auto fieldWrappers = getFields(js.v8Isolate);
+    StructWrapper& structWrapper = self;
+    auto fieldWrappers = structWrapper.getFields(js.v8Isolate);
     auto in = handle.As<v8::Object>();
 
     // Note: We unwrap struct members in the order in which the compiler evaluates the expressions
@@ -284,7 +288,7 @@ class StructWrapper<Self, T, StructFields<fields...>, kj::_::Indexes<indices...>
     //   before derived members. Objects with mutating getters might be broken by this, but it
     //   doesn't seem worth fixing absent a compelling use case.
     auto t = T{fieldWrappers[indices].template unwrap<FieldType<fields>>(
-        static_cast<Self&>(*this), js.v8Isolate, context, in, typeid(T))...};
+        self, js.v8Isolate, context, in, typeid(T))...};
 
     // Note that if a `validate` function is provided, then it will be called after the struct is
     // unwrapped from v8. This would be an appropriate time to throw an error.
