@@ -665,8 +665,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
   return context.attachSpans(js,
       context
           .blockConcurrencyWhile(js,
-              [callback = kj::mv(callback), &context, &cache = *cache](
-                  jsg::Lock& js) mutable -> jsg::Promise<TxnResult> {
+              [callback = kj::mv(callback), &cache = *cache](
+                  jsg::Lock& js, IoContext& context) mutable -> jsg::Promise<TxnResult> {
     // Note that the call to `startTransaction()` is when the SQLite-backed implementation will
     // actually invoke `BEGIN TRANSACTION`, so it's important that we're inside the
     // blockConcurrencyWhile block before that point so we don't accidentally catch some other
