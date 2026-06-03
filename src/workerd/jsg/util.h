@@ -343,7 +343,7 @@ struct LiftKj_ {
           if constexpr (isVoid<T>()) {
             func();
             if constexpr (!kj::canConvert<Info&, v8::PropertyCallbackInfo<void>&>() &&
-                          !kj::canConvert<Info&, v8::PropertyCallbackInfo<v8::Boolean>&>()) {
+                !kj::canConvert<Info&, v8::PropertyCallbackInfo<v8::Boolean>&>()) {
               // Skip `SetUndefined` for `PropertyCallbackInfo<v8::Boolean>` (the V2 native data
               // property setter signature): `ReturnValue<Boolean>::SetUndefined` does not compile
               // (its `static_assert` rejects `Boolean`), and per V8's contract leaving the return
