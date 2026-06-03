@@ -221,9 +221,9 @@ export function TLSSocket(
   }
 
   // checkServerIdentity requires access to the peer certificate via
-  // getPeerCertificate(), which is not yet implemented. When the autogate is
-  // enabled we throw; otherwise we log a periodic warning and continue so
-  // that existing workers are not broken.
+  // getPeerCertificate(), which is not yet implemented. When the
+  // throw_on_not_implemented_tls_options compat flag is enabled we throw;
+  // otherwise we silently continue so that existing workers are not broken.
   if (tlsOptions.checkServerIdentity !== undefined) {
     validateFunction(
       tlsOptions.checkServerIdentity,
