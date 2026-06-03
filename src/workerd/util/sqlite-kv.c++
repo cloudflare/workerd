@@ -174,7 +174,8 @@ void SqliteKv::beforeSqliteReset() {
 void SqliteKv::rollbackMultiPut(Initialized& stmts, WriteOptions options) {
   KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
     // This should be rare, so we don't prepare a statement for it.
-    stmts.db.run({.regulator = stmts.regulator, .allowUnconfirmed = options.allowUnconfirmed},
+    stmts.db.run(
+        {.regulator = Initialized::regulator, .allowUnconfirmed = options.allowUnconfirmed},
         kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
     stmts.stmtMultiPutRelease.run({.allowUnconfirmed = options.allowUnconfirmed});
   })) {

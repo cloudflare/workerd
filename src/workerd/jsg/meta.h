@@ -129,6 +129,10 @@ struct RequiredArgCount_;
 // The actual counting logic lives in type-wrapper.h (needs the ValueLessParameter concept).
 template <typename TypeWrapper, typename T>
 inline constexpr int requiredArgumentCount =
-    detail::RequiredArgCount_<TypeWrapper, typename detail::MethodArgs<T>::Args>::value;
+    // `typename` is required: MethodArgs<T> is an alias template whose target
+    // StripMagicParam_<...> is a dependent type whose ::Args member is itself
+    // dependent. The readability-redundant-typename check misses this path.
+    detail::RequiredArgCount_<TypeWrapper,
+        typename detail::MethodArgs<T>::Args>::value;  // NOLINT(readability-redundant-typename)
 
 }  // namespace workerd::jsg

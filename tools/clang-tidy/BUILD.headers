@@ -1,0 +1,47 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# Headers needed to compile the workerd jsg-lint clang-tidy plugin
+# out-of-tree against the clang-tidy binary published by
+# cloudflare/workerd-tools. jsg-lint.c++ uses the C++ API directly but
+# transitively pulls in llvm-c headers (e.g. llvm-c/DataTypes.h via
+# llvm/Support/DataTypes.h), so the C-API directories are kept.
+# clang-tools-extra is narrowed to the top-level clang-tidy plugin
+# headers (ClangTidyCheck.h, ClangTidyModule.h); the ~400 files under
+# per-check subdirectories are not needed.
+#
+# `build/` holds tablegen-generated `.inc` files (Attrs.inc,
+# DiagnosticGroups.inc, OMP.inc, etc.) and the Config headers
+# (llvm/Config/llvm-config.h, abi-breaking.h) that are transitively
+# included by every LLVM Support header, so it is not optional.
+cc_library(
+    name = "clang_tidy_dev_headers",
+    hdrs = glob(
+        [
+            "clang/include/clang/**/*.h",
+            "clang/include/clang/**/*.def",
+            "clang/include/clang/**/*.inc",
+            "clang/include/clang-c/**/*.h",
+            "llvm/include/llvm/**/*.h",
+            "llvm/include/llvm/**/*.def",
+            "llvm/include/llvm/**/*.inc",
+            "llvm/include/llvm-c/**/*.h",
+            "build/include/**/*.h",
+            "build/include/**/*.def",
+            "build/include/**/*.inc",
+            "build/tools/clang/include/**/*.h",
+            "build/tools/clang/include/**/*.def",
+            "build/tools/clang/include/**/*.inc",
+            "clang-tools-extra/clang-tidy/*.h",
+        ],
+        allow_empty = True,
+    ),
+    includes = [
+        "build/include",
+        "build/tools/clang/include",
+        "clang-tools-extra",
+        "clang/include",
+        "llvm/include",
+    ],
+)

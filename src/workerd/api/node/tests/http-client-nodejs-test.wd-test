@@ -16,6 +16,7 @@ const unitTests :Workerd.Config = (
           (name = "REQUEST_ARGUMENTS_PORT", fromEnvironment = "REQUEST_ARGUMENTS_PORT"),
           (name = "HELLO_WORLD_SERVER_PORT", fromEnvironment = "HELLO_WORLD_SERVER_PORT"),
           (name = "GZIP_SERVER_PORT", fromEnvironment = "GZIP_SERVER_PORT"),
+          (name = "HOST_ECHO_SERVER_PORT", fromEnvironment = "HOST_ECHO_SERVER_PORT"),
         ],
       )
     ),

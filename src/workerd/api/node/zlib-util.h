@@ -447,6 +447,13 @@ class ZlibUtil final: public jsg::Object {
       JSG_METHOD(setErrorHandler);
     }
 
+    // writeCallback and errorHandler typically capture `this`'s JS wrapper
+    // (see internal_zlib_base.ts), forming a JS<->C++ cycle that V8 can only
+    // collect with this tracing.
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(writeCallback, writeResult, errorHandler);
+    }
+
    protected:
     CompressionContext* context() {
       return &context_;

@@ -29,6 +29,8 @@ struct ReadRequest {
 struct WriteRequest {
   static constexpr kj::StringPtr NAME KJ_UNUSED = "write-request"_kj;
   kj::ArrayPtr<const kj::byte> bytes;
+  // WARNING: `bytes` may be invalid if fulfiller->isWaiting() returns false! (This indicates the
+  //   write was canceled, e.g. via removeSink() destroying the Canceler.)
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
 };
 
@@ -225,6 +227,15 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
 
     // Check for pending write request.
     KJ_IF_SOME(request, state.tryGetUnsafe<WriteRequest>()) {
+      if (!request.fulfiller->isWaiting()) {
+        // The write was canceled (e.g. removeSink() destroyed the Canceler during RPC
+        // serialization). The non-owning `bytes` pointer is now dangling — we must not
+        // dereference it. Transition to a disconnected error state and retry, mirroring
+        // the analogous guard in writeHelper() for canceled ReadRequests.
+        state.forceTransitionTo<kj::Exception>(KJ_EXCEPTION(DISCONNECTED, "writer canceled"));
+        return readHelper(bytes);
+      }
+
       if (bytes.size() >= request.bytes.size()) {
         // The write buffer will entirely fit into our read buffer; fulfill both requests.
         memmove(bytes.begin(), request.bytes.begin(), request.bytes.size());

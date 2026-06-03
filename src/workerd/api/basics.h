@@ -300,6 +300,10 @@ class CustomEvent: public Event {
 
  private:
   jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(detail);
+  }
 };
 
 // An implementation of the Web Platform Standard EventTarget API

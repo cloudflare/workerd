@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    ( name = "worker-loader-unnamed-gc-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "worker-loader-unnamed-gc-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "loader", workerLoader = ()),
+        ],
+      )
+    ),
+  ],
+);

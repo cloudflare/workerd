@@ -59,6 +59,10 @@ class SyncKvStorage: public jsg::Object {
  private:
   jsg::Ref<DurableObjectStorage> storage;
 
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(storage);
+  }
+
   SqliteKv& getSqliteKv(jsg::Lock& js) {
     return storage->getSqliteKv(js);
   }

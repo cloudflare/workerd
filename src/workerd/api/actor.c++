@@ -15,6 +15,15 @@
 
 namespace workerd::api {
 
+namespace {
+
+// This number was arbitrarily chosen, but is meant to account for the cost of holding open outbound
+// actor connections, which do have a real cost and should be accounted for to encourage GC if they
+// accumulate.
+constexpr size_t ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL = 32768;
+
+}  // namespace
+
 kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
     kj::Maybe<kj::String> cfStr) {
   auto& context = IoContext::current();
@@ -27,6 +36,11 @@ kj::Own<WorkerInterface> LocalActorOutgoingFactory::newSingleUseClient(
     if (actorChannel == kj::none) {
       actorChannel =
           context.getColoLocalActorChannel(channelId, actorId, tracing.getInternalSpanParent());
+
+      // As in GlobalActorOutgoingFactory, account for external memory used by the open connection.
+      jsg::Lock& js = context.getCurrentLock();
+      channelMemoryAdjustment =
+          js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
     }
 
     return KJ_REQUIRE_NONNULL(actorChannel)
@@ -60,6 +74,14 @@ kj::Own<WorkerInterface> GlobalActorOutgoingFactory::newSingleUseClient(
               enableReplicaRouting, routingMode, tracing.getInternalSpanParent(), kj::mv(version));
         }
       }
+
+      // The ActorChannelImpl we just created holds a Cap'n Proto Pipeline::Client representing an
+      // open connection to the target DO's routing supervisor. Register external memory to pressure
+      // V8 into collecting this factory's owning stub promptly when it becomes unreachable,
+      // preventing connection/FD accumulation from stubs that are created and discarded in a loop.
+      jsg::Lock& js = context.getCurrentLock();
+      channelMemoryAdjustment =
+          js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_ACTOR_CHANNEL);
     }
 
     return KJ_REQUIRE_NONNULL(actorChannel)
@@ -220,7 +242,8 @@ kj::Own<IoChannelFactory::ActorClassChannel> DurableObjectClass::getChannel(IoCo
 }
 
 void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  auto channel = getChannel(IoContext::current());
+  auto& ioctx = IoContext::current();
+  auto channel = getChannel(ioctx);
   channel->requireAllowsTransfer();
 
   KJ_IF_SOME(handler, serializer.getExternalHandler()) {
@@ -232,10 +255,34 @@ void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), DOMDataCloneError,
           "DurableObjectClass serialization requires the 'experimental' compat flag.");
 
-      auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
-      rpcHandler.write([token = kj::mv(token)](rpc::JsValue::External::Builder builder) {
-        builder.setActorClassChannelToken(token);
-      });
+      KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
+        KJ_CASE_ONEOF(token, kj::Array<byte>) {
+          rpcHandler.write([token = kj::mv(token)](rpc::JsValue::External::Builder builder) {
+            builder.setActorClassChannelToken(token);
+          });
+        }
+        KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+          // Token isn't available synchronously, so we have to send a promise.
+          auto paf = kj::newPromiseAndFulfiller<
+              rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
+
+          // Arrange to send the token when it's ready.
+          ioctx.addTask(
+              promise.then([pusher = rpcHandler.getExternalPusher(),
+                               fulfiller = kj::mv(paf.fulfiller)](kj::Array<byte> token) mutable {
+            auto req = pusher.pushDelayedChannelTokenRequest(
+                capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
+            req.setToken(token);
+            fulfiller->fulfill(req.send().getCap());
+          }));
+
+          // Write the promise for now.
+          rpcHandler.write(
+              [promise = kj::mv(paf.promise)](rpc::JsValue::External::Builder builder) mutable {
+            builder.setDelayedActorClassChannelToken(kj::mv(promise));
+          });
+        }
+      }
       return;
     }
     // TODO(someday): structuredClone() should have special handling that just reproduces the same
@@ -246,7 +293,16 @@ void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // is temporary, anyone using this will lose their data later.
   JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
       "DurableObjectClass cannot be serialized in this context.");
-  serializer.writeLengthDelimited(channel->getToken(IoChannelFactory::ChannelTokenUsage::STORAGE));
+  KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::STORAGE)) {
+    KJ_CASE_ONEOF(token, kj::Array<byte>) {
+      serializer.writeLengthDelimited(token);
+    }
+    KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+      // TODO(stub-storage): Eventually we'll serialize by pointing to an external table.
+      KJ_UNIMPLEMENTED(
+          "tried to store ActorClassChannel whose token is not synchronously available");
+    }
+  }
 }
 
 jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
@@ -273,10 +329,21 @@ jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
           "DurableObjectClass serialization requires the 'experimental' compat flag.");
 
       auto external = rpcHandler.read();
-      KJ_REQUIRE(external.isActorClassChannelToken());
       auto& ioctx = IoContext::current();
-      auto channel = ioctx.getIoChannelFactory().actorClassFromToken(
-          IoChannelFactory::ChannelTokenUsage::RPC, external.getActorClassChannelToken());
+      kj::Own<IoChannelFactory::ActorClassChannel> channel;
+
+      if (external.isDelayedActorClassChannelToken()) {
+        auto promise = ioctx.getExternalPusher()->unwrapDelayedChannelToken(
+            external.getDelayedActorClassChannelToken());
+        channel = ioctx.getIoChannelFactory().actorClassFromToken(
+            IoChannelFactory::ChannelTokenUsage::RPC, kj::mv(promise));
+      } else if (external.isActorClassChannelToken()) {
+        channel = ioctx.getIoChannelFactory().actorClassFromToken(
+            IoChannelFactory::ChannelTokenUsage::RPC, external.getActorClassChannelToken());
+      } else {
+        KJ_FAIL_REQUIRE("wrong external type for DurableObjectClass", external.which());
+      }
+
       return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channel)));
     }
   }

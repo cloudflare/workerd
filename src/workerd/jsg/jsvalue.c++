@@ -134,14 +134,15 @@ JsObject JsObject::jsonClone(Lock& js) {
 }
 
 JsValue JsObject::getPrototype(Lock& js) {
-  if (inner->IsProxy()) {
-    // Here we emulate the behavior of v8's GetPrototype() function for proxies.
-    // If the proxy has a getPrototypeOf trap, we call it and return the result.
-    // Otherwise we return the prototype of the target object.
-    // Note that we do not check if the target object is extensible or not, or
-    // if the returned prototype is consistent with the target's prototype if
-    // the target is not extensible. See the comment below for more details.
-    auto proxy = inner.As<v8::Proxy>();
+  // Iteratively unwrap nested Proxy targets so that an attacker-controlled
+  // chain of `new Proxy(prev, {})` cannot drive unbounded native recursion.
+  // V8's own JSProxy::GetPrototype does the same and caps at kMaxIterationLimit.
+  static constexpr int kMaxProxyDepth = 100'000;
+  v8::Local<v8::Object> current = inner;
+  for (int depth = 0; current->IsProxy(); ++depth) {
+    JSG_REQUIRE(
+        depth < kMaxProxyDepth, RangeError, "Maximum proxy chain length exceeded in getPrototype");
+    auto proxy = current.As<v8::Proxy>();
     JSG_REQUIRE(!proxy->IsRevoked(), TypeError, "Proxy is revoked");
     auto handler = proxy->GetHandler();
     JSG_REQUIRE(handler->IsObject(), TypeError, "Proxy handler is not an object");
@@ -150,8 +151,8 @@ JsValue JsObject::getPrototype(Lock& js) {
     auto target = proxy->GetTarget();
     if (trap.isUndefined()) {
       JSG_REQUIRE(target->IsObject(), TypeError, "Proxy target is not an object");
-      // Run this through getPrototype to handle the case where the target is also a proxy.
-      return JsObject(target.As<v8::Object>()).getPrototype(js);
+      current = target.As<v8::Object>();
+      continue;  // unwrap one layer iteratively, no native recursion
     }
     JSG_REQUIRE(trap.isFunction(), TypeError, "Proxy getPrototypeOf trap is not a function");
     v8::Local<v8::Function> fn = ((v8::Local<v8::Value>)trap).As<v8::Function>();
@@ -169,10 +170,10 @@ JsValue JsObject::getPrototype(Lock& js) {
     return ret;
   }
 #if V8_MAJOR_VERSION >= 15 || (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION >= 7)
-  return JsValue(inner->GetPrototype());
+  return JsValue(current->GetPrototype());
 #else
   // TODO(cleanup): Remove when unnecessary.
-  return JsValue(inner->GetPrototypeV2());
+  return JsValue(current->GetPrototypeV2());
 #endif
 }
 

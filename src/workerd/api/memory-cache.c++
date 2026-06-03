@@ -212,7 +212,10 @@ void SharedMemoryCache::evictNextWhileLocked(
   KJ_REQUIRE(data.cache.size() > 0);
 
   // Create eviction span - only called from IO context
-  auto evictionSpan = IoContext::current().makeTraceSpan("memory_cache_eviction"_kjc);
+  SpanBuilder evictionSpan = nullptr;
+  KJ_IF_SOME(ctx, IoContext::tryCurrent()) {
+    evictionSpan = ctx.makeTraceSpan("memory_cache_eviction"_kjc);
+  }
 
   // If there is an entry that has expired already, evict that one.
   MemoryCacheEntry& maybeExpired = *data.cache.ordered<3>().begin();
@@ -349,59 +352,21 @@ SharedMemoryCache::Use::getWithFallback(const kj::String& key, SpanBuilder& read
 
 SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::Use::prepareFallback(
     InProgress& inProgress) const {
-  // We need to detect if the Promise that we are about to create ever settles,
-  // as opposed to being destroyed without either being resolved or rejecting.
-  struct FallbackStatus {
-    bool hasSettled = false;
-  };
-  auto status = kj::heap<FallbackStatus>();
-  auto& statusRef = *status;
-
-  auto deferredCancel = kj::defer([this, status = kj::mv(status), &inProgress]() {
-    // If the callback was destroyed without having run (for example, because
-    // it was added to an I/O context that has since been canceled), we treat
-    // it as if the promise had failed.
-    if (!status->hasSettled) {
-      handleFallbackFailure(inProgress);
-    }
-  });
-
-  return [this, &inProgress, &status = statusRef, deferredCancel = kj::mv(deferredCancel)](
-             kj::Maybe<FallbackResult> maybeResult, SpanBuilder& fallbackSpan) mutable {
-    KJ_IF_SOME(result, maybeResult) {
-      // The fallback succeeded. Store the value in the cache and propagate it to
-      // all waiting requests, even if it has expired already.
-      status.hasSettled = true;
-
-      auto data = cache->data.lockExclusive();
-      size_t waiterCount = inProgress.waiting.size();
-
-      cache->putWhileLocked(
-          *data, kj::str(inProgress.key), kj::atomicAddRef(*result.value), result.expiration);
-
-      inProgress.waiting.drainTo(
-          [&](auto&& waiter) { waiter.fulfiller->fulfill(kj::atomicAddRef(*result.value)); });
-      data->inProgress.eraseMatch(inProgress.key);
-
-      // Track the completion of fallback and distribution to waiters
-      fallbackSpan.setTag("waiters_notified"_kjc, static_cast<double>(waiterCount));
-    } else {
-      // The fallback failed for some reason. We do not care much about why it
-      // failed. If there are other queued fallbacks, handelFallbackFailure will
-      // schedule the next one.
-      status.hasSettled = true;
-      handleFallbackFailure(inProgress);
-    }
-  };
+  return SharedMemoryCache::prepareFallback(*cache, inProgress);
 }
 
 void SharedMemoryCache::Use::handleFallbackFailure(InProgress& inProgress) const {
-  kj::Own<kj::CrossThreadPromiseFulfiller<GetWithFallbackOutcome>> nextFulfiller;
+  SharedMemoryCache::handleFallbackFailure(*cache, inProgress);
+}
+
+void SharedMemoryCache::handleFallbackFailure(
+    const SharedMemoryCache& cache, InProgress& inProgress) {
+  kj::Own<kj::CrossThreadPromiseFulfiller<Use::GetWithFallbackOutcome>> nextFulfiller;
 
   // If there is another queued fallback, retrieve it and remove it from the
   // queue. Otherwise, just delete the queue entirely.
   {
-    auto data = cache->data.lockExclusive();
+    auto data = cache.data.lockExclusive();
 
     KJ_IF_SOME(next, inProgress.waiting.pop()) {
       nextFulfiller = kj::mv(next.fulfiller);
@@ -418,8 +383,47 @@ void SharedMemoryCache::Use::handleFallbackFailure(InProgress& inProgress) const
   // from that, but it will lock the cache while doing so. That is why it is
   // important that the cache is not already locked when we call fulfill().
   if (nextFulfiller) {
-    nextFulfiller->fulfill(prepareFallback(inProgress));
+    nextFulfiller->fulfill(SharedMemoryCache::prepareFallback(cache, inProgress));
   }
+}
+
+SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::prepareFallback(
+    const SharedMemoryCache& cacheArg, InProgress& inProgress) {
+  struct FallbackStatus {
+    bool hasSettled = false;
+  };
+  auto status = kj::heap<FallbackStatus>();
+  auto& statusRef = *status;
+
+  auto deferredCancel = kj::defer(
+      [cache = kj::atomicAddRef(cacheArg), status = kj::mv(status), &inProgress]() mutable {
+    if (!status->hasSettled) {
+      SharedMemoryCache::handleFallbackFailure(*cache, inProgress);
+    }
+  });
+
+  return [cache = kj::atomicAddRef(cacheArg), &inProgress, &status = statusRef,
+             deferredCancel = kj::mv(deferredCancel)](
+             kj::Maybe<Use::FallbackResult> maybeResult, SpanBuilder& fallbackSpan) mutable {
+    KJ_IF_SOME(result, maybeResult) {
+      status.hasSettled = true;
+
+      auto data = cache->data.lockExclusive();
+      size_t waiterCount = inProgress.waiting.size();
+
+      cache->putWhileLocked(
+          *data, kj::str(inProgress.key), kj::atomicAddRef(*result.value), result.expiration);
+
+      inProgress.waiting.drainTo(
+          [&](auto&& waiter) { waiter.fulfiller->fulfill(kj::atomicAddRef(*result.value)); });
+      data->inProgress.eraseMatch(inProgress.key);
+
+      fallbackSpan.setTag("waiters_notified"_kjc, static_cast<double>(waiterCount));
+    } else {
+      status.hasSettled = true;
+      SharedMemoryCache::handleFallbackFailure(*cache, inProgress);
+    }
+  };
 }
 
 void SharedMemoryCache::Use::delete_(const kj::String& key) const {

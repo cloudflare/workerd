@@ -141,6 +141,13 @@ class MessagePort final: public EventTarget {
   // ports!
   kj::Own<WeakRef<MessagePort>> other;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onmessageValue;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    KJ_IF_SOME(pending, state.tryGet<Pending>()) {
+      visitor.visitAll(pending);
+    }
+    visitor.visit(onmessageValue);
+  }
 };
 
 // MessageChannel is simple enough... create a couple of MessagePorts
@@ -169,6 +176,10 @@ class MessageChannel final: public jsg::Object {
  private:
   jsg::Ref<MessagePort> port1;
   jsg::Ref<MessagePort> port2;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(port1, port2);
+  }
 };
 
 // Module that exposes MessageChannel and MessagePort for internal use by

@@ -3,6 +3,24 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    src = "messageport-postmessage-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["messageport-postmessage-uaf-test.js"],
+)
+
+wd_test(
+    src = "streams-byte-cancel-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byte-cancel-uaf-test.js"],
+)
+
+wd_test(
+    src = "streams-byte-handlePush-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byte-handlePush-uaf-test.js"],
+)
+
+wd_test(
     src = "structuredclone-error-serialize-test.wd-test",
     args = ["--experimental"],
     data = ["structuredclone-error-serialize-test.js"],
@@ -44,6 +62,14 @@ wd_test(
     # with this tag from running at the same time, but still allows for running at the same time as
     # tests without the tag.
     tags = ["resources:socket:1"],
+)
+
+# Regression test for AUTOVULN-CLOUDFLARE-WORKERD-334: connect() handler must neuter the
+# NeuterableIoStream when the handler promise resolves, preventing use-after-free.
+wd_test(
+    src = "connect-neuter-test.wd-test",
+    args = ["--experimental"],
+    data = ["connect-neuter-test.js"],
 )
 
 wd_test(
@@ -506,6 +532,20 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-byob-close-reentry-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byob-close-reentry-test.js"],
+    # This test exercises a SIGSEGV regression (EDGEWORKER-RUNTIME-H40) by
+    # forcing reentrant controller.error() during the ReadableStream close
+    # drain. Predictable mode triggers an extra GC pass after every worker
+    # entrypoint in KJ_DEBUG builds (see maybeAddGcPassForTest), which
+    # surfaces a separate latent GC-traceability issue in the stream's
+    # state machine. Opt out of predictable mode here so this test only
+    # covers the regression it was written for.
+    predictable = False,
+)
+
+wd_test(
     src = "pipe-streams-test.wd-test",
     args = ["--experimental"],
     data = ["pipe-streams-test.js"],
@@ -557,6 +597,12 @@ wd_test(
     src = "streams-byob-edge-cases-test.wd-test",
     args = ["--experimental"],
     data = ["streams-byob-edge-cases-test.js"],
+)
+
+wd_test(
+    src = "streams-byob-concurrent-readatleast-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-byob-concurrent-readatleast-test.js"],
 )
 
 wd_test(
@@ -820,6 +866,18 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-unnamed-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-unnamed-gc-test.js"],
+)
+
+wd_test(
+    src = "worker-loader-rab-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-rab-test.js"],
+)
+
+wd_test(
     src = "leak-fetch-test.wd-test",
     args = ["--experimental"],
     data = ["leak-fetch-test.js"],
@@ -893,9 +951,21 @@ wd_test(
 )
 
 wd_test(
+    src = "r2-write-http-metadata-validation-test.wd-test",
+    args = ["--experimental"],
+    data = ["r2-write-http-metadata-validation-test.js"],
+)
+
+wd_test(
     src = "identity-transform-stream-state-machine-test.wd-test",
     args = ["--experimental"],
     data = ["identity-transform-stream-state-machine-test.js"],
+)
+
+wd_test(
+    src = "identity-transform-stream-uaf-test.wd-test",
+    args = ["--experimental"],
+    data = ["identity-transform-stream-uaf-test.js"],
 )
 
 wd_test(

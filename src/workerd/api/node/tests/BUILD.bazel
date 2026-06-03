@@ -16,6 +16,13 @@ wd_test(
 )
 
 wd_test(
+    size = "enormous",
+    src = "buffer-base64-large-test.wd-test",
+    args = ["--experimental"],
+    data = ["buffer-base64-large-test.js"],
+)
+
+wd_test(
     src = "cluster-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["cluster-nodejs-test.js"],
@@ -220,6 +227,12 @@ wd_test(
     src = "zlib-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["zlib-nodejs-test.js"],
+)
+
+wd_test(
+    src = "gc-tracing-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["gc-tracing-nodejs-test.js"],
 )
 
 wd_test(
@@ -523,7 +536,14 @@ wd_test(
         "REQUEST_ARGUMENTS_PORT",
         "HELLO_WORLD_SERVER_PORT",
         "GZIP_SERVER_PORT",
+        "HOST_ECHO_SERVER_PORT",
     ],
+)
+
+wd_test(
+    src = "http-client-path-ssrf-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-client-path-ssrf-test.js"],
 )
 
 js_binary(

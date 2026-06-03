@@ -76,8 +76,31 @@ class SqliteDatabase {
   struct VfsOptions;
   class Regulator;
 
-  struct QueryOptions {
+  // StaticRegulator is a wrapper type that asserts (using consteval) that the Regulator is
+  // defined statically, and thus its lifetime is process-long. Regulators are static bundles of
+  // logic that parameterize how a SqliteDatabase behaves. There are a couple of challenges to
+  // making a SqliteDatabase template-parameterized with these behaviors, but we do want to assert
+  // that no one accidentally provides a relatively short-lived Regulator to logic that outlives
+  // that Regulator. For now, requiring that regulators are statically defined fits this goal.
+  class StaticRegulator {
+   public:
+    // consteval implicitly asserts that the const Regulator& reference is known at compile time,
+    // which means it must have a static memory address.
+    consteval StaticRegulator(const Regulator& regulator): regulator(regulator) {}
+
+    const Regulator* operator->() const {
+      return &regulator;
+    }
+    const Regulator* get() const {
+      return &regulator;
+    }
+
+   private:
     const Regulator& regulator;
+  };
+
+  struct QueryOptions {
+    StaticRegulator regulator;
     bool allowUnconfirmed = false;
   };
 
@@ -174,7 +197,7 @@ class SqliteDatabase {
 
   // Prepares the given SQL code as a persistent statement that can be used across several queries.
   // Don't use this for one-off queries; use run() instead.
-  Statement prepare(const Regulator& regulator, kj::StringPtr sqlCode);
+  Statement prepare(StaticRegulator regulator, kj::StringPtr sqlCode);
 
   // Prepares a statement that may actually be multiple statements (separated by semicolons).
   // In this case, the code is not actually parsed until first executed (this implies
@@ -186,7 +209,7 @@ class SqliteDatabase {
   //
   // As with exec(), the result of executing a batch of multiple statements is always the result
   // of the last statement. The results of all other statements are discarded.
-  Statement prepareMulti(const Regulator& regulator, kj::String sqlCode);
+  Statement prepareMulti(StaticRegulator regulator, kj::String sqlCode);
 
   // Convenience method to start a query. This is equivalent to `prepare(sqlCode).run(bindings...)`
   // except:
@@ -201,7 +224,7 @@ class SqliteDatabase {
   Statement prepare(const char (&sqlCode)[size]);
 
   template <size_t size>
-  Statement prepare(const Regulator& regulator, const char (&sqlCode)[size]);
+  Statement prepare(StaticRegulator regulator, const char (&sqlCode)[size]);
 
   // When the input is a string literal, we automatically use the TRUSTED regulator.
   template <size_t size, typename... Params>
@@ -251,10 +274,10 @@ class SqliteDatabase {
   // Helper to execute a chunk of SQL that may not be complete.
   // Executes every valid statement provided, and returns the remaining portion of the input
   // that was not processed. This is used for streaming SQL ingestion.
-  IngestResult ingestSql(const Regulator& regulator, kj::StringPtr sqlCode);
+  IngestResult ingestSql(StaticRegulator regulator, kj::StringPtr sqlCode);
 
   // Execute a function with the given regulator.
-  void executeWithRegulator(const Regulator& regulator, kj::FunctionParam<void()> func);
+  void executeWithRegulator(StaticRegulator regulator, kj::FunctionParam<void()> func);
 
   // Resets the database to an empty state by deleting the underlying database file and creating
   // a new one in its place. This is the recommended way to "drop database" in SQLite, and is used
@@ -341,7 +364,7 @@ class SqliteDatabase {
   kj::Maybe<sqlite3&> maybeDb;
 
   // Set while a query is compiling.
-  kj::Maybe<const Regulator&> currentRegulator;
+  kj::Maybe<StaticRegulator> currentRegulator;
 
   // Set during the *first* time a statement is being compiled, to capture information about it
   // from the authorizer callback. It is assumed that if the statement must be re-parsed later,
@@ -418,7 +441,7 @@ class SqliteDatabase {
   //
   // If `prelude` is provided, then, in MULTI mode, all statements which are executed immediately
   // are also appended to `prelude`.
-  StatementAndEffect prepareSql(const Regulator& regulator,
+  StatementAndEffect prepareSql(StaticRegulator regulator,
       kj::StringPtr sqlCode,
       uint prepFlags,
       Multi multi,
@@ -435,7 +458,7 @@ class SqliteDatabase {
   bool isAuthorizedTemp(int actionCode,
       const kj::Maybe<kj::StringPtr>& param1,
       const kj::Maybe<kj::StringPtr>& param2,
-      const Regulator& regulator);
+      StaticRegulator regulator);
 
   void setupSecurity(sqlite3* db);
 
@@ -484,20 +507,20 @@ class SqliteDatabase::Statement final: private ResetListener {
   Query run(StatementOptions options, Params&&... bindings);
 
  private:
-  const Regulator& regulator;
+  StaticRegulator regulator;
   kj::OneOf<kj::String, StatementAndEffect> stmt;
 
   // List of statements to execute before this one. Only non-empty if this Statement was created
   // by prepareMulti().
   kj::Vector<Statement> prelude;
 
-  Statement(SqliteDatabase& db, const Regulator& regulator, StatementAndEffect stmt)
+  Statement(SqliteDatabase& db, StaticRegulator regulator, StatementAndEffect stmt)
       : ResetListener(db),
         regulator(regulator),
         stmt(kj::mv(stmt)) {}
 
   // Lazily-parsed statement -- used by `prepareMulti()`.
-  Statement(SqliteDatabase& db, const Regulator& regulator, kj::String sqlCode)
+  Statement(SqliteDatabase& db, StaticRegulator regulator, kj::String sqlCode)
       : ResetListener(db),
         regulator(regulator),
         stmt(kj::mv(sqlCode)) {}
@@ -663,7 +686,7 @@ class SqliteDatabase::Query final: private ResetListener {
     kj::Maybe<kj::String> queryErrorDescription = kj::none;
   };
 
-  const Regulator& regulator;
+  StaticRegulator regulator;
   StatementAndEffect ownStatement;                // for one-off queries
   kj::Maybe<StatementAndEffect&> maybeStatement;  // null if database was reset
   bool done = false;
@@ -1031,12 +1054,12 @@ SqliteDatabase::Statement SqliteDatabase::prepare(const char (&sqlCode)[size]) {
 }
 template <size_t size>
 SqliteDatabase::Statement SqliteDatabase::prepare(
-    const Regulator& regulator, const char (&sqlCode)[size]) {
+    StaticRegulator regulator, const char (&sqlCode)[size]) {
   return prepare(regulator, kj::StringPtr(sqlCode, size - 1));
 }
 
 inline SqliteDatabase::Statement SqliteDatabase::prepareMulti(
-    const Regulator& regulator, kj::String sqlCode) {
+    StaticRegulator regulator, kj::String sqlCode) {
   return Statement(*this, regulator, kj::mv(sqlCode));
 }
 

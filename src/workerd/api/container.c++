@@ -382,46 +382,65 @@ jsg::Promise<void> Container::interceptOutboundHttp(
     jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding) {
   auto& ioctx = IoContext::current();
   auto channel = binding->getSubrequestChannel(ioctx);
+  return ioctx.awaitIo(js, interceptOutboundHttpImpl(*rpcClient, kj::mv(addr), kj::mv(channel)));
+}
 
+kj::Promise<void> Container::interceptOutboundHttpImpl(rpc::Container::Client rpcClient,
+    kj::String addr,
+    kj::Own<IoChannelFactory::SubrequestChannel> channel) {
   // Get a channel token for RPC usage, the container runtime can use this
   // token later to redeem a Fetcher.
-  auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+  kj::Array<byte> token = co_await channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+  { auto drop = kj::mv(channel); }  // no longer needed
 
-  auto req = rpcClient->setEgressHttpRequest();
+  auto req = rpcClient.setEgressHttpRequest();
   req.setHostPort(addr);
   req.setChannelToken(token);
-  return ioctx.awaitIo(js, req.sendIgnoringResult());
+  co_await req.send();
 }
 
 jsg::Promise<void> Container::interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<Fetcher> binding) {
   auto& ioctx = IoContext::current();
   auto channel = binding->getSubrequestChannel(ioctx);
-  auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+  return ioctx.awaitIo(js, interceptAllOutboundHttpImpl(*rpcClient, kj::mv(channel)));
+}
+
+kj::Promise<void> Container::interceptAllOutboundHttpImpl(
+    rpc::Container::Client rpcClient, kj::Own<IoChannelFactory::SubrequestChannel> channel) {
+  auto token = co_await channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+  { auto drop = kj::mv(channel); }  // no longer needed
 
   // Register for all IPv4 and IPv6 addresses (on port 80)
-  auto reqV4 = rpcClient->setEgressHttpRequest();
+  auto reqV4 = rpcClient.setEgressHttpRequest();
   reqV4.setHostPort("0.0.0.0/0"_kj);
   reqV4.setChannelToken(token);
 
-  auto reqV6 = rpcClient->setEgressHttpRequest();
+  auto reqV6 = rpcClient.setEgressHttpRequest();
   reqV6.setHostPort("::/0"_kj);
   reqV6.setChannelToken(token);
 
-  return ioctx.awaitIo(js,
-      kj::joinPromisesFailFast(kj::arr(reqV4.sendIgnoringResult(), reqV6.sendIgnoringResult())));
+  co_await kj::joinPromisesFailFast(
+      kj::arr(reqV4.sendIgnoringResult(), reqV6.sendIgnoringResult()));
 }
 
 jsg::Promise<void> Container::interceptOutboundHttps(
     jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding) {
   auto& ioctx = IoContext::current();
   auto channel = binding->getSubrequestChannel(ioctx);
-  auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+  return ioctx.awaitIo(js, interceptOutboundHttpsImpl(*rpcClient, kj::mv(addr), kj::mv(channel)));
+}
 
-  auto req = rpcClient->setEgressHttpsRequest();
+kj::Promise<void> Container::interceptOutboundHttpsImpl(rpc::Container::Client rpcClient,
+    kj::String addr,
+    kj::Own<IoChannelFactory::SubrequestChannel> channel) {
+  auto token = co_await channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+  { auto drop = kj::mv(channel); }  // no longer needed
+
+  auto req = rpcClient.setEgressHttpsRequest();
   req.setHostPort(addr);
   req.setChannelToken(token);
 
-  return ioctx.awaitIo(js, req.sendIgnoringResult());
+  co_await req.send();
 }
 
 jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
@@ -557,15 +576,22 @@ jsg::Promise<void> Container::interceptOutboundTcp(
     jsg::Lock& js, kj::String addr, jsg::Ref<Fetcher> binding) {
   auto& ioctx = IoContext::current();
   auto channel = binding->getSubrequestChannel(ioctx);
+  return ioctx.awaitIo(js, interceptOutboundTcpImpl(*rpcClient, kj::mv(addr), kj::mv(channel)));
+}
+
+kj::Promise<void> Container::interceptOutboundTcpImpl(rpc::Container::Client rpcClient,
+    kj::String addr,
+    kj::Own<IoChannelFactory::SubrequestChannel> channel) {
 
   // Get a channel token for RPC usage, the container runtime can use this
   // token later to redeem a Fetcher whose connect() handler processes the TCP stream.
-  auto token = channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+  auto token = co_await channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
+  { auto drop = kj::mv(channel); }  // no longer needed
 
-  auto req = rpcClient->setEgressTcpRequest();
+  auto req = rpcClient.setEgressTcpRequest();
   req.setHostPort(addr);
   req.setChannelToken(token);
-  return ioctx.awaitIo(js, req.sendIgnoringResult());
+  co_await req.send();
 }
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {

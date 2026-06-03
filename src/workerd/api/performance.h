@@ -120,6 +120,10 @@ class PerformanceMark: public PerformanceEntry {
 
  private:
   jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(detail);
+  }
 };
 
 // UvMetricsInfo represents libuv event loop metrics.
@@ -249,6 +253,10 @@ class PerformanceMeasure: public PerformanceEntry {
 
  private:
   jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(detail);
+  }
 };
 
 class PerformanceResourceTiming: public PerformanceEntry {
@@ -619,6 +627,10 @@ class Performance: public EventTarget {
  private:
   const IsolateLimitEnforcer& isolateLimitEnforcer;
   kj::Vector<jsg::Ref<PerformanceEntry>> entries;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visitAll(entries);
+  }
 };
 
 #define EW_PERFORMANCE_ISOLATE_TYPES                                                               \

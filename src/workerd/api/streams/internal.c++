@@ -2172,6 +2172,7 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     visitor.visit(*pendingAbort);
   }
+  visitor.visit(maybeClosureWaitable);
 }
 
 void ReadableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {

@@ -5,7 +5,9 @@
 #include "hibernation-manager.h"
 
 #include "io-channels.h"
+#include "io-context.h"
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/uuid.h>
 
 namespace workerd {
@@ -110,6 +112,15 @@ void HibernationManagerImpl::acceptWebSocket(
 
   auto hib = kj::heap<HibernatableWebSocket>(kj::mv(ws), tags, *this);
   HibernatableWebSocket& refToHibernatable = *hib.get();
+
+  // TODO(mar): Improve accept span context capturing — route snapshotted user span context
+  // to serialization point instead of capturing only the invocation root span here.
+  if (util::Autogate::isEnabled(util::AutogateKey::USER_SPAN_CONTEXT_PROPAGATION)) {
+    auto invCtx = IoContext::current().getInvocationSpanContext();
+    refToHibernatable.userSpanContext =
+        tracing::SpanContext(invCtx.getTraceId(), invCtx.getSpanId());
+  }
+
   allWs.push_front(kj::mv(hib));
   refToHibernatable.node = allWs.begin();
 
@@ -266,8 +277,14 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
     }
 
     KJ_REQUIRE_NONNULL(params).setTimeout(eventTimeoutMs);
-    // Dispatch the event.
-    auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
+    // Dispatch the event, restoring the trace context captured at acceptWebSocket time.
+    SpanParent userSpanParent = SpanParent(nullptr);
+    KJ_IF_SOME(ctx, hib.userSpanContext) {
+      userSpanParent = SpanParent::fromSpanContext(tracing::SpanContext::clone(ctx));
+    }
+    auto workerInterface = loopback->getWorker({
+      .userSpanParent = kj::mv(userSpanParent),
+    });
     event = workerInterface
                 ->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
                     hibernationEventType, kj::mv(KJ_REQUIRE_NONNULL(params)), *this))
@@ -372,8 +389,14 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
     auto params = kj::mv(KJ_REQUIRE_NONNULL(maybeParams));
     params.setTimeout(eventTimeoutMs);
     auto isClose = params.isCloseEvent();
-    // Dispatch the event.
-    auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
+    // Dispatch the event, restoring the trace context captured at acceptWebSocket time.
+    SpanParent userSpanParent = SpanParent(nullptr);
+    KJ_IF_SOME(ctx, hib.userSpanContext) {
+      userSpanParent = SpanParent::fromSpanContext(tracing::SpanContext::clone(ctx));
+    }
+    auto workerInterface = loopback->getWorker({
+      .userSpanParent = kj::mv(userSpanParent),
+    });
     co_await workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEvent>(
         hibernationEventType, kj::mv(params), *this));
     if (isClose) {
