@@ -55,6 +55,8 @@ EventOutcome RequestObserver::outcomeFromException(const kj::Exception& e, Failu
     return EventOutcome::EXCEEDED_MEMORY;
   } else if (e.getDetail(CPU_LIMIT_DETAIL_ID) != kj::none) {
     return EventOutcome::EXCEEDED_CPU;
+  } else if (e.getDetail(WALL_TIME_LIMIT_DETAIL_ID) != kj::none) {
+    return EventOutcome::EXCEEDED_WALL_TIME;
   } else if (e.getDetail(SCRIPT_KILLED_DETAIL_ID) != kj::none) {
     return EventOutcome::KILL_SWITCH;
   } else if (source == RequestObserver::FailureSource::DEFERRED_PROXY &&

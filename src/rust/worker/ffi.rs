@@ -39,6 +39,7 @@ pub mod bridge {
         LoadShed = 9,
         ResponseStreamDisconnected = 10,
         InternalError = 11,
+        ExceededWallTime = 12,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -241,6 +242,7 @@ impl From<outcome_capnp::EventOutcome> for bridge::EventOutcome {
                 Self::ResponseStreamDisconnected
             }
             outcome_capnp::EventOutcome::InternalError => Self::InternalError,
+            outcome_capnp::EventOutcome::ExceededWallTime => Self::ExceededWallTime,
         }
     }
 }

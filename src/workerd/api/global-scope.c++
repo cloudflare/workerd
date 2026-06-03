@@ -499,7 +499,7 @@ namespace {
 // Returns true if an alarm failure should count against the user's retry limit.
 // A failure is user-generated if any of:
 //   - The exception was explicitly tagged with EXCEPTION_IS_USER_ERROR at construction time
-//     (e.g. state.abort(), exceededCpu, exceededMemory, overload queue).
+//     (e.g. state.abort(), exceededCpu, exceededMemory, exceededWallTime, overload queue).
 //   - The exception originated from user code throwing inside blockConcurrencyWhile, which
 //     breaks the input gate as a secondary side-effect.
 //   - The exception is a plain jsg.* error without broken.* or jsg-internal.* prefixes,
