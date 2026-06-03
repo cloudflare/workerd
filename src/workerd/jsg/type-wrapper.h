@@ -351,9 +351,7 @@ class TypeWrapperBase<Self, T, JsgKind::RESOURCE>: public ResourceWrapper<Self, 
 // Specialization of TypeWrapperBase for types that have a JSG_STRUCT block.
 template <typename Self, typename T>
 class TypeWrapperBase<Self, T, JsgKind::STRUCT>
-    : public StructWrapper<Self,
-          T,
-          typename T::template _JSG_STRUCT_FIELDS_DO_NOT_USE_DIRECTLY<T>> {
+    : public StructWrapper<T, typename T::template _JSG_STRUCT_FIELDS_DO_NOT_USE_DIRECTLY<T>> {
  public:
   template <typename MetaConfiguration>
   TypeWrapperBase(MetaConfiguration& config) {}
@@ -480,8 +478,7 @@ class TypeWrapperOps {
     KJ_IF_SOME(result, maybe) {
       return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
     } else {
-      throwTypeError(
-          js.v8Isolate, errorContext, Self::getName(static_cast<kj::Decay<U>*>(nullptr)));
+      throwTypeError(js.v8Isolate, errorContext, self.getName(static_cast<kj::Decay<U>*>(nullptr)));
     }
   }
 
@@ -533,7 +530,7 @@ class TypeWrapperOps {
           // We're unwrapping a nonexistent argument into a required parameter. Since Web IDL
           // nullable types (Maybe<T>) can be initialized from `undefined`, we need to explicitly
           // throw here, or else `f(Maybe<T>)` could be called like `f()`.
-          throwTypeError(js.v8Isolate, errorContext, Self::getName(static_cast<V*>(nullptr)));
+          throwTypeError(js.v8Isolate, errorContext, self.getName(static_cast<V*>(nullptr)));
         }
       }
 
@@ -641,12 +638,12 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public PrimitiveWrapper,
                    public NameWrapper,
                    public StringWrapper,
-                   public OptionalWrapper<Self>,
-                   public LenientOptionalWrapper<Self>,
-                   public MaybeWrapper<Self>,
-                   public OneOfWrapper<Self>,
-                   public ArrayWrapper<Self>,
-                   public SetWrapper<Self>,
+                   public OptionalWrapper,
+                   public LenientOptionalWrapper,
+                   public MaybeWrapper,
+                   public OneOfWrapper,
+                   public ArrayWrapper,
+                   public SetWrapper,
                    public SequenceWrapper,
                    public GeneratorWrapper<Self>,
                    public ArrayBufferWrapper,
@@ -654,9 +651,9 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public DateWrapper,
                    public FunctionWrapper<Self>,
                    public PromiseWrapper<Self>,
-                   public NonCoercibleWrapper<Self>,
-                   public MemoizedIdentityWrapper<Self>,
-                   public IdentifiedWrapper<Self>,
+                   public NonCoercibleWrapper,
+                   public MemoizedIdentityWrapper,
+                   public IdentifiedWrapper,
                    public SelfRefWrapper,
                    public ExceptionWrapper<Self>,
                    public ObjectWrapper<Self>,
@@ -669,7 +666,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   template <typename MetaConfiguration>
   TypeWrapper(v8::Isolate* isolate, MetaConfiguration&& configuration)
       : TypeWrapperBase<Self, T>(configuration)...,
-        MaybeWrapper<Self>(configuration),
+        MaybeWrapper(configuration),
         GeneratorWrapper<Self>(configuration),
         PromiseWrapper<Self>(configuration),
         config(getConfig(configuration)) {
@@ -714,12 +711,12 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(PrimitiveWrapper);
   USING_WRAPPER(NameWrapper);
   USING_WRAPPER(StringWrapper);
-  USING_WRAPPER(OptionalWrapper<Self>);
-  USING_WRAPPER(LenientOptionalWrapper<Self>);
-  USING_WRAPPER(MaybeWrapper<Self>);
-  USING_WRAPPER(OneOfWrapper<Self>);
-  USING_WRAPPER(ArrayWrapper<Self>);
-  USING_WRAPPER(SetWrapper<Self>);
+  USING_WRAPPER(OptionalWrapper);
+  USING_WRAPPER(LenientOptionalWrapper);
+  USING_WRAPPER(MaybeWrapper);
+  USING_WRAPPER(OneOfWrapper);
+  USING_WRAPPER(ArrayWrapper);
+  USING_WRAPPER(SetWrapper);
   USING_WRAPPER(SequenceWrapper);
   USING_WRAPPER(GeneratorWrapper<Self>);
   USING_WRAPPER(ArrayBufferWrapper);
@@ -727,9 +724,9 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(DateWrapper);
   USING_WRAPPER(FunctionWrapper<Self>);
   USING_WRAPPER(PromiseWrapper<Self>);
-  USING_WRAPPER(NonCoercibleWrapper<Self>);
-  USING_WRAPPER(MemoizedIdentityWrapper<Self>);
-  USING_WRAPPER(IdentifiedWrapper<Self>);
+  USING_WRAPPER(NonCoercibleWrapper);
+  USING_WRAPPER(MemoizedIdentityWrapper);
+  USING_WRAPPER(IdentifiedWrapper);
   USING_WRAPPER(SelfRefWrapper);
   USING_WRAPPER(SelfUnwrap<Self>);
   USING_WRAPPER(ExceptionWrapper<Self>);
