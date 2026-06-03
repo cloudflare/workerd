@@ -274,8 +274,19 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // throws, the input lock will break, resetting the actor.
   //
   // This can only be called when I/O gates are active, i.e. in an actor.
+  //
+  // Like run(), the callback can accept either (jsg::Lock&) or (jsg::Lock&, IoContext&).
   template <typename Func>
-  jsg::PromiseForResult<Func, void, true> blockConcurrencyWhile(jsg::Lock& js, Func&& callback);
+  auto blockConcurrencyWhile(jsg::Lock& js, Func&& callback) {
+    if constexpr (runFuncAcceptsIoContext<Func>) {
+      return blockConcurrencyWhileImpl(
+          js, [this, callback = kj::fwd<Func>(callback)](jsg::Lock& lock) mutable {
+        return callback(lock, *this);
+      });
+    } else {
+      return blockConcurrencyWhileImpl(js, kj::fwd<Func>(callback));
+    }
+  }
 
   // Returns true if output lock gating is necessary.
   // Can be used in optimizations to bypass wait* calls altogether.
@@ -1118,7 +1129,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<InputGate::Lock> inputLock,
       Runnable::Exceptional exceptional);
 
-  // Detect whether a run() callback accepts IoContext& as a second argument.
+  // Detect whether a callback accepts IoContext& as a second argument.
+  // Used by run() and blockConcurrencyWhile() to optionally pass *this.
   template <typename Func>
   static constexpr bool runFuncAcceptsIoContext =
       std::invocable<std::decay_t<Func>&, Worker::Lock&, IoContext&>;
@@ -1131,6 +1143,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename Func>
   kj::PromiseForResult<Func, Worker::Lock&> runSingle(
       Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection);
+
+  // Internal implementation of blockConcurrencyWhile(), always invoked with a single-arg callback.
+  template <typename Func>
+  jsg::PromiseForResult<Func, void, true> blockConcurrencyWhileImpl(jsg::Lock& js, Func&& callback);
 
   void abortFromHang(Worker::AsyncLock& asyncLock);
 
@@ -1664,7 +1680,7 @@ inline ReverseIoOwn<T> IoContext::addObjectReverse(kj::Own<T> obj) {
 }
 
 template <typename Func>
-jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
+jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
     jsg::Lock& js, Func&& callback) {
   auto lock = getInputLock();
   auto cs = lock.startCriticalSection();
