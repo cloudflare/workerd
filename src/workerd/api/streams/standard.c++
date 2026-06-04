@@ -2410,6 +2410,10 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
       if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
         // While this particular request may be invalidated, there are still
         // other branches we can push the data to.
+        JSG_REQUIRE(bytesWritten > 0 && static_cast<size_t>(bytesWritten) <= handle.size(),
+            RangeError,
+            "The bytesWritten must be more than zero and less than or equal to the view byte "
+            "length while the stream is open.");
         auto taken = handle.detachAndTake(js);
         auto sliced = taken.slice(js, 0, bytesWritten);
         auto entry = kj::rc<ByteQueue::Entry>(js, jsg::JsBufferSource(sliced));

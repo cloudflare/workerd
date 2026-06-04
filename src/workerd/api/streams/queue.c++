@@ -1065,7 +1065,6 @@ bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferSour
 
   size_t expectedOffset = handle.getOffset() + req.pullInto.filled;
 
-  // First check, the expectedOffset cannot
   JSG_REQUIRE(expectedOffset <= handle.size(), RangeError,
       "The given view has an invalid byte offset that is out of bounds of the original buffer.");
 
