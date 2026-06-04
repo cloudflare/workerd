@@ -133,6 +133,62 @@ function findReadableStreamKeys(
   return readableStreamKeys;
 }
 
+/**
+ * Convert `gateway` options into the `cf-aig-*` request headers that AI Gateway
+ * enforces. This mirrors `AiGateway.#getHeadersFromOptions` in `aig-api.ts` so
+ * that `env.AI.run(model, inputs, { gateway })` honors the same options as the
+ * Universal endpoint (`env.AI.gateway(id).run(...)`). `gateway.id` is
+ * intentionally not emitted here — it is conveyed via the request body / the
+ * `/ai-gateway/run` endpoint.
+ */
+function gatewayOptionsToHeaders(
+  gateway: GatewayOptions
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+
+  if (gateway.skipCache !== undefined) {
+    headers['cf-aig-skip-cache'] = gateway.skipCache ? 'true' : 'false';
+  }
+
+  if (gateway.cacheTtl) {
+    headers['cf-aig-cache-ttl'] = gateway.cacheTtl.toString();
+  }
+
+  if (gateway.metadata) {
+    headers['cf-aig-metadata'] = JSON.stringify(gateway.metadata);
+  }
+
+  if (gateway.cacheKey) {
+    headers['cf-aig-cache-key'] = gateway.cacheKey;
+  }
+
+  if (gateway.collectLog !== undefined) {
+    headers['cf-aig-collect-log'] = gateway.collectLog ? 'true' : 'false';
+  }
+
+  if (gateway.eventId !== undefined) {
+    headers['cf-aig-event-id'] = gateway.eventId;
+  }
+
+  if (gateway.requestTimeoutMs !== undefined) {
+    headers['cf-aig-request-timeout'] = gateway.requestTimeoutMs.toString();
+  }
+
+  if (gateway.retries !== undefined) {
+    if (gateway.retries.maxAttempts !== undefined) {
+      headers['cf-aig-max-attempts'] = gateway.retries.maxAttempts.toString();
+    }
+    if (gateway.retries.retryDelayMs !== undefined) {
+      headers['cf-aig-retry-delay'] = gateway.retries.retryDelayMs.toString();
+    }
+    if (gateway.retries.backoff !== undefined) {
+      headers['cf-aig-backoff'] = gateway.retries.backoff;
+    }
+  }
+
+  return headers;
+}
+
 export class Ai {
   #fetcher: Fetcher;
 
@@ -177,6 +233,12 @@ export class Ai {
       headers: {
         ...this.#options.sessionOptions?.extraHeaders,
         ...this.#options.extraHeaders,
+        // Translate gateway options into the cf-aig-* headers that AI Gateway
+        // enforces (e.g. requestTimeoutMs -> cf-aig-request-timeout). Placed
+        // after extraHeaders so the typed `gateway` option takes precedence.
+        ...(cleanedOptions.gateway
+          ? gatewayOptionsToHeaders(cleanedOptions.gateway)
+          : {}),
         'content-type': 'application/json',
         'cf-consn-sdk-version': '2.0.0',
         'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,

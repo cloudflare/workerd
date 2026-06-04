@@ -272,6 +272,64 @@ export const tests = {
     }
 
     {
+      // Gateway options must be forwarded as cf-aig-* request headers, not just
+      // in the body. Regression test for ESCALATION-3355: requestTimeoutMs was
+      // previously sent only in the body and therefore ignored by AI Gateway,
+      // which enforces the cf-aig-request-timeout header.
+      const resp = await env.ai.run(
+        'echoGatewayHeaders',
+        { prompt: 'test' },
+        {
+          gateway: {
+            id: 'my-gateway',
+            requestTimeoutMs: 1000,
+            cacheTtl: 3600,
+            skipCache: true,
+            cacheKey: 'abc',
+            metadata: { employee: 1233 },
+            collectLog: false,
+            eventId: 'evt-1',
+            retries: {
+              maxAttempts: 3,
+              retryDelayMs: 250,
+              backoff: 'exponential',
+            },
+          },
+        }
+      );
+
+      assert.deepStrictEqual(resp, {
+        headers: {
+          'cf-aig-request-timeout': '1000',
+          'cf-aig-cache-ttl': '3600',
+          'cf-aig-skip-cache': 'true',
+          'cf-aig-cache-key': 'abc',
+          'cf-aig-metadata': '{"employee":1233}',
+          'cf-aig-collect-log': 'false',
+          'cf-aig-event-id': 'evt-1',
+          'cf-aig-max-attempts': '3',
+          'cf-aig-retry-delay': '250',
+          'cf-aig-backoff': 'exponential',
+        },
+        requestUrl: 'https://workers-binding.ai/ai-gateway/run?version=3',
+      });
+    }
+
+    {
+      // Gateway requestTimeoutMs alone maps to cf-aig-request-timeout.
+      const resp = await env.ai.run(
+        'echoGatewayHeaders',
+        { prompt: 'test' },
+        { gateway: { id: 'my-gateway', requestTimeoutMs: 1000 } }
+      );
+
+      assert.deepStrictEqual(resp, {
+        headers: { 'cf-aig-request-timeout': '1000' },
+        requestUrl: 'https://workers-binding.ai/ai-gateway/run?version=3',
+      });
+    }
+
+    {
       // Test models
       const resp = await env.ai.models();
 

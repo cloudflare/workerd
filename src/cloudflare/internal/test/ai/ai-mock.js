@@ -74,6 +74,26 @@ export default {
       );
     }
 
+    if (modelName === 'echoGatewayHeaders') {
+      // Echo back the cf-aig-* headers the binding sent so the test can assert
+      // that gateway options are translated into headers (not just the body).
+      const aigHeaders = {};
+      for (const [key, value] of request.headers.entries()) {
+        if (key.startsWith('cf-aig-')) {
+          aigHeaders[key] = value;
+        }
+      }
+      return Response.json(
+        {
+          headers: aigHeaders,
+          requestUrl: request.url,
+        },
+        {
+          headers: respHeaders,
+        }
+      );
+    }
+
     if (modelName === 'readableStreamIputs') {
       return Response.json(
         {
