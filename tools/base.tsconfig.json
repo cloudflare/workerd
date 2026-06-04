@@ -10,7 +10,6 @@
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
     "composite": true,
-    "incremental": true,
     "exactOptionalPropertyTypes": true,
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,

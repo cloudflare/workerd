@@ -22,7 +22,6 @@ ts_project(
     name = "ts_project",
     srcs = glob(["*.ts"]),
     composite = True,
-    incremental = True,
     tsconfig = ":ts_config",
     deps = ["//src/node:node@tsproject"],
 )

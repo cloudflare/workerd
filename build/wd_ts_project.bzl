@@ -19,7 +19,6 @@ def wd_ts_project(name, srcs, deps, tsconfig_json, eslintrc_json = None, source_
         source_map = source_map,
         testonly = testonly,
         composite = composite,
-        incremental = True,
     )
 
     if eslintrc_json:
