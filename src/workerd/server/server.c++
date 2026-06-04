@@ -6143,8 +6143,9 @@ kj::Promise<void> Server::preloadPython(
     KJ_IF_SOME(release, pythonRelease) {
       auto version = getPythonBundleName(release);
 
-      // Fetch the Pyodide bundle.
-      co_await server::fetchPyodideBundle(pythonConfig, kj::mv(version), network, timer);
+      // Fetch the Pyodide bundle, verifying its integrity against the expected checksum.
+      co_await server::fetchPyodideBundle(
+          pythonConfig, kj::mv(version), release.getIntegrity(), network, timer);
 
       // Preload Python packages.
       KJ_IF_SOME(modulesSource, workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {

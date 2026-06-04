@@ -47,6 +47,7 @@ def _fmt_python_snapshot_release(
         baseline_snapshot_hash,
         flag,
         real_pyodide_version,
+        integrity,
         **_kwds):
     content = ", ".join(
         [
@@ -57,6 +58,7 @@ def _fmt_python_snapshot_release(
             "backport = %s" % backport,
             'baselineSnapshotHash = "%s"' % baseline_snapshot_hash,
             'flagName = "%s"' % flag,
+            'integrity = "%s"' % integrity,
         ],
     )
     return "(%s)" % content

@@ -538,6 +538,16 @@ kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
 // Constructs the path to a Python package in the package repository
 kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);
 
+// Computes the subresource-integrity-style checksum ("sha256-<base64>") of the given bytes.
+kj::String computePyodideBundleIntegrity(kj::ArrayPtr<const kj::byte> bytes);
+
+// Verifies that a fetched/downloaded Pyodide bundle matches the expected subresource-integrity
+// checksum from the release metadata. Throws on mismatch. Verification is skipped only for the
+// "dev" bundle (built locally, no published checksum); for any other bundle a blank
+// `expectedIntegrity` is itself an error.
+void verifyPyodideBundleIntegrity(
+    kj::StringPtr version, kj::StringPtr expectedIntegrity, kj::ArrayPtr<const kj::byte> bytes);
+
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
