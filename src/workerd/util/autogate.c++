@@ -31,6 +31,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "updated-auto-allocate-chunk-size"_kj;
     case AutogateKey::STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME:
       return "starttls-reject-expected-server-hostname"_kj;
+    case AutogateKey::HIBERNATABLE_WEBSOCKET_REFACTOR:
+      return "hibernatable-websocket-refactor"_kj;
     case AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP:
       return "per-isolate-javascript-bootstrap"_kj;
     case AutogateKey::NumOfKeys:
