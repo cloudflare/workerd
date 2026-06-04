@@ -676,11 +676,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
-  // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
-  // waitUntil'ed callback safely without worrying about whether this coroutine gets canceled.
+  // This vestigial type used to hold more than just this bool.
+  // TODO(cleanup): There's probably a better way to pass this bool through.
   struct QueueEventHolder: public kj::Refcounted {
-    jsg::Ref<QueueEvent> event = nullptr;
-    kj::Maybe<kj::Promise<void>> exportedHandlerProm;
     bool isServiceWorkerHandler = false;
   };
   auto queueEventHolder = kj::refcounted<QueueEventHolder>();
@@ -689,7 +687,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
   auto runProm = context.run(
       [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
           &metrics = incomingRequest->getMetrics(), versionInfo = kj::mv(versionInfo),
-          props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
+          props = kj::mv(props),
+          isDynamicDispatch](Worker::Lock& lock) mutable -> kj::Promise<void> {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
 
@@ -703,9 +702,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
         lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch),
         typeHandler);
-    queueEvent->event = kj::mv(startResp.event);
-    queueEvent->exportedHandlerProm = kj::mv(startResp.exportedHandlerProm);
     queueEvent->isServiceWorkerHandler = startResp.isServiceWorkerHandler;
+
+    KJ_IF_SOME(p, startResp.exportedHandlerProm) {
+      return kj::mv(p);
+    } else {
+      return kj::READY_NOW;
+    }
   });
 
   // 3. Now that we've (asynchronously) called into the event handler, wait on all necessary async
@@ -724,15 +727,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     // finishScheduled, but only waiting on the promise returned by the event handler rather than on
     // all waitUntil'ed promises.
     auto outcome = co_await runProm
-                       .then([queueEvent = kj::addRef(
-                                  *queueEventHolder)]() mutable -> kj::Promise<EventOutcome> {
-      // If the queue handler returned a promise, wait on the promise.
-      KJ_IF_SOME(handlerProm, queueEvent->exportedHandlerProm) {
-        return handlerProm.then([]() { return EventOutcome::OK; });
-      }
-      // If not, we can consider the invocation complete.
-      return EventOutcome::OK;
-    })
+                       .then([]() mutable -> kj::Promise<EventOutcome> { return EventOutcome::OK; })
                        .catch_([](kj::Exception&& e) {
       // If any exceptions were thrown, mark the outcome accordingly.
       return EventOutcome::EXCEPTION;
