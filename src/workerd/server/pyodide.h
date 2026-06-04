@@ -15,10 +15,15 @@
 
 namespace workerd::server {
 
-// Used to preload the Pyodide bundle during workerd startup
+// Used to preload the Pyodide bundle during workerd startup.
+//
+// `integrity` is a subresource-integrity-style checksum ("sha256-<base64>") used to verify the
+// integrity of the bundle when downloaded from the network. It may be empty (e.g. for the "dev"
+// version), in which case no verification is performed.
 kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig,
     kj::String version,
+    kj::StringPtr integrity,
     kj::Network& network,
     kj::Timer& timer);
 

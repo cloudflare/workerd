@@ -47,6 +47,7 @@ void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>&
 kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig,
     kj::String version,
+    kj::StringPtr integrity,
     kj::Network& network,
     kj::Timer& timer) {
   if (pyConfig.pyodideBundleManager.getPyodideBundle(version) != kj::none) {
@@ -56,6 +57,7 @@ kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
   auto maybePyodideBundleFile = getPyodideBundleFile(pyConfig.pyodideDiskCacheRoot, version);
   KJ_IF_SOME(pyodideBundleFile, maybePyodideBundleFile) {
     auto body = pyodideBundleFile->readAllBytes();
+    api::pyodide::verifyPyodideBundleIntegrity(version, integrity, body);
     pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
     co_return pyConfig.pyodideBundleManager.getPyodideBundle(version);
   }
@@ -85,6 +87,8 @@ kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
   auto res = co_await req.response;
   KJ_ASSERT(res.statusCode == 200, "Request for Pyodide bundle failed", url);
   auto body = co_await res.body->readAllBytes();
+
+  api::pyodide::verifyPyodideBundleIntegrity(version, integrity, body);
 
   writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
 
