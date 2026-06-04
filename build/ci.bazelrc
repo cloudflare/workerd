@@ -9,6 +9,8 @@ build:ci --verbose_failures
 # closer towards the suggested value of 200. Note the number of maximum build jobs is controlled by
 # the --local_resources=cpu flag and still limited to the number of cores by default.
 build:ci --jobs=64
+# attempt to recover from remote cache errors without needing to retry build
+build:ci --rewind_lost_inputs
 # Do not check for changes in external repository files, should speed up bazel invocations after the first one
 build:ci --noexperimental_check_external_repository_files
 # Only build runfile trees when needed. Runfile trees are useful for directly invoking bazel-built
