@@ -13,6 +13,24 @@
 
 namespace workerd::api {
 
+// Used with KJ_SWITCH_ONEOF statements inside while loops to indicate whether
+// to continue the outer loop or break out of it.
+constexpr uint8_t kContinueFlag = 0x01;
+constexpr uint8_t kBreakFlag = 0x02;
+
+void setContinueFlag(uint8_t& flag) {
+  flag |= kContinueFlag;
+}
+void setBreakFlag(uint8_t& flag) {
+  flag |= kBreakFlag;
+}
+bool shouldContinue(uint8_t flag) {
+  return (flag & kContinueFlag) != 0;
+}
+bool shouldBreak(uint8_t flag) {
+  return (flag & kBreakFlag) != 0;
+}
+
 // ======================================================================================
 // ValueQueue
 #pragma region ValueQueue
@@ -278,12 +296,17 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     KJ_IF_SOME(errorPromise, drainBuffer(js, impl, ready, chunks, totalRead, isClosing, maxRead)) {
       return kj::mv(errorPromise);
     }
+
+    // Our ready reference should still be valid here.
+    KJ_ASSERT(impl.state.isActive());
+
     ready.hasPendingDrainingRead = false;
     bool done = ready.buffer.empty() || isClosing;
     // If isClosing, finalize the consumer so onConsumerClose fires promptly.
     // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
     if (isClosing) {
       impl.maybeDrainAndSetState(js);
+      // Don't touch ready after this point since it may be dangling.
     }
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
@@ -298,6 +321,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
     // maybeDrainAndSetState may transition consumer to Closed, making `ready` dangling.
     if (isClosing) {
       impl.maybeDrainAndSetState(js);
+      // Don't touch ready after this point since it may be dangling.
     }
     return js.resolvedPromise(DrainingReadResult{
       .chunks = chunks.releaseAsArray(),
@@ -1426,6 +1450,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
       // There must be at least one item in the buffer.
       auto& item = state.buffer.front();
       auto handle = request.pullInto.store.getHandle(js);
+      uint8_t skipFlag = 0;
       KJ_SWITCH_ONEOF(item) {
         KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
           // We reached the end of the buffer! All data has been consumed.
@@ -1472,7 +1497,8 @@ void ByteQueue::handleRead(jsg::Lock& js,
           if (entry.offset == entrySize) {
             auto released = kj::mv(item);
             state.buffer.pop_front();
-            continue;
+            setContinueFlag(skipFlag);
+            break;
           }
 
           // Otherwise, it is OK that there is data remaining but the amountToConsume
@@ -1482,6 +1508,17 @@ void ByteQueue::handleRead(jsg::Lock& js,
           KJ_REQUIRE(amountToConsume == 0);
         }
       }
+      // This is a defense-in-depth check. We're in a while loop. Hidden
+      // within the KJ_CASE_ONEOF cases are nested for loops. While the
+      // bodies of the KJ_CASE_ONEOF *appear* to be running in the scope
+      // of the outer while loop, they are not directly! If there is a
+      // continue statement nested within those, that just ends up operating
+      // on the innermost loop. This while loop happens to be safe by
+      // accident because there's nothing following the KJ_SWITCH_ONEOF that
+      // could be problematic but if we were to add something in the future,
+      // we could run into issues.
+      if (shouldContinue(skipFlag)) continue;
+      if (shouldBreak(skipFlag)) break;
     }
     return false;
   };
@@ -1590,6 +1627,7 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
       // The pending read request should not have been popped off the queue.
       KJ_ASSERT(&pendingReadRequest == state.readRequests.front());
       auto& next = state.buffer.front();
+      uint8_t skipFlag = 0;
       KJ_SWITCH_ONEOF(next) {
         KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
           // We've reached the end! queueTotalSize should be zero. We need to
@@ -1620,7 +1658,8 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
           if (sourcePtr.size() == 0) {
             auto released = kj::mv(next);
             state.buffer.pop_front();
-            continue;
+            setContinueFlag(skipFlag);
+            break;
           }
 
           // sourceStart is the start of the remaining data in the current entry that
@@ -1750,7 +1789,8 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
             // Continuing here means that our pending read still has space to fill
             // and we might still have value entries to fill it. We'll iterate around
             // and see where we get.
-            continue;
+            setContinueFlag(skipFlag);
+            break;
           }
 
           // This read did not consume everything in this entry but doesn't have
@@ -1772,6 +1812,8 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
           return false;
         }
       }
+      if (shouldContinue(skipFlag)) continue;
+      if (shouldBreak(skipFlag)) break;
     }
 
     // If we get here, we've consumed everything in the buffer. The queue total size
