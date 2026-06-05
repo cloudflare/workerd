@@ -100,6 +100,10 @@ class FastMethodContext: public jsg::Object, public jsg::ContextGlobal {
     return str.size();
   }
 
+  int32_t unwrapBufferSource(jsg::Lock& js, jsg::BufferSource source) {
+    return source.size();
+  }
+
   int32_t unwrapMaybe(jsg::Lock& js, kj::Maybe<kj::String> str) {
     KJ_IF_SOME(s, str) {
       return s.size();
@@ -142,6 +146,7 @@ class FastMethodContext: public jsg::Object, public jsg::ContextGlobal {
     JSG_METHOD(unwrapStruct);
     JSG_METHOD(unwrapUint);
     JSG_METHOD(unwrapString);
+    JSG_METHOD(unwrapBufferSource);
     JSG_METHOD(unwrapMaybe);
     JSG_METHOD(unwrapOptional);
     JSG_METHOD(unwrapLenientOptional);
@@ -207,6 +212,8 @@ KJ_TEST("type unwrapping arguments") {
   KJ_ASSERT(runTest({"unwrapUint(4)"_kjc, "number"_kjc, "4"_kjc}) == CallCounter(2, 1));
   KJ_ASSERT(runTest({"unwrapStruct({i: 3})"_kjc, "number"_kjc, "3"_kjc}) == CallCounter(2, 1));
   KJ_ASSERT(runTest({"unwrapString('0123')"_kjc, "number"_kjc, "4"_kjc}) == CallCounter(2, 1));
+  KJ_ASSERT(runTest({"unwrapBufferSource(new Uint8Array(256))"_kjc, "number"_kjc, "256"_kjc}) ==
+      CallCounter(2, 1));
   KJ_ASSERT(runTest({"unwrapMaybe(undefined)"_kjc, "number"_kjc, "-1"_kjc}) == CallCounter(2, 1));
   KJ_ASSERT(runTest({"unwrapMaybe('foo')"_kjc, "number"_kjc, "3"_kjc}) == CallCounter(2, 1));
   KJ_ASSERT(
