@@ -992,8 +992,9 @@ jsg::Ref<ReadableStream> createFiniteByobReadableStream(jsg::Lock& js, size_t ch
         KJ_ASSERT_NONNULL(controller.template tryGet<jsg::Ref<ReadableByteStreamController>>()));
     static int count = 0;
     if (count++ < 10) {
+      // TODO(soon): Switch from jsg::BufferSource
       auto ab = jsg::JsArrayBuffer::create(js, chunkSize);
-      c->enqueue(js, jsg::JsBufferSource(ab));
+      c->enqueue(js, jsg::BufferSource(js, ab));
     }
     if (count == 10) {
       c->close(js);

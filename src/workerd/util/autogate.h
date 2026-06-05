@@ -38,6 +38,8 @@ enum class AutogateKey {
   WASM_SHUTDOWN_SIGNAL_SHIM,
   // Enable fast TextEncoder implementation using simdutf
   ENABLE_FAST_TEXTENCODER,
+  // Enable draining read on standard streams
+  ENABLE_DRAINING_READ_ON_STANDARD_STREAMS,
   // Make SqlStorage::isAllowedName case-insensitive and enforce it on virtual tables (FTS5).
   SQL_RESTRICT_RESERVED_NAMES,
   // Increase the SQLite hard heap limit from 512 MiB to 8 GiB.
