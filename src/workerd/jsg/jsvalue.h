@@ -873,11 +873,11 @@ inline kj::Array<T> JsString::toArray(Lock& js, WriteFlags options) const {
   if constexpr (kj::isSameType<T, kj::byte>()) {
     KJ_DASSERT(inner->ContainsOnlyOneByte());
     auto buf = kj::heapArray<kj::byte>(inner->Length());
-    inner->WriteOneByteV2(js.v8Isolate, 0, buf.size(), buf.begin(), options);
+    inner->WriteOneByte(js.v8Isolate, 0, buf.size(), buf.begin(), options);
     return kj::mv(buf);
   } else {
     auto buf = kj::heapArray<uint16_t>(inner->Length());
-    inner->WriteV2(js.v8Isolate, 0, buf.size(), buf.begin(), options);
+    inner->Write(js.v8Isolate, 0, buf.size(), buf.begin(), options);
     return kj::mv(buf);
   }
 }
@@ -1419,7 +1419,7 @@ inline bool JsString::isOneByte(jsg::Lock& js) const {
 }
 
 inline size_t JsString::utf8Length(jsg::Lock& js) const {
-  return inner->Utf8LengthV2(js.v8Isolate);
+  return inner->Utf8Length(js.v8Isolate);
 }
 
 }  // namespace workerd::jsg

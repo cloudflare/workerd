@@ -15,14 +15,14 @@ namespace workerd::api {
   {                                                                                                \
     v8::Local<v8::String> v8str = jsg::check(handle->ToString(js.v8Context()));                    \
     char* ptr;                                                                                     \
-    size_t len = v8str->Utf8LengthV2(js.v8Isolate);                                                \
+    size_t len = v8str->Utf8Length(js.v8Isolate);                                                  \
     if (len < sizeHint) {                                                                          \
       ptr = name##_buf;                                                                            \
     } else {                                                                                       \
       name##_heap = kj::heapArray<char>(len + 1);                                                  \
       ptr = name##_heap.begin();                                                                   \
     }                                                                                              \
-    v8str->WriteUtf8V2(js.v8Isolate, ptr, len);                                                    \
+    v8str->WriteUtf8(js.v8Isolate, ptr, len);                                                      \
     name = kj::StringPtr(ptr, len);                                                                \
   }
 
@@ -104,8 +104,8 @@ struct JsCapnpConverter {
         case capnp::schema::Type::TEXT: {
           auto str = jsg::check(jsValue->ToString(js.v8Context()));
           capnp::Orphan<capnp::Text> orphan =
-              orphanage.newOrphan<capnp::Text>(str->Utf8LengthV2(js.v8Isolate));
-          str->WriteUtf8V2(js.v8Isolate, orphan.get().begin(), orphan.get().size());
+              orphanage.newOrphan<capnp::Text>(str->Utf8Length(js.v8Isolate));
+          str->WriteUtf8(js.v8Isolate, orphan.get().begin(), orphan.get().size());
           return kj::mv(orphan);
         }
         case capnp::schema::Type::DATA:

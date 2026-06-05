@@ -1329,8 +1329,13 @@ struct ResourceTypeBuilder {
 
     if constexpr (isFastApiCompatible<decltype(method)>) {
       if (typeWrapper.isFastApiEnabled()) {
-        auto cFunction = v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self,
-            decltype(method), method, ArgumentIndexes<decltype(method)>>::template fastCallback<>);
+        // V8's FunctionTemplate::SetCallHandler stores a pointer to this CFunction (not a copy),
+        // so it must outlive the FunctionTemplate. This register function is a unique template
+        // instantiation per method, so a function-local static gives us exactly one persistent
+        // CFunction per registered method.
+        static const auto cFunction =
+            v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self, decltype(method),
+                method, ArgumentIndexes<decltype(method)>>::template fastCallback<>);
         auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
             &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
                 ArgumentIndexes<decltype(method)>>::callback,
@@ -1357,8 +1362,9 @@ struct ResourceTypeBuilder {
 
     if constexpr (isFastApiCompatible<Method>) {
       if (typeWrapper.isFastApiEnabled()) {
-        auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name, Self, Method,
-            method, ArgumentIndexes<Method>>::template fastCallback<>);
+        // Must outlive the FunctionTemplate; see registerMethod for details.
+        static const auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name,
+            Self, Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
 
         // Create a function template with both slow and fast paths
         // Notably, we specify an empty signature because a static method invocation will have no holder
@@ -1419,12 +1425,13 @@ struct ResourceTypeBuilder {
     bool useSlowApi = true;
     if constexpr (isFastApiCompatible<Getter> && isFastApiCompatible<Setter>) {
       if (typeWrapper.isFastApiEnabled()) {
-        auto getterCFunction = v8::CFunction::Make(Gcb::template fastCallback<>);
+        // These CFunctions must outlive the FunctionTemplates; see registerMethod for details.
+        static const auto getterCFunction = v8::CFunction::Make(Gcb::template fastCallback<>);
         getterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Gcb::callback,
             v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
             v8::SideEffectType::kHasSideEffect, {&getterCFunction, 1});
 
-        auto setterCFunction = v8::CFunction::Make(Scb::template fastCallback<>);
+        static const auto setterCFunction = v8::CFunction::Make(Scb::template fastCallback<>);
         setterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Scb::callback,
             v8::Local<v8::Value>(), signature, specCompliant ? 1 : 0,
             v8::ConstructorBehavior::kThrow, v8::SideEffectType::kHasSideEffect,
@@ -1893,6 +1900,15 @@ class ResourceWrapper {
     // means "call the callback registered on the isolate to check" -- setting it to `true` means
     // "skip callback and just allow".)
     context->AllowCodeGenerationFromStrings(false);
+
+    // Register a placeholder for Temporal's high-resolution "now" source. We don't enable the
+    // Temporal API yet, but V8 uses this callback to obtain the current time for Temporal once it
+    // is enabled. Returning a constant rather than a real high-resolution clock is important for
+    // Spectre mitigation (high-resolution timers are a timing-attack vector). Install a dummy
+    // returning 0 now so we don't forget this requirement when Temporal is turned on; revisit the
+    // returned value (and its resolution) at that point.
+    context->SetTemporalHostSystemUTCEpochNanosecondsCallback(
+        [](v8::Local<v8::Context>) -> int64_t { return 0; });
 
     if (!options.enableWeakRef) {
       check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));
