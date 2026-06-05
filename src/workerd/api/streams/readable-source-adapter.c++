@@ -613,9 +613,8 @@ kj::Maybe<kj::Array<const kj::byte>> copyFromSource(
         // again into our buffer. This is because the V8 string UTF-8
         // write API does not support partial writes with an offset.
         auto data = view.toUSVString(js);
-        context.buffer.first(toCopy).copyFrom(data.asBytes().first(toCopy));
+        context.buffer.write(data.asBytes().first(toCopy));
         context.totalRead += toCopy;
-        context.buffer = context.buffer.slice(toCopy);
         KJ_DASSERT(context.buffer.size() == 0);
         return kj::Maybe(data.asBytes().slice(toCopy).attach(kj::mv(data)));
       }
@@ -636,9 +635,8 @@ kj::Maybe<kj::Array<const kj::byte>> copyFromSource(
         return kj::none;
       }
 
-      context.buffer.first(toCopy).copyFrom(src.first(toCopy));
+      context.buffer.write(src.first(toCopy));
       context.totalRead += toCopy;
-      context.buffer = context.buffer.slice(toCopy);
 
       if (toCopy < src.size()) {
         KJ_DASSERT(context.buffer.size() == 0);
@@ -661,9 +659,8 @@ kj::Maybe<kj::Array<const kj::byte>> copyFromSource(
         return kj::none;
       }
 
-      context.buffer.first(toCopy).copyFrom(src.first(toCopy));
+      context.buffer.write(src.first(toCopy));
       context.totalRead += toCopy;
-      context.buffer = context.buffer.slice(toCopy);
 
       if (toCopy < src.size()) {
         KJ_DASSERT(context.buffer.size() == 0);
@@ -853,8 +850,7 @@ kj::Promise<size_t> ReadableSourceKjAdapter::readImpl(
 
     // Otherwise, consume what we do have left over.
     auto size = readable.view.size();
-    dest.first(size).copyFrom(readable.view);
-    dest = dest.slice(size);
+    dest.write(readable.view);
 
     active.state.transitionTo<Active::Idle>();
 

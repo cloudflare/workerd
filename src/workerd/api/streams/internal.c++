@@ -248,8 +248,7 @@ class AllReader final {
         continue;
       }
       KJ_DASSERT(slicedPart.size() <= out.size());
-      out.first(slicedPart.size()).copyFrom(slicedPart);
-      out = out.slice(slicedPart.size());
+      out.write(slicedPart);
     }
   }
 };
