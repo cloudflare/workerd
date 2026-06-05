@@ -328,7 +328,7 @@ class CompressionStreamBase: public kj::Refcounted,
   kj::Promise<size_t> tryReadInternal(kj::ArrayPtr<kj::byte> dest, size_t minBytes) {
     const auto copyIntoBuffer = [this](kj::ArrayPtr<kj::byte> dest) {
       auto maxBytesToCopy = kj::min(dest.size(), output.size());
-      dest.first(maxBytesToCopy).copyFrom(output.take(maxBytesToCopy));
+      dest.write(output.take(maxBytesToCopy));
       output.maybeShift();
       return maxBytesToCopy;
     };

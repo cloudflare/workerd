@@ -434,8 +434,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         KJ_DASSERT(ptr.size() > 0);
         KJ_DASSERT(piece.size() <= ptr.size());
         if (piece.size() == 0) continue;
-        ptr.first(piece.size()).copyFrom(piece);
-        ptr = ptr.slice(piece.size());
+        ptr.write(piece);
       }
 
       return context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));

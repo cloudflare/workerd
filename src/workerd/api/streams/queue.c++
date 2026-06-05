@@ -965,7 +965,7 @@ bool ByteQueue::ByobRequest::respond(
       auto start = sourcePtr.slice(req.pullInto.filled);
 
       // Safely copy the data over into the entry.
-      entry->toArrayPtr(js).first(amount).copyFrom(start.first(amount));
+      entry->toArrayPtr(js).write(start.first(amount));
 
       // Push the entry into the other consumers, skipping this one.
       qu.push(js, kj::mv(entry), consumer);
@@ -1029,7 +1029,7 @@ bool ByteQueue::ByobRequest::respond(
     auto start = sourcePtr.slice(amount - unaligned);
     KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, unaligned)) {
       auto excess = kj::rc<Entry>(js, jsg::JsBufferSource(store));
-      excess->toArrayPtr(js).first(unaligned).copyFrom(start.first(unaligned));
+      excess->toArrayPtr(js).write(start.first(unaligned));
       maybeExcess = kj::mv(excess);
     } else {
       js.throwException(js.error("Failed to allocate memory for the byob read response."_kj));
@@ -1327,7 +1327,7 @@ void ByteQueue::handlePush(jsg::Lock& js,
           KJ_REQUIRE(sourceSize > 0 && sourceSize < destAmount);
 
           // Safely copy sourceSize bytes from sourcePtr to destPtr
-          destPtr.first(sourceSize).copyFrom(sourcePtr.slice(entry.offset));
+          destPtr.write(sourcePtr.slice(entry.offset));
 
           // We have completely consumed the data in this entry and can safely free
           // our reference to it now. Yay!
@@ -1377,7 +1377,7 @@ void ByteQueue::handlePush(jsg::Lock& js,
     // where we start copying.
     auto entryPtr = newEntry->toArrayPtr(js);
     auto destPtr = handle.asArrayPtr().slice(pending.pullInto.filled);
-    destPtr.first(amountToCopy).copyFrom(entryPtr.slice(entryOffset).first(amountToCopy));
+    destPtr.write(entryPtr.slice(entryOffset).first(amountToCopy));
 
     // Yay! this pending read has been fulfilled. There might be more tho. Let's adjust
     // the amountAvailable and continue trying to consume data.
@@ -1475,7 +1475,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
           auto sourcePtr = entry.entry->toArrayPtr(js).slice(entry.offset);
           auto destPtr = handle.asArrayPtr().slice(request.pullInto.filled);
 
-          destPtr.first(amountToCopy).copyFrom(sourcePtr.first(amountToCopy));
+          destPtr.write(sourcePtr.first(amountToCopy));
 
           request.pullInto.filled += amountToCopy;
 
@@ -1728,7 +1728,7 @@ bool ByteQueue::handleMaybeClose(jsg::Lock& js,
           KJ_ASSERT(amountToCopy <= sourceStart.size());
 
           // Safely copy amountToCopy bytes from the source into the destination.
-          destPtr.first(amountToCopy).copyFrom(sourceStart.first(amountToCopy));
+          destPtr.write(sourceStart.first(amountToCopy));
           pendingReadRequest.pullInto.filled += amountToCopy;
 
           // We do not need to adjust down the atLeast here because, no matter what,

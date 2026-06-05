@@ -100,7 +100,7 @@ class MemoryAsyncInputStream: public kj::AsyncInputStream {
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     auto dest = kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes);
     size_t amount = kj::min(dest.size(), data_.size());
-    dest.first(amount).copyFrom(data_.first(amount));
+    dest.write(data_.first(amount));
     data_ = data_.slice(amount);
     return amount;
   }

@@ -619,11 +619,7 @@ kj::Promise<void> WritableStreamSinkKjAdapter::write(
     // would incur the overhead of a separate promise and microtask checkpoint.
     // By collapsing into a single write we reduce that overhead.
     auto source = jsg::JsArrayBuffer::create(js, totalAmount);
-    auto ptr = source.asArrayPtr();
-    for (auto piece: pieces) {
-      ptr.first(piece.size()).copyFrom(piece);
-      ptr = ptr.slice(piece.size());
-    }
+    source.asArrayPtr().write(pieces);
 
     auto promise =
         KJ_ASSERT_NONNULL(writer->isReady(js))
