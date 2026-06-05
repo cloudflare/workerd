@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { match, rejects, strictEqual, throws } from 'assert';
+import { match, rejects, strictEqual } from 'assert';
 import { AsyncLocalStorage } from 'async_hooks';
 import { inspect } from 'util';
 import { mock } from 'node:test';
@@ -139,6 +139,19 @@ export const cyclicAwaitsWorks = {
   },
 };
 
+export const crossContextResolveViaSubrequest = {
+  async test(_, env) {
+    // A request creates a promise, delegates resolution to a subrequest, then
+    // awaits the promise after the subrequest completes. At the point of await
+    // the request has no other pending I/O.
+    const res = await env.subrequest.fetch(
+      'http://example.org/resolve-via-subrequest'
+    );
+    strictEqual(res.status, 200);
+    strictEqual(await res.text(), 'ok');
+  },
+};
+
 export default {
   async fetch(req, env, ctx) {
     if (req.url.endsWith('/resolve')) {
@@ -157,6 +170,10 @@ export default {
       return asyncIterator(req, env, ctx);
     } else if (req.url.endsWith('/cyclic')) {
       return cyclicPromise(req, env, ctx);
+    } else if (req.url.endsWith('/resolve-via-subrequest')) {
+      return resolveViaSubrequest(req, env, ctx);
+    } else if (req.url.endsWith('/resolve-via-subrequest-helper')) {
+      return resolveViaSubrequestHelper(req, env, ctx);
     }
     throw new Error('Invalid URL');
   },
@@ -195,22 +212,22 @@ async function resolveTest(req, env, ctx) {
 
   // This is our second request. Here, all we do is resolve the promise.
 
-  // While we are deferring the continuations from the promise, the promise state
-  // change should happen immediately. Before calling resolve, the state should
-  // be pending. After calling resolve, the state should be resolved showing
-  // an undefined value. Updating the state of the promise immediately and
-  // synchronously is required by the language specification.
-  // See: https://tc39.es/ecma262/#sec-promise-resolve-functions
+  // Before resolving, the promise should be pending.
   strictEqual(inspect(globalThis.request1.promise), 'Promise { <pending> }');
   als.run('abc', () => globalThis.request1.resolve());
-  strictEqual(inspect(globalThis.request1.promise), 'Promise { undefined }');
+  // With cross-context promise settlement, the entire settlement (status
+  // update + reaction triggering) is deferred to the owning IoContext.
+  // The promise may still appear pending here.
 
   const p = globalThis.request1.promise;
 
   globalThis.request1 = undefined;
 
-  // We ought to be able to do a cross-request wait on the promise still.
+  // Verify the promise eventually settles by awaiting it from this context.
   await p;
+
+  // After awaiting, confirm the promise is now resolved.
+  strictEqual(inspect(p), 'Promise { undefined }');
 
   return new Response('ok');
 }
@@ -336,13 +353,11 @@ async function unhandledRejection(req, env, ctx) {
     globalThis.addEventListener(
       'unhandledrejection',
       (event) => {
-        // Here we have a gotcha! The unhandledrejection event is dispatched
-        // synchronously when the promise is rejected. It does not get deferred.
-        // so the IoContext here will be the second request's IoContext! This
-        // means that our ab.aborted check will fail!
-        throws(() => ab.aborted, {
-          message: /I\/O type: RefcountedCanceler/,
-        });
+        // With deferred cross-context settlement, the rejection (and therefore
+        // the unhandledrejection event) is dispatched in the owning IoContext,
+        // not the rejecting request's context. This means ab.aborted should
+        // work correctly here — we are in the right IoContext.
+        strictEqual(ab.aborted, true);
         strictEqual(event.reason, reason);
         rejectPromise.resolve();
       },
@@ -454,5 +469,46 @@ async function cyclicPromise(req, env, ctx) {
   globalThis.cyclic.resolve(foo());
   globalThis.cyclic = undefined;
 
+  return new Response('ok');
+}
+
+async function resolveViaSubrequest(req, env, ctx) {
+  // This handler creates a promise then delegates its resolution to a nested
+  // subrequest. After the subrequest completes, it awaits the promise. At that
+  // point the subrequest has already called resolve() from its own IoContext,
+  // so the cross-context settlement action is guaranteed to be queued in this
+  // request's delete queue before the await.
+  //
+  // This is expected to pass because the hang detector (whenThreadIdle) waits
+  // for pending event port signals — including the cross-thread fulfiller
+  // notification from the delete queue — before declaring the thread idle.
+  // The drain loop processes the settlement action before the hang fires.
+  //
+  // Note that we deliberately do NOT call setupWaiter(ctx) here. If the
+  // resolution had NOT already happened-before the await (e.g. if it were
+  // deferred via waitUntil + scheduler.wait), the runtime would have no way
+  // to distinguish "waiting for a cross-context resolution that will arrive
+  // later" from "waiting on a promise that will never resolve". In that case
+  // the hang detector should fire, and the caller must use setupWaiter(ctx)
+  // or ctx.waitUntil() to keep the request alive explicitly.
+  const { promise, resolve } = Promise.withResolvers();
+  globalThis.resolveViaSubrequest = { resolve };
+  const ab = AbortSignal.abort();
+  strictEqual(ab.aborted, true);
+
+  const res = await env.subrequest.fetch(
+    'http://example.org/resolve-via-subrequest-helper'
+  );
+  strictEqual(res.status, 200);
+
+  const result = await promise;
+  strictEqual(ab.aborted, true);
+  strictEqual(result, 'resolved-by-subrequest');
+  return new Response('ok');
+}
+
+async function resolveViaSubrequestHelper(req, env, ctx) {
+  globalThis.resolveViaSubrequest.resolve('resolved-by-subrequest');
+  globalThis.resolveViaSubrequest = undefined;
   return new Response('ok');
 }

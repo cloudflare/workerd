@@ -16,6 +16,7 @@ class Counter extends RpcTarget {
 
   [Symbol.dispose]() {
     ++this.disposeCount;
+    this.onDispose?.();
   }
 }
 
@@ -177,6 +178,8 @@ export let rpcParamsDupFunction = {
 export let rpcReturnsTransferOwnership = {
   async test(controller, env, ctx) {
     let counter = new Counter();
+    const { promise: disposed, resolve } = Promise.withResolvers();
+    counter.onDispose = resolve;
 
     {
       using stub = new RpcStub(counter);
@@ -186,7 +189,11 @@ export let rpcReturnsTransferOwnership = {
       assert.strictEqual(counter.disposeCount, 0);
     }
 
-    await scheduler.wait(0);
+    // Disposing a stub asynchronously disposes the RpcTarget. Await the
+    // disposal callback rather than relying on a fixed number of event
+    // loop ticks.
+    await disposed;
     assert.strictEqual(counter.disposeCount, 1);
   },
 };
+
