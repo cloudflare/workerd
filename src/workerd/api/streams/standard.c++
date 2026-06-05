@@ -2908,9 +2908,10 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
   // state change only fires after the promise resolves/rejects and the Consumer's
   // this-capturing callbacks have already run.
   auto wrapDrainingRead =
-      [this](jsg::Lock& js,
-          jsg::Promise<DrainingReadResult> promise) -> jsg::Promise<DrainingReadResult> {
-    return promise.then(js, [this](jsg::Lock& js, DrainingReadResult result) {
+      [this](jsg::Lock& js, jsg::Promise<DrainingReadResult> promise,
+          jsg::Ref<ReadableStream> ref) mutable -> jsg::Promise<DrainingReadResult> {
+    // the ref keeps the `this` alive.
+    return promise.then(js, [this, ref = ref.addRef()](jsg::Lock& js, DrainingReadResult result) {
       if (state.endOperation()) {
         // A pending state was applied. Call the appropriate callback.
         if (state.template is<StreamStates::Closed>()) {
@@ -2926,7 +2927,7 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
         }
       }
       return kj::mv(result);
-    }, [this](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
+    }, [this, self = ref.addRef()](jsg::Lock& js, jsg::Value exception) -> DrainingReadResult {
       state.clearPendingState();
       (void)state.endOperation();
       js.throwException(kj::mv(exception));
@@ -2954,7 +2955,7 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
       // beginOperation MUST be before consumer->drainingRead() — see comment above.
       state.beginOperation();
       JSG_TRY(js) {
-        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead), addRef());
       }
       JSG_CATCH(exception) {
         state.clearPendingState();
@@ -2968,7 +2969,7 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamJsController::draining
       // beginOperation MUST be before consumer->drainingRead() — see comment above.
       state.beginOperation();
       JSG_TRY(js) {
-        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead));
+        return wrapDrainingRead(js, consumer->drainingRead(js, maxRead), addRef());
       }
       JSG_CATCH(exception) {
         state.clearPendingState();

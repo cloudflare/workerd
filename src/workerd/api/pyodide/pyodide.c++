@@ -11,6 +11,7 @@
 #include <workerd/util/autogate.h>
 #include <workerd/util/strings.h>
 
+#include <openssl/sha.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
 
 #include <capnp/dynamic.h>
@@ -20,6 +21,7 @@
 #include <kj/compat/gzip.h>
 #include <kj/compat/tls.h>
 #include <kj/debug.h>
+#include <kj/encoding.h>
 #include <kj/string.h>
 
 #include <algorithm>  // for std::sort
@@ -592,6 +594,27 @@ void DiskCache::putSnapshot(jsg::Lock& js, kj::String key, kj::Array<kj::byte> d
   } else {
     return;
   }
+}
+
+kj::String computePyodideBundleIntegrity(kj::ArrayPtr<const kj::byte> bytes) {
+  kj::byte hash[SHA256_DIGEST_LENGTH]{};
+  SHA256(bytes.begin(), bytes.size(), hash);
+  return kj::str("sha256-", kj::encodeBase64(kj::arrayPtr(hash, SHA256_DIGEST_LENGTH)));
+}
+
+void verifyPyodideBundleIntegrity(
+    kj::StringPtr version, kj::StringPtr expectedIntegrity, kj::ArrayPtr<const kj::byte> bytes) {
+  // The "dev" bundle is built locally from the current tree and has no published checksum.
+  if (version == "dev") {
+    return;
+  }
+  // Every released bundle must have a published checksum; refuse to use one without it.
+  KJ_REQUIRE(expectedIntegrity != nullptr && expectedIntegrity.size() > 0,
+      "Pyodide bundle is missing an integrity checksum; refusing to use it.", version);
+  auto actualIntegrity = computePyodideBundleIntegrity(bytes);
+  KJ_REQUIRE(actualIntegrity == expectedIntegrity,
+      "Pyodide bundle integrity check failed: the bundle does not match the expected checksum.",
+      version, expectedIntegrity, actualIntegrity);
 }
 
 }  // namespace workerd::api::pyodide

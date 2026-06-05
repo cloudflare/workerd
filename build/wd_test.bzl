@@ -1,4 +1,3 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@workerd//:build/lint_test.bzl", "lint_test")
 
 def wd_test(
@@ -6,7 +5,6 @@ def wd_test(
         data = [],
         name = None,
         args = [],
-        ts_deps = [],
         lint = True,
         python_snapshot_test = False,
         generate_default_variant = True,
@@ -50,24 +48,6 @@ def wd_test(
         name = src.removesuffix(".capnp").removesuffix(".wd-test").removesuffix(".ts-wd-test")
 
     if len(ts_srcs) != 0:
-        # NOTE: We intentionally do not use isolated_typecheck here. While isolated_typecheck can
-        # improve build parallelism by separating transpilation from type-checking, it requires
-        # isolatedDeclarations in tsconfig (which mandates explicit return type annotations on all
-        # exports) and uses --noResolve during transpilation. The --noResolve flag prevents
-        # TypeScript from finding @types/node, breaking IDE support for Node.js imports like
-        # 'node:assert'. Since wd_test TypeScript files are typically standalone test files (leaf
-        # nodes in the dependency graph), the parallelization benefits would be minimal anyway.
-        ts_config(
-            name = name + "@ts_config",
-            src = "tsconfig.json",
-            deps = ["@workerd//tools:base-tsconfig"],
-        )
-        ts_project(
-            name = name + "@ts_project",
-            srcs = ts_srcs,
-            tsconfig = ":" + name + "@ts_config",
-            deps = ["//src/node:node@tsproject"] + ts_deps,
-        )
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
 
     if lint:

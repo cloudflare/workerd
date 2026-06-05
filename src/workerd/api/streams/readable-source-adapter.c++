@@ -699,9 +699,9 @@ void ReadableSourceKjAdapter::Active::cancel(kj::Exception reason) {
     // If the previous read indicated that it was the last read, then
     // the reader will have already been dropped. We do not need to
     // cancel it here.
-    ioContext.addTask(ioContext.run([readable = kj::mv(stream), reader = kj::mv(reader),
-                                        exception = kj::mv(reason)](jsg::Lock& js) mutable {
-      auto& ioContext = IoContext::current();
+    ioContext.addTask(
+        ioContext.run([readable = kj::mv(stream), reader = kj::mv(reader),
+                          exception = kj::mv(reason)](jsg::Lock& js, IoContext& ioContext) mutable {
       auto error = js.exceptionToJsValue(kj::mv(exception));
       auto promise = reader->cancel(js, error.getHandle(js));
       return ioContext.awaitJs(js, kj::mv(promise));
@@ -899,10 +899,8 @@ kj::Promise<size_t> ReadableSourceKjAdapter::readImpl(
           // reference to the adapter itself and check that we are still alive
           // and active before trying to update any state.
           active.ioContext.run([context = kj::mv(context), self = selfRef.addRef(),
-                                   minReadPolicy = options.minReadPolicy](
-                                   jsg::Lock& js) mutable -> kj::Promise<size_t> {
-    auto& ioContext = IoContext::current();
-
+                                   minReadPolicy = options.minReadPolicy](jsg::Lock& js,
+                                   IoContext& ioContext) mutable -> kj::Promise<size_t> {
     // Perform the actual read.
     return ioContext.awaitJs(js, readInternal(js, kj::mv(context), minReadPolicy))
         .then([self = kj::mv(self)](kj::Own<ReadContext> context) mutable -> kj::Promise<size_t> {
@@ -1124,8 +1122,7 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
       // to minimize the number of times we need to re-enter the lock.
       DrainingReader* readerPtr = reader.get();
       DrainingReadResult result =
-          co_await active->ioContext.run([readerPtr](jsg::Lock& js) mutable {
-        auto& ioContext = IoContext::current();
+          co_await active->ioContext.run([readerPtr](jsg::Lock& js, IoContext& ioContext) mutable {
         // Use a 256KB limit to allow periodic yielding to the event loop,
         // preventing a fast producer from monopolizing the thread. This limit
         // only affects subsequent pump iterations after the initial buffer drain.
@@ -1164,8 +1161,8 @@ kj::Promise<void> ReadableSourceKjAdapter::pumpToImpl(
   // If there was an error, cancel the reader and propagate the exception.
   KJ_IF_SOME(exception, pendingException) {
     DrainingReader* readerPtr = reader.get();
-    co_await active->ioContext.run([readerPtr, ex = exception.clone()](jsg::Lock& js) mutable {
-      auto& ioContext = IoContext::current();
+    co_await active->ioContext.run(
+        [readerPtr, ex = exception.clone()](jsg::Lock& js, IoContext& ioContext) mutable {
       auto error = js.exceptionToJsValue(kj::mv(ex));
       return ioContext.awaitJs(js, readerPtr->cancel(js, error.getHandle(js)));
     });
@@ -1288,7 +1285,7 @@ kj::Promise<kj::Array<T>> ReadableSourceKjAdapter::readAllImpl(size_t limit) {
   CancelationToken cancelationToken;
   co_return co_await IoContext::current().run(
       [limit, active = kj::mv(activeState), cancelationToken = cancelationToken.getWeakRef()](
-          jsg::Lock& js) mutable -> kj::Promise<kj::Array<T>> {
+          jsg::Lock& js, IoContext& ioContext) mutable -> kj::Promise<kj::Array<T>> {
     kj::Vector<T> accumulated;
     // If we know the length of the stream ahead of time, and it is within the limit,
     // we can reserve that much space in the accumulator to avoid multiple allocations.
@@ -1298,7 +1295,6 @@ kj::Promise<kj::Array<T>> ReadableSourceKjAdapter::readAllImpl(size_t limit) {
       }
     }
 
-    auto& ioContext = IoContext::current();
     return ioContext.awaitJs(js,
         readAllReadImpl(js, ioContext.addObject(kj::mv(active)), kj::mv(accumulated), limit,
             kj::mv(cancelationToken)));

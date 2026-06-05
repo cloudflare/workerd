@@ -1,6 +1,30 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
+
+# Compile all ts test sources in one project. This is needed to work around https://github.com/aspect-build/rules_ts/issues/664 –
+# rules_ts transpiles all .ts files for each ts_project where the files are present based on the
+# tsconfig "include": ["**/*.ts"] directive, which is an issue on Windows where Bazel does not have
+# a proper sandbox, so it ends up trying to write to the same file path repeatedly.
+# This approach does not scale well if we end up adding many more TS-based wd_tests since we need to
+# transpile all TS sources before running TS-based wd-tests. At that point, we hopefully either have
+# a proper Windows sandbox and can properly define a separate ts_project for each test, or we may
+# have to put the files for a given test in a separate directory so that they are kept separate from
+# the other ts files without sandboxing.
+ts_config(
+    name = "ts_config",
+    src = "tsconfig.json",
+    deps = ["@workerd//tools:base-tsconfig"],
+)
+
+ts_project(
+    name = "ts_project",
+    srcs = glob(["*.ts"]),
+    composite = True,
+    tsconfig = ":ts_config",
+    deps = ["//src/node:node@tsproject"],
+)
 
 wd_test(
     src = "stdio-writesync-reentry-uaf-test.wd-test",
@@ -452,13 +476,11 @@ wd_test(
     data = ["form-data-test.js"],
 )
 
-# TODO(soon): Re-enable once it is determined why this test is failing
-# consistently in CI on Windows in all variant
-# wd_test(
-#     src = "form-data-test-ts.wd-test",
-#     args = ["--experimental"],
-#     data = ["form-data-test-ts.ts"],
-# )
+wd_test(
+    src = "form-data-test-ts.wd-test",
+    args = ["--experimental"],
+    data = ["form-data-test-ts.ts"],
+)
 
 wd_test(
     src = "warnings-test.wd-test",

@@ -11,9 +11,7 @@
       "@workerd/*": ["../bazel-bin/src/workerd/*"]
     },
     "checkJs": true,
-    "composite": true,
     "skipLibCheck": true,
-
     "exactOptionalPropertyTypes": false,
     "strictNullChecks": false,
     "noImplicitReturns": false,

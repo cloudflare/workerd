@@ -29,6 +29,8 @@
 #include <kj/function.h>
 #include <kj/mutex.h>
 
+#include <concepts>
+
 namespace workerd {
 class WorkerTracer;
 class BaseTracer;
@@ -272,8 +274,19 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // throws, the input lock will break, resetting the actor.
   //
   // This can only be called when I/O gates are active, i.e. in an actor.
+  //
+  // Like run(), the callback can accept either (jsg::Lock&) or (jsg::Lock&, IoContext&).
   template <typename Func>
-  jsg::PromiseForResult<Func, void, true> blockConcurrencyWhile(jsg::Lock& js, Func&& callback);
+  auto blockConcurrencyWhile(jsg::Lock& js, Func&& callback) {
+    if constexpr (runFuncAcceptsIoContext<Func>) {
+      return blockConcurrencyWhileImpl(
+          js, [this, callback = kj::fwd<Func>(callback)](jsg::Lock& lock) mutable {
+        return callback(lock, *this);
+      });
+    } else {
+      return blockConcurrencyWhileImpl(js, kj::fwd<Func>(callback));
+    }
+  }
 
   // Returns true if output lock gating is necessary.
   // Can be used in optimizations to bypass wait* calls altogether.
@@ -377,15 +390,34 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   //
   // If `inputLock` is not provided, and this is an actor context, an input lock will be obtained
   // before executing the callback.
+  //
+  // The callback can accept either (Worker::Lock&) or (Worker::Lock&, IoContext&). When the
+  // two-argument form is used, *this is passed as the second argument. Existing single-argument
+  // call sites are unaffected.
   template <typename Func>
-  kj::PromiseForResult<Func, Worker::Lock&> run(
-      Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT;
+  auto run(Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT {
+    if constexpr (runFuncAcceptsIoContext<Func>) {
+      return runSingle([this, func = kj::fwd<Func>(func)](Worker::Lock& lock) mutable {
+        return func(lock, *this);
+      }, kj::mv(inputLock));
+    } else {
+      return runSingle(kj::fwd<Func>(func), kj::mv(inputLock));
+    }
+  }
 
   // Like run() but executes within the given critical section, if it is non-null. If
   // `criticalSection` is null, then this just forwards to the other run() (with null inputLock).
   template <typename Func>
-  kj::PromiseForResult<Func, Worker::Lock&> run(Func&& func,
-      kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) KJ_WARN_UNUSED_RESULT;
+  auto run(Func&& func,
+      kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) KJ_WARN_UNUSED_RESULT {
+    if constexpr (runFuncAcceptsIoContext<Func>) {
+      return runSingle([this, func = kj::fwd<Func>(func)](Worker::Lock& lock) mutable {
+        return func(lock, *this);
+      }, kj::mv(criticalSection));
+    } else {
+      return runSingle(kj::fwd<Func>(func), kj::mv(criticalSection));
+    }
+  }
 
   // Returns the current IoContext for the thread.
   // Throws an exception if there is no current context (see hasCurrent() below).
@@ -1097,6 +1129,25 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<InputGate::Lock> inputLock,
       Runnable::Exceptional exceptional);
 
+  // Detect whether a callback accepts IoContext& as a second argument.
+  // Used by run() and blockConcurrencyWhile() to optionally pass *this.
+  template <typename Func>
+  static constexpr bool runFuncAcceptsIoContext =
+      std::invocable<std::decay_t<Func>&, Worker::Lock&, IoContext&>;
+
+  // Internal implementation of run(), always invoked with a single-arg callback.
+  template <typename Func>
+  kj::PromiseForResult<Func, Worker::Lock&> runSingle(
+      Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none);
+
+  template <typename Func>
+  kj::PromiseForResult<Func, Worker::Lock&> runSingle(
+      Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection);
+
+  // Internal implementation of blockConcurrencyWhile(), always invoked with a single-arg callback.
+  template <typename Func>
+  jsg::PromiseForResult<Func, void, true> blockConcurrencyWhileImpl(jsg::Lock& js, Func&& callback);
+
   void abortFromHang(Worker::AsyncLock& asyncLock);
 
   template <typename T>
@@ -1185,21 +1236,21 @@ kj::Promise<T> IoContext::lockOutputWhile(kj::Promise<T> promise) {
 }
 
 template <typename Func>
-kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
+kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
     return cs.get()
         ->wait(getCurrentTraceSpan())
         .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
-      return run(kj::fwd<Func>(func), kj::mv(inputLock));
+      return runSingle(kj::fwd<Func>(func), kj::mv(inputLock));
     });
   } else {
-    return run(kj::fwd<Func>(func));
+    return runSingle(kj::fwd<Func>(func));
   }
 }
 
 template <typename Func>
-kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
+kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     Func&& func, kj::Maybe<InputGate::Lock> inputLock) {
   // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
   // been aborted, there's likely not an active request so later operations will fail anyway.
@@ -1213,7 +1264,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
       return a.getInputGate()
           .wait(getCurrentTraceSpan())
           .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
-        return run(kj::fwd<Func>(func), kj::mv(inputLock));
+        return runSingle(kj::fwd<Func>(func), kj::mv(inputLock));
       });
     }
 
@@ -1629,7 +1680,7 @@ inline ReverseIoOwn<T> IoContext::addObjectReverse(kj::Own<T> obj) {
 }
 
 template <typename Func>
-jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
+jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
     jsg::Lock& js, Func&& callback) {
   auto lock = getInputLock();
   auto cs = lock.startCriticalSection();
