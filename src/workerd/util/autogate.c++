@@ -43,8 +43,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "updated-auto-allocate-chunk-size"_kj;
     case AutogateKey::PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR:
       return "python-abort-isolate-on-fatal-error"_kj;
-    case AutogateKey::THROW_ON_NOT_IMPLEMENTED_TLS_OPTIONS:
-      return "throw-on-not-implemented-tls-options"_kj;
     case AutogateKey::STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME:
       return "starttls-reject-expected-server-hostname"_kj;
     case AutogateKey::NumOfKeys:

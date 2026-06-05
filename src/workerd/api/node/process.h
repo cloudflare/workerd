@@ -50,9 +50,8 @@ class ProcessModule final: public jsg::Object {
 
   void setCwd(jsg::Lock& js, kj::String path);
 
-  // Checks the THROW_ON_NOT_IMPLEMENTED_TLS_OPTIONS autogate. If enabled, returns true
-  // (caller should throw). Otherwise, logs a periodic warning that checkServerIdentity is
-  // not yet implemented and will be ignored, then returns false (caller should silently continue).
+  // Checks the throw_on_not_implemented_tls_options compat flag. If enabled, returns true
+  // (caller should throw). Otherwise returns false (caller should silently continue).
   bool shouldThrowOnNotImplementedTlsOption(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(ProcessModule) {

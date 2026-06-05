@@ -10,8 +10,6 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/autogate.h>
-#include <workerd/util/sentry.h>
 
 #include <kj/vector.h>
 
@@ -260,11 +258,7 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
 }
 
 bool ProcessModule::shouldThrowOnNotImplementedTlsOption(jsg::Lock& js) {
-  if (util::Autogate::isEnabled(util::AutogateKey::THROW_ON_NOT_IMPLEMENTED_TLS_OPTIONS)) {
-    return true;
-  }
-  LOG_WARNING_PERIODICALLY("NOSENTRY VULN-136596 Worker has set options.checkServerIdentity");
-  return false;
+  return FeatureFlags::get(js).getThrowOnNotImplementedTlsOptions();
 }
 
 }  // namespace workerd::api::node
