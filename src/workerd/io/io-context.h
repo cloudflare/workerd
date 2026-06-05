@@ -8,6 +8,7 @@
 #include "worker.h"
 
 #include <workerd/api/deferred-proxy.h>
+#include <workerd/io/access-info.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/external-pusher.h>
 #include <workerd/io/io-channels.h>
@@ -73,7 +74,8 @@ class IoContext_IncomingRequest final {
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
+      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
+      kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -147,6 +149,12 @@ class IoContext_IncomingRequest final {
     return rootUserTraceSpan.addRef();
   }
 
+  // The Cloudflare Access auth info for this request, if any was provided by the embedder. Used
+  // to populate `ctx.access` in JavaScript.
+  kj::Maybe<AccessInfo&> getAccessInfo() {
+    return accessInfo.map([](kj::Own<AccessInfo>& p) -> AccessInfo& { return *p; });
+  }
+
   // The invocation span context is a unique identifier for a specific
   // worker invocation.
   tracing::InvocationSpanContext& getInvocationSpanContext();
@@ -156,6 +164,7 @@ class IoContext_IncomingRequest final {
   kj::Own<RequestObserver> metrics;
   kj::Maybe<kj::Own<BaseTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
+  kj::Maybe<kj::Own<AccessInfo>> accessInfo;
 
   // Root user trace span for this request. Populated during delivered() via
   // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references
@@ -257,6 +266,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getRootUserTraceSpan() {
     if (incomingRequests.empty()) return SpanParent(nullptr);
     return getCurrentIncomingRequest().getRootUserTraceSpan();
+  }
+
+  // The Cloudflare Access auth info for the current incoming request, if any was provided by
+  // the embedder. Used to populate `ctx.access` in JavaScript.
+  kj::Maybe<AccessInfo&> getAccessInfo() {
+    if (incomingRequests.empty()) return kj::none;
+    return getCurrentIncomingRequest().getAccessInfo();
   }
 
   LimitEnforcer& getLimitEnforcer() {

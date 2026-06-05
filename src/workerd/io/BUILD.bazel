@@ -47,6 +47,7 @@ wd_cc_library(
         "worker-fs.c++",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
+        "access-info.h",
         "compatibility-date.h",
         "external-pusher.h",
         "hibernation-manager.h",

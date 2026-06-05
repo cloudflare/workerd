@@ -21,6 +21,7 @@
 #include <workerd/api/tracing.h>
 #include <workerd/api/util.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/io/access-info.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -93,6 +94,31 @@ jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {
   return js.alloc<Tracing>();
 }
 
+kj::StringPtr AccessContext::getAud() {
+  return info->getAudience();
+}
+
+jsg::Promise<jsg::Optional<jsg::JsValue>> AccessContext::getIdentity(jsg::Lock& js) {
+  auto& ioctx = IoContext::current();
+  return ioctx.awaitIo(js, info->getIdentity(),
+      [](jsg::Lock& js, kj::Maybe<kj::String> json) -> jsg::Optional<jsg::JsValue> {
+    KJ_IF_SOME(j, json) {
+      return jsg::JsValue(js.parseJson(j).getHandle(js));
+    }
+    return kj::none;
+  });
+}
+
+jsg::Optional<jsg::Ref<AccessContext>> ExecutionContext::getAccess(jsg::Lock& js) {
+  // Pull the per-request AccessInfo (if any) off the current IncomingRequest. Standalone workerd
+  // never supplies one; production embedders construct one before calling newWorkerEntrypoint().
+  if (!IoContext::hasCurrent()) return kj::none;
+  auto& ioctx = IoContext::current();
+  KJ_IF_SOME(info, ioctx.getAccessInfo()) {
+    return js.alloc<AccessContext>(ioctx.addObject(kj::addRef(info)));
+  }
+  return kj::none;
+}
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   KJ_IF_SOME(r, reason) {
     IoContext::current().abort(js.exceptionToKj(kj::mv(r)));

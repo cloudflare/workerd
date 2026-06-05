@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/access-info.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/worker.h>
 
@@ -47,6 +48,9 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     // subtask of another request. If it is kj::none, then this invocation is a top-level
     // invocation.
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan = kj::none,
-    bool isDynamicDispatch = false);
+    bool isDynamicDispatch = false,
+    // Per-request Cloudflare Access info. Supplied by the embedding application; standalone
+    // workerd passes kj::none, which causes `ctx.access` to be `undefined` in JS.
+    kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none);
 
 }  // namespace workerd
