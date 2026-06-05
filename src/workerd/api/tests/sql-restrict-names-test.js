@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Tests for the SQL_RESTRICT_RESERVED_NAMES autogate.
-// This test only runs in the @all-autogates variant so it can assert the gated behavior.
+// Tests for SQL reserved name restrictions.
 
 import * as assert from 'node:assert';
 import { DurableObject } from 'cloudflare:workers';
