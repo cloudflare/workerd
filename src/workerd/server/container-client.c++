@@ -138,7 +138,7 @@ class BufferedAsyncIoStream final: public kj::AsyncIoStream {
     auto bufferedRemaining = buffered.size() - bufferedOffset;
     if (bufferedRemaining > 0) {
       auto toCopy = kj::min(maxBytes, bufferedRemaining);
-      out.first(toCopy).copyFrom(buffered.asPtr().slice(bufferedOffset, bufferedOffset + toCopy));
+      out.write(buffered.asPtr().slice(bufferedOffset, bufferedOffset + toCopy));
       bufferedOffset += toCopy;
       copied = toCopy;
 
@@ -147,7 +147,7 @@ class BufferedAsyncIoStream final: public kj::AsyncIoStream {
       }
     }
 
-    auto read = co_await inner->tryRead(out.begin() + copied, minBytes - copied, maxBytes - copied);
+    auto read = co_await inner->tryRead(out.begin(), minBytes - copied, maxBytes - copied);
     co_return copied + read;
   }
 
@@ -472,7 +472,7 @@ kj::StringPtr signalToString(uint32_t signal) {
 
 void writeTarField(kj::ArrayPtr<kj::byte> field, kj::StringPtr value) {
   auto len = kj::min(value.size(), field.size());
-  field.first(len).copyFrom(value.asBytes().first(len));
+  field.write(value.asBytes().first(len));
 }
 
 // createTarWithFile creates simple tar files without importing a full blown TAR library.
