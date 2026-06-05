@@ -625,6 +625,19 @@ static kj::Array<kj::byte> getEmptyArray() {
   return kj::Array<kj::byte>(&DUMMY, 0, kj::NullArrayDisposer::instance);
 }
 
+// The returned kj::Array<kj::byte> aliases the V8 BackingStore (kept alive via the attached
+// shared_ptr).  Two consequences:
+//
+//   * If using MPK to protect isolate memory, the bytes live in V8 sandbox pages tagged with
+//     the isolate's pkey.  Access is then only valid while the isolate lock is held.  Handing
+//     this Array to async I/O that runs without the lock will fault.  Callers that cross a
+//     lock boundary must make their own kj-heap copy (e.g. via `kj::heapArray(result.asPtr())`)
+//     before the await.
+//
+//   * Writes through the Array land in the JS BackingStore.  This is the contract Pyodide's
+//     ReadOnlyBuffer::read and similar "destination buffer" APIs rely on.  An always-copy
+//     implementation would silently break those callers.  Their data would land in a temporary
+//     that is dropped on return.
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer) {
   if (arrayBuffer->IsResizableByUserJavaScript() || arrayBuffer->IsImmutable()) {
     // For resizable ArrayBuffers, resize(0) decommits pages (PROT_NONE) even while the
@@ -650,6 +663,8 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer) {
   }
   return bytes.attach(kj::mv(backing));
 }
+
+// See the ArrayBuffer overload above for the aliasing contract (MPK + write-through).
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   auto buffer = arrayBufferView->Buffer();
   if (buffer->IsResizableByUserJavaScript() || buffer->IsImmutable()) {
@@ -675,9 +690,7 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   return bytes.attach(kj::mv(backing));
 }
 
-// TODO(soon): If the returned kj::Array<kj::byte> is used outside of the isolate lock,
-// we'll need to ensure it works correctly once MPK (Memory Protection Keys) enforcement
-// is fully in place.
+// See the ArrayBuffer overload above for the aliasing contract (MPK + write-through).
 kj::Array<kj::byte> asBytes(v8::Local<v8::SharedArrayBuffer> sharedArrayBuffer) {
   auto backing = sharedArrayBuffer->GetBackingStore();
   kj::ArrayPtr bytes(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());

@@ -2394,9 +2394,16 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(jsg::Lock& js,
         .body = serializer.release().data,
         .attempts = msg.attempts});
     } else KJ_IF_SOME(b, msg.serializedBody) {
+      // `b` arrives via jsg::asBytes() and aliases the V8 BackingStore in the
+      // sender's isolate.  The encoded IncomingQueueMessage may be dispatched
+      // to a consumer worker running in a different isolate.  If using MPK to
+      // protect isolate memory, each isolate's sandbox pages are tagged with
+      // its own pkey and the consumer's thread cannot read the sender's pages.
+      // Copy into a kj-heap allocation now, while we still hold the sender's
+      // isolate lock, so the receiver can read the bytes.
       encodedMessages.add(IncomingQueueMessage{.id = kj::mv(msg.id),
         .timestamp = msg.timestamp,
-        .body = kj::mv(b),
+        .body = kj::heapArray(b.asPtr()),
         .attempts = msg.attempts});
     } else {
       JSG_FAIL_REQUIRE(TypeError, "Expected one of body or serializedBody for each message");
