@@ -3855,6 +3855,28 @@ interface EventSourceEventSourceInit {
   withCredentials?: boolean;
   fetcher?: Fetcher;
 }
+interface ExecOutput {
+  readonly stdout: ArrayBuffer;
+  readonly stderr: ArrayBuffer;
+  readonly exitCode: number;
+}
+interface ContainerExecOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  user?: string;
+  stdin?: ReadableStream | "pipe";
+  stdout?: "pipe" | "ignore";
+  stderr?: "pipe" | "ignore" | "combined";
+}
+interface ExecProcess {
+  readonly stdin: WritableStream | null;
+  readonly stdout: ReadableStream | null;
+  readonly stderr: ReadableStream | null;
+  readonly pid: number;
+  readonly exitCode: Promise<number>;
+  output(): Promise<ExecOutput>;
+  kill(signal?: number): void;
+}
 interface Container {
   get running(): boolean;
   start(options?: ContainerStartupOptions): void;
@@ -3872,6 +3894,7 @@ interface Container {
     options: ContainerSnapshotOptions,
   ): Promise<ContainerSnapshot>;
   interceptOutboundHttps(addr: string, binding: Fetcher): Promise<void>;
+  exec(cmd: string[], options?: ContainerExecOptions): Promise<ExecProcess>;
 }
 interface ContainerDirectorySnapshot {
   id: string;
