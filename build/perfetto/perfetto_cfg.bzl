@@ -50,6 +50,7 @@ PERFETTO_CONFIG = struct(
         # overridden in Google internal builds.
         base_platform = ["//:perfetto_base_default_platform"],
         zlib = ["@zlib//:zlib"],
+        re2 = [],
         expat = ["@perfetto_dep_expat//:expat"],
         jsoncpp = ["@perfetto_dep_jsoncpp//:jsoncpp"],
         linenoise = ["@perfetto_dep_linenoise//:linenoise"],
@@ -60,6 +61,7 @@ PERFETTO_CONFIG = struct(
         protobuf_lite = ["@protobuf//:protobuf_lite"],
         protobuf_full = ["@protobuf//:protobuf"],
         protobuf_descriptor_proto = ["@protobuf//:descriptor_proto"],
+        error_prone_annotations = [],
 
         # The Python targets are empty on the standalone build because we assume
         # any relevant deps are installed on the system or are not applicable.
@@ -115,6 +117,7 @@ PERFETTO_CONFIG = struct(
     # Go protos have all sorts of strange behavior in Google3 so need special
     # handling as the rules for other languages do not work for Go.
     go_proto_library_visibility = "//visibility:private",
+    trace_processor_proto_library_visibility = ["//visibility:public"],
 
     # This struct allows the embedder to customize copts and other args passed
     # to rules like cc_binary. Prefixed rules (e.g. perfetto_cc_binary) will

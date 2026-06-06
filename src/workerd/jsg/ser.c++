@@ -230,12 +230,7 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
   // to be serialized normally. Otherwise, it is a class instance, which we should treat as a host
   // object. Inside `WriteHostObject()` we will throw DataCloneError due to the object not having
   // internal fields.
-#if V8_MAJOR_VERSION >= 15 || (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION >= 7)
   return v8::Just(object->GetPrototype() != prototypeOfObject);
-#else
-  // TODO(cleanup): Remove when unnecessary.
-  return v8::Just(object->GetPrototypeV2() != prototypeOfObject);
-#endif
 }
 
 v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
