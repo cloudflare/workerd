@@ -71,7 +71,8 @@ KJ_TEST("compatibility flag parsing") {
       [](kj::StringPtr compatDate, kj::ArrayPtr<const kj::StringPtr> featureFlags,
           kj::StringPtr expectedOutput, kj::ArrayPtr<const kj::StringPtr> expectedErrors = nullptr,
           CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
-          bool r2InternalBetaApiSet = false, bool experimental = false) {
+          bool r2InternalBetaApiSet = false, bool experimental = false,
+          kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags = nullptr) {
     capnp::MallocMessageBuilder message;
     auto orphanage = message.getOrphanage();
 
@@ -85,8 +86,8 @@ KJ_TEST("compatibility flag parsing") {
     auto output = outputOrphan.get();
 
     SimpleWorkerErrorReporter errorReporter;
-    compileCompatibilityFlags(
-        compatDate, flagList.asReader(), output, errorReporter, experimental, dateValidation);
+    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter, experimental,
+        dateValidation, allowedExperimentalFlags);
 
     capnp::TextCodec codec;
     auto parsedExpectedOutput = codec.decode<CompatibilityFlags>(expectedOutput, orphanage);
@@ -163,6 +164,30 @@ KJ_TEST("compatibility flag parsing") {
       CompatibilityDateValidation::CODE_VERSION, false, false);
   expectCompileCompatibilityFlags("2020-01-01", {"durable_object_rename"_kj}, "(obsolete19 = true)",
       {}, CompatibilityDateValidation::CODE_VERSION, false, true);
+
+  // An experimental flag may be individually permitted via the allowlist, even when experimental
+  // features are not generally allowed.
+  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_rename"_kj}, "(obsolete19 = true)",
+      {}, CompatibilityDateValidation::CODE_VERSION, false, false, {"durable_object_rename"_kj});
+
+  // Allowlisting an unrelated experimental flag does not grant access to a different one.
+  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_rename"_kj}, "(obsolete19 = true)",
+      {"The compatibility flag durable_object_rename is experimental and may break or be removed "
+       "in a future version of workerd. To use this flag, you must pass --experimental on the "
+       "command line."_kj},
+      CompatibilityDateValidation::CODE_VERSION, false, false, {"some_other_flag"_kj});
+
+  // The allowlist also applies under CURRENT_DATE_FOR_CLOUDFLARE validation.
+  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_rename"_kj}, "(obsolete19 = true)",
+      {}, CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE, false, false,
+      {"durable_object_rename"_kj});
+
+  // Without the allowlist, CURRENT_DATE_FOR_CLOUDFLARE emits the Cloudflare-specific message.
+  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_rename"_kj}, "(obsolete19 = true)",
+      {"The compatibility flag durable_object_rename is experimental and cannot yet be used in "
+       "Workers deployed to Cloudflare."_kj},
+      CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE, false, false,
+      {"some_other_flag"_kj});
 
   // Test experimental requirement using the durable_object_alarms flag since we know this flag
   // is obsolete and will never have a date set. (Should always pass, even if experimental flags
@@ -329,8 +354,8 @@ KJ_TEST("encode to flag list for FL") {
 
     SimpleWorkerErrorReporter errorReporter;
 
-    compileCompatibilityFlags(
-        compatDate, flagList.asReader(), output, errorReporter, experimental, dateValidation);
+    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter, experimental,
+        dateValidation, nullptr);
     KJ_ASSERT(errorReporter.errors.empty());
 
     return kj::mv(outputOrphan);

@@ -36,13 +36,15 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     CompatibilityFlags::Builder output,
     Worker::ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
-    CompatibilityDateValidation dateValidation);
+    CompatibilityDateValidation dateValidation,
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags);
 void compileCompatibilityFlags(kj::StringPtr compatDate,
     kj::ArrayPtr<const kj::String> compatFlags,
     CompatibilityFlags::Builder output,
     Worker::ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
-    CompatibilityDateValidation dateValidation);
+    CompatibilityDateValidation dateValidation,
+    kj::ArrayPtr<const kj::StringPtr> allowedExperimentalFlags);
 
 // Return an array of compatibility enable-flags which express the given FeatureFlags. The returned
 // StringPtrs point to FeatureFlags annotation parameters, which live in static storage.

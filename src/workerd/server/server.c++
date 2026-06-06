@@ -4819,10 +4819,11 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     // Use FUTURE_FOR_TEST to allow any valid date (including far future like 2999-12-31)
     // without validation against CODE_VERSION or current date.
     compileCompatibilityFlags(overrideDate, conf.getCompatibilityFlags(), featureFlags,
-        errorReporter, experimental, CompatibilityDateValidation::FUTURE_FOR_TEST);
+        errorReporter, experimental, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
   } else if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(),
-        featureFlags, errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION);
+        featureFlags, errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION,
+        nullptr);
   } else {
     errorReporter.addError(kj::str("Worker must specify compatibilityDate."));
   }

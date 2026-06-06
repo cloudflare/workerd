@@ -179,7 +179,7 @@ CompatibilityFlags::Reader compileFlags(capnp::MessageBuilder &message,
   SimpleWorkerErrorReporter errorReporter;
 
   compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter, experimental,
-      CompatibilityDateValidation::FUTURE_FOR_TEST);
+      CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr);
 
   if (!errorReporter.errors.empty()) {
     // TODO(someday): throw an `AggregateError` containing all errors
