@@ -82,9 +82,8 @@ jsg::Promise<ReadResult> ReaderImpl::read(
   KJ_IF_SOME(options, byobOptions) {
     // Per the spec, we must perform these checks before disturbing the stream.
     size_t atLeast = options.atLeast.orDefault(1);
-    auto view = options.bufferView.getHandle(js);
 
-    if (view.size() == 0) {
+    if (options.byteLength == 0) {
       return js.rejectedPromise<ReadResult>(
           js.typeError("You must call read() on a \"byob\" reader with a positive-sized "
                        "TypedArray object."_kj));
@@ -93,30 +92,21 @@ jsg::Promise<ReadResult> ReaderImpl::read(
       return js.rejectedPromise<ReadResult>(js.typeError(
           kj::str("Requested invalid minimum number of bytes to read (", atLeast, ").")));
     }
-    if (view.isImmutable()) {
-      return js.rejectedPromise<ReadResult>(
-          js.typeError("Cannot call read() with an immutable BYOB view"));
-    }
 
     // Both read() and readAtLeast() pass atLeast in element count.
     // Convert to bytes before validation and forwarding to the controller.
-    auto elementSize = view.getElementSize();
+    jsg::JsArrayBufferView source(options.bufferView.getHandle(js));
+    auto elementSize = source.getElementSize();
     atLeast = atLeast * elementSize;
 
-    if (atLeast > view.size()) {
-      return js.rejectedPromise<ReadResult>(js.typeError(kj::str(
-          "Minimum bytes to read (", atLeast, ") exceeds size of buffer (", view.size(), ").")));
+    if (atLeast > options.byteLength) {
+      return js.rejectedPromise<ReadResult>(js.typeError(kj::str("Minimum bytes to read (", atLeast,
+          ") exceeds size of buffer (", options.byteLength, ").")));
     }
 
     options.atLeast = atLeast;
   }
 
-  // Hold a strong reference to the stream across the read() call.
-  // The read can synchronously invoke the user's pull() callback, which could
-  // call reader.releaseLock() — dropping the jsg::Ref inside Attached. Without
-  // this local ref, GC could collect the ReadableStream (and its controller /
-  // ValueReadable / ByteReadable) while the C++ stack is still inside read().
-  auto ref = attached.stream.addRef();
   return KJ_ASSERT_NONNULL(attached.stream->getController().read(js, kj::mv(byobOptions)));
 }
 
@@ -232,11 +222,13 @@ void ReadableStreamBYOBReader::lockToStream(jsg::Lock& js, ReadableStream& strea
 }
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
-    jsg::JsArrayBufferView byobBuffer,
+    v8::Local<v8::ArrayBufferView> byobBuffer,
     jsg::Optional<ReadableStreamBYOBReaderReadOptions> maybeOptions) {
   static const ReadableStreamBYOBReaderReadOptions defaultOptions{};
   auto options = ReadableStreamController::ByobOptions{
-    .bufferView = byobBuffer.addRef(js),
+    .bufferView = js.v8Ref(byobBuffer),
+    .byteOffset = byobBuffer->ByteOffset(),
+    .byteLength = byobBuffer->ByteLength(),
     .atLeast = maybeOptions.orDefault(defaultOptions).min.orDefault(1),
     .detachBuffer = FeatureFlags::get(js).getStreamsByobReaderDetachesBuffer(),
   };
@@ -244,9 +236,11 @@ jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(jsg::Lock& js,
 }
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::readAtLeast(
-    jsg::Lock& js, int minElements, jsg::JsArrayBufferView byobBuffer) {
+    jsg::Lock& js, int minElements, v8::Local<v8::ArrayBufferView> byobBuffer) {
   auto options = ReadableStreamController::ByobOptions{
-    .bufferView = byobBuffer.addRef(js),
+    .bufferView = js.v8Ref(byobBuffer),
+    .byteOffset = byobBuffer->ByteOffset(),
+    .byteLength = byobBuffer->ByteLength(),
     .atLeast = minElements,
     .detachBuffer = true,
   };
@@ -606,22 +600,23 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(jsg::Lock& js,
 jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
     jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeValue) {
   KJ_IF_SOME(value, maybeValue) {
-    KJ_IF_SOME(ab, value.tryCast<jsg::JsArrayBuffer>()) {
-      return ab.size();
-    } else KJ_IF_SOME(sab, value.tryCast<jsg::JsSharedArrayBuffer>()) {
-      return sab.size();
-    } else KJ_IF_SOME(view, value.tryCast<jsg::JsArrayBufferView>()) {
-      return view.size();
-    } else KJ_IF_SOME(str, value.tryCast<jsg::JsString>()) {
-      return str.utf8Length(js);
-    } else KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
+    if (value.isArrayBuffer()) {
+      v8::Local<v8::ArrayBuffer> buffer = KJ_ASSERT_NONNULL(value.tryCast<jsg::JsArrayBuffer>());
+      return buffer->ByteLength();
+    } else if (value.isArrayBufferView()) {
+      v8::Local<v8::ArrayBufferView> view =
+          KJ_ASSERT_NONNULL(value.tryCast<jsg::JsArrayBufferView>());
+      return view->ByteLength();
+    } else {
       // Per the WHATWG Streams spec, ByteLengthQueuingStrategy.size should return
       // GetV(chunk, "byteLength"), which means getting the byteLength property
-      // from any object, not just ArrayBuffer/ArrayBufferView/etc
-      auto byteLength = obj.get(js, "byteLength"_kj);
-      KJ_IF_SOME(num, byteLength.tryCast<jsg::JsNumber>()) {
-        KJ_IF_SOME(val, num.value(js)) {
-          return static_cast<uint32_t>(val);
+      // from any object, not just ArrayBuffer/ArrayBufferView.
+      KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
+        auto byteLength = obj.get(js, "byteLength"_kj);
+        KJ_IF_SOME(num, byteLength.tryCast<jsg::JsNumber>()) {
+          KJ_IF_SOME(val, num.value(js)) {
+            return static_cast<uint32_t>(val);
+          }
         }
       }
     }

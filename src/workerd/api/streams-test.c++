@@ -95,9 +95,10 @@ KJ_TEST("Reading from byob reader") {
       KJ_REQUIRE(reader.is<jsg::Ref<ReadableStreamBYOBReader>>());
       auto& byobReader = reader.get<jsg::Ref<ReadableStreamBYOBReader>>();
 
-      auto u8 = jsg::JsUint8Array::create(js, test.bufferSize);
+      auto buffer = v8::Uint8Array::New(
+          v8::ArrayBuffer::New(js.v8Isolate, test.bufferSize), 0, test.bufferSize);
 
-      return env.context.awaitJs(js, byobReader->read(js, u8, {}).then(js,
+      return env.context.awaitJs(js, byobReader->read(js, buffer, {}).then(js,
                   JSG_VISITABLE_LAMBDA(
                       (test, reader = byobReader.addRef(), stream = stream.addRef()),
                       (reader, stream), (jsg::Lock& js, ReadResult readResult) {

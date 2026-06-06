@@ -100,9 +100,10 @@ jsg::Ref<ReadableStream> createValueStream(
         KJ_ASSERT_NONNULL(controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
 
     if ((*counter)++ < numChunks) {
-      auto buffer = jsg::JsArrayBuffer::create(js, chunkSize);
+      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
+      jsg::BufferSource buffer(js, kj::mv(backing));
       buffer.asArrayPtr().fill(0xAB);
-      c->enqueue(js, jsg::JsValue(buffer));
+      c->enqueue(js, buffer.getHandle(js));
     }
     if (*counter == numChunks) {
       c->close(js);
@@ -128,9 +129,10 @@ jsg::Ref<ReadableStream> createByteStream(
         KJ_ASSERT_NONNULL(controller.template tryGet<jsg::Ref<ReadableByteStreamController>>());
 
     if ((*counter)++ < numChunks) {
-      auto buffer = jsg::JsArrayBuffer::create(js, chunkSize);
+      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
+      jsg::BufferSource buffer(js, kj::mv(backing));
       buffer.asArrayPtr().fill(0xAB);
-      c->enqueue(js, jsg::JsBufferSource(buffer));
+      c->enqueue(js, kj::mv(buffer));
     }
     if (*counter == numChunks) {
       c->close(js);
@@ -169,9 +171,10 @@ jsg::Ref<ReadableStream> createIoLatencyValueStream(
         JSG_VISITABLE_LAMBDA(
             (cRef = kj::mv(cRef), chunkSize, numChunks, counter), (cRef), (jsg::Lock & js) mutable {
               if ((*counter)++ < numChunks) {
-              auto buffer = jsg::JsArrayBuffer::create(js, chunkSize);
+              auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, chunkSize);
+              jsg::BufferSource buffer(js, kj::mv(backing));
               buffer.asArrayPtr().fill(0xAB);
-              cRef->enqueue(js, jsg::JsValue(buffer));
+              cRef->enqueue(js, buffer.getHandle(js));
               }
               if (*counter == numChunks) {
               cRef->close(js);

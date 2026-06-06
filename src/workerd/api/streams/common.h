@@ -393,10 +393,9 @@ class ReadableStreamController {
   struct ByobOptions {
     static constexpr size_t DEFAULT_AT_LEAST = 1;
 
-    // The ArrayBufferView that we are going to read into. We do not
-    // cache the offset and length in case the user resizes or detaches
-    // it after providing it.
-    jsg::JsRef<jsg::JsArrayBufferView> bufferView;
+    jsg::V8Ref<v8::ArrayBufferView> bufferView;
+    size_t byteOffset = 0;
+    size_t byteLength;
 
     // The minimum number of elements that should be read. When not specified, the default
     // is DEFAULT_AT_LEAST. This is a non-standard, Workers-specific extension to
@@ -508,7 +507,7 @@ class ReadableStreamController {
   virtual bool isByteOriented() const = 0;
 
   // Reads data from the stream. If the stream is byte-oriented, then the ByobOptions can be
-  // specified to provide an ArrayBufferView to be filled by the read operation. If the ByobOptions
+  // specified to provide a v8::ArrayBuffer to be filled by the read operation. If the ByobOptions
   // are provided and the stream is not byte-oriented, the operation will return a rejected promise.
   virtual kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js, kj::Maybe<ByobOptions> byobOptions) = 0;

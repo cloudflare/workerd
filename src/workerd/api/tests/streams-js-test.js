@@ -2366,17 +2366,13 @@ export const queuingStrategies = {
 
       ok(startRan);
       strictEqual(highWaterMark, 10);
-      strictEqual(size('nothing'), 7);
+      strictEqual(size('nothing'), undefined);
       strictEqual(size(123), undefined);
       strictEqual(size(undefined), undefined);
       strictEqual(size(null), undefined);
       strictEqual(size(), undefined);
       strictEqual(size(new ArrayBuffer(10)), 10);
-      strictEqual(size(new SharedArrayBuffer(10)), 10);
       strictEqual(size(new Uint8Array(10)), 10);
-      strictEqual(size(new Uint32Array(1)), 4);
-      strictEqual(size({ byteLength: 2 }), 2);
-      strictEqual(size({}), undefined);
     }
 
     // CountQueuingStrategy
