@@ -404,6 +404,7 @@ v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
   auto isolate = v8::Isolate::GetCurrent();
   auto object =
       jsg::check(IsolateBase::getOpaqueTemplate(isolate)->InstanceTemplate()->NewInstance(context));
+  jsg::check(object->SetPrototype(context, v8::Null(isolate)));
   attachWrapper(isolate, object, needsGcTracing);
   return object;
 }
