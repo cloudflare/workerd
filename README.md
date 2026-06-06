@@ -235,3 +235,4 @@ WantedBy=sockets.target
 ```
 
 Once these files are in place you can enable the service -- see the systemd documentation or ask your favorite LLM for details.
+The JavaScript / Wasm runtime that powers Cloudflare Workers
