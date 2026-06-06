@@ -1,6 +1,7 @@
 #include "frankenvalue.h"
 
 #include <workerd/jsg/ser.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd {
 
@@ -16,6 +17,9 @@ Frankenvalue Frankenvalue::cloneImpl() const {
     }
     KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
       result.value = V8Serialized{kj::heapArray(v8Serialized.data.asPtr())};
+    }
+    KJ_CASE_ONEOF(capability, Capability) {
+      result.value = capability;
     }
   }
 
@@ -84,6 +88,11 @@ void Frankenvalue::toCapnpImpl(rpc::Frankenvalue::Builder builder, size_t capTab
     KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
       builder.setV8Serialized(v8Serialized.data);
     }
+    KJ_CASE_ONEOF(capability, Capability) {
+      auto capBuilder = builder.initCapability();
+      capBuilder.setCapIndex(capability.capIndex);
+      capBuilder.setTag(capability.tag);
+    }
   }
 
   if (properties.empty()) {
@@ -129,11 +138,23 @@ size_t Frankenvalue::fromCapnpImpl(
     case rpc::Frankenvalue::V8_SERIALIZED:
       this->value = V8Serialized{kj::heapArray(reader.getV8Serialized())};
       break;
+    case rpc::Frankenvalue::CAPABILITY: {
+      auto cap = reader.getCapability();
+      this->value = Capability{.capIndex = cap.getCapIndex(), .tag = cap.getTag()};
+      break;
+    }
   }
 
   size_t nodeCaps = reader.getCapTableSize();
   // Security invariant: never create OOB cap table slices.
   KJ_REQUIRE(nodeCaps <= capTableTotal - capCount, "Frankenvalue capTableSize exceeds capTable");
+
+  // A `capability` value references one of this node's base caps by index; make sure it's in
+  // range so that toJs() can't read out of bounds.
+  KJ_IF_SOME(capability, this->value.tryGet<Capability>()) {
+    KJ_REQUIRE(capability.capIndex < nodeCaps, "Frankenvalue capability index out of range");
+  }
+
   capCount += nodeCaps;
 
   auto properties = reader.getProperties();
@@ -178,6 +199,28 @@ jsg::JsValue Frankenvalue::toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTable
                 .externalHandler = capTableReader,
               });
           return deser.readValue(js);
+        }
+        KJ_CASE_ONEOF(capability, Capability) {
+          // The value is a single capability taken directly from the cap table, without going
+          // through V8 serialization. We materialize it by invoking the deserializer registered
+          // for the capability's `tag` (e.g. `Fetcher::deserialize` for `serviceStub`), feeding it
+          // a `Deserializer` whose external handler is our cap table and whose first raw value is
+          // the cap index -- exactly what those deserializers expect to read.
+          CapTableReader capTableReader(
+              properties.empty() ? capTable : capTable.first(properties[0].capTableOffset));
+
+          jsg::Serializer payloadSer(js);
+          payloadSer.writeRawUint32(capability.capIndex);
+          auto payload = payloadSer.release();
+
+          jsg::Deserializer deser(js, payload.data, kj::none, kj::none,
+              jsg::Deserializer::Options{
+                .externalHandler = capTableReader,
+              });
+
+          auto obj = jsg::IsolateBase::from(js.v8Isolate).deserialize(js, capability.tag, deser);
+          return jsg::JsValue(v8::Local<v8::Value>(KJ_REQUIRE_NONNULL(
+              obj, "no deserializer registered for Frankenvalue capability tag", capability.tag)));
         }
       }
       KJ_UNREACHABLE;
@@ -249,6 +292,9 @@ size_t Frankenvalue::estimateSize() const {
     KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
       result += v8Serialized.data.size();
     }
+    KJ_CASE_ONEOF(capability, Capability) {
+      result += sizeof(Capability);
+    }
   }
 
   for (auto& property: properties) {
@@ -256,6 +302,13 @@ size_t Frankenvalue::estimateSize() const {
     result += property.value.estimateSize();
   }
 
+  return result;
+}
+
+Frankenvalue Frankenvalue::fromCapability(uint16_t tag, kj::Own<CapTableEntry> entry) {
+  Frankenvalue result;
+  result.value = Capability{.capIndex = 0, .tag = tag};
+  result.capTable.add(kj::mv(entry));
   return result;
 }
 

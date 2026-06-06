@@ -62,6 +62,14 @@ class Frankenvalue {
   // then JSON-stringifying from there.)
   static Frankenvalue fromJson(kj::String json);
 
+  // Construct a Frankenvalue whose value is a single capability (cap table entry), without going
+  // through V8 serialization. When converted to JS, the capability is materialized using the
+  // deserializer registered for `tag` (a `workerd::rpc::SerializationTag` value, e.g.
+  // `serviceStub` to produce a Fetcher). This is useful when building a Frankenvalue outside of any
+  // JavaScript context, e.g. to place a service binding (Fetcher) into `ctx.props` from config or a
+  // control plane.
+  static Frankenvalue fromCapability(uint16_t tag, kj::Own<CapTableEntry> entry);
+
   // Add a property to the value, represented as another Frankenvalue. This is how you "stitch
   // together" values!
   //
@@ -176,7 +184,17 @@ class Frankenvalue {
   struct V8Serialized {
     kj::Array<byte> data;
   };
-  kj::OneOf<EmptyObject, Json, V8Serialized> value;
+  struct Capability {
+    // Index into this value's base cap table (the caps referenced by the union, before property
+    // caps).
+    uint32_t capIndex;
+
+    // The `workerd::rpc::SerializationTag` value describing how to materialize the capability into
+    // a JS value (e.g. `serviceStub` for a Fetcher). Stored as a raw integer so that this header
+    // need not depend on the `SerializationTag` schema.
+    uint16_t tag;
+  };
+  kj::OneOf<EmptyObject, Json, V8Serialized, Capability> value;
 
   struct Property;
   kj::Vector<Property> properties;
