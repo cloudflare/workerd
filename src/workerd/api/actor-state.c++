@@ -993,19 +993,17 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
         [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
       tracing.setTag("facet_name"_kjc, name.asPtr());
 
-      // Lazily initialize actorChannel
-      if (actorChannel == kj::none) {
-        actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
-      }
-
-      return KJ_REQUIRE_NONNULL(actorChannel)
-          ->startRequest({.cfBlobJson = kj::mv(cfStr),
-            .parentSpan = tracing.getInternalSpanParent(),
-            .userSpanParent = tracing.getUserSpanParent()});
+      return getOrCreateActorChannel().startRequest({.cfBlobJson = kj::mv(cfStr),
+        .parentSpan = tracing.getInternalSpanParent(),
+        .userSpanParent = tracing.getUserSpanParent()});
     },
         {.inHouse = true,
           .wrapMetrics = true,
           .operationName = kj::ConstString("facet_subrequest"_kjc)}));
+  }
+
+  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
+    return kj::addRef(getOrCreateActorChannel());
   }
 
  private:
@@ -1016,6 +1014,14 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo;
 
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+
+  IoChannelFactory::ActorChannel& getOrCreateActorChannel() {
+    if (actorChannel == kj::none) {
+      actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
+    }
+
+    return *KJ_REQUIRE_NONNULL(actorChannel);
+  }
 };
 
 jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
