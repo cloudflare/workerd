@@ -373,21 +373,12 @@ void onConsumerClose(jsg::Lock& js) override {
 }
 ```
 
-### Pattern: Refcounted Pipe State
+### Pattern: Weak-ref'd Pipe State
 
 - **When**: Internal stream pipe operations with async continuations
-- **How**: `Pipe::State` is `kj::Refcounted`; lambdas capture `kj::addRef(*state)`;
-  `~Pipe()` sets `state->aborted = true`; continuations check before proceeding
-
-```cpp
-struct Pipe {
-    struct State: public kj::Refcounted {
-        bool aborted = false;
-    };
-    kj::Own<State> state;
-    ~Pipe() noexcept(false) { state->aborted = true; }
-};
-```
+- **How**: `Pipe::State` holds a weak ref to `Pipe`/ Rather than holding bare
+  references to `Pipe` in the queue, ensures continuations remain safe if the
+  pipe is somehow destroyed while operations are pending.
 
 ### Pattern: Generation Counter
 

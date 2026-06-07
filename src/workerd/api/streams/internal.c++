@@ -1076,14 +1076,16 @@ jsg::Promise<void> WritableStreamInternalController::write(
         KJ_IF_SOME(o, observer) {
           o->onChunkEnqueued(len);
         }
-        queue.push_back(
-            WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-              .event = kj::heap<Write>({
+        queue.push_back(WriteEvent{
+          .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
+          .event =
+              Write{
                 .promise = kj::mv(prp.resolver),
                 .totalBytes = len,
                 .ownBytes = kj::mv(data),
                 .bytes = ptr,
-              })});
+              },
+        });
 
         ensureWriting(js);
         return kj::mv(prp.promise);
@@ -1151,7 +1153,7 @@ jsg::Promise<void> WritableStreamInternalController::closeImpl(jsg::Lock& js, bo
       }
       queue.push_back(
           WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-            .event = kj::heap<Close>({.promise = kj::mv(prp.resolver)})});
+            .event = Close{.promise = kj::mv(prp.resolver)}});
       ensureWriting(js);
       return kj::mv(prp.promise);
     }
@@ -1208,7 +1210,7 @@ jsg::Promise<void> WritableStreamInternalController::flush(jsg::Lock& js, bool m
       }
       queue.push_back(
           WriteEvent{.outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-            .event = kj::heap<Flush>({.promise = kj::mv(prp.resolver)})});
+            .event = Flush{.promise = kj::mv(prp.resolver)}});
       ensureWriting(js);
       return kj::mv(prp.promise);
     }
@@ -1387,7 +1389,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   }
   queue.push_back(WriteEvent{
     .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
-    .event = kj::heap<Pipe>(*this, sourceLock, kj::mv(prp.resolver), preventAbort, preventClose,
+    .event = Pipe(*this, sourceLock, kj::mv(prp.resolver), preventAbort, preventClose,
         preventCancel, kj::mv(options.signal)),
   });
   ensureWriting(js);
@@ -1517,13 +1519,12 @@ void WritableStreamInternalController::releaseWriter(
 
 bool WritableStreamInternalController::isClosedOrClosing() {
 
-  bool isClosing = !queue.empty() && queue.back().event.is<kj::Own<Close>>();
-  bool isFlushing = !queue.empty() && queue.back().event.is<kj::Own<Flush>>();
-  return state.is<StreamStates::Closed>() || isClosing || isFlushing;
+  bool isCloseOrFlush = !queue.empty() && queue.back().isCloseOrFlush();
+  return state.is<StreamStates::Closed>() || isCloseOrFlush;
 }
 
 bool WritableStreamInternalController::isPiping() {
-  return state.is<IoOwn<Writable>>() && !queue.empty() && queue.back().event.is<kj::Own<Pipe>>();
+  return state.is<IoOwn<Writable>>() && !queue.empty() && queue.back().isPipe();
 }
 
 bool WritableStreamInternalController::isErrored() {
@@ -1608,16 +1609,16 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       kj::Vector<kj::String> events;
       for (auto& event: queue) {
         KJ_SWITCH_ONEOF(event.event) {
-          KJ_CASE_ONEOF(write, kj::Own<Write>) {
+          KJ_CASE_ONEOF(write, Write) {
             events.add(kj::str("Write"));
           }
-          KJ_CASE_ONEOF(flush, kj::Own<Flush>) {
+          KJ_CASE_ONEOF(flush, Flush) {
             events.add(kj::str("Flush"));
           }
-          KJ_CASE_ONEOF(close, kj::Own<Close>) {
+          KJ_CASE_ONEOF(close, Close) {
             events.add(kj::str("Close"));
           }
-          KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
+          KJ_CASE_ONEOF(pipe, Pipe) {
             events.add(kj::str("Pipe"));
           }
         }
@@ -1643,15 +1644,15 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       auto& queue = controller.queue;
       KJ_ASSERT(!queue.empty());
       KJ_ASSERT(queue.currentGeneration() == expectedGeneration);
-      if constexpr (kj::isSameType<Request, kj::Own<Close>>()) {
+      if constexpr (kj::isSameType<Request, Close>()) {
         // Pipe and Close requests are always the last one in the queue.
         KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue));
-      } else if constexpr (kj::isSameType<Request, kj::Own<Pipe>>()) {
+      } else if constexpr (kj::isSameType<Request, Pipe>()) {
         // Pipe and Close requests are always the last one in the queue.
         KJ_ASSERT(queue.size() == 1, queue.size(), inspectQueue(queue));
       }
 
-      return *queue.front().event.template get<kj::Own<Request>>();
+      return queue.front().event.template get<Request>();
     };
   };
 
@@ -1671,13 +1672,13 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
   if (queue.empty()) return js.resolvedPromise();
 
   KJ_SWITCH_ONEOF(queue.front().event) {
-    KJ_CASE_ONEOF(request, kj::Own<Write>) {
-      auto amountToWrite = request->bytes.size();
+    KJ_CASE_ONEOF(request, Write) {
+      auto amountToWrite = request.bytes.size();
       if (amountToWrite == 0) {
         // Zero-length writes are no-ops with a pending event. If we allowed them, we'd have a hard
         // time distinguishing between disconnections and zero-length reads on the other end of the
         // TransformStream.
-        maybeResolvePromise(js, request->promise);
+        maybeResolvePromise(js, request.promise);
         queue.pop_front();
 
         // Note: we don't bother checking for an abort() here because either this write was just
@@ -1689,7 +1690,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       auto check = makeChecker(*this);
       auto promise = KJ_ASSERT_NONNULL(state.whenActive([&request](IoOwn<Writable>& writable) {
         return writable->canceler.wrap(
-            writable->sink->write(request->bytes).attach(kj::mv(request->ownBytes)));
+            writable->sink->write(request.bytes).attach(kj::mv(request.ownBytes)));
       }));
 
       // TODO(soon): We use awaitIoLegacy() here because if the stream terminates in JavaScript in
@@ -1744,8 +1745,8 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         return js.resolvedPromise();
       }));
     }
-    KJ_CASE_ONEOF(request, kj::Own<Pipe>) {
-      if (request->checkSignal(js)) {
+    KJ_CASE_ONEOF(request, Pipe) {
+      if (request.checkSignal(js)) {
         // If the signal is triggered, checkSignal will handle erroring the source and destination.
         return js.resolvedPromise();
       }
@@ -1753,17 +1754,15 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // The readable side should *should* still be readable here but let's double check, just
       // to be safe, both for closed state and errored states. We just constructed the Pipe
       // and haven't yet entered pipeLoop, so source is guaranteed non-null.
-      auto& sourceRef = KJ_ASSERT_NONNULL(request->source);
-      auto preventClose = request->flags.preventClose;
-      auto preventAbort = request->flags.preventAbort;
+      auto& sourceRef = KJ_ASSERT_NONNULL(request.source);
+      auto preventClose = request.flags.preventClose;
+      auto preventAbort = request.flags.preventAbort;
 
-      // The readable side should *should* still be readable here but let's double check, just
-      // to be safe, both for closed state and errored states.
       if (sourceRef.isClosed()) {
         // Resolve the pipe promise before pop_front destroys the Pipe event.
-        auto promise = request->takePromise();
+        auto promise = request.takePromise();
         maybeResolvePromise(js, promise);
-        request->releaseSource(js);
+        request.releaseSource(js);
         // Pop the Pipe from the queue before calling close() — isPiping()
         // checks the queue, and close() rejects if isPiping() is true.
         queue.pop_front();
@@ -1781,9 +1780,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
       KJ_IF_SOME(errored, sourceRef.tryGetErrored(js)) {
         // Reject the pipe promise before pop_front destroys the Pipe event.
-        auto promise = request->takePromise();
+        auto promise = request.takePromise();
         maybeRejectPromise<void>(js, promise, errored);
-        request->releaseSource(js);
+        request.releaseSource(js);
         // Pop the Pipe from the queue before further processing — the source
         // has been released, so the Pipe entry is stale.
         queue.pop_front();
@@ -1924,18 +1923,18 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           return handlePromise(js,
               ioContext.awaitIo(js,
                   writable->canceler.wrap(
-                      AbortSignal::maybeCancelWrap(js, request->maybeSignal, kj::mv(promise)))));
+                      AbortSignal::maybeCancelWrap(js, request.maybeSignal, kj::mv(promise)))));
         } else {
           // The ReadableStream is JavaScript-backed. We can still pipe the data but it's going to be
           // a bit slower because we will be relying on JavaScript promises when reading the data
           // from the ReadableStream, then waiting on kj::Promises to write the data. We will keep
           // reading until either the source or destination errors or until the source signals that
           // it is done.
-          return handlePromise(js, request->pipeLoop(js));
+          return handlePromise(js, request.pipeLoop(js));
         }
       }));
     }
-    KJ_CASE_ONEOF(request, kj::Own<Close>) {
+    KJ_CASE_ONEOF(request, Close) {
       return KJ_ASSERT_NONNULL(state.whenActive([&](IoOwn<Writable>& writable) {
         return ioContext.awaitIo(js, writable->canceler.wrap(writable->sink->end()))
             .then(js,
@@ -1966,13 +1965,13 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         }));
       }));
     }
-    KJ_CASE_ONEOF(request, kj::Own<Flush>) {
+    KJ_CASE_ONEOF(request, Flush) {
       // This is not a standards-defined state for a WritableStream and is only used internally
       // for Socket's startTls call.
       //
       // Flushing is essentially just a signal that the write loop has reached this point.
       // Note: For Flush, we don't need makeChecker since we process immediately without async I/O.
-      auto fulfiller = kj::mv(request->promise);
+      auto fulfiller = kj::mv(request.promise);
       maybeResolvePromise(js, fulfiller);
       queue.pop_front();
 
@@ -1991,7 +1990,7 @@ bool WritableStreamInternalController::Pipe::State::checkSignal(jsg::Lock& js) {
 }
 
 bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
-  // Returns true if the caller should bail out and stop processing. This happens in two cases:
+  // Returns true if the caller should bail out and stop processing.
   // The caller should return a resolved promise and not continue the pipe loop.
   KJ_IF_SOME(signal, maybeSignal) {
     if (signal->getAborted(js)) {
@@ -2024,6 +2023,7 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
           parentRef.state.whenActive(
               [&](IoOwn<Writable>& writable) { writable->abort(js.exceptionToKj(reason)); });
           parentRef.drain(js, reason);
+          // Note that drain deletes `this`. Do not touch any members after this.
         } else {
           parentRef.writeState.transitionTo<Unlocked>();
           parentRef.queue.pop_front();
@@ -2034,7 +2034,7 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
       }
 
       maybeRejectPromise<void>(js, promiseCopy, reason);
-      weakRef->invalidate();
+      KJ_ASSERT_NONNULL(weakRef)->invalidate();
       return true;
     }
   }
@@ -2064,7 +2064,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(
   // the data from the ArrayBuffer anyway... We incur an allocation and copy cost
   // here but that's to be expected.
   //
-  auto writeBytes = [&](kj::Array<const kj::byte> data) mutable {
+  auto writeBytes = [&](kj::Array<const kj::byte> data) {
     auto& ioContext = IoContext::current();
     return KJ_ASSERT_NONNULL(parent.state.whenActive([&](IoOwn<Writable>& writable) {
       return ioContext.awaitIo(js,
@@ -2328,25 +2328,25 @@ void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason)
   doError(js, reason);
   while (!queue.empty()) {
     KJ_SWITCH_ONEOF(queue.front().event) {
-      KJ_CASE_ONEOF(writeRequest, kj::Own<Write>) {
-        auto promise = kj::mv(writeRequest->promise);
+      KJ_CASE_ONEOF(writeRequest, Write) {
+        auto promise = kj::mv(writeRequest.promise);
         maybeRejectPromise<void>(js, promise, reason);
       }
-      KJ_CASE_ONEOF(pipeRequest, kj::Own<Pipe>) {
-        if (!pipeRequest->flags.preventCancel) {
-          KJ_IF_SOME(sourceRef, pipeRequest->source) {
+      KJ_CASE_ONEOF(pipeRequest, Pipe) {
+        if (!pipeRequest.flags.preventCancel) {
+          KJ_IF_SOME(sourceRef, pipeRequest.source) {
             sourceRef.cancel(js, reason);
           }
         }
-        auto promise = pipeRequest->takePromise();
+        auto promise = pipeRequest.takePromise();
         maybeRejectPromise<void>(js, promise, reason);
       }
-      KJ_CASE_ONEOF(closeRequest, kj::Own<Close>) {
-        auto promise = kj::mv(closeRequest->promise);
+      KJ_CASE_ONEOF(closeRequest, Close) {
+        auto promise = kj::mv(closeRequest.promise);
         maybeRejectPromise<void>(js, promise, reason);
       }
-      KJ_CASE_ONEOF(flushRequest, kj::Own<Flush>) {
-        auto promise = kj::mv(flushRequest->promise);
+      KJ_CASE_ONEOF(flushRequest, Flush) {
+        auto promise = kj::mv(flushRequest.promise);
         maybeRejectPromise<void>(js, promise, reason);
       }
     }
@@ -2357,17 +2357,17 @@ void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason)
 void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
   for (auto& event: queue) {
     KJ_SWITCH_ONEOF(event.event) {
-      KJ_CASE_ONEOF(write, kj::Own<Write>) {
-        visitor.visit(write->promise);
+      KJ_CASE_ONEOF(write, Write) {
+        visitor.visit(write.promise);
       }
-      KJ_CASE_ONEOF(close, kj::Own<Close>) {
-        visitor.visit(close->promise);
+      KJ_CASE_ONEOF(close, Close) {
+        visitor.visit(close.promise);
       }
-      KJ_CASE_ONEOF(flush, kj::Own<Flush>) {
-        visitor.visit(flush->promise);
+      KJ_CASE_ONEOF(flush, Flush) {
+        visitor.visit(flush.promise);
       }
-      KJ_CASE_ONEOF(pipe, kj::Own<Pipe>) {
-        visitor.visit(pipe->maybeSignal, pipe->promise);
+      KJ_CASE_ONEOF(pipe, Pipe) {
+        pipe.visitForGc(visitor);
       }
     }
   }

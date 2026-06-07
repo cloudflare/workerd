@@ -405,7 +405,7 @@ class WritableStreamInternalController: public WritableStreamController {
     Flags flags{};
     kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
     kj::Maybe<jsg::JsRef<jsg::JsValue>> capturedSourceError;
-    kj::Rc<workerd::WeakRef<Pipe>> selfRef;
+    kj::Maybe<kj::Rc<workerd::WeakRef<Pipe>>> selfRef;
 
     Pipe(WritableStreamInternalController& parent,
         ReadableStreamController::PipeController& source,
@@ -434,17 +434,22 @@ class WritableStreamInternalController: public WritableStreamController {
           selfRef(kj::rc<workerd::WeakRef<Pipe>>(kj::Badge<Pipe>(), *this)) {
       // Invalidate the old Pipe's weak ref — any State objects pointing to it
       // will see isAborted() = true.
-      other.selfRef->invalidate();
+      KJ_IF_SOME(ref, other.selfRef) {
+        ref->invalidate();
+        other.selfRef = kj::none;
+      }
     }
 
     ~Pipe() noexcept(false) {
-      selfRef->invalidate();
+      KJ_IF_SOME(ref, selfRef) {
+        ref->invalidate();
+      }
     }
 
     KJ_DISALLOW_COPY(Pipe);
 
     kj::Rc<State> getState() {
-      return kj::rc<State>(parent.addRef(), selfRef.addRef());
+      return kj::rc<State>(parent.addRef(), KJ_ASSERT_NONNULL(selfRef).addRef());
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
@@ -474,23 +479,31 @@ class WritableStreamInternalController: public WritableStreamController {
   };
   struct WriteEvent {
     kj::Maybe<IoOwn<kj::Promise<void>>> outputLock;  // must wait for this before actually writing
-    kj::OneOf<kj::Own<Write>, kj::Own<Pipe>, kj::Own<Close>, kj::Own<Flush>> event;
+    kj::OneOf<Write, Pipe, Close, Flush> event;
+
+    bool isCloseOrFlush() const {
+      return event.is<Close>() || event.is<Flush>();
+    }
+
+    bool isPipe() const {
+      return event.is<Pipe>();
+    }
 
     JSG_MEMORY_INFO(WriteEvent) {
       if (outputLock != kj::none) {
         tracker.trackFieldWithSize("outputLock", sizeof(IoOwn<kj::Promise<void>>));
       }
       KJ_SWITCH_ONEOF(event) {
-        KJ_CASE_ONEOF(w, kj::Own<Write>) {
+        KJ_CASE_ONEOF(w, Write) {
           tracker.trackField("inner", w);
         }
-        KJ_CASE_ONEOF(p, kj::Own<Pipe>) {
+        KJ_CASE_ONEOF(p, Pipe) {
           tracker.trackField("inner", p);
         }
-        KJ_CASE_ONEOF(c, kj::Own<Close>) {
+        KJ_CASE_ONEOF(c, Close) {
           tracker.trackField("inner", c);
         }
-        KJ_CASE_ONEOF(f, kj::Own<Flush>) {
+        KJ_CASE_ONEOF(f, Flush) {
           tracker.trackField("inner", f);
         }
       }
