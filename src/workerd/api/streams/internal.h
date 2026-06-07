@@ -324,7 +324,7 @@ class WritableStreamInternalController: public WritableStreamController {
 
   kj::Maybe<kj::Own<ByteStreamObserver>> observer;
 
-  kj::Maybe<kj::Own<PendingAbort>> maybePendingAbort;
+  kj::Maybe<PendingAbort> maybePendingAbort;
 
   uint64_t currentWriteBufferSize = 0;
 
