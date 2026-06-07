@@ -54,56 +54,7 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
     service.setEntrypoint(e);
   }
 
-  {
-    auto propsBuilder = service.initProps();
-    props.toCapnp(propsBuilder);
-
-    auto capTable = props.getCapTable();
-    if (capTable.size() > 0) {
-      auto tableBuilder = propsBuilder.initCapTable().initAs<ChannelToken::FrankenvalueCapTable>();
-
-      auto caps = tableBuilder.initCaps(capTable.size());
-
-      for (auto i: kj::indices(capTable)) {
-        KJ_IF_SOME(subreq, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*capTable[i])) {
-          KJ_SWITCH_ONEOF(subreq.getTokenMaybeSync(usage)) {
-            KJ_CASE_ONEOF(token, kj::Array<byte>) {
-              caps[i].setSubrequestChannel(token);
-            }
-            KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-              promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
-                slot.setSubrequestChannel(token);
-              }));
-            }
-          }
-        } else KJ_IF_SOME(actorClass,
-            kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*capTable[i])) {
-          KJ_SWITCH_ONEOF(actorClass.getTokenMaybeSync(usage)) {
-            KJ_CASE_ONEOF(token, kj::Array<byte>) {
-              caps[i].setActorClassChannel(token);
-            }
-            KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-              promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
-                slot.setActorClassChannel(token);
-              }));
-            }
-          }
-        } else KJ_IF_SOME(rpcChannel, kj::tryDowncast<IoChannelFactory::RpcChannel>(*capTable[i])) {
-          KJ_SWITCH_ONEOF(rpcChannel.getTokenMaybeSync(usage)) {
-            KJ_CASE_ONEOF(token, kj::Array<byte>) {
-              caps[i].setRpcChannel(token);
-            }
-            KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-              promises.add(promise.then(
-                  [slot = caps[i]](kj::Array<byte> token) mutable { slot.setRpcChannel(token); }));
-            }
-          }
-        } else {
-          KJ_FAIL_REQUIRE("unknown type in props");
-        }
-      }
-    }
-  }
+  encodeFrankenvalue(usage, props, service.initProps(), promises);
 
   if (promises.empty()) {
     return serializeTokenImpl(usage, *message);
@@ -112,6 +63,59 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
         .then([this, usage, message = kj::mv(message)]() mutable {
       return serializeTokenImpl(usage, *message);
     });
+  }
+}
+
+void ChannelTokenHandler::encodeFrankenvalue(IoChannelFactory::ChannelTokenUsage usage,
+    Frankenvalue& value,
+    rpc::Frankenvalue::Builder valueBuilder,
+    kj::Vector<kj::Promise<void>>& promises) {
+  value.toCapnp(valueBuilder);
+
+  auto capTable = value.getCapTable();
+  if (capTable.size() > 0) {
+    auto tableBuilder = valueBuilder.initCapTable().initAs<ChannelToken::FrankenvalueCapTable>();
+
+    auto caps = tableBuilder.initCaps(capTable.size());
+
+    for (auto i: kj::indices(capTable)) {
+      KJ_IF_SOME(subreq, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*capTable[i])) {
+        KJ_SWITCH_ONEOF(subreq.getTokenMaybeSync(usage)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            caps[i].setSubrequestChannel(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
+              slot.setSubrequestChannel(token);
+            }));
+          }
+        }
+      } else KJ_IF_SOME(actorClass,
+          kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*capTable[i])) {
+        KJ_SWITCH_ONEOF(actorClass.getTokenMaybeSync(usage)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            caps[i].setActorClassChannel(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            promises.add(promise.then([slot = caps[i]](kj::Array<byte> token) mutable {
+              slot.setActorClassChannel(token);
+            }));
+          }
+        }
+      } else KJ_IF_SOME(rpcChannel, kj::tryDowncast<IoChannelFactory::RpcChannel>(*capTable[i])) {
+        KJ_SWITCH_ONEOF(rpcChannel.getTokenMaybeSync(usage)) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            caps[i].setRpcChannel(token);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            promises.add(promise.then(
+                [slot = caps[i]](kj::Array<byte> token) mutable { slot.setRpcChannel(token); }));
+          }
+        }
+      } else {
+        KJ_FAIL_REQUIRE("unknown type in props");
+      }
+    }
   }
 }
 
@@ -299,34 +303,7 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
 
       Frankenvalue props;
       if (service.hasProps()) {
-        auto propsReader = service.getProps();
-        auto tableReader = propsReader.getCapTable().getAs<ChannelToken::FrankenvalueCapTable>();
-
-        kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
-        if (tableReader.hasCaps()) {
-          auto caps = tableReader.getCaps();
-          capTable.reserve(caps.size());
-
-          for (auto cap: caps) {
-            switch (cap.which()) {
-              case ChannelToken::FrankenvalueCapTable::Cap::UNKNOWN:
-                break;
-              case ChannelToken::FrankenvalueCapTable::Cap::SUBREQUEST_CHANNEL:
-                capTable.add(decodeSubrequestChannelToken(usage, cap.getSubrequestChannel()));
-                continue;
-              case ChannelToken::FrankenvalueCapTable::Cap::ACTOR_CLASS_CHANNEL:
-                capTable.add(decodeActorClassChannelToken(usage, cap.getActorClassChannel()));
-                continue;
-              case ChannelToken::FrankenvalueCapTable::Cap::RPC_CHANNEL:
-                capTable.add(
-                    decodeChannelTokenImpl(ChannelToken::Type::RPC, usage, cap.getRpcChannel()));
-                continue;
-            }
-            KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
-          }
-        }
-
-        props = Frankenvalue::fromCapnp(propsReader, kj::mv(capTable));
+        props = decodeFrankenvalue(usage, service.getProps());
       }
 
       // HACK: It would be more type-safe for us to return the (name, entrypoint, props) triplet and
@@ -365,6 +342,40 @@ kj::Own<Frankenvalue::CapTableEntry> ChannelTokenHandler::decodeChannelTokenImpl
   }
 
   KJ_FAIL_REQUIRE("unknown channel token kind", reader.which());
+}
+
+Frankenvalue ChannelTokenHandler::decodeFrankenvalue(
+    IoChannelFactory::ChannelTokenUsage usage, rpc::Frankenvalue::Reader reader) {
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+  if (reader.hasCapTable()) {
+    auto tableReader = reader.getCapTable().getAs<ChannelToken::FrankenvalueCapTable>();
+    if (!tableReader.hasCaps()) {
+      return Frankenvalue::fromCapnp(reader, kj::mv(capTable));
+    }
+
+    auto caps = tableReader.getCaps();
+    capTable.reserve(caps.size());
+
+    for (auto cap: caps) {
+      switch (cap.which()) {
+        case ChannelToken::FrankenvalueCapTable::Cap::UNKNOWN:
+          break;
+        case ChannelToken::FrankenvalueCapTable::Cap::SUBREQUEST_CHANNEL:
+          capTable.add(decodeSubrequestChannelToken(usage, cap.getSubrequestChannel()));
+          continue;
+        case ChannelToken::FrankenvalueCapTable::Cap::ACTOR_CLASS_CHANNEL:
+          capTable.add(decodeActorClassChannelToken(usage, cap.getActorClassChannel()));
+          continue;
+        case ChannelToken::FrankenvalueCapTable::Cap::RPC_CHANNEL:
+          capTable.add(
+              decodeChannelTokenImpl(ChannelToken::Type::RPC, usage, cap.getRpcChannel()));
+          continue;
+      }
+      KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
+    }
+  }
+
+  return Frankenvalue::fromCapnp(reader, kj::mv(capTable));
 }
 
 kj::Own<IoChannelFactory::SubrequestChannel> ChannelTokenHandler::decodeSubrequestChannelToken(

@@ -99,6 +99,10 @@ class ChannelTokenHandler {
       kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
       Frankenvalue& props);
+  void encodeFrankenvalue(IoChannelFactory::ChannelTokenUsage usage,
+      Frankenvalue& value,
+      rpc::Frankenvalue::Builder valueBuilder,
+      kj::Vector<kj::Promise<void>>& promises);
   kj::Array<byte> serializeTokenImpl(
       IoChannelFactory::ChannelTokenUsage usage, capnp::MessageBuilder& message);
 
@@ -107,6 +111,9 @@ class ChannelTokenHandler {
   kj::Own<Frankenvalue::CapTableEntry> decodeChannelTokenImpl(ChannelToken::Type type,
       IoChannelFactory::ChannelTokenUsage usage,
       kj::ArrayPtr<const byte> token);
+
+  Frankenvalue decodeFrankenvalue(
+      IoChannelFactory::ChannelTokenUsage usage, rpc::Frankenvalue::Reader reader);
 };
 
 }  // namespace workerd::server
