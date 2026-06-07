@@ -372,102 +372,104 @@ class WritableStreamInternalController: public WritableStreamController {
     }
   };
   struct Pipe {
-    // PipeState is ref-counted so that it can be safely captured by lambdas in pipeLoop().
-    // When drain() destroys the Pipe, the state survives as long as pending callbacks need it.
-    // The `aborted` flag is set when the Pipe is destroyed.
     struct State: public kj::Refcounted {
-      WritableStreamInternalController& parent;
-      ReadableStreamController::PipeController& source;
-      kj::Maybe<jsg::Promise<void>::Resolver> promise;
-      kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+      jsg::Ref<WritableStream> owner;
+      kj::Rc<workerd::WeakRef<Pipe>> weakRef;
 
-      bool preventAbort;
-      bool preventClose;
-      bool preventCancel;
+      State(jsg::Ref<WritableStream> owner, kj::Rc<workerd::WeakRef<Pipe>> weakRef)
+          : owner(kj::mv(owner)),
+            weakRef(kj::mv(weakRef)) {}
 
-      // True when the Pipe is being destroyed
-      bool aborted = false;
-
-      State(WritableStreamInternalController& parent,
-          ReadableStreamController::PipeController& source,
-          kj::Maybe<jsg::Promise<void>::Resolver> promise,
-          bool preventAbort,
-          bool preventClose,
-          bool preventCancel,
-          kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
-          : parent(parent),
-            source(source),
-            promise(kj::mv(promise)),
-            maybeSignal(kj::mv(maybeSignal)),
-            preventAbort(preventAbort),
-            preventClose(preventClose),
-            preventCancel(preventCancel) {}
-
+      inline bool isAborted() const {
+        return !weakRef->isValid();
+      }
       bool checkSignal(jsg::Lock& js);
       jsg::Promise<void> pipeLoop(jsg::Lock& js);
       jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
-
-      JSG_MEMORY_INFO(State) {
-        tracker.trackField("resolver", promise);
-        tracker.trackField("signal", maybeSignal);
-      }
+      void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none);
+      bool isSourceReleased();
+      void tryErrorParent(jsg::Lock& js, jsg::JsValue reason);
+      void tryFinishCloseParent(jsg::Lock& js);
+      void tryFinishErrorParent(jsg::Lock& js, jsg::JsValue reason);
+      void tryNoBytesError(jsg::Lock& js);
     };
 
-    kj::Own<State> state;
+    WritableStreamInternalController& parent;
+    kj::Maybe<ReadableStreamController::PipeController&> source;
+    kj::Maybe<jsg::Promise<void>::Resolver> promise;
+    struct Flags {
+      uint8_t preventAbort : 1;
+      uint8_t preventClose : 1;
+      uint8_t preventCancel : 1;
+    };
+    Flags flags{};
+    kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+    kj::Maybe<jsg::JsRef<jsg::JsValue>> capturedSourceError;
+    kj::Rc<workerd::WeakRef<Pipe>> selfRef;
 
     Pipe(WritableStreamInternalController& parent,
         ReadableStreamController::PipeController& source,
-        kj::Maybe<jsg::Promise<void>::Resolver> promise,
+        jsg::Promise<void>::Resolver promise,
         bool preventAbort,
         bool preventClose,
         bool preventCancel,
         kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal)
-        : state(kj::refcounted<State>(parent,
-              source,
-              kj::mv(promise),
-              preventAbort,
-              preventClose,
-              preventCancel,
-              kj::mv(maybeSignal))) {}
+        : parent(parent),
+          source(source),
+          promise(kj::mv(promise)),
+          maybeSignal(kj::mv(maybeSignal)),
+          selfRef(kj::rc<workerd::WeakRef<Pipe>>(kj::Badge<Pipe>(), *this)) {
+      flags.preventAbort = preventAbort;
+      flags.preventClose = preventClose;
+      flags.preventCancel = preventCancel;
+    }
+
+    Pipe(Pipe&& other) noexcept(false)
+        : parent(other.parent),
+          source(kj::mv(other.source)),
+          promise(kj::mv(other.promise)),
+          flags(other.flags),
+          maybeSignal(kj::mv(other.maybeSignal)),
+          capturedSourceError(kj::mv(other.capturedSourceError)),
+          selfRef(kj::rc<workerd::WeakRef<Pipe>>(kj::Badge<Pipe>(), *this)) {
+      // Invalidate the old Pipe's weak ref — any State objects pointing to it
+      // will see isAborted() = true.
+      other.selfRef->invalidate();
+    }
 
     ~Pipe() noexcept(false) {
-      state->aborted = true;
+      selfRef->invalidate();
     }
 
-    WritableStreamInternalController& parent() {
-      return state->parent;
-    }
-    ReadableStreamController::PipeController& source() {
-      return state->source;
-    }
-    kj::Maybe<jsg::Promise<void>::Resolver>& promise() {
-      return state->promise;
-    }
-    bool preventAbort() const {
-      return state->preventAbort;
-    }
-    bool preventClose() const {
-      return state->preventClose;
-    }
-    bool preventCancel() const {
-      return state->preventCancel;
-    }
-    kj::Maybe<jsg::Ref<AbortSignal>>& maybeSignal() {
-      return state->maybeSignal;
+    KJ_DISALLOW_COPY(Pipe);
+
+    kj::Rc<State> getState() {
+      return kj::rc<State>(parent.addRef(), selfRef.addRef());
     }
 
-    bool checkSignal(jsg::Lock& js) {
-      return state->checkSignal(js);
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(promise, maybeSignal, capturedSourceError);
     }
-    jsg::Promise<void> pipeLoop(jsg::Lock& js) {
-      return state->pipeLoop(js);
+
+    void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none);
+    bool checkSignal(jsg::Lock& js);
+    jsg::Promise<void> pipeLoop(jsg::Lock& js);
+    jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value);
+    bool isSourceReleased() const {
+      return source == kj::none;
     }
-    jsg::Promise<void> write(jsg::Lock& js, jsg::JsValue value) {
-      return state->write(js, value);
+    void errorParent(jsg::Lock& js, jsg::JsValue reason);
+    void finishCloseParent(jsg::Lock& js);
+    void finishErrorParent(jsg::Lock& js, jsg::JsValue reason);
+    void noBytesError(jsg::Lock& js);
+    kj::Maybe<jsg::Promise<void>::Resolver> takePromise() {
+      return kj::mv(promise);
     }
 
     JSG_MEMORY_INFO(Pipe) {
-      tracker.trackField("state", state);
+      tracker.trackField("promise", promise);
+      tracker.trackField("signal", maybeSignal);
+      tracker.trackField("capturedSourceError", capturedSourceError);
     }
   };
   struct WriteEvent {
