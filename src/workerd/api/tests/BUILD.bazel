@@ -330,13 +330,10 @@ wd_test(
     data = ["kv-resizable-arraybuffer-test.js"],
 )
 
-# Tests for SQL_RESTRICT_RESERVED_NAMES autogate - only runs in @all-autogates variant
 wd_test(
     src = "sql-restrict-names-test.wd-test",
     args = ["--experimental"],
     data = ["sql-restrict-names-test.js"],
-    generate_all_compat_flags_variant = False,
-    generate_default_variant = False,
 )
 
 wd_test(
