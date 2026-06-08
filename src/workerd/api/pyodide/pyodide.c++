@@ -178,7 +178,6 @@ int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
   return readToTarget(KJ_REQUIRE_NONNULL(inner->existingSnapshot), offset, buf);
 }
 
-
 const kj::Array<kj::StringPtr> snapshotImports = kj::arr("_pyodide"_kj,
     "_pyodide.docstring"_kj,
     "_pyodide._core_docs"_kj,

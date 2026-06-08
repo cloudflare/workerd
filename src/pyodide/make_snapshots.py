@@ -86,7 +86,7 @@ def make_worker(imports: list[str]) -> str:
     return contents
 
 
-def make_snapshot(  # noqa: PLR0913
+def make_snapshot(
     d: Path,
     outdir: Path,
     outprefix: str,
