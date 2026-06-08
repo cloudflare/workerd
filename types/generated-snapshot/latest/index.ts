@@ -11660,6 +11660,17 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
   cacheReserveMinimumFileSize?: number;
   scrapeShield?: boolean;
   apps?: boolean;
+  /**
+   * Controls whether an outbound gRPC-web subrequest from this Worker is
+   * converted to gRPC at the Cloudflare edge.
+   *
+   * - `"passthrough"`: forward the subrequest unchanged as gRPC-web (default).
+   * - `"convert"`: convert the gRPC-web subrequest to gRPC at the edge.
+   *
+   * Provides per-request control over the same edge conversion behavior
+   * gated by the `auto_grpc_convert` compatibility flag.
+   */
+  grpcWeb?: "passthrough" | "convert";
   image?: RequestInitCfPropertiesImage;
   minify?: RequestInitCfPropertiesImageMinify;
   mirage?: boolean;
