@@ -593,17 +593,18 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
           .then(js,
               ioContext.addFunctor(
-                  [this, ref = addRef(), store = js.v8Ref(store), byteOffset, byteLength,
+                  [ref = addRef(), store = js.v8Ref(store), byteOffset, byteLength,
                       isByob = maybeByobOptions != kj::none, isResizable, readPtr,
                       tempBuffer = kj::mv(tempBuffer)](
                       jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
-        readPending = false;
+        auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
+        controller.readPending = false;
         KJ_ASSERT(amount <= byteLength);
         if (amount == 0) {
-          if (!state.is<StreamStates::Errored>()) {
-            doClose(js);
+          if (!controller.state.is<StreamStates::Errored>()) {
+            controller.doClose(js);
           }
-          KJ_IF_SOME(o, owner) {
+          KJ_IF_SOME(o, controller.owner) {
             o.signalEof(js);
           }
           if (isByob && FeatureFlags::get(js).getInternalStreamByobReturn()) {
@@ -676,12 +677,13 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           .done = false,
         });
       }),
-              ioContext.addFunctor([this, ref = addRef()](jsg::Lock& js,
+              ioContext.addFunctor([ref = addRef()](jsg::Lock& js,
                                        jsg::Value reason) mutable -> jsg::Promise<ReadResult> {
-        readPending = false;
+        auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
+        controller.readPending = false;
         auto error = jsg::JsValue(reason.getHandle(js));
-        if (!state.is<StreamStates::Errored>()) {
-          doError(js, error);
+        if (!controller.state.is<StreamStates::Errored>()) {
+          controller.doError(js, error);
         }
 
         return js.rejectedPromise<ReadResult>(error);
@@ -755,15 +757,16 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
       auto& ioContext = IoContext::current();
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
           .then(js,
-              ioContext.addFunctor([this, ref = addRef(), store = kj::mv(store)](jsg::Lock& js,
+              ioContext.addFunctor([ref = addRef(), store = kj::mv(store)](jsg::Lock& js,
                                        size_t amount) mutable -> jsg::Promise<DrainingReadResult> {
-        readPending = false;
+        auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
+        controller.readPending = false;
         KJ_ASSERT(amount <= store.size());
         if (amount == 0) {
-          if (!state.is<StreamStates::Errored>()) {
-            doClose(js);
+          if (!controller.state.is<StreamStates::Errored>()) {
+            controller.doClose(js);
           }
-          KJ_IF_SOME(o, owner) {
+          KJ_IF_SOME(o, controller.owner) {
             o.signalEof(js);
           }
           return js.resolvedPromise(DrainingReadResult{.done = true});
@@ -773,12 +776,13 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
           .chunks = kj::arr(store.slice(0, amount).attach(kj::mv(store))), .done = false});
       }),
               ioContext.addFunctor(
-                  [this, ref = addRef()](jsg::Lock& js,
+                  [ref = addRef()](jsg::Lock& js,
                       jsg::Value reason) mutable -> jsg::Promise<DrainingReadResult> {
-        readPending = false;
+        auto& controller = static_cast<ReadableStreamInternalController&>(ref->getController());
+        controller.readPending = false;
         auto error = jsg::JsValue(reason.getHandle(js));
-        if (!state.is<StreamStates::Errored>()) {
-          doError(js, error);
+        if (!controller.state.is<StreamStates::Errored>()) {
+          controller.doError(js, error);
         }
 
         return js.rejectedPromise<DrainingReadResult>(error);
@@ -1179,8 +1183,9 @@ jsg::Promise<void> WritableStreamInternalController::close(jsg::Lock& js, bool m
       return closureWaitable.whenResolved(js);
     }
     waitingOnClosureWritableAlready = true;
-    auto promise = closureWaitable.then(js, [markAsHandled, this](jsg::Lock& js) {
-      return closeImpl(js, markAsHandled);
+    auto promise = closureWaitable.then(js, [ref = addRef(), markAsHandled](jsg::Lock& js) mutable {
+      auto& controller = static_cast<WritableStreamInternalController&>(ref->getController());
+      return controller.closeImpl(js, markAsHandled);
     }, [](jsg::Lock& js, jsg::Value) {
       // Ignore rejection as it will be reported in the Socket's `closed`/`opened` promises
       // instead.
@@ -1582,8 +1587,11 @@ jsg::Promise<void> WritableStreamInternalController::writeLoop(
   if (queue.empty()) {
     return js.resolvedPromise();
   } else KJ_IF_SOME(promise, queue.front().outputLock) {
-    return ioContext.awaitIo(js, kj::mv(*promise),
-        [this](jsg::Lock& js) -> jsg::Promise<void> { return writeLoopAfterFrontOutputLock(js); });
+    return ioContext.awaitIo(
+        js, kj::mv(*promise), [ref = addRef()](jsg::Lock& js) mutable -> jsg::Promise<void> {
+      auto& controller = static_cast<WritableStreamInternalController&>(ref->getController());
+      return controller.writeLoopAfterFrontOutputLock(js);
+    });
   } else {
     return writeLoopAfterFrontOutputLock(js);
   }
@@ -1815,6 +1823,8 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // ReadableStream is JavaScript-backed and we need to setup a JavaScript-promise read/write
       // loop to pass the data into the destination.
 
+      // Capturing `this` in the handlePromise lambda is safe. Handle promise is only
+      // invoked synchronously and `this` is not propagated into the promise continuations.
       const auto handlePromise = [this, &ioContext, check = makeChecker(*this), preventAbort,
                                      preventClose](jsg::Lock& js, auto promise) {
         return promise.then(js,
