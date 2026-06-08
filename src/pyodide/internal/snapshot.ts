@@ -75,8 +75,6 @@ type SnapshotSettings = {
 // The new wire format, with additional information about the hiwire state, the order that dsos were
 // loaded in, and their memory bases. We also moved settings out of the dsoHandles.
 type SnapshotMeta = {
-  // We just store importedModulesList to help with testing and introspection
-  readonly importedModulesList: ReadonlyArray<string> | undefined;
   readonly hiwire: SnapshotConfig | undefined;
   readonly dsoHandles: DsoHandles;
   readonly settings: SnapshotSettings;
@@ -627,7 +625,6 @@ function getHiwireDeserializer(
  */
 function makeLinearMemorySnapshot(
   Module: Module,
-  importedModulesList: string[],
   customSerializedObjects: CustomSerializedObjects,
   snapshotType: ArtifactBundler.SnapshotType
 ): Uint8Array {
@@ -648,7 +645,6 @@ function makeLinearMemorySnapshot(
     version: 1,
     dsoHandles,
     hiwire,
-    importedModulesList,
     jsModuleNames: Array.from(jsModuleNames),
     settings,
     ...CREATED_SNAPSHOT_META,
@@ -717,7 +713,6 @@ function decodeSnapshot(
   if (!meta?.version) {
     return {
       version: 1,
-      importedModulesList: undefined,
       dsoHandles: meta,
       hiwire: undefined,
       loadOrder: [],
@@ -818,7 +813,6 @@ export function maybeRestoreSnapshot(Module: Module): void {
 
 function collectSnapshot(
   Module: Module,
-  importedModulesList: string[],
   customSerializedObjects: CustomSerializedObjects,
   snapshotType: ArtifactBundler.SnapshotType
 ): void {
@@ -829,7 +823,6 @@ function collectSnapshot(
   }
   const snapshot = makeLinearMemorySnapshot(
     Module,
-    importedModulesList,
     customSerializedObjects,
     snapshotType
   );
@@ -837,7 +830,9 @@ function collectSnapshot(
   if (IS_EW_VALIDATING) {
     ArtifactBundler.storeMemorySnapshot({
       snapshot,
-      importedModulesList,
+      // This field is no longer used but is still required by the C++
+      // MemorySnapshotResult struct consumed by the validator.
+      importedModulesList: [],
       snapshotType,
     });
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
@@ -876,7 +871,7 @@ export function maybeCollectDedicatedSnapshot(
       'customSerializedObjects is required for dedicated snapshot'
     );
   }
-  collectSnapshot(Module, [], customSerializedObjects, 'dedicated');
+  collectSnapshot(Module, customSerializedObjects, 'dedicated');
 }
 
 /**
@@ -904,7 +899,6 @@ export function maybeCollectSnapshot(
 
   collectSnapshot(
     Module,
-    [],
     customSerializedObjects,
     IS_CREATING_BASELINE_SNAPSHOT ? 'baseline' : 'package'
   );
@@ -935,6 +929,5 @@ export function finalizeBootstrap(
   Module.API.public_api.registerJsModule('_cf_internal_snapshot_info', {
     loadedSnapshot: !!LOADED_SNAPSHOT_META,
     loadedBaselineSnapshot: LOADED_SNAPSHOT_META?.settings.baselineSnapshot,
-    importedModulesList: LOADED_SNAPSHOT_META?.importedModulesList,
   });
 }

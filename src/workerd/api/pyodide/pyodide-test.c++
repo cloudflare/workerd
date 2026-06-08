@@ -59,8 +59,6 @@ KJ_TEST("getPythonSnapshotRelease") {
 }
 
 
-using pyodide::PythonModuleInfo;
-
 template <typename... Params>
 kj::Array<kj::String> strArray(Params&&... params) {
   return kj::arr(kj::str(params)...);
