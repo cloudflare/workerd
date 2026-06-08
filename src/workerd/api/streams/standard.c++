@@ -3440,7 +3440,9 @@ class PumpToReader {
             kj::OneOf<Pumping, kj::Array<kj::byte>, StreamStates::Closed, jsg::JsRef<jsg::JsValue>>;
 
         return KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none))
-            .then(js, ioContext.addFunctor([](auto& js, ReadResult result) mutable -> Result {
+            .then(js,
+                ioContext.addFunctor([byteStream = readable->getController().isByteOriented()](
+                                         auto& js, ReadResult result) mutable -> Result {
           if (result.done) {
             return StreamStates::Closed();
           }
