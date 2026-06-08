@@ -169,12 +169,7 @@ JsValue JsObject::getPrototype(Lock& js) {
     // given how we are currently using this function.
     return ret;
   }
-#if V8_MAJOR_VERSION >= 15 || (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION >= 7)
   return JsValue(current->GetPrototype());
-#else
-  // TODO(cleanup): Remove when unnecessary.
-  return JsValue(current->GetPrototypeV2());
-#endif
 }
 
 kj::String JsSymbol::description(Lock& js) const {

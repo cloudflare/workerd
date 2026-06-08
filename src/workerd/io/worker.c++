@@ -2179,14 +2179,8 @@ void Worker::handleLog(jsg::Lock& js,
 
           // Determine whether `obj` is constructed using `{}` or `new Object()`. This ensures
           // we don't serialise values like Promises to JSON.
-#if V8_MAJOR_VERSION >= 15 || (V8_MAJOR_VERSION == 14 && V8_MINOR_VERSION >= 7)
           if (obj->GetPrototype()->SameValue(freshObj->GetPrototype()) ||
               obj->GetPrototype()->IsNull()) {
-#else
-          // TODO(cleanup): Remove when unnecessary.
-          if (obj->GetPrototypeV2()->SameValue(freshObj->GetPrototypeV2()) ||
-              obj->GetPrototypeV2()->IsNull()) {
-#endif
             shouldSerialiseToJson = true;
           }
 
