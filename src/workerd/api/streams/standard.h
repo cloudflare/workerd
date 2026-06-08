@@ -418,7 +418,7 @@ class WritableImpl {
   kj::Maybe<WriteRequest> inFlightWrite;
   kj::Maybe<jsg::Promise<void>::Resolver> inFlightClose;
   kj::Maybe<jsg::Promise<void>::Resolver> closeRequest;
-  kj::Maybe<kj::Own<PendingAbort>> maybePendingAbort;
+  kj::Maybe<PendingAbort> maybePendingAbort;
 
   struct Flags {
     uint8_t started : 1 = 0;

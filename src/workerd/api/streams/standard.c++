@@ -1296,7 +1296,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     // Notice here that, per the spec, the reason given in this call of abort is
     // intentionally ignored if there is already an abort pending.
-    return pendingAbort->whenResolved(js);
+    return pendingAbort.whenResolved(js);
   }
 
   bool wasAlreadyErroring = false;
@@ -1307,8 +1307,8 @@ jsg::Promise<void> WritableImpl<Self>::abort(
 
   KJ_DEFER(if (!wasAlreadyErroring) { startErroring(js, kj::mv(self), reason); });
 
-  maybePendingAbort = kj::heap<PendingAbort>(js, reason, wasAlreadyErroring);
-  return KJ_ASSERT_NONNULL(maybePendingAbort)->whenResolved(js);
+  auto& pending = maybePendingAbort.emplace(js, reason, wasAlreadyErroring);
+  return pending.whenResolved(js);
 }
 
 template <typename Self>
@@ -1510,21 +1510,21 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(writeRequests.empty());
 
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
-    if (pendingAbort->reject) {
-      pendingAbort->fail(js, reason);
+    if (pendingAbort.reject) {
+      pendingAbort.fail(js, reason);
       return rejectCloseAndClosedPromiseIfNeeded(js);
     }
 
     auto onSuccess = [this, self = self.addRef()](jsg::Lock& js) mutable {
       auto& pendingAbort = KJ_ASSERT_NONNULL(maybePendingAbort);
-      pendingAbort->reject = false;
-      pendingAbort->complete(js);
+      pendingAbort.reject = false;
+      pendingAbort.complete(js);
       rejectCloseAndClosedPromiseIfNeeded(js);
     };
 
     auto onFailure = [this, self = self.addRef()](jsg::Lock& js, jsg::Value reason) mutable {
       auto& pendingAbort = KJ_ASSERT_NONNULL(maybePendingAbort);
-      pendingAbort->fail(js, jsg::JsValue(reason.getHandle(js)));
+      pendingAbort.fail(js, jsg::JsValue(reason.getHandle(js)));
       rejectCloseAndClosedPromiseIfNeeded(js);
     };
 
@@ -1544,8 +1544,8 @@ void WritableImpl<Self>::finishInFlightClose(
   KJ_IF_SOME(reason, maybeReason) {
     maybeRejectPromise<void>(js, inFlightClose, reason);
 
-    KJ_IF_SOME(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
-      pendingAbort->fail(js, reason);
+    KJ_IF_SOME(pendingAbort, kj::mv(maybePendingAbort)) {
+      pendingAbort.fail(js, reason);
     }
 
     return dealWithRejection(js, kj::mv(self), reason);
@@ -1554,12 +1554,12 @@ void WritableImpl<Self>::finishInFlightClose(
   maybeResolvePromise(js, inFlightClose);
 
   if (state.template is<StreamStates::Erroring>()) {
-    KJ_IF_SOME(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
-      pendingAbort->reject = false;
-      pendingAbort->complete(js);
+    KJ_IF_SOME(pendingAbort, kj::mv(maybePendingAbort)) {
+      pendingAbort.reject = false;
+      pendingAbort.complete(js);
     }
   }
-  KJ_ASSERT(maybePendingAbort == kj::none);
+  KJ_DASSERT(maybePendingAbort == kj::none);
 
   state.template transitionTo<StreamStates::Closed>();
   doClose(js);
@@ -1592,7 +1592,7 @@ void WritableImpl<Self>::rejectCloseAndClosedPromiseIfNeeded(jsg::Lock& js) {
   auto reason =
       KJ_ASSERT_NONNULL(state.template tryGetUnsafe<StreamStates::Errored>()).getHandle(js);
   maybeRejectPromise<void>(js, closeRequest, reason);
-  PendingAbort::dequeue(maybePendingAbort);
+  maybePendingAbort = kj::none;
   doError(js, reason);
 }
 
@@ -1739,9 +1739,7 @@ template <typename Self>
 void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
   state.visitForGc(visitor);
   visitor.visit(inFlightWrite, inFlightClose, closeRequest, algorithms, signal);
-  KJ_IF_SOME(pendingAbort, maybePendingAbort) {
-    visitor.visit(*pendingAbort);
-  }
+  visitor.visit(maybePendingAbort);
   visitor.visitAll(writeRequests);
 }
 

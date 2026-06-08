@@ -1234,8 +1234,8 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
   // If there is already an abort pending, return that pending promise
   // instead of trying to schedule another.
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
-    pendingAbort->reject = options.reject;
-    auto promise = pendingAbort->whenResolved(js);
+    pendingAbort.reject = options.reject;
+    auto promise = pendingAbort.whenResolved(js);
     if (options.handled) {
       promise.markAsHandled(js);
     }
@@ -1264,8 +1264,8 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
                             : js.resolvedPromise();
     }
 
-    maybePendingAbort = kj::heap<PendingAbort>(js, reason, options.reject);
-    auto promise = KJ_ASSERT_NONNULL(maybePendingAbort)->whenResolved(js);
+    auto& pending = maybePendingAbort.emplace(js, reason, options.reject);
+    auto promise = pending.whenResolved(js);
     if (options.handled) {
       promise.markAsHandled(js);
     }
@@ -1542,7 +1542,7 @@ void WritableStreamInternalController::doClose(jsg::Lock& js) {
   } else {
     (void)writeState.transitionFromTo<PipeLocked, Unlocked>();
   }
-  PendingAbort::dequeue(maybePendingAbort);
+  maybePendingAbort = kj::none;
 }
 
 void WritableStreamInternalController::doError(jsg::Lock& js, jsg::JsValue reason) {
@@ -1557,7 +1557,7 @@ void WritableStreamInternalController::doError(jsg::Lock& js, jsg::JsValue reaso
   } else {
     (void)writeState.transitionFromTo<PipeLocked, Unlocked>();
   }
-  PendingAbort::dequeue(maybePendingAbort);
+  maybePendingAbort = kj::none;
 }
 
 void WritableStreamInternalController::ensureWriting(jsg::Lock& js) {
@@ -1580,19 +1580,19 @@ jsg::Promise<void> WritableStreamInternalController::writeLoop(
 }
 
 void WritableStreamInternalController::finishClose(jsg::Lock& js) {
-  KJ_IF_SOME(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
-    pendingAbort->complete(js);
+  KJ_IF_SOME(pendingAbort, kj::mv(maybePendingAbort)) {
+    pendingAbort.complete(js);
   }
 
   doClose(js);
 }
 
 void WritableStreamInternalController::finishError(jsg::Lock& js, jsg::JsValue reason) {
-  KJ_IF_SOME(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
+  KJ_IF_SOME(pendingAbort, kj::mv(maybePendingAbort)) {
     // In this case, and only this case, we ignore any pending rejection
     // that may be stored in the pendingAbort. The current exception takes
     // precedence.
-    pendingAbort->fail(js, reason);
+    pendingAbort.fail(js, reason);
   }
 
   doError(js, reason);
@@ -1659,11 +1659,11 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
   const auto maybeAbort = [this](jsg::Lock& js) -> bool {
     auto& writable = KJ_ASSERT_NONNULL(state.tryGetUnsafe<IoOwn<Writable>>());
-    KJ_IF_SOME(pendingAbort, WritableStreamController::PendingAbort::dequeue(maybePendingAbort)) {
-      auto ex = js.exceptionToKj(pendingAbort->reason.addRef(js));
+    KJ_IF_SOME(pendingAbort, kj::mv(maybePendingAbort)) {
+      auto ex = js.exceptionToKj(pendingAbort.reason.addRef(js));
       writable->abort(kj::mv(ex));
-      drain(js, pendingAbort->reason.getHandle(js));
-      pendingAbort->complete(js);
+      drain(js, pendingAbort.reason.getHandle(js));
+      pendingAbort.complete(js);
       return true;
     }
     return false;
@@ -2162,10 +2162,7 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
     visitor.visit(locked);
   }
-  KJ_IF_SOME(pendingAbort, maybePendingAbort) {
-    visitor.visit(*pendingAbort);
-  }
-  visitor.visit(maybeClosureWaitable);
+  visitor.visit(maybeClosureWaitable, maybePendingAbort);
 }
 
 void ReadableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {

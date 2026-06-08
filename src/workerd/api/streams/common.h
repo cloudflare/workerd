@@ -671,6 +671,11 @@ class WritableStreamController {
     virtual void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) = 0;
   };
 
+  // PendingAbort is a GC traced struct. Do not hold it with a kj::Own or
+  // kj::Rc as that will cause GC tracing issues. Once traced, the held
+  // resolver and reason become weak. Moving the own does not change their
+  // status and GC can reclaim them even while the PendingAbort is still
+  // alive.
   struct PendingAbort {
     kj::Maybe<jsg::Promise<void>::Resolver> resolver;
     jsg::Promise<void> promise;
@@ -701,9 +706,6 @@ class WritableStreamController {
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(resolver, promise, reason);
     }
-
-    static kj::Maybe<kj::Own<PendingAbort>> dequeue(
-        kj::Maybe<kj::Own<PendingAbort>>& maybePendingAbort);
 
     JSG_MEMORY_INFO(PendingAbort) {
       tracker.trackField("resolver", resolver);
