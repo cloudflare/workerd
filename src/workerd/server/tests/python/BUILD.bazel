@@ -68,9 +68,9 @@ py_wd_test("python-compat-flag")
 
 py_wd_test("pth-file")
 
-# Shell-driven test for the python-abort-isolate-on-fatal-error autogate. The Python worker
-# triggers a fatal error which (with the autogate enabled) calls abortIsolate(), terminating the
-# workerd process. The shell script verifies the expected fatal output and non-zero exit.
+# Shell-driven test for aborting the isolate on a Python fatal error. The Python worker
+# triggers a fatal error which calls abortIsolate(), terminating the workerd process. The shell
+# script verifies the expected fatal output and non-zero exit.
 sh_test(
     name = "python-abort-isolate-on-fatal-test",
     size = "enormous",

@@ -19,7 +19,6 @@ declare namespace MetadataReader {
   const isTracing: () => boolean;
   const shouldSnapshotToDisk: () => boolean;
   const isCreatingBaselineSnapshot: () => boolean;
-  const shouldAbortIsolateOnFatalError: () => boolean;
   const getMainModule: () => string;
   const hasMemorySnapshot: () => boolean;
   const getNames: () => string[];

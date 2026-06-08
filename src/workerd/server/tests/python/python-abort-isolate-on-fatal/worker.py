@@ -4,9 +4,8 @@
 
 
 async def test(ctrl, env, ctx):
-    # _pyodide_core.trigger_fatal_error() invokes Pyodide's on_fatal handler. With the
-    # python-abort-isolate-on-fatal-error autogate enabled, the on_fatal handler calls
-    # abortIsolate() which terminates the workerd process.
+    # _pyodide_core.trigger_fatal_error() invokes Pyodide's on_fatal handler. The on_fatal
+    # handler calls abortIsolate() which terminates the workerd process.
     from _pyodide_core import trigger_fatal_error
 
     trigger_fatal_error()

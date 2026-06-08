@@ -207,11 +207,5 @@ export const cache = new Proxy(
 export const tracing = innerTracing;
 
 export function abortIsolate(reason?: string): never {
-  if (entrypoints.isExperimental) {
-    entrypoints.abortIsolate(reason);
-  } else {
-    throw new Error(
-      'abortIsolate() requires the "experimental" compatibility flag.'
-    );
-  }
+  entrypoints.abortIsolate(reason);
 }

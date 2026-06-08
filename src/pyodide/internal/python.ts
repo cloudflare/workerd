@@ -24,7 +24,6 @@ import {
 import {
   LEGACY_VENDOR_PATH,
   PROCESS_PTH_FILES,
-  SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR,
   setCpuLimitNearlyExceededCallback,
 } from 'pyodide-internal:metadata';
 import { default as FatalReporter } from 'pyodide-internal:fatal-reporter';
@@ -285,11 +284,9 @@ export async function loadPyodide(
       } catch (_e) {
         FatalReporter.reportFatal('Internal error reporting fatal error');
       }
-      if (SHOULD_ABORT_ISOLATE_ON_FATAL_ERROR) {
-        cloudflareWorkers.abortIsolate(
-          `Python worker fatal error: ${String(error)}`
-        );
-      }
+      cloudflareWorkers.abortIsolate(
+        `Python worker fatal error: ${String(error)}`
+      );
     };
     return pyodide;
   } catch (e) {
