@@ -19,7 +19,7 @@ run_test() {
     > "$TEST_TMPDIR/abortIsolate.wd-test.tmp" \
     && mv "$TEST_TMPDIR/abortIsolate.wd-test.tmp" "$TEST_TMPDIR/abortIsolate.wd-test"
 
-  output=$("$WORKERD" test "$TEST_TMPDIR/abortIsolate.wd-test" --experimental --compat-date=2000-01-01 -dTEST_TMPDIR="$TEST_TMPDIR" 2>&1)
+  output=$("$WORKERD" test "$TEST_TMPDIR/abortIsolate.wd-test" --compat-date=2000-01-01 -dTEST_TMPDIR="$TEST_TMPDIR" 2>&1)
   exit_code=$?
 
   echo "--- captured output ---" >&2

@@ -46,8 +46,6 @@ enum class AutogateKey {
   USER_SPAN_CONTEXT_PROPAGATION,
   // Apply an updated default autoAllocateChunkSize for ReadableStreams
   UPDATED_AUTO_ALLOCATE_CHUNK_SIZE,
-  // Call abortIsolate() when a Python worker encounters a fatal error.
-  PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR,
   // When enabled, reject startTls calls that pass the expectedServerHostname option,
   // which is not currently supported. When disabled, log the usage instead.
   STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME,

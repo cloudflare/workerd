@@ -41,8 +41,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "user-span-context-propagation"_kj;
     case AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE:
       return "updated-auto-allocate-chunk-size"_kj;
-    case AutogateKey::PYTHON_ABORT_ISOLATE_ON_FATAL_ERROR:
-      return "python-abort-isolate-on-fatal-error"_kj;
     case AutogateKey::STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME:
       return "starttls-reject-expected-server-hostname"_kj;
     case AutogateKey::NumOfKeys:
