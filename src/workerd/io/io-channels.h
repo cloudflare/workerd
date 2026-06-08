@@ -571,4 +571,8 @@ kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
     IoChannelFactory::ActorClassChannel>(
     kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>> promise);
 
+template <>
+kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise);
+
 }  // namespace workerd

@@ -363,4 +363,10 @@ kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
   return kj::refcounted<PromisedActorClassChannel>(kj::mv(promise));
 }
 
+template <>
+kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
+    kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise) {
+  return kj::refcounted<PromisedRpcChannel>(kj::mv(promise));
+}
+
 }  // namespace workerd
