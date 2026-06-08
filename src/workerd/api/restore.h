@@ -98,6 +98,21 @@ class RestoreServiceCustomEvent final: public WorkerInterface::CustomEvent {
     channelFulfiller->reject(e.clone());
   }
 
+  // Same as `EventDispatcher::Server::RestoreServiceContext` -- but that typedef is `protected`.
+  using RestoreServiceContext = capnp::CallContext<rpc::EventDispatcher::RestoreServiceParams,
+      rpc::EventDispatcher::RestoreServiceResults>;
+
+  // Common implementation of `EventDispatcher::restoreService()`. Dispatches the (already
+  // constructed) event to `worker`, then returns a `WorkerdBootstrap` representing the restored
+  // service. The caller is responsible for constructing `event` with the deserialized
+  // `restoreParams` and (in the edge runtime) a `RestoreRehydrateCallback`. `ownWorker` is held
+  // alive for the duration of the dispatched event (e.g. the multi-use dispatcher server).
+  static kj::Promise<void> receiveRpc(RestoreServiceContext context,
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      kj::Own<RestoreServiceCustomEvent> event,
+      WorkerInterface& worker,
+      kj::Own<void> ownWorker);
+
   // Like JsRpcSessionCustomEvent::WORKER_RPC_EVENT_TYPE.
   //
   // Similar to other custom events, we define this event ID in the internal codebase, but since
@@ -169,6 +184,20 @@ class RestoreRpcStubCustomEvent final: public WorkerInterface::CustomEvent {
   void failed(const kj::Exception& e) override {
     capFulfiller->reject(e.clone());
   }
+
+  // Same as `EventDispatcher::Server::RestoreRpcStubContext` -- but that typedef is `protected`.
+  using RestoreRpcStubContext = capnp::CallContext<rpc::EventDispatcher::RestoreRpcStubParams,
+      rpc::EventDispatcher::RestoreRpcStubResults>;
+
+  // Common implementation of `EventDispatcher::restoreRpcStub()`. Dispatches the (already
+  // constructed) event to `worker` and hooks up the resulting `JsRpcTarget` + `session`, modeled
+  // on `JsRpcSessionCustomEvent::receiveRpc()`. The caller is responsible for constructing `event`
+  // with the deserialized `restoreParams` and (in the edge runtime) a `RestoreRehydrateCallback`.
+  // `ownWorker` is held alive until the session completes.
+  static kj::Promise<void> receiveRpc(RestoreRpcStubContext context,
+      kj::Own<RestoreRpcStubCustomEvent> event,
+      WorkerInterface& worker,
+      kj::Own<void> ownWorker);
 
   // We give the two restore events the same event type since they are semantically very similar.
   static constexpr uint16_t RESTORE_RPC_STUB_EVENT_TYPE =

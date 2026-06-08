@@ -143,6 +143,81 @@ class RestoredRpcSubrequestChannel final: public IoChannelFactory::SubrequestCha
   rpc::WorkerdBootstrap::Client rpcClient;
 };
 
+// EventDispatcher server that forwards events to a restored service channel. This is a minimal
+// duplicate of the (private) `Server::WorkerdBootstrapImpl::EventDispatcherImpl` in workerd's
+// server.c++, used to implement the `service :WorkerdBootstrap` result of `restoreService()` when
+// the restore event is received over RPC. A restored ServiceStub is only ever used to make HTTP
+// requests or JS-RPC calls, so other event types are unsupported.
+class RestoredServiceEventDispatcher final: public rpc::EventDispatcher::Server {
+ public:
+  RestoredServiceEventDispatcher(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      kj::Own<IoChannelFactory::SubrequestChannel> service,
+      kj::Maybe<kj::String> cfBlobJson)
+      : httpOverCapnpFactory(httpOverCapnpFactory),
+        service(kj::mv(service)),
+        cfBlobJson(kj::mv(cfBlobJson)) {}
+
+  kj::Promise<void> getHttpService(GetHttpServiceContext context) override {
+    context.initResults(capnp::MessageSize{4, 1})
+        .setHttp(httpOverCapnpFactory.kjToCapnp(getWorker()));
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
+    return api::JsRpcSessionCustomEvent::receiveRpc(context, getWorker());
+  }
+
+  // Since the client is definitely calling us through a `Fetcher`, we expect no other event types
+  // will be called here. If that changes we should probably factor out a shared implementation
+  // somewhere.
+
+ private:
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> service;
+  kj::Maybe<kj::String> cfBlobJson;
+
+  kj::Own<WorkerInterface> getWorker() {
+    auto movedService =
+        kj::mv(KJ_ASSERT_NONNULL(service, "EventDispatcher can only be used for one request"));
+
+    IoChannelFactory::SubrequestMetadata metadata;
+    metadata.cfBlobJson = kj::mv(cfBlobJson);
+    auto worker = movedService->startRequest(kj::mv(metadata));
+
+    return worker.attach(kj::mv(movedService));
+  }
+};
+
+// WorkerdBootstrap server returned by `restoreService()` over RPC. Each `startEvent()` starts a
+// fresh request against the restored service channel. Also owns the `[restore]()` event's running
+// promise so that the restoration stays alive as long as the client holds this bootstrap.
+class RestoredServiceBootstrap final: public rpc::WorkerdBootstrap::Server {
+ public:
+  RestoredServiceBootstrap(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      kj::Own<IoChannelFactory::SubrequestChannel> service,
+      kj::Promise<void> eventTask)
+      : httpOverCapnpFactory(httpOverCapnpFactory),
+        service(kj::mv(service)),
+        eventTask(eventTask.eagerlyEvaluate(nullptr)) {}
+
+  kj::Promise<void> startEvent(StartEventContext context) override {
+    kj::Maybe<kj::String> cfBlobJson;
+    auto params = context.getParams();
+    if (params.hasCfBlobJson()) {
+      cfBlobJson = kj::str(params.getCfBlobJson());
+    }
+    context.initResults(capnp::MessageSize{4, 1})
+        .setDispatcher(kj::heap<RestoredServiceEventDispatcher>(
+            httpOverCapnpFactory, kj::addRef(*service), kj::mv(cfBlobJson)));
+    return kj::READY_NOW;
+  }
+
+ private:
+  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  kj::Own<IoChannelFactory::SubrequestChannel> service;
+  kj::Promise<void> eventTask;
+};
+
 }  // namespace
 
 tracing::EventInfo RestoreServiceCustomEvent::getEventInfo() const {
@@ -220,7 +295,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::sen
     FrankenvalueHandler& frankenvalueHandler,
     rpc::EventDispatcher::Client dispatcher) {
   auto req = dispatcher.restoreServiceRequest();
-  restoreParams.toCapnp(req.initParams());
+  frankenvalueHandler.toCapnp(restoreParams, req.initParams());
   auto sent = req.send();
 
   channelFulfiller->fulfill(kj::refcounted<RestoredRpcSubrequestChannel>(
@@ -229,6 +304,26 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::sen
   co_await sent.ignoreResult();
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+}
+
+kj::Promise<void> RestoreServiceCustomEvent::receiveRpc(RestoreServiceContext context,
+    capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+    kj::Own<RestoreServiceCustomEvent> event,
+    WorkerInterface& worker,
+    kj::Own<void> ownWorker) {
+  // Grab the (promised) restored channel off the event before dispatching it.
+  auto channel = event->getChannel();
+
+  // Dispatch the event to the worker. The event runs `[restore]()` and fulfills `channel`. We
+  // keep the event's promise running (and the worker alive) as long as the returned bootstrap is
+  // held, by storing it inside the bootstrap.
+  auto eventTask = worker.customEvent(kj::mv(event)).ignoreResult().attach(kj::mv(ownWorker));
+
+  context.initResults(capnp::MessageSize{4, 2})
+      .setService(kj::heap<RestoredServiceBootstrap>(
+          httpOverCapnpFactory, kj::mv(channel), kj::mv(eventTask)));
+
+  return kj::READY_NOW;
 }
 
 // -----------------------------------------------------------------------------
@@ -329,7 +424,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::sen
   });
 
   auto req = dispatcher.restoreRpcStubRequest();
-  restoreParams.toCapnp(req.initParams());
+  frankenvalueHandler.toCapnp(restoreParams, req.initParams());
   auto sent = req.send();
 
   rpc::JsRpcTarget::Client cap = sent.getTarget();
@@ -355,6 +450,27 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::sen
   }
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+}
+
+kj::Promise<void> RestoreRpcStubCustomEvent::receiveRpc(RestoreRpcStubContext context,
+    kj::Own<RestoreRpcStubCustomEvent> event,
+    WorkerInterface& worker,
+    kj::Own<void> ownWorker) {
+  // Modeled on JsRpcSessionCustomEvent::receiveRpc(): dispatch the event, read the target cap off
+  // it, and tie the returned session to the event's completion.
+  auto cap = event->getCap();
+
+  auto promise = worker.customEvent(kj::mv(event));
+
+  auto results = context.getResults(capnp::MessageSize{4, 2});
+  results.setTarget(kj::mv(cap));
+
+  // The returned session capability keeps the session alive; dropping it cancels the event.
+  results.setSession(promise.then([ownWorker = kj::mv(ownWorker)](auto outcome) {
+    return rpc::JsRpcSession::Client(nullptr);
+  }));
+
+  return kj::READY_NOW;
 }
 
 };  // namespace workerd::api
