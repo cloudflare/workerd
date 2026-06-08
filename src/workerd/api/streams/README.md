@@ -376,7 +376,7 @@ void onConsumerClose(jsg::Lock& js) override {
 ### Pattern: Weak-ref'd Pipe State
 
 - **When**: Internal stream pipe operations with async continuations
-- **How**: `Pipe::State` holds a weak ref to `Pipe`/ Rather than holding bare
+- **How**: `Pipe::State` holds a weak ref to `Pipe`. Rather than holding bare
   references to `Pipe` in the queue, ensures continuations remain safe if the
   pipe is somehow destroyed while operations are pending.
 
