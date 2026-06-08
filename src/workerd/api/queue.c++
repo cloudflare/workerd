@@ -114,15 +114,6 @@ Serialized serializeV8(jsg::Lock& js, const jsg::JsValue& body) {
 // non-resizable buffers (the BackingStore shared_ptr prevents deallocation), but
 // resizable buffers can have pages decommitted by resize(0) while the pointer is held.
 // The SHALLOW_REFERENCE path deep-copies resizable buffers to prevent this.
-//
-// SHALLOW_REFERENCE for non-resizable buffers additionally aliases pkey-protected
-// V8 sandbox memory when MPK is enabled.  Callers MUST consume the bytes
-// synchronously under the isolate lock and not hand the ArrayPtr to async I/O
-// that runs after the lock is released; the I/O thread would not have the
-// sender's pkey and the access would fault.  sendBatch() relies on this: it
-// base64-encodes the bytes into a fresh kj-heap buffer before any co_await.
-// New SHALLOW_REFERENCE callers must preserve this invariant or switch to
-// DEEP_COPY.
 enum class SerializeArrayBufferBehavior {
   DEEP_COPY,
   SHALLOW_REFERENCE,
