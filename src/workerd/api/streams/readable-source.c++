@@ -828,17 +828,10 @@ class MemoryInputStream final: public ReadableStreamSource {
     // Explicitly NOT using KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING here!
     // The backing memory may be tied to V8 heap (e.g., ArrayBuffer, Blob data),
     // so we must complete all I/O before the IoContext can be released.
-    //
-    // If using MPK to protect isolate memory, the source bytes may live in V8
-    // sandbox pages tagged with the isolate's pkey.  The sink->write() call may
-    // run on the kj event loop without the isolate lock and would fault.  Copy
-    // the bytes into a kj-heap allocation before writing.  This memcpy runs
-    // synchronously here (this is the first turn of the coroutine, scheduled
-    // while the lock is held), so the source pkey is still enabled.
     if (unread.size() > 0) {
-      auto copy = kj::heapArray<kj::byte>(unread);
+      auto data = unread;
       unread = nullptr;
-      co_await output.write(copy);
+      co_await output.write(data);
     }
     if (end) {
       co_await output.end();
