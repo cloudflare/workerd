@@ -163,6 +163,15 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
     auto channel = co_await ioctx.run(
         [this, entrypointName = entrypointName, &ioctx, versionInfo = kj::mv(versionInfo),
             props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
+      // Now that we're inside the IoContext, rehydrate any cap-table entries in the params (e.g.
+      // in the edge runtime, turn dehydrated channel tokens into live channels). See
+      // RestoreRehydrateCallback.
+      KJ_IF_SOME(rehydrate, rehydrateCaps) {
+        restoreParams.rewriteCaps([&rehydrate](kj::Own<Frankenvalue::CapTableEntry> cap) {
+          return rehydrate(kj::mv(cap));
+        });
+      }
+
       auto params = restoreParams.toJs(lock);
       auto handler = JSG_REQUIRE_NONNULL(
           lock.getExportedHandler(entrypointName, kj::mv(versionInfo), kj::mv(props),
@@ -245,6 +254,15 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::run
     auto cap = co_await ioctx.run(
         [this, entrypointName = entrypointName, &ioctx, versionInfo = kj::mv(versionInfo),
             props = kj::mv(props), isDynamicDispatch](Worker::Lock& lock) mutable {
+      // Now that we're inside the IoContext, rehydrate any cap-table entries in the params (e.g.
+      // in the edge runtime, turn dehydrated channel tokens into live channels). See
+      // RestoreRehydrateCallback.
+      KJ_IF_SOME(rehydrate, rehydrateCaps) {
+        restoreParams.rewriteCaps([&rehydrate](kj::Own<Frankenvalue::CapTableEntry> cap) {
+          return rehydrate(kj::mv(cap));
+        });
+      }
+
       auto params = restoreParams.toJs(lock);
       auto handler =
           JSG_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, kj::mv(versionInfo),

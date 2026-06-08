@@ -13,6 +13,19 @@ namespace workerd::api {
 class Fetcher;
 class JsRpcStub;
 
+// Callback used to rehydrate (deserialize) the cap-table entries of a restore event's parameters
+// once the target IoContext has been entered.
+//
+// In environments where Frankenvalue cap-table entries are stored in a "dehydrated" form that is
+// not tied to any IoContext (e.g. the edge runtime, where they are channel tokens), a live channel
+// cannot be constructed until the IoContext in which `[restore]()` runs actually exists. This
+// callback is invoked via `Frankenvalue::rewriteCaps()` inside the event's `run()`, after entering
+// the IoContext and before converting the parameters to JS, in order to turn each dehydrated entry
+// into a live, IoContext-bound channel. If null, the parameters' caps are used as-is (this is the
+// case in workerd, where caps are already live).
+using RestoreRehydrateCallback =
+    kj::Function<kj::Own<Frankenvalue::CapTableEntry>(kj::Own<Frankenvalue::CapTableEntry>)>;
+
 // Implementation of ctx.restore(). Invokes `[restore](params)` on the current entrypoint,
 // constructs the appropriate channel token for the result, and returns a Fetcher or JsRpcStub
 // imbued with that token.
@@ -35,12 +48,14 @@ class RestoreServiceCustomEvent final: public WorkerInterface::CustomEvent {
  public:
   RestoreServiceCustomEvent(uint16_t typeId,
       Frankenvalue restoreParams,
+      kj::Maybe<RestoreRehydrateCallback> rehydrateCaps = kj::none,
       kj::PromiseFulfillerPair<kj::Own<IoChannelFactory::SubrequestChannel>> paf =
           kj::newPromiseAndFulfiller<kj::Own<IoChannelFactory::SubrequestChannel>>())
       : channelFulfiller(kj::mv(paf.fulfiller)),
         channel(newPromisedChannel<IoChannelFactory::SubrequestChannel>(kj::mv(paf.promise))),
         typeId(typeId),
-        restoreParams(kj::mv(restoreParams)) {}
+        restoreParams(kj::mv(restoreParams)),
+        rehydrateCaps(kj::mv(rehydrateCaps)) {}
 
   ~RestoreServiceCustomEvent() noexcept(false) {
     if (channelFulfiller->isWaiting()) {
@@ -97,18 +112,21 @@ class RestoreServiceCustomEvent final: public WorkerInterface::CustomEvent {
   kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> channel;
   uint16_t typeId;
   Frankenvalue restoreParams;
+  kj::Maybe<RestoreRehydrateCallback> rehydrateCaps;
 };
 
 class RestoreRpcStubCustomEvent final: public WorkerInterface::CustomEvent {
  public:
   RestoreRpcStubCustomEvent(uint16_t typeId,
       Frankenvalue restoreParams,
+      kj::Maybe<RestoreRehydrateCallback> rehydrateCaps = kj::none,
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
         typeId(typeId),
-        restoreParams(kj::mv(restoreParams)) {}
+        restoreParams(kj::mv(restoreParams)),
+        rehydrateCaps(kj::mv(rehydrateCaps)) {}
 
   ~RestoreRpcStubCustomEvent() noexcept(false) {
     if (capFulfiller->isWaiting()) {
@@ -159,6 +177,7 @@ class RestoreRpcStubCustomEvent final: public WorkerInterface::CustomEvent {
   kj::Maybe<rpc::JsRpcTarget::Client> clientCap;
   uint16_t typeId;
   Frankenvalue restoreParams;
+  kj::Maybe<RestoreRehydrateCallback> rehydrateCaps;
 };
 
 };  // namespace workerd::api
