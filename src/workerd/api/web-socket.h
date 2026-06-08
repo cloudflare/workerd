@@ -12,7 +12,6 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/checked-queue.h>
 #include <workerd/util/strong-bool.h>
-#include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
 
@@ -215,9 +214,7 @@ class WebSocket: public EventTarget {
     AllowHalfOpen allowHalfOpen = AllowHalfOpen::YES;
   };
 
-  ~WebSocket() noexcept(false) {
-    weakRef->invalidate();
-  }
+  ~WebSocket() noexcept(false) = default;
 
   // This WebSocket constructor is only used when WebSockets wake up from hibernation.
   // It will immediately set the `state` to `Accepted`, but it limits the behavior by specifying it
@@ -253,7 +250,8 @@ class WebSocket: public EventTarget {
   // As an exception to the usual KJ convention, it is not necessary for the JavaScript `WebSocket`
   // object to be kept live while waiting for the promise returned by couple() to complete. Instead,
   // the promise takes direct ownership of the underlying KJ-native WebSocket (as well as `other`).
-  kj::Promise<DeferredProxy<void>> couple(kj::Own<kj::WebSocket> other, RequestObserver& request);
+  kj::Promise<DeferredProxy<void>> couple(
+      jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request);
 
   // Extract the kj::WebSocket from this api::WebSocket (if applicable). The kj::WebSocket will be
   // owned elsewhere, but the api::WebSocket will retain a reference.
@@ -286,7 +284,7 @@ class WebSocket: public EventTarget {
   // Should only be called on one end of a WebSocketPair.
   // Relevant for WebSocket Hibernation: the end we return in the Response must be in the
   // AwaitingAcceptanceOrCoupling state.
-  bool peerIsAwaitingCoupling();
+  bool peerIsAwaitingCoupling(jsg::Lock& js);
 
   HibernationPackage buildPackageForHibernation();
 
@@ -407,12 +405,7 @@ class WebSocket: public EventTarget {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-  kj::Own<WeakRef<WebSocket>> addWeakRef() {
-    return weakRef->addRef();
-  }
-
  private:
-  kj::Own<WeakRef<WebSocket>> weakRef;
   kj::Maybe<kj::String> url;
   kj::Maybe<kj::String> protocol = kj::String();
   kj::Maybe<kj::String> extensions = kj::String();
@@ -627,13 +620,13 @@ class WebSocket: public EventTarget {
   // between the two WebSocket instances that would cause them to leak. This
   // can mean, however, that it's possible for one of the peers to be garbage
   // collected while the other still exists. This should be fairly unusual tho.
-  kj::Maybe<kj::Own<WeakRef<WebSocket>>> peer;
+  kj::Maybe<jsg::WeakRef<WebSocket>> peer;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(error);
   }
 
-  void setPeer(kj::Own<WeakRef<WebSocket>> peer);
+  void setPeer(jsg::WeakRef<WebSocket> peer);
 
   friend jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock&);
 

@@ -6,7 +6,6 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
-#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
 
@@ -106,11 +105,7 @@ class MessagePort final: public EventTarget {
 
   // Bind two message ports together such that messages posted to
   // one are delivered to the other.
-  static void entangle(MessagePort& port1, MessagePort& port2);
-
-  kj::Maybe<MessagePort&> getOther() {
-    return other->tryGet().map([](MessagePort& o) -> MessagePort& { return o; });
-  }
+  static void entangle(jsg::Lock& js, jsg::Ref<MessagePort>& port1, jsg::Ref<MessagePort>& port2);
 
   // TODO(soon): Support serialization/deserialization to use MessagePort
   // with JSRPC. We'll need to implement a rpc mechanism for passing the
@@ -126,12 +121,6 @@ class MessagePort final: public EventTarget {
 
   void dispatchMessage(jsg::Lock& js, const jsg::JsValue& value);
 
-  kj::Own<WeakRef<MessagePort>> addWeakRef() {
-    KJ_ASSERT(weakThis->isValid());
-    return kj::addRef(*weakThis);
-  }
-
-  kj::Own<WeakRef<MessagePort>> weakThis;
   kj::OneOf<Pending, Started, Closed> state;
 
   // Two ports are entangled when they weakly reference each other.
@@ -139,7 +128,7 @@ class MessagePort final: public EventTarget {
   // ports gets GC'd the other will will also end up being closed.
   // To keep them both alive, maintain strong references to both
   // ports!
-  kj::Own<WeakRef<MessagePort>> other;
+  kj::Maybe<jsg::WeakRef<MessagePort>> other;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onmessageValue;
 
   void visitForGc(jsg::GcVisitor& visitor) {

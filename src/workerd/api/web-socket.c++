@@ -50,8 +50,7 @@ IoOwn<WebSocket::Native> WebSocket::initNative(IoContext& ioContext,
 
 WebSocket::WebSocket(
     jsg::Lock& js, IoContext& ioContext, kj::WebSocket& ws, HibernationPackage package)
-    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
-      url(kj::mv(package.url)),
+    : url(kj::mv(package.url)),
       protocol(kj::mv(package.protocol)),
       extensions(kj::mv(package.extensions)),
       binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
@@ -73,8 +72,7 @@ jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
 }
 
 WebSocket::WebSocket(jsg::Lock& js, kj::Own<kj::WebSocket> native)
-    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
-      url(kj::none),
+    : url(kj::none),
       binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
                                                                         : BinaryType::ARRAYBUFFER),
       allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
@@ -86,8 +84,7 @@ WebSocket::WebSocket(jsg::Lock& js, kj::Own<kj::WebSocket> native)
 }
 
 WebSocket::WebSocket(jsg::Lock& js, kj::String url)
-    : weakRef(kj::refcounted<WeakRef<WebSocket>>(kj::Badge<WebSocket>{}, *this)),
-      url(kj::mv(url)),
+    : url(kj::mv(url)),
       binaryType_(FeatureFlags::get(js).getWebsocketBinaryTypeDefault() ? BinaryType::BLOB
                                                                         : BinaryType::ARRAYBUFFER),
       allowHalfOpen(!FeatureFlags::get(js).getWebSocketAutoReplyToClose()),
@@ -317,7 +314,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
 }
 
 kj::Promise<DeferredProxy<void>> WebSocket::couple(
-    kj::Own<kj::WebSocket> other, RequestObserver& request) {
+    jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) {
   auto& native = *farNative;
   JSG_REQUIRE(!native.state.is<AwaitingConnection>(), TypeError,
       "Can't return WebSocket in a Response if it was created with `new WebSocket()`");
@@ -332,73 +329,83 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(
     }
   }
 
-  // Tear down the IoOwn since we now need to extend the WebSocket to a `DeferredProxy` promise.
-  // This works because the `DeferredProxy` ends on the same event loop, but after the request
-  // context goes away.
-  kj::Own<kj::WebSocket> self =
-      kj::mv(KJ_ASSERT_NONNULL(native.state.tryGet<AwaitingAcceptanceOrCoupling>()).ws);
+  // Grab the peer reference if it exists and is still alive. We have to do
+  // this here while we have the isolate lock.
+  kj::Maybe<workerd::jsg::Ref<workerd::api::WebSocket>> maybePeerRef;
+  KJ_IF_SOME(p, peer) {
+    maybePeerRef = p.tryAddRef(js);
+  }
+
+  static const auto coupleImpl =
+      [](kj::Own<kj::WebSocket> self, kj::Own<kj::WebSocket> other,
+          kj::Maybe<workerd::jsg::Ref<workerd::api::WebSocket>> maybePeerRef,
+          RequestObserver& request) -> kj::Promise<DeferredProxy<void>> {
+    // Tear down the IoOwn since we now need to extend the WebSocket to a `DeferredProxy` promise.
+    // This works because the `DeferredProxy` ends on the same event loop, but after the request
+    // context goes away.
+
+    auto& context = IoContext::current();
+
+    auto upstream = other->pumpTo(*self);
+    auto downstream = self->pumpTo(*other);
+
+    auto isHibernatable = [&](workerd::api::WebSocket& ws) {
+      KJ_IF_SOME(state, ws.farNative->state.tryGet<Accepted>()) {
+        return state.isHibernatable();
+      }
+      return false;
+    };
+
+    KJ_IF_SOME(peerRef, maybePeerRef) {
+      // We're terminating the WebSocket in this worker, so the upstream promise (which pumps
+      // messages from the client to this worker) counts as something the request is waiting for.
+      upstream = upstream.attach(context.registerPendingEvent());
+
+      // We can observe websocket traffic in both directions by attaching an observer to the peer
+      // websocket which terminates in the worker.
+      KJ_IF_SOME(observer, request.tryCreateWebSocketObserver()) {
+        peerRef->observer = kj::mv(observer);
+      }
+    }
+
+    // We need to use `eagerlyEvaluate()` on both inputs to `joinPromises` to work around the awkward
+    // behavior of `joinPromises` lazily-evaluating tail continuations.
+    auto promise = kj::joinPromises(
+        kj::arr(upstream.eagerlyEvaluate(nullptr), downstream.eagerlyEvaluate(nullptr)))
+                       .attach(kj::mv(self), kj::mv(other));
+
+    KJ_IF_SOME(peerRef, maybePeerRef) {
+      // Since the WebSocket is terminated locally, we generally want the request and associated
+      // IoContext to stay alive until the WebSocket connection has terminated.
+      //
+      // However, there is one exception to this: when the WebSocket is hibernatable, we don't want
+      // the existence of this connection to prevent the actor from being evicted, so we fall through
+      // to deferred proxying in this case.
+      if (!isHibernatable(*peerRef)) {
+        co_await promise;
+        co_return;
+      }
+      // Drop the maybePeerRef before we hit the BEGIN_DEFERRED_PROXYING below.
+      maybePeerRef = kj::none;
+    }
+
+    // Either:
+    // 1. This websocket is just proxying through, in which case we can allow the IoContext to go
+    // away while still being able to successfully pump the websocket connection.
+    // 2. This is a hibernatable websocket and we are falling through to deferred proxying to
+    // potentially allow for hibernation to occur.
+
+    // To begin deferred proxying, we can use this magic `KJ_CO_MAGIC` expression, which fulfills
+    // our outer promise for a DeferredProxy<void>, which wraps a promise for the rest of this
+    // coroutine.
+    KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+
+    co_return co_await promise;
+  };
+
+  auto self = kj::mv(KJ_ASSERT_NONNULL(native.state.tryGet<AwaitingAcceptanceOrCoupling>()).ws);
   native.state.init<Released>();
-
-  auto& context = IoContext::current();
-
-  auto upstream = other->pumpTo(*self);
-  auto downstream = self->pumpTo(*other);
-
-  auto tryGetPeer = [&]() -> kj::Maybe<WebSocket&> {
-    KJ_IF_SOME(p, peer) {
-      return p->tryGet();
-    }
-    return kj::none;
-  };
-  auto isHibernatable = [&](workerd::api::WebSocket& ws) {
-    KJ_IF_SOME(state, ws.farNative->state.tryGet<Accepted>()) {
-      return state.isHibernatable();
-    }
-    return false;
-  };
-  KJ_IF_SOME(p, tryGetPeer()) {
-    // We're terminating the WebSocket in this worker, so the upstream promise (which pumps
-    // messages from the client to this worker) counts as something the request is waiting for.
-    upstream = upstream.attach(context.registerPendingEvent());
-
-    // We can observe websocket traffic in both directions by attaching an observer to the peer
-    // websocket which terminates in the worker.
-    KJ_IF_SOME(observer, request.tryCreateWebSocketObserver()) {
-      p.observer = kj::mv(observer);
-    }
-  }
-
-  // We need to use `eagerlyEvaluate()` on both inputs to `joinPromises` to work around the awkward
-  // behavior of `joinPromises` lazily-evaluating tail continuations.
-  auto promise = kj::joinPromises(
-      kj::arr(upstream.eagerlyEvaluate(nullptr), downstream.eagerlyEvaluate(nullptr)))
-                     .attach(kj::mv(self), kj::mv(other));
-
-  KJ_IF_SOME(peer, tryGetPeer()) {
-    // Since the WebSocket is terminated locally, we generally want the request and associated
-    // IoContext to stay alive until the WebSocket connection has terminated.
-    //
-    // However, there is one exception to this: when the WebSocket is hibernatable, we don't want
-    // the existence of this connection to prevent the actor from being evicted, so we fall through
-    // to deferred proxying in this case.
-    if (!isHibernatable(peer)) {
-      co_await promise;
-      co_return;
-    }
-  }
-
-  // Either:
-  // 1. This websocket is just proxying through, in which case we can allow the IoContext to go
-  // away while still being able to successfully pump the websocket connection.
-  // 2. This is a hibernatable websocket and we are falling through to deferred proxying to
-  // potentially allow for hibernation to occur.
-
-  // To begin deferred proxying, we can use this magic `KJ_CO_MAGIC` expression, which fulfills
-  // our outer promise for a DeferredProxy<void>, which wraps a promise for the rest of this
-  // coroutine.
-  KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
-
-  co_return co_await promise;
+  return coupleImpl(kj::mv(self), kj::mv(other), kj::mv(maybePeerRef), request);
 }
 
 void WebSocket::accept(jsg::Lock& js, jsg::Optional<AcceptOptions> options) {
@@ -523,9 +530,7 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
 
   auto hasLocalPeer = [&]() {
     KJ_IF_SOME(p, peer) {
-      if (p->isValid()) {
-        return true;
-      }
+      return p.isAlive();
     }
     return false;
   };
@@ -1130,8 +1135,8 @@ jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock& js) {
   auto first = pair->getFirst();
   auto second = pair->getSecond();
 
-  first->setPeer(second->addWeakRef());
-  second->setPeer(first->addWeakRef());
+  first->setPeer(second.getWeakRef(js));
+  second->setPeer(first.getWeakRef(js));
   return kj::mv(pair);
 }
 
@@ -1182,7 +1187,7 @@ void WebSocket::assertNoError(jsg::Lock& js) {
   }
 }
 
-void WebSocket::setPeer(kj::Own<WeakRef<WebSocket>> other) {
+void WebSocket::setPeer(jsg::WeakRef<WebSocket> other) {
   peer = kj::mv(other);
 }
 
@@ -1230,14 +1235,13 @@ bool WebSocket::awaitingHibernatableRelease() {
   return false;
 }
 
-bool WebSocket::peerIsAwaitingCoupling() {
-  bool answer = false;
+bool WebSocket::peerIsAwaitingCoupling(jsg::Lock& js) {
   KJ_IF_SOME(p, peer) {
-    p->runIfAlive([&answer](WebSocket& ws) {
-      answer = ws.farNative->state.is<AwaitingAcceptanceOrCoupling>();
-    });
+    KJ_IF_SOME(ref, p.tryAddRef(js)) {
+      return ref->farNative->state.is<AwaitingAcceptanceOrCoupling>();
+    }
   }
-  return answer;
+  return false;
 }
 
 WebSocket::HibernationPackage WebSocket::buildPackageForHibernation() {

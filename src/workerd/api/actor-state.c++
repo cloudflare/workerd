@@ -1170,10 +1170,10 @@ Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManag
 }
 
 void DurableObjectState::acceptWebSocket(
-    jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags) {
+    jsg::Lock& js, jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags) {
   JSG_ASSERT(!ws->isAccepted(), Error,
       "Cannot call `acceptWebSocket()` if the WebSocket was already accepted via `accept()`");
-  JSG_ASSERT(ws->peerIsAwaitingCoupling(), Error,
+  JSG_ASSERT(ws->peerIsAwaitingCoupling(js), Error,
       "Cannot call `acceptWebSocket()` on this WebSocket because its pair has already been "
       "accepted or used in a Response.");
 

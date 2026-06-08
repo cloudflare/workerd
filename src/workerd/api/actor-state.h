@@ -652,7 +652,8 @@ class DurableObjectState: public jsg::Object {
   //
   // `tags` are string tags which can be used to look up
   // the WebSocket with getWebSockets().
-  void acceptWebSocket(jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags);
+  void acceptWebSocket(
+      jsg::Lock& js, jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags);
 
   // Gets an array of accepted WebSockets matching the given tag.
   // If no tag is provided, an array of all accepted WebSockets is returned.
