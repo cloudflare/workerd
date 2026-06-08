@@ -3344,8 +3344,7 @@ class AllReader {
   void copyInto(kj::ArrayPtr<byte> out, kj::ArrayPtr<kj::ArrayPtr<byte>> in) {
     for (auto& part: in) {
       KJ_ASSERT(part.size() <= out.size());
-      out.first(part.size()).copyFrom(part);
-      out = out.slice(part.size());
+      out.write(part);
     }
   }
 };
