@@ -58,7 +58,6 @@ KJ_TEST("getPythonSnapshotRelease") {
   }
 }
 
-
 template <typename... Params>
 kj::Array<kj::String> strArray(Params&&... params) {
   return kj::arr(kj::str(params)...);
