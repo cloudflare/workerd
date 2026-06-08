@@ -447,6 +447,7 @@ IsolateBase::IsolateBase(V8System& system,
 
       // Create opaqueTemplate
       auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
+      opaqueTemplate->ReadOnlyPrototype();
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
     }
