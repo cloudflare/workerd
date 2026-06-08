@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 import { env } from 'node:process';
 import { beforeEach, afterEach, test } from 'node:test';
+import { scheduler } from 'node:timers/promises';
 import assert from 'node:assert';
 import CDP from 'chrome-remote-interface';
 import { WorkerdServerHarness } from '../server-harness.mjs';
