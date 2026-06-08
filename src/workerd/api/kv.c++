@@ -595,15 +595,6 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         traceContext.setTag("cloudflare.kv.query.value_type"_kjc, "text"_kjc);
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
-        // `data` aliases the V8 BackingStore via jsg::asBytes().  The async
-        // write() below runs after context.waitForOutputLocks() has released
-        // the isolate lock.  If using MPK to protect isolate memory, the
-        // sandbox pages are tagged with the isolate's pkey and the kernel's
-        // write() syscall would EFAULT.  `data` is a reference into
-        // supportedBody's storage, so assigning a kj-heap copy here replaces
-        // the alias in place.  The post-await lambda moves supportedBody (and
-        // thus the copy) into the write.
-        data = kj::heapArray(data.asPtr());
         expectedBodySize = static_cast<uint64_t>(data.size());
         traceContext.setTag("cloudflare.kv.query.value_type"_kjc, "ArrayBuffer"_kjc);
       }
@@ -635,8 +626,6 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
           writePromise = req.body->write(text.asBytes()).attach(kj::mv(text));
         }
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
-          // `data` was already converted to a kj-heap allocation in the outer
-          // KJ_SWITCH_ONEOF above (before context.waitForOutputLocks()).
           writePromise = req.body->write(data).attach(kj::mv(data));
         }
         KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {

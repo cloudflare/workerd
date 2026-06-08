@@ -528,21 +528,27 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             js.typeError("Unable to allocate memory for read"_kj));
       }
 
-      // All reads go through a temporary kj-heap buffer outside the V8 sandbox.
-      //
-      // Two reasons for this:
-      //   1. For resizable ArrayBuffers, the buffer may be resized while the
-      //      read is pending, decommitting memory pages and making a direct
-      //      pointer into the BackingStore invalid (SIGSEGV).
-      //   2. The V8 sandbox is tagged with a Memory Protection Key (MPK).  The
-      //      kj sink fills the destination from the event loop without the
-      //      isolate lock held, so writing into sandbox-tagged memory directly
-      //      would fault.
-      //
-      // We let the kj read fill the temp buffer, then memcpy into the user's
-      // BackingStore in the .then() continuation under the isolate lock, after
-      // re-validating the BackingStore is still attached and large enough.
-      if (theStore->IsResizableByUserJavaScript()) {
+      // In the case the ArrayBuffer is detached/transfered while the read is pending, we
+      // need to make sure that the ptr remains stable, so we grab a shared ptr to the
+      // backing store and use that to get the pointer to the data. If the buffer is detached
+      // while the read is pending, this does mean that the read data will end up being lost,
+      // but there's not really a better option. The best we can do here is warn the user
+      // that this is happening so they can avoid doing it in the future.
+      // Also, the user really shouldn't do this because the read will end up completing into
+      // the detached backing store still which could cause issues with whatever code now actually
+      // owns the transfered buffer. Below we'll warn the user about this if it happens so they
+      // can avoid doing it in the future.
+      auto backing = theStore->GetBackingStore();
+
+      // For resizable ArrayBuffers, the buffer may be resized while the read is
+      // pending, decommitting memory pages and making the pointer invalid (SIGSEGV).
+      // We read into a temporary buffer and copy the data back in the .then()
+      // callback, where we can validate the buffer is still large enough.
+      bool isResizable = theStore->IsResizableByUserJavaScript();
+
+      kj::Array<kj::byte> tempBuffer;
+      kj::byte* readPtr;
+      if (isResizable) {
         auto currentByteLength = theStore->ByteLength();
         if (byteOffset >= currentByteLength) {
           readPending = false;
@@ -558,15 +564,19 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             atLeast = byteLength > 0 ? byteLength : 1;
           }
         }
+        tempBuffer = kj::heapArray<kj::byte>(byteLength);
+        readPtr = tempBuffer.begin();
+      } else {
+        auto ptr = static_cast<kj::byte*>(backing->Data());
+        readPtr = ptr + byteOffset;
       }
-
-      auto tempBuffer = kj::heapArray<kj::byte>(byteLength);
-      auto bytes = tempBuffer.asPtr();
+      auto bytes = kj::arrayPtr(readPtr, byteLength);
 
       KJ_ASSERT(atLeast <= bytes.size(), "minBytes must not exceed maxBytes in tryRead");
 
-      auto promise =
-          kj::evalNow([&] { return readable->tryRead(bytes.begin(), atLeast, bytes.size()); });
+      auto promise = kj::evalNow([&] {
+        return readable->tryRead(bytes.begin(), atLeast, bytes.size()).attach(kj::mv(backing));
+      });
       KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
         promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
       }
@@ -584,7 +594,8 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           .then(js,
               ioContext.addFunctor(
                   [this, ref = addRef(), store = js.v8Ref(store), byteOffset, byteLength,
-                      isByob = maybeByobOptions != kj::none, tempBuffer = kj::mv(tempBuffer)](
+                      isByob = maybeByobOptions != kj::none, isResizable, readPtr,
+                      tempBuffer = kj::mv(tempBuffer)](
                       jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
         readPending = false;
         KJ_ASSERT(amount <= byteLength);
@@ -652,14 +663,12 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           amount = handle->ByteLength() - byteOffset;
         }
 
-        // Copy the data from the kj-heap temporary buffer into the user's
-        // BackingStore.  At this point we hold the isolate lock so writes to
-        // V8-sandbox memory are allowed by the MPK.  We already validated
-        // above that the buffer is still attached and large enough (the
-        // detached and resized-smaller cases are handled and either return
-        // early or truncate `amount`).
-        auto destPtr = static_cast<kj::byte*>(handle->GetBackingStore()->Data());
-        memcpy(destPtr + byteOffset, tempBuffer.begin(), amount);
+        if (isResizable && byteOffset + amount <= handle->ByteLength()) {
+          // For resizable buffers, the data was read into a temporary buffer.
+          // Copy it back into the user's (still valid) buffer region.
+          auto destPtr = static_cast<kj::byte*>(handle->GetBackingStore()->Data());
+          memcpy(destPtr + byteOffset, readPtr, amount);
+        }
 
         auto u8 = v8::Uint8Array::New(store.getHandle(js), byteOffset, amount);
         return js.resolvedPromise(ReadResult{

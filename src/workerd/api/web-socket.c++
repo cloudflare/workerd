@@ -611,13 +611,7 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
         break;
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
-        // `data` arrives via jsg::asBytes() and aliases the V8 BackingStore.
-        // The kj::WebSocket frame writer eventually syscalls write() on these
-        // bytes from the kj event loop without the isolate lock.  If using MPK
-        // to protect isolate memory, the sandbox pages are tagged with the
-        // isolate's pkey and the syscall would fault.  Copy into a kj-heap
-        // allocation while we still hold the lock.
-        return kj::heapArray(data.asPtr());
+        return kj::mv(data);
         break;
       }
     }
