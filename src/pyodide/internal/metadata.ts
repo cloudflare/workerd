@@ -36,7 +36,6 @@ export const LOCKFILE = JSON.parse(
   MetadataReader.getPackagesLock()
 ) as PackageLock;
 
-export const REQUIREMENTS = MetadataReader.getRequirements();
 export const TRANSITIVE_REQUIREMENTS =
   MetadataReader.getTransitiveRequirements();
 

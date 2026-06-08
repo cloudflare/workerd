@@ -95,26 +95,8 @@ class PythonModuleInfo {
     return PythonModuleInfo(kj::mv(clonedNames), kj::mv(clonedContents));
   }
 
-  // Return the list of names to import into a package snapshot.
-  kj::Array<kj::String> getPackageSnapshotImports(kj::StringPtr version);
-  // Takes in a list of Python files (their contents). Parses these files to find the import
-  // statements, then returns a list of modules imported via those statements.
-  //
-  // For example:
-  // import a, b, c
-  // from z import x
-  // import t.y.u
-  // from . import k
-  //
-  // -> ["a", "b", "c", "z", "t.y.u"]
-  //
-  // Package relative imports are ignored.
-  static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
   kj::HashSet<kj::String> getWorkerModuleSet();
   kj::Array<kj::String> getPythonFileContents();
-  static kj::Array<kj::String> filterPythonScriptImports(kj::HashSet<kj::String> workerModules,
-      kj::ArrayPtr<kj::String> imports,
-      kj::StringPtr version);
 };
 
 // A class wrapping the information stored in a WorkerBundle, in particular the Python source files
@@ -199,11 +181,6 @@ class PyodideMetadataReader: public jsg::Object {
   kj::Array<kj::StringPtr> getNames(jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter);
   kj::Array<int> getSizes(jsg::Lock& js);
 
-  // Return the list of names to import into a package snapshot.
-  kj::Array<kj::String> getPackageSnapshotImports(kj::String version);
-
-  kj::Array<jsg::JsRef<jsg::JsString>> getRequirements(jsg::Lock& js);
-
   int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
 
   bool hasMemorySnapshot() {
@@ -254,10 +231,8 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
     JSG_METHOD(getMainModule);
-    JSG_METHOD(getRequirements);
     JSG_METHOD(getNames);
     JSG_METHOD(getSizes);
-    JSG_METHOD(getPackageSnapshotImports);
     JSG_METHOD(read);
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
