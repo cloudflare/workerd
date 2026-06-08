@@ -3458,13 +3458,11 @@ class PumpToReader {
             return Pumping{};
           }
 
-          // The returned kj::Array<kj::byte> is handed to an async sink->write()
-          // that runs on the kj event loop without the isolate lock.  If using
-          // MPK to protect isolate memory, the V8 sandbox backing store pages
-          // are tagged with the isolate's pkey and would be inaccessible in
-          // that context.  Memcpy into a kj-heap allocation while we still
-          // hold the lock.
-          return kj::heapArray(bufferSource.asArrayPtr());
+          if (byteStream) {
+            jsg::BackingStore backing = bufferSource.detach(js);
+            return backing.asArrayPtr().attach(kj::mv(backing));
+          }
+          return bufferSource.asArrayPtr().attach(kj::mv(bufferSource));
         }),
                 [](auto& js, jsg::Value exception) mutable -> Result {
           return jsg::JsValue(exception.getHandle(js)).addRef(js);
