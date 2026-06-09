@@ -35,6 +35,12 @@ include:
   - component: $CI_SERVER_FQDN/cloudflare/ci/cfsetup/build@~latest
     inputs:
       <<: *cfsetup-input-template
+      jobPrefix: "linux-x64-release"
+      CFSETUP_TARGET: "ci-bazel-x64-release"
+
+  - component: $CI_SERVER_FQDN/cloudflare/ci/cfsetup/build@~latest
+    inputs:
+      <<: *cfsetup-input-template
       jobPrefix: "linux-x64-asan"
       CFSETUP_TARGET: "ci-bazel-x64-asan"
 
@@ -89,6 +95,9 @@ linux-x64-build:
   <<: *job-template
 
 linux-x64-asan-build:
+  <<: *job-template
+
+linux-x64-release-build:
   <<: *job-template
 
 linux-x64-lint-build:
