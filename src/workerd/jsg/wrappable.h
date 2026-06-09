@@ -294,6 +294,7 @@ class Wrappable: public kj::Refcounted {
     return a;
   }
 
+  friend class Object;
   friend class GcVisitor;
   friend class HeapTracer;
   friend class MemoryTracker;

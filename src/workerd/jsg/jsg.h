@@ -1168,6 +1168,10 @@ constexpr bool resourceNeedsGcTracing();
 template <typename T>
 void visitSubclassForGc(T* obj, GcVisitor& visitor);
 
+// Forward declaration for weak reference types.
+template <typename T>
+class WeakRef;
+
 // All resource types must inherit from this.
 class Object: private Wrappable {
  public:
@@ -1209,6 +1213,10 @@ class Object: private Wrappable {
   // This is used to detect when a subclass has defined a custom serializer.
   static constexpr uint jsgSerializeLevel = 0;
 
+ protected:
+  template <typename T>
+  WeakRef<T> getWeakRefToThis(Lock& js);
+
  private:
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
   inline void visitForGc(GcVisitor& visitor) {}
@@ -1236,10 +1244,6 @@ class Object: private Wrappable {
   friend class SelfPropertyReader;
   friend class MemoryTracker;
 };
-
-// Forward declaration for weak reference types.
-template <typename T>
-class WeakRef;
 
 // Ref<T> is a reference to a resource type (a type with a JSG_RESOURCE_TYPE block) living on
 // the V8 heap.
@@ -1412,6 +1416,7 @@ Ref<T> _jsgThis(T* obj) {
 }
 
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))
+#define JSG_THIS_WEAK(js) (getWeakRefToThis<std::remove_pointer_t<decltype(this)>>(js))
 
 // A non-owning weak reference to a resource type (a type with a JSG_RESOURCE_TYPE block).
 //
@@ -1545,6 +1550,7 @@ class WeakRef {
   friend class WeakRef;
   template <typename>
   friend class Ref;
+  friend class Object;
 };
 
 // Holds a value of type `T` and allows it to be passed to JavaScript multiple times, resulting
