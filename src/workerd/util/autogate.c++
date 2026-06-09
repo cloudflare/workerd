@@ -29,8 +29,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "tail-stream-refactor"_kj;
     case AutogateKey::RUST_BACKED_NODE_DNS:
       return "rust-backed-node-dns"_kj;
-    case AutogateKey::WASM_SHUTDOWN_SIGNAL_SHIM:
-      return "wasm-shutdown-signal-shim"_kj;
     case AutogateKey::ENABLE_FAST_TEXTENCODER:
       return "enable-fast-textencoder"_kj;
     case AutogateKey::ENABLE_DRAINING_READ_ON_STANDARD_STREAMS:
