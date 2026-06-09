@@ -234,5 +234,18 @@ KJ_TEST("Moving WeakRefs") {
   });
 }
 
+KJ_TEST("Getting weakref from self") {
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+
+  e.run([](Lock& js) {
+    auto strong = js.alloc<NumberBox>(123);
+    // Uses JSG_THIS_WEAK internally
+    auto weak = strong->getWeakRefToSelf(js);
+    KJ_ASSERT(weak.isAlive());
+    auto strong2 = KJ_ASSERT_NONNULL(weak.tryAddRef(js));
+    KJ_ASSERT(strong.get() == strong2.get());
+  });
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

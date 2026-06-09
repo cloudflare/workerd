@@ -236,6 +236,10 @@ struct NumberBox: public Object {
     JSG_INSTANCE_PROPERTY(boxed, getBoxed, setBoxed);
     JSG_READONLY_INSTANCE_PROPERTY(boxedFromTypeHandler, getBoxedFromTypeHandler);
   }
+
+  WeakRef<NumberBox> getWeakRefToSelf(jsg::Lock& js) {
+    return JSG_THIS_WEAK(js);
+  }
 };
 
 class BoxBox: public Object {

@@ -1016,8 +1016,13 @@ class Isolate: public IsolateBase {
 };
 
 template <typename T>
+WeakRef<T> Object::getWeakRefToThis(Lock& js) {
+  return WeakRef<T>(js.v8Isolate, static_cast<T&>(*this), getOrCreateWeakRefAnchor());
+}
+
+template <typename T>
 WeakRef<T> Ref<T>::getWeakRef(Lock& js) & {
-  return WeakRef<T>(js.v8Isolate, *inner.get(), inner->getOrCreateWeakRefAnchor());
+  return WeakRef<T>(js.v8Isolate, static_cast<T&>(*inner.get()), inner->getOrCreateWeakRefAnchor());
 }
 
 template <typename T>
