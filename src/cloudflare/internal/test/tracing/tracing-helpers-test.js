@@ -321,3 +321,35 @@ export const helperStartActiveSpan = {
     );
   },
 };
+
+export const startActiveSpanSyncThrow = {
+  async test(ctrl, env, ctx) {
+    let capturedSpan = null;
+    let caught = false;
+
+    try {
+      ctx.tracing.startActiveSpan('manual-throw-op', (span) => {
+        capturedSpan = span;
+        span.setAttribute('test', 'startActiveSpanSyncThrow');
+        throw new Error('manual lifecycle throw');
+      });
+    } catch (e) {
+      caught = true;
+      assert.strictEqual(e.message, 'manual lifecycle throw');
+    }
+
+    assert(caught, 'startActiveSpan callback error should be rethrown');
+    assert.strictEqual(
+      capturedSpan.isTraced,
+      true,
+      'Manual span should stay open after callback throws'
+    );
+    capturedSpan.setAttribute('after.throw', true);
+    capturedSpan.end();
+    assert.strictEqual(
+      capturedSpan.isTraced,
+      false,
+      'Manual span should stop tracing after explicit end()'
+    );
+  },
+};

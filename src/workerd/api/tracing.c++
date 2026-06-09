@@ -179,8 +179,9 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
 
   kj::Own<user_tracing::SpanImpl> impl;
   kj::Maybe<SpanParent> childSpanForAsyncContext;
+  bool hasIoContext = IoContext::hasCurrent();
 
-  if (IoContext::hasCurrent()) {
+  if (hasIoContext) {
     auto& context = IoContext::current();
     SpanParent parent = context.getCurrentUserTraceSpan();
 
@@ -211,7 +212,7 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
   // kj::Own; tracing without an IoContext is a no-op tracing-wise but still runs the
   // callback.
   jsg::Ref<user_tracing::Span> jsSpan = [&]() -> jsg::Ref<user_tracing::Span> {
-    if (IoContext::hasCurrent()) {
+    if (hasIoContext) {
       auto ownedImpl = IoContext::current().addObject(kj::mv(impl));
       return js.alloc<user_tracing::Span>(kj::mv(ownedImpl));
     }

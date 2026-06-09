@@ -45,6 +45,7 @@ export const validateSpans = {
         expectedSpan: 'detached-stream-op',
       },
       { test: 'helperStartActiveSpan', expectedSpan: 'helper-detached-op' },
+      { test: 'startActiveSpanSyncThrow', expectedSpan: 'manual-throw-op' },
     ];
 
     for (const { test, expectedSpan } of testValidations) {
@@ -94,6 +95,15 @@ export const validateSpans = {
       assert(span, 'helperStartActiveSpan: span present');
       assert.strictEqual(span['ended.explicitly'], true);
       assert(span.closed, 'Helper-created span should be explicitly closed');
+    }
+
+    {
+      const span = (spansByTest.get('startActiveSpanSyncThrow') || []).find(
+        (s) => s.name === 'manual-throw-op'
+      );
+      assert(span, 'startActiveSpanSyncThrow: span present');
+      assert.strictEqual(span['after.throw'], true);
+      assert(span.closed, 'Manual throw span should be explicitly closed');
     }
 
     // Nested spans: verify both outer and inner spans exist and both are closed.
