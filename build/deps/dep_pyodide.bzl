@@ -83,16 +83,10 @@ def _snapshot_http_files_version(
         baseline_snapshot = None,
         baseline_snapshot_hash = None,
         baseline_snapshot_integrity = None,
-        numpy_snapshot = None,
-        numpy_snapshot_integrity = None,
-        fastapi_snapshot = None,
-        fastapi_snapshot_integrity = None,
         dedicated_fastapi_snapshot = None,
         dedicated_fastapi_snapshot_integrity = None,
         **_kwds):
     return (_snapshot_http_file(name, "baseline-snapshot/", baseline_snapshot, baseline_snapshot_integrity, baseline_snapshot_hash) +
-            _snapshot_http_file(name, "test-snapshot/", numpy_snapshot, numpy_snapshot_integrity, None) +
-            _snapshot_http_file(name, "test-snapshot/", fastapi_snapshot, fastapi_snapshot_integrity, None) +
             _snapshot_http_file(name, "", dedicated_fastapi_snapshot, dedicated_fastapi_snapshot_integrity, None, VENDOR_R2))
 
 def _snapshot_http_files():
