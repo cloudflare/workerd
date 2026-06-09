@@ -238,6 +238,27 @@ Frankenvalue Frankenvalue::fromJson(kj::String json) {
   return result;
 }
 
+size_t Frankenvalue::estimateSize() const {
+  size_t result = 0;
+
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(_, EmptyObject) {}
+    KJ_CASE_ONEOF(json, Json) {
+      result += json.json.size();
+    }
+    KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
+      result += v8Serialized.data.size();
+    }
+  }
+
+  for (auto& property: properties) {
+    result += property.name.size();
+    result += property.value.estimateSize();
+  }
+
+  return result;
+}
+
 void Frankenvalue::setProperty(kj::String name, Frankenvalue value) {
   // We need to merge the value's cap table into ours.
   uint capTableOffset = capTable.size();

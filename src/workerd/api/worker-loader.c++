@@ -10,6 +10,18 @@
 
 namespace workerd::api {
 
+namespace {
+
+// Maximum total (uncompressed) size of all module bodies in a dynamically-loaded Worker. This
+// mirrors the documented paid Worker uncompressed size limit (64 MB)
+constexpr size_t MAX_DYNAMIC_WORKER_CODE_SIZE = 64 * 1024 * 1024;
+
+// Maximum serialized size of the `env` object passed to a dynamically-loaded Worker. This is
+// roughly the paid Worker analog of 128 environment variables at 5 KB each
+constexpr size_t MAX_DYNAMIC_WORKER_ENV_SIZE = 1 * 1024 * 1024;
+
+}  // namespace
+
 jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
     jsg::Optional<kj::Maybe<kj::String>> name,
     jsg::Optional<EntrypointOptions> options) {
@@ -145,6 +157,10 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
   Frankenvalue env;
   KJ_IF_SOME(codeEnv, code.env) {
     env = Frankenvalue::fromJs(js, codeEnv.getHandle(js));
+    auto estimate = env.estimateSize();
+    JSG_REQUIRE(estimate <= MAX_DYNAMIC_WORKER_ENV_SIZE, Error, "Dynamic Worker env size (",
+        estimate, " bytes) exceeds the maximum allowed size of ", MAX_DYNAMIC_WORKER_ENV_SIZE,
+        " bytes.");
   }
 
   kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
@@ -281,7 +297,9 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
   };
 
   bool isPython = code.mainModule.endsWith(".py"_kj);
-  // Disallow Python modules when the main module is a JS module, and vice versa.
+  // Disallow Python modules when the main module is a JS module, and vice versa. Also tally up the
+  // total size of all module bodies so we can enforce the worker code size limit.
+  size_t totalCodeSize = 0;
   for (auto& module: modules) {
     auto isJsModule = module.content.is<Worker::Script::EsModule>() ||
         module.content.is<Worker::Script::CommonJsModule>();
@@ -294,7 +312,37 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
       JSG_FAIL_REQUIRE(TypeError, "Module \"", module.name,
           "\" is a Python module, but the main module isn't a Python module.");
     }
+
+    KJ_SWITCH_ONEOF(module.content) {
+      KJ_CASE_ONEOF(m, Worker::Script::EsModule) {
+        totalCodeSize += m.body.size();
+      }
+      KJ_CASE_ONEOF(m, Worker::Script::CommonJsModule) {
+        totalCodeSize += m.body.size();
+      }
+      KJ_CASE_ONEOF(m, Worker::Script::TextModule) {
+        totalCodeSize += m.body.size();
+      }
+      KJ_CASE_ONEOF(m, Worker::Script::DataModule) {
+        totalCodeSize += m.body.size();
+      }
+      KJ_CASE_ONEOF(m, Worker::Script::WasmModule) {
+        totalCodeSize += m.body.size();
+      }
+      KJ_CASE_ONEOF(m, Worker::Script::JsonModule) {
+        totalCodeSize += m.body.size();
+      }
+      KJ_CASE_ONEOF(m, Worker::Script::PythonModule) {
+        totalCodeSize += m.body.size();
+      }
+      KJ_CASE_ONEOF(m, Worker::Script::PythonRequirement) {}
+      KJ_CASE_ONEOF(m, Worker::Script::CapnpModule) {}
+    }
   }
+
+  JSG_REQUIRE(totalCodeSize <= MAX_DYNAMIC_WORKER_CODE_SIZE, Error, "Dynamic Worker code size (",
+      totalCodeSize, " bytes) exceeds the maximum allowed size of ", MAX_DYNAMIC_WORKER_CODE_SIZE,
+      " bytes.");
 
   return Worker::Script::ModulesSource{
     .mainModule = code.mainModule,

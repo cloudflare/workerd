@@ -24,6 +24,12 @@ class Frankenvalue {
     return value.is<EmptyObject>() && properties.empty();
   }
 
+  // Returns an estimate of the in-memory size of the value, in bytes. This sums the size of the
+  // serialized/JSON content of this value plus, recursively, the sizes of any stitched-in
+  // properties (including their names). Intended for enforcing size limits, not for exact
+  // accounting. The cap table is not included.
+  size_t estimateSize() const;
+
   Frankenvalue clone();
 
   // This method only works if the `CapTableEntry`s in this `Frankenvalue` all implement

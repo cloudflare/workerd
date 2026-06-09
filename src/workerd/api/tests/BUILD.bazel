@@ -961,6 +961,13 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
+    src = "worker-loader-limits-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-limits-test.js"],
+)
+
+wd_test(
     src = "worker-loader-unnamed-gc-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-unnamed-gc-test.js"],
