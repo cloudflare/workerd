@@ -2,31 +2,28 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Benchmark for PumpToReader in standard.c++.
+// Benchmark for ReadableStream::pumpTo() in standard.c++.
 //
 // Measures the performance of ReadableStream::pumpTo() which routes through
-// ReadableStreamJsController::pumpTo() → PumpToReader::pumpLoop().
+// ReadableStreamJsController::pumpTo() and DrainingReader.
 //
-// This benchmark establishes a baseline before the DrainingReader adoption,
-// then the same benchmarks are re-run after the change to quantify improvement.
-// This test was originally written to measure improvement from DrainingReader
-// adoption (deployed by an autogate), but remains broadly useful as a benchmark
-// even after we remove the autogate.
+// This benchmark was originally written to measure improvement from DrainingReader
+// adoption, but remains broadly useful for tracking pumpTo throughput and batching.
 //
 // Usage:
-//   # Capture baseline (before changes):
+//   # Capture baseline:
 //   bazel run --config=opt //src/workerd/tests:bench-pumpto \
 //       -- --benchmark_format=json --benchmark_out=baseline.json
 //
-//   # Capture comparison (after changes):
+//   # Capture comparison:
 //   bazel run --config=opt //src/workerd/tests:bench-pumpto \
 //       -- --benchmark_format=json --benchmark_out=after.json
 //
 // Key metrics:
 //   - bytes_per_second: Primary throughput metric.
 //   - WriteOps: Average sink write calls per iteration. Directly measures batching.
-//     Before DrainingReader adoption: WriteOps ≈ numChunks (one write per chunk).
-//     After: WriteOps ≪ numChunks (one vectored write per drain cycle).
+//     With synchronous streams, WriteOps should be much lower than numChunks
+//     because pumpTo writes one vectored batch per drain cycle.
 
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/system-streams.h>
@@ -208,7 +205,7 @@ jsg::Ref<ReadableStream> createConfiguredStream(
 // Core benchmark function
 // =============================================================================
 
-// Exercises: ReadableStream::pumpTo() → ReadableStreamJsController::pumpTo() → PumpToReader
+// Exercises: ReadableStream::pumpTo() → ReadableStreamJsController::pumpTo().
 static void benchPumpTo(
     benchmark::State& state, size_t chunkSize, size_t numChunks, const StreamConfig& config) {
   capnp::MallocMessageBuilder message;
@@ -226,7 +223,7 @@ static void benchPumpTo(
       auto stream = createConfiguredStream(env.js, chunkSize, numChunks, config);
 
       // Wrap DiscardingSink as a WritableStreamSink via newSystemStream.
-      // This is the production path: PumpToReader receives a WritableStreamSink.
+      // This is the production path: pumpTo receives a WritableStreamSink.
       kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
       auto writableSink = newSystemStream(kj::mv(fakeOwn), StreamEncoding::IDENTITY, env.context);
 
@@ -302,7 +299,7 @@ static void PumpTo_64KB_Byte(benchmark::State& state) {
 // =============================================================================
 // Each chunk requires a KJ event loop yield, simulating real network I/O.
 // DrainingReader cannot batch these (at most 1 chunk per drain cycle).
-// These verify no regression from the PumpToReader change.
+// These verify no regression when the stream cannot be batched.
 // Smaller total payload because each chunk incurs real event loop overhead.
 
 static void PumpTo_256B_IoLatency(benchmark::State& state) {

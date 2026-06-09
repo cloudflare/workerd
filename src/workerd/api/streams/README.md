@@ -319,14 +319,12 @@ for (auto consumer: consumers) {
 
 ### Pattern: WeakRef for User-Held Handles
 
-- **When**: Handles user code may hold longer than underlying object (`ByobRequest`,
-  `PumpToReader`)
+- **When**: Handles user code may hold longer than underlying object (`ByobRequest`)
 - **How**: Check liveness before use
 
 ```cpp
-KJ_IF_SOME(reader, pumpToReader->tryGet()) {
-    reader.pumpLoop(js, ...);  // Safe -- still alive
-}
+impl.controller->runIfAlive(
+    [](ReadableByteStreamController& controller) { controller.maybeByobRequest = kj::none; });
 ```
 
 ### Pattern: `Rc<Entry>` for Shared Queue Data

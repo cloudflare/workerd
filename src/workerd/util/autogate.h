@@ -38,8 +38,6 @@ enum class AutogateKey {
   WASM_SHUTDOWN_SIGNAL_SHIM,
   // Enable fast TextEncoder implementation using simdutf
   ENABLE_FAST_TEXTENCODER,
-  // Enable draining read on standard streams
-  ENABLE_DRAINING_READ_ON_STANDARD_STREAMS,
   // Increase the SQLite hard heap limit from 512 MiB to 8 GiB.
   INCREASE_SQLITE_HARD_HEAP_LIMIT,
   // Enable user span context propagation across worker-to-worker subrequests.

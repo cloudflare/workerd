@@ -116,12 +116,12 @@ KJ_TEST("Reading from byob reader") {
   }
 }
 
-KJ_TEST("PumpToReader regression") {
-  // If the promise holding the PumpToReader is dropped while the inner
-  // write to the sink is pending, the PumpToReader can free the sink.
-  // In some cases, this means that the sink can error because shutdownWrite
-  // is called while there is still a pending write promise. This test verifies
-  // that PumpToReader cancels any pending write promise when it is destroyed.
+KJ_TEST("ReadableStream pumpTo pending write cancellation regression") {
+  // If the promise holding pumpTo's implementation is dropped while the inner
+  // write to the sink is pending, the sink can be freed. In some cases, this
+  // means that the sink can error because shutdownWrite is called while there
+  // is still a pending write promise. This test verifies that destruction of
+  // the pump operation cancels any pending write promise.
 
   struct TestSink final: public WritableStreamSink {
     kj::TwoWayPipe pipe;
