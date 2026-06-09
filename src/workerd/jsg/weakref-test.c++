@@ -7,7 +7,7 @@
 namespace workerd::jsg::test {
 namespace {
 
-V8System v8System;
+V8System v8System({"--expose-gc"_kj});
 class ContextGlobalObject: public Object, public ContextGlobal {};
 
 struct WeakRefContext: public ContextGlobalObject {
@@ -244,6 +244,145 @@ KJ_TEST("Getting weakref from self") {
     KJ_ASSERT(weak.isAlive());
     auto strong2 = KJ_ASSERT_NONNULL(weak.tryAddRef(js));
     KJ_ASSERT(strong.get() == strong2.get());
+  });
+}
+
+// ========================================================================================
+// jsg::WeakV8Ref<T> tests
+
+KJ_TEST("WeakV8Ref: basic creation and access") {
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+  e.run([](Lock& js) {
+    // Create a V8 value and a weak ref to it.
+    auto strong = js.v8Ref(v8Str(js.v8Isolate, "hello"_kj));
+    auto weak = strong.getWeakRef(js);
+
+    KJ_ASSERT(weak.isAlive());
+
+    auto local = KJ_ASSERT_NONNULL(weak.tryGetHandle(js.v8Isolate));
+    v8::String::Utf8Value utf8(js.v8Isolate, local);
+    KJ_ASSERT(kj::StringPtr(*utf8, utf8.length()) == "hello");
+  });
+}
+
+KJ_TEST("WeakV8Ref: tryAddRef promotes to strong V8Ref") {
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+  e.run([](Lock& js) {
+    auto strong = js.v8Ref(v8Str(js.v8Isolate, "world"_kj));
+    auto weak = strong.getWeakRef(js);
+
+    auto promoted = KJ_ASSERT_NONNULL(weak.tryAddRef(js.v8Isolate));
+    auto local = promoted.getHandle(js.v8Isolate);
+    v8::String::Utf8Value utf8(js.v8Isolate, local);
+    KJ_ASSERT(kj::StringPtr(*utf8, utf8.length()) == "world");
+  });
+}
+
+KJ_TEST("WeakV8Ref: null-constructed is not alive") {
+  WeakV8Ref<v8::String> weak(nullptr);
+  KJ_ASSERT(!weak.isAlive());
+}
+
+KJ_TEST("WeakV8Ref: move semantics") {
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+  e.run([](Lock& js) {
+    auto strong = js.v8Ref(v8Str(js.v8Isolate, "test"_kj));
+    auto weak1 = strong.getWeakRef(js);
+    auto weak2 = kj::mv(weak1);
+
+    KJ_ASSERT(weak2.isAlive());
+    KJ_ASSERT(!weak1.isAlive());
+  });
+}
+
+KJ_TEST("WeakV8Ref: not alive after drop") {
+  setPredictableModeForTest();
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+  e.run([](Lock& js) {
+    // A nested handle scope is required to ensure that the object is collected
+    // and not being held alive by the outer handle scope.
+    auto weak = js.withinHandleScope([&] {
+      auto strong = js.v8Ref(v8::Object::New(js.v8Isolate));
+      auto weak = strong.getWeakRef(js);
+      KJ_ASSERT(weak.isAlive());
+      return kj::mv(weak);
+    });
+    js.requestGcForTesting();
+    KJ_ASSERT(!weak.isAlive());
+  });
+}
+
+// ========================================================================================
+// jsg::WeakJsRef<T> tests
+
+KJ_TEST("WeakJsRef: basic creation and access") {
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+  e.run([](Lock& js) {
+    auto obj = js.obj();
+    JsRef<JsObject> strong(js, obj);
+    auto weak = strong.getWeakRef(js);
+
+    KJ_ASSERT(weak.isAlive());
+
+    auto handle = KJ_ASSERT_NONNULL(weak.tryGetHandle(js));
+    // Should be the same object.
+    KJ_ASSERT(handle == obj);
+  });
+}
+
+KJ_TEST("WeakJsRef: tryAddRef promotes to strong JsRef") {
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+  e.run([](Lock& js) {
+    auto str = js.str("test"_kj);
+    JsRef<JsString> strong(js, str);
+    auto weak = strong.getWeakRef(js);
+
+    auto promoted = KJ_ASSERT_NONNULL(weak.tryAddRef(js));
+    auto handle = promoted.getHandle(js);
+    KJ_ASSERT(handle == str);
+  });
+}
+
+KJ_TEST("WeakJsRef: null-constructed is not alive") {
+  WeakJsRef<JsValue> weak(nullptr);
+  KJ_ASSERT(!weak.isAlive());
+}
+
+KJ_TEST("WeakJsRef: move semantics") {
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+  e.run([](Lock& js) {
+    auto obj = js.obj();
+    JsRef<JsObject> strong(js, obj);
+    auto weak1 = strong.getWeakRef(js);
+    auto weak2 = kj::mv(weak1);
+
+    KJ_ASSERT(weak2.isAlive());
+    KJ_ASSERT(!weak1.isAlive());
+  });
+}
+
+KJ_TEST("WeakJsRef: getHandle asserts when dead") {
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+  e.run([](Lock& js) {
+    WeakJsRef<JsObject> weak(nullptr);
+    KJ_EXPECT_THROW_MESSAGE("collected", weak.getHandle(js));
+  });
+}
+
+KJ_TEST("WeakJsRef: not alive after drop") {
+  setPredictableModeForTest();
+  Evaluator<WeakRefContext, WeakRefIsolate> e(v8System);
+  e.run([](Lock& js) {
+    // A nested handle scope is required to ensure that the object is collected
+    // and not being held alive by the outer handle scope.
+    auto weak = js.withinHandleScope([&] {
+      auto obj = js.obj();
+      auto weak = obj.getWeakRef(js);
+      KJ_ASSERT(weak.isAlive());
+      return kj::mv(weak);
+    });
+    js.requestGcForTesting();
+    KJ_ASSERT(!weak.isAlive());
   });
 }
 

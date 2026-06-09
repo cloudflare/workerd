@@ -804,6 +804,9 @@ enum SetDataIndex {
 class Lock;
 WD_STRONG_BOOL(RequireEsm);
 
+template <typename T>
+class WeakV8Ref;
+
 // Arbitrary V8 data, wrapped for storage from C++. You can't do much with it, so instead you
 // should probably use V8Ref<T>, a version of this that's strongly typed.
 //
@@ -905,6 +908,13 @@ class Data {
   // garbage collection.
   void moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTracedRef) noexcept;
 
+  // Defers destruction of a v8::Global handle to the next time the isolate is locked.
+  // Used by Data::destroy() and WeakV8Ref::destroy().
+  static void deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> handle);
+
+  template <typename>
+  friend class WeakV8Ref;
+
   friend class MemoryTracker;
 };
 
@@ -953,6 +963,13 @@ class V8Ref: private Data {
   template <typename U>
   V8Ref<U> cast(jsg::Lock& js);
 
+  // Create a weak reference to the held V8 value. The weak reference does not prevent the
+  // value from being garbage collected and is not traced by GC.
+  WeakV8Ref<T> getWeakRef(v8::Isolate* isolate) const {
+    return WeakV8Ref<T>(isolate, getHandle(isolate));
+  }
+  WeakV8Ref<T> getWeakRef(jsg::Lock& js) const;
+
  private:
   friend class GcVisitor;
   friend class MemoryTracker;
@@ -994,6 +1011,106 @@ class HashableV8Ref: public V8Ref<T> {
   HashableV8Ref(v8::Isolate* isolate, v8::Local<T> handle, int identityHash)
       : V8Ref<T>(isolate, handle),
         identityHash(identityHash) {}
+};
+
+// A weak reference to a V8 value (where T is a v8::Value subtype).
+//
+// Unlike V8Ref<T>, a WeakV8Ref<T> does NOT prevent the referenced value from being garbage
+// collected and is NOT traced by V8's GC. Internally it holds a v8::Global<T> with SetWeak()
+// applied, which V8 automatically clears when the target is collected.
+//
+// Use tryGetHandle() to safely access the value:
+//
+//     KJ_IF_SOME(local, weakRef.tryGetHandle(js)) {
+//       // value is still alive, use local
+//     }
+//
+// Use tryAddRef() to promote to a strong V8Ref<T>:
+//
+//     KJ_IF_SOME(strong, weakRef.tryAddRef(js.v8Isolate)) {
+//       // strong keeps the value alive
+//     }
+//
+// It is safe to destroy a WeakV8Ref outside the isolate lock (handles are deferred for later
+// cleanup, like V8Ref).
+template <typename T>
+class WeakV8Ref final {
+ public:
+  WeakV8Ref(decltype(nullptr)) {}
+
+  WeakV8Ref(v8::Isolate* isolate, v8::Local<T> handle): isolate(isolate), handle(isolate, handle) {
+    this->handle.SetWeak();
+  }
+
+  ~WeakV8Ref() noexcept(false) {
+    destroy();
+  }
+
+  WeakV8Ref(WeakV8Ref&& other) noexcept: isolate(other.isolate), handle(kj::mv(other.handle)) {
+    other.isolate = nullptr;
+  }
+
+  WeakV8Ref& operator=(WeakV8Ref&& other) {
+    if (this != &other) {
+      auto tmp = kj::mv(other.handle);
+      auto tmpIsolate = other.isolate;
+      other.handle = kj::mv(handle);
+      other.isolate = isolate;
+      handle = kj::mv(tmp);
+      isolate = tmpIsolate;
+      other.destroy();
+    }
+    return *this;
+  }
+  KJ_DISALLOW_COPY(WeakV8Ref);
+
+  // Check if the referenced value is still alive (not yet garbage collected).
+  bool isAlive() const {
+    return !handle.IsEmpty();
+  }
+
+  // Try to get the handle. Returns kj::none if the value has been garbage collected.
+  kj::Maybe<v8::Local<T>> tryGetHandle(v8::Isolate* isolate) const {
+    if (handle.IsEmpty()) return kj::none;
+    if constexpr (std::is_base_of_v<v8::Value, T>) {
+      auto local = handle.Get(isolate).template As<v8::Value>().template As<T>();
+      if (local.IsEmpty()) return kj::none;
+      return local;
+    } else {
+      auto local = handle.Get(isolate).template As<T>();
+      if (local.IsEmpty()) return kj::none;
+      return local;
+    }
+  }
+  kj::Maybe<v8::Local<T>> tryGetHandle(Lock& js) const;
+
+  // Get the handle, throwing kj::Exception if collected.
+  v8::Local<T> getHandle(v8::Isolate* isolate) const {
+    return KJ_ASSERT_NONNULL(
+        tryGetHandle(isolate), "attempt to access collected jsg::WeakV8Ref target");
+  }
+  v8::Local<T> getHandle(Lock& js) const;
+
+  // Try to promote to a strong V8Ref<T>. Returns kj::none if collected.
+  kj::Maybe<V8Ref<T>> tryAddRef(v8::Isolate* isolate) const {
+    return tryGetHandle(isolate).map([&](v8::Local<T> local) { return V8Ref<T>(isolate, local); });
+  }
+  kj::Maybe<V8Ref<T>> tryAddRef(Lock& js) const;
+
+ private:
+  v8::Isolate* isolate = nullptr;
+  v8::Global<v8::Data> handle;
+
+  void destroy() {
+    if (isolate != nullptr && !handle.IsEmpty()) {
+      if (v8::Locker::IsLocked(isolate)) {
+        handle.Reset();
+      } else {
+        Data::deferGlobalDestruction(isolate, kj::mv(handle));
+      }
+      isolate = nullptr;
+    }
+  }
 };
 
 template <V8Value T>
@@ -3072,6 +3189,26 @@ class Lock {
   virtual kj::Maybe<Object&> getInstance(v8::Local<v8::Object> obj, const std::type_info& type) = 0;
   virtual v8::Local<v8::Object> getPrototypeFor(const std::type_info& type) = 0;
 };
+
+template <typename T>
+inline WeakV8Ref<T> V8Ref<T>::getWeakRef(jsg::Lock& js) const {
+  return getWeakRef(js.v8Isolate);
+}
+
+template <typename T>
+inline kj::Maybe<v8::Local<T>> WeakV8Ref<T>::tryGetHandle(Lock& js) const {
+  return tryGetHandle(js.v8Isolate);
+}
+
+template <typename T>
+inline v8::Local<T> WeakV8Ref<T>::getHandle(Lock& js) const {
+  return getHandle(js.v8Isolate);
+}
+
+template <typename T>
+inline kj::Maybe<V8Ref<T>> WeakV8Ref<T>::tryAddRef(Lock& js) const {
+  return tryAddRef(js.v8Isolate);
+}
 
 // Ensures that the given fn is run within both a handlescope and the context scope.
 // The lock must be assignable to a jsg::Lock, and the context must be or be assignable

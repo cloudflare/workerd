@@ -78,6 +78,9 @@ enum IndexFilter { INCLUDE_INDICES, SKIP_INDICES };
 
 enum PromiseState { PENDING, FULFILLED, REJECTED };
 
+template <typename T>
+class WeakJsRef;
+
 // A JsValue is an abstraction for a JavaScript value that has not been mapped
 // to a C++ type. It wraps an underlying v8::Local<T> in order to avoid direct
 // use of the v8 API in many cases. The JsValue (and JsRef<T>) are meant to
@@ -152,6 +155,7 @@ class JsValue final {
   static JsValue fromJson(Lock& js, const JsValue& input) KJ_WARN_UNUSED_RESULT;
 
   JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  WeakJsRef<JsValue> getWeakRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
   JsValue structuredClone(
       Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers = kj::none) KJ_WARN_UNUSED_RESULT;
@@ -201,6 +205,7 @@ class JsBase {
     requireOnStack(this);
   }
   JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  WeakJsRef<Self> getWeakRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
  private:
   v8::Local<T> inner;
@@ -1017,6 +1022,12 @@ class JsRef final {
     return kj::mv(value).template cast<U>(jsg::Lock::current());
   }
 
+  // Create a weak reference to the held JS value. The weak reference does not prevent the
+  // value from being garbage collected.
+  WeakJsRef<T> getWeakRef(Lock& js) const {
+    return WeakJsRef<T>(js, getHandle(js));
+  }
+
   JSG_MEMORY_INFO(JsRef) {
     tracker.trackField("value", value);
   }
@@ -1031,9 +1042,63 @@ class JsRef final {
   friend class MemoryTracker;
 };
 
+// A weak reference to a JsValue type (JsObject, JsString, etc.).
+//
+// Mirrors jsg::JsRef<T> but does not prevent the value from being garbage collected.
+// Automatically becomes invalid when V8's GC collects the underlying value.
+//
+// Usage:
+//     WeakJsRef<JsObject> weak(js, jsObj);
+//     KJ_IF_SOME(handle, weak.tryGetHandle(js)) { ... }
+//     KJ_IF_SOME(strong, weak.tryAddRef(js)) { ... }
+template <typename T>
+class WeakJsRef final {
+  static_assert(
+      std::is_assignable_v<JsValue, T>, "WeakJsRef<T>, T must be assignable to type JsValue");
+
+ public:
+  WeakJsRef(): WeakJsRef(nullptr) {}
+  WeakJsRef(decltype(nullptr)): value(nullptr) {}
+  WeakJsRef(Lock& js, const T& val): value(js.v8Isolate, v8::Local<v8::Value>(val)) {}
+  WeakJsRef(WeakJsRef<T>&& other) = default;
+  WeakJsRef& operator=(WeakJsRef<T>&& other) = default;
+  KJ_DISALLOW_COPY(WeakJsRef);
+
+  bool isAlive() const {
+    return value.isAlive();
+  }
+
+  kj::Maybe<T> tryGetHandle(Lock& js) const {
+    return value.tryGetHandle(js.v8Isolate).map([](v8::Local<v8::Value> local) -> T {
+      JsValue handle(local);
+      return KJ_ASSERT_NONNULL(handle.tryCast<T>());
+    });
+  }
+
+  T getHandle(Lock& js) const {
+    return KJ_ASSERT_NONNULL(tryGetHandle(js), "attempt to access collected jsg::WeakJsRef target");
+  }
+
+  kj::Maybe<JsRef<T>> tryAddRef(Lock& js) const {
+    return tryGetHandle(js).map([&](T handle) { return JsRef<T>(js, handle); });
+  }
+
+ private:
+  WeakV8Ref<v8::Value> value;
+};
+
+inline WeakJsRef<JsValue> JsValue::getWeakRef(Lock& js) {
+  return WeakJsRef(js, *this);
+}
+
 template <typename T, typename Self>
 inline JsRef<Self> JsBase<T, Self>::addRef(Lock& js) {
   return JsRef<Self>(js, *static_cast<Self*>(this));
+}
+
+template <typename T, typename Self>
+inline WeakJsRef<Self> JsBase<T, Self>::getWeakRef(Lock& js) {
+  return WeakJsRef<Self>(js, *static_cast<Self*>(this));
 }
 
 inline kj::String KJ_STRINGIFY(const JsValue& value) {
