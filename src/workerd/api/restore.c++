@@ -143,6 +143,39 @@ class RestoredRpcSubrequestChannel final: public IoChannelFactory::SubrequestCha
   rpc::WorkerdBootstrap::Client rpcClient;
 };
 
+// Wraps a restored service channel and keeps the restore event alive until the channel is no
+// longer held. Some channel implementations are tied to the IoContext where [restore]() ran.
+class LifetimeExtendedSubrequestChannel final: public IoChannelFactory::SubrequestChannel {
+ public:
+  LifetimeExtendedSubrequestChannel(kj::Own<IoChannelFactory::SubrequestChannel> inner,
+      kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
+      : inner(kj::mv(inner)),
+        doneFulfiller(kj::mv(doneFulfiller)) {}
+
+  ~LifetimeExtendedSubrequestChannel() noexcept(false) {
+    if (doneFulfiller->isWaiting()) {
+      doneFulfiller->fulfill();
+    }
+  }
+
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    return inner->startRequest(kj::mv(metadata));
+  }
+
+  void requireAllowsTransfer() override {
+    inner->requireAllowsTransfer();
+  }
+
+  kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> getTokenMaybeSync(
+      IoChannelFactory::ChannelTokenUsage usage) override {
+    return inner->getTokenMaybeSync(usage);
+  }
+
+ private:
+  kj::Own<IoChannelFactory::SubrequestChannel> inner;
+  kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
+};
+
 // EventDispatcher server that forwards events to a restored service channel. This is a minimal
 // duplicate of the (private) `Server::WorkerdBootstrapImpl::EventDispatcherImpl` in workerd's
 // server.c++, used to implement the `service :WorkerdBootstrap` result of `restoreService()` when
@@ -197,8 +230,8 @@ class RestoredServiceBootstrap final: public rpc::WorkerdBootstrap::Server {
       kj::Own<IoChannelFactory::SubrequestChannel> service,
       kj::Promise<void> eventTask)
       : httpOverCapnpFactory(httpOverCapnpFactory),
-        service(kj::mv(service)),
-        eventTask(eventTask.eagerlyEvaluate(nullptr)) {}
+        eventTask(eventTask.eagerlyEvaluate(nullptr)),
+        service(kj::mv(service)) {}
 
   kj::Promise<void> startEvent(StartEventContext context) override {
     kj::Maybe<kj::String> cfBlobJson;
@@ -214,8 +247,8 @@ class RestoredServiceBootstrap final: public rpc::WorkerdBootstrap::Server {
 
  private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-  kj::Own<IoChannelFactory::SubrequestChannel> service;
   kj::Promise<void> eventTask;
+  kj::Own<IoChannelFactory::SubrequestChannel> service;
 };
 
 }  // namespace
@@ -278,7 +311,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
       }));
     });
 
-    channelFulfiller->fulfill(kj::mv(channel));
+    auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
+
+    channelFulfiller->fulfill(
+        kj::refcounted<LifetimeExtendedSubrequestChannel>(kj::mv(channel), kj::mv(doneFulfiller)));
+
+    // Keep the restore event's IoContext alive as long as the restored service channel exists.
+    co_await donePromise.exclusiveJoin(ioctx.onAbort());
 
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
   }
