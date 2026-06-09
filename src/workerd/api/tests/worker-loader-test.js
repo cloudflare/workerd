@@ -1133,3 +1133,37 @@ export let abortIsolateDynamicAnonymous = {
     );
   },
 };
+
+export let minimalPythonPackage = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('pythonBasics', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'main.py',
+        compatibilityFlags: ['python_workers', 'python_no_global_handlers'],
+        modules: {
+          'main.py': `
+from workers import WorkerEntrypoint
+class Default(WorkerEntrypoint):
+  async def main(self):
+    import testpkg
+    return testpkg.testfunc()
+          `,
+          'testpkg/pkgmodule.py': `
+def testfunc():
+  return "Hello dynamic worker package"
+          `,
+          'testpkg/__init__.py': `
+from . import pkgmodule
+testfunc = pkgmodule.testfunc
+`
+        },
+      };
+    });
+
+    {
+      let result = await worker.getEntrypoint().main();
+      assert.strictEqual(result, "Hello dynamic worker package");
+    }
+  },
+};
