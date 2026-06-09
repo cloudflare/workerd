@@ -335,7 +335,7 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
       KJ_CASE_ONEOF(m, Worker::Script::PythonModule) {
         totalCodeSize += m.body.size();
       }
-      KJ_CASE_ONEOF(m, Worker::Script::PythonRequirement) {}
+      KJ_CASE_ONEOF(m, Worker::Script::ObsoletePythonRequirement) {}
       KJ_CASE_ONEOF(m, Worker::Script::CapnpModule) {}
     }
   }
