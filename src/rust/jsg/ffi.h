@@ -271,7 +271,7 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 ::rust::String unwrap_string(Isolate* isolate, Local value);
 bool unwrap_boolean(Isolate* isolate, Local value);
 double unwrap_number(Isolate* isolate, Local value);
-kj::Rc<Wrappable> unwrap_resource(Isolate* isolate, Local value);
+kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
 ::rust::Vec<uint8_t> unwrap_uint8_array(Isolate* isolate, Local value);
 ::rust::Vec<uint16_t> unwrap_uint16_array(Isolate* isolate, Local value);
 ::rust::Vec<uint32_t> unwrap_uint32_array(Isolate* isolate, Local value);
