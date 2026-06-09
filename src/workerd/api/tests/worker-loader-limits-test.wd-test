@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "worker-loader-limits-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "worker-loader-limits-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "loader", workerLoader = ()),
+        ],
+      )
+    ),
+  ],
+);
