@@ -260,11 +260,6 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     bool isDefaultFetchPort,
     kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair);
 
-jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
-    kj::Maybe<jsg::Ref<Fetcher>> fetcher,
-    AnySocketAddress address,
-    jsg::Optional<SocketOptions> options);
-
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     AnySocketAddress address,

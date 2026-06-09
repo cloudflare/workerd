@@ -618,7 +618,6 @@ kj_test(
         "//src/workerd/io",
         "//src/workerd/io:worker-interface",
         "//src/workerd/tests:test-fixture",
-        "//src/workerd/util:autogate",
     ],
 )
 

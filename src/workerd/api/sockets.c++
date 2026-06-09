@@ -184,7 +184,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   return result;
 }
 
-jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
+jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     AnySocketAddress address,
     jsg::Optional<SocketOptions> options) {
@@ -258,10 +258,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
   httpConnectSettings.tlsStarter = tlsStarter;
 
-  KJ_IF_SOME(promise,
-      util::Autogate::isEnabled(util::AutogateKey::TCP_SOCKET_CONNECT_OUTPUT_GATE)
-          ? ioContext.waitForOutputLocksIfNecessary()
-          : kj::none) {
+  KJ_IF_SOME(promise, ioContext.waitForOutputLocksIfNecessary()) {
     // Wrap the real WorkerInterface in a promised interface that defers connect
     // until the DO output gate clears.
     client = newPromisedWorkerInterface(
@@ -280,16 +277,6 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   // a `connect`.
   result->handleProxyStatus(js, kj::mv(request.status));
   return result;
-}
-
-jsg::Ref<Socket> connectImpl(jsg::Lock& js,
-    kj::Maybe<jsg::Ref<Fetcher>> fetcher,
-    AnySocketAddress address,
-    jsg::Optional<SocketOptions> options) {
-  // When the TCP_SOCKET_CONNECT_OUTPUT_GATE autogate is enabled, the output gate wait is
-  // handled inside connectImplNoOutputLock via a deferred connect task, so no separate wait
-  // is needed here. TODO(cleanup): rename connectImplNoOutputLock once the autogate is removed.
-  return connectImplNoOutputLock(js, kj::mv(fetcher), kj::mv(address), kj::mv(options));
 }
 
 jsg::Promise<void> Socket::close(jsg::Lock& js) {
