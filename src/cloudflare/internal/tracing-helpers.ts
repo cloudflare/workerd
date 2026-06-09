@@ -40,3 +40,11 @@ export function withSpan<T>(name: string, fn: (span: Span) => T): T {
   // promise-reject) auto-ending, so this is a pure passthrough.
   return tracing.enterSpan(name, fn);
 }
+
+/**
+ * Helper function to start a span that is active while `fn` runs, but whose
+ * lifecycle is controlled explicitly by the caller via `span.end()`.
+ */
+export function startActiveSpan<T>(name: string, fn: (span: Span) => T): T {
+  return tracing.startActiveSpan(name, fn);
+}

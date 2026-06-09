@@ -270,4 +270,92 @@ v8::Local<v8::Value> Tracing::enterSpan(jsg::Lock& js,
   }
 }
 
+v8::Local<v8::Value> Tracing::startActiveSpan(jsg::Lock& js,
+    kj::String operationName,
+    v8::Local<v8::Function> callback,
+    jsg::Arguments<jsg::Value> args,
+    const jsg::TypeHandler<jsg::Ref<user_tracing::Span>>& spanHandler) {
+  // We use qualified `user_tracing::Span` / `user_tracing::SpanImpl` throughout because an
+  // unqualified `Span` in this namespace resolves to workerd::Span (the runtime span struct),
+  // which is a different type.
+
+  // Cap operation name length at the API boundary so every downstream submitter sees the
+  // truncated value.
+  if (operationName.size() > user_tracing::MAX_USER_OPERATION_NAME_BYTES) {
+    operationName = kj::str(operationName.first(user_tracing::MAX_USER_OPERATION_NAME_BYTES));
+  }
+
+  kj::Own<user_tracing::SpanImpl> impl;
+  kj::Maybe<SpanParent> childSpanForAsyncContext;
+
+  if (IoContext::hasCurrent()) {
+    auto& context = IoContext::current();
+    SpanParent parent = context.getCurrentUserTraceSpan();
+
+    if (parent.isObserved()) {
+      KJ_IF_SOME(observer, parent.getObserver()) {
+        // newChildFromUserCode (vs newChild) signals user-origin to the submitter so it can
+        // skip the operation-name allowlist that gates runtime spans.
+        auto childObserver = observer.newChildFromUserCode();
+        impl = kj::refcounted<user_tracing::SpanImpl>(
+            kj::mv(childObserver), kj::ConstString(kj::heapString(operationName)));
+        // Capture a SpanParent for the child so we can push it onto the AsyncContextFrame
+        // below. Safe to carry across the request boundary thanks to BaseTracer::WeakRef in
+        // the submitter - stale parents cannot pin the tracer.
+        childSpanForAsyncContext = impl->makeSpanParent();
+      } else {
+        impl = kj::refcounted<user_tracing::SpanImpl>(nullptr);
+      }
+    } else {
+      impl = kj::refcounted<user_tracing::SpanImpl>(nullptr);
+    }
+  } else {
+    // No IoContext: callback still runs, but with a no-op span and no async-context push.
+    impl = kj::refcounted<user_tracing::SpanImpl>(nullptr);
+  }
+
+  // Wrap impl in IoOwn (when inside an IoContext) so destruction funnels through the
+  // IoContext's delete queue and cannot cross threads. Outside an IoContext, fall back to
+  // kj::Own; startActiveSpan without an IoContext is a no-op tracing-wise but still runs
+  // the callback.
+  jsg::Ref<user_tracing::Span> jsSpan = [&]() -> jsg::Ref<user_tracing::Span> {
+    if (IoContext::hasCurrent()) {
+      auto ownedImpl = IoContext::current().addObject(kj::mv(impl));
+      return js.alloc<user_tracing::Span>(kj::mv(ownedImpl));
+    }
+    return js.alloc<user_tracing::Span>(kj::mv(impl));
+  }();
+
+  // Build argv for the callback: (span, ...args).
+  v8::LocalVector<v8::Value> argv(js.v8Isolate);
+  argv.push_back(spanHandler.wrap(js, jsSpan.addRef()));
+  for (auto& arg: args) {
+    argv.push_back(arg.getHandle(js));
+  }
+
+  auto executeCallback = [&]() -> v8::Local<v8::Value> {
+    auto v8Context = js.v8Context();
+    return js.tryCatch([&]() -> v8::Local<v8::Value> {
+      return jsg::check(callback->Call(v8Context, v8Context->Global(), argv.size(), argv.data()));
+    }, [&](jsg::Value exception) -> v8::Local<v8::Value> {
+      // Unlike enterSpan(), this API does not auto-end on any callback result path.
+      js.throwException(kj::mv(exception));
+    });
+  };
+
+  // If we have an IoContext and an observed child span, push it onto the AsyncContextFrame
+  // for the duration of the callback. The StorageScope RAII object restores the prior
+  // async-context storage on scope exit; any async continuations captured during the
+  // callback will already have snapshotted the new frame and will see our child span as
+  // "current".
+  KJ_IF_SOME(span, kj::mv(childSpanForAsyncContext)) {
+    auto& context = IoContext::current();
+    jsg::AsyncContextFrame::StorageScope traceScope =
+        context.makeUserAsyncTraceScope(context.getCurrentLock(), kj::mv(span));
+    return executeCallback();
+  } else {
+    return executeCallback();
+  }
+}
+
 }  // namespace workerd::api
