@@ -128,6 +128,9 @@ class ReadableStreamInternalController: public ReadableStreamController {
   void doClose(jsg::Lock& js);
   void doError(jsg::Lock& js, jsg::JsValue reason);
 
+  jsg::Promise<ReadResult> readImpl(jsg::Lock& js);
+  jsg::Promise<ReadResult> readImpl(jsg::Lock& js, const ByobOptions& options);
+
   class PipeLocked: public PipeController {
    public:
     static constexpr kj::StringPtr NAME KJ_UNUSED = "pipe-locked"_kj;
