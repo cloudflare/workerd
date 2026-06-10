@@ -4740,11 +4740,17 @@ export interface Tracing {
     callback: (span: Span, ...args: A) => T,
     ...args: A
   ): T;
+  startActiveSpan<T, A extends unknown[]>(
+    name: string,
+    callback: (span: Span, ...args: A) => T,
+    ...args: A
+  ): T;
   Span: typeof Span;
 }
 export declare abstract class Span {
   get isTraced(): boolean;
   setAttribute(key: string, value?: boolean | number | string): void;
+  end(): void;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
