@@ -7,7 +7,6 @@
 #include "io-channels.h"
 #include "io-context.h"
 
-#include <workerd/util/autogate.h>
 #include <workerd/util/uuid.h>
 
 namespace workerd {
@@ -115,11 +114,9 @@ void HibernationManagerImpl::acceptWebSocket(
 
   // TODO(mar): Improve accept span context capturing — route snapshotted user span context
   // to serialization point instead of capturing only the invocation root span here.
-  if (util::Autogate::isEnabled(util::AutogateKey::USER_SPAN_CONTEXT_PROPAGATION)) {
-    auto invCtx = IoContext::current().getInvocationSpanContext();
-    refToHibernatable.userSpanContext =
-        tracing::SpanContext(invCtx.getTraceId(), invCtx.getSpanId());
-  }
+  auto invCtx = IoContext::current().getInvocationSpanContext();
+  refToHibernatable.userSpanContext =
+      tracing::SpanContext(invCtx.getTraceId(), invCtx.getSpanId());
 
   allWs.push_front(kj::mv(hib));
   refToHibernatable.node = allWs.begin();

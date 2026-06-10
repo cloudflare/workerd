@@ -37,8 +37,6 @@ enum class AutogateKey {
   ENABLE_FAST_TEXTENCODER,
   // Increase the SQLite hard heap limit from 512 MiB to 8 GiB.
   INCREASE_SQLITE_HARD_HEAP_LIMIT,
-  // Enable user span context propagation across worker-to-worker subrequests.
-  USER_SPAN_CONTEXT_PROPAGATION,
   // Apply an updated default autoAllocateChunkSize for ReadableStreams
   UPDATED_AUTO_ALLOCATE_CHUNK_SIZE,
   // When enabled, reject startTls calls that pass the expectedServerHostname option,

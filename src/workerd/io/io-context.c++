@@ -10,7 +10,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
@@ -272,13 +271,9 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   // IoContext's delete queue) are safe: user-tracing SpanSubmitters hold only a
   // BaseTracer::WeakRef, so they cannot extend tracer lifetime.
   KJ_IF_SOME(workerTracer, workerTracer) {
-    if (util::Autogate::isEnabled(util::AutogateKey::USER_SPAN_CONTEXT_PROPAGATION)) {
-      auto& invCtx = getInvocationSpanContext();
-      rootUserTraceSpan =
-          workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
-    } else {
-      rootUserTraceSpan = workerTracer->makeUserRequestSpan(tracing::TraceId(nullptr), kj::none);
-    }
+    auto& invCtx = getInvocationSpanContext();
+    rootUserTraceSpan =
+        workerTracer->makeUserRequestSpan(invCtx.getTraceId(), invCtx.getTraceFlags());
   }
 
   KJ_IF_SOME(a, context->actor) {
