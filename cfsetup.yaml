@@ -16,6 +16,15 @@ trixie: &default-build
       - &pre-bazel-write-gcp-creds python3 -c 'import os; p="/tmp/bazel_cache_gcp_creds.json"; fd=os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.write(fd, os.environ["GCP_CREDS"].encode()); os.close(fd)'
       - bazel test -k --config=ci --config=ci-limit-storage --config=ci-linux-common --config=ci-test //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
 
+  ci-bazel-x64-release:
+    nosubmodule: true
+    base_image: *ci-image-bazel-amd64
+    tmpfs_tmp: true
+    post-cache:
+      - *pre-bazel-install-deps
+      - *pre-bazel-write-gcp-creds
+      - bazel test -k --config=ci --config=ci-limit-storage --config=ci-linux-common --config=ci-test --config=release_linux //... --announce_rc --remote_cache=https://storage.googleapis.com/cloudflare-edgeworker-bazel-build-cache --google_credentials=/tmp/bazel_cache_gcp_creds.json --remote_local_fallback=True --remote_timeout=10
+
   ci-bazel-x64-asan:
     nosubmodule: true
     base_image: *ci-image-bazel-amd64
