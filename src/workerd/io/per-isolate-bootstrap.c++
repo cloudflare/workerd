@@ -119,7 +119,9 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
     // properties available as variables in the function scope without
     // putting them on globalThis.
     auto source = script.getSrc();
-    auto sourceStr = js.str(source);
+    // Use strExtern to avoid copying — the source data lives in the static
+    // capnp bundle for the lifetime of the process.
+    auto sourceStr = js.strExtern(source.asChars());
     v8::ScriptOrigin origin(js.strIntern(normalized));
 
     // Use the compile cache from the bundle if available and compatible.
@@ -221,12 +223,13 @@ void runPerIsolateBootstrap(
   // The result is cached in state and injected as a pseudo-global into every
   // subsequent script via the context extension object.
   JSG_TRY(js) {
-    auto result = state->requireFn.getHandle(js).call(js, js.undefined(), js.str("primordials"_kj));
+    auto result =
+        state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("primordials"_kj));
     state->primordials = result.addRef(js);
 
     // Run the entry point. This synchronously executes main.js, which may
     // require() other scripts. All execution is synchronous.
-    state->requireFn.getHandle(js).call(js, js.undefined(), js.str("main"_kj));
+    state->requireFn.getHandle(js).call(js, js.undefined(), js.strIntern("main"_kj));
   }
   JSG_CATCH(exception) {
     kj::throwFatalException(js.exceptionToKj(kj::mv(exception)));
