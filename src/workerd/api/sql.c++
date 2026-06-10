@@ -25,6 +25,37 @@ namespace workerd::api {
 // queries containing dynamic content or excessively large one-off queries.
 static constexpr uint SQL_STATEMENT_CACHE_MAX_SIZE = 1024 * 1024;
 
+namespace {
+
+// While a SQL query is executing, points to a slot in which a JavaScript exception thrown by an
+// application-defined SQL function can be stashed. Exceptions cannot propagate through SQLite's
+// stack frames, so the function wrapper converts the exception to a kj::Exception for the
+// unwind; this slot additionally carries the original JavaScript exception object across that
+// unwind so that the query call site can rethrow it with its identity and stack intact, rather
+// than throwing a copy that round-tripped through the kj::Exception. (Compare `vfsErrorListener`
+// in sqlite.c++, which uses the same pattern.)
+thread_local kj::Maybe<jsg::Value>* currentUserFunctionError = nullptr;
+
+// Calls func(), rethrowing the original JavaScript exception object if an application-defined
+// SQL function threw during the call.
+template <typename Func>
+auto rethrowingUserFunctionErrors(jsg::Lock& js, Func&& func) -> decltype(func()) {
+  kj::Maybe<jsg::Value> error;
+  auto prev = currentUserFunctionError;
+  currentUserFunctionError = &error;
+  KJ_DEFER(currentUserFunctionError = prev);
+  try {
+    return func();
+  } catch (...) {
+    KJ_IF_SOME(e, error) {
+      js.throwException(kj::mv(e));
+    }
+    throw;
+  }
+}
+
+}  // namespace
+
 SqlStorage::SqlStorage(jsg::Ref<DurableObjectStorage> storage)
     : storage(kj::mv(storage)),
       statementCache(IoContext::current().addObject(kj::heap<StatementCache>())) {}
@@ -82,11 +113,15 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     //
     // In theory we could try to cache multiple copies of the statement, but as this is probably
     // exceedingly rare, it is not worth the added code complexity.
-    return js.alloc<Cursor>(js, kj::mv(doneCallback), db,
-        SqliteDatabase::StaticRegulator(regulator), js.toString(querySql), kj::mv(bindings));
+    return rethrowingUserFunctionErrors(js, [&]() {
+      return js.alloc<Cursor>(js, kj::mv(doneCallback), db,
+          SqliteDatabase::StaticRegulator(regulator), js.toString(querySql), kj::mv(bindings));
+    });
   }
 
-  auto result = js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings));
+  auto result = rethrowingUserFunctionErrors(js, [&]() {
+    return js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings));
+  });
 
   // If the statement cache grew too big, drop the least-recently-used entry.
   while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
@@ -100,10 +135,331 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
   return result;
 }
 
+jsg::Value SqlStorage::wrapFunctionArgument(
+    jsg::Lock& js, const SqliteDatabase::ValuePtr& arg, bool useBigIntArguments) {
+  KJ_SWITCH_ONEOF(arg) {
+    KJ_CASE_ONEOF(blob, kj::ArrayPtr<const byte>) {
+      return js.v8Ref(v8::Local<v8::Value>(jsg::JsValue(js.wrapBytes(kj::heapArray(blob)))));
+    }
+    KJ_CASE_ONEOF(text, kj::StringPtr) {
+      return js.v8Ref(v8::Local<v8::Value>(js.str(text)));
+    }
+    KJ_CASE_ONEOF(i, int64_t) {
+      if (useBigIntArguments) {
+        return js.v8Ref(v8::Local<v8::Value>(js.bigInt(i)));
+      }
+      // Matching node:sqlite, we'd rather fail loudly than silently lose precision.
+      JSG_REQUIRE(i >= -9007199254740991 && i <= 9007199254740991, RangeError,
+          "Integer argument to SQL function is too large to be represented as a JavaScript "
+          "number: ",
+          i, ". Pass the option `useBigIntArguments: true` to receive integers as BigInts.");
+      return js.v8Ref(v8::Local<v8::Value>(js.num(static_cast<double>(i))));
+    }
+    KJ_CASE_ONEOF(d, double) {
+      return js.v8Ref(v8::Local<v8::Value>(js.num(d)));
+    }
+    KJ_CASE_ONEOF(_, decltype(nullptr)) {
+      return js.v8Ref(v8::Local<v8::Value>(js.null()));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+SqliteDatabase::Value SqlStorage::unwrapFunctionResult(jsg::Lock& js, const jsg::Value& result) {
+  auto handle = result.getHandle(js);
+
+  // Matching node:sqlite, only types with an unambiguous SQL representation are accepted;
+  // notably, there is no implicit coercion of booleans or arbitrary objects.
+  if (handle->IsNullOrUndefined()) {
+    return nullptr;
+  } else if (handle->IsNumber()) {
+    return handle.As<v8::Number>()->Value();
+  } else if (handle->IsBigInt()) {
+    bool lossless = false;
+    int64_t value = handle.As<v8::BigInt>()->Int64Value(&lossless);
+    JSG_REQUIRE(lossless, RangeError,
+        "BigInt returned from a SQL function is too large to be stored as a SQL integer.");
+    return value;
+  } else if (handle->IsString()) {
+    return js.toString(jsg::JsString(handle.As<v8::String>()));
+  } else if (handle->IsArrayBuffer()) {
+    return kj::Array<const byte>(jsg::asBytes(handle.As<v8::ArrayBuffer>()));
+  } else if (handle->IsArrayBufferView()) {
+    return kj::Array<const byte>(jsg::asBytes(handle.As<v8::ArrayBufferView>()));
+  } else if (handle->IsPromise()) {
+    JSG_FAIL_REQUIRE(TypeError,
+        "SQL functions must be synchronous: the function returned a Promise. Functions cannot "
+        "perform any asynchronous work, including I/O, while the SQL query that invoked them is "
+        "executing.");
+  } else {
+    JSG_FAIL_REQUIRE(TypeError,
+        "SQL functions must return a number, BigInt, string, ArrayBuffer (or view), null, or "
+        "undefined.");
+  }
+}
+
+void SqlStorage::stashAndTunnelFunctionError(jsg::Lock& js, jsg::Value exception) {
+  // Stash the original JavaScript exception object so that the query call site can rethrow
+  // it as-is, then unwind through SQLite with a tunneled kj::Exception. (The tunneled copy
+  // also serves as a fallback in case no stash slot is active.)
+  auto tunneled = js.exceptionToKj(exception.addRef(js));
+  if (currentUserFunctionError != nullptr && *currentUserFunctionError == kj::none) {
+    *currentUserFunctionError = kj::mv(exception);
+  }
+  kj::throwFatalException(kj::mv(tunneled));
+}
+
+namespace {
+
+// Returns the declared parameter count (the `length` property) of the JavaScript function
+// underlying `callback`, used as the SQL function's required argument count when the `varargs`
+// option is false.
+uint getFunctionLength(jsg::Lock& js, SqlStorage::FunctionCallback& callback) {
+  auto handle = KJ_ASSERT_NONNULL(callback.tryGetHandle(js.v8Isolate));
+  auto lengthValue = jsg::check(handle->Get(js.v8Context(), js.strIntern("length"_kj)));
+  double length = jsg::check(lengthValue->NumberValue(js.v8Context()));
+  if (!(length > 0)) return 0;  // negative or NaN
+  // Out-of-range counts are rejected with a friendly error by the SQLite layer; just avoid
+  // overflowing the conversion here.
+  return static_cast<uint>(kj::min(length, 1000.0));
+}
+
+}  // namespace
+
+void SqlStorage::registerFunction(jsg::Lock& js,
+    kj::String name,
+    kj::OneOf<FunctionCallback, FunctionOptions> optionsOrCallback,
+    jsg::Optional<FunctionCallback> maybeCallback) {
+  FunctionOptions options;
+  kj::Maybe<FunctionCallback> callbackFromArgs;
+  KJ_SWITCH_ONEOF(optionsOrCallback) {
+    KJ_CASE_ONEOF(cb, FunctionCallback) {
+      JSG_REQUIRE(maybeCallback == kj::none, TypeError,
+          "function() must be called as function(name, callback) or "
+          "function(name, options, callback).");
+      callbackFromArgs = kj::mv(cb);
+    }
+    KJ_CASE_ONEOF(opts, FunctionOptions) {
+      options = kj::mv(opts);
+      callbackFromArgs =
+          kj::mv(JSG_REQUIRE_NONNULL(maybeCallback, TypeError, "function() requires a callback."));
+    }
+  }
+  auto callback = KJ_ASSERT_NONNULL(kj::mv(callbackFromArgs));
+
+  bool useBigIntArguments = options.useBigIntArguments.orDefault(false);
+  kj::Maybe<uint> argCount;
+  if (!options.varargs.orDefault(false)) {
+    argCount = getFunctionLength(js, callback);
+  }
+
+  auto& db = getDb(js);
+  db.registerFunction(regulator, name, argCount,
+      [callback = kj::mv(callback), useBigIntArguments, isolate = js.v8Isolate](
+          kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) mutable -> SqliteDatabase::Value {
+    // We can only get here while a query is executing, and queries on this database are only
+    // executed from the JavaScript API, so the current thread must hold the isolate lock.
+    auto& js = jsg::Lock::from(isolate);
+
+    return js.tryCatch([&]() -> SqliteDatabase::Value {
+      return js.withinHandleScope([&]() -> SqliteDatabase::Value {
+        auto jsArgs = kj::heapArrayBuilder<jsg::Value>(args.size());
+        for (auto& arg: args) {
+          jsArgs.add(wrapFunctionArgument(js, arg, useBigIntArguments));
+        }
+
+        auto result = callback(js, jsg::Arguments<jsg::Value>(jsArgs.finish()));
+        return unwrapFunctionResult(js, result);
+      });
+    }, [&](jsg::Value exception) -> SqliteDatabase::Value {
+      stashAndTunnelFunctionError(js, kj::mv(exception));
+    });
+  });
+}
+
+namespace {
+
+// Accumulator state for an application-defined aggregate function: an arbitrary JavaScript
+// value.
+struct JsAggregateState final: public SqliteDatabase::AggregateState {
+  jsg::Value value;
+
+  JsAggregateState(jsg::Value value): value(kj::mv(value)) {}
+};
+
+// Produces the initial accumulator from the aggregate's `start` option: the option's value, or
+// the result of calling it if it is a function (so that mutable accumulators get a fresh value
+// per aggregation group), or undefined if absent.
+jsg::Value resolveStartValue(jsg::Lock& js, kj::Maybe<jsg::JsRef<jsg::JsValue>>& start) {
+  KJ_IF_SOME(s, start) {
+    v8::Local<v8::Value> handle = s.getHandle(js);
+    if (handle->IsFunction()) {
+      auto fn = handle.As<v8::Function>();
+      return js.v8Ref(
+          jsg::check(fn->Call(js.v8Context(), v8::Undefined(js.v8Isolate), 0, nullptr)));
+    }
+    return js.v8Ref(handle);
+  }
+  return js.v8Ref(v8::Local<v8::Value>(js.undefined()));
+}
+
+// Returns the current accumulator value: the accumulated state if present, otherwise a fresh
+// initial value.
+jsg::Value aggregateAccumulator(
+    jsg::Lock& js, kj::Maybe<jsg::Value> stateValue, kj::Maybe<jsg::JsRef<jsg::JsValue>>& start) {
+  KJ_IF_SOME(s, stateValue) {
+    return kj::mv(s);
+  }
+  return resolveStartValue(js, start);
+}
+
+}  // namespace
+
+void SqlStorage::registerAggregate(jsg::Lock& js, kj::String name, AggregateOptions options) {
+  auto& db = getDb(js);
+  auto isolate = js.v8Isolate;
+
+  bool isWindow = options.inverse != kj::none;
+  bool useBigIntArguments = options.useBigIntArguments.orDefault(false);
+
+  kj::Maybe<uint> argCount;
+  if (!options.varargs.orDefault(false)) {
+    // The step callback's first parameter is the accumulator, not a SQL argument.
+    uint stepLength = getFunctionLength(js, options.step);
+    argCount = stepLength > 0 ? stepLength - 1 : 0;
+  }
+
+  // The step and result wrappers (and, for window functions, the value wrapper) each need
+  // their own reference to the `start` option, and the value wrapper shares the result
+  // callback.
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> startForStep;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> startForFinal;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> startForValue;
+  KJ_IF_SOME(s, options.start) {
+    startForStep = s.addRef(js);
+    startForFinal = s.addRef(js);
+    if (isWindow) startForValue = s.addRef(js);
+  }
+  kj::Maybe<jsg::Function<jsg::Value(jsg::Value)>> resultForValue;
+  KJ_IF_SOME(r, options.result) {
+    if (isWindow) resultForValue = r.addRef(js);
+  }
+
+  SqliteDatabase::AggregateCallbacks callbacks{
+    .step = [stepFn = kj::mv(options.step), start = kj::mv(startForStep), useBigIntArguments,
+                isolate](kj::Maybe<kj::Own<SqliteDatabase::AggregateState>> state,
+                kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) mutable
+    -> kj::Own<SqliteDatabase::AggregateState> {
+    auto& js = jsg::Lock::from(isolate);
+    return js.tryCatch([&]() -> kj::Own<SqliteDatabase::AggregateState> {
+      return js.withinHandleScope([&]() -> kj::Own<SqliteDatabase::AggregateState> {
+        auto jsArgs = kj::heapArrayBuilder<jsg::Value>(args.size() + 1);
+        jsArgs.add(
+            aggregateAccumulator(js, state.map([](kj::Own<SqliteDatabase::AggregateState>& s) {
+          return kj::mv(kj::downcast<JsAggregateState>(*s).value);
+        }),
+                start));
+        for (auto& arg: args) {
+          jsArgs.add(wrapFunctionArgument(js, arg, useBigIntArguments));
+        }
+
+        auto result = stepFn(js, jsg::Arguments<jsg::Value>(jsArgs.finish()));
+        return kj::heap<JsAggregateState>(kj::mv(result));
+      });
+    }, [&](jsg::Value exception) -> kj::Own<SqliteDatabase::AggregateState> {
+      stashAndTunnelFunctionError(js, kj::mv(exception));
+    });
+  },
+    .finalize = [resultFn = kj::mv(options.result), start = kj::mv(startForFinal), isolate](
+                    kj::Maybe<kj::Own<SqliteDatabase::AggregateState>> state) mutable
+    -> SqliteDatabase::Value {
+    if (v8::Isolate::TryGetCurrent() != isolate) {
+      // We are being invoked to clean up an abandoned query from outside the isolate lock (e.g.
+      // an unconsumed cursor is being destroyed from the I/O thread), so we cannot call into
+      // JavaScript -- and the result would be discarded anyway. Note that dropping `state` here
+      // without the lock is safe: V8 handle destruction is deferred in that case.
+      return nullptr;
+    }
+    auto& js = jsg::Lock::from(isolate);
+    return js.tryCatch([&]() -> SqliteDatabase::Value {
+      return js.withinHandleScope([&]() -> SqliteDatabase::Value {
+        auto acc =
+            aggregateAccumulator(js, state.map([](kj::Own<SqliteDatabase::AggregateState>& s) {
+          return kj::mv(kj::downcast<JsAggregateState>(*s).value);
+        }),
+                start);
+
+        KJ_IF_SOME(f, resultFn) {
+          auto result = f(js, kj::mv(acc));
+          return unwrapFunctionResult(js, result);
+        } else {
+          // No result callback: the result is the accumulator itself.
+          return unwrapFunctionResult(js, acc);
+        }
+      });
+    }, [&](jsg::Value exception) -> SqliteDatabase::Value {
+      stashAndTunnelFunctionError(js, kj::mv(exception));
+    });
+  },
+  };
+
+  if (isWindow) {
+    callbacks.value.emplace(
+        [resultFn = kj::mv(resultForValue), start = kj::mv(startForValue), isolate](
+            kj::Maybe<SqliteDatabase::AggregateState&> state) mutable -> SqliteDatabase::Value {
+      auto& js = jsg::Lock::from(isolate);
+      return js.tryCatch([&]() -> SqliteDatabase::Value {
+        return js.withinHandleScope([&]() -> SqliteDatabase::Value {
+          // Unlike the final result, this must not consume the state, since SQLite will keep
+          // updating the same window.
+          auto acc = aggregateAccumulator(js, state.map([&js](SqliteDatabase::AggregateState& s) {
+            return kj::downcast<JsAggregateState>(s).value.addRef(js);
+          }),
+              start);
+
+          KJ_IF_SOME(f, resultFn) {
+            auto result = f(js, kj::mv(acc));
+            return unwrapFunctionResult(js, result);
+          } else {
+            return unwrapFunctionResult(js, acc);
+          }
+        });
+      }, [&](jsg::Value exception) -> SqliteDatabase::Value {
+        stashAndTunnelFunctionError(js, kj::mv(exception));
+      });
+    });
+
+    callbacks.inverse.emplace(
+        [inverseFn = kj::mv(KJ_ASSERT_NONNULL(options.inverse)), useBigIntArguments, isolate](
+            kj::Own<SqliteDatabase::AggregateState> state,
+            kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) mutable
+        -> kj::Own<SqliteDatabase::AggregateState> {
+      auto& js = jsg::Lock::from(isolate);
+      return js.tryCatch([&]() -> kj::Own<SqliteDatabase::AggregateState> {
+        return js.withinHandleScope([&]() -> kj::Own<SqliteDatabase::AggregateState> {
+          auto jsArgs = kj::heapArrayBuilder<jsg::Value>(args.size() + 1);
+          jsArgs.add(kj::mv(kj::downcast<JsAggregateState>(*state).value));
+          for (auto& arg: args) {
+            jsArgs.add(wrapFunctionArgument(js, arg, useBigIntArguments));
+          }
+
+          auto result = inverseFn(js, jsg::Arguments<jsg::Value>(jsArgs.finish()));
+          return kj::heap<JsAggregateState>(kj::mv(result));
+        });
+      }, [&](jsg::Value exception) -> kj::Own<SqliteDatabase::AggregateState> {
+        stashAndTunnelFunctionError(js, kj::mv(exception));
+      });
+    });
+  }
+
+  db.registerAggregateFunction(regulator, name, argCount, kj::mv(callbacks));
+}
+
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
   auto& context = IoContext::current();
   TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_ingest"_kjc);
-  auto result = getDb(js).ingestSql(regulator, querySql);
+  auto result =
+      rethrowingUserFunctionErrors(js, [&]() { return getDb(js).ingestSql(regulator, querySql); });
 
   traceContext.setTag(
       "cloudflare.durable_object.response.rows_read"_kjc, static_cast<int64_t>(result.rowsRead));
@@ -391,7 +747,7 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
   // Unfortunately, this does not help with the case where the application stops iterating with
   // results still available from the cursor. There's not much we can do about that case since
   // there's no way to know if the app might come back and try to use the cursor again later.
-  query.nextRow();
+  rethrowingUserFunctionErrors(js, [&]() { query.nextRow(); });
   if (query.isDone()) {
     obj->endQuery(state);
   }

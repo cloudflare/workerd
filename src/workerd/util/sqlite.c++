@@ -4,8 +4,10 @@
 
 #include "sqlite.h"
 
+#include <workerd/jsg/exception.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/strings.h>
 
 #include <kj/debug.h>
 #include <kj/refcount.h>
@@ -627,6 +629,12 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
 
   setupSecurity(db);
 
+  // Re-register application-defined functions. (This is a no-op the first time the database is
+  // opened, since the registry can only be non-empty when re-opening after a reset().)
+  for (auto& entry: functions) {
+    applyFunction(db, *entry.value);
+  }
+
   maybeDb = *db;
 }
 
@@ -790,6 +798,8 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
     uint prepFlags,
     Multi multi,
     kj::Maybe<kj::Vector<Statement>&> prelude) {
+  requireNotInUserFunction(regulator);
+
   sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 
   ParseContext parseContext;
@@ -882,6 +892,11 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
             auto start = sqliteObserver.now();
             auto dbWalSizeBefore = sqliteObserver.getDbWalSize();
 
+            // As in nextRow(), discard any stale user-function error before stepping, so the
+            // rethrow below cannot misattribute an error stashed during earlier statement
+            // cleanup (e.g. an aggregate's xFinal invoked while finalizing an abandoned query)
+            // to this statement.
+            userFunctionError = kj::none;
             int err = sqlite3_step(result);
             int extendedCode = sqlite3_extended_errcode(db);
 
@@ -912,6 +927,13 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
             } else if (err == SQLITE_ROW) {
               // Intermediate statement returned results. We will discard.
             } else {
+              // If the statement failed because an application-defined function threw, rethrow
+              // the original exception instead of a generic SQLite error.
+              KJ_IF_SOME(e, userFunctionError) {
+                kj::Exception exception = kj::mv(e);
+                userFunctionError = kj::none;
+                kj::throwFatalException(kj::mv(exception));
+              }
               SQLITE_CALL_FAILED("sqlite3_step()", err);
             }
           }
@@ -1075,6 +1097,19 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       actionCode != SQLITE_SAVEPOINT) {
     // Everything is allowed for trusted queries. (But transactions and savepoints need special
     // handling below.)
+
+    if (actionCode == SQLITE_FUNCTION) {
+      // ... except application-defined functions. Trusted queries are internal, and internal
+      // queries must never depend on application-defined behavior. (Built-in and unknown
+      // function names remain allowed; SQLite itself reports "no such function" for the
+      // latter.)
+      //
+      // Checking the size first keeps the overwhelmingly-common no-functions-registered case
+      // free of the allocation in toLower().
+      if (functions.size() == 0) return true;
+      return functions.find(toLower(KJ_ASSERT_NONNULL(param2))) == kj::none;
+    }
+
     return true;
   }
 
@@ -1272,7 +1307,22 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         }
         return result;
       }();
-      return allowSet.contains(KJ_ASSERT_NONNULL(param2));
+      kj::StringPtr name = KJ_ASSERT_NONNULL(param2);
+      if (allowSet.contains(name)) {
+        return true;
+      }
+
+      // Check application-defined functions. SQLite function names are case-insensitive, and
+      // the registry is keyed by lower-cased name. (The size check just avoids the allocation
+      // in toLower() when no functions are registered.)
+      if (functions.size() == 0) return false;
+      KJ_IF_SOME(fn, functions.find(toLower(name))) {
+        // An application-defined function is only visible to queries running under the same
+        // regulator that registered it. In particular, this ensures that internal queries can
+        // never invoke application-defined functions.
+        return fn->regulator.get() == regulator.get();
+      }
+      return false;
     }
 
       // ---------------------------------------------------------------
@@ -1429,6 +1479,377 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // (handled in BUILD.sqlite3)
 }
 
+void SqliteDatabase::registerFunction(StaticRegulator regulator,
+    kj::StringPtr name,
+    kj::Maybe<uint> argCount,
+    ScalarFunction function) {
+  registerFunctionImpl(regulator, name, argCount, kj::mv(function));
+}
+
+void SqliteDatabase::registerAggregateFunction(StaticRegulator regulator,
+    kj::StringPtr name,
+    kj::Maybe<uint> argCount,
+    AggregateCallbacks callbacks) {
+  KJ_REQUIRE((callbacks.value == kj::none) == (callbacks.inverse == kj::none),
+      "the window-function callbacks `value` and `inverse` must be provided together");
+  registerFunctionImpl(regulator, name, argCount, kj::mv(callbacks));
+}
+
+void SqliteDatabase::registerFunctionImpl(StaticRegulator regulator,
+    kj::StringPtr name,
+    kj::Maybe<uint> argCount,
+    kj::OneOf<ScalarFunction, AggregateCallbacks> callback) {
+  requireNotInUserFunction(regulator);
+
+  sqlite3* db = *this;
+
+  SQLITE_REQUIRE(name.size() > 0, kj::none, "SQL function name cannot be empty.");
+  KJ_IF_SOME(count, argCount) {
+    // SQLite itself refuses (as misuse) registrations beyond SQLITE_MAX_FUNCTION_ARG; report
+    // a friendly error instead.
+    SQLITE_REQUIRE(count <= 100, kj::none,
+        kj::str(
+            "SQL functions can take at most 100 parameters, but this function takes ", count, "."));
+  }
+  SQLITE_REQUIRE(regulator->isAllowedName(name), kj::none,
+      kj::str("not authorized to register SQL function: ", name));
+
+  // SQLite function names are case-insensitive, so the registry is keyed by lower-cased name.
+  kj::String key = toLower(name);
+
+  SQLITE_REQUIRE(functions.find(key) == kj::none, kj::none,
+      kj::str("A function named \"", name,
+          "\" has already been registered. Functions cannot be re-registered or replaced."));
+
+  // Refuse to shadow built-in functions: queries embedded in the schema (e.g. triggers and
+  // views) may rely on the built-in behavior. `pragma_function_list` enumerates every function
+  // known to the connection; since we already know `key` is not an application-defined function,
+  // any match must be a built-in.
+  bool isBuiltin =
+      run("SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name = ?)", key.asPtr())
+          .getInt(0) != 0;
+  SQLITE_REQUIRE(!isBuiltin, kj::none,
+      kj::str("Cannot register SQL function \"", name,
+          "\" because a built-in SQL function with the same name already exists."));
+
+  auto entry = kj::heap<RegisteredFunction>(RegisteredFunction{
+    .name = kj::mv(key),
+    .db = *this,
+    .regulator = regulator,
+    .argCount = argCount,
+    .callback = kj::mv(callback),
+  });
+  applyFunction(db, *entry);
+  functions.insert(entry->name, kj::mv(entry));
+}
+
+void SqliteDatabase::applyFunction(sqlite3* db, RegisteredFunction& fn) {
+  auto regulator = fn.regulator;
+  auto memoryScope = enterMemoryScope();
+
+  int argCount = -1;  // SQLite interprets -1 as "any number of arguments"
+  KJ_IF_SOME(count, fn.argCount) {
+    argCount = count;
+  }
+
+  // Note that we intentionally do NOT pass SQLITE_DETERMINISTIC nor SQLITE_DIRECTONLY. Marking
+  // the function non-deterministic makes SQLite reject its use in index expressions, partial
+  // index WHERE clauses, and generated columns, where a function whose behavior can change
+  // across application restarts would corrupt the database. SQLITE_DIRECTONLY would
+  // additionally ban use in triggers and views, which we want to allow. (See registerFunction()
+  // doc comment.)
+  KJ_SWITCH_ONEOF(fn.callback) {
+    KJ_CASE_ONEOF(scalar, ScalarFunction) {
+      SQLITE_CALL(sqlite3_create_function_v2(db, fn.name.cStr(), argCount, SQLITE_UTF8, &fn,
+          &SqliteDatabase::scalarFunctionCallback, nullptr, nullptr, nullptr));
+    }
+    KJ_CASE_ONEOF(aggregate, AggregateCallbacks) {
+      if (aggregate.inverse == kj::none) {
+        SQLITE_CALL(sqlite3_create_function_v2(db, fn.name.cStr(), argCount, SQLITE_UTF8, &fn,
+            nullptr, &SqliteDatabase::aggregateStepCallback,
+            &SqliteDatabase::aggregateFinalCallback, nullptr));
+      } else {
+        SQLITE_CALL(sqlite3_create_window_function(db, fn.name.cStr(), argCount, SQLITE_UTF8, &fn,
+            &SqliteDatabase::aggregateStepCallback, &SqliteDatabase::aggregateFinalCallback,
+            &SqliteDatabase::aggregateValueCallback, &SqliteDatabase::aggregateInverseCallback,
+            nullptr));
+      }
+    }
+  }
+}
+
+namespace {
+
+// Converts the arguments of an application-defined function invocation into ValuePtrs. The
+// returned values point into SQLite-owned buffers which are only valid for the duration of the
+// callback.
+kj::Array<SqliteDatabase::ValuePtr> convertFunctionArgs(int argc, sqlite3_value** argv) {
+  auto args = kj::heapArrayBuilder<SqliteDatabase::ValuePtr>(argc);
+  for (auto i: kj::zeroTo(argc)) {
+    sqlite3_value* value = argv[i];
+    switch (sqlite3_value_type(value)) {
+      case SQLITE_INTEGER:
+        args.add(static_cast<int64_t>(sqlite3_value_int64(value)));
+        break;
+      case SQLITE_FLOAT:
+        args.add(sqlite3_value_double(value));
+        break;
+      case SQLITE_TEXT: {
+        // Note that sqlite3_value_text() must be called before sqlite3_value_bytes().
+        const char* ptr = reinterpret_cast<const char*>(sqlite3_value_text(value));
+        args.add(kj::StringPtr(ptr, sqlite3_value_bytes(value)));
+        break;
+      }
+      case SQLITE_BLOB: {
+        const byte* ptr = reinterpret_cast<const byte*>(sqlite3_value_blob(value));
+        args.add(kj::arrayPtr(ptr, sqlite3_value_bytes(value)));
+        break;
+      }
+      case SQLITE_NULL:
+        args.add(nullptr);
+        break;
+      default:
+        KJ_FAIL_ASSERT("unknown SQLite value type");
+    }
+  }
+  return args.finish();
+}
+
+// Reports `result` as the result of an application-defined function invocation.
+void setFunctionResult(sqlite3_context* context, SqliteDatabase::Value result) {
+  KJ_SWITCH_ONEOF(result) {
+    KJ_CASE_ONEOF(blob, kj::Array<const byte>) {
+      if (blob.size() == 0) {
+        // sqlite3_result_blob() treats a null pointer as a NULL result, but an empty
+        // kj::Array may have a null begin(). Use a zeroblob to produce a true empty blob.
+        sqlite3_result_zeroblob(context, 0);
+      } else {
+        sqlite3_result_blob(context, blob.begin(), blob.size(), SQLITE_TRANSIENT);
+      }
+    }
+    KJ_CASE_ONEOF(text, kj::String) {
+      sqlite3_result_text(context, text.cStr(), text.size(), SQLITE_TRANSIENT);
+    }
+    KJ_CASE_ONEOF(n, int64_t) {
+      sqlite3_result_int64(context, n);
+    }
+    KJ_CASE_ONEOF(d, double) {
+      sqlite3_result_double(context, d);
+    }
+    KJ_CASE_ONEOF(_, decltype(nullptr)) {
+      sqlite3_result_null(context);
+    }
+  }
+}
+
+}  // namespace
+
+// Sets `inUserFunction` for the duration of an application-defined function callback, so that
+// the callback cannot re-enter SQLite; see requireNotInUserFunction().
+class SqliteDatabase::UserFunctionScope {
+ public:
+  explicit UserFunctionScope(SqliteDatabase& db): db(db), prev(db.inUserFunction) {
+    db.inUserFunction = true;
+  }
+  ~UserFunctionScope() noexcept(false) {
+    db.inUserFunction = prev;
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(UserFunctionScope);
+
+ private:
+  SqliteDatabase& db;
+  bool prev;
+};
+
+void SqliteDatabase::reportUserFunctionError(
+    sqlite3_context* context, SqliteDatabase& db, kj::Exception&& exception) {
+  sqlite3_result_error(context, exception.getDescription().cStr(), -1);
+  // Only stash the first error; assume subsequent errors are side effects.
+  if (db.userFunctionError == kj::none) {
+    db.userFunctionError = kj::mv(exception);
+  }
+}
+
+void SqliteDatabase::scalarFunctionCallback(
+    sqlite3_context* context, int argc, sqlite3_value** argv) {
+  auto& fn = *reinterpret_cast<RegisteredFunction*>(sqlite3_user_data(context));
+  auto& db = fn.db;
+
+  // We can't allow an exception to propagate through SQLite's stack frames, so we stash it on
+  // the database and report a generic error to SQLite; nextRow() will rethrow the stashed
+  // exception once sqlite3_step() returns.
+  //
+  // The exception must be caught using `catch (kj::Exception& e)`, NOT `catch (...)` followed by
+  // kj::getCaughtExceptionAsKj(), because the latter truncates the stack trace; see
+  // reportVfsErrorCaught() for discussion.
+  try {
+    auto args = convertFunctionArgs(argc, argv);
+
+    Value result;
+    {
+      UserFunctionScope userFunctionScope(db);
+      result = fn.callback.get<ScalarFunction>()(args.asPtr());
+    }
+
+    setFunctionResult(context, kj::mv(result));
+  } catch (kj::Exception& e) {
+    reportUserFunctionError(context, db, kj::mv(e));
+  }
+}
+
+void SqliteDatabase::aggregateStepCallback(
+    sqlite3_context* context, int argc, sqlite3_value** argv) {
+  auto& fn = *reinterpret_cast<RegisteredFunction*>(sqlite3_user_data(context));
+  auto& db = fn.db;
+
+  // (See scalarFunctionCallback() regarding exception handling.)
+  try {
+    // We only use the aggregate context allocation as a stable address identifying the group;
+    // the actual state lives in `db.activeAggregates`, since SQLite's allocation is raw bytes in
+    // which we can't directly store a kj::Own.
+    const void* key = sqlite3_aggregate_context(context, 1);
+    KJ_REQUIRE(key != nullptr, "sqlite3_aggregate_context() failed");
+
+    auto args = convertFunctionArgs(argc, argv);
+    auto& callbacks = fn.callback.get<AggregateCallbacks>();
+
+    auto& slot = db.activeAggregates.findOrCreate(key,
+        [&]() -> decltype(db.activeAggregates)::Entry { return {key, kj::Own<AggregateState>()}; });
+
+    kj::Maybe<kj::Own<AggregateState>> state;
+    if (slot.get() != nullptr) {
+      state = kj::mv(slot);
+    }
+
+    {
+      UserFunctionScope userFunctionScope(db);
+      slot = callbacks.step(kj::mv(state), args.asPtr());
+    }
+  } catch (kj::Exception& e) {
+    reportUserFunctionError(context, db, kj::mv(e));
+  }
+}
+
+void SqliteDatabase::aggregateFinalCallback(sqlite3_context* context) {
+  auto& fn = *reinterpret_cast<RegisteredFunction*>(sqlite3_user_data(context));
+  auto& db = fn.db;
+
+  // (See scalarFunctionCallback() regarding exception handling.)
+  try {
+    // Passing zero for the second parameter means no allocation is performed if xStep was never
+    // invoked for this group, in which case we get null back.
+    const void* key = sqlite3_aggregate_context(context, 0);
+
+    // Remove the state from the table before invoking the callback, so that it is freed even if
+    // the callback throws. (SQLite guarantees this callback is invoked for every group whose
+    // xStep was invoked -- including when an erroring or abandoned statement is reset -- so
+    // entries cannot leak.)
+    kj::Maybe<kj::Own<AggregateState>> state;
+    if (key != nullptr) {
+      KJ_IF_SOME(entry, db.activeAggregates.findEntry(key)) {
+        // Note that the entry's value can be null if the xStep callback threw before producing
+        // the group's first state; treat that the same as no state at all.
+        if (entry.value.get() != nullptr) {
+          state = kj::mv(entry.value);
+        }
+        db.activeAggregates.erase(entry);
+      }
+    }
+
+    auto& callbacks = fn.callback.get<AggregateCallbacks>();
+
+    Value result;
+    {
+      UserFunctionScope userFunctionScope(db);
+      result = callbacks.finalize(kj::mv(state));
+    }
+
+    setFunctionResult(context, kj::mv(result));
+  } catch (kj::Exception& e) {
+    reportUserFunctionError(context, db, kj::mv(e));
+  }
+}
+
+void SqliteDatabase::aggregateValueCallback(sqlite3_context* context) {
+  auto& fn = *reinterpret_cast<RegisteredFunction*>(sqlite3_user_data(context));
+  auto& db = fn.db;
+
+  // (See scalarFunctionCallback() regarding exception handling.)
+  try {
+    const void* key = sqlite3_aggregate_context(context, 0);
+
+    kj::Maybe<AggregateState&> state;
+    if (key != nullptr) {
+      KJ_IF_SOME(own, db.activeAggregates.find(key)) {
+        // (As in aggregateFinalCallback(), the entry's value can be null if xStep threw.)
+        if (own.get() != nullptr) {
+          state = *own;
+        }
+      }
+    }
+
+    auto& callbacks = fn.callback.get<AggregateCallbacks>();
+    auto& valueCallback = KJ_ASSERT_NONNULL(callbacks.value);
+
+    Value result;
+    {
+      UserFunctionScope userFunctionScope(db);
+      result = valueCallback(state);
+    }
+
+    setFunctionResult(context, kj::mv(result));
+  } catch (kj::Exception& e) {
+    reportUserFunctionError(context, db, kj::mv(e));
+  }
+}
+
+void SqliteDatabase::aggregateInverseCallback(
+    sqlite3_context* context, int argc, sqlite3_value** argv) {
+  auto& fn = *reinterpret_cast<RegisteredFunction*>(sqlite3_user_data(context));
+  auto& db = fn.db;
+
+  // (See scalarFunctionCallback() regarding exception handling.)
+  try {
+    const void* key = sqlite3_aggregate_context(context, 0);
+    KJ_REQUIRE(key != nullptr, "xInverse invoked before xStep?");
+
+    auto args = convertFunctionArgs(argc, argv);
+    auto& callbacks = fn.callback.get<AggregateCallbacks>();
+    auto& inverseCallback = KJ_ASSERT_NONNULL(callbacks.inverse);
+
+    // xInverse is only invoked to remove a row that was previously added by a *successful*
+    // xStep, so state must exist.
+    auto& entry = KJ_ASSERT_NONNULL(db.activeAggregates.findEntry(key));
+    auto state = kj::mv(entry.value);
+    KJ_ASSERT(state.get() != nullptr);
+
+    {
+      UserFunctionScope userFunctionScope(db);
+      entry.value = inverseCallback(kj::mv(state), args.asPtr());
+    }
+  } catch (kj::Exception& e) {
+    reportUserFunctionError(context, db, kj::mv(e));
+  }
+}
+
+void SqliteDatabase::requireNotInUserFunction(StaticRegulator regulator) {
+  if (KJ_LIKELY(!inUserFunction)) return;
+
+  static constexpr kj::StringPtr message =
+      "Cannot execute SQL or access Durable Object storage from within an application-defined "
+      "SQL function. SQL functions must compute their result using only their arguments."_kj;
+
+  // Give the regulator a chance to throw a friendly (e.g. JavaScript-visible) exception.
+  regulator->onError(kj::none, message);
+
+  // The regulator didn't throw, which means this code path was likely reached from internal
+  // (trusted) code, such as the implementation of another storage API. The mistake is still the
+  // application's (its function callback re-entered the database), so throw an exception that
+  // the JavaScript API bindings will surface to the application rather than treating it as an
+  // internal error.
+  kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error, message));
+}
+
 SqliteDatabase::Statement SqliteDatabase::prepare(
     StaticRegulator regulator, kj::StringPtr sqlCode) {
   return Statement(
@@ -1499,6 +1920,13 @@ SqliteDatabase::Query::~Query() noexcept(false) {
 }
 
 void SqliteDatabase::Query::destroy() {
+  // Resetting or finalizing the statement below may invoke an application-defined aggregate
+  // function's xFinal callback for cleanup. If that callback throws, the error gets stashed in
+  // `userFunctionError`, but there is no query for it to fail; discard it so it can't be
+  // spuriously attributed to a later query. (This mirrors how other errors during reset are
+  // ignored; see the comments below.)
+  KJ_DEFER(db.userFunctionError = kj::none);
+
   // Install memory scope for sqlite3_reset, sqlite3_clear_bindings, and sqlite3_finalize (via
   // ownStatement destruction). The scope is idempotent, so this is safe even if a scope is already
   // active from the caller.
@@ -1546,6 +1974,8 @@ void SqliteDatabase::Query::destroy() {
 }
 
 void SqliteDatabase::Query::checkRequirements(size_t size) {
+  db.requireNotInUserFunction(regulator);
+
   if (regulator->shouldAddQueryStats()) {
     KJ_IF_SOME(actorAccountLimits, db.actorAccountLimits) {
       actorAccountLimits.requireActorCanExecuteQueries();
@@ -1654,6 +2084,7 @@ void SqliteDatabase::Query::nextRow(bool first) {
 
   auto memoryScope = db.enterMemoryScope();
   SQLITE_CALL_SCOPE {
+    db.userFunctionError = kj::none;
     int err = sqlite3_step(statement);
     queryEvent.setQueryResult(err);
 
@@ -1669,6 +2100,13 @@ void SqliteDatabase::Query::nextRow(bool first) {
     if (err == SQLITE_DONE) {
       done = true;
     } else if (err != SQLITE_ROW) {
+      // If the statement failed because an application-defined function threw, rethrow the
+      // original exception instead of a generic SQLite error.
+      KJ_IF_SOME(e, db.userFunctionError) {
+        kj::Exception exception = kj::mv(e);
+        db.userFunctionError = kj::none;
+        kj::throwFatalException(kj::mv(exception));
+      }
       SQLITE_CALL_FAILED("sqlite3_step()", err);
     }
   }

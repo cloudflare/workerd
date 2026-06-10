@@ -22,14 +22,14 @@ export const test = {
       return acc;
     }, {});
     assert.deepStrictEqual(reduced, {
-      durable_object_storage_exec: 269,
+      durable_object_storage_exec: 320,
       durable_object_storage_ingest: 1030,
       durable_object_storage_getDatabaseSize: 3,
       durable_object_storage_put: 18,
       durable_object_storage_get: 18,
       durable_object_storage_transaction: 8,
-      durable_object_subrequest: 48,
-      durable_object_storage_deleteAll: 1,
+      durable_object_subrequest: 49,
+      durable_object_storage_deleteAll: 2,
       createStringTable: 4,
       runActorFunc: 4,
       durable_object_storage_sync: 4,
@@ -38,6 +38,7 @@ export const test = {
       testRollbackKvInit: 1,
       testRollbackAlarmInit: 1,
       testCursorUaf: 1,
+      testUserDefinedFunctions: 1,
       durable_object_storage_setAlarm: 2,
       durable_object_storage_getAlarm: 1,
       testSessionsAPIBookmark: 20,

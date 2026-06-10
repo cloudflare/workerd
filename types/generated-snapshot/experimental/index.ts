@@ -3854,6 +3854,12 @@ export interface SqlStorage {
     query: string,
     ...bindings: any[]
   ): SqlStorageCursor<T>;
+  function(
+    param1: string,
+    param2: ((...param0: any[]) => any) | SqlStorageFunctionOptions,
+    param3?: (...param0: any[]) => any,
+  ): void;
+  aggregate(param1: string, param2: SqlStorageAggregateOptions): void;
   prepare(query: string): SqlStorageStatement;
   ingest(query: string): SqlStorageIngestResult;
   setMaxPageCountForTest(count: number): void;
@@ -3889,6 +3895,18 @@ export interface SqlStorageIngestResult {
   rowsRead: number;
   rowsWritten: number;
   statementCount: number;
+}
+export interface SqlStorageFunctionOptions {
+  useBigIntArguments?: boolean;
+  varargs?: boolean;
+}
+export interface SqlStorageAggregateOptions {
+  start?: any;
+  step: (accumulator: any, ...args: SqlStorageValue[]) => any;
+  result?: (accumulator: any) => SqlStorageValue | ArrayBufferView | undefined;
+  inverse?: (accumulator: any, ...args: SqlStorageValue[]) => any;
+  useBigIntArguments?: boolean;
+  varargs?: boolean;
 }
 export interface Socket {
   get readable(): ReadableStream;

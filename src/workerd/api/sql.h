@@ -40,6 +40,85 @@ class SqlStorage final: public jsg::Object {
 
   jsg::Ref<Cursor> exec(jsg::Lock& js, jsg::JsString query, jsg::Arguments<BindingValue> bindings);
   IngestResult ingest(jsg::Lock& js, kj::String query);
+
+  // A JavaScript callback implementing (some part of) an application-defined SQL function.
+  using FunctionCallback = jsg::Function<jsg::Value(jsg::Arguments<jsg::Value>)>;
+
+  // Options accepted by `function()`. Modeled on Node.js's `database.function()` from
+  // node:sqlite. (Note that node:sqlite's `deterministic` and `directOnly` options are
+  // intentionally NOT supported; functions are always registered non-deterministic, see
+  // SqliteDatabase::registerFunction().)
+  struct FunctionOptions {
+    // If true, integer arguments are passed to the callback as BigInts. If false (the default),
+    // integer arguments are passed as numbers, and any value outside the safely-representable
+    // range causes an error.
+    jsg::Optional<bool> useBigIntArguments;
+
+    // If true, the function may be invoked with any number of arguments. If false (the
+    // default), the function must be invoked with exactly `callback.length` arguments.
+    jsg::Optional<bool> varargs;
+
+    JSG_STRUCT(useBigIntArguments, varargs);
+  };
+
+  // Registers an application-defined SQL function, implemented by the given JavaScript
+  // callback, which queries on this database may then invoke by name. Exposed to JavaScript as
+  // `function(name[, options], callback)`.
+  //
+  // Registrations only last for the lifetime of the SQLite connection (in particular, they do
+  // NOT persist in the database), so applications are expected to register their functions in
+  // the Durable Object's constructor. Registering a name twice, or registering a name that
+  // matches a built-in SQL function, throws.
+  //
+  // The callback must be synchronous, must not access storage (including executing further SQL
+  // queries), and may be invoked from trigger bodies, views, and CHECK constraints -- but never
+  // from index expressions or generated columns, since those persist computed values whose
+  // meaning would change if the function's behavior ever changed.
+  void registerFunction(jsg::Lock& js,
+      kj::String name,
+      kj::OneOf<FunctionCallback, FunctionOptions> optionsOrCallback,
+      jsg::Optional<FunctionCallback> maybeCallback);
+
+  // Options accepted by `aggregate()`. Modeled on Node.js's `database.aggregate()` from
+  // node:sqlite (with the same intentional omissions as FunctionOptions).
+  //
+  // The accumulator may be any JavaScript value. It starts as `start` -- or, if `start` is a
+  // function, the result of calling it, which is done once per aggregation group so that
+  // mutable accumulators get a fresh value each time -- and is threaded through the callbacks:
+  // `step(accumulator, ...args)` is called once per row and returns the new accumulator, and
+  // `result(accumulator)` converts the final accumulator into the function's result
+  // (defaulting to the accumulator itself).
+  //
+  // If `inverse` is provided, the function is registered as a window function: SQLite will call
+  // `inverse(accumulator, ...args)` to remove a row from the current window, and may call
+  // `result` multiple times with intermediate accumulators (so it must not mutate its
+  // argument).
+  struct AggregateOptions {
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> start;
+    FunctionCallback step;
+    jsg::Optional<jsg::Function<jsg::Value(jsg::Value)>> result;
+    jsg::Optional<FunctionCallback> inverse;
+    jsg::Optional<bool> useBigIntArguments;
+    jsg::Optional<bool> varargs;
+
+    JSG_STRUCT(start, step, result, inverse, useBigIntArguments, varargs);
+
+    JSG_STRUCT_TS_OVERRIDE({
+      start?: any;
+      step: (accumulator: any, ...args: SqlStorageValue[]) => any;
+      result?: (accumulator: any) => SqlStorageValue | ArrayBufferView | undefined;
+      inverse?: (accumulator: any, ...args: SqlStorageValue[]) => any;
+      useBigIntArguments?: boolean;
+      varargs?: boolean;
+    });
+  };
+
+  // Like registerFunction(), but registers an aggregate function -- or, if `inverse` is
+  // provided, a window function. Exposed to JavaScript as `aggregate(name, options)`. When
+  // `varargs` is false, the required argument count is `step.length - 1` (the first parameter
+  // being the accumulator).
+  void registerAggregate(jsg::Lock& js, kj::String name, AggregateOptions options);
+
   void setMaxPageCountForTest(jsg::Lock& js, int count);
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, jsg::JsString query);
@@ -50,6 +129,10 @@ class SqlStorage final: public jsg::Object {
     JSG_METHOD(exec);
 
     if (flags.getWorkerdExperimental()) {
+      // Application-defined SQL functions are experimental while the API bakes.
+      JSG_METHOD_NAMED(function, registerFunction);
+      JSG_METHOD_NAMED(aggregate, registerAggregate);
+
       // Prepared statement API is experimental-only and deprecated. exec() will automatically
       // handle caching prepared statements, so apps don't need to worry about it.
       JSG_METHOD(prepare);
@@ -179,6 +262,22 @@ class SqlStorage final: public jsg::Object {
   //   that we're being too clever with optimizations to avoid copying strings when we don't need
   //   to.
   static jsg::JsValue wrapSqlValue(jsg::Lock& js, SqlValue value);
+
+  // Helpers shared by the application-defined function wrappers created in registerFunction()
+  // and registerAggregate().
+  //
+  // wrapFunctionArgument() converts a SQL argument value to JavaScript, following the same
+  // conventions as cursor results (except for integers, which follow node:sqlite semantics: as
+  // BigInt when `useBigIntArguments`, otherwise as a number, throwing if unrepresentable).
+  // unwrapFunctionResult() converts a function's JavaScript return value to a SQL value,
+  // following node:sqlite semantics: only numbers, BigInts, strings, blobs, null, and undefined
+  // are accepted; anything else (including booleans and Promises) throws.
+  // stashAndTunnelFunctionError() arranges for a JavaScript exception to propagate out of
+  // SQLite and be rethrown, as the original object, at the query call site.
+  static jsg::Value wrapFunctionArgument(
+      jsg::Lock& js, const SqliteDatabase::ValuePtr& arg, bool useBigIntArguments);
+  static SqliteDatabase::Value unwrapFunctionResult(jsg::Lock& js, const jsg::Value& result);
+  [[noreturn]] static void stashAndTunnelFunctionError(jsg::Lock& js, jsg::Value exception);
 };
 
 class SqlStorage::Cursor final: public jsg::Object {
@@ -362,7 +461,8 @@ struct SqlStorage::IngestResult {
 
 #define EW_SQL_ISOLATE_TYPES                                                                       \
   api::SqlStorage, api::SqlStorage::Statement, api::SqlStorage::Cursor,                            \
-      api::SqlStorage::IngestResult, api::SqlStorage::Cursor::RowIterator,                         \
+      api::SqlStorage::IngestResult, api::SqlStorage::FunctionOptions,                             \
+      api::SqlStorage::AggregateOptions, api::SqlStorage::Cursor::RowIterator,                     \
       api::SqlStorage::Cursor::RowIterator::Next, api::SqlStorage::Cursor::RawIterator,            \
       api::SqlStorage::Cursor::RawIterator::Next
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE

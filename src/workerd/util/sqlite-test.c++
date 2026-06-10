@@ -460,6 +460,450 @@ KJ_TEST("SQLite Regulator") {
       "access to bar.value is prohibited", KJ_EXPECT(getBar.run().getInt(0) == 456));
 }
 
+// A permissive Regulator representing application-level (untrusted) queries, for use in
+// application-defined function tests.
+class UserRegulatorImpl: public SqliteDatabase::Regulator {
+ public:
+  bool isAllowedName(kj::StringPtr name) const override {
+    return !name.startsWith("_cf_");
+  }
+  bool isAllowedTrigger(kj::StringPtr name) const override {
+    return true;
+  }
+};
+
+KJ_TEST("SQLite application-defined functions") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  static constexpr UserRegulatorImpl USER;
+  static constexpr UserRegulatorImpl OTHER_USER;
+
+  db.registerFunction(USER, "double_it", kj::none,
+      [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    KJ_ASSERT(args.size() == 1);
+    return args[0].get<int64_t>() * 2;
+  });
+
+  // Basic invocation.
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT double_it(21)").getInt64(0) == 42);
+
+  // Function names are case-insensitive.
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT DOUBLE_IT(21)").getInt64(0) == 42);
+
+  // Integer arguments and results are passed through with full 64-bit precision.
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT double_it(?)", 2305843009213693952ll).getInt64(0) ==
+      4611686018427387904ll);
+
+  // All argument types convert correctly. (This also covers variable argument counts.)
+  db.registerFunction(USER, "describe_args", kj::none,
+      [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return kj::str(kj::strArray(KJ_MAP(arg, args) -> kj::String {
+      KJ_SWITCH_ONEOF(arg) {
+        KJ_CASE_ONEOF(blob, kj::ArrayPtr<const byte>) {
+          return kj::str("blob(", blob.size(), ")");
+        }
+        KJ_CASE_ONEOF(text, kj::StringPtr) {
+          return kj::str("text(", text, ")");
+        }
+        KJ_CASE_ONEOF(i, int64_t) {
+          return kj::str("int(", i, ")");
+        }
+        KJ_CASE_ONEOF(d, double) {
+          return kj::str("double(", d, ")");
+        }
+        KJ_CASE_ONEOF(n, decltype(nullptr)) {
+          return kj::str("null");
+        }
+      }
+      KJ_UNREACHABLE;
+    }, ","));
+  });
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT describe_args(123, 4.5, 'hello', x'0102', NULL)")
+                .getText(0) == "int(123),double(4.5),text(hello),blob(2),null");
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT describe_args()").getText(0) == "");
+
+  // All result types convert correctly.
+  db.registerFunction(USER, "make_blob", kj::none,
+      [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return kj::Array<const byte>(kj::heapArray<byte>({1, 2, 3}));
+  });
+  db.registerFunction(USER, "make_empty_blob", kj::none,
+      [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return kj::Array<const byte>();
+  });
+  db.registerFunction(USER, "make_null", kj::none,
+      [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return nullptr;
+  });
+  db.registerFunction(USER, "make_double", kj::none,
+      [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return 1.25;
+  });
+  {
+    auto query = db.run({.regulator = USER},
+        "SELECT typeof(make_blob()), length(make_blob()), typeof(make_empty_blob()), "
+        "length(make_empty_blob()), typeof(make_null()), make_double()");
+    KJ_EXPECT(query.getText(0) == "blob");
+    KJ_EXPECT(query.getInt(1) == 3);
+    KJ_EXPECT(query.getText(2) == "blob");
+    KJ_EXPECT(query.getInt(3) == 0);
+    KJ_EXPECT(query.getText(4) == "null");
+    KJ_EXPECT(query.getDouble(5) == 1.25);
+  }
+
+  // Exceptions thrown by the function propagate out of the query.
+  db.registerFunction(USER, "throw_up", kj::none,
+      [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    KJ_FAIL_REQUIRE("application function failed in a special way");
+  });
+  KJ_EXPECT_THROW_MESSAGE("application function failed in a special way",
+      db.run({.regulator = USER}, "SELECT throw_up()"));
+
+  // ... including when the failure occurs while stepping past the first row.
+  db.run("CREATE TABLE nums(n INTEGER)");
+  db.run("INSERT INTO nums VALUES (1), (2)");
+  db.registerFunction(USER, "throw_if_two", kj::none,
+      [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    int64_t n = args[0].get<int64_t>();
+    KJ_REQUIRE(n != 2, "two is right out");
+    return n;
+  });
+  {
+    // (No ORDER BY here: sorting would force SQLite to evaluate every row up front, but this
+    // test specifically wants the failure to occur on the second step.)
+    auto query = db.run({.regulator = USER}, "SELECT throw_if_two(n) FROM nums");
+    KJ_EXPECT(query.getInt64(0) == 1);
+    KJ_EXPECT_THROW_MESSAGE("two is right out", query.nextRow());
+  }
+
+  // ... including when the function is used in a non-final statement of a multi-statement
+  // query.
+  KJ_EXPECT_THROW_MESSAGE("application function failed in a special way",
+      db.run({.regulator = USER}, "SELECT throw_up(); SELECT 1;"));
+
+  // The database remains usable after a function throws.
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT double_it(1)").getInt64(0) == 2);
+
+  // Application-defined functions may not re-enter the database.
+  db.registerFunction(USER, "reenter", kj::none,
+      [&db](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    db.run({.regulator = USER}, "SELECT 1");
+    return nullptr;
+  });
+  KJ_EXPECT_THROW_MESSAGE("Cannot execute SQL", db.run({.regulator = USER}, "SELECT reenter()"));
+
+  // ... including via prepared statements.
+  auto prepared = db.prepare(USER, "SELECT 1");
+  db.registerFunction(USER, "reenter_prepared", kj::none,
+      [&prepared](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    prepared.run();
+    return nullptr;
+  });
+  KJ_EXPECT_THROW_MESSAGE(
+      "Cannot execute SQL", db.run({.regulator = USER}, "SELECT reenter_prepared()"));
+
+  // ... and registering functions from within a function is also prohibited.
+  db.registerFunction(USER, "reenter_register", kj::none,
+      [&db](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    db.registerFunction(USER, "sneaky", kj::none,
+        [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+      return nullptr;
+    });
+    return nullptr;
+  });
+  KJ_EXPECT_THROW_MESSAGE(
+      "Cannot execute SQL", db.run({.regulator = USER}, "SELECT reenter_register()"));
+
+  // Duplicate registration is refused, case-insensitively.
+  KJ_EXPECT_THROW_MESSAGE("already been registered",
+      db.registerFunction(USER, "DOUBLE_IT", kj::none,
+          [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return nullptr;
+  }));
+
+  // Built-in functions (scalar and aggregate) cannot be shadowed.
+  KJ_EXPECT_THROW_MESSAGE("built-in",
+      db.registerFunction(USER, "abs", kj::none,
+          [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return nullptr;
+  }));
+  KJ_EXPECT_THROW_MESSAGE("built-in",
+      db.registerFunction(USER, "GROUP_CONCAT", kj::none,
+          [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return nullptr;
+  }));
+
+  // The regulator's name restrictions apply to function names.
+  KJ_EXPECT_THROW_MESSAGE("not authorized to register SQL function",
+      db.registerFunction(USER, "_cf_evil", kj::none,
+          [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return nullptr;
+  }));
+
+  // A function is only visible to queries running under the regulator that registered it.
+  KJ_EXPECT_THROW_MESSAGE(
+      "not authorized to use function", db.run({.regulator = OTHER_USER}, "SELECT double_it(1)"));
+  KJ_EXPECT_THROW_MESSAGE("not authorized to use function",
+      db.run({.regulator = SqliteDatabase::TRUSTED}, "SELECT double_it(1)"));
+
+  // Non-deterministic functions (which application-defined functions always are) cannot be used
+  // in schema elements that persist computed values, whose integrity would depend on the
+  // function's behavior never changing.
+  db.run({.regulator = USER}, "CREATE TABLE t(a INTEGER)");
+  KJ_EXPECT_THROW_MESSAGE("non-deterministic functions prohibited",
+      db.run({.regulator = USER}, "CREATE INDEX idx ON t(double_it(a))"));
+  KJ_EXPECT_THROW_MESSAGE("non-deterministic functions prohibited",
+      db.run({.regulator = USER}, "CREATE INDEX pidx ON t(a) WHERE double_it(a) > 0"));
+  KJ_EXPECT_THROW_MESSAGE("non-deterministic functions prohibited",
+      db.run({.regulator = USER}, "CREATE TABLE t3(a INTEGER, b INTEGER AS (double_it(a)))"));
+
+  // CHECK constraints, unlike the above, do not persist computed values, so SQLite permits
+  // non-deterministic functions there and simply evaluates them on each write.
+  db.run({.regulator = USER}, "CREATE TABLE t2(a INTEGER CHECK (double_it(a) > 0))");
+  db.run({.regulator = USER}, "INSERT INTO t2 VALUES (1)");
+  KJ_EXPECT_THROW_MESSAGE(
+      "CHECK constraint failed", db.run({.regulator = USER}, "INSERT INTO t2 VALUES (-1)"));
+
+  // Triggers and views may use application-defined functions.
+  db.run({.regulator = USER}, R"(
+    CREATE TABLE src(v INTEGER);
+    CREATE TABLE log(doubled INTEGER);
+    CREATE TRIGGER src_insert AFTER INSERT ON src BEGIN
+      INSERT INTO log VALUES (double_it(NEW.v));
+    END;
+  )");
+  db.run({.regulator = USER}, "INSERT INTO src VALUES (7)");
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT doubled FROM log").getInt64(0) == 14);
+
+  db.run({.regulator = USER}, "CREATE VIEW quadrupled AS SELECT double_it(doubled) AS q FROM log");
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT q FROM quadrupled").getInt64(0) == 28);
+
+  // A function registered with a specific argument count rejects calls with any other count, at
+  // parse time.
+  db.registerFunction(USER, "exactly_two", 2,
+      [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    KJ_ASSERT(args.size() == 2);
+    return args[0].get<int64_t>() + args[1].get<int64_t>();
+  });
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT exactly_two(1, 2)").getInt64(0) == 3);
+  KJ_EXPECT_THROW_MESSAGE("wrong number of arguments to function exactly_two",
+      db.run({.regulator = USER}, "SELECT exactly_two(1)"));
+  KJ_EXPECT_THROW_MESSAGE("wrong number of arguments to function exactly_two",
+      db.run({.regulator = USER}, "SELECT exactly_two(1, 2, 3)"));
+
+  // Excessive argument counts are rejected at registration.
+  KJ_EXPECT_THROW_MESSAGE("at most 100 parameters",
+      db.registerFunction(USER, "too_many", 101,
+          [](kj::ArrayPtr<const SqliteDatabase::ValuePtr> args) -> SqliteDatabase::Value {
+    return nullptr;
+  }));
+
+  // Functions survive reset().
+  db.reset();
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT double_it(5)").getInt64(0) == 10);
+}
+
+KJ_TEST("SQLite application-defined aggregate functions") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  static constexpr UserRegulatorImpl USER;
+
+  db.run(R"(
+    CREATE TABLE items(grp TEXT, val INTEGER);
+    INSERT INTO items VALUES ('a', 1), ('a', 2), ('b', 3), ('a', 4), ('b', 5);
+  )");
+
+  struct SumState final: public SqliteDatabase::AggregateState {
+    int64_t total = 0;
+  };
+
+  // Step and finalize callbacks shared by several functions below.
+  auto step = [](kj::Maybe<kj::Own<SqliteDatabase::AggregateState>> state,
+                  kj::ArrayPtr<const SqliteDatabase::ValuePtr> args)
+      -> kj::Own<SqliteDatabase::AggregateState> {
+    kj::Own<SqliteDatabase::AggregateState> own;
+    KJ_IF_SOME(s, state) {
+      own = kj::mv(s);
+    } else {
+      own = kj::heap<SumState>();
+    }
+    kj::downcast<SumState>(*own).total += args[0].get<int64_t>();
+    return own;
+  };
+
+  uint finalizeCount = 0;
+  auto finalize =
+      [&finalizeCount](
+          kj::Maybe<kj::Own<SqliteDatabase::AggregateState>> state) -> SqliteDatabase::Value {
+    ++finalizeCount;
+    KJ_IF_SOME(s, state) {
+      return kj::downcast<SumState>(*s).total;
+    }
+    return nullptr;
+  };
+
+  db.registerAggregateFunction(USER, "my_sum", kj::none, {.step = step, .finalize = finalize});
+
+  // Basic GROUP BY aggregation, with state correctly isolated per group.
+  {
+    auto query =
+        db.run({.regulator = USER}, "SELECT grp, my_sum(val) FROM items GROUP BY grp ORDER BY grp");
+    KJ_EXPECT(query.getText(0) == "a");
+    KJ_EXPECT(query.getInt64(1) == 7);
+    query.nextRow();
+    KJ_EXPECT(query.getText(0) == "b");
+    KJ_EXPECT(query.getInt64(1) == 8);
+    query.nextRow();
+    KJ_EXPECT(query.isDone());
+    KJ_EXPECT(finalizeCount == 2);
+  }
+
+  // Aggregating zero rows: finalize receives no state.
+  {
+    auto query = db.run({.regulator = USER}, "SELECT my_sum(val) FROM items WHERE 0");
+    KJ_EXPECT(query.isNull(0));
+  }
+
+  // Window functions.
+  kj::Function<SqliteDatabase::Value(kj::Maybe<SqliteDatabase::AggregateState&>)> winValue =
+      [](kj::Maybe<SqliteDatabase::AggregateState&> state) -> SqliteDatabase::Value {
+    KJ_IF_SOME(s, state) {
+      return kj::downcast<SumState>(s).total;
+    }
+    return nullptr;
+  };
+  kj::Function<kj::Own<SqliteDatabase::AggregateState>(
+      kj::Own<SqliteDatabase::AggregateState>, kj::ArrayPtr<const SqliteDatabase::ValuePtr>)>
+      winInverse = [](kj::Own<SqliteDatabase::AggregateState> state,
+                       kj::ArrayPtr<const SqliteDatabase::ValuePtr> args)
+      -> kj::Own<SqliteDatabase::AggregateState> {
+    kj::downcast<SumState>(*state).total -= args[0].get<int64_t>();
+    return kj::mv(state);
+  };
+  db.registerAggregateFunction(USER, "win_sum", kj::none,
+      {
+        .step = step,
+        .finalize = finalize,
+        .value = kj::mv(winValue),
+        .inverse = kj::mv(winInverse),
+      });
+
+  {
+    auto query = db.run({.regulator = USER},
+        "SELECT win_sum(val) OVER (ORDER BY val ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) "
+        "FROM items");
+    int64_t expected[] = {1, 3, 5, 7, 9};
+    for (int64_t e: expected) {
+      KJ_ASSERT(!query.isDone());
+      KJ_EXPECT(query.getInt64(0) == e, e, query.getInt64(0));
+      query.nextRow();
+    }
+    KJ_EXPECT(query.isDone());
+  }
+
+  // Abandoning a query partway through cleans up aggregation state.
+  uint finalizeCountBefore;
+  {
+    auto query = db.run({.regulator = USER},
+        "SELECT win_sum(val) OVER (ORDER BY val ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) "
+        "FROM items");
+    KJ_EXPECT(query.getInt64(0) == 1);
+    finalizeCountBefore = finalizeCount;
+    // Dropping the query here resets the statement, which invokes xFinal for cleanup.
+  }
+  KJ_EXPECT(finalizeCount == finalizeCountBefore + 1);
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT my_sum(val) FROM items").getInt64(0) == 15);
+
+  // Exceptions thrown from step callbacks propagate out of the query.
+  db.registerAggregateFunction(USER, "sum_no_three", kj::none,
+      {
+        .step = [](kj::Maybe<kj::Own<SqliteDatabase::AggregateState>> state,
+                    kj::ArrayPtr<const SqliteDatabase::ValuePtr> args)
+            -> kj::Own<SqliteDatabase::AggregateState> {
+    KJ_REQUIRE(args[0].get<int64_t>() != 3, "three is right out");
+    return kj::heap<SumState>();
+  },
+        .finalize = [](kj::Maybe<kj::Own<SqliteDatabase::AggregateState>> state)
+            -> SqliteDatabase::Value { return nullptr; },
+      });
+  KJ_EXPECT_THROW_MESSAGE(
+      "three is right out", db.run({.regulator = USER}, "SELECT sum_no_three(val) FROM items"));
+
+  // ... including when the very first step of a group throws (regression test: cleanup must
+  // handle a group that never produced any state).
+  KJ_EXPECT_THROW_MESSAGE("three is right out",
+      db.run({.regulator = USER}, "SELECT sum_no_three(val) FROM items WHERE val = 3"));
+
+  // The database remains usable afterwards.
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT my_sum(val) FROM items").getInt64(0) == 15);
+
+  // Aggregate functions share the same registry as scalar functions: duplicate names and
+  // built-ins are refused.
+  {
+    SqliteDatabase::AggregateCallbacks dupCallbacks{.step = step, .finalize = finalize};
+    KJ_EXPECT_THROW_MESSAGE("already been registered",
+        db.registerAggregateFunction(USER, "MY_SUM", kj::none, kj::mv(dupCallbacks)));
+    SqliteDatabase::AggregateCallbacks builtinCallbacks{.step = step, .finalize = finalize};
+    KJ_EXPECT_THROW_MESSAGE(
+        "built-in", db.registerAggregateFunction(USER, "sum", kj::none, kj::mv(builtinCallbacks)));
+  }
+
+  // Aggregate functions survive reset().
+  db.reset();
+  db.run("CREATE TABLE items(grp TEXT, val INTEGER); INSERT INTO items VALUES ('a', 6)");
+  KJ_EXPECT(db.run({.regulator = USER}, "SELECT my_sum(val) FROM items").getInt64(0) == 6);
+
+  // Regression test: an error thrown by a finalize callback during statement *cleanup* (here,
+  // reset() finalizing an abandoned window query) is discarded, and must not be misattributed
+  // to a later, unrelated query failure.
+  {
+    kj::Function<SqliteDatabase::Value(kj::Maybe<SqliteDatabase::AggregateState&>)> peekValue =
+        [](kj::Maybe<SqliteDatabase::AggregateState&> state) -> SqliteDatabase::Value {
+      KJ_IF_SOME(s, state) {
+        return kj::downcast<SumState>(s).total;
+      }
+      return nullptr;
+    };
+    kj::Function<kj::Own<SqliteDatabase::AggregateState>(
+        kj::Own<SqliteDatabase::AggregateState>, kj::ArrayPtr<const SqliteDatabase::ValuePtr>)>
+        subtractInverse = [](kj::Own<SqliteDatabase::AggregateState> state,
+                              kj::ArrayPtr<const SqliteDatabase::ValuePtr> args)
+        -> kj::Own<SqliteDatabase::AggregateState> {
+      kj::downcast<SumState>(*state).total -= args[0].get<int64_t>();
+      return kj::mv(state);
+    };
+    db.registerAggregateFunction(USER, "throw_in_final", kj::none,
+        {
+          .step = step,
+          .finalize = [](kj::Maybe<kj::Own<SqliteDatabase::AggregateState>> state)
+              -> SqliteDatabase::Value { KJ_FAIL_REQUIRE("final boom"); },
+          .value = kj::mv(peekValue),
+          .inverse = kj::mv(subtractInverse),
+        });
+
+    db.run("INSERT INTO items VALUES ('a', 7)");
+    auto query = db.run({.regulator = USER},
+        "SELECT throw_in_final(val) OVER (ORDER BY val ROWS BETWEEN 1 PRECEDING AND CURRENT "
+        "ROW) FROM items");
+    KJ_EXPECT(!query.isDone());
+
+    // Reset the database while the window query is still outstanding. This finalizes the
+    // statement, invoking xFinal for cleanup, whose error is stashed and must be discarded.
+    db.reset();
+
+    // A later multi-statement query that fails for an unrelated reason must report the real
+    // error, not "final boom".
+    KJ_EXPECT_THROW_MESSAGE("UNIQUE constraint failed",
+        db.run({.regulator = USER},
+            "CREATE TABLE uniq(x INTEGER UNIQUE); INSERT INTO uniq VALUES (1); "
+            "INSERT INTO uniq VALUES (1); SELECT 1;"));
+  }
+}
+
 KJ_TEST("SQLite onWrite callback") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);

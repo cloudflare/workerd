@@ -1474,6 +1474,443 @@ export class DurableObjectExample extends DurableObject {
     const rows = cursor.toArray();
     assert.deepEqual(rows, [{ value: 1 }, { value: 2 }, { value: 3 }]);
   }
+
+  async testUserDefinedFunctions() {
+    const state = this.state;
+    const sql = state.storage.sql;
+
+    // Basic scalar function.
+    sql.function('double_it', (x) => x * 2);
+    assert.equal([...sql.exec('SELECT double_it(21) AS v')][0].v, 42);
+    assert.equal([...sql.exec('SELECT double_it(1.25) AS v')][0].v, 2.5);
+
+    // Function names are case-insensitive, both at registration and invocation.
+    assert.equal([...sql.exec('SELECT DOUBLE_IT(21) AS v')][0].v, 42);
+
+    // By default, the callback's declared parameter count is enforced by SQLite at parse time.
+    assert.throws(() => sql.exec('SELECT double_it(1, 2)'), {
+      message: /wrong number of arguments to function double_it/,
+    });
+    assert.throws(() => sql.exec('SELECT double_it()'), {
+      message: /wrong number of arguments to function double_it/,
+    });
+
+    // With the varargs option, a function accepts any number of arguments. Argument types
+    // mirror cursor value conventions: integers and floats arrive as numbers, text as strings,
+    // blobs as ArrayBuffers, and NULL as null.
+    sql.function('describe_args', { varargs: true }, (...args) => {
+      return args
+        .map((arg) => {
+          if (arg === null) return 'null';
+          if (typeof arg === 'number') return `number(${arg})`;
+          if (typeof arg === 'string') return `string(${arg})`;
+          if (arg instanceof ArrayBuffer)
+            return `blob(${new Uint8Array(arg).join('-')})`;
+          return `unexpected(${typeof arg})`;
+        })
+        .join(',');
+    });
+    assert.equal(
+      [
+        ...sql.exec("SELECT describe_args(123, 4.5, 'hi', x'0102', NULL) AS v"),
+      ][0].v,
+      'number(123),number(4.5),string(hi),blob(1-2),null'
+    );
+    assert.equal([...sql.exec('SELECT describe_args() AS v')][0].v, '');
+
+    // Integer arguments outside the safely-representable number range throw...
+    sql.function('no_big', (x) => x);
+    assert.throws(
+      () => sql.exec('SELECT no_big(9007199254740993)'),
+      (e) => e instanceof RangeError && /useBigIntArguments/.test(e.message)
+    );
+
+    // ... unless useBigIntArguments is set, in which case integers arrive as BigInts. BigInt
+    // return values are always accepted (when they fit in a 64-bit integer).
+    sql.function('big_id', { useBigIntArguments: true }, (x) => {
+      assert.equal(typeof x, 'bigint');
+      return x;
+    });
+    assert.equal(
+      [
+        ...sql.exec('SELECT big_id(9007199254740993) = 9007199254740993 AS v'),
+      ][0].v,
+      1
+    );
+    sql.function('too_big', () => 2n ** 64n);
+    assert.throws(
+      () => sql.exec('SELECT too_big()'),
+      (e) => e instanceof RangeError && /too large/.test(e.message)
+    );
+
+    // Return types follow node:sqlite rules: blobs may be returned as ArrayBuffers or views,
+    // and both null and undefined become SQL NULL.
+    sql.function('make_blob', () => new Uint8Array([1, 2, 3]));
+    sql.function('make_null', () => null);
+    sql.function('make_undefined', () => {});
+    {
+      const row = [
+        ...sql.exec(
+          'SELECT typeof(make_blob()) AS t, length(make_blob()) AS l, ' +
+            'typeof(make_null()) AS a, typeof(make_undefined()) AS b'
+        ),
+      ][0];
+      assert.equal(row.t, 'blob');
+      assert.equal(row.l, 3);
+      assert.equal(row.a, 'null');
+      assert.equal(row.b, 'null');
+    }
+
+    // Functions are evaluated per row.
+    sql.exec('CREATE TABLE udf_nums(n INTEGER)');
+    sql.exec('INSERT INTO udf_nums VALUES (1), (2), (3), (4)');
+    assert.deepEqual(
+      [...sql.exec('SELECT n FROM udf_nums WHERE double_it(n) > 4')].map(
+        (r) => r.n
+      ),
+      [3, 4]
+    );
+
+    // An exception thrown inside a function propagates to the exec() call site as the ORIGINAL
+    // error object: same identity, same subclass, same custom properties, same stack.
+    class KaboomError extends Error {}
+    let thrownError;
+    function kaboomImpl() {
+      thrownError = new KaboomError('boom!');
+      thrownError.customProperty = 1234;
+      throw thrownError;
+    }
+    sql.function('kaboom', kaboomImpl);
+    {
+      let caught;
+      try {
+        sql.exec('SELECT kaboom()');
+      } catch (e) {
+        caught = e;
+      }
+      assert.strictEqual(caught, thrownError);
+      assert.ok(caught instanceof KaboomError);
+      assert.equal(caught.message, 'boom!');
+      assert.equal(caught.customProperty, 1234);
+      // The stack trace covers the original throw site inside the function implementation.
+      assert.ok(caught.stack.includes('kaboomImpl'), caught.stack);
+    }
+
+    // The FULL call stack inside the UDF is preserved when an exception thrown deep inside the
+    // UDF is not caught before it crosses back out through sql.exec(). The exact, ordered frame
+    // sequence below proves it: the deepest throw site, every intermediate helper, the UDF body
+    // itself, and then the exec() call site (testUserDefinedFunctions) — one continuous stack
+    // spanning the C++/SQLite boundary, not a single "udf" placeholder. This works because we
+    // surface the identical Error object the UDF threw, with the stack V8 captured at
+    // `new Error()` time still attached.
+    function udfStackDeepest() {
+      throw new Error('deep boom');
+    }
+    function udfStackMiddle() {
+      udfStackDeepest();
+    }
+    function udfStackEntry() {
+      udfStackMiddle();
+    }
+    sql.function('deep_throw', () => udfStackEntry());
+    {
+      let caught;
+      try {
+        sql.exec('SELECT deep_throw()');
+      } catch (e) {
+        caught = e;
+      }
+      assert.ok(caught instanceof Error, 'expected an Error');
+      assert.equal(caught.message, 'deep boom');
+
+      // The function names appearing in the stack, top (deepest) to bottom, with frames that
+      // have no name (the anonymous UDF arrow function, internal frames) left in place.
+      const frameNames = caught.stack
+        .split('\n')
+        .slice(1) // drop the "Error: deep boom" header
+        .map((line) => {
+          const m = line.match(/^\s*at (?:async )?([^ (]+)/);
+          return m ? m[1] : '';
+        });
+
+      // The named UDF-internal frames must appear in throw-site-first order, contiguously, with
+      // the exec() call site (testUserDefinedFunctions) below them. We locate the deepest frame
+      // and assert the chain follows from there.
+      const deepest = frameNames.indexOf('udfStackDeepest');
+      assert.ok(deepest >= 0, `deepest UDF frame missing in:\n${caught.stack}`);
+      assert.equal(
+        frameNames[deepest + 1],
+        'udfStackMiddle',
+        `expected udfStackMiddle below udfStackDeepest in:\n${caught.stack}`
+      );
+      assert.equal(
+        frameNames[deepest + 2],
+        'udfStackEntry',
+        `expected udfStackEntry below udfStackMiddle in:\n${caught.stack}`
+      );
+      // The exec() call site appears below the UDF frames (some unnamed boundary frames may sit
+      // between the UDF body and it), proving the stack is continuous across sql.exec(). The
+      // frame name is class-qualified (e.g. "DurableObjectExample.testUserDefinedFunctions"),
+      // so match by suffix.
+      const callSite = frameNames.findIndex((n) =>
+        n.endsWith('testUserDefinedFunctions')
+      );
+      assert.ok(
+        callSite > frameNames.indexOf('udfStackEntry'),
+        `exec() call site must appear below the UDF frames in:\n${caught.stack}`
+      );
+    }
+
+    // ... including when the failure occurs partway through cursor iteration.
+    sql.function('throw_if_three', (n) => {
+      if (n === 3) throw new RangeError('three!');
+      return n;
+    });
+    assert.throws(
+      () => sql.exec('SELECT throw_if_three(n) AS v FROM udf_nums').toArray(),
+      (e) => e instanceof RangeError && e.message === 'three!'
+    );
+
+    // The database remains usable after a function throws.
+    assert.equal([...sql.exec('SELECT double_it(1) AS v')][0].v, 2);
+
+    // Functions must be synchronous: a Promise is not a valid return value.
+    sql.function('async_fn', async () => 42);
+    assert.throws(
+      () => sql.exec('SELECT async_fn()'),
+      (e) => e instanceof TypeError && /must be synchronous/.test(e.message)
+    );
+
+    // Booleans (and other types with no unambiguous SQL representation) are rejected,
+    // matching node:sqlite. Note this is stricter than exec() bindings, which coerce.
+    sql.function('bool_fn', () => true);
+    assert.throws(
+      () => sql.exec('SELECT bool_fn()'),
+      (e) => e instanceof TypeError && /must return/.test(e.message)
+    );
+    sql.function('obj_fn', () => ({ some: 'object' }));
+    assert.throws(
+      () => sql.exec('SELECT obj_fn()'),
+      (e) => e instanceof TypeError && /must return/.test(e.message)
+    );
+
+    // Functions may not re-enter SQL...
+    sql.function('reenter', () => sql.exec('SELECT 1').toArray());
+    assert.throws(() => sql.exec('SELECT reenter()'), {
+      message: /Cannot execute SQL or access Durable Object storage/,
+    });
+
+    // ... nor access storage through other synchronous APIs.
+    sql.function('reenter_txn', () => state.storage.transactionSync(() => 123));
+    assert.throws(() => sql.exec('SELECT reenter_txn()'), {
+      message: /Cannot execute SQL or access Durable Object storage/,
+    });
+
+    // The database remains usable after a re-entry attempt.
+    assert.equal([...sql.exec('SELECT double_it(2) AS v')][0].v, 4);
+
+    // Calling function() with bad argument shapes throws.
+    assert.throws(() => sql.function('no_callback', { varargs: true }), {
+      message: /requires a callback/,
+    });
+
+    // Registering the same name twice throws (case-insensitively).
+    sql.function('dupe', () => 1);
+    assert.throws(() => sql.function('DUPE', () => 2), {
+      message: /already been registered/,
+    });
+
+    // Built-in functions cannot be shadowed.
+    assert.throws(() => sql.function('abs', () => 1), {
+      message: /built-in/,
+    });
+    assert.throws(() => sql.function('GROUP_CONCAT', () => 1), {
+      message: /built-in/,
+    });
+
+    // Reserved names are rejected.
+    assert.throws(() => sql.function('_cf_evil', () => 1), {
+      message: /not authorized/,
+    });
+
+    // Referencing an unregistered function is a standard SQL error.
+    assert.throws(() => sql.exec('SELECT no_such_fn(1)'), {
+      message: /no_such_fn/,
+    });
+
+    // Trigger bodies may invoke functions.
+    sql.exec(`
+      CREATE TABLE udf_src(v INTEGER);
+      CREATE TABLE udf_log(doubled INTEGER);
+      CREATE TRIGGER udf_src_insert AFTER INSERT ON udf_src BEGIN
+        INSERT INTO udf_log VALUES (double_it(NEW.v));
+      END;
+    `);
+    sql.exec('INSERT INTO udf_src VALUES (7)');
+    assert.equal([...sql.exec('SELECT doubled FROM udf_log')][0].doubled, 14);
+
+    // Index expressions and generated columns are rejected, because they would persist computed
+    // values that become garbage if the function's behavior ever changes.
+    assert.throws(
+      () => sql.exec('CREATE INDEX udf_idx ON udf_nums(double_it(n))'),
+      {
+        message: /non-deterministic functions prohibited/,
+      }
+    );
+    assert.throws(
+      () =>
+        sql.exec(
+          'CREATE TABLE udf_gen(a INTEGER, b INTEGER AS (double_it(a)))'
+        ),
+      { message: /non-deterministic functions prohibited/ }
+    );
+
+    // CHECK constraints may use functions; they are evaluated on each write and persist nothing.
+    sql.exec('CREATE TABLE udf_check(a INTEGER CHECK (double_it(a) > 0))');
+    sql.exec('INSERT INTO udf_check VALUES (1)');
+    assert.throws(() => sql.exec('INSERT INTO udf_check VALUES (-1)'), {
+      message: /CHECK constraint failed/,
+    });
+
+    // ---------------------------------------------------------------------------
+    // Aggregate functions
+
+    // Basic aggregate: the accumulator starts as `start` and is threaded through step.
+    sql.aggregate('sum_doubled', {
+      start: 0,
+      step: (acc, n) => acc + n * 2,
+    });
+    assert.equal(
+      [...sql.exec('SELECT sum_doubled(n) AS v FROM udf_nums')][0].v,
+      20
+    );
+
+    // Aggregate arity comes from step's declared parameters, minus the accumulator.
+    assert.throws(() => sql.exec('SELECT sum_doubled(n, n) FROM udf_nums'), {
+      message: /wrong number of arguments to function sum_doubled/,
+    });
+
+    // A function-valued `start` produces a fresh accumulator per aggregation group, so the
+    // accumulator may be mutated in place. The accumulator can be any JS value.
+    sql.exec('CREATE TABLE udf_words(g TEXT, w TEXT)');
+    sql.exec("INSERT INTO udf_words VALUES ('a','x'), ('a','y'), ('b','z')");
+    sql.aggregate('join_words', {
+      start: () => [],
+      step: (acc, w) => {
+        acc.push(w);
+        return acc;
+      },
+      result: (acc) => (acc.length === 0 ? '(none)' : acc.join('+')),
+    });
+    assert.deepEqual(
+      [
+        ...sql.exec(
+          'SELECT g, join_words(w) AS joined FROM udf_words GROUP BY g ORDER BY g'
+        ),
+      ],
+      [
+        { g: 'a', joined: 'x+y' },
+        { g: 'b', joined: 'z' },
+      ]
+    );
+
+    // Aggregating zero rows: result receives the start value.
+    assert.equal(
+      [
+        ...sql.exec(
+          "SELECT join_words(w) AS v FROM udf_words WHERE g = 'nope'"
+        ),
+      ][0].v,
+      '(none)'
+    );
+
+    // Without a result callback, the result is the accumulator itself; an undefined
+    // accumulator becomes NULL.
+    sql.aggregate('agg_undef', { step: (acc, n) => undefined });
+    assert.equal(
+      [...sql.exec('SELECT typeof(agg_undef(n)) AS t FROM udf_nums')][0].t,
+      'null'
+    );
+
+    // Providing `inverse` makes it a window function.
+    sql.aggregate('win_sum', {
+      start: 0,
+      step: (acc, n) => acc + n,
+      inverse: (acc, n) => acc - n,
+    });
+    assert.deepEqual(
+      [
+        ...sql.exec(
+          'SELECT win_sum(n) OVER (ORDER BY n ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS s FROM udf_nums'
+        ),
+      ].map((r) => r.s),
+      [1, 3, 5, 7]
+    );
+
+    // Exceptions from aggregate callbacks propagate to the call site as the original object.
+    let aggError;
+    sql.aggregate('agg_throw', {
+      step: (acc, n) => {
+        aggError = new Error('agg boom');
+        throw aggError;
+      },
+    });
+    {
+      let caught;
+      try {
+        sql.exec('SELECT agg_throw(n) FROM udf_nums').toArray();
+      } catch (e) {
+        caught = e;
+      }
+      assert.strictEqual(caught, aggError);
+    }
+
+    // ... including from result.
+    sql.aggregate('agg_throw_final', {
+      step: (acc, n) => acc,
+      result: () => {
+        throw new RangeError('final boom');
+      },
+    });
+    assert.throws(
+      () => sql.exec('SELECT agg_throw_final(n) FROM udf_nums').toArray(),
+      (e) => e instanceof RangeError && e.message === 'final boom'
+    );
+
+    // Aggregates may not re-enter SQL either.
+    sql.aggregate('agg_reenter', {
+      step: (acc, n) => sql.exec('SELECT 1').toArray(),
+    });
+    assert.throws(
+      () => sql.exec('SELECT agg_reenter(n) FROM udf_nums').toArray(),
+      { message: /Cannot execute SQL or access Durable Object storage/ }
+    );
+
+    // Aggregates share a registry with scalar functions: no duplicates, no shadowing built-in
+    // aggregates.
+    assert.throws(() => sql.aggregate('double_it', { step: (acc) => acc }), {
+      message: /already been registered/,
+    });
+    assert.throws(() => sql.aggregate('sum', { step: (acc) => acc }), {
+      message: /built-in/,
+    });
+
+    // The database remains usable after aggregate errors.
+    assert.equal(
+      [...sql.exec('SELECT sum_doubled(n) AS v FROM udf_nums')][0].v,
+      20
+    );
+
+    // Registrations survive deleteAll(), which resets the underlying database connection.
+    await state.storage.deleteAll();
+    assert.equal([...sql.exec('SELECT double_it(5) AS v')][0].v, 10);
+    sql.exec('CREATE TABLE udf_nums(n INTEGER)');
+    sql.exec('INSERT INTO udf_nums VALUES (1), (2)');
+    assert.equal(
+      [...sql.exec('SELECT sum_doubled(n) AS v FROM udf_nums')][0].v,
+      6
+    );
+  }
 }
 
 export default {
@@ -1572,6 +2009,13 @@ export let testMultiStatement = {
   async test(ctrl, env, ctx) {
     let stub = env.ns.get(env.ns.idFromName('multi-statement-test'));
     await stub.testMultiStatement();
+  },
+};
+
+export let testUserDefinedFunctions = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('user-defined-functions-test'));
+    await stub.testUserDefinedFunctions();
   },
 };
 

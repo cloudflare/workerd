@@ -10,6 +10,7 @@
 #include <kj/filesystem.h>
 #include <kj/function.h>
 #include <kj/list.h>
+#include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
 
@@ -18,6 +19,8 @@
 struct sqlite3;
 struct sqlite3_vfs;
 struct sqlite3_stmt;
+struct sqlite3_context;
+struct sqlite3_value;
 
 KJ_DECLARE_NON_POLYMORPHIC(sqlite3_stmt);
 
@@ -102,6 +105,55 @@ class SqliteDatabase {
   struct QueryOptions {
     StaticRegulator regulator;
     bool allowUnconfirmed = false;
+  };
+
+  // One SQLite value, e.g. a query binding or result, or an argument to an application-defined
+  // function. The pointer types (blobs and text) do not own their content; see each usage site
+  // for the lifetime rules.
+  using ValuePtr =
+      kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double, decltype(nullptr)>;
+
+  // Like ValuePtr, but owns its content. Used where a value must outlive the scope that produced
+  // it, e.g. the return value of an application-defined function.
+  using Value = kj::OneOf<kj::Array<const byte>, kj::String, int64_t, double, decltype(nullptr)>;
+
+  // Callback implementing an application-defined scalar SQL function. The argument values point
+  // into SQLite-owned buffers which are valid only for the duration of the call.
+  //
+  // The callback must not invoke any other methods of the SqliteDatabase (doing so will throw).
+  // If the callback throws, the exception propagates out of the query which invoked the
+  // function.
+  using ScalarFunction = kj::Function<Value(kj::ArrayPtr<const ValuePtr> args)>;
+
+  // Opaque accumulator state for an application-defined aggregate function. The layer providing
+  // the callbacks subclasses this to hold whatever per-group state it needs.
+  class AggregateState {
+   public:
+    virtual ~AggregateState() noexcept(false) = default;
+  };
+
+  // Callbacks implementing an application-defined aggregate (or window) SQL function. The same
+  // rules as for ScalarFunction apply to each callback: argument values are only valid for the
+  // duration of the call, the callbacks must not re-enter the database, and exceptions propagate
+  // out of the invoking query.
+  struct AggregateCallbacks {
+    // Called once per input row. `state` is the state accumulated so far, or kj::none for the
+    // group's first row. Returns the new state.
+    kj::Function<kj::Own<AggregateState>(
+        kj::Maybe<kj::Own<AggregateState>> state, kj::ArrayPtr<const ValuePtr> args)>
+        step;
+
+    // Computes the function's result, consuming the state. `state` is kj::none if the group
+    // contained no rows.
+    kj::Function<Value(kj::Maybe<kj::Own<AggregateState>> state)> finalize;
+
+    // The remaining callbacks are only used for window functions, and must be provided together
+    // or not at all. `value` computes the function's current result without consuming the state,
+    // and `inverse` removes a row (previously added by `step`) from the window.
+    kj::Maybe<kj::Function<Value(kj::Maybe<AggregateState&> state)>> value;
+    kj::Maybe<kj::Function<kj::Own<AggregateState>(
+        kj::Own<AggregateState> state, kj::ArrayPtr<const ValuePtr> args)>>
+        inverse;
   };
 
   struct IngestResult {
@@ -229,6 +281,40 @@ class SqliteDatabase {
   // When the input is a string literal, we automatically use the TRUSTED regulator.
   template <size_t size, typename... Params>
   Query run(const char (&sqlCode)[size], Params&&... bindings);
+
+  // Registers an application-defined scalar SQL function on this database. If `argCount` is
+  // provided, SQLite will reject (at parse time) any invocation with a different number of
+  // arguments; otherwise the function accepts any number of arguments.
+  //
+  // Function names are case-insensitive. Attempting to register a name that is already
+  // registered, or that matches a built-in SQL function, throws. `regulator->isAllowedName()`
+  // must permit the name (e.g. to enforce reserved prefixes like `_cf_`).
+  //
+  // Only queries executed under the same Regulator that registered the function are permitted to
+  // reference it; other regulators' queries (including internal queries) behave as if the
+  // function does not exist.
+  //
+  // Functions are intentionally registered as non-deterministic, which makes SQLite itself
+  // reject any attempt to use them in index expressions, partial index WHERE clauses, and
+  // generated columns. This is important: if such persisted computations could depend on an
+  // application-defined function, then re-registering the function later with different behavior
+  // (e.g. after the application restarts with new code) would corrupt the database. Triggers,
+  // views, and CHECK constraints, which merely store SQL to be re-evaluated later without
+  // persisting any computed values, may reference application-defined functions.
+  //
+  // Registered functions survive reset(): they are automatically re-registered on the new
+  // database connection.
+  void registerFunction(StaticRegulator regulator,
+      kj::StringPtr name,
+      kj::Maybe<uint> argCount,
+      ScalarFunction function);
+
+  // Like registerFunction(), but registers an aggregate function -- or, if the window callbacks
+  // are provided, a window function. All the same rules apply.
+  void registerAggregateFunction(StaticRegulator regulator,
+      kj::StringPtr name,
+      kj::Maybe<uint> argCount,
+      AggregateCallbacks callbacks);
 
   // Invokes the given callback whenever a query begins which may write to the database. The
   // callback is called just before executing the query.
@@ -375,6 +461,43 @@ class SqliteDatabase {
   // Set while a statement is executing.
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
+  // An application-defined function registered with registerFunction() or
+  // registerAggregateFunction().
+  struct RegisteredFunction {
+    // Lower-cased name, as SQLite function names are case-insensitive.
+    kj::String name;
+
+    SqliteDatabase& db;
+
+    // The regulator under which the function was registered. Only queries running under the same
+    // regulator may invoke the function.
+    StaticRegulator regulator;
+
+    // If non-null, the exact number of arguments the function requires.
+    kj::Maybe<uint> argCount;
+
+    kj::OneOf<ScalarFunction, AggregateCallbacks> callback;
+  };
+
+  // Application-defined functions, keyed by `RegisteredFunction::name`. Entries are
+  // heap-allocated because SQLite retains a pointer to each entry as the function's user-data.
+  kj::HashMap<kj::StringPtr, kj::Own<RegisteredFunction>> functions;
+
+  // Accumulator state for in-progress invocations of application-defined aggregate functions,
+  // keyed by the group's sqlite3_aggregate_context() address (which is stable for the lifetime
+  // of the group). Entries are removed by the xFinal callback, which SQLite guarantees to invoke
+  // (possibly during statement reset/finalization) for every group whose xStep was invoked.
+  kj::HashMap<const void*, kj::Own<AggregateState>> activeAggregates;
+
+  // True while an application-defined function callback is executing. Used to prevent such
+  // callbacks from re-entering SQLite.
+  bool inUserFunction = false;
+
+  // If an application-defined function callback throws, the exception is stashed here (since it
+  // cannot safely propagate through SQLite's stack frames), then rethrown once sqlite3_step()
+  // returns.
+  kj::Maybe<kj::Exception> userFunctionError;
+
   bool criticalErrorOccurred = false;
   kj::Maybe<kj::Function<void(bool allowUnconfirmed)>> onWriteCallback;
   kj::Maybe<kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>>
@@ -462,6 +585,40 @@ class SqliteDatabase {
 
   void setupSecurity(sqlite3* db);
 
+  // Registers `fn` with the underlying SQLite connection. Called by registerFunction(), and
+  // again by init() after a reset() re-opens the connection.
+  void applyFunction(sqlite3* db, RegisteredFunction& fn);
+
+  // Validation and bookkeeping shared by registerFunction() and registerAggregateFunction().
+  void registerFunctionImpl(StaticRegulator regulator,
+      kj::StringPtr name,
+      kj::Maybe<uint> argCount,
+      kj::OneOf<ScalarFunction, AggregateCallbacks> callback);
+
+  // RAII scope marking an application-defined function callback as executing; see
+  // `inUserFunction`.
+  class UserFunctionScope;
+
+  // Reports an exception thrown by an application-defined function callback to SQLite, stashing
+  // it in `userFunctionError` for rethrow once sqlite3_step() returns. Common implementation of
+  // the catch blocks in the callbacks below.
+  static void reportUserFunctionError(
+      sqlite3_context* context, SqliteDatabase& db, kj::Exception&& exception);
+
+  // Implement the SQLite callbacks for application-defined functions; see
+  // sqlite3_create_function_v2() and sqlite3_create_window_function(). Each function's
+  // user-data is a RegisteredFunction.
+  static void scalarFunctionCallback(sqlite3_context* context, int argc, sqlite3_value** argv);
+  static void aggregateStepCallback(sqlite3_context* context, int argc, sqlite3_value** argv);
+  static void aggregateFinalCallback(sqlite3_context* context);
+  static void aggregateValueCallback(sqlite3_context* context);
+  static void aggregateInverseCallback(sqlite3_context* context, int argc, sqlite3_value** argv);
+
+  // Throws if called while an application-defined function is executing. Called on every code
+  // path that would compile or execute a statement, so that user function callbacks cannot
+  // re-enter SQLite.
+  void requireNotInUserFunction(StaticRegulator regulator);
+
   struct ParseContext {
     // What kind of state change does this statement cause, if any?
     StateChange stateChange = NoChange();
@@ -540,8 +697,7 @@ class SqliteDatabase::Statement final: private ResetListener {
 // the stack.
 class SqliteDatabase::Query final: private ResetListener {
  public:
-  using ValuePtr =
-      kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double, decltype(nullptr)>;
+  using ValuePtr = SqliteDatabase::ValuePtr;
 
   // Construct using Statement::run() or SqliteDatabase::run().
 

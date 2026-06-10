@@ -205,6 +205,7 @@ wd_cc_library(
     ],
     implementation_deps = [
         ":autogate",
+        ":strings",
         "//src/workerd/jsg:exception",
         "@sqlite3",
     ],
