@@ -60,27 +60,30 @@ void Data::destroy() {
       // In particular, this permits `Data` values to be collected by minor (non-tracing) GC, as
       // long as there are no cycles.
       //
-      // HOWEVER, this is not safe if the TracedReference is being destroyed as a result of a
-      // major (traced) GC. In that case, the TracedReference itself may point to a reference slot
-      // that was already collected, and trying to reset it would be UB.
-      //
-      // In all other cases, resetting the handle is safe:
-      // - During minor GC, TracedReferences aren't collected by the GC itself, so must still be
-      //   valid.
-      // - If the `Data` is being destroyed _not_ as part of GC, e.g. it's being destroyed because
-      //   the data structure holding it is being modified in a way that drops the reference, then
-      //   that implies that the reference is still reachable, so must still be valid.
+      // The TracedReference is created with DelaysReuse (see GcVisitor::visit(Data&)), which
+      // means V8 keeps its storage cell reserved until we Reset() it. The cell is therefore never
+      // reclaimed or reused behind our back -- even if the pointee was collected by a major
+      // (traced) GC while this `Data` lived on. That makes Reset() always safe here: the slot
+      // still refers to our own (possibly cleared) cell, never to one that has been handed to an
+      // unrelated reference. It is also *required*: if we merely dropped the TracedReference, V8
+      // would keep the cell reserved forever, leaking it. So we always Reset(), including when
+      // destroyed from within a cppgc destructor.
       KJ_IF_SOME(t, tracedHandle) {
-        if (!HeapTracer::isInCppgcDestructor()) {
-          t.Reset();
-        }
+        t.Reset();
       }
     } else {
       // This thread doesn't have the isolate locked right now. To minimize lock contention, we'll
       // defer these handles' destruction to the next time the isolate is locked.
       //
-      // Note that only the v8::Global part of `handle` needs to be destroyed under isolate lock.
-      // The `tracedRef` part has a trivial destructor so can be destroyed on any thread.
+      // Only the v8::Global part of `handle` needs to be destroyed under the isolate lock. We do
+      // not touch `tracedHandle` here: it is only ever non-empty for a *weak* `Data` (one that is
+      // reachable via GC tracing), and a weak `Data` must only be destroyed under the isolate lock
+      // (see the class comment). So `tracedHandle` is necessarily empty on this path.
+      //
+      // This invariant matters for correctness: `tracedHandle` uses DelaysReuse, so V8 keeps its
+      // storage cell reserved until we Reset() it. Dropping a *non-empty* tracedHandle here (rather
+      // than Reset()ing it) would leak the cell permanently, so assert the invariant explicitly.
+      KJ_IASSERT(tracedHandle == kj::none);
       deferGlobalDestruction(isolate, kj::mv(handle));
     }
     isolate = nullptr;

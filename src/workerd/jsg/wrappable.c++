@@ -486,9 +486,13 @@ void GcVisitor::visit(Data& value) {
     // Make ref strength match the parent.
     if (parent.strongRefcount > 0 && parent.wrapper == kj::none) {
       // This is directly reachable by a strong ref, so mark the handle strong.
-      if (value.tracedHandle != kj::none) {
+      KJ_IF_SOME(t, value.tracedHandle) {
         // Convert the handle back to strong and discard the traced reference.
         value.handle.ClearWeak<void>();
+        // The traced reference is created with DelaysReuse (see below), so V8 keeps its storage
+        // cell reserved until Reset() is called. We must therefore Reset() it explicitly rather
+        // than merely dropping it, or the cell would be leaked.
+        t.Reset();
         value.tracedHandle = kj::none;
       }
     } else {
@@ -496,9 +500,16 @@ void GcVisitor::visit(Data& value) {
       // hold a TracedReference alongside it.
       if (value.tracedHandle == kj::none) {
         // Create the TracedReference.
+        //
+        // It is created with DelaysReuse so that V8 keeps the underlying storage cell reserved
+        // until we explicitly Reset() it. This `Data` always Reset()s the handle (in ~Data and
+        // in the strong-transition branch above), so V8 must never reclaim and reuse the cell
+        // while we still hold it -- otherwise, if the pointee were collected while this `Data`
+        // lived on (i.e. the `Data` was not traced during a CppHeap GC), the cell could be
+        // handed to an unrelated reference, causing use-after-reclaim / type confusion.
         v8::HandleScope scope(parent.isolate);
-        value.tracedHandle =
-            v8::TracedReference<v8::Data>(parent.isolate, value.handle.Get(parent.isolate));
+        value.tracedHandle = v8::TracedReference<v8::Data>(parent.isolate,
+            value.handle.Get(parent.isolate), v8::TracedReference<v8::Data>::DelaysReuse());
 
         // Set the handle weak.
         value.handle.SetWeak();

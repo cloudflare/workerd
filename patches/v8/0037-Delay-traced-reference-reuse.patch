@@ -1,0 +1,689 @@
+commit c2666ad28d22e3f19373c3ab9f9b627d6260e71e
+Author: Erik Corry <erikcorry@chromium.org>
+Date:   Tue Jun 9 17:50:19 2026 +0200
+
+    [api] Add an option to TracedReference to delay slot reuse
+    
+    TracedReference deliberately has no destructor, but this
+    means that V8 has no way to know when it has been destroyed.
+    The underlying slot (location_) is freed and can be used after
+    a GC where the TracedReference was not traced.  This is assumed
+    to be because the holder has been destroyed, and Chromium has a
+    linter to ensure that TracedReference (which is only in cppgc
+    heap objects) gets traced.
+    
+    However, if an embedder has off-heap TracedReference then this
+    assumption may not hold.  This change allows a new kind of
+    TracedReference to be created where the embedder guarantees
+    they will call Reset() on it when it dies.  Until that time,
+    the slot is not freed and cannot be reused.  This avoids
+    type confusion where the slot gets reused for a different type.
+    
+    No change in behaviour for Chromium.
+
+diff --git a/include/v8-traced-handle.h b/include/v8-traced-handle.h
+index 3eb8e7835d7..b3527dccdcd 100644
+--- a/include/v8-traced-handle.h
++++ b/include/v8-traced-handle.h
+@@ -37,10 +37,25 @@ enum class TracedReferenceHandling {
+   kDroppable
+ };
+ 
++// Controls whether V8 may immediately reuse the storage cell backing a
++// TracedReference once it reclaims the reference, or whether it must keep the
++// cell reserved until the embedder explicitly calls Reset().
++//
++// With kDelayed, if the pointee is reclaimed while the owning C++ object lives
++// on (e.g. because the reference was not traced during a CppHeap GC), V8 clears
++// the cell but will not hand it out to an unrelated reference until Reset() is
++// called. This lets an embedder that guarantees a Reset() in the destructor of
++// the object holding the reference avoid use-after-reclaim / type confusion on
++// the storage cell.
++enum class TracedReferenceReuse {
++  kEager,    // Default: V8 may reuse the cell as soon as it is reclaimed.
++  kDelayed,  // V8 must keep the cell reserved until Reset() is called.
++};
++
+ V8_EXPORT Address* GlobalizeTracedReference(
+     Isolate* isolate, Address value, Address* slot,
+     TracedReferenceStoreMode store_mode,
+-    TracedReferenceHandling reference_handling);
++    TracedReferenceHandling reference_handling, TracedReferenceReuse reuse);
+ V8_EXPORT void MoveTracedReference(Address** from, Address** to);
+ V8_EXPORT void CopyTracedReference(const Address* const* from, Address** to);
+ V8_EXPORT void DisposeTracedReference(Address* global_handle);
+@@ -143,7 +158,8 @@ class BasicTracedReference : public TracedReferenceBase {
+   V8_INLINE static internal::Address* NewFromNonEmptyValue(
+       Isolate* isolate, T* that, internal::Address** slot,
+       internal::TracedReferenceStoreMode store_mode,
+-      internal::TracedReferenceHandling reference_handling);
++      internal::TracedReferenceHandling reference_handling,
++      internal::TracedReferenceReuse reuse);
+ 
+   template <typename F>
+   friend class Local;
+@@ -166,6 +182,11 @@ class TracedReference : public BasicTracedReference<T> {
+  public:
+   struct IsDroppable {};
+ 
++  // Tag indicating that V8 must keep the underlying storage cell reserved until
++  // Reset() is called, rather than reusing it as soon as it is reclaimed. See
++  // internal::TracedReferenceReuse for details.
++  struct DelaysReuse {};
++
+   using BasicTracedReference<T>::Reset;
+ 
+   /**
+@@ -188,7 +209,8 @@ class TracedReference : public BasicTracedReference<T> {
+     this->slot() = this->NewFromNonEmptyValue(
+         isolate, *that, &this->slot(),
+         internal::TracedReferenceStoreMode::kInitializingStore,
+-        internal::TracedReferenceHandling::kDefault);
++        internal::TracedReferenceHandling::kDefault,
++        internal::TracedReferenceReuse::kEager);
+   }
+ 
+   /**
+@@ -209,7 +231,30 @@ class TracedReference : public BasicTracedReference<T> {
+     this->slot() = this->NewFromNonEmptyValue(
+         isolate, *that, &this->slot(),
+         internal::TracedReferenceStoreMode::kInitializingStore,
+-        internal::TracedReferenceHandling::kDroppable);
++        internal::TracedReferenceHandling::kDroppable,
++        internal::TracedReferenceReuse::kEager);
++  }
++
++  /**
++   * Construct a TracedReference from a Local whose backing storage cell V8 must
++   * not reuse until Reset() is called. See TracedReference::DelaysReuse and
++   * internal::TracedReferenceReuse.
++   *
++   * When the Local is non-empty, a new storage cell is created
++   * pointing to the same object.
++   */
++  template <class S>
++  TracedReference(Isolate* isolate, Local<S> that, DelaysReuse)
++      : BasicTracedReference<T>() {
++    static_assert(std::is_base_of_v<T, S>, "type check");
++    if (V8_UNLIKELY(that.IsEmpty())) {
++      return;
++    }
++    this->slot() = this->NewFromNonEmptyValue(
++        isolate, *that, &this->slot(),
++        internal::TracedReferenceStoreMode::kInitializingStore,
++        internal::TracedReferenceHandling::kDefault,
++        internal::TracedReferenceReuse::kDelayed);
+   }
+ 
+   /**
+@@ -275,6 +320,11 @@ class TracedReference : public BasicTracedReference<T> {
+   /**
+    * Always resets the reference. Creates a new reference from `other` if it is
+    * non-empty.
++   *
++   * The new reference uses the default behavior: it is neither droppable nor
++   * delays-reuse, regardless of how this reference was previously constructed.
++   * To keep those behaviors, construct a new TracedReference with the
++   * corresponding tag (e.g. DelaysReuse) and move/assign it instead.
+    */
+   template <class S>
+   V8_INLINE void Reset(Isolate* isolate, const Local<S>& other);
+@@ -298,12 +348,13 @@ template <class T>
+ internal::Address* BasicTracedReference<T>::NewFromNonEmptyValue(
+     Isolate* isolate, T* that, internal::Address** slot,
+     internal::TracedReferenceStoreMode store_mode,
+-    internal::TracedReferenceHandling reference_handling) {
++    internal::TracedReferenceHandling reference_handling,
++    internal::TracedReferenceReuse reuse) {
+   return internal::GlobalizeTracedReference(
+       reinterpret_cast<internal::Isolate*>(isolate),
+       internal::ValueHelper::ValueAsAddress(that),
+       reinterpret_cast<internal::Address*>(slot), store_mode,
+-      reference_handling);
++      reference_handling, reuse);
+ }
+ 
+ void TracedReferenceBase::Reset() {
+@@ -359,7 +410,8 @@ void TracedReference<T>::Reset(Isolate* isolate, const Local<S>& other) {
+   this->SetSlotThreadSafe(this->NewFromNonEmptyValue(
+       isolate, *other, &this->slot(),
+       internal::TracedReferenceStoreMode::kAssigningStore,
+-      internal::TracedReferenceHandling::kDefault));
++      internal::TracedReferenceHandling::kDefault,
++      internal::TracedReferenceReuse::kEager));
+ }
+ 
+ template <class T>
+@@ -374,7 +426,8 @@ void TracedReference<T>::Reset(Isolate* isolate, const Local<S>& other,
+   this->SetSlotThreadSafe(this->NewFromNonEmptyValue(
+       isolate, *other, &this->slot(),
+       internal::TracedReferenceStoreMode::kAssigningStore,
+-      internal::TracedReferenceHandling::kDroppable));
++      internal::TracedReferenceHandling::kDroppable,
++      internal::TracedReferenceReuse::kEager));
+ }
+ 
+ template <class T>
+diff --git a/src/api/api.cc b/src/api/api.cc
+index 315659e78fe..3c2c2fc0aa9 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -619,12 +619,13 @@ void VerifyHandleIsNonEmpty(bool is_empty) {
+                   "SetNonEmpty() called with empty handle.");
+ }
+ 
+-i::Address* GlobalizeTracedReference(
+-    i::Isolate* i_isolate, i::Address value, internal::Address* slot,
+-    TracedReferenceStoreMode store_mode,
+-    TracedReferenceHandling reference_handling) {
++i::Address* GlobalizeTracedReference(i::Isolate* i_isolate, i::Address value,
++                                     internal::Address* slot,
++                                     TracedReferenceStoreMode store_mode,
++                                     TracedReferenceHandling reference_handling,
++                                     TracedReferenceReuse reuse) {
+   return i_isolate->traced_handles()
+-      ->Create(value, slot, store_mode, reference_handling)
++      ->Create(value, slot, store_mode, reference_handling, reuse)
+       .location();
+ }
+ 
+diff --git a/src/common/globals.h b/src/common/globals.h
+index a255c74517b..fc36c62f906 100644
+--- a/src/common/globals.h
++++ b/src/common/globals.h
+@@ -1124,6 +1124,24 @@ constexpr uint64_t kTracedHandleMinorGCWeakResetZapValue =
+     uint64_t{0x1beffed11baffedf};
+ constexpr uint64_t kTracedHandleFullGCResetZapValue =
+     uint64_t{0x1beffed77baffedf};
++// Object-slot sentinels for "delay reuse" traced handles (see
++// TracedReferenceReuse). Unlike the zap values above, these are written into
++// the `object_` slot of a node that is still *in use*, so they must be
++// Smi-shaped (low bit clear). This way the marker and young-generation code
++// treat them as non-heap values and skip them, exactly like kNullAddress. They
++// are chosen with non-zero lower 32 bits so that on 64-bit they can never
++// collide with a genuine Smi stored in a TracedReference (real Smis have zero
++// lower 32 bits).
++//   kTracedHandleLingeringZapValue: the pointee was reclaimed by the GC while
++//     the owning C++ object is still alive; the cell stays reserved until the
++//     embedder calls Reset().
++//   kTracedHandleDestroyedZapValue: the embedder called Reset() but reclamation
++//     was deferred (concurrent marking / mutator-thread sweeping); the cell is
++//     freed on the next reclamation cycle.
++constexpr uint64_t kTracedHandleLingeringZapValue =
++    uint64_t{0x1beffed99baffed0};
++constexpr uint64_t kTracedHandleDestroyedZapValue =
++    uint64_t{0x1beffedccbaffed0};
+ constexpr uint64_t kFromSpaceZapValue = uint64_t{0x1beefdad0beefdaf};
+ constexpr uint64_t kDebugZapValue = uint64_t{0xbadbaddbbadbaddb};
+ constexpr uint64_t kSlotsZapValue = uint64_t{0xbeefdeadbeefdeef};
+@@ -1138,6 +1156,12 @@ constexpr uint32_t kTracedHandleEagerResetZapValue = 0xbeffedf;
+ constexpr uint32_t kTracedHandleMinorGCResetZapValue = 0xbeffadf;
+ constexpr uint32_t kTracedHandleMinorGCWeakResetZapValue = 0xbe11adf;
+ constexpr uint32_t kTracedHandleFullGCResetZapValue = 0xbe77adf;
++// See the 64-bit definitions above. On 32-bit every even value is a valid Smi,
++// so these cannot be made fully collision-proof against a genuine Smi stored in
++// a TracedReference; the (low-bit-clear) shape still keeps them safe for the
++// marker and young-generation code, which is what matters for correctness.
++constexpr uint32_t kTracedHandleLingeringZapValue = 0xbe99ed0;
++constexpr uint32_t kTracedHandleDestroyedZapValue = 0xbecced0;
+ constexpr uint32_t kFromSpaceZapValue = 0xbeefdaf;
+ constexpr uint32_t kSlotsZapValue = 0xbeefdeef;
+ constexpr uint32_t kDebugZapValue = 0xbadbaddb;
+diff --git a/src/handles/traced-handles-inl.h b/src/handles/traced-handles-inl.h
+index 6087965f988..80a59819dd8 100644
+--- a/src/handles/traced-handles-inl.h
++++ b/src/handles/traced-handles-inl.h
+@@ -93,21 +93,24 @@ bool TracedHandles::NeedsToBeRemembered(
+ FullObjectSlot TracedNode::Publish(Tagged<Object> object,
+                                    bool needs_young_bit_update,
+                                    bool needs_black_allocation,
+-                                   bool has_old_host, bool is_droppable_value) {
++                                   bool has_old_host, bool is_droppable_value,
++                                   bool delays_reuse_value) {
+   DCHECK(IsMetadataCleared());
+ 
+   flags_ = needs_young_bit_update << IsInYoungList::kShift |
+            has_old_host << HasOldHost::kShift |
+-           is_droppable_value << IsDroppable::kShift | 1 << IsInUse::kShift;
++           is_droppable_value << IsDroppable::kShift |
++           delays_reuse_value << DelaysReuse::kShift | 1 << IsInUse::kShift;
+   if (needs_black_allocation) set_markbit();
+   reinterpret_cast<std::atomic<Address>*>(&object_)->store(
+       object.ptr(), std::memory_order_release);
+   return FullObjectSlot(&object_);
+ }
+ 
+-FullObjectSlot TracedHandles::Create(
+-    Address value, Address* slot, TracedReferenceStoreMode store_mode,
+-    TracedReferenceHandling reference_handling) {
++FullObjectSlot TracedHandles::Create(Address value, Address* slot,
++                                     TracedReferenceStoreMode store_mode,
++                                     TracedReferenceHandling reference_handling,
++                                     TracedReferenceReuse reuse) {
+   DCHECK_NOT_NULL(slot);
+   Tagged<Object> object(value);
+   auto [block, node] = AllocateNode();
+@@ -117,9 +120,10 @@ FullObjectSlot TracedHandles::Create(
+       is_marking_ && store_mode != TracedReferenceStoreMode::kInitializingStore;
+   const bool is_droppable =
+       reference_handling == TracedReferenceHandling::kDroppable;
++  const bool delays_reuse = reuse == TracedReferenceReuse::kDelayed;
+   auto result_slot =
+       node->Publish(object, needs_young_bit_update, needs_black_allocation,
+-                    has_old_host, is_droppable);
++                    has_old_host, is_droppable, delays_reuse);
+   // Write barrier and young node tracking may be reordered, so move them below
+   // `Publish()`.
+   if (needs_young_bit_update && !block->InYoungList()) {
+diff --git a/src/handles/traced-handles.cc b/src/handles/traced-handles.cc
+index 00e807c8e73..14b1b9cc5ce 100644
+--- a/src/handles/traced-handles.cc
++++ b/src/handles/traced-handles.cc
+@@ -35,6 +35,7 @@ TracedNode::TracedNode(IndexType index, IndexType next_free_index)
+   DCHECK(!markbit());
+   DCHECK(!has_old_host());
+   DCHECK(!is_droppable());
++  DCHECK(!delays_reuse());
+ }
+ 
+ void TracedNode::Release(Address zap_value) {
+@@ -175,6 +176,15 @@ void TracedHandles::Destroy(TracedNodeBlock& node_block, TracedNode& node) {
+   // This allows v8::TracedReference::Reset() calls from destructors on
+   // objects that may be used from stack and heap.
+   if (is_sweeping_on_mutator_thread_) {
++    if (node.delays_reuse()) {
++      // The node may currently be lingering (its pointee was reclaimed while
++      // the owner stayed alive). Record that the owner has now released it, so
++      // the next reclamation frees the cell instead of keeping it reserved.
++      // Only `object_` may be touched here (atomically): marking and sweeping
++      // are mutually exclusive, but writing the sentinel uniformly via the
++      // atomic accessor keeps the encoding consistent with the marking path.
++      node.set_raw_object<AccessMode::ATOMIC>(kTracedHandleDestroyedZapValue);
++    }
+     return;
+   }
+ 
+@@ -185,7 +195,14 @@ void TracedHandles::Destroy(TracedNodeBlock& node_block, TracedNode& node) {
+     // `ResetDeadNodes()` when they are discovered as not marked. Eagerly clear
+     // out the object here to avoid needlessly marking it from this point on.
+     // The node will be reclaimed on the next cycle.
+-    node.set_raw_object<AccessMode::ATOMIC>(kNullAddress);
++    //
++    // For "delay reuse" nodes we additionally encode that this is an explicit
++    // Reset() (as opposed to a GC-initiated park) in `object_`, so the next
++    // `ResetDeadNodes()` frees the cell rather than keeping it reserved. We use
++    // `object_` because it can be updated atomically while a concurrent marker
++    // reads it; `flags_` cannot be written here without racing the marker.
++    node.set_raw_object<AccessMode::ATOMIC>(
++        node.delays_reuse() ? kTracedHandleDestroyedZapValue : kNullAddress);
+     return;
+   }
+ 
+@@ -197,10 +214,19 @@ void TracedHandles::Destroy(TracedNodeBlock& node_block, TracedNode& node) {
+ 
+ void TracedHandles::Copy(const TracedNode& from_node, Address** to) {
+   DCHECK_NE(kGlobalHandleZapValue, from_node.raw_object());
++  // Copying a node whose pointee has already been reclaimed (lingering) or that
++  // is pending free (destroyed) is an embedder use-after-reclaim bug.
++  DCHECK_NE(kTracedHandleLingeringZapValue, from_node.raw_object());
++  DCHECK_NE(kTracedHandleDestroyedZapValue, from_node.raw_object());
++  // Preserve the "delay reuse" property: the copy is held by the embedder too
++  // and is subject to the same Reset()-before-reuse guarantee.
++  const TracedReferenceReuse reuse = from_node.delays_reuse()
++                                         ? TracedReferenceReuse::kDelayed
++                                         : TracedReferenceReuse::kEager;
+   FullObjectSlot o =
+       Create(from_node.raw_object(), reinterpret_cast<Address*>(to),
+              TracedReferenceStoreMode::kAssigningStore,
+-             TracedReferenceHandling::kDefault);
++             TracedReferenceHandling::kDefault, reuse);
+   SetSlotThreadSafe(to, o.location());
+ #ifdef VERIFY_HEAP
+   if (v8_flags.verify_heap) {
+@@ -317,6 +343,49 @@ void TracedHandles::DeleteEmptyBlocks() {
+   empty_blocks_.shrink_to_fit();
+ }
+ 
++namespace {
++// Transition an in-use "delay reuse" node to the lingering state: its pointee
++// has been reclaimed but the owning C++ object still holds the slot, so the
++// cell must stay reserved (and counted as used) until the embedder calls
++// Reset(). This only runs in the GC atomic pause, so plain (non-atomic) writes
++// are safe even for `flags_`.
++void MakeNodeLinger(TracedNode* node) {
++  DCHECK(node->is_in_use());
++  DCHECK(node->delays_reuse());
++  DCHECK(!node->markbit());
++  // The lingering sentinel is Smi-shaped and therefore not in the young
++  // generation; drop young tracking accordingly.
++  node->set_is_in_young_list(false);
++  node->set_has_old_host(false);
++  node->set_raw_object(kTracedHandleLingeringZapValue);
++}
++}  // namespace
++
++bool TracedHandles::ReclaimDelaysReuseNode(TracedNode* node,
++                                           Address free_zap_value) {
++  DCHECK(node->delays_reuse());
++  const Address object = node->raw_object();
++  if (object == kTracedHandleDestroyedZapValue) {
++    // The embedder already called Reset() (deferred during marking/sweeping);
++    // it is now safe to reclaim the cell for reuse.
++    FreeNode(node, free_zap_value);
++    return true;
++  }
++  if (object == kTracedHandleLingeringZapValue) {
++    // Already lingering; keep the cell reserved until Reset().
++    node->clear_markbit();
++    return true;
++  }
++  if (!node->markbit()) {
++    // Pointee unreachable but the owner still holds the slot: clear the cell
++    // but keep it reserved so it can't be handed to an unrelated reference.
++    MakeNodeLinger(node);
++    return true;
++  }
++  // Reachable; fall through to the regular markbit handling.
++  return false;
++}
++
+ void TracedHandles::ResetDeadNodes(
+     WeakSlotCallbackWithHeap should_reset_handle) {
+   // Manual iteration as the block may be deleted in `FreeNode()`.
+@@ -325,6 +394,11 @@ void TracedHandles::ResetDeadNodes(
+     for (auto* node : *block) {
+       if (!node->is_in_use()) continue;
+ 
++      if (node->delays_reuse() &&
++          ReclaimDelaysReuseNode(node, kTracedHandleFullGCResetZapValue)) {
++        continue;
++      }
++
+       // Detect unreachable nodes first.
+       if (!node->markbit()) {
+         FreeNode(node, kTracedHandleFullGCResetZapValue);
+@@ -357,6 +431,11 @@ void TracedHandles::ResetYoungDeadNodes(
+       DCHECK(node->is_in_use());
+       DCHECK_IMPLIES(node->has_old_host(), node->markbit());
+ 
++      if (node->delays_reuse() &&
++          ReclaimDelaysReuseNode(node, kTracedHandleMinorGCResetZapValue)) {
++        continue;
++      }
++
+       if (!node->markbit()) {
+         FreeNode(node, kTracedHandleMinorGCResetZapValue);
+         continue;
+diff --git a/src/handles/traced-handles.h b/src/handles/traced-handles.h
+index f747a628e78..f313eaea7eb 100644
+--- a/src/handles/traced-handles.h
++++ b/src/handles/traced-handles.h
+@@ -47,6 +47,13 @@ class TracedNode final {
+   bool is_droppable() const { return IsDroppable::decode(flags_); }
+   void set_droppable(bool v) { flags_ = IsDroppable::update(flags_, v); }
+ 
++  // Whether V8 must keep this node reserved until the embedder calls Reset(),
++  // rather than reusing it as soon as it is reclaimed. Set once at creation
++  // (in `Publish()`) and never mutated afterwards, so it can be read without
++  // synchronization even while a concurrent marker is running. See
++  // TracedReferenceReuse and the "lingering" handling in traced-handles.cc.
++  bool delays_reuse() const { return DelaysReuse::decode(flags_); }
++
+   bool is_in_use() const { return IsInUse::decode(flags_); }
+   void set_is_in_use(bool v) { flags_ = IsInUse::update(flags_, v); }
+ 
+@@ -87,7 +94,8 @@ class TracedNode final {
+   V8_INLINE FullObjectSlot Publish(Tagged<Object> object,
+                                    bool needs_young_bit_update,
+                                    bool needs_black_allocation,
+-                                   bool has_old_host, bool is_droppable);
++                                   bool has_old_host, bool is_droppable,
++                                   bool delays_reuse);
+   void Release(Address zap_value);
+ 
+  private:
+@@ -96,6 +104,7 @@ class TracedNode final {
+   using IsWeak = IsInYoungList::Next<bool, 1>;
+   using IsDroppable = IsWeak::Next<bool, 1>;
+   using HasOldHost = IsDroppable::Next<bool, 1>;
++  using DelaysReuse = HasOldHost::Next<bool, 1>;
+ 
+   Address object_ = kNullAddress;
+   // When a node is not in use, this index is used to build the free list.
+@@ -294,7 +303,8 @@ class V8_EXPORT_PRIVATE TracedHandles final {
+ 
+   V8_INLINE FullObjectSlot Create(Address value, Address* slot,
+                                   TracedReferenceStoreMode store_mode,
+-                                  TracedReferenceHandling reference_handling);
++                                  TracedReferenceHandling reference_handling,
++                                  TracedReferenceReuse reuse);
+ 
+   using NodeBounds = std::vector<std::pair<const void*, const void*>>;
+   const NodeBounds GetNodeBounds() const;
+@@ -339,6 +349,12 @@ class V8_EXPORT_PRIVATE TracedHandles final {
+   V8_NOINLINE V8_PRESERVE_MOST void RefillUsableNodeBlocks();
+   void FreeNode(TracedNode* node, Address zap_value);
+ 
++  // Handles reclamation of a "delay reuse" node (see TracedReferenceReuse).
++  // Returns true if the node was fully handled (freed, or kept reserved as
++  // lingering), false if it is reachable and should fall through to the regular
++  // markbit-based handling. Must only be called during a GC atomic pause.
++  bool ReclaimDelaysReuseNode(TracedNode* node, Address free_zap_value);
++
+   V8_INLINE bool NeedsToBeRemembered(Tagged<Object> value, TracedNode* node,
+                                      Address* slot,
+                                      TracedReferenceStoreMode store_mode) const;
+diff --git a/test/unittests/heap/cppgc-js/traced-reference-unittest.cc b/test/unittests/heap/cppgc-js/traced-reference-unittest.cc
+index fbc7b88aa6d..354e489ae19 100644
+--- a/test/unittests/heap/cppgc-js/traced-reference-unittest.cc
++++ b/test/unittests/heap/cppgc-js/traced-reference-unittest.cc
+@@ -6,6 +6,7 @@
+ #include "include/v8-traced-handle.h"
+ #include "src/api/api-inl.h"
+ #include "src/handles/global-handles.h"
++#include "src/handles/traced-handles.h"
+ #include "src/heap/cppgc/visitor.h"
+ #include "src/heap/marking-state-inl.h"
+ #include "test/unittests/heap/heap-utils.h"
+@@ -372,5 +373,201 @@ TEST_F(TracedReferenceTest, WriteBarrierForOnStackMove) {
+   }
+ }
+ 
++// --- DelaysReuse -----------------------------------------------------------
++//
++// A TracedReference created with the DelaysReuse tag instructs V8 to keep the
++// underlying storage cell reserved (not reusable) once the reference is
++// reclaimed, until the embedder explicitly calls Reset(). This protects
++// embedders that always Reset() in the destructor of the object holding the
++// reference from use-after-reclaim / type confusion on the cell when the
++// pointee is reclaimed while that C++ object lives on (i.e. the reference was
++// not traced during a CppHeap GC).
++
++TEST_F(TracedReferenceTest, DelaysReuseConstructFromLocal) {
++  v8::Local<v8::Context> context = v8::Context::New(v8_isolate());
++  v8::Context::Scope context_scope(context);
++  {
++    v8::HandleScope handles(v8_isolate());
++    v8::Local<v8::Object> local =
++        v8::Local<v8::Object>::New(v8_isolate(), v8::Object::New(v8_isolate()));
++    v8::TracedReference<v8::Object> ref(
++        v8_isolate(), local, v8::TracedReference<v8::Object>::DelaysReuse());
++    EXPECT_FALSE(ref.IsEmpty());
++    EXPECT_EQ(ref, local);
++    ref.Reset();
++    EXPECT_TRUE(ref.IsEmpty());
++  }
++}
++
++// A DelaysReuse reference is repointed by constructing a fresh one and
++// move-assigning it (this is how embedders, e.g. jsg, store one into a member).
++// Move transfers the same node, preserving the delays-reuse property.
++TEST_F(TracedReferenceTest, DelaysReuseMoveAssignFromLocal) {
++  v8::Local<v8::Context> context = v8::Context::New(v8_isolate());
++  v8::Context::Scope context_scope(context);
++  v8::TracedReference<v8::Object> ref;
++  {
++    v8::HandleScope handles(v8_isolate());
++    v8::Local<v8::Object> local =
++        v8::Local<v8::Object>::New(v8_isolate(), v8::Object::New(v8_isolate()));
++    ref = v8::TracedReference<v8::Object>(
++        v8_isolate(), local, v8::TracedReference<v8::Object>::DelaysReuse());
++    EXPECT_FALSE(ref.IsEmpty());
++    EXPECT_EQ(ref, local);
++  }
++}
++
++// Confirms the test setup: a regular (reusable) reference that is neither
++// traced nor found on the stack has its node reclaimed by a full GC. This is
++// the behavior DelaysReuse deliberately suppresses (see below).
++TEST_F(TracedReferenceTest, ReusableNodeIsReclaimedByFullGC) {
++  if (v8_flags.stress_incremental_marking) {
++    GTEST_SKIP() << "Write barrier may keep the node marked.";
++  }
++  ManualGCScope manual_gc_scope(i_isolate());
++  DisableConservativeStackScanningScopeForTesting no_stack_scanning(heap());
++  v8::Local<v8::Context> context = v8::Context::New(v8_isolate());
++  v8::Context::Scope context_scope(context);
++
++  auto* traced_handles = i_isolate()->traced_handles();
++  const size_t initial_count = traced_handles->used_node_count();
++
++  v8::TracedReference<v8::Object> ref;
++  {
++    v8::HandleScope handles(v8_isolate());
++    v8::Local<v8::Object> local =
++        v8::Local<v8::Object>::New(v8_isolate(), v8::Object::New(v8_isolate()));
++    ref.Reset(v8_isolate(), local);
++  }
++  ASSERT_EQ(initial_count + 1, traced_handles->used_node_count());
++
++  InvokeAtomicMajorGC();
++  // The node was reclaimed for reuse. Note that `ref` now dangles (its slot is
++  // still set but the cell is freed); we must not touch it -- exactly the
++  // hazard that DelaysReuse avoids.
++  EXPECT_EQ(initial_count, traced_handles->used_node_count());
++}
++
++// Core property: an untraced DelaysReuse reference is NOT reclaimed by a full
++// GC -- its cell lingers (still counted as used) until Reset() is called.
++TEST_F(TracedReferenceTest, DelaysReuseLingersUntilReset) {
++  if (v8_flags.stress_incremental_marking) {
++    GTEST_SKIP() << "Write barrier may keep the node marked.";
++  }
++  ManualGCScope manual_gc_scope(i_isolate());
++  DisableConservativeStackScanningScopeForTesting no_stack_scanning(heap());
++  v8::Local<v8::Context> context = v8::Context::New(v8_isolate());
++  v8::Context::Scope context_scope(context);
++
++  auto* traced_handles = i_isolate()->traced_handles();
++  const size_t initial_count = traced_handles->used_node_count();
++
++  v8::TracedReference<v8::Object> ref;
++  {
++    v8::HandleScope handles(v8_isolate());
++    v8::Local<v8::Object> local =
++        v8::Local<v8::Object>::New(v8_isolate(), v8::Object::New(v8_isolate()));
++    ref = v8::TracedReference<v8::Object>(
++        v8_isolate(), local, v8::TracedReference<v8::Object>::DelaysReuse());
++  }
++  ASSERT_EQ(initial_count + 1, traced_handles->used_node_count());
++
++  // The reference is neither traced (no cppgc object holds it) nor found by
++  // conservative stack scanning (disabled), so its node is unmarked. Unlike a
++  // reusable node, it must linger rather than be freed.
++  InvokeAtomicMajorGC();
++  EXPECT_EQ(initial_count + 1, traced_handles->used_node_count());
++  EXPECT_FALSE(ref.IsEmpty());
++
++  // A second GC must keep it lingering (it is never marked, but must not be
++  // freed or reused).
++  InvokeAtomicMajorGC();
++  EXPECT_EQ(initial_count + 1, traced_handles->used_node_count());
++
++  // Only Reset() releases the cell.
++  ref.Reset();
++  EXPECT_TRUE(ref.IsEmpty());
++  EXPECT_EQ(initial_count, traced_handles->used_node_count());
++}
++
++// Reset() during marking cannot free the node immediately (a concurrent marker
++// may observe it); the release is recorded and the node is freed in the
++// following atomic pause.
++TEST_F(TracedReferenceTest, DelaysReuseResetDuringMarkingFreesAtGC) {
++  if (!v8_flags.incremental_marking) {
++    GTEST_SKIP() << "Requires incremental marking";
++  }
++  ManualGCScope manual_gc_scope(i_isolate());
++  DisableConservativeStackScanningScopeForTesting no_stack_scanning(heap());
++  v8::Local<v8::Context> context = v8::Context::New(v8_isolate());
++  v8::Context::Scope context_scope(context);
++
++  auto* traced_handles = i_isolate()->traced_handles();
++  const size_t initial_count = traced_handles->used_node_count();
++
++  v8::TracedReference<v8::Object> ref;
++  {
++    v8::HandleScope handles(v8_isolate());
++    v8::Local<v8::Object> local =
++        v8::Local<v8::Object>::New(v8_isolate(), v8::Object::New(v8_isolate()));
++    ref = v8::TracedReference<v8::Object>(
++        v8_isolate(), local, v8::TracedReference<v8::Object>::DelaysReuse());
++  }
++  ASSERT_EQ(initial_count + 1, traced_handles->used_node_count());
++
++  SimulateIncrementalMarking(/*force_completion=*/false);
++  ref.Reset();
++  EXPECT_TRUE(ref.IsEmpty());
++  // Free is deferred: the node is still in use until the atomic pause.
++  EXPECT_EQ(initial_count + 1, traced_handles->used_node_count());
++
++  InvokeAtomicMajorGC();
++  EXPECT_EQ(initial_count, traced_handles->used_node_count());
++}
++
++// Exercises both null-ish sentinels: a node that is first parked as lingering
++// by a full GC, then Reset() during a subsequent marking, must transition from
++// "lingering" to "release pending" and be freed in the atomic pause (not kept
++// reserved).
++TEST_F(TracedReferenceTest, DelaysReuseLingeringThenResetDuringMarkingFrees) {
++  if (!v8_flags.incremental_marking) {
++    GTEST_SKIP() << "Requires incremental marking";
++  }
++  if (v8_flags.stress_incremental_marking) {
++    GTEST_SKIP() << "Write barrier may keep the node marked.";
++  }
++  ManualGCScope manual_gc_scope(i_isolate());
++  DisableConservativeStackScanningScopeForTesting no_stack_scanning(heap());
++  v8::Local<v8::Context> context = v8::Context::New(v8_isolate());
++  v8::Context::Scope context_scope(context);
++
++  auto* traced_handles = i_isolate()->traced_handles();
++  const size_t initial_count = traced_handles->used_node_count();
++
++  v8::TracedReference<v8::Object> ref;
++  {
++    v8::HandleScope handles(v8_isolate());
++    v8::Local<v8::Object> local =
++        v8::Local<v8::Object>::New(v8_isolate(), v8::Object::New(v8_isolate()));
++    ref = v8::TracedReference<v8::Object>(
++        v8_isolate(), local, v8::TracedReference<v8::Object>::DelaysReuse());
++  }
++  ASSERT_EQ(initial_count + 1, traced_handles->used_node_count());
++
++  // Park as lingering.
++  InvokeAtomicMajorGC();
++  ASSERT_EQ(initial_count + 1, traced_handles->used_node_count());
++  ASSERT_FALSE(ref.IsEmpty());
++
++  // Reset the lingering reference while marking is in progress.
++  SimulateIncrementalMarking(/*force_completion=*/false);
++  ref.Reset();
++  EXPECT_TRUE(ref.IsEmpty());
++  EXPECT_EQ(initial_count + 1, traced_handles->used_node_count());
++
++  InvokeAtomicMajorGC();
++  EXPECT_EQ(initial_count, traced_handles->used_node_count());
++}
++
+ }  // namespace internal
+ }  // namespace v8
