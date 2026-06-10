@@ -249,32 +249,29 @@ export const detachedSpanEndsAfterStreamDrain = {
     );
 
     let capturedSpan = null;
-    const stream = ctx.tracing.startActiveSpan(
-      'detached-stream-op',
-      (span) => {
-        capturedSpan = span;
-        span.setAttribute('test', 'detachedSpanEndsAfterStreamDrain');
-        span.setAttribute('phase.created', true);
+    const stream = ctx.tracing.startActiveSpan('detached-stream-op', (span) => {
+      capturedSpan = span;
+      span.setAttribute('test', 'detachedSpanEndsAfterStreamDrain');
+      span.setAttribute('phase.created', true);
 
-        return new ReadableStream({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode('hello'));
-            controller.enqueue(new TextEncoder().encode(' world'));
-            controller.close();
+      return new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('hello'));
+          controller.enqueue(new TextEncoder().encode(' world'));
+          controller.close();
+        },
+      }).pipeThrough(
+        new TransformStream({
+          transform(chunk, controller) {
+            controller.enqueue(chunk);
           },
-        }).pipeThrough(
-          new TransformStream({
-            transform(chunk, controller) {
-              controller.enqueue(chunk);
-            },
-            flush() {
-              span.setAttribute('phase.drained', true);
-              span.end();
-            },
-          })
-        );
-      }
-    );
+          flush() {
+            span.setAttribute('phase.drained', true);
+            span.end();
+          },
+        })
+      );
+    });
 
     assert.strictEqual(
       capturedSpan.isTraced,
