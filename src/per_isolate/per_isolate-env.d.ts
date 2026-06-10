@@ -31,3 +31,12 @@ declare const exports: any;
 declare const compatFlags: {
   readonly [key: string]: boolean;
 };
+
+/**
+ * Captured built-in prototype methods and constructors, immune to
+ * prototype pollution. Loaded before main.ts and injected automatically
+ * into every bootstrap script's scope.
+ *
+ * See primordials.ts for the full list of captures.
+ */
+declare const primordials: Record<string, any>;

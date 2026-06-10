@@ -46,6 +46,10 @@ struct BootstrapState {
   kj::HashSet<kj::String> loading;
   jsg::JsRef<jsg::JsObject> compatFlagsObj;
   jsg::JsRef<jsg::JsFunction> requireFn;
+  // The primordials object, loaded before main and injected as a pseudo-global
+  // into every script. Provides prototype-pollution-safe references to built-in
+  // methods and constructors.
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> primordials;
 };
 
 // Retrieve the BootstrapState from the current context's embedder data.
@@ -98,12 +102,17 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
     moduleObj.set(js, "exports"_kj, exportsObj);
 
     // Build the context extension object containing all pseudo-globals:
-    //   require, compatFlags, module, exports
+    //   require, compatFlags, primordials, module, exports
     auto extObj = js.obj();
-    extObj.set(js, "require"_kj, state.requireFn.getHandle(js));
+    if (normalized != "primordials") {
+      extObj.set(js, "require"_kj, state.requireFn.getHandle(js));
+    }
     extObj.set(js, "compatFlags"_kj, state.compatFlagsObj.getHandle(js));
     extObj.set(js, "module"_kj, moduleObj);
     extObj.set(js, "exports"_kj, exportsObj);
+    KJ_IF_SOME(primordials, state.primordials) {
+      extObj.set(js, "primordials"_kj, primordials.getHandle(js));
+    }
 
     // Compile the script as a function with the context extension.
     // CompileFunction with context_extensions makes the extension object's
@@ -185,7 +194,9 @@ void runPerIsolateBootstrap(
   // Get (or lazily build) the thread-local script lookup table.
   auto& scripts = getScriptTable(bundle);
 
-  // Verify the entry point exists.
+  // Verify required scripts exist.
+  KJ_REQUIRE(scripts.find("primordials"_kj) != kj::none,
+      "per-isolate bootstrap bundle is missing 'primordials' script");
   KJ_REQUIRE(scripts.find("main"_kj) != kj::none,
       "per-isolate bootstrap bundle is missing 'main' entry point");
 
@@ -205,9 +216,16 @@ void runPerIsolateBootstrap(
   state->requireFn =
       jsg::JsFunction(jsg::check(v8::Function::New(context, requireCallback))).addRef(js);
 
-  // Run the entry point. This synchronously executes main.js, which may
-  // require() other scripts. All execution is synchronous.
+  // Load primordials first — this must happen before any other script so that
+  // built-in prototype methods are captured before anything could pollute them.
+  // The result is cached in state and injected as a pseudo-global into every
+  // subsequent script via the context extension object.
   JSG_TRY(js) {
+    auto result = state->requireFn.getHandle(js).call(js, js.undefined(), js.str("primordials"_kj));
+    state->primordials = result.addRef(js);
+
+    // Run the entry point. This synchronously executes main.js, which may
+    // require() other scripts. All execution is synchronous.
     state->requireFn.getHandle(js).call(js, js.undefined(), js.str("main"_kj));
   }
   JSG_CATCH(exception) {
