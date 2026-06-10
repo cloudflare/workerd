@@ -57,6 +57,8 @@ For file map and coding invariants, see [AGENTS.md](AGENTS.md).
 | `jsg::Value`                  | Any                         | Alias for `V8Ref<v8::Value>`                                |
 | `jsg::Ref<T>`                 | Resource wrapper            | Strong ref to JSG Resource Type                             |
 | `jsg::WeakRef<T>`             | —                           | Non-owning weak ref to JSG Resource Type                    |
+| `jsg::WeakV8Ref<T>`           | Any V8 type                 | Non-owning weak ref to V8 value                             |
+| `jsg::WeakJsRef<T>`           | Any JsValue type            | Non-owning weak ref to JsValue type                         |
 | `jsg::HashableV8Ref<T>`       | Any V8 type                 | `V8Ref` + `hashCode()`                                      |
 | `jsg::MemoizedIdentity<T>`    | Any                         | Preserves JS object identity across round-trips             |
 | `jsg::Identified<T>`          | Any                         | Captures JS object identity + unwrapped value               |
@@ -267,6 +269,53 @@ Does not hold V8 handles. Safe to drop outside the isolate lock.
 `operator*()` is deliberately omitted to prevent storing dangling references.
 
 Supports converting moves: `WeakRef<Derived>` → `WeakRef<Base>`.
+
+### `jsg::WeakV8Ref<T>` — Weak reference to a V8 value
+
+Created from any `jsg::V8Ref<T>` via `getWeakRef(isolate)` or `getWeakRef(js)`.
+Uses `v8::Global::SetWeak()` internally — V8 automatically clears the handle
+when the target is garbage collected.
+
+Note: `WeakV8Ref` is provided mostly to support the impl of `WeakJsRef`.
+As newer code should be focusing on use of `jsg::Js*` types and `jsg::JsRef<T>`
+rather than using `v8::Value` types and `jsg::V8Ref<T>` directly.
+
+```cpp
+jsg::V8Ref<v8::Object> strong = js.v8Ref(someLocal);
+jsg::WeakV8Ref<v8::Object> weak = strong.getWeakRef(js);
+
+KJ_IF_SOME(local, weak.tryGetHandle(js)) {
+  // value is still alive
+}
+
+KJ_IF_SOME(ref, weak.tryAddRef(js)) {
+  // ref is a jsg::V8Ref<v8::Object> that keeps the value alive
+}
+```
+
+| Method                    | Returns                   | Behavior when collected   |
+| ------------------------- | ------------------------- | ------------------------- |
+| `getHandle(isolate/js)`   | `v8::Local<T>`            | Throws `kj::Exception`    |
+| `tryGetHandle(isolate/js)`| `kj::Maybe<v8::Local<T>>` | Returns `kj::none`        |
+| `isAlive()`               | `bool`                    | Returns `false`           |
+| `tryAddRef(isolate/js)`   | `kj::Maybe<V8Ref<T>>`     | Returns `kj::none`        |
+
+**Not GC-traced** — attempting to visit in `visitForGc()` is a compile error.
+Safe to drop outside the isolate lock (uses deferred destruction).
+
+### `jsg::WeakJsRef<T>` — Weak reference to a JsValue type
+
+Created from any `jsg::JsRef<T>` via `getWeakRef(js)`. Wraps `WeakV8Ref<v8::Value>`
+with typed `JsValue` access.
+
+```cpp
+jsg::JsRef<JsObject> strong(js, someJsObj);
+jsg::WeakJsRef<JsObject> weak = strong.getWeakRef(js);
+
+KJ_IF_SOME(handle, weak.tryGetHandle(js)) {
+  // handle is a JsObject
+}
+```
 
 ## Error Type Catalog
 

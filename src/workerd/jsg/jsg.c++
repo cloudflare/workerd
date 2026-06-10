@@ -42,6 +42,11 @@ const char* JsExceptionThrown::what() const noexcept {
   return whatBuffer.cStr();
 }
 
+void Data::deferGlobalDestruction(v8::Isolate* isolate, v8::Global<v8::Data> handle) {
+  auto& jsgIsolate = IsolateBase::from(isolate);
+  jsgIsolate.deferDestruction(kj::mv(handle));
+}
+
 void Data::destroy() {
   assertInvariant();
   if (isolate != nullptr) {
@@ -76,8 +81,7 @@ void Data::destroy() {
       //
       // Note that only the v8::Global part of `handle` needs to be destroyed under isolate lock.
       // The `tracedRef` part has a trivial destructor so can be destroyed on any thread.
-      auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-      jsgIsolate.deferDestruction(v8::Global<v8::Data>(kj::mv(handle)));
+      deferGlobalDestruction(isolate, kj::mv(handle));
     }
     isolate = nullptr;
   }
