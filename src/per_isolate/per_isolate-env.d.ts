@@ -33,6 +33,15 @@ declare const compatFlags: {
 };
 
 /**
+ * Autogate flags for the current process. Unlike compatFlags (per-worker),
+ * autogates are process-wide and used for gradual rollout of risky changes.
+ * Gate names use kebab-case (e.g., "v8-fast-api", "rust-backed-node-dns").
+ */
+declare const autogates: {
+  readonly [key: string]: boolean;
+};
+
+/**
  * Captured built-in prototype methods and constructors, immune to
  * prototype pollution. Loaded before main.ts and injected automatically
  * into every bootstrap script's scope.

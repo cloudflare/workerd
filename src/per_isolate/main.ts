@@ -7,9 +7,10 @@
 // be available at the global scope implemented in JavaScript/TypeScript. This
 // runs before any user code is executed.
 //
-// There are six pseudo-globals available in this script:
+// There are several pseudo-globals available in this script:
 // - `globalThis`: the global object of the context being initialized.
-// - `compatFlags`: an object containing compatibility flags for the context.
+// - `compatFlags`: an object containing compatibility flags enabled for the context.
+// - `autogates`: an object containing autogates enabled for the context.
 // - `require`: a function to load other per-isolate bootstrap scripts.
 // - `module`: the commonjs-style module object for this script, used for exporting values
 // - `exports`: the commonjs-style exports object for this script, used for exporting values

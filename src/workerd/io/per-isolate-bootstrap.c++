@@ -8,6 +8,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
 #include <workerd/jsg/util.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/dynamic.h>
 #include <capnp/schema.h>
@@ -45,6 +46,7 @@ struct BootstrapState {
   kj::HashMap<kj::String, jsg::JsRef<jsg::JsValue>> cache;
   kj::HashSet<kj::String> loading;
   jsg::JsRef<jsg::JsObject> compatFlagsObj;
+  jsg::JsRef<jsg::JsObject> autogatesObj;
   jsg::JsRef<jsg::JsFunction> requireFn;
   // The primordials object, loaded before main and injected as a pseudo-global
   // into every script. Provides prototype-pollution-safe references to built-in
@@ -108,6 +110,7 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       extObj.set(js, "require"_kj, state.requireFn.getHandle(js));
     }
     extObj.set(js, "compatFlags"_kj, state.compatFlagsObj.getHandle(js));
+    extObj.set(js, "autogates"_kj, state.autogatesObj.getHandle(js));
     extObj.set(js, "module"_kj, moduleObj);
     extObj.set(js, "exports"_kj, exportsObj);
     KJ_IF_SOME(primordials, state.primordials) {
@@ -165,7 +168,9 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   });
 }
 
-// Build a JS object with { flagName: true/false } entries from compat flags.
+// Build a JS object with { flagName: true } entries for enabled compat flags.
+// Disabled flags are omitted — scripts check with `if (compatFlags['flag_name'])`
+// which yields undefined (falsy) for unset flags.
 jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   auto obj = js.obj();
 
@@ -173,14 +178,28 @@ jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFla
   auto dynamicFlags = capnp::toDynamic(flags);
 
   for (auto field: schema.getFields()) {
-    // Find the enableFlag annotation to get the JS-visible flag name.
     for (auto annotation: field.getProto().getAnnotations()) {
       if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
-        auto flagName = annotation.getValue().getText();
-        auto value = dynamicFlags.get(field).as<bool>();
-        obj.set(js, flagName, js.boolean(value));
+        if (dynamicFlags.get(field).as<bool>()) {
+          obj.set(js, annotation.getValue().getText(), js.boolean(true));
+        }
         break;
       }
+    }
+  }
+
+  return obj.addRef(js);
+}
+
+// Build a JS object with { gateName: true/false } entries from autogates.
+jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
+  auto obj = js.obj();
+
+  for (auto i = util::AutogateKey(0); i < util::AutogateKey::NumOfKeys;
+       i = util::AutogateKey(static_cast<int>(i) + 1)) {
+    if (util::Autogate::isEnabled(i)) {
+      auto name = kj::str(i);
+      obj.set(js, name, js.boolean(true));
     }
   }
 
@@ -210,8 +229,9 @@ void runPerIsolateBootstrap(
   auto* state = new BootstrapState{.scripts = scripts};
   jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::BOOTSTRAP_STATE, state);
 
-  // Build the compat flags object.
+  // Build the compat flags and autogates objects.
   state->compatFlagsObj = buildCompatFlagsObject(js, flags);
+  state->autogatesObj = buildAutogatesObject(js);
 
   // Create the require() function. No v8::External needed — the callback
   // reads state from the context embedder slot.
