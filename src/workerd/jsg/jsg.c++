@@ -75,8 +75,15 @@ void Data::destroy() {
       // This thread doesn't have the isolate locked right now. To minimize lock contention, we'll
       // defer these handles' destruction to the next time the isolate is locked.
       //
-      // Note that only the v8::Global part of `handle` needs to be destroyed under isolate lock.
-      // The `tracedRef` part has a trivial destructor so can be destroyed on any thread.
+      // Only the v8::Global part of `handle` needs to be destroyed under the isolate lock. We do
+      // not touch `tracedHandle` here: it is only ever non-empty for a *weak* `Data` (one that is
+      // reachable via GC tracing), and a weak `Data` must only be destroyed under the isolate lock
+      // (see the class comment). So `tracedHandle` is necessarily empty on this path.
+      //
+      // This invariant matters for correctness: `tracedHandle` uses DelaysReuse, so V8 keeps its
+      // storage cell reserved until we Reset() it. Dropping a *non-empty* tracedHandle here (rather
+      // than Reset()ing it) would leak the cell permanently, so assert the invariant explicitly.
+      KJ_IASSERT(tracedHandle == kj::none);
       deferGlobalDestruction(isolate, kj::mv(handle));
     }
     isolate = nullptr;
