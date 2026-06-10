@@ -638,7 +638,7 @@ pub mod ffi {
         pub unsafe fn unwrap_resource(
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
-        ) -> KjRc<Wrappable>;
+        ) -> KjMaybe<KjRc<Wrappable>>;
 
         pub unsafe fn function_template_get_function(
             isolate: *mut Isolate,
@@ -3478,17 +3478,14 @@ impl WrappableRc {
     /// Returns `None` if the value is not a Rust-tagged Wrappable
     /// (e.g. a C++ JSG object, a plain JS object, or a primitive).
     ///
-    /// The C++ `unwrap_resource` returns a `KjRc<Wrappable>` whose inner
-    /// pointer is null when the value doesn't contain a Rust Wrappable.
-    /// We check `get().is_null()` to distinguish that case.
+    /// The C++ `unwrap_resource` returns `None` when the value doesn't contain
+    /// a Rust Wrappable.
     #[doc(hidden)]
     pub fn from_js(isolate: IsolatePtr, value: Local<Value>) -> Option<Self> {
         // SAFETY: isolate is valid and locked; value handle is valid.
-        let handle = unsafe { ffi::unwrap_resource(isolate.as_ffi(), value.into_ffi()) };
-        if handle.get().is_null() {
-            return None;
-        }
-        Some(Self { handle })
+        let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
+            unsafe { ffi::unwrap_resource(isolate.as_ffi(), value.into_ffi()) }.into();
+        handle.map(|handle| Self { handle })
     }
 
     /// Wraps this Wrappable as a JavaScript object using the given constructor template.
