@@ -1753,9 +1753,7 @@ void Worker::setupContext(
   setWebAssemblyModuleHasInstance(lock, context);
 
   // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
-  if (util::Autogate::isEnabled(util::AutogateKey::WASM_SHUTDOWN_SIGNAL_SHIM)) {
-    shimWebAssemblyInstantiate(lock, context);
-  }
+  shimWebAssemblyInstantiate(lock, context);
 
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
   // logged content, and log formatted values to stdout/stderr locally.
