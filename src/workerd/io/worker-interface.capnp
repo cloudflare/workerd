@@ -523,11 +523,16 @@ struct JsValue {
         cap @1 :JsRpcTarget;
         # Live capability to the target.
 
-        channelToken @14 :Data;
-        # Optional: A channel token which can be restored to get this same RpcStub again. Most
-        # stubs don't have this, but if the stub was created by `ctx.restore()` then it will have
-        # an attached token. This makes it possible to store the stub in long-term storage, e.g.
-        # in Durable Object KV storage.
+        union {
+          channelToken @14 :Data;
+          # Optional: A channel token which can be restored to get this same RpcStub again. Most
+          # stubs don't have this, but if the stub was created by `ctx.restore()` then it will have
+          # an attached token. This makes it possible to store the stub in long-term storage, e.g.
+          # in Durable Object KV storage.
+
+          delayedChannelToken @15 :ExternalPusher.DelayedChannelToken;
+          # Like `delayedSubrequestChannelToken` below, but the token is for an RpcChannel.
+        }
       }
 
       writableStream :group {

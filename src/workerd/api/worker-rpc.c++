@@ -784,30 +784,53 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
           getClient(), kj::refcounted<AttachmentMembrane>(ioctx.registerPendingEvent()));
 
       // If a channel is present, send a channel token for it.
-      kj::Maybe<kj::Array<byte>> channelToken;
+      kj::Maybe<kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>>> channelToken;
       KJ_IF_SOME(channel, getRpcChannel(ioctx)) {
         // Note: RpcChannels are always transferrable (there wouldn't be any reason to create one
         //   that isn't), but we still call requireAllowsTransfer() for good measure.
         channel->requireAllowsTransfer();
-        KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
-          KJ_CASE_ONEOF(token, kj::Array<byte>) {
-            channelToken = kj::mv(token);
-          }
-          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-            // TODO(now): Support this.
-            KJ_UNIMPLEMENTED("tried to send RpcChannel whose token is not synchronously available");
-          }
-        }
+        channelToken = channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC);
       }
 
-      externalHandler.write([cap = kj::mv(cap), channelToken = kj::mv(channelToken)](
-                                rpc::JsValue::External::Builder builder) mutable {
-        auto target = builder.initRpcTarget();
-        target.setCap(kj::mv(cap));
-        KJ_IF_SOME(token, channelToken) {
-          target.setChannelToken(token);
+      KJ_IF_SOME(token, channelToken) {
+        KJ_SWITCH_ONEOF(token) {
+          KJ_CASE_ONEOF(token, kj::Array<byte>) {
+            externalHandler.write([cap = kj::mv(cap), token = kj::mv(token)](
+                                      rpc::JsValue::External::Builder builder) mutable {
+              auto target = builder.initRpcTarget();
+              target.setCap(kj::mv(cap));
+              target.setChannelToken(token);
+            });
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+            // Token isn't available synchronously, so we have to send a promise.
+            auto paf = kj::newPromiseAndFulfiller<
+                rpc::JsValue::ExternalPusher::DelayedChannelToken::Client>();
+
+            // Arrange to send the token when it's ready.
+            ioctx.addTask(
+                promise.then([pusher = externalHandler.getExternalPusher(),
+                                 fulfiller = kj::mv(paf.fulfiller)](kj::Array<byte> token) mutable {
+              auto req = pusher.pushDelayedChannelTokenRequest(
+                  capnp::MessageSize{4 + token.size() / sizeof(capnp::word), 0});
+              req.setToken(token);
+              fulfiller->fulfill(req.send().getCap());
+            }));
+
+            externalHandler.write([cap = kj::mv(cap), promise = kj::mv(paf.promise)](
+                                      rpc::JsValue::External::Builder builder) mutable {
+              auto target = builder.initRpcTarget();
+              target.setCap(kj::mv(cap));
+              target.setDelayedChannelToken(kj::mv(promise));
+            });
+          }
         }
-      });
+      } else {
+        // No channel token.
+        externalHandler.write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
+          builder.initRpcTarget().setCap(kj::mv(cap));
+        });
+      }
 
       if (externalHandler.getStubOwnership() == RpcSerializerExternalHandler::TRANSFER) {
         // Instead of disposing the stub immediately, we add a disposer to the serializer
@@ -860,12 +883,20 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
       auto externalMemory = js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_STUB);
 
       auto& ioctx = IoContext::current();
-      if (rpcTarget.hasChannelToken()) {
-        auto channel = ioctx.getIoChannelFactory().rpcChannelFromToken(
+      kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> channel;
+      if (rpcTarget.isDelayedChannelToken()) {
+        auto promise = ioctx.getExternalPusher()->unwrapDelayedChannelToken(
+            rpcTarget.getDelayedChannelToken());
+        channel = ioctx.getIoChannelFactory().rpcChannelFromToken(
+            IoChannelFactory::ChannelTokenUsage::RPC, kj::mv(promise));
+      } else if (rpcTarget.hasChannelToken()) {
+        channel = ioctx.getIoChannelFactory().rpcChannelFromToken(
             IoChannelFactory::ChannelTokenUsage::RPC, rpcTarget.getChannelToken());
+      }
+
+      KJ_IF_SOME(c, channel) {
         return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(rpcTarget.getCap())),
-            ioctx.addObject(kj::mv(channel)), externalHandler.getDisposalGroup(),
-            kj::mv(externalMemory));
+            ioctx.addObject(kj::mv(c)), externalHandler.getDisposalGroup(), kj::mv(externalMemory));
       } else {
         return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(rpcTarget.getCap())),
             externalHandler.getDisposalGroup(), kj::mv(externalMemory));
