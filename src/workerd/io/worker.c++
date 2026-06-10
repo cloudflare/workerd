@@ -36,7 +36,6 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
-#include <per_isolate/per_isolate.capnp.h>
 #include <rust/jsg/ffi.h>
 #include <v8-inspector.h>
 #include <v8-profiler.h>
@@ -1423,7 +1422,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
           // Run per-isolate bootstrap scripts before any user code.
           JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
-            runPerIsolateBootstrap(js, PER_ISOLATE_BUNDLE, isolate->getApi().getFeatureFlags());
+            runPerIsolateBootstrap(js, isolate->getApi().getFeatureFlags());
           });
         }
       } else {
@@ -1913,8 +1912,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       if (freshContext &&
           util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
         JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
-          runPerIsolateBootstrap(
-              js, PER_ISOLATE_BUNDLE, script->isolate->getApi().getFeatureFlags());
+          runPerIsolateBootstrap(js, script->isolate->getApi().getFeatureFlags());
         });
       }
 

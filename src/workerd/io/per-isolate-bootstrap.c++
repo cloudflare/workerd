@@ -10,6 +10,8 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/autogate.h>
 
+#include <per_isolate/per_isolate.capnp.h>
+
 #include <capnp/dynamic.h>
 #include <capnp/schema.h>
 
@@ -24,13 +26,41 @@ namespace {
 //   - Keys (kj::StringPtr) and values (Module::Reader) are non-owning views
 //     into the static capnp bundle data which lives for the process lifetime
 //   - C++ guarantees thread-safe initialization of function-local statics
-const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& getScriptTable(jsg::Bundle::Reader bundle) {
-  static auto table = [&]() {
+const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& getScriptTable() {
+  static auto table = []() {
+    jsg::Bundle::Reader bundle = PER_ISOLATE_BUNDLE;
     kj::HashMap<kj::StringPtr, jsg::Module::Reader> t;
     for (auto module: bundle.getModules()) {
       t.insert(module.getName(), module);
     }
     return t;
+  }();
+  return table;
+}
+
+// Parsed compat flag field: maps a JS-visible flag name to the capnp schema field.
+// The schema is compiled into the binary, so these are cached per-process.
+struct CompatFlagField {
+  kj::StringPtr enableFlag;
+  capnp::StructSchema::Field field;
+};
+
+const kj::ArrayPtr<const CompatFlagField> getCompatFlagFields() {
+  static auto table = []() {
+    auto schema = capnp::Schema::from<CompatibilityFlags>();
+    kj::Vector<CompatFlagField> fields;
+    for (auto field: schema.getFields()) {
+      for (auto annotation: field.getProto().getAnnotations()) {
+        if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+          fields.add(CompatFlagField{
+            .enableFlag = annotation.getValue().getText(),
+            .field = field,
+          });
+          break;
+        }
+      }
+    }
+    return fields.releaseAsArray();
   }();
   return table;
 }
@@ -43,6 +73,7 @@ struct BootstrapState {
   // Scripts is a const reference to the process-wide script lookup table built
   // from the compiled-in bundle. It is guaranteed to outlive this BootstrapState
   const kj::HashMap<kj::StringPtr, jsg::Module::Reader>& scripts;
+  v8::Global<v8::DictionaryTemplate> contextExtensionTemplate;
   kj::HashMap<kj::String, jsg::JsRef<jsg::JsValue>> cache;
   kj::HashSet<kj::String> loading;
   jsg::JsRef<jsg::JsObject> compatFlagsObj;
@@ -53,6 +84,48 @@ struct BootstrapState {
   // methods and constructors.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> primordials;
 };
+
+// Build the context extension object for a script. This provides the pseudo-global
+// variables that scripts access directly (e.g. `require`, `compatFlags`, `primordials`).
+// We use a DictionaryTemplate to create a fresh object for each script with the same
+// shape. This is faster than creating a new object and defining properties on it for
+// each script using set().
+jsg::JsObject createContextExtension(jsg::Lock& js,
+    BootstrapState& state,
+    const jsg::JsObject& moduleObj,
+    const jsg::JsObject& exportsObj,
+    bool includeRequire) {
+
+  auto tmpl = state.contextExtensionTemplate.Get(js.v8Isolate);
+  if (tmpl.IsEmpty()) {
+    static constexpr std::string_view names[] = {
+      "require",
+      "compatFlags",
+      "autogates",
+      "module",
+      "exports",
+      "primordials",
+    };
+    tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
+    state.contextExtensionTemplate.Reset(js.v8Isolate, tmpl);
+  }
+
+  v8::MaybeLocal<v8::Value> values[6] = {
+    js.v8Undefined(),  // require
+    v8::Local<v8::Value>(state.compatFlagsObj.getHandle(js)),
+    v8::Local<v8::Value>(state.autogatesObj.getHandle(js)), v8::Local<v8::Value>(moduleObj),
+    v8::Local<v8::Value>(exportsObj),
+    js.v8Undefined(),  // primordials
+  };
+
+  if (includeRequire) {
+    values[0] = v8::Local<v8::Value>(state.requireFn.getHandle(js));
+  }
+  KJ_IF_SOME(primordials, state.primordials) {
+    values[5] = v8::Local<v8::Value>(primordials.getHandle(js));
+  }
+  return jsg::JsObject(tmpl->NewInstance(js.v8Context(), values));
+}
 
 // Retrieve the BootstrapState from the current context's embedder data.
 BootstrapState& getBootstrapState(jsg::Lock& js) {
@@ -105,17 +178,8 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
     // Build the context extension object containing all pseudo-globals:
     //   require, compatFlags, primordials, module, exports
-    auto extObj = js.obj();
-    if (normalized != "primordials") {
-      extObj.set(js, "require"_kj, state.requireFn.getHandle(js));
-    }
-    extObj.set(js, "compatFlags"_kj, state.compatFlagsObj.getHandle(js));
-    extObj.set(js, "autogates"_kj, state.autogatesObj.getHandle(js));
-    extObj.set(js, "module"_kj, moduleObj);
-    extObj.set(js, "exports"_kj, exportsObj);
-    KJ_IF_SOME(primordials, state.primordials) {
-      extObj.set(js, "primordials"_kj, primordials.getHandle(js));
-    }
+    auto extObj =
+        createContextExtension(js, state, moduleObj, exportsObj, normalized != "primordials");
 
     // Compile the script as a function with the context extension.
     // CompileFunction with context_extensions makes the extension object's
@@ -169,29 +233,23 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
 }
 
 // Build a JS object with { flagName: true } entries for enabled compat flags.
-// Disabled flags are omitted — scripts check with `if (compatFlags['flag_name'])`
-// which yields undefined (falsy) for unset flags.
+// Disabled flags are omitted — scripts check with `if ('flag_name' in compatFlags)`
+// which yields false for unset flags.
 jsg::JsRef<jsg::JsObject> buildCompatFlagsObject(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   auto obj = js.obj();
-
-  auto schema = capnp::Schema::from<CompatibilityFlags>();
   auto dynamicFlags = capnp::toDynamic(flags);
 
-  for (auto field: schema.getFields()) {
-    for (auto annotation: field.getProto().getAnnotations()) {
-      if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
-        if (dynamicFlags.get(field).as<bool>()) {
-          obj.set(js, annotation.getValue().getText(), js.boolean(true));
-        }
-        break;
-      }
+  for (auto& entry: getCompatFlagFields()) {
+    if (dynamicFlags.get(entry.field).as<bool>()) {
+      obj.set(js, entry.enableFlag, js.boolean(true));
     }
   }
 
   return obj.addRef(js);
 }
 
-// Build a JS object with { gateName: true/false } entries from autogates.
+// Build a JS object with { gateName: true } entries for enabled autogates.
+// Disabled autogates are omitted.
 jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
   auto obj = js.obj();
 
@@ -208,12 +266,11 @@ jsg::JsRef<jsg::JsObject> buildAutogatesObject(jsg::Lock& js) {
 
 }  // namespace
 
-void runPerIsolateBootstrap(
-    jsg::Lock& js, jsg::Bundle::Reader bundle, CompatibilityFlags::Reader flags) {
+void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   auto context = js.v8Context();
 
-  // Get (or lazily build) the thread-local script lookup table.
-  auto& scripts = getScriptTable(bundle);
+  // Get (or lazily build) the process-wide script lookup table.
+  auto& scripts = getScriptTable();
 
   // Verify required scripts exist.
   KJ_REQUIRE(scripts.find("primordials"_kj) != kj::none,
@@ -226,6 +283,7 @@ void runPerIsolateBootstrap(
   // this call, supporting lazy evaluation patterns in bootstrap scripts.
   // We use new instead of the idiomatic kj::heap<...>, etc because the
   // pointer is being stored in a raw form in the embedder data slot.
+
   auto* state = new BootstrapState{.scripts = scripts};
   jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::BOOTSTRAP_STATE, state);
 

@@ -6,11 +6,10 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/modules.capnp.h>
 
 namespace workerd {
 
-// Runs the per-isolate bootstrap scripts from the given bundle.
+// Runs the per-isolate bootstrap scripts from the compiled-in PER_ISOLATE_BUNDLE.
 //
 // Must be called within a V8 context scope, after JSG global setup is complete
 // but before any user code evaluation. The entry point script named "main" is
@@ -26,8 +25,7 @@ namespace workerd {
 //
 // Throws kj::Exception on failure (compilation errors, missing scripts, cycles).
 // This is fatal for isolate creation since these are runtime-owned scripts.
-void runPerIsolateBootstrap(
-    jsg::Lock& js, jsg::Bundle::Reader bundle, CompatibilityFlags::Reader flags);
+void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags);
 
 // Cleans up the per-isolate bootstrap state stored in the context's embedder data.
 // Must be called before the context is destroyed (e.g., from disposeContext()).
