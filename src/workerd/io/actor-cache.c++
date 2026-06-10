@@ -2015,8 +2015,9 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(
       [waiter = kj::mv(waiter)]() { return waiter->getCountedDelete().countDeleted; });
 }
 
-kj::Own<ActorCacheInterface::Transaction> ActorCache::startTransaction() {
-  return kj::heap<Transaction>(*this);
+kj::OneOf<kj::Own<ActorCacheInterface::Transaction>, kj::Promise<void>> ActorCache::
+    startTransaction() {
+  return kj::Own<ActorCacheInterface::Transaction>(kj::heap<Transaction>(*this));
 }
 
 ActorCache::DeleteAllResults ActorCache::deleteAll(

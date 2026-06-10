@@ -63,6 +63,8 @@ class IoContext;
 class InputGate;
 class OutputGate;
 
+class StoredExternalHandler;
+
 // Type signature of an entrypoint implementation class (Durable Object or stateless service).
 using ExecutionContextOrState =
     kj::OneOf<jsg::Ref<api::ExecutionContext>, jsg::Ref<api::DurableObjectState>>;
@@ -996,6 +998,13 @@ class Worker::Actor final: public kj::Refcounted {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> getTransient(Worker::Lock& lock);
   kj::Maybe<ActorCacheInterface&> getPersistent();
   kj::Own<Loopback> getLoopback();
+
+  // Get the StoredExternalHandler, creating it if it doesn't already exist. Returns none if the
+  // actor's storage is not SQLite-backed, in which case externals cannot be stored.
+  StoredExternalHandler& getOrCreateStoredExternalHandler();
+
+  // Get the StoredExternalHandler if it has been created previously.
+  kj::Maybe<StoredExternalHandler&> getStoredExternalHandler();
 
   // Make the storage object for use in Service Workers syntax. This should not be used for
   // modules-syntax workers. (Note that Service-Workers-syntax actors are not supported publicly.)

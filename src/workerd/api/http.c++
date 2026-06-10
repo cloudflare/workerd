@@ -16,6 +16,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/stored-value.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
@@ -2188,25 +2189,35 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
         }
       }
       return;
+    } else KJ_IF_SOME(storedHandler, kj::tryDowncast<StoredExternalHandler::Serializer>(handler)) {
+      // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
+      // format is temporary, anyone using this will lose their data later.
+      JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+          "ServiceStub cannot be serialized in this context.");
+      KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::STORAGE)) {
+        KJ_CASE_ONEOF(token, kj::Array<byte>) {
+          // Token is available synchronously. For backwards compatibility, write it directly into
+          // the serialized value.
+          // TODO(cleanup): As soon as all of production is updated to understand externals, stop
+          //   writing inline tokens.
+          serializer.writeLengthDelimited(token);
+        }
+        KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
+          storedHandler.writeChannel(kj::mv(channel), kj::mv(promise));
+
+          // Write an empty array to signal that we're using an external rather than an inline
+          // token.
+          serializer.writeLengthDelimited(kj::ArrayPtr<const byte>());
+        }
+      }
+      return;
     }
+
     // TODO(someday): structuredClone() should have special handling that just reproduces the same
     //   local object. At present we have no way to recognize structuredClone() here though.
   }
 
-  // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This format
-  // is temporary, anyone using this will lose their data later.
-  JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
-      "ServiceStub cannot be serialized in this context.");
-  KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::STORAGE)) {
-    KJ_CASE_ONEOF(token, kj::Array<byte>) {
-      serializer.writeLengthDelimited(token);
-    }
-    KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-      // TODO(stub-storage): Eventually we'll serialize by pointing to an external table.
-      KJ_UNIMPLEMENTED(
-          "tried to store SubrequestChannel whose token is not synchronously available");
-    }
-  }
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "ServiceStub cannot be serialized in this context.");
 }
 
 jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
@@ -2250,17 +2261,28 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
       }
 
       return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+    } else KJ_IF_SOME(storedHandler,
+        kj::tryDowncast<StoredExternalHandler::Deserializer>(handler)) {
+      // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This
+      // format is temporary, anyone using this will lose their data later.
+      JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
+          "ServiceStub cannot be deserialized in this context.");
+      auto& ioctx = IoContext::current();
+      auto token = deserializer.readLengthDelimitedBytes();
+      kj::Own<IoChannelFactory::SubrequestChannel> channel;
+      if (token.size() > 0) {
+        // Token embedded inline, just use it.
+        channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
+            IoChannelFactory::ChannelTokenUsage::STORAGE, token);
+      } else {
+        // Token stored out-of-line as an external.
+        channel = storedHandler.readSubrequestChannel(ioctx.getIoChannelFactory());
+      }
+      return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
     }
   }
 
-  // The allow_irrevocable_stub_storage flag allows us to just embed the token inline. This format
-  // is temporary, anyone using this will lose their data later.
-  JSG_REQUIRE(FeatureFlags::get(js).getAllowIrrevocableStubStorage(), DOMDataCloneError,
-      "ServiceStub cannot be deserialized in this context.");
-  auto& ioctx = IoContext::current();
-  auto channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
-      IoChannelFactory::ChannelTokenUsage::STORAGE, deserializer.readLengthDelimitedBytes());
-  return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
+  JSG_FAIL_REQUIRE(DOMDataCloneError, "ServiceStub cannot be deserialized in this context.");
 }
 
 static jsg::Promise<void> throwOnError(

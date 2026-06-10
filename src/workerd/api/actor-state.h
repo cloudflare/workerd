@@ -30,11 +30,6 @@ class DurableObjectClass;
 class LoopbackDurableObjectNamespace;
 class LoopbackColoLocalActorNamespace;
 
-kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value);
-
-jsg::JsValue deserializeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf);
-
 // Common implementation of DurableObjectStorage and DurableObjectTransaction. This class is
 // designed to be used as a mixin.
 class DurableObjectStorageOperations {
@@ -228,10 +223,11 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
     // Omit from definitions
   };
 
-  jsg::Promise<jsg::JsRef<jsg::JsValue>> transaction(jsg::Lock& js,
-      jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>(jsg::Ref<DurableObjectTransaction>)>
-          closure,
-      jsg::Optional<TransactionOptions> options);
+  using AsyncTxnCallback =
+      jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>(jsg::Ref<DurableObjectTransaction>)>;
+
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> transaction(
+      jsg::Lock& js, AsyncTxnCallback closure, jsg::Optional<TransactionOptions> options);
 
   jsg::JsRef<jsg::JsValue> transactionSync(
       jsg::Lock& js, jsg::Function<jsg::JsRef<jsg::JsValue>()> callback);
@@ -361,6 +357,14 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(maybePrimary);
   }
+
+  struct AsyncTxnResult {
+    jsg::JsRef<jsg::JsValue> value;
+    bool isError;
+  };
+
+  static jsg::Promise<AsyncTxnResult> asyncTransactionImpl(
+      jsg::Lock& js, IoContext& context, ActorCacheInterface& cache, AsyncTxnCallback callback);
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {

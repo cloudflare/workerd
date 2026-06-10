@@ -60,6 +60,25 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     return !currentTxn.is<NoTxn>() || deleteAllCommitScheduled;
   }
 
+  // Prevents the current transaction from being committed until `promise` resolves. This is used
+  // when storing an external capability that requires performing some async RPC to obtain the
+  // token -- the transaction must be held open until the token is obtained and stored.
+  //
+  // For implicit transactions (or explicit synchronous transactions nested within an implicit
+  // transaction), extending the transaction lifetime may mean that several independent events get
+  // coalesced into a single transaction that normally wouldn't. That's fine, as long as the output
+  // gate stays closed until the commit actually happens.
+  //
+  // For explicit, asynchronous transactions, the input gate is locked until the transaction
+  // completes. This just means that the promise extends the input gate lock, preventing any other
+  // events from arriving until the transaction can finish.
+  //
+  // If no transaction is currently open, an implicit transaction is started.
+  //
+  // NOTE: It's important that canceling this promise early cancels all work as this means the
+  //   transaction is being rolled back.
+  void blockTransaction(kj::Promise<void> promise) override;
+
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override {
     return *db;
   }
@@ -91,7 +110,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
       kj::Maybe<kj::Date> newAlarmTime, WriteOptions options, SpanParent traceSpan) override;
   // See ActorCacheOps.
 
-  kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
+  kj::OneOf<kj::Own<ActorCacheInterface::Transaction>, kj::Promise<void>> startTransaction()
+      override;
   DeleteAllResults deleteAll(
       WriteOptions options, SpanParent traceSpan, DeleteAllOptions deleteAllOptions = {}) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
@@ -143,6 +163,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     void setSomeWriteConfirmed(bool someWriteConfirmed);
     bool isSomeWriteConfirmed() const;
 
+    kj::Promise<void> waitForCompletion();
+
    private:
     ActorSqlite& parent;
 
@@ -150,6 +172,21 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
     // True if any of the writes in this commit are confirmed writes.
     bool someWriteConfirmed = false;
+
+    struct CompletionPaf {
+      kj::Own<kj::PromiseFulfiller<void>> fulfiller;
+      kj::ForkedPromise<void> promise;
+
+      CompletionPaf(kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
+          : fulfiller(kj::mv(paf.fulfiller)),
+            promise(paf.promise.fork()) {}
+      ~CompletionPaf() noexcept(false) {
+        fulfiller->fulfill();
+      }
+    };
+
+    // Initialized if waitForCompletion() is ever called.
+    kj::Maybe<CompletionPaf> completionPaf;
   };
 
   class ExplicitTxn: public ActorCacheInterface::Transaction, public kj::Refcounted {
@@ -201,6 +238,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     bool someWriteConfirmed = false;
 
     void rollbackImpl();
+    void commitImpl();
   };
 
   // When set to NoTxn, there is no transaction outstanding.
@@ -261,6 +299,9 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   kj::TaskSet commitTasks;
 
+  // Tasks queued by blockTransaction().
+  kj::TaskSet blockTasks;
+
   // Trace span for the current commit operation. Captured from each write and used
   // for the output gate lock hold trace when a non-allowUnconfirmed write occurs.
   SpanParent currentCommitSpan = nullptr;
@@ -288,6 +329,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   bool debugAlarmSync = false;
 
   void startImplicitTxn();
+
+  kj::Promise<void> startImplicitTxnImpl(kj::Own<ImplicitTxn> txn);
 
   void onWrite(bool allowUnconfirmed);
 
