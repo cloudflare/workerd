@@ -31,8 +31,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "rust-backed-node-dns"_kj;
     case AutogateKey::ENABLE_FAST_TEXTENCODER:
       return "enable-fast-textencoder"_kj;
-    case AutogateKey::ENABLE_DRAINING_READ_ON_STANDARD_STREAMS:
-      return "enable-draining-read-on-standard-streams"_kj;
     case AutogateKey::INCREASE_SQLITE_HARD_HEAP_LIMIT:
       return "increase-sqlite-hard-heap-limit"_kj;
     case AutogateKey::USER_SPAN_CONTEXT_PROPAGATION:
