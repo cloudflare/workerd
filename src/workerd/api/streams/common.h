@@ -108,7 +108,7 @@ struct UnderlyingSource {
   // We want to increase the default auto allocate chunk size but we need to do
   // so carefully to avoid introducing memory regressions and causing workers to
   // hit OOM errors. We'll use an autogate to roll out the new default.
-  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2 = 16 * 1024;
+  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2 = 32 * 1024;
 
   // Per the spec, the type property for the UnderlyingSource should be either
   // undefined, the empty string, or "bytes". When undefined, the empty string is
@@ -394,6 +394,10 @@ class ReadableStreamController {
     static constexpr size_t DEFAULT_AT_LEAST = 1;
 
     jsg::V8Ref<v8::ArrayBufferView> bufferView;
+
+    // TODO(soon): The byteOffset and byteLength fields are obsolete and
+    // will be removed soon. Always get the live offset and live length
+    // from the bufferView itself.
     size_t byteOffset = 0;
     size_t byteLength;
 
