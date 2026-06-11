@@ -8,6 +8,7 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "module-test.js"),
           (name = "a/b/c",
            esModule = "import * as assert from 'node:assert'; await import('node:buffer'); export default assert;"),
+          (name = "bad-static-import", esModule = "import '../dep';"),
         ],
         compatibilityFlags = ["nodejs_compat"]
       )

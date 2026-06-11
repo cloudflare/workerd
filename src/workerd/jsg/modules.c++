@@ -76,13 +76,18 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
         ref.type == ModuleRegistry::Type::BUILTIN || ref.type == ModuleRegistry::Type::INTERNAL;
 
     kj::Path targetPath = ([&] {
-      // If the specifier begins with one of our known prefixes, let's not resolve
-      // it against the referrer.
-      if (internalOnly || spec.startsWith("node:") || spec.startsWith("cloudflare:") ||
-          spec.startsWith("workerd:")) {
-        return kj::Path::parse(spec);
+      try {
+        // If the specifier begins with one of our known prefixes, let's not resolve
+        // it against the referrer.
+        if (internalOnly || spec.startsWith("node:") || spec.startsWith("cloudflare:") ||
+            spec.startsWith("workerd:")) {
+          return kj::Path::parse(spec);
+        }
+        return ref.specifier.parent().eval(spec);
+      } catch (kj::Exception&) {
+        JSG_FAIL_REQUIRE(TypeError, "Invalid module specifier \"", spec, "\".\n  imported from \"",
+            ref.specifier.toString(), "\".");
       }
-      return ref.specifier.parent().eval(spec);
     })();
 
     KJ_IF_SOME(resolved,
