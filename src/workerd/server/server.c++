@@ -6130,14 +6130,6 @@ uint startInspector(
 
     kj::NEVER_DONE.wait(io.waitScope);
   });
-  // TODO(someday): This thread is detached and runs forever, with no shutdown mechanism.
-  // During KJ_CLEAN_SHUTDOWN (ASAN tests), active inspector connections hold strong references
-  // to the Isolate (via InspectorChannelImpl's kj::Own<const Worker::Isolate> and the
-  // co_await'd attachInspector() coroutine state in the request handler). These references
-  // prevent the Isolate from being destroyed before V8::Dispose(), causing a
-  // "Check failed: group->reference_count_.load() == 1" crash. To fix this properly, the
-  // inspector thread needs a shutdown mechanism: replace kj::NEVER_DONE with a cancellable
-  // promise, make the thread joinable (not detached), and join it before V8 teardown.
   thread.detach();
 
   // EW-7716: Wait for the InspectorService instance to be initialized before proceeding.
