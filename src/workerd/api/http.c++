@@ -1553,6 +1553,14 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     }
   }
 
+  // Stash whether this request's body can be rewound (and so the request re-sent), before we lose
+  // access to the JS-level request. This is currently consumed only when the target is an actor
+  // (Durable Object), to classify retry eligibility for disconnected calls; for other fetches the
+  // value is simply overwritten by the next call and never read. The set->getClientWithTracing->
+  // wrap*SubrequestClient sequence is synchronous, so there is no stale-attribution risk.
+  ioContext.getMetrics().setNextSubrequestBodyRewindable(
+      SubrequestBodyRewindable(jsRequest->canRewindBody()));
+
   // Get client and trace context (if needed) in one clean call
   auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
   auto traceContext = kj::mv(clientWithTracing.traceContext);

@@ -38,6 +38,10 @@ struct TestFixture {
     // to it) via actor.getLoopback(). This way the actor and the HibernationManager share a
     // single Loopback, mirroring production.
     kj::Maybe<kj::Own<Worker::Actor::Loopback>> actorLoopback;
+    // If set, called to create the RequestObserver for each IncomingRequest instead of the default
+    // no-op base RequestObserver. Lets tests observe metrics hooks (e.g. recording the values
+    // passed to setNextSubrequestBodyRewindable()).
+    kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
@@ -231,6 +235,7 @@ struct TestFixture {
   kj::TaskSet waitUntilTasks;
   kj::Own<kj::HttpHeaderTable> headerTable;
   kj::Maybe<kj::Function<kj::Own<IoChannelFactory>(TimerChannel&)>> ioChannelFactory;
+  kj::Maybe<kj::Function<kj::Own<RequestObserver>()>> requestObserverFactory;
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);

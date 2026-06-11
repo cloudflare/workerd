@@ -368,7 +368,8 @@ TestFixture::TestFixture(SetupParams&& params)
       errorHandler(kj::heap<DummyErrorHandler>()),
       waitUntilTasks(*errorHandler),
       headerTable(headerTableBuilder.build()),
-      ioChannelFactory(kj::mv(params.ioChannelFactory)) {
+      ioChannelFactory(kj::mv(params.ioChannelFactory)),
+      requestObserverFactory(kj::mv(params.requestObserverFactory)) {
   KJ_IF_SOME(id, params.actorId) {
     KJ_IF_SOME(provided, params.actorLoopback) {
       savedActorLoopback = kj::mv(provided);
@@ -460,8 +461,14 @@ kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest(IoContext& c
   } else {
     channelFactory = kj::heap<DummyIoChannelFactory>(*timerChannel);
   }
-  auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(context),
-      kj::mv(channelFactory), kj::refcounted<RequestObserver>(), kj::none, kj::none);
+  kj::Own<RequestObserver> observer;
+  KJ_IF_SOME(factory, requestObserverFactory) {
+    observer = factory();
+  } else {
+    observer = kj::refcounted<RequestObserver>();
+  }
+  auto incomingRequest = kj::heap<IoContext::IncomingRequest>(
+      kj::addRef(context), kj::mv(channelFactory), kj::mv(observer), kj::none, kj::none);
   incomingRequest->delivered();
   return incomingRequest;
 }
