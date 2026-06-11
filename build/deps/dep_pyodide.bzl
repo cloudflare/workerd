@@ -12,23 +12,48 @@ def _pyodide_core(*, version, sha256, **_kwds):
     )
     return [name]
 
-def _pyodide_packages(*, tag, lockfile_hash, all_wheels_hash, **_kwds):
-    lock_name = "pyodide-lock_%s.json" % tag
-    http_file(
-        name = lock_name,
-        sha256 = lockfile_hash,
-        url = "https://github.com/cloudflare/pyodide-build-scripts/releases/download/%s/pyodide-lock.json" % tag,
-    )
+# Base URL that the runtime downloads Python packages from at request time. Keep in sync with
+# PYTHON_PACKAGES_URL in src/workerd/api/pyodide/pyodide.h.
+PYTHON_PACKAGES_URL = "https://pyodide-capnp-bin.edgeworker.net/"
 
-    # Use @workerd prefix on build_file so we can use this from edgeworker too
-    archive_name = "all_pyodide_wheels_%s" % tag
-    http_archive(
-        name = archive_name,
-        build_file = "@workerd//:build/BUILD.all_pyodide_wheels",
-        sha256 = all_wheels_hash,
-        urls = ["https://github.com/cloudflare/pyodide-build-scripts/releases/download/%s/all_wheels.zip" % tag],
+def _stdlib_wheels_repo_impl(rctx):
+    # Built-in Python package support has been removed, so workers can no longer request arbitrary
+    # packages. The checked-in lock files (src/pyodide/python-lock/) are pre-filtered to contain
+    # exactly the packages that are still loaded at runtime (the CPython stdlib modules and the
+    # shared libraries they depend on). We download just those wheels and expose them as the package
+    # disk cache used by the Python tests, rather than the full upstream all_wheels.zip archive.
+    lock = json.decode(rctx.read(rctx.attr.lockfile))
+    for pkg in lock["packages"].values():
+        file_name = pkg["file_name"]
+        rctx.download(
+            url = "%spython-package-bucket/%s/%s" % (PYTHON_PACKAGES_URL, rctx.attr.tag, file_name),
+            output = file_name,
+            sha256 = pkg["sha256"],
+        )
+    rctx.file("BUILD.bazel", """\
+filegroup(
+    name = "whls",
+    srcs = glob(["*"], exclude = ["BUILD.bazel"]),
+    visibility = ["//visibility:public"],
+)
+""")
+
+_stdlib_wheels_repo = repository_rule(
+    implementation = _stdlib_wheels_repo_impl,
+    attrs = {
+        "tag": attr.string(mandatory = True),
+        "lockfile": attr.label(mandatory = True, allow_single_file = True),
+    },
+)
+
+def _pyodide_packages(*, tag, **_kwds):
+    name = "all_pyodide_wheels_%s" % tag
+    _stdlib_wheels_repo(
+        name = name,
+        tag = tag,
+        lockfile = "@workerd//src/pyodide:python-lock/pyodide-lock_%s.json" % tag,
     )
-    return [lock_name, archive_name]
+    return [name]
 
 VENDOR_R2 = "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/"
 

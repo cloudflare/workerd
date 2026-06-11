@@ -1,8 +1,6 @@
 # After updating this file, make sure to run "bazel mod tidy"
 load("@bazel_lib//lib:base64.bzl", "base64")
 load("@bazel_lib//lib:strings.bzl", "chr")
-load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
-load("//:build/python/packages_20250808.bzl", "PACKAGES_20250808")
 
 def _chunk(data, length):
     return [data[i:i + length] for i in range(0, len(data), length)]
@@ -24,37 +22,20 @@ PYODIDE_VERSIONS = [
     },
 ]
 
-# This is the list of all the package metadata that we use.
+# The below is a list of package tags for the old builtin packages support.
 #
-# IMPORTANT: packages that are present here should never be removed after the package version is
-# released to the public. This is so that we don't break workers using those packages.
-#
-# ORDER MATTERS: the order of the keys in this dictionary matters, older package bundles should come
-# first.
-_package_lockfiles = [
-    PACKAGES_20240829_4,
-    PACKAGES_20250808,
+# Now that built-in package support is gone, the only packages we load are the CPython stdlib
+# modules and the shared libraries they depend on. Newer Pyodide versions bundle all of these
+# builtin modules directly into the core distribution, so future package bundle versions won't
+# need a lock file (or per-package wheel downloads) here at all.
+PYTHON_LOCKFILES = [
+    {
+        "tag": "20240829.4",
+    },
+    {
+        "tag": "20250808",
+    },
 ]
-
-# The below is a list of pyodide-lock.json files for each package bundle version that we support.
-# Each of these gets embedded in the workerd and EW binary.
-PYTHON_LOCKFILES = [meta["info"] for meta in _package_lockfiles]
-
-# Used to generate the import tests, where we import each top level name from each package and check
-# that it doesn't fail.
-PYTHON_IMPORTS_TO_TEST = {meta["info"]["tag"]: meta["import_tests"] for meta in _package_lockfiles}
-
-# Each new package bundle should contain the same packages as the previous. We verify this
-# constraint here.
-def verify_no_packages_were_removed():
-    for curr_info, next_info in zip(_package_lockfiles[:-1], _package_lockfiles[1:]):
-        curr_pkgs = curr_info["import_tests"]
-        next_pkgs = next_info["import_tests"]
-        missing_pkgs = [pkg for pkg in curr_pkgs if pkg not in next_pkgs]
-        if missing_pkgs:
-            fail("Some packages from version ", curr_info["info"]["tag"], " missing in version", next_info["info"]["tag"], ":\n", "   ", ", ".join(missing_pkgs), "\n\n")
-
-verify_no_packages_were_removed()
 
 def _bundle_id(*, pyodide_version, pyodide_date, backport, **_kwds):
     return "%s_%s_%s" % (pyodide_version, pyodide_date, backport)
@@ -90,8 +71,6 @@ def _make_bundle_version_info(versions):
             entry["real_pyodide_version"] = entry["pyodide_version"]
         entry["feature_flags"] = [entry["flag"]]
         entry["feature_string_flags"] = [entry["enable_flag_name"]]
-        if "packages" in entry:
-            entry["packages"] = entry["packages"]["info"]["tag"]
         _add_integrity(entry)
         result[name] = entry
         _make_vendored_packages(entry)
@@ -129,7 +108,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "released": True,
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
-        "packages": PACKAGES_20240829_4,
+        "packages": "20240829.4",
         "backport": "79",
         "integrity": "sha256-LO3jNW3PXEiwHm10GgnssxwKw+v37KMGZBiBwjUReVk=",
         "flag": "pythonWorkers",
@@ -157,7 +136,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "released": True,
         "pyodide_version": "0.28.2",
         "pyodide_date": "2025-01-16",
-        "packages": PACKAGES_20250808,
+        "packages": "20250808",
         "backport": "10",
         "integrity": "sha256-k37ELtvRw8fd3QHsMgja0Tl+4QKP1qGTnNdjxUiqb2E=",
         "flag": "pythonWorkers20250116",

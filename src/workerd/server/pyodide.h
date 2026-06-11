@@ -27,10 +27,9 @@ kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
     kj::Network& network,
     kj::Timer& timer);
 
-// Preloads all required Python packages for a worker
-kj::Promise<void> fetchPyodidePackages(const api::pyodide::PythonConfig& pyConfig,
+// Preloads the Python stdlib packages (every package in the pre-filtered lock file) for a worker.
+kj::Promise<void> fetchPyodideStdlib(const api::pyodide::PythonConfig& pyConfig,
     const api::pyodide::PyodidePackageManager& pyodidePackageManager,
-    kj::ArrayPtr<kj::String> pythonRequirements,
     workerd::PythonSnapshotRelease::Reader pythonSnapshotRelease,
     kj::Network& network,
     kj::Timer& timer);

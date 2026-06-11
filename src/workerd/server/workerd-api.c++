@@ -854,14 +854,11 @@ const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
 // TODO(soon): These are required for python workers but we don't support those yet
 // with the new module registry. Uncomment these when we do.
 // namespace {
-// static constexpr auto PYTHON_TAR_READER = "export default { }"_kj;
-
 // static const auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
 // static const auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
 // static const auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
 // static const auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
 // static const auto limiterSpecifier = "pyodide-internal:limiter"_url;
-// static const auto tarReaderSpecifier = "pyodide-internal:packages_tar_reader"_url;
 // }  // namespace
 
 kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
@@ -917,8 +914,6 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
 
     //   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, PYODIDE_BUNDLE);
     //   jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, bundle);
-
-    //   pyodideBundleBuilder.addEsm(tarReaderSpecifier, PYTHON_TAR_READER);
 
     //   api::pyodide::CreateBaselineSnapshot createBaselineSnapshot(
     //       pythonConfig.createBaselineSnapshot);

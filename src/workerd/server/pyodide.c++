@@ -216,9 +216,8 @@ kj::Promise<void> loadPyodidePackage(const api::pyodide::PythonConfig& pyConfig,
   co_return;
 }
 
-kj::Promise<void> fetchPyodidePackages(const api::pyodide::PythonConfig& pyConfig,
+kj::Promise<void> fetchPyodideStdlib(const api::pyodide::PythonConfig& pyConfig,
     const api::pyodide::PyodidePackageManager& pyodidePackageManager,
-    kj::ArrayPtr<kj::String> pythonRequirements,
     workerd::PythonSnapshotRelease::Reader pythonSnapshotRelease,
     kj::Network& network,
     kj::Timer& timer) {
@@ -230,8 +229,7 @@ kj::Promise<void> fetchPyodidePackages(const api::pyodide::PythonConfig& pyConfi
     co_return;
   }
 
-  auto filenames = api::pyodide::getPythonPackageFiles(
-      KJ_ASSERT_NONNULL(pyodideLock), pythonRequirements, packagesVersion);
+  auto filenames = api::pyodide::getPythonPackageFiles(KJ_ASSERT_NONNULL(pyodideLock));
 
   kj::Vector<kj::Promise<void>> promises(filenames.size());
   for (const auto& filename: filenames) {

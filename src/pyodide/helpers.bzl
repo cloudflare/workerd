@@ -90,7 +90,7 @@ def pyodide_extra():
     )
 
     for tag in package_tags:
-        _copy_and_capnp_embed("@pyodide-lock_" + tag + ".json//file")
+        _copy_and_capnp_embed("python-lock/pyodide-lock_" + tag + ".json")
 
     cc_capnp_library(
         name = "pyodide_extra_capnp",
@@ -124,7 +124,6 @@ def pyodide_static():
         "internal/*.py",
         "internal/workers-api/src/*.py",
         "internal/workers-api/src/workers/*.py",
-        "internal/patches/*.py",
         "internal/topLevelEntropy/*.py",
     ])
     internal_modules = native.glob(
