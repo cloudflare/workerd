@@ -3,7 +3,10 @@
   "compilerOptions": {
     "composite": false,
     "declaration": false,
-    "moduleDetection": "auto",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "verbatimModuleSyntax": false,
+    "isolatedModules": false,
     "types": []
   },
   "include": ["**/*.ts"]
